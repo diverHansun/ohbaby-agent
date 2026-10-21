@@ -9,8 +9,8 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
-import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
-import type { InterfaceProviderStreamEvent } from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 import type { ToolSchedulerInstance } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import { createHeuristicTokenCounter } from "../../../packages/ohbaby-agent/src/services/llm-model/tokenCounting.js";
 import { createContextSummaryClient } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/prompt-context.js";

@@ -16,7 +16,7 @@ import { InMemoryPromptSubmissionStore } from "../runtime/prompt-scheduler/index
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../services/interface-providers/index.js";
+} from "ohbaby-llm";
 
 function latestInput(request: InterfaceProviderRequest | undefined): unknown {
   return request?.messages.findLast(

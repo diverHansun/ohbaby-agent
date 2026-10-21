@@ -1,4 +1,4 @@
-import type { InterfaceProviderKind, ReasoningCapabilities } from "./types.js";
+import type { InterfaceProviderKind, ReasoningCapabilities } from "ohbaby-llm";
 import { buildModelMetadataUrl } from "./context-window-probe.js";
 
 const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;

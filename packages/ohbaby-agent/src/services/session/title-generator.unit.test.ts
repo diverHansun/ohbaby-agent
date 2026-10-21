@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { sessionTitleGenerationFailed } from "../../observability/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../interface-providers/index.js";
+} from "ohbaby-llm";
 import {
   cleanGeneratedSessionTitle,
   generateSessionTitle,

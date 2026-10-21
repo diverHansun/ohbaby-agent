@@ -20,7 +20,7 @@ import { McpManager } from "../mcp/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {

@@ -9,7 +9,7 @@ import type {
   SteerQueuedPromptOutcome,
   SteerQueuedPromptReceipt,
 } from "./current-run-inputs.js";
-import type { ReasoningConfig } from "../../config/llm/types.js";
+import type { ReasoningConfig } from "ohbaby-llm";
 import { sameReasoning } from "./types.js";
 import { randomUUID } from "node:crypto";
 import type { UiPromptError } from "ohbaby-sdk";

@@ -9,10 +9,10 @@ import {
   createPersistentUiBackendClient,
   closePersistentUiBackendDatabase,
 } from "../../../../ohbaby-agent/src/adapters/ui-persistent.js";
-import { createInterfaceProvider } from "../../../../ohbaby-agent/src/services/interface-providers/index.js";
-import type { LLMClientInstance } from "../../../../ohbaby-agent/src/core/llm-client/types.js";
-import type { InterfaceProviderStreamEvent } from "../../../../ohbaby-agent/src/services/interface-providers/types.js";
-import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "../../../../ohbaby-agent/src/core/llm-client/idle-watchdog.js";
+import { createInterfaceProvider } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
+import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "ohbaby-llm";
 import { loadEnvFile } from "../../../../ohbaby-agent/src/config/llm/loaders.js";
 import { createDaemonHttpServer } from "./server.js";
 import { createRemoteUiBackendClient } from "../../protocols/jsonrpc/client.js";

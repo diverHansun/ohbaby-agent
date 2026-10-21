@@ -6,17 +6,17 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../message/index.js";
-import { createAnthropicProvider } from "../../services/interface-providers/anthropic.js";
-import { createOpenAIResponsesProvider } from "../../services/interface-providers/openai-responses.js";
+import { createAnthropicProvider } from "ohbaby-llm";
+import { createOpenAIResponsesProvider } from "ohbaby-llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createOpenAICompatibleProvider } from "../../services/interface-providers/openai-compatible.js";
+import { createOpenAICompatibleProvider } from "ohbaby-llm";
 import {
   isRetryableProviderError,
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
-} from "./retry.js";
-import { resolvePreparedRequestSettings, streamResponse } from "./streaming.js";
-import type { LLMClientInstance, StreamingResponse } from "./types.js";
+} from "ohbaby-llm";
+import { resolvePreparedRequestSettings, streamResponse } from "ohbaby-llm";
+import type { LLMClientInstance, StreamingResponse } from "ohbaby-llm";
 
 // Exercise the installed SDK, production adapter and project retry loop together.
 // Only HTTP is replaced; production SDK settings and project retry policy apply.

@@ -1,8 +1,8 @@
-import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type {
   InterfaceProviderRequest as ProviderRequest,
   InterfaceProviderStreamEvent as ProviderStreamEvent,
-} from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+} from "ohbaby-llm";
 import { createTemporarySessionTitle } from "../../../packages/ohbaby-agent/src/services/session/index.js";
 
 interface FakeSdkClient {

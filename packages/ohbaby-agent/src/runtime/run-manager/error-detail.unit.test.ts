@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
-} from "../../core/llm-client/index.js";
+} from "ohbaby-llm";
 import {
   normalizeLifecycleRunError,
   normalizeRunError,

@@ -11,14 +11,11 @@ import {
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
 import { createInMemoryRunLedger } from "../../../packages/ohbaby-agent/src/runtime/run-ledger/index.js";
 import { createInProcessUiBackendClient } from "../../../packages/ohbaby-agent/src/adapters/ui-inprocess.js";
-import type {
-  LLMClientInstance,
-  TokenUsage,
-} from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance, TokenUsage } from "ohbaby-llm";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+} from "ohbaby-llm";
 
 type ProviderScript =
   | readonly InterfaceProviderStreamEvent[]

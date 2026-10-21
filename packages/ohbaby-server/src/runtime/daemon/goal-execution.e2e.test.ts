@@ -22,16 +22,16 @@ import {
   isModelContextPart,
   isSystemReminderMessage,
 } from "../../../../ohbaby-agent/src/core/message/origin.js";
-import type { LLMClientInstance } from "../../../../ohbaby-agent/src/core/llm-client/types.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { createSqliteGoalPersistence } from "../../../../ohbaby-agent/src/goals/persistence.js";
 import type { GoalPersistencePort } from "../../../../ohbaby-agent/src/goals/types.js";
 import { getDatabase } from "../../../../ohbaby-agent/src/services/database/index.js";
-import { createInterfaceProvider } from "../../../../ohbaby-agent/src/services/interface-providers/index.js";
+import { createInterfaceProvider } from "ohbaby-llm";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
   InterfaceProviderTokenUsage,
-} from "../../../../ohbaby-agent/src/services/interface-providers/types.js";
+} from "ohbaby-llm";
 import { createRemoteUiBackendClient } from "../../protocols/jsonrpc/client.js";
 import { createDaemonHttpServer } from "./server.js";
 

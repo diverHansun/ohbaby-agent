@@ -10,7 +10,7 @@ import {
   type BusInstance,
 } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import { createInProcessUiBackendClient } from "../../../packages/ohbaby-agent/src/adapters/ui-inprocess.js";
-import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { InMemoryGoalPersistence } from "../../../packages/ohbaby-agent/src/goals/index.js";
 import {
   createDatabaseMessageStore,

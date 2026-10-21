@@ -4,7 +4,7 @@ import {
   defaultReasoningEffort,
   orderedReasoningEfforts,
   type ResolveRequestReasoningOptions,
-} from "../interface-providers/reasoning.js";
+} from "ohbaby-llm";
 
 export function reasoningCapabilityView(
   options: ResolveRequestReasoningOptions,

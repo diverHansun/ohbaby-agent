@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import { streamResponse } from "./streaming.js";
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import type { InterfaceProviderStreamEvent } from "../providers/types.js";
 import type { LLMClientInstance, StreamingResponse } from "./types.js";
 const output = {
   protocol: "anthropic" as const,

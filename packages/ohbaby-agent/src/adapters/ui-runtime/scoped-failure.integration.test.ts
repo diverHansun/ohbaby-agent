@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { createContextManager } from "../../core/context/index.js";
 import { Lifecycle } from "../../core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -12,7 +12,7 @@ import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/types.js";
+} from "ohbaby-llm";
 import {
   RunManager,
   type RunStepUsageObserver,

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await -- Fetch fixtures implement the asynchronous fetch contract. */
-import type { ModelJsonConfig } from "../types.js";
+import type { ModelJsonConfig } from "ohbaby-llm";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

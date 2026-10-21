@@ -1,4 +1,4 @@
-import type { TokenUsage } from "../llm-client/index.js";
+import type { TokenUsage } from "ohbaby-llm";
 import type { PartMetadata } from "./types.js";
 
 function record(value: unknown): Record<string, unknown> | undefined {

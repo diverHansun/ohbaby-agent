@@ -2,17 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { createContextManager } from "../../core/context/index.js";
 import { Lifecycle } from "../../core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
   readTokenUsageMetadata,
 } from "../../core/message/index.js";
 import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
-import { createAnthropicProvider } from "../../services/interface-providers/anthropic.js";
-import { createOpenAICompatibleProvider } from "../../services/interface-providers/openai-compatible.js";
-import { createOpenAIResponsesProvider } from "../../services/interface-providers/openai-responses.js";
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import { createAnthropicProvider } from "ohbaby-llm";
+import { createOpenAICompatibleProvider } from "ohbaby-llm";
+import { createOpenAIResponsesProvider } from "ohbaby-llm";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 import { RunManager } from "../../runtime/run-manager/index.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import {

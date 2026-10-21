@@ -1,0 +1,46 @@
+{
+  "name": "ohbaby-llm",
+  "version": "0.1.16",
+  "description": "Provider-neutral LLM clients, streaming, and configuration contracts",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.d.ts.map",
+    "!dist/**/*.unit.test.d.ts",
+    "!dist/**/*.unit.test.d.ts.map",
+    "!dist/**/*.contract.test.d.ts",
+    "!dist/**/*.contract.test.d.ts.map",
+    "!dist/**/*.integration.test.d.ts",
+    "!dist/**/*.integration.test.d.ts.map",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rimraf dist && tsup && tsc -b --force",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist coverage"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "openai": "^7.13.0",
+    "zod": "^3.24.1"
+  }
+}

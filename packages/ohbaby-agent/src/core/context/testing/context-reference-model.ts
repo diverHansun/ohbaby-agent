@@ -1,4 +1,4 @@
-import type { ModelMessage } from "../../llm-client/index.js";
+import type { ModelMessage } from "ohbaby-llm";
 
 export type ReferenceToolTerminalStatus = "aborted" | "completed" | "error";
 

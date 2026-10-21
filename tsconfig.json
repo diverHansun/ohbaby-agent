@@ -3,6 +3,9 @@
   "files": [],
   "references": [
     {
+      "path": "./packages/ohbaby-llm"
+    },
+    {
       "path": "./packages/ohbaby-sdk"
     },
     {

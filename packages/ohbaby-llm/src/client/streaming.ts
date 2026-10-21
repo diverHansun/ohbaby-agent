@@ -58,17 +58,17 @@ import {
   NativeOutputSchema,
   validateNativeProjection,
   type NativeOutput,
-} from "../../services/interface-providers/native-state.js";
+} from "../providers/native-state.js";
 import {
   resolveRequestReasoning,
   type ReasoningIntent,
-} from "../../services/interface-providers/reasoning.js";
-import type { ReasoningConfig } from "../../config/llm/types.js";
+} from "../providers/reasoning.js";
+import type { ReasoningConfig } from "../config/types.js";
 import { resolvePromptCacheRequest } from "./prompt-cache.js";
 import type {
   ModelToolDefinition,
   LLMRequestPurpose,
-} from "../../services/interface-providers/index.js";
+} from "../providers/index.js";
 
 interface AccumulatedToolCall {
   callId: string;
@@ -440,7 +440,7 @@ export async function* streamResponse(
     );
     let iterator:
       | AsyncIterator<
-          import("../../services/interface-providers/types.js").InterfaceProviderStreamEvent
+          import("../providers/types.js").InterfaceProviderStreamEvent
         >
       | undefined;
     let exhausted = false;

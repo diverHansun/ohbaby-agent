@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TokenUsage } from "../../core/llm-client/index.js";
+import type { TokenUsage } from "ohbaby-llm";
 import {
   cacheReadShareFromUsage,
   createPromptCacheUsageTracker,

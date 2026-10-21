@@ -30,10 +30,10 @@ import {
   createInterfaceProvider,
   type InterfaceProviderKind,
   type InterfaceProviderTokenUsage,
-} from "../../packages/ohbaby-agent/src/services/interface-providers/index.js";
-import type { LLMClientInstance } from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
-import type { ReasoningCapabilities } from "../../packages/ohbaby-agent/src/config/llm/types.js";
-import type { NativeOutput } from "../../packages/ohbaby-agent/src/services/interface-providers/native-state.js";
+} from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { ReasoningCapabilities } from "ohbaby-llm";
+import type { NativeOutput } from "ohbaby-llm";
 import {
   extractCacheErrorCode,
   extractCacheUsageEvidence,
@@ -705,7 +705,7 @@ function failureDetails(error: unknown, apiKey: string): SafeFailureDetails {
     error instanceof Error
       ? (
           error.stack?.match(
-            /(?:interface-providers|core\/[^/]+)\/[a-z-]+\.ts:\d+:\d+/g,
+            /(?:interface-providers|core\/[^/]+|ohbaby-llm\/src\/(?:providers|client))\/[a-z-]+\.ts:\d+:\d+/g,
           ) ?? []
         ).slice(0, 4)
       : [];

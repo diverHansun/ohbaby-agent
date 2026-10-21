@@ -1,7 +1,7 @@
-import type { ModelRequestRecord } from "../llm-client/types.js";
+import type { ModelRequestRecord } from "ohbaby-llm";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
-import type { ModelState } from "../../services/interface-providers/native-state.js";
-import type { ModelMessage, TokenUsage } from "../llm-client/index.js";
+import type { ModelState } from "ohbaby-llm";
+import type { ModelMessage, TokenUsage } from "ohbaby-llm";
 
 export type MessageRole = "user" | "assistant" | "system";
 

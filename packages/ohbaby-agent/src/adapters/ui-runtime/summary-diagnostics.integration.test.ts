@@ -4,8 +4,8 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../core/message/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/types.js";
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 import {
   encodeDiagnosticEvent,
   type Logger,

@@ -15,7 +15,7 @@ import type {
   RuntimeInputOrigin,
 } from "../../core/message/types.js";
 import { applyMessagePatch } from "../../core/message/message-patch.js";
-import type { AgentStepRequestRecord } from "../../core/llm-client/types.js";
+import type { AgentStepRequestRecord } from "ohbaby-llm";
 import type { RunLedger, RunLedgerRecord } from "../run-ledger/types.js";
 import type { PromptSubmissionRecord } from "./types.js";
 import { InMemoryPromptSubmissionStore } from "./in-memory-store.js";

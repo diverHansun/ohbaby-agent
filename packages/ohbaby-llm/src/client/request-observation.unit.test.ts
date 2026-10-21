@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await -- Fake adapters exercise eager calls and lazy async iterators without external I/O. */
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import type { InterfaceProviderStreamEvent } from "../providers/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { streamResponse } from "./streaming.js";
 import type { LLMClientInstance, ModelRequestObservation } from "./types.js";

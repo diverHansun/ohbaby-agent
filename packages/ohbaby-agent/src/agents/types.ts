@@ -1,5 +1,5 @@
 import type { SlashSkillUsage } from "../skill/usage.js";
-import type { ReasoningConfig } from "../config/llm/types.js";
+import type { ReasoningConfig } from "ohbaby-llm";
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { AgentRunResult } from "../core/agents/index.js";
 

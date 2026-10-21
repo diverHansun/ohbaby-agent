@@ -1,6 +1,6 @@
 import { getReminderAnchorId } from "../message/origin.js";
 import type { MessageWithParts } from "../message/index.js";
-import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
+import type { ModelOrigin } from "ohbaby-llm";
 import { isActivePart } from "./filters.js";
 import { serializeHistoryMessages } from "./serializer.js";
 

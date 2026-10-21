@@ -8,7 +8,7 @@ import type {
   LLMClientInstance,
   StreamingResponse,
   TokenUsage,
-} from "../../core/llm-client/index.js";
+} from "ohbaby-llm";
 
 type StreamResponseFn = (
   llmClient: LLMClientInstance,
@@ -23,7 +23,7 @@ type StreamResponseFn = (
 
 const streamResponseMock = vi.hoisted(() => vi.fn<StreamResponseFn>());
 
-vi.mock("../../core/llm-client/index.js", () => ({
+vi.mock("ohbaby-llm", () => ({
   streamResponse: streamResponseMock,
 }));
 

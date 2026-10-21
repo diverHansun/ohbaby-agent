@@ -1,18 +1,15 @@
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
-import type {
-  ModelMessage,
-  ModelResponseSnapshot,
-} from "../core/llm-client/index.js";
+import type { ModelMessage, ModelResponseSnapshot } from "ohbaby-llm";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   streamResponse,
   type ModelToolDefinition,
   type LLMClientInstance,
   type StreamingResponse,
-} from "../core/llm-client/index.js";
+} from "ohbaby-llm";
 import { PRIMARY_BASE_PROMPT } from "../core/system-prompt/prompts/primary/base.js";
-import { createInterfaceProvider } from "../services/interface-providers/index.js";
+import { createInterfaceProvider } from "ohbaby-llm";
 
 const runRealEval =
   process.env.OHBABY_GOAL_REAL_EVAL === "1" ? describe : describe.skip;

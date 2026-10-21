@@ -27,7 +27,7 @@ import {
   readTokenUsageMetadata,
 } from "./token-usage-metadata.js";
 import { MessageEvent } from "./events.js";
-import type { ModelRequestRecord } from "../llm-client/types.js";
+import type { ModelRequestRecord } from "ohbaby-llm";
 import type { Message, MessageStore } from "./types.js";
 
 const cleanupPaths: string[] = [];

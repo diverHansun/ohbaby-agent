@@ -14,8 +14,8 @@
 
 import * as path from "node:path";
 import { getLLMConfig } from "../../config/index.js";
-import { createLLMClientFromConfig } from "./client.js";
-import type { LLMClientInstance } from "./types.js";
+import { createLLMClientFromConfig } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   NOOP_LOGGER,
   tokenUsageNormalization,

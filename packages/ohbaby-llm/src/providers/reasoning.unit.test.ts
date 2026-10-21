@@ -7,7 +7,7 @@ import {
   toResponsesReasoningWire,
   type ResolveRequestReasoningOptions,
 } from "./reasoning.js";
-import type { ReasoningCapabilities } from "../../config/llm/types.js";
+import type { ReasoningCapabilities } from "../config/types.js";
 const openai = {
   provider: "openai",
   baseUrl: "https://api.openai.com/v1",

@@ -10,8 +10,8 @@ import { createPermissionState } from "../../permission/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/types.js";
-import type { LLMClientInstance } from "../llm-client/index.js";
+} from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { Lifecycle } from "./lifecycle.js";
 import type { LifecycleEvent, ResolvedStepTools } from "./types.js";
 

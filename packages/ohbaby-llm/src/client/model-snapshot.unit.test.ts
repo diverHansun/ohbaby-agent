@@ -8,7 +8,7 @@ import type {
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/types.js";
+} from "../providers/types.js";
 
 it("keeps partial call index and raw arguments in a text-only snapshot without role or reasoning", async () => {
   const client: LLMClientInstance = {

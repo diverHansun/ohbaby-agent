@@ -11,7 +11,7 @@ import {
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent as Event,
-} from "../../services/interface-providers/types.js";
+} from "../providers/types.js";
 import type {
   LLMClientInstance,
   ModelRequestObservation,

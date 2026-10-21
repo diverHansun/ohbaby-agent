@@ -1,9 +1,9 @@
 /** Creates a provider-backed client from validated configuration. */
-import type { LLMConfig } from "../../config/llm/types.js";
+import type { LLMConfig } from "../config/types.js";
 import {
   createInterfaceProvider,
   type TokenUsageDiagnosticReporter,
-} from "../../services/interface-providers/index.js";
+} from "../providers/index.js";
 import type { LLMClientInstance } from "./types.js";
 
 export function createLLMClientFromConfig(

@@ -6,7 +6,7 @@ import {
   type LifecycleEvent,
   type LifecycleResult,
 } from "../../core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -16,7 +16,7 @@ import { createPermissionState } from "../../permission/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import type { RunContext, RunRecord } from "../../runtime/run-manager/index.js";
 import { RunWorker } from "../../runtime/run-manager/worker.js";
 import {

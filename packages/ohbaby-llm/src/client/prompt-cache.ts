@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import type { PromptCachePolicy } from "../../config/llm/types.js";
-import type { ModelMessage } from "../../services/interface-providers/types.js";
+import type { PromptCachePolicy } from "../config/types.js";
+import type { ModelMessage } from "../providers/types.js";
 import type {
   InterfaceProviderKind,
   InterfaceProviderPromptCache,
   LLMRequestPurpose,
   PromptCacheRequestStrategy,
-} from "../../services/interface-providers/index.js";
+} from "../providers/index.js";
 
 interface PromptCacheCapabilityInput {
   readonly baseUrl: string;

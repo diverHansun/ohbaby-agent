@@ -96,7 +96,69 @@ export {
 export type { AgentServiceOptions, RuntimeAgent } from "./agents/index.js";
 export * from "./core/agents/index.js";
 export * from "./core/system-prompt/index.js";
-export * from "./core/llm-client/index.js";
+/**
+ * Public API for the LLM Client module.
+ *
+ * This module exports the core functions and types needed to interact
+ * with the configured LLM provider through the shared streaming interface.
+ *
+ * Design Principle: Interface Segregation
+ * Consumers import only what they need. The module provides three categories:
+ * 1. Functions: createLLMClient, streamResponse
+ * 2. Types: LLMClientInstance, StreamingResponse, etc.
+ * 3. Error Classes: APIUserAbortError (for convenience)
+ */
+
+export {
+  DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  ProviderStreamIdleTimeoutError,
+} from "ohbaby-llm";
+
+// Export core functions
+export { createLLMClient } from "./core/llm-client/create-llm-client.js";
+export { isContextOverflowError, ToolCallParseError } from "ohbaby-llm";
+export {
+  DEFAULT_PROVIDER_RETRY_POLICY,
+  ProviderRetryExhaustedError,
+  ProviderStreamInterruptedError,
+  isRetryableProviderError,
+  nextRetryDelayMs,
+  parseRetryAfterMs,
+  providerErrorStatus,
+  retryReason,
+} from "ohbaby-llm";
+export type { CreateLLMClientOptions } from "./core/llm-client/create-llm-client.js";
+export { streamResponse, resolvePreparedRequestSettings } from "ohbaby-llm";
+
+// Export type definitions for consumers
+export type {
+  ModelResponseSnapshot,
+  ToolCallSnapshot,
+  // Main interfaces
+  LLMClientInstance,
+  StreamingResponse,
+  // Message and token types
+  ModelMessage,
+  StreamingTokenUsage,
+  TokenUsage,
+  // Tool-related types
+  ParsedToolCall,
+  // Metadata types
+  ModelFinishReason,
+  StreamStopReason,
+} from "ohbaby-llm";
+export type { ProviderRetryEvent, ProviderRetryPolicy } from "ohbaby-llm";
+export type {
+  ModelToolDefinition,
+  ModelToolCall,
+  LLMRequestPurpose,
+  PromptCacheRequestStrategy,
+} from "ohbaby-llm";
+
+// Re-export error class for convenience
+// Allows consumers to: import { APIUserAbortError } from '@/core/llm-client'
+export { APIUserAbortError } from "ohbaby-llm";
+
 export * from "./mcp/index.js";
 export * from "./migration/index.js";
 export * from "./observability/index.js";

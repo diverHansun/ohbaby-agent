@@ -43,5 +43,8 @@
     "hono": "^4.12.25",
     "ohbaby-agent": "workspace:*",
     "ohbaby-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "ohbaby-llm": "workspace:*"
   }
 }

@@ -4,7 +4,7 @@ import {
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
   providerErrorStatus,
-} from "../../core/llm-client/index.js";
+} from "ohbaby-llm";
 
 function message(error: unknown): string {
   if (error instanceof Error) {

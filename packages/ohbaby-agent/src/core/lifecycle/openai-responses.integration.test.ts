@@ -1,23 +1,23 @@
 import type OpenAI from "openai";
 import { describe, expect, it, vi, type Mock, type MockInstance } from "vitest";
-import { createOpenAIResponsesProvider } from "./openai-responses.js";
+import { createOpenAIResponsesProvider } from "ohbaby-llm";
 import { createBus } from "../../bus/index.js";
-import { createContextManager } from "../../core/context/index.js";
+import { createContextManager } from "../context/index.js";
 import {
   Lifecycle,
   type LifecycleEvent,
   type LifecycleResult,
-} from "../../core/lifecycle/index.js";
+} from "./index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
   readTokenUsageMetadata,
   type MessageManager,
-} from "../../core/message/index.js";
+} from "../message/index.js";
 import {
   createToolScheduler,
   type ToolSchedulerInstance,
-} from "../../core/tool-scheduler/index.js";
+} from "../tool-scheduler/index.js";
 import { createPermissionState } from "../../permission/index.js";
 import { createPromptCacheUsageTracker } from "../../adapters/ui-inprocess/prompt-cache-usage.js";
 

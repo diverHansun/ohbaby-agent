@@ -1,8 +1,5 @@
-import type {
-  ModelMessage,
-  LLMClientInstance,
-} from "../../core/llm-client/index.js";
-import { streamResponse } from "../../core/llm-client/index.js";
+import type { ModelMessage, LLMClientInstance } from "ohbaby-llm";
+import { streamResponse } from "ohbaby-llm";
 import {
   isDefaultSessionTitle,
   sanitizePromptForSessionTitle,

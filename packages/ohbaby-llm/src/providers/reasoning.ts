@@ -1,15 +1,15 @@
-import { normalizedEndpoint } from "../../config/llm/model-profile.js";
+import { normalizedEndpoint } from "../config/model-profile.js";
 import {
   ConfigError,
   type InterfaceProviderKind,
   type ModelJsonModelProfile,
   type ReasoningCapabilities,
   type ReasoningConfig,
-} from "../../config/llm/types.js";
+} from "../config/types.js";
 import {
   validateReasoningCapabilities,
   validateReasoningConfig,
-} from "../../config/llm/validation.js";
+} from "../config/validation.js";
 
 /** Internal provenance survives inheritance; it is never a persisted user field. */
 export interface ReasoningIntent {

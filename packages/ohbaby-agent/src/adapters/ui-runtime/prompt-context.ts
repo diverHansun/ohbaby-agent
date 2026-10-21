@@ -4,9 +4,9 @@ import type {
   ContextLLMClient,
   SummaryRequestResult,
 } from "../../core/context/index.js";
-import type { SummaryRequestRecord } from "../../core/llm-client/types.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
-import { streamResponse } from "../../core/llm-client/index.js";
+import type { SummaryRequestRecord } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
+import { streamResponse } from "ohbaby-llm";
 import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
 import { redactPromptSecrets } from "../../services/session/prompt-sanitizer.js";
 

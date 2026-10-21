@@ -3,8 +3,8 @@ import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setActiveLLMConfig } from "../writer.js";
-import type { ModelJsonConfig, ModelJsonModelProfile } from "../types.js";
-import { resolveRequestReasoning } from "../../../services/interface-providers/reasoning.js";
+import type { ModelJsonConfig, ModelJsonModelProfile } from "ohbaby-llm";
+import { resolveRequestReasoning } from "ohbaby-llm";
 
 it("preserves independent routes and legacy profiles, and resolves the exact route first", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ohbaby-route-"));
@@ -151,7 +151,7 @@ it("loads exact active route windows for summary and token budgets", async () =>
     expect(summarizeActiveModel(config).profile?.contextWindowTokens).toBe(
       200000,
     );
-    const { activeModelBudgetProfiles } = await import("../model-profile.js");
+    const { activeModelBudgetProfiles } = await import("ohbaby-llm");
     const { createHeuristicTokenCounter } =
       await import("../../../services/llm-model/tokenCounting.js");
     expect(

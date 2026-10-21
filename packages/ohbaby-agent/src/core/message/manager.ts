@@ -25,7 +25,7 @@ import type {
   UpdatePartPatch,
   UpdatePartCondition,
 } from "./types.js";
-import type { ModelMessage } from "../llm-client/index.js";
+import type { ModelMessage } from "ohbaby-llm";
 
 export interface MessageManagerOptions {
   readonly commitCoordinator?: MessageCommitCoordinator;

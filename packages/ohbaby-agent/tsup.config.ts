@@ -30,5 +30,6 @@ export default defineConfig({
     "tls",
     "zlib",
     "ohbaby-sdk",
+    "ohbaby-llm",
   ],
 });

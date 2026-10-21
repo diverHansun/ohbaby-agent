@@ -1,5 +1,5 @@
-import { validateReasoningCapabilities } from "./validation.js";
-import type { InterfaceProviderKind, ReasoningCapabilities } from "./types.js";
+import { validateReasoningCapabilities } from "ohbaby-llm";
+import type { InterfaceProviderKind, ReasoningCapabilities } from "ohbaby-llm";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 const CONTEXT_WINDOW_FIELDS = [

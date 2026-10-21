@@ -5,8 +5,8 @@ import { expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import { createContextManager } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
-import type { InterfaceProviderRequest } from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { InterfaceProviderRequest } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,

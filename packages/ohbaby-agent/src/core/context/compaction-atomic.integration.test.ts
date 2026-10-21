@@ -1,7 +1,7 @@
-import { resolvePreparedRequestSettings } from "../llm-client/streaming.js";
+import { resolvePreparedRequestSettings } from "ohbaby-llm";
 import { createContextSummaryClient } from "../../adapters/ui-runtime/prompt-context.js";
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
-import type { LLMClientInstance } from "../llm-client/types.js";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -1,6 +1,6 @@
-import { mergeReasoningIntent } from "../../services/interface-providers/reasoning.js";
+import { mergeReasoningIntent } from "ohbaby-llm";
 import type { LifecycleEvent } from "../lifecycle/index.js";
-import type { ModelToolDefinition } from "../llm-client/index.js";
+import type { ModelToolDefinition } from "ohbaby-llm";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
 import type {
   AgentRunDeps,

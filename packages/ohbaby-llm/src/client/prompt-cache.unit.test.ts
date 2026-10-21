@@ -4,7 +4,7 @@ import type {
   InterfaceProviderPromptCache,
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/index.js";
+} from "../providers/index.js";
 import type { LLMClientInstance } from "./types.js";
 import { streamResponse } from "./streaming.js";
 import {

@@ -1,7 +1,7 @@
 import { renderReminderText } from "../message/origin.js";
 import { isRuntimeInputSnapshotChanged } from "./runtime-input-error.js";
-import type { AgentStepRequestRecord } from "../llm-client/types.js";
-import { ModelObservationError } from "../llm-client/request-observation.js";
+import type { AgentStepRequestRecord } from "ohbaby-llm";
+import { ModelObservationError } from "ohbaby-llm";
 import { ToolBatchEventQueue } from "./tool-event-queue.js";
 import { ToolDeliveryError } from "../tool-scheduler/index.js";
 import { randomUUID } from "node:crypto";
@@ -18,13 +18,13 @@ import {
   streamResponse,
   resolvePreparedRequestSettings,
   providerErrorStatus,
-} from "../llm-client/index.js";
+} from "ohbaby-llm";
 import type {
   ModelMessage,
   ModelResponseSnapshot,
   ParsedToolCall,
   TokenUsage,
-} from "../llm-client/index.js";
+} from "ohbaby-llm";
 import type {
   AgentRunPromptSnapshot,
   PreparedModelRequest,
@@ -53,8 +53,8 @@ import type {
   LifecycleSessionParams,
   TurnContext,
 } from "./types.js";
-import { mergeReasoningIntent } from "../../services/interface-providers/reasoning.js";
-import type { ModelState } from "../../services/interface-providers/native-state.js";
+import { mergeReasoningIntent } from "ohbaby-llm";
+import type { ModelState } from "ohbaby-llm";
 import { aggregateTokenUsage } from "./token-usage.js";
 import { ensureInterruptionFact } from "../message/interruption.js";
 
@@ -1482,7 +1482,7 @@ export class Lifecycle {
                   step,
                 },
                 onRequestObservation: async (
-                  fact: import("../llm-client/types.js").ModelRequestObservation,
+                  fact: import("ohbaby-llm").ModelRequestObservation,
                 ): Promise<void> => {
                   const saved = this.deps.messageManager.updateMessage(
                     assistantMessage.id,

@@ -1,4 +1,4 @@
-import type { InterfaceProviderRequest } from "../../packages/ohbaby-agent/src/services/interface-providers/types.js";
+import type { InterfaceProviderRequest } from "ohbaby-llm";
 /** Interactive controller: all generation enters the real persistent UI backend. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
@@ -16,11 +16,8 @@ import {
   createPersistentUiBackendClient,
   closePersistentUiBackendDatabase,
 } from "../../packages/ohbaby-agent/src/adapters/ui-persistent.js";
-import {
-  createLLMClient,
-  type TokenUsage,
-  type LLMClientInstance,
-} from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import { createLLMClient } from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import { type TokenUsage, type LLMClientInstance } from "ohbaby-llm";
 import { loadEnvFile } from "../../packages/ohbaby-agent/src/config/llm/loaders.js";
 import { reloadLLMConfig } from "../../packages/ohbaby-agent/src/config/llm/index.js";
 import { probeActiveModelContextWindow } from "../../packages/ohbaby-agent/src/config/llm/apply-active-model-config.js";

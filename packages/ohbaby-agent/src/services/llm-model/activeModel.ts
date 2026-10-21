@@ -1,4 +1,4 @@
-import { activeModelBudgetProfiles } from "../../config/llm/model-profile.js";
+import { activeModelBudgetProfiles } from "ohbaby-llm";
 import type { LLMConfig, InterfaceProviderKind } from "../../config/index.js";
 import {
   createModelProfileRegistry,

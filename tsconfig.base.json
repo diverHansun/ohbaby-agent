@@ -3,7 +3,9 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2023"],
+    "lib": [
+      "ES2023"
+    ],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,11 +16,23 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
-      "ohbaby-sdk": ["packages/ohbaby-sdk/src/index.ts"],
-      "ohbaby-agent": ["packages/ohbaby-agent/src/index.ts"],
-      "ohbaby-cli": ["packages/ohbaby-cli/src/index.ts"]
+      "ohbaby-sdk": [
+        "packages/ohbaby-sdk/src/index.ts"
+      ],
+      "ohbaby-agent": [
+        "packages/ohbaby-agent/src/index.ts"
+      ],
+      "ohbaby-cli": [
+        "packages/ohbaby-cli/src/index.ts"
+      ],
+      "ohbaby-llm": [
+        "packages/ohbaby-llm/src/index.ts"
+      ]
     },
-    "types": ["node", "vitest/globals"],
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
     "jsx": "react-jsx",
     "noUnusedLocals": true,
     "noUnusedParameters": true,

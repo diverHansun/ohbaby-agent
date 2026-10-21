@@ -65,6 +65,7 @@ export default tseslint.config(
   {
     files: [
       "packages/ohbaby-agent/src/**/*.{ts,tsx}",
+      "packages/ohbaby-llm/src/**/*.{ts,tsx}",
       "packages/ohbaby-server/src/**/*.{ts,tsx}",
     ],
     ignores: [

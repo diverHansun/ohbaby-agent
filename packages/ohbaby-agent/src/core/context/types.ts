@@ -1,11 +1,8 @@
-import type {
-  PreparedRequestSettings,
-  SummaryRequestRecord,
-} from "../llm-client/types.js";
-import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
-import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
+import type { PreparedRequestSettings, SummaryRequestRecord } from "ohbaby-llm";
+import type { ReasoningIntent } from "ohbaby-llm";
+import type { ModelOrigin } from "ohbaby-llm";
 import type { BusInstance } from "../../bus/index.js";
-import type { ModelMessage, ModelToolDefinition } from "../llm-client/index.js";
+import type { ModelMessage, ModelToolDefinition } from "ohbaby-llm";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
 import type { EnvironmentInfo } from "../system-prompt/types.js";
 import type { ReminderCollector } from "../../services/reminder/index.js";

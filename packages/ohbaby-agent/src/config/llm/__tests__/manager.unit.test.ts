@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { _LLMConfigManager as LLMConfigManager } from "../index.js";
-import { ConfigError } from "../types.js";
+import { ConfigError } from "ohbaby-llm";
 import * as loaders from "../loaders.js";
 
 // Mock loaders module

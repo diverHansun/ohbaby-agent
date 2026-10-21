@@ -9,8 +9,8 @@ import type { UiEvent, UiPromptReceipt, UiRun } from "ohbaby-sdk";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../services/interface-providers/index.js";
-import type { LLMClientInstance } from "../core/llm-client/index.js";
+} from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   closeDatabase,
   getDatabase,

@@ -15,10 +15,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  createLLMClient,
-  streamResponse,
-} from "../../../core/llm-client/index.js";
+import { createLLMClient } from "../../../core/llm-client/index.js";
+import { streamResponse } from "ohbaby-llm";
 import { applyActiveModelConfig } from "../apply-active-model-config.js";
 import { _LLMConfigManager as LLMConfigManager } from "../index.js";
 

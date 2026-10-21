@@ -1,4 +1,4 @@
-import type { ReasoningConfig } from "../../config/llm/types.js";
+import type { ReasoningConfig } from "ohbaby-llm";
 import type { BusInstance } from "../../bus/index.js";
 
 export type SessionStatus = "active" | "archived";

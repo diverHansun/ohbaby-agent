@@ -10,7 +10,7 @@ import {
   resolveOhbabyHome,
   resolveReadPathWithLegacy,
 } from "../../paths/index.js";
-import { ConfigError } from "./types.js";
+import { ConfigError } from "ohbaby-llm";
 import { parseEnvFile } from "./env-file.js";
 
 /** Directory name for ohbaby-agent configuration */

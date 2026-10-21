@@ -34,10 +34,10 @@ import type {
   UiSessionControl,
   UiPromptReceiptResult,
 } from "ohbaby-sdk";
-import type { ResolveRequestReasoningOptions } from "../services/interface-providers/reasoning.js";
-import { validateReasoningConfig } from "../config/llm/validation.js";
-import type { ReasoningConfig } from "../config/llm/types.js";
-import { resolveRequestReasoning } from "../services/interface-providers/reasoning.js";
+import type { ResolveRequestReasoningOptions } from "ohbaby-llm";
+import { validateReasoningConfig } from "ohbaby-llm";
+import type { ReasoningConfig } from "ohbaby-llm";
+import { resolveRequestReasoning } from "ohbaby-llm";
 import { reasoningCapabilityView } from "../services/llm-model/reasoning-view.js";
 import { currentDiscoveryState } from "../config/llm/apply-active-model-config.js";
 import {
@@ -99,10 +99,8 @@ import type {
 } from "ohbaby-sdk";
 import type { BusInstance } from "../bus/index.js";
 import { createLLMClient } from "../core/llm-client/index.js";
-import type {
-  CreateLLMClientOptions,
-  LLMClientInstance,
-} from "../core/llm-client/index.js";
+import type { CreateLLMClientOptions } from "../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { createBus } from "../bus/index.js";
 import type {
   CommandGoalBackend,
@@ -214,9 +212,9 @@ import {
   probeActiveModelContextWindow,
 } from "../config/llm/apply-active-model-config.js";
 import { loadModelJson } from "../config/llm/loaders.js";
-import { ConfigError } from "../config/llm/types.js";
-import { validateModelJson } from "../config/llm/validation.js";
-import type { ModelJsonConfig } from "../config/llm/types.js";
+import { ConfigError } from "ohbaby-llm";
+import { validateModelJson } from "ohbaby-llm";
+import type { ModelJsonConfig } from "ohbaby-llm";
 import {
   reloadSearchConfig,
   setSearchApiKey as writeSearchApiKey,

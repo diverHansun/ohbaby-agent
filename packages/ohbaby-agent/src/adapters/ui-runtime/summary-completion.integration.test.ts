@@ -1,4 +1,4 @@
-import { resolvePreparedRequestSettings } from "../../core/llm-client/streaming.js";
+import { resolvePreparedRequestSettings } from "ohbaby-llm";
 import type { RawMessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
@@ -7,13 +7,10 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../core/message/index.js";
-import { createAnthropicProvider } from "../../services/interface-providers/anthropic.js";
+import { createAnthropicProvider } from "ohbaby-llm";
 import { createContextSummaryClient } from "./prompt-context.js";
-import type {
-  LLMClientInstance,
-  SummaryRequestRecord,
-} from "../../core/llm-client/types.js";
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import type { LLMClientInstance, SummaryRequestRecord } from "ohbaby-llm";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 
 describe("summary completion through the production stream accumulator", () => {
   it.each([

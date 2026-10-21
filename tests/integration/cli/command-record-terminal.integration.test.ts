@@ -46,6 +46,8 @@ beforeAll(async () => {
       "--filter",
       "ohbaby-sdk",
       "--filter",
+      "ohbaby-llm",
+      "--filter",
       "ohbaby-agent",
       "--filter",
       "ohbaby-server",

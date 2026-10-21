@@ -1,4 +1,4 @@
-import type { ModelState } from "../../services/interface-providers/native-state.js";
+import type { ModelState } from "ohbaby-llm";
 import type { MessageWithParts } from "../message/index.js";
 import { isActivePart } from "./filters.js";
 import type { TokenCounter } from "./types.js";

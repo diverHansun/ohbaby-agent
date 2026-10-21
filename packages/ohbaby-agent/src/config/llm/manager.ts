@@ -10,10 +10,10 @@ import { inferConnectModelInterfaceProvider } from "ohbaby-sdk";
  * Coordinates loading, validation, caching, and hot-reload.
  */
 
-import type { LLMConfig, ModelJsonConfig } from "./types.js";
-import { ConfigError } from "./types.js";
+import type { LLMConfig, ModelJsonConfig } from "ohbaby-llm";
+import { ConfigError } from "ohbaby-llm";
 import { loadModelJson, loadApiKey, loadEnvFile } from "./loaders.js";
-import { validateModelJson } from "./validation.js";
+import { validateModelJson } from "ohbaby-llm";
 import {
   firstNonEmptyApiKey,
   OPTIONAL_API_KEY_PLACEHOLDER,

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type { Tool } from "../../core/tool-scheduler/index.js";
 import {
   createInMemoryMessageStore,
@@ -15,7 +15,7 @@ import {
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import { createInMemorySessionManager } from "../../services/session/index.js";
 import { SkillRegistry } from "../../skill/index.js";
 import {

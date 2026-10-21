@@ -1,0 +1,1166 @@
+/**
+ * Integration tests for the LLM Client module.
+ *
+ * Tests provider-backed client creation and streamResponse
+ * with explicit configuration and mocked provider responses.
+ */
+
+import { APIConnectionError as OpenAIConnectionError } from "openai";
+import { APIConnectionError as AnthropicConnectionError } from "@anthropic-ai/sdk/error";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type {
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "../providers/index.js";
+import {
+  isRetryableProviderError,
+  nextRetryDelayMs,
+  parseRetryAfterMs,
+  ProviderStreamInterruptedError,
+  retryReason,
+  streamResponse,
+  ToolCallParseError,
+} from "./index.js";
+import type {
+  ModelResponseSnapshot,
+  LLMClientInstance,
+  StreamingResponse,
+} from "./types.js";
+
+type AssistantMessage = ModelResponseSnapshot;
+
+interface MockSdkClient {
+  chat: {
+    completions: {
+      create: () => void;
+    };
+  };
+}
+
+interface OpenAIClientLike {
+  chat: {
+    completions: {
+      create: unknown;
+    };
+  };
+}
+
+function createProviderStream(
+  events: readonly InterfaceProviderStreamEvent[],
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
+  return (async function* (): AsyncGenerator<
+    InterfaceProviderStreamEvent,
+    void,
+    unknown
+  > {
+    for (const event of events) {
+      yield await Promise.resolve(event);
+    }
+  })();
+}
+
+function createAbortingProviderStream(
+  events: readonly InterfaceProviderStreamEvent[],
+  error: Error,
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
+  return (async function* (): AsyncGenerator<
+    InterfaceProviderStreamEvent,
+    void,
+    unknown
+  > {
+    for (const event of events) {
+      yield await Promise.resolve(event);
+    }
+
+    throw error;
+  })();
+}
+
+let streamResponseMock: ReturnType<
+  typeof vi.fn<
+    (
+      request: InterfaceProviderRequest,
+    ) => Promise<AsyncIterable<InterfaceProviderStreamEvent>>
+  >
+>;
+let isAbortErrorMock: ReturnType<typeof vi.fn<(error: unknown) => boolean>>;
+
+function getInterfaceProviderRequest(): InterfaceProviderRequest {
+  const request = streamResponseMock.mock.calls[0][0];
+  return request;
+}
+
+function getAssistantMessage(response: StreamingResponse): AssistantMessage {
+  return response.messageSnapshot;
+}
+
+import { createLLMClientFromConfig } from "./client.js";
+import type { LLMConfig } from "../config/types.js";
+
+describe("LLM Client Integration Tests", () => {
+  const mockConfig: LLMConfig = {
+    provider: "openai",
+    model: "gpt-4",
+    apiKey: "sk-test-123",
+    apiKeyEnv: "OPENAI_API_KEY",
+    baseUrl: "https://api.openai.com/v1",
+    interfaceProvider: "openai-compatible",
+    promptCache: "auto",
+    temperature: 0.7,
+    maxTokens: 4096,
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  describe("createLLMClientFromConfig", () => {
+    it("should not expose apiKey in returned config", () => {
+      const client = createLLMClientFromConfig(mockConfig);
+
+      // apiKey should not be in the config object
+      expect("apiKey" in client.config).toBe(false);
+    });
+
+    it("should use different provider config", () => {
+      const zhipuConfig: LLMConfig = {
+        provider: "zhipu",
+        model: "glm-4-plus",
+        apiKey: "zhipu-key-123",
+        apiKeyEnv: "ZHIPU_API_KEY",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
+        promptCache: "auto",
+        temperature: 0.2,
+        maxTokens: 2048,
+      };
+      const client = createLLMClientFromConfig(zhipuConfig);
+
+      expect(client.config.provider).toBe("zhipu");
+      expect(client.config.model).toBe("glm-4-plus");
+      expect(client.config.baseUrl).toBe(
+        "https://open.bigmodel.cn/api/paas/v4",
+      );
+      expect(client.config.temperature).toBe(0.2);
+      expect(client.config.maxTokens).toBe(2048);
+    });
+
+    it("should expose the provider SDK client through provider.client", () => {
+      const client = createLLMClientFromConfig(mockConfig);
+      const providerClient = client.provider.client as OpenAIClientLike;
+
+      expect(providerClient.chat).toBeDefined();
+      expect(providerClient.chat.completions).toBeDefined();
+      expect(typeof providerClient.chat.completions.create).toBe("function");
+    });
+  });
+
+  describe("streamResponse", () => {
+    let mockClient: LLMClientInstance<MockSdkClient>;
+
+    beforeEach(() => {
+      const sdkClient: MockSdkClient = {
+        chat: {
+          completions: {
+            create: () => undefined,
+          },
+        },
+      };
+      streamResponseMock =
+        vi.fn<
+          (
+            request: InterfaceProviderRequest,
+          ) => Promise<AsyncIterable<InterfaceProviderStreamEvent>>
+        >();
+      isAbortErrorMock = vi
+        .fn<(error: unknown) => boolean>()
+        .mockReturnValue(false);
+
+      mockClient = {
+        provider: {
+          id: "openai",
+          kind: "openai-compatible",
+          client: sdkClient,
+          streamResponse: streamResponseMock,
+          isAbortError: isAbortErrorMock,
+        },
+        config: {
+          provider: "openai",
+          model: "gpt-4",
+          apiKeyEnv: "OPENAI_API_KEY",
+          baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-compatible",
+          temperature: 0.7,
+          maxTokens: 4096,
+        },
+      };
+    });
+
+    it("sends the configured maxTokens when no per-request override is given", async () => {
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "ok", finishReason: "stop" }]),
+      );
+
+      const messages = [{ role: "user" as const, content: "Say hello" }];
+      for await (const response of streamResponse(mockClient, messages)) {
+        void response;
+      }
+
+      expect(streamResponseMock).toHaveBeenCalledWith(
+        expect.objectContaining({ maxTokens: 4096 }),
+      );
+    });
+
+    it("sends a per-request maxTokens override without touching client config", async () => {
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "ok", finishReason: "stop" }]),
+      );
+
+      const messages = [{ role: "user" as const, content: "Say hello" }];
+      for await (const response of streamResponse(mockClient, messages, {
+        maxTokens: 128,
+      })) {
+        void response;
+      }
+
+      expect(streamResponseMock).toHaveBeenCalledWith(
+        expect.objectContaining({ maxTokens: 128 }),
+      );
+      expect(mockClient.config.maxTokens).toBe(4096);
+    });
+
+    it("rejects invalid per-request maxTokens before calling the provider", async () => {
+      const messages = [{ role: "user" as const, content: "Say hello" }];
+
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamResponse(mockClient, messages, {
+            maxTokens: 0,
+          })) {
+            void response;
+          }
+        })(),
+      ).rejects.toThrow(/maxTokens.*positive integer/u);
+
+      expect(streamResponseMock).not.toHaveBeenCalled();
+    });
+
+    it("should accumulate text content from streaming chunks", async () => {
+      const events: InterfaceProviderStreamEvent[] = [
+        {
+          textDelta: "Hello",
+        },
+        {
+          textDelta: " world",
+          finishReason: "stop",
+          tokenUsage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
+            reasoningTokens: 2,
+          },
+        },
+      ];
+
+      streamResponseMock.mockResolvedValue(createProviderStream(events));
+
+      const messages = [{ role: "user" as const, content: "Say hello" }];
+      const responses: StreamingResponse[] = [];
+
+      for await (const response of streamResponse(mockClient, messages)) {
+        responses.push(response);
+      }
+
+      expect(responses.length).toBe(3);
+
+      // First chunk should have accumulated content
+      expect(responses[0].messageSnapshot.content).toBe("Hello");
+      expect(responses[0].isComplete).toBe(false);
+
+      // Last chunk should have complete content
+      expect(responses[2].messageSnapshot.content).toBe("Hello world");
+      expect(responses[2].isComplete).toBe(true);
+      expect(responses[2].finishReason).toBe("stop");
+      expect(responses[2].rawFinishReason).toBeUndefined();
+      expect(responses[2].tokenUsage).toEqual({
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        reasoningTokens: 2,
+      });
+    });
+
+    it("should accumulate and parse tool calls", async () => {
+      const events: InterfaceProviderStreamEvent[] = [
+        {
+          toolCallDeltas: [
+            {
+              index: 0,
+              id: "call_123",
+              name: "get_weather",
+              argumentsDelta: '{"location":"',
+            },
+          ],
+        },
+        {
+          toolCallDeltas: [
+            {
+              index: 0,
+              argumentsDelta: 'NYC"}',
+            },
+          ],
+          finishReason: "tool_calls",
+          tokenUsage: {
+            inputTokens: 20,
+            outputTokens: 10,
+            totalTokens: 30,
+          },
+        },
+      ];
+
+      streamResponseMock.mockResolvedValue(createProviderStream(events));
+
+      const messages = [
+        { role: "user" as const, content: "Get weather for NYC" },
+      ];
+      const responses: StreamingResponse[] = [];
+
+      for await (const response of streamResponse(mockClient, messages)) {
+        responses.push(response);
+      }
+
+      const lastResponse = responses[responses.length - 1];
+      const assistantMessage = getAssistantMessage(lastResponse);
+
+      if (!("toolCalls" in assistantMessage) || !assistantMessage.toolCalls) {
+        throw new Error("Expected tool calls on assistant message.");
+      }
+
+      // Verify raw tool call accumulation
+      const toolCall = assistantMessage.toolCalls[0];
+      expect(toolCall.callId).toBe("call_123");
+      expect(toolCall.name).toBe("get_weather");
+      expect(toolCall.argumentsJson).toBe('{"location":"NYC"}');
+
+      // Verify parsed tool call
+      const parsedCall = lastResponse.parsedToolCalls?.[0];
+      expect(parsedCall).toEqual({
+        callId: "call_123",
+        name: "get_weather",
+        arguments: { location: "NYC" },
+      });
+    });
+
+    it("keeps interleaved tool fragments separate when IDs and names arrive late", async () => {
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([
+          {
+            toolCallDeltas: [{ index: 2, argumentsDelta: '{"path":"se' }],
+          },
+          {
+            toolCallDeltas: [
+              { index: 0, id: "call_first", argumentsDelta: '{"path":"' },
+              { index: 2, name: "read_file", argumentsDelta: 'cond.txt"' },
+            ],
+          },
+          {
+            toolCallDeltas: [
+              { index: 2, id: "call_second", argumentsDelta: "}" },
+              {
+                index: 0,
+                name: "read_file",
+                argumentsDelta: 'first.txt","limit":2}',
+              },
+            ],
+          },
+          {
+            toolCallDeltas: [
+              { index: 2, id: "", name: "", argumentsDelta: "" },
+            ],
+            finishReason: "tool_calls",
+          },
+        ]),
+      );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamResponse(mockClient, [
+        { role: "user", content: "Read both files" },
+      ])) {
+        responses.push(response);
+      }
+
+      // Later fragments must not mutate snapshots already delivered to consumers.
+      expect(responses[0].messageSnapshot.toolCalls).toEqual([
+        { index: 2, callId: "", name: "", argumentsJson: '{"path":"se' },
+      ]);
+      expect(responses[1].messageSnapshot.toolCalls).toEqual([
+        {
+          index: 0,
+          callId: "call_first",
+          name: "",
+          argumentsJson: '{"path":"',
+        },
+        {
+          index: 2,
+          callId: "",
+          name: "read_file",
+          argumentsJson: '{"path":"second.txt"',
+        },
+      ]);
+
+      const final = responses.at(-1);
+      // Snapshots use numeric index order; parsed calls retain first-seen order.
+      expect(final?.messageSnapshot.toolCalls).toEqual([
+        {
+          index: 0,
+          callId: "call_first",
+          name: "read_file",
+          argumentsJson: '{"path":"first.txt","limit":2}',
+        },
+        {
+          index: 2,
+          callId: "call_second",
+          name: "read_file",
+          argumentsJson: '{"path":"second.txt"}',
+        },
+      ]);
+      expect(final?.parsedToolCalls).toEqual([
+        {
+          callId: "call_second",
+          name: "read_file",
+          arguments: { path: "second.txt" },
+        },
+        {
+          callId: "call_first",
+          name: "read_file",
+          arguments: { path: "first.txt", limit: 2 },
+        },
+      ]);
+      expect(
+        responses.slice(0, -1).every((r) => r.parsedToolCalls === undefined),
+      ).toBe(true);
+    });
+
+    it("preserves sorted partial tool arguments without parsing when cancelled", async () => {
+      const controller = new AbortController();
+      streamResponseMock.mockResolvedValue(
+        createAbortingProviderStream(
+          [
+            {
+              toolCallDeltas: [
+                { index: 2, name: "read_file", argumentsDelta: '{"path":"sec' },
+                { index: 0, id: "call_first", argumentsDelta: '{"path":' },
+              ],
+            },
+            {
+              toolCallDeltas: [
+                { index: 2, id: "call_second", argumentsDelta: "ond" },
+                { index: 0, name: "read_file" },
+              ],
+            },
+          ],
+          new Error("stream cancelled"),
+        ),
+      );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamResponse(
+        mockClient,
+        [{ role: "user", content: "Read both files" }],
+        { signal: controller.signal },
+      )) {
+        responses.push(response);
+        if (responses.length === 2) controller.abort();
+      }
+
+      const final = responses.at(-1);
+      expect(final?.streamStopReason).toBe("user_aborted");
+      expect(final?.parsedToolCalls).toBeUndefined();
+      expect(final?.messageSnapshot).toEqual({
+        content: null,
+        toolCalls: [
+          {
+            index: 0,
+            callId: "call_first",
+            name: "read_file",
+            argumentsJson: '{"path":',
+          },
+          {
+            index: 2,
+            callId: "call_second",
+            name: "read_file",
+            argumentsJson: '{"path":"second',
+          },
+        ],
+      });
+    });
+
+    it("should handle empty responses with default content", async () => {
+      const events: InterfaceProviderStreamEvent[] = [
+        {
+          finishReason: "stop",
+          tokenUsage: {
+            inputTokens: 10,
+            outputTokens: 0,
+            totalTokens: 10,
+          },
+        },
+      ];
+
+      streamResponseMock.mockResolvedValue(createProviderStream(events));
+
+      const messages = [{ role: "user" as const, content: "test" }];
+      const responses: StreamingResponse[] = [];
+
+      for await (const response of streamResponse(mockClient, messages)) {
+        responses.push(response);
+      }
+
+      const lastResponse = responses[responses.length - 1];
+      expect(lastResponse.messageSnapshot.content).toBeNull();
+    });
+
+    it("should yield provider reasoning deltas without exposing them as assistant text", async () => {
+      const events: InterfaceProviderStreamEvent[] = [
+        { reasoningTextDelta: "think " },
+        { reasoningTextDelta: "more" },
+        { textDelta: "Visible answer" },
+        { finishReason: "stop" },
+      ];
+
+      streamResponseMock.mockResolvedValue(createProviderStream(events));
+
+      const messages = [{ role: "user" as const, content: "test" }];
+      const responses: StreamingResponse[] = [];
+
+      for await (const response of streamResponse(mockClient, messages)) {
+        responses.push(response);
+      }
+
+      expect(
+        responses.map((response) => ({
+          content: response.messageSnapshot.content,
+          reasoningText: response.reasoningText,
+          reasoningTextDelta: response.reasoningTextDelta,
+        })),
+      ).toEqual([
+        {
+          content: null,
+          reasoningText: "think ",
+          reasoningTextDelta: "think ",
+        },
+        {
+          content: null,
+          reasoningText: "think more",
+          reasoningTextDelta: "more",
+        },
+        {
+          content: "Visible answer",
+          reasoningText: "think more",
+          reasoningTextDelta: undefined,
+        },
+        {
+          content: "Visible answer",
+          reasoningText: "think more",
+          reasoningTextDelta: undefined,
+        },
+        {
+          content: "Visible answer",
+          reasoningText: "think more",
+          reasoningTextDelta: undefined,
+        },
+      ]);
+      expect(responses.filter((response) => response.isComplete)).toHaveLength(
+        1,
+      );
+    });
+
+    it("should use configuration from client instance", async () => {
+      mockClient.config.model = "gpt-4-turbo";
+      mockClient.config.modelProfiles = [
+        {
+          model: "gpt-4-turbo",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ];
+      mockClient.config.temperature = 1.0;
+      mockClient.config.maxTokens = 128000;
+
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "test", finishReason: "stop" }]),
+      );
+
+      const messages = [{ role: "user" as const, content: "test" }];
+
+      const iterator = streamResponse(mockClient, messages);
+      await iterator.next();
+
+      const callArgs = getInterfaceProviderRequest();
+
+      expect(callArgs.model).toBe("gpt-4-turbo");
+      expect(callArgs.temperature).toBe(1.0);
+      expect(callArgs.maxTokens).toBe(128000);
+    });
+
+    it("omits temperature when the active model has no temperature override", async () => {
+      mockClient.config.temperature = undefined;
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "test", finishReason: "stop" }]),
+      );
+
+      const iterator = streamResponse(mockClient, [
+        { role: "user", content: "test" },
+      ]);
+      await iterator.next();
+
+      expect(getInterfaceProviderRequest()).not.toHaveProperty("temperature");
+    });
+
+    it("should pass tools parameter to API", async () => {
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "test", finishReason: "stop" }]),
+      );
+
+      const messages = [{ role: "user" as const, content: "use tool" }];
+      const tools: InterfaceProviderRequest["tools"] = [
+        {
+          name: "test_tool",
+          description: "Test tool",
+          inputSchema: {
+            type: "object" as const,
+            properties: {},
+          },
+        },
+      ];
+
+      const iterator = streamResponse(mockClient, messages, { tools });
+      await iterator.next();
+
+      const callArgs = getInterfaceProviderRequest();
+
+      expect(callArgs.tools).toEqual(tools);
+    });
+
+    it("should pass abort signal to provider request", async () => {
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "test", finishReason: "stop" }]),
+      );
+
+      const messages = [{ role: "user" as const, content: "test" }];
+      const controller = new AbortController();
+      const iterator = streamResponse(mockClient, messages, {
+        signal: controller.signal,
+      });
+      await iterator.next();
+
+      const callArgs = getInterfaceProviderRequest();
+
+      expect(callArgs.signal?.aborted).toBe(false);
+      controller.abort();
+      expect(callArgs.signal?.aborted).toBe(true);
+      expect(callArgs.signal?.reason).toBe(controller.signal.reason);
+      await iterator.return();
+    });
+
+    it("should return partial content when local cancellation aborts the provider", async () => {
+      const controller = new AbortController();
+      const abortError = new Error("aborted");
+      isAbortErrorMock.mockImplementation(
+        (error: unknown) => error === abortError,
+      );
+      streamResponseMock.mockResolvedValue(
+        createAbortingProviderStream([{ textDelta: "Partial" }], abortError),
+      );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamResponse(
+        mockClient,
+        [{ role: "user" as const, content: "test" }],
+        { signal: controller.signal },
+      )) {
+        responses.push(response);
+        controller.abort();
+      }
+
+      expect(responses).toHaveLength(2);
+      expect(responses[0].isComplete).toBe(false);
+      expect(responses[1]).toMatchObject({
+        isComplete: true,
+        streamStopReason: "user_aborted",
+      });
+      expect(responses[1].finishReason).toBeUndefined();
+      expect(responses[1].messageSnapshot.content).toBe("Partial");
+    });
+
+    it("retries retryable provider errors before any stream delta is emitted", async () => {
+      const unavailable = Object.assign(new Error("temporarily unavailable"), {
+        status: 503,
+      });
+      streamResponseMock
+        .mockRejectedValueOnce(unavailable)
+        .mockResolvedValueOnce(
+          createProviderStream([
+            { textDelta: "Recovered", finishReason: "stop" },
+          ]),
+        );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamResponse(
+        mockClient,
+        [{ role: "user" as const, content: "test" }],
+        {
+          retry: {
+            initialDelayMs: 0,
+            maxDelayMs: 0,
+            maxRetriesPerStep: 5,
+            retryAfterCapMs: 0,
+          },
+        },
+      )) {
+        responses.push(response);
+      }
+
+      expect(streamResponseMock).toHaveBeenCalledTimes(2);
+      expect(responses[0]).toMatchObject({
+        isComplete: false,
+        retry: { attempt: 1, maxRetries: 5, reason: "server_error" },
+      });
+      expect(responses.at(-1)).toMatchObject({
+        finishReason: "stop",
+        isComplete: true,
+        streamStopReason: "provider_finished",
+      });
+      expect(responses.at(-1)?.messageSnapshot.content).toBe("Recovered");
+    });
+
+    it("discards usage from a failed attempt before retrying", async () => {
+      const unavailable = Object.assign(new Error("stream failed"), {
+        status: 503,
+      });
+      streamResponseMock
+        .mockResolvedValueOnce(
+          createAbortingProviderStream(
+            [
+              {
+                tokenUsage: {
+                  inputBreakdown: {
+                    cacheRead: 80,
+                    cacheWrite: 0,
+                    observed: { cacheRead: true, cacheWrite: false },
+                    uncached: 20,
+                  },
+                  inputTokens: 100,
+                  outputTokens: 0,
+                  totalTokens: 100,
+                },
+              },
+            ],
+            unavailable,
+          ),
+        )
+        .mockResolvedValueOnce(
+          createProviderStream([
+            {
+              finishReason: "stop",
+              textDelta: "Recovered",
+              tokenUsage: {
+                inputTokens: 12,
+                outputTokens: 3,
+                totalTokens: 15,
+              },
+            },
+          ]),
+        );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamResponse(
+        mockClient,
+        [{ role: "user" as const, content: "test" }],
+        {
+          retry: {
+            initialDelayMs: 0,
+            maxDelayMs: 0,
+            maxRetriesPerStep: 1,
+            retryAfterCapMs: 0,
+          },
+        },
+      )) {
+        responses.push(response);
+      }
+
+      expect(responses).toHaveLength(3);
+      expect(responses[0].retry).toBeDefined();
+      expect(responses[2].tokenUsage).toMatchObject({
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+      });
+      expect(responses[2].tokenUsage?.inputBreakdown).toBeUndefined();
+      const publicUsage = responses[2].tokenUsage;
+      expect(publicUsage).toBeDefined();
+      if (!publicUsage) {
+        throw new Error("expected public token usage");
+      }
+      // Reflect also includes the old non-enumerable aliases: canonical
+      // usage must be the entire public result, including after a retry.
+      expect(Reflect.ownKeys(publicUsage).sort()).toEqual([
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+      ]);
+    });
+
+    describe.each([
+      {
+        label: "OpenAI SDK",
+        error: new OpenAIConnectionError({}),
+      },
+      {
+        label: "Anthropic SDK",
+        error: new AnthropicConnectionError({}),
+      },
+      {
+        label: "socket reset",
+        error: Object.assign(new Error("socket closed"), {
+          code: "ECONNRESET",
+        }),
+      },
+    ])("summary transport interruption: $label", ({ error }) => {
+      it.each([false, true])(
+        "preserves the transport cause for Context without retrying (partial output: %s)",
+        async (partialOutput) => {
+          streamResponseMock.mockResolvedValueOnce(
+            createAbortingProviderStream(
+              partialOutput ? [{ textDelta: "Partial summary" }] : [],
+              error,
+            ),
+          );
+          const responses: StreamingResponse[] = [];
+          const consume = async (): Promise<void> => {
+            for await (const response of streamResponse(
+              mockClient,
+              [{ role: "user", content: "Summarize the conversation" }],
+              {
+                purpose: "context-summary",
+                retry: { maxRetriesPerStep: 0 },
+              },
+            )) {
+              responses.push(response);
+            }
+          };
+
+          await expect(consume()).rejects.toMatchObject({
+            name: "ProviderStreamInterruptedError",
+            source: "transport",
+            cause: error,
+          });
+          expect(streamResponseMock).toHaveBeenCalledTimes(1);
+          expect(responses).toHaveLength(partialOutput ? 1 : 0);
+          expect(responses.every((response) => !response.isComplete)).toBe(
+            true,
+          );
+          expect(responses.some((response) => response.retry)).toBe(false);
+          if (partialOutput)
+            expect(responses[0].messageSnapshot.content).toBe(
+              "Partial summary",
+            );
+        },
+      );
+    });
+
+    it("does not retry after a reasoning delta has been emitted", async () => {
+      const streamError = Object.assign(new Error("socket closed"), {
+        status: 503,
+      });
+      streamResponseMock.mockResolvedValueOnce(
+        createAbortingProviderStream(
+          [{ reasoningTextDelta: "private thought" }],
+          streamError,
+        ),
+      );
+
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamResponse(
+            mockClient,
+            [{ role: "user" as const, content: "test" }],
+            {
+              retry: {
+                initialDelayMs: 0,
+                maxDelayMs: 0,
+                maxRetriesPerStep: 5,
+                retryAfterCapMs: 0,
+              },
+            },
+          )) {
+            void response;
+          }
+        })(),
+      ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
+      expect(streamResponseMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not retry after a tool-call delta has been emitted", async () => {
+      const streamError = Object.assign(new Error("socket closed"), {
+        status: 503,
+      });
+      streamResponseMock.mockResolvedValueOnce(
+        createAbortingProviderStream(
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_1",
+                  index: 0,
+                  name: "read_file",
+                },
+              ],
+            },
+          ],
+          streamError,
+        ),
+      );
+
+      const responses: StreamingResponse[] = [];
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamResponse(
+            mockClient,
+            [{ role: "user" as const, content: "test" }],
+            {
+              retry: {
+                initialDelayMs: 0,
+                maxDelayMs: 0,
+                maxRetriesPerStep: 5,
+                retryAfterCapMs: 0,
+              },
+            },
+          )) {
+            responses.push(response);
+          }
+        })(),
+      ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
+      expect(streamResponseMock).toHaveBeenCalledTimes(1);
+      expect(responses).toHaveLength(1);
+      expect(responses.some((response) => response.retry !== undefined)).toBe(
+        false,
+      );
+    });
+
+    it("returns an aborted partial response when the signal aborts during retry sleep", async () => {
+      vi.useFakeTimers();
+      try {
+        const unavailable = Object.assign(
+          new Error("temporarily unavailable"),
+          {
+            status: 503,
+          },
+        );
+        const controller = new AbortController();
+        streamResponseMock.mockRejectedValueOnce(unavailable);
+
+        const responses: StreamingResponse[] = [];
+        const consume = (async (): Promise<void> => {
+          for await (const response of streamResponse(
+            mockClient,
+            [{ role: "user" as const, content: "test" }],
+            {
+              retry: {
+                initialDelayMs: 1_000,
+                maxDelayMs: 1_000,
+                maxRetriesPerStep: 5,
+                retryAfterCapMs: 0,
+              },
+              signal: controller.signal,
+            },
+          )) {
+            responses.push(response);
+          }
+        })();
+
+        await vi.waitUntil(() =>
+          responses.some((response) => response.retry !== undefined),
+        );
+        controller.abort("user cancelled");
+
+        await expect(consume).resolves.toBeUndefined();
+        expect(streamResponseMock).toHaveBeenCalledTimes(1);
+        expect(responses).toHaveLength(2);
+        expect(responses[0]).toMatchObject({
+          isComplete: false,
+          retry: { attempt: 1, maxRetries: 5 },
+        });
+        expect(responses[1]).toMatchObject({
+          isComplete: true,
+          streamStopReason: "user_aborted",
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("rejects an empty stream without manufacturing provider completion", async () => {
+      streamResponseMock.mockResolvedValue(createProviderStream([]));
+      const responses: StreamingResponse[] = [];
+      await expect(async () => {
+        for await (const response of streamResponse(mockClient, [
+          { role: "user", content: "test" },
+        ]))
+          responses.push(response);
+      }).rejects.toMatchObject({
+        name: "ProviderStreamInterruptedError",
+        source: "eof",
+      });
+      expect(responses).toHaveLength(0);
+    });
+
+    it("does not replay a provider stream after a non-abort error follows emitted delta", async () => {
+      const streamError = new Error("socket closed");
+      streamResponseMock.mockResolvedValueOnce(
+        createAbortingProviderStream([{ textDelta: "Partial" }], streamError),
+      );
+
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamResponse(
+            mockClient,
+            [{ role: "user" as const, content: "test" }],
+            {
+              retry: {
+                initialDelayMs: 0,
+                maxDelayMs: 0,
+                maxRetriesPerStep: 5,
+                retryAfterCapMs: 0,
+              },
+            },
+          )) {
+            void response;
+          }
+        })(),
+      ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
+      expect(streamResponseMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("classifies malformed tool call arguments as a parse error, not a stream interruption", async () => {
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([
+          {
+            toolCallDeltas: [
+              {
+                index: 0,
+                id: "call_bad",
+                name: "get_weather",
+                argumentsDelta: '{"location": broken',
+              },
+            ],
+            finishReason: "tool_calls",
+          },
+        ]),
+      );
+
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamResponse(mockClient, [
+            { role: "user" as const, content: "test" },
+          ])) {
+            void response;
+          }
+        })(),
+      ).rejects.toBeInstanceOf(ToolCallParseError);
+      // A model output defect must not be retried.
+      expect(streamResponseMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should surface raw finish reason from provider events", async () => {
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([
+          {
+            textDelta: "Paused",
+            finishReason: "stop",
+            rawFinishReason: "pause_turn",
+          },
+        ]),
+      );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamResponse(mockClient, [
+        { role: "user" as const, content: "test" },
+      ])) {
+        responses.push(response);
+      }
+
+      expect(responses[0].finishReason).toBe("stop");
+      expect(responses[0].rawFinishReason).toBe("pause_turn");
+    });
+  });
+
+  describe("Module exports", () => {
+    it("should export createLLMClientFromConfig and streamResponse", () => {
+      expect(typeof createLLMClientFromConfig).toBe("function");
+      expect(typeof streamResponse).toBe("function");
+    });
+
+    it("should work with ES module imports", () => {
+      const client = createLLMClientFromConfig(mockConfig);
+
+      expect(client).toBeDefined();
+      const gen = streamResponse(client, []);
+      expect(typeof gen[Symbol.asyncIterator]).toBe("function");
+    });
+  });
+
+  describe("retry helpers", () => {
+    it("parses retry-after headers and caps explicit retry delays", () => {
+      const error = {
+        headers: {
+          "retry-after-ms": "2500",
+        },
+      };
+
+      expect(parseRetryAfterMs(error)).toBe(2500);
+      expect(
+        nextRetryDelayMs({
+          attempt: 1,
+          error,
+          policy: {
+            initialDelayMs: 100,
+            maxDelayMs: 1_000,
+            maxRetriesPerStep: 5,
+            retryAfterCapMs: 1_000,
+          },
+          random: () => 0.5,
+        }),
+      ).toBe(1_000);
+    });
+
+    it("uses deterministic exponential backoff jitter when retry-after is absent", () => {
+      expect(
+        nextRetryDelayMs({
+          attempt: 3,
+          error: Object.assign(new Error("reset"), { code: "ECONNRESET" }),
+          policy: {
+            initialDelayMs: 100,
+            maxDelayMs: 1_000,
+            maxRetriesPerStep: 5,
+            retryAfterCapMs: 1_000,
+          },
+          random: () => 0.5,
+        }),
+      ).toBe(400);
+    });
+
+    it("classifies retriable transport and rate-limit errors without retrying conflicts", () => {
+      expect(isRetryableProviderError({ status: 429 })).toBe(true);
+      expect(isRetryableProviderError({ status: 503 })).toBe(true);
+      expect(isRetryableProviderError({ code: "ECONNRESET" })).toBe(true);
+      expect(isRetryableProviderError({ status: 409 })).toBe(false);
+      expect(retryReason({ code: "ECONNRESET" })).toBe("econnreset");
+    });
+  });
+});

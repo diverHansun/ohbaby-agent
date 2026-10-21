@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBus } from "../../bus/index.js";
-import type {
-  ModelOrigin,
-  ModelState,
-} from "../../services/interface-providers/native-state.js";
+import type { ModelOrigin, ModelState } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,

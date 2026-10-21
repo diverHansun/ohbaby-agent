@@ -3,8 +3,8 @@ import {
   validateNativeProjection,
   sameModelOrigin,
   type ModelOrigin,
-} from "../../services/interface-providers/native-state.js";
-import type { ModelMessage } from "../llm-client/index.js";
+} from "ohbaby-llm";
+import type { ModelMessage } from "ohbaby-llm";
 import type { MessageWithParts, Part, ToolPart } from "../message/index.js";
 import { isInterruptionFactPart } from "../message/interruption.js";
 import { isSystemReminderMessage } from "../message/origin.js";

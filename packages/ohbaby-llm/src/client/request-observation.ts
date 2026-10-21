@@ -1,4 +1,4 @@
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import type { InterfaceProviderStreamEvent } from "../providers/types.js";
 import type {
   ModelRequestObservation,
   ModelRequestRecord,

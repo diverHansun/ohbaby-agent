@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import { createBus } from "../../bus/index.js";
 import { createContextManager, type ContextManager } from "../context/index.js";
 import type { PreparedTurn, TokenCounter } from "../context/index.js";
-import type { LLMClientInstance } from "../llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,

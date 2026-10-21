@@ -7,9 +7,18 @@
     "outDir": "dist",
     "tsBuildInfoFile": "tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["dist", "coverage", "node_modules"],
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "coverage",
+    "node_modules"
+  ],
   "references": [
+    {
+      "path": "../ohbaby-llm"
+    },
     {
       "path": "../ohbaby-sdk"
     }

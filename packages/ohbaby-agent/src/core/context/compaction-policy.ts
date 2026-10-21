@@ -1,5 +1,5 @@
 import { getMessageOrigin, getReminderAnchorId } from "../message/origin.js";
-import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
+import type { ModelOrigin } from "ohbaby-llm";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 import { serializeHistoryMessages } from "./serializer.js";
 import { hasUnfinishedNativeDependencies } from "./native-context.js";

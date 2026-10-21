@@ -7,7 +7,7 @@
 
 import { LLMConfigManager } from "./manager.js";
 import type { LLMConfigLoadOptions } from "./manager.js";
-import type { LLMConfig } from "./types.js";
+import type { LLMConfig } from "ohbaby-llm";
 import type {
   SetActiveLLMConfigInput,
   SetActiveLLMConfigResult,
@@ -21,8 +21,8 @@ export type {
   ModelJsonConfig,
   ModelJsonModelProfile,
   ConfigErrorCode,
-} from "./types.js";
-export { ConfigError } from "./types.js";
+} from "ohbaby-llm";
+export { ConfigError } from "ohbaby-llm";
 export type {
   SetActiveLLMConfigInput,
   SetActiveLLMConfigResult,

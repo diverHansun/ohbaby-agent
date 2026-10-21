@@ -685,6 +685,8 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
       "--filter",
       "ohbaby-sdk",
       "--filter",
+      "ohbaby-llm",
+      "--filter",
       "ohbaby-cli",
       "--filter",
       "ohbaby-agent",
@@ -700,6 +702,10 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   const sdkPack = await packWorkspacePackage({
     packDestination,
     packageDirectory: join(repoRoot, "packages", "ohbaby-sdk"),
+  });
+  const llmPack = await packWorkspacePackage({
+    packDestination,
+    packageDirectory: join(repoRoot, "packages", "ohbaby-llm"),
   });
   const agentPack = await packWorkspacePackage({
     packDestination,
@@ -724,6 +730,7 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
 
   const registry = await startLocalNpmRegistry([
     sdkPack,
+    llmPack,
     agentPack,
     serverPack,
     cliPack,

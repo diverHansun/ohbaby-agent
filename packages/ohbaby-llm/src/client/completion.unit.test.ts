@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { streamResponse } from "./streaming.js";
 import type { LLMClientInstance, StreamingResponse } from "./types.js";
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import type { InterfaceProviderStreamEvent } from "../providers/types.js";
 
 const usage = { inputTokens: 12, outputTokens: 3, totalTokens: 15 };
 function client(

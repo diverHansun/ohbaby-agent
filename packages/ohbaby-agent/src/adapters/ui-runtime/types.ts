@@ -2,7 +2,7 @@ import type {
   ShutdownOptions,
   CleanupTaskResult,
 } from "../../runtime/shutdown.js";
-import type { ReasoningConfig } from "../../config/llm/types.js";
+import type { ReasoningConfig } from "ohbaby-llm";
 import type { UiEvent } from "ohbaby-sdk";
 import type {
   CommandMcpServerSummary,

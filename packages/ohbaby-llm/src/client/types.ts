@@ -1,7 +1,7 @@
 /**
  * Type definitions for the LLM Client module.
  *
- * This module provides the public types for the ohbaby-agent LLM client system.
+ * This module provides the public types for the LLM client system.
  *
  * Design Principles:
  * - DRY: Re-export the provider-neutral request types
@@ -12,10 +12,10 @@
 import type {
   InterfaceProviderInstance,
   InterfaceProviderTokenUsage,
-} from "../../services/interface-providers/index.js";
-import type { LLMConfig } from "../../config/llm/types.js";
-import type { ModelState } from "../../services/interface-providers/native-state.js";
-import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
+} from "../providers/index.js";
+import type { LLMConfig } from "../config/types.js";
+import type { ModelState } from "../providers/native-state.js";
+import type { ReasoningIntent } from "../providers/reasoning.js";
 import type { ProviderRetryEvent } from "./retry.js";
 
 /**
@@ -27,7 +27,7 @@ import type { ProviderRetryEvent } from "./retry.js";
  * - assistant: Assistant response message
  * - tool: Tool execution result message
  */
-export type { ModelMessage } from "../../services/interface-providers/types.js";
+export type { ModelMessage } from "../providers/types.js";
 
 export interface ToolCallSnapshot {
   readonly index: number;
@@ -279,7 +279,7 @@ export interface ModelRequestObservation<T = AgentStepRequestRecord> {
 /** Resolved ordinary-request settings, snapshotted before context maintenance. */
 export type PreparedRequestSettings = Readonly<
   Pick<
-    import("../../services/interface-providers/types.js").InterfaceProviderRequest,
+    import("../providers/types.js").InterfaceProviderRequest,
     "model" | "temperature" | "reasoning" | "maxTokens"
   >
 >;

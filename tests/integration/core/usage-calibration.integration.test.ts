@@ -14,10 +14,7 @@ import {
   type LifecycleResult,
   type StepUsageObservation,
 } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
-import type {
-  LLMClientInstance,
-  TokenUsage,
-} from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance, TokenUsage } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -31,7 +28,7 @@ import { createPermissionState } from "../../../packages/ohbaby-agent/src/permis
 import {
   createInterfaceProvider,
   type InterfaceProviderKind,
-} from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+} from "ohbaby-llm";
 
 const protocols = [
   "openai-compatible",
