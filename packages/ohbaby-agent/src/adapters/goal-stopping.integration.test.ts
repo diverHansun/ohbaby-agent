@@ -1,11 +1,11 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { AgentManager } from "../agents/index.js";
-import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "../core/llm-client/idle-watchdog.js";
+import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "ohbaby-llm";
 import { InMemoryGoalPersistence } from "../goals/persistence.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import {
   createInProcessUiBackendClient,
   type InProcessUiBackendOptions,

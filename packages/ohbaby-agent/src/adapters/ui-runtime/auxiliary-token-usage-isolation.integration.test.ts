@@ -1,4 +1,4 @@
-import { resolvePreparedRequestSettings } from "../../core/llm-client/streaming.js";
+import { resolvePreparedRequestSettings } from "ohbaby-llm";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import type { ContextManager } from "../../core/context/index.js";
@@ -7,8 +7,8 @@ import type {
   LifecycleEvent,
   LifecycleResult,
 } from "../../core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
-import { streamResponse } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
+import { streamResponse } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -17,7 +17,7 @@ import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import { generateSessionTitle } from "../../services/session/title-generator.js";
 import { createContextSummaryClient } from "./prompt-context.js";
 

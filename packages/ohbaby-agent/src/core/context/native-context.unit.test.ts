@@ -1,9 +1,6 @@
 import type { AssembledContext, ContextOccupancyComposition } from "./types.js";
 import { describe, expect, it } from "vitest";
-import type {
-  ModelState,
-  ModelOrigin,
-} from "../../services/interface-providers/native-state.js";
+import type { ModelState, ModelOrigin } from "ohbaby-llm";
 import type { MessageWithParts } from "../message/index.js";
 import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
 import {

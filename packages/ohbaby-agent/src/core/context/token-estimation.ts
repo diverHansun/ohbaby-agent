@@ -3,7 +3,7 @@ import {
   estimateNativeStateTokens,
   hasNativeDependencies,
 } from "./native-context.js";
-import type { ModelMessage } from "../../services/interface-providers/types.js";
+import type { ModelMessage } from "ohbaby-llm";
 import {
   isContextSummaryPart,
   isModelContextPart,

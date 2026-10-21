@@ -5,7 +5,7 @@ import type {
   Part,
   TextPart,
 } from "./types.js";
-import type { TokenUsage } from "../llm-client/types.js";
+import type { TokenUsage } from "ohbaby-llm";
 import { createTokenUsageMetadata } from "./token-usage-metadata.js";
 
 /** Historical facts, never instructions or replacement model output. */

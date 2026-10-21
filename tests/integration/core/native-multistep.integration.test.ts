@@ -10,10 +10,7 @@ import {
   Lifecycle,
   type LifecycleResult,
 } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
-import type {
-  LLMClientInstance,
-  TokenUsage,
-} from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance, TokenUsage } from "ohbaby-llm";
 import {
   createDatabaseMessageStore,
   createMessageManager,
@@ -27,8 +24,8 @@ import {
   initDatabase,
   schema,
 } from "../../../packages/ohbaby-agent/src/services/database/index.js";
-import { createInterfaceProvider } from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
-import type { NativeResponsesItem } from "../../../packages/ohbaby-agent/src/services/interface-providers/native-state.js";
+import { createInterfaceProvider } from "ohbaby-llm";
+import type { NativeResponsesItem } from "ohbaby-llm";
 
 const sessionId = "native-multistep";
 const model = "responses-fixture";

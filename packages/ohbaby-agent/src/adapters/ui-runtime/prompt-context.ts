@@ -4,9 +4,9 @@ import type {
   ContextLLMClient,
   SummaryRequestResult,
 } from "../../core/context/index.js";
-import type { SummaryRequestRecord } from "../../core/llm-client/types.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
-import { streamResponse } from "../../core/llm-client/index.js";
+import type { SummaryRequestRecord } from "../../core/message/types.js";
+import type { LLMClientInstance } from "ohbaby-llm";
+import { streamResponse } from "ohbaby-llm";
 import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
 import { redactPromptSecrets } from "../../services/session/prompt-sanitizer.js";
 
@@ -90,15 +90,22 @@ export function createContextSummaryClient(
             sessionId: input.sessionId,
             contextScopeId: input.contextScopeId,
             signal: input.signal,
-            summaryOwner: {
-              compactionId: input.compactionId,
-              messageId: input.summaryMessageId,
-              attempt: input.attempt,
-              inputIds: input.request.inputIds,
-            },
-            onSummaryRequestRecord(record) {
+            // Only the finished attempt is kept; the summary owns its identity.
+            onRequestObservation({ type, request }) {
+              if (type !== "request-ended") return Promise.resolve();
+              const record: SummaryRequestRecord = {
+                ...request,
+                compactionId: input.compactionId,
+                messageId: input.summaryMessageId,
+                attempt: input.attempt,
+                ...(input.request.inputIds === undefined
+                  ? {}
+                  : { inputIds: input.request.inputIds }),
+                purpose: "context-summary",
+              };
               requests.push(record);
               input.onRequestRecord?.(record);
+              return Promise.resolve();
             },
           },
         )) {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamResponse as streamModelResponse } from "../../core/llm-client/streaming.js";
-import type { StreamingResponse } from "../../core/llm-client/types.js";
+import { streamResponse as streamModelResponse } from "../client/streaming.js";
+import type { StreamingResponse } from "../client/types.js";
 import { resolveRequestReasoning } from "./reasoning.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import type {

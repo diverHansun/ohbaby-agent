@@ -1,10 +1,8 @@
 import * as path from "node:path";
 import { config as loadDotenv } from "dotenv";
 import { describe, expect, it, beforeEach } from "vitest";
-import {
-  createLLMClient,
-  streamResponse,
-} from "../../../core/llm-client/index.js";
+import { createLLMClient } from "../../../core/llm-client/index.js";
+import { streamResponse } from "ohbaby-llm";
 import { _LLMConfigManager as LLMConfigManager } from "../index.js";
 
 const runE2E = process.env.OHBABY_LLM_E2E === "1" ? describe : describe.skip;

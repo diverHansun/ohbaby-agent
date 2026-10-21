@@ -6,11 +6,11 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import { setActiveLLMConfig } from "../config/llm/writer.js";
-import type { LLMClientInstance } from "../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../services/interface-providers/index.js";
+} from "ohbaby-llm";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;

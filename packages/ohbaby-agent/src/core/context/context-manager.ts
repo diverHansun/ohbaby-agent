@@ -53,19 +53,17 @@ import type {
   PrepareTurnInput,
   TokenCounter,
 } from "./types.js";
-import type {
-  PreparedRequestSettings,
-  SummaryRequestRecord,
-} from "../llm-client/types.js";
-import { isContextOverflowError } from "../llm-client/index.js";
+import type { PreparedRequestSettings } from "ohbaby-llm";
+import type { SummaryRequestRecord } from "../message/types.js";
+import { isContextOverflowError } from "ohbaby-llm";
 import {
   isRetryableProviderError,
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
   nextRetryDelayMs,
   DEFAULT_PROVIDER_RETRY_POLICY,
-} from "../llm-client/retry.js";
-import type { ModelMessage } from "../llm-client/index.js";
+} from "ohbaby-llm";
+import type { ModelMessage } from "ohbaby-llm";
 import {
   SYSTEM_REMINDER_KIND,
   renderReminderText,

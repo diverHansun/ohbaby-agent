@@ -1,11 +1,11 @@
-import type { AgentStepRequestRecord } from "../llm-client/types.js";
+import type { AgentStepRequestRecord } from "../message/types.js";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type {
   DisplayReasoningOwner,
   ReasoningEndReason,
 } from "./display-reasoning.js";
-import type { ReasoningConfig } from "../../config/llm/types.js";
-import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
+import type { ReasoningConfig } from "ohbaby-llm";
+import type { ReasoningIntent } from "ohbaby-llm";
 import type {
   ModelResponseSnapshot,
   ModelFinishReason,
@@ -14,7 +14,7 @@ import type {
   ParsedToolCall,
   ProviderRetryEvent,
   TokenUsage,
-} from "../llm-client/index.js";
+} from "ohbaby-llm";
 import type {
   CompactResult,
   ContextManager,

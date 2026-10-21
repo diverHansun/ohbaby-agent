@@ -1,4 +1,4 @@
-import type { TokenUsage } from "../llm-client/index.js";
+import type { TokenUsage } from "ohbaby-llm";
 import type { LifecycleTokenUsage } from "./types.js";
 
 function combineBreakdown(

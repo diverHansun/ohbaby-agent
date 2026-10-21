@@ -14,7 +14,7 @@ import {
   getDatabase,
 } from "../../packages/ohbaby-agent/src/services/database/index.js";
 import { createDaemonHttpServer } from "../../packages/ohbaby-server/src/runtime/daemon/server.js";
-import type { LLMClientInstance } from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type { ToolPart } from "../../packages/ohbaby-agent/src/core/message/types.js";
 
 function gate() {

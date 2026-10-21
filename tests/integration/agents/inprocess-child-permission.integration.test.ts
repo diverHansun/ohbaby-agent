@@ -9,10 +9,10 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
-import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { createInMemorySessionManager } from "../../../packages/ohbaby-agent/src/services/session/index.js";
 import { createInProcessUiBackendClient } from "../../../packages/ohbaby-agent/src/adapters/ui-inprocess.js";
-import type { InterfaceProviderStreamEvent } from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 
 function tool(
   name: string,

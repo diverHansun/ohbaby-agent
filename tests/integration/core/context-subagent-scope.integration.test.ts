@@ -8,7 +8,7 @@ import {
   type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { estimatePreparedRequestHeuristic } from "../../../packages/ohbaby-agent/src/core/context/token-estimation.js";
-import { createScopedPromptCacheKey } from "../../../packages/ohbaby-agent/src/core/llm-client/prompt-cache.js";
+import { createScopedPromptCacheKey } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,

@@ -10,7 +10,7 @@ import {
   TITLE_GENERATION_MAX_TOKENS,
 } from "../packages/ohbaby-agent/src/services/session/title-generator.js";
 import { NATIVE_REAL_PROFILES } from "../tests/smoke/reasoning-native-harness.js";
-import type { InterfaceProviderStreamEvent } from "../packages/ohbaby-agent/src/services/interface-providers/types.js";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 
 const profileIds = [
   "zenmux-gpt56-luna-chat-native",

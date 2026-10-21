@@ -1,8 +1,5 @@
-import {
-  mergeReasoningIntent,
-  type ReasoningIntent,
-} from "../services/interface-providers/reasoning.js";
-import type { ReasoningConfig } from "../config/llm/types.js";
+import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
+import type { ReasoningConfig } from "ohbaby-llm";
 import type { AgentInstanceFactory } from "../core/agents/index.js";
 import {
   sessionTargetProjectRoot,

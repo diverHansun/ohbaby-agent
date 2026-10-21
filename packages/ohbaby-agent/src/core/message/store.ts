@@ -6,10 +6,7 @@ import {
   validateMessageIds,
 } from "./pagination.js";
 import { isDeepStrictEqual } from "node:util";
-import {
-  ModelStateSchema,
-  validateNativeProjection,
-} from "../../services/interface-providers/native-state.js";
+import { ModelStateSchema, validateNativeProjection } from "ohbaby-llm";
 import { createTokenUsageMetadata } from "./token-usage-metadata.js";
 import type {
   MessagePage,

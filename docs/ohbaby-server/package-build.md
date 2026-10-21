@@ -164,8 +164,8 @@ export default defineConfig({
     "stream",
     "url",
     "ohbaby-agent",
-    "ohbaby-sdk"
-  ]
+    "ohbaby-sdk",
+  ],
 });
 ```
 
@@ -184,24 +184,20 @@ packages:
 
 因此新增包不需要改 workspace 文件。
 
-迁移后的依赖方向：
+当前公开包依赖方向（箭头表示依赖）：
 
 ```text
-ohbaby-sdk
-  ▲
-  ├── ohbaby-agent
-  │     ▲
-  │     └── ohbaby-server
-  │             ▲
-  │             └── ohbaby-cli
+ohbaby-cli    -> ohbaby-agent + ohbaby-server + ohbaby-sdk
+ohbaby-server -> ohbaby-agent + ohbaby-sdk
+ohbaby-agent  -> ohbaby-sdk + ohbaby-llm
+ohbaby-sdk    -> 无 runtime workspace 依赖
+ohbaby-llm    -> 无 runtime workspace 依赖
 ```
 
-解释：
-
-- `ohbaby-agent` 依赖 `ohbaby-sdk`，提供领域 backend。
-- `ohbaby-server` 依赖 `ohbaby-agent` + `ohbaby-sdk`，提供显式 server/remote client。
+- `ohbaby-agent` 提供领域 backend，依赖独立的 `ohbaby-llm` 执行模型请求。
+- `ohbaby-server` 提供显式 server/remote client。
 - `ohbaby-cli` 依赖 `ohbaby-agent` 做默认 in-process，依赖 `ohbaby-server` 做显式 serve/remote。
-- 禁止 `ohbaby-agent` import `ohbaby-server`。
+- 禁止 `ohbaby-agent` import `ohbaby-server`，`ohbaby-llm` 不依赖 agent 或 sdk。
 
 ---
 
@@ -229,7 +225,7 @@ ohbaby serve --port 4096
 ohbaby --remote-port 4096
 ```
 
-`packaging-smoke.integration.test.ts` 必须模拟真实发布拓扑：先 pack `ohbaby-sdk` / `ohbaby-agent` / `ohbaby-server` / `ohbaby-cli`，再通过临时本地 registry 只执行 `npm install -g ohbaby-cli@<version>`。测试需要读取每个 `.tgz` 内部的 `package/package.json`，确认没有 `workspace:` 依赖残留，避免用测试代码手动改写 manifest 造成假阳性。
+`packaging-smoke.integration.test.ts` 必须模拟真实发布拓扑：先 pack `ohbaby-sdk` / `ohbaby-llm` / `ohbaby-agent` / `ohbaby-server` / `ohbaby-cli`，再通过临时本地 registry 只执行 `npm install -g ohbaby-cli@<version>`。测试需要读取每个 `.tgz` 内部的 `package/package.json`，确认没有 `workspace:` 依赖残留，并确认 agent 对 `ohbaby-llm` 的依赖已改为具体版本，避免用测试代码手动改写 manifest 造成假阳性。独立安装目录清空 `NODE_PATH`，不得借用 workspace 解析路径。
 
 实际命令可根据仓库当前 pack 脚本调整，但验证含义不变：
 
@@ -241,14 +237,17 @@ ohbaby --remote-port 4096
 
 ## 7. npm 发布顺序
 
-用户只安装 `ohbaby-cli`，但 npm registry 上依赖包必须先存在。发布顺序建议：
+用户只安装 `ohbaby-cli`，但 npm registry 上依赖包必须先存在。五个公开包保持同一版本，按以下顺序发布：
 
-1. `ohbaby-sdk@0.1.4`
-2. `ohbaby-agent@0.1.4`
-3. `ohbaby-server@0.1.4`
-4. `ohbaby-cli@0.1.4`
+1. `ohbaby-sdk`
+2. `ohbaby-llm`
+3. `ohbaby-agent`
+4. `ohbaby-server`
+5. `ohbaby-cli`
 
-若 `ohbaby-cli` 的 `dependencies` 指向 `ohbaby-server`，必须先发布 `ohbaby-server`，再发布 `ohbaby-cli`。
+`ohbaby-llm` 与 `ohbaby-sdk` 相互独立，统一将 llm 放第二。agent 依赖这两个包；server 必须先于 CLI 发布。源码中的 `workspace:*` 由 `pnpm pack` / publish 改写为发布版本，不能将原始 workspace manifest 直接交给 npm 消费。
+
+当前源码版本仍为 `0.1.16`，本轮提取不改版本、不实际发布。下一次发布前确认五包版本一致及 `ohbaby-llm` 包名可用，并完成 tarball/独立 CLI 安装验证。根 build 已用 `./packages/**` 与 `--sort` 自动覆盖新包，按依赖顺序构建。
 
 ---
 

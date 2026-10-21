@@ -1,11 +1,11 @@
 import type { SlashSkillUsage } from "../../skill/usage.js";
-import type { ReasoningConfig } from "../../config/llm/types.js";
-import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
+import type { ReasoningConfig } from "ohbaby-llm";
+import type { ReasoningIntent } from "ohbaby-llm";
 import type {
   AgentTerminalReason,
   LifecycleEvent,
 } from "../lifecycle/index.js";
-import type { ModelToolDefinition } from "../llm-client/index.js";
+import type { ModelToolDefinition } from "ohbaby-llm";
 import type { MessageManager } from "../message/index.js";
 import type {
   ToolExecutionEnvironment,

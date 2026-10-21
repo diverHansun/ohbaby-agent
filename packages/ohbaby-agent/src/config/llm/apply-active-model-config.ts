@@ -1,9 +1,7 @@
-import {
-  reasoningCapabilityView,
-  capabilitiesFor,
-} from "../../services/interface-providers/reasoning.js";
+import { capabilitiesFor } from "ohbaby-llm";
+import { reasoningCapabilityView } from "../../services/llm-model/reasoning-view.js";
 import type { UiReasoningCapabilityView } from "ohbaby-sdk";
-import { modelProfileRouteKey, normalizedEndpoint } from "./model-profile.js";
+import { modelProfileRouteKey, normalizedEndpoint } from "ohbaby-llm";
 import {
   coordinateModelConfig,
   modelConfigVersion,
@@ -14,9 +12,9 @@ import { resolve } from "node:path";
 import { runtimeEnvValue } from "../../utils/managed-runtime-env.js";
 import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../services/llm-model/modelProfiles.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
-import type { InterfaceProviderKind, ReasoningConfig } from "./types.js";
-import { ConfigError } from "./types.js";
-import { validateReasoningConfig, validateModelJson } from "./validation.js";
+import type { InterfaceProviderKind, ReasoningConfig } from "ohbaby-llm";
+import { ConfigError } from "ohbaby-llm";
+import { validateReasoningConfig, validateModelJson } from "ohbaby-llm";
 import {
   probeContextWindow,
   type ContextWindowSource,

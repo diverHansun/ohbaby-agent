@@ -27,11 +27,11 @@ import { createPermissionState } from "../../permission/index.js";
 import { adaptMcpTool } from "../../mcp/integration/tool-adapter.js";
 import { admitMcpTool } from "../../mcp/integration/dynamic-tool-menu.js";
 import type { McpClientLike } from "../../mcp/types.js";
-import type { LLMClientInstance } from "../llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/types.js";
+} from "ohbaby-llm";
 import { estimateHistoryForCompaction } from "./compaction-policy.js";
 
 const cleanupPaths: string[] = [];

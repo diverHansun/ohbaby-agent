@@ -1,4 +1,4 @@
-import type { ModelMessage } from "../llm-client/index.js";
+import type { ModelMessage } from "ohbaby-llm";
 import type { MessageWithParts, Part } from "./types.js";
 import { getMessageOrigin } from "./origin.js";
 

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { validateReasoningCapabilities } from "../../packages/ohbaby-agent/src/config/llm/validation.js";
+import { validateReasoningCapabilities } from "ohbaby-llm";
 import {
   COMPACT_TOKEN_PROFILES,
   generationEndpoint,

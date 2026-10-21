@@ -8,7 +8,7 @@ import {
 /** Test-only observation at the production provider and HTTP boundaries. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
-import type { LLMClientInstance } from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type {
   LifecycleEvent,
   LifecycleResult,

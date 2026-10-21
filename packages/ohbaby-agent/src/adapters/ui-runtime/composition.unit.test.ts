@@ -10,12 +10,12 @@ import {
 } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
 import type { ContextManager } from "../../core/context/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type { MessageManager, Part } from "../../core/message/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,

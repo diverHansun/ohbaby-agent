@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { InterfaceProviderRequest } from "../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+import type { InterfaceProviderRequest } from "ohbaby-llm";
 import {
   assertAppendExtension,
   assertCacheableStablePrefix,

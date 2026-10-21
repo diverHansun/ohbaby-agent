@@ -17,7 +17,7 @@ import {
 import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
 import { serializeHistoryMessages } from "../../../packages/ohbaby-agent/src/core/context/serializer.js";
 import { toModelTools } from "../../../packages/ohbaby-agent/src/core/agents/index.js";
-import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createDatabaseMessageStore,
   createInMemoryMessageStore,
@@ -53,7 +53,7 @@ import { SourceSessionProjection } from "../../../packages/ohbaby-agent/src/adap
 import type {
   InterfaceProviderRequest as ProviderRequest,
   InterfaceProviderStreamEvent as ProviderStreamEvent,
-} from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+} from "ohbaby-llm";
 
 interface FakeSdkClient {
   readonly kind: "fake";

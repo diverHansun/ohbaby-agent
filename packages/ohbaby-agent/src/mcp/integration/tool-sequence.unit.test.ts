@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createScopedPromptCacheKey } from "../../core/llm-client/prompt-cache.js";
+import { createScopedPromptCacheKey } from "ohbaby-llm";
 import type { ToolDefinition } from "../../core/tool-scheduler/index.js";
 import { ScopeToolSequence } from "./tool-sequence.js";
 

@@ -1,5 +1,5 @@
 /**
- * Provider-backed client creation and initialization.
+ * Agent configuration and diagnostics for LLM client creation.
  *
  * This module handles the instantiation of the configured provider client.
  *
@@ -14,8 +14,8 @@
 
 import * as path from "node:path";
 import { getLLMConfig } from "../../config/index.js";
-import { createInterfaceProvider } from "../../services/interface-providers/index.js";
-import type { LLMClientInstance } from "./types.js";
+import { createLLMClientFromConfig } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   NOOP_LOGGER,
   tokenUsageNormalization,
@@ -58,12 +58,7 @@ export async function createLLMClient(
     envPath: options.envPath ?? path.join(projectDirectory, ".env"),
   });
 
-  // Create protocol-specific SDK adapter instance.
-  const provider = createInterfaceProvider({
-    id: config.provider,
-    interfaceProvider: config.interfaceProvider,
-    apiKey: config.apiKey,
-    baseUrl: config.baseUrl,
+  return createLLMClientFromConfig(config, {
     tokenUsageReporter(diagnostic): void {
       emitDiagnostic(options.logger ?? NOOP_LOGGER, tokenUsageNormalization, {
         code: diagnostic.code,
@@ -75,29 +70,4 @@ export async function createLLMClient(
       });
     },
   });
-
-  // Return configured client instance
-  // Note: apiKey is intentionally excluded from the returned config for security
-  return {
-    provider,
-    config: {
-      provider: config.provider,
-      model: config.model,
-      ...(config.apiKeyEnv === undefined
-        ? {}
-        : { apiKeyEnv: config.apiKeyEnv }),
-      baseUrl: config.baseUrl,
-      interfaceProvider: config.interfaceProvider,
-      promptCache: config.promptCache,
-      reasoning: config.reasoning,
-      temperature: config.temperature,
-      maxTokens: config.maxTokens,
-      ...(config.contextWindowTokens === undefined
-        ? {}
-        : { contextWindowTokens: config.contextWindowTokens }),
-      ...(config.modelProfiles === undefined
-        ? {}
-        : { modelProfiles: config.modelProfiles }),
-    },
-  };
 }

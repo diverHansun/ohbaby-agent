@@ -9,7 +9,7 @@ import {
   initDatabase,
   schema,
 } from "../../services/database/index.js";
-import type { SummaryRequestRecord } from "../llm-client/types.js";
+import type { SummaryRequestRecord } from "./types.js";
 import { createDatabaseMessageStore } from "./database-store.js";
 import { createMessageManager } from "./manager.js";
 import { createInMemoryMessageStore } from "./store.js";

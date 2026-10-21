@@ -13,8 +13,8 @@ import { createDaemonHttpServer } from "./server.js";
 import { createSqliteGoalPersistence } from "../../../../ohbaby-agent/src/goals/persistence.js";
 import { RunManager } from "../../../../ohbaby-agent/src/runtime/run-manager/manager.js";
 import * as schedulerModule from "../../../../ohbaby-agent/src/core/tool-scheduler/scheduler.js";
-import type { LLMClientInstance } from "../../../../ohbaby-agent/src/core/llm-client/index.js";
-import type { InterfaceProviderStreamEvent } from "../../../../ohbaby-agent/src/services/interface-providers/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 
 interface FixtureRpcResponse {
   readonly ok: boolean;

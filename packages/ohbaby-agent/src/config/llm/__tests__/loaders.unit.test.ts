@@ -12,7 +12,7 @@ import {
   loadEnvFile,
   getModelJsonPath,
 } from "../loaders.js";
-import { ConfigError } from "../types.js";
+import { ConfigError } from "ohbaby-llm";
 
 // Mock fs module
 vi.mock("node:fs/promises");

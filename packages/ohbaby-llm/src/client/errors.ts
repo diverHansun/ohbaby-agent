@@ -1,3 +1,19 @@
+import { APIUserAbortError as AnthropicUserAbortError } from "@anthropic-ai/sdk/error";
+import { APIUserAbortError as OpenAIUserAbortError } from "openai";
+
+/**
+ * Whether the error is a user-initiated abort from any supported provider SDK.
+ *
+ * Each SDK throws its own `APIUserAbortError` class, so a single `instanceof`
+ * check against one of them misses aborts from the others.
+ */
+export function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof OpenAIUserAbortError ||
+    error instanceof AnthropicUserAbortError
+  );
+}
+
 /**
  * The model produced tool call arguments that are not valid JSON.
  *

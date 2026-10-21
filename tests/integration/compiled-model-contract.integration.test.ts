@@ -158,7 +158,7 @@ beforeAll(async () => {
   const lock = await acquireCliPackageBuildLock();
   releaseBuildLock = lock.release;
   // Hold the same lock through all consumers; package smoke builds delete dist.
-  for (const name of ["ohbaby-sdk", "ohbaby-agent"]) {
+  for (const name of ["ohbaby-sdk", "ohbaby-llm", "ohbaby-agent"]) {
     const command =
       process.platform === "win32"
         ? (process.env.ComSpec ?? "cmd.exe")
@@ -171,7 +171,7 @@ beforeAll(async () => {
   }
   consumerDirectory = await mkdtemp(join(tmpdir(), "ohbaby-model-consumer-"));
   await mkdir(join(consumerDirectory, "node_modules"));
-  for (const name of ["ohbaby-sdk", "ohbaby-agent"]) {
+  for (const name of ["ohbaby-sdk", "ohbaby-llm", "ohbaby-agent"]) {
     await symlink(
       resolve(repoRoot, "packages", name),
       join(consumerDirectory, "node_modules", name),

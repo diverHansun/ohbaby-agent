@@ -2,10 +2,8 @@ import type { ResolvedReasoning } from "./reasoning.js";
 import type { NativeOutput, ModelState } from "./native-state.js";
 import type { TokenUsageDiagnosticReporter } from "./token-usage.js";
 
-export type InterfaceProviderKind =
-  | "openai-compatible"
-  | "openai-responses"
-  | "anthropic";
+import type { InterfaceProviderKind } from "../config/types.js";
+export type { InterfaceProviderKind } from "../config/types.js";
 
 export type LLMRequestPurpose =
   | "agent-step"

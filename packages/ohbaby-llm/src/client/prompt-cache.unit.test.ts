@@ -4,7 +4,7 @@ import type {
   InterfaceProviderPromptCache,
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/index.js";
+} from "../providers/index.js";
 import type { LLMClientInstance } from "./types.js";
 import { streamResponse } from "./streaming.js";
 import {
@@ -12,6 +12,43 @@ import {
   resolvePromptCacheRequest,
   resolvePromptCacheStrategy,
 } from "./prompt-cache.js";
+
+describe("scoped prompt cache key compatibility", () => {
+  it.each([
+    {
+      sessionId: "session-a",
+      expected: "ob:v1:-lelLb8IGQIYUpcwo-mdtpRsbCkiD7bgVR4hWYsLBds",
+    },
+    {
+      sessionId: "session-a",
+      contextScopeId: "child-a",
+      expected: "ob:v1:ZF3MyHQ9M1ugMexaoZOOtO5DyLNQZiyhuY_UX_7u9IQ",
+    },
+    {
+      sessionId: "session secret",
+      expected: "ob:v1:iLw1_wE0AFzLf6wTbmLP67CtMwYEJ15vyljyKbN-jTY",
+    },
+    {
+      sessionId: "s::a/b?#%",
+      contextScopeId: "子 任务/:?%",
+      expected: "ob:v1:GQpi-FEaJEMj3SBhrpMkGjd5dIk-QbHNHHA1zeGOBu4",
+    },
+    {
+      sessionId: "session-a",
+      contextScopeId: "",
+      expected: "ob:v1:3ZKk0gzc77Ct9YGiuTptpnFEPb__GF9a0w8idYWui4U",
+    },
+    {
+      sessionId: "",
+      expected: "ob:v1:47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+    },
+  ])(
+    "preserves the known key for $sessionId / $contextScopeId",
+    ({ expected, ...input }) => {
+      expect(createScopedPromptCacheKey(input)).toBe(expected);
+    },
+  );
+});
 
 describe("prompt cache capability resolver", () => {
   it.each<{

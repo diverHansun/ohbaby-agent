@@ -5,7 +5,7 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
-import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { createInMemorySessionManager } from "../../../packages/ohbaby-agent/src/services/session/index.js";
 import {
   createPermissionManager,
@@ -14,7 +14,7 @@ import {
   type PermissionInfo,
 } from "../../../packages/ohbaby-agent/src/permission/index.js";
 import { createUiRuntimeComposition } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/composition.js";
-import type { InterfaceProviderStreamEvent } from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 import { SkillRegistry } from "../../../packages/ohbaby-agent/src/skill/index.js";
 import { ToolSchedulerEvent } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/events.js";
 import type { ToolCallResult } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/types.js";

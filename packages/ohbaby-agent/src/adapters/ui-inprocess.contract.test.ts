@@ -10,11 +10,8 @@ import { createUiCommandGateway } from "../host/ui-command-gateway.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../services/interface-providers/index.js";
-import type {
-  ModelMessage,
-  LLMClientInstance,
-} from "../core/llm-client/index.js";
+} from "ohbaby-llm";
+import type { ModelMessage, LLMClientInstance } from "ohbaby-llm";
 import { createBus, type BusInstance } from "../bus/index.js";
 import { CommandsEvent } from "../commands/index.js";
 import {

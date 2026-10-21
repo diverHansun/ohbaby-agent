@@ -1,15 +1,12 @@
 import { expect, it } from "vitest";
 import { createContextSummaryClient } from "./prompt-context.js";
-import {
-  streamResponse,
-  resolvePreparedRequestSettings,
-} from "../../core/llm-client/streaming.js";
-import type { LLMClientInstance } from "../../core/llm-client/types.js";
+import { streamResponse, resolvePreparedRequestSettings } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/types.js";
-import { mergeReasoningIntent } from "../../services/interface-providers/reasoning.js";
+} from "ohbaby-llm";
+import { mergeReasoningIntent } from "ohbaby-llm";
 
 it("concurrent agent summaries send their own reasoning snapshot while the shared client changes", async () => {
   const requests: InterfaceProviderRequest[] = [];

@@ -21,11 +21,8 @@ import { createModeReminderProvider } from "../../services/reminder/mode.js";
 import { createTodoReminderProvider } from "../../services/reminder/todo.js";
 import { PermissionEvent } from "../../permission/events.js";
 import { randomUUID } from "node:crypto";
-import { activeModelBudgetProfiles } from "../../config/llm/model-profile.js";
-import {
-  mergeReasoningIntent,
-  type ReasoningIntent,
-} from "../../services/interface-providers/reasoning.js";
+import { activeModelBudgetProfiles } from "ohbaby-llm";
+import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
 import type { UiNotice } from "ohbaby-sdk";
 import type { BusInstance } from "../../bus/index.js";
 import type {
@@ -51,7 +48,7 @@ import type { ResolvedStepTools } from "../../core/lifecycle/index.js";
 import {
   resolvePreparedRequestSettings,
   type LLMClientInstance,
-} from "../../core/llm-client/index.js";
+} from "ohbaby-llm";
 import type { MessageManager } from "../../core/message/index.js";
 import {
   createToolScheduler,

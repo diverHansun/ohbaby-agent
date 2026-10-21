@@ -23,7 +23,7 @@ import {
   type LifecycleEvent,
   type LifecycleResult,
 } from "../../packages/ohbaby-agent/src/core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -39,7 +39,7 @@ import {
   type InterfaceProviderKind,
   type InterfaceProviderRequest,
   type InterfaceProviderTokenUsage,
-} from "../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+} from "ohbaby-llm";
 
 const ENABLE_ENV = "OHBABY_RUN_REAL_RESPONSES_MIGRATION";
 const SELECT_ENV = "OHBABY_REAL_MIGRATION_PROTOCOL";
@@ -420,7 +420,9 @@ function safeFailure(error: unknown): Error {
   const kind = error instanceof Error ? error.name : typeof error;
   const localFrames =
     error instanceof Error
-      ? (error.stack?.match(/interface-providers\/[a-z-]+\.ts:\d+:\d+/g) ?? [])
+      ? (error.stack?.match(
+          /(?:interface-providers|ohbaby-llm\/src\/(?:providers|client))\/[a-z-]+\.ts:\d+:\d+/g,
+        ) ?? [])
       : [];
   const status =
     typeof error === "object" && error !== null && "status" in error

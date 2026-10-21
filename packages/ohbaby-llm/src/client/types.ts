@@ -1,7 +1,7 @@
 /**
  * Type definitions for the LLM Client module.
  *
- * This module provides the public types for the ohbaby-agent LLM client system.
+ * This module provides the public types for the LLM client system.
  *
  * Design Principles:
  * - DRY: Re-export the provider-neutral request types
@@ -12,10 +12,10 @@
 import type {
   InterfaceProviderInstance,
   InterfaceProviderTokenUsage,
-} from "../../services/interface-providers/index.js";
-import type { LLMConfig } from "../../config/index.js";
-import type { ModelState } from "../../services/interface-providers/native-state.js";
-import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
+} from "../providers/index.js";
+import type { LLMConfig } from "../config/types.js";
+import type { ModelState } from "../providers/native-state.js";
+import type { ReasoningIntent } from "../providers/reasoning.js";
 import type { ProviderRetryEvent } from "./retry.js";
 
 /**
@@ -27,7 +27,7 @@ import type { ProviderRetryEvent } from "./retry.js";
  * - assistant: Assistant response message
  * - tool: Tool execution result message
  */
-export type { ModelMessage } from "../../services/interface-providers/types.js";
+export type { ModelMessage } from "../providers/types.js";
 
 export interface ToolCallSnapshot {
   readonly index: number;
@@ -253,44 +253,32 @@ export interface StreamingResponse {
   tokenUsage?: StreamingTokenUsage;
 }
 
-/** One observable adapter invocation; provider-internal retries are not counted. */
-export interface AgentStepRequestRecord {
-  /** Provider-reported usage; absence means unknown, not zero. */
-  readonly usage?: TokenUsage;
-  readonly endTimeSource?: "recovery";
-  /** Immutable current-run input membership of this exact prepared request. */
-  readonly inputIds?: readonly string[];
+/**
+ * One observable adapter invocation; provider-internal retries are not counted.
+ *
+ * The client only measures the attempt. Callers that need to attribute it to
+ * their own work (a run, a step, a compaction) attach those fields themselves.
+ */
+export interface ModelRequestAttempt {
   readonly requestId: string;
-  readonly runId: string;
-  readonly messageId: string;
-  readonly step: number;
+  /** 1-based attempt number within this `streamResponse` call. */
   readonly attempt: number;
-  readonly purpose: "agent-step";
   readonly startedAt: number;
   readonly firstTextAt?: number;
   readonly endedAt?: number;
+  /** Provider-reported usage; absence means unknown, not zero. */
+  readonly usage?: TokenUsage;
   readonly outcome: "running" | "success" | "error" | "aborted";
 }
-export interface ModelRequestObservation<T = AgentStepRequestRecord> {
+export interface ModelRequestObservation {
   readonly type: "request-started" | "first-text" | "request-ended";
-  readonly request: T;
+  readonly request: ModelRequestAttempt;
 }
 
 /** Resolved ordinary-request settings, snapshotted before context maintenance. */
 export type PreparedRequestSettings = Readonly<
   Pick<
-    import("../../services/interface-providers/types.js").InterfaceProviderRequest,
+    import("../providers/types.js").InterfaceProviderRequest,
     "model" | "temperature" | "reasoning" | "maxTokens"
   >
 >;
-
-/** A compact attempt owns a future summary, without inventing an ordinary run. */
-export type SummaryRequestRecord = Omit<
-  AgentStepRequestRecord,
-  "runId" | "step" | "purpose"
-> & {
-  readonly compactionId: string;
-  readonly purpose: "context-summary";
-};
-
-export type ModelRequestRecord = AgentStepRequestRecord | SummaryRequestRecord;

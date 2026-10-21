@@ -25,7 +25,7 @@ import type {
   InteractionRequestContext,
   InteractionRequestInput,
 } from "../runtime/interaction-broker/index.js";
-import type { InterfaceProviderKind } from "../config/llm/types.js";
+import type { InterfaceProviderKind } from "ohbaby-llm";
 
 export interface CommandToolSummary {
   readonly name: string;

@@ -5,25 +5,28 @@
  * Consumers should import from '@/config' rather than sub-modules directly.
  */
 
+export { ConfigError } from "ohbaby-llm";
+export type {
+  LLMConfig,
+  InterfaceProviderKind,
+  PromptCachePolicy,
+  ModelJsonConfig,
+  ModelJsonModelProfile,
+  ConfigErrorCode,
+} from "ohbaby-llm";
+
 // LLM configuration
 export {
   getLLMConfig,
   reloadLLMConfig,
   setActiveLLMConfig,
   isLLMConfigCached,
-  ConfigError,
 } from "./llm/index.js";
 
 export type {
-  LLMConfig,
   LLMConfigLoadOptions,
-  InterfaceProviderKind,
-  PromptCachePolicy,
-  ModelJsonConfig,
-  ModelJsonModelProfile,
   SetActiveLLMConfigInput,
   SetActiveLLMConfigResult,
-  ConfigErrorCode,
 } from "./llm/index.js";
 
 export {

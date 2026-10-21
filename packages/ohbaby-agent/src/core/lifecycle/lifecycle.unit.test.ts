@@ -1,12 +1,12 @@
 import { RuntimeInputSnapshotChangedError } from "./runtime-input-error.js";
 import { createPromptCacheUsageTracker } from "../../adapters/ui-inprocess/prompt-cache-usage.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
-import * as llmStreaming from "../llm-client/index.js";
-import type { AgentStepRequestRecord } from "../llm-client/types.js";
+import * as llmStreaming from "ohbaby-llm";
+import type { AgentStepRequestRecord } from "../message/types.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import { createBus } from "../../bus/index.js";
 import {
   createInMemoryMessageStore,
@@ -23,7 +23,7 @@ import {
   ProviderStreamInterruptedError,
   type LLMClientInstance,
   type TokenUsage,
-} from "../llm-client/index.js";
+} from "ohbaby-llm";
 import type {
   BatchToolCallRequest,
   ToolCallResult,

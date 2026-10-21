@@ -1,8 +1,5 @@
 import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../services/llm-model/modelProfiles.js";
-import {
-  capabilitiesFor,
-  compatibleReasoningPreference,
-} from "../../services/interface-providers/reasoning.js";
+import { capabilitiesFor, compatibleReasoningPreference } from "ohbaby-llm";
 import { setManagedRuntimeEnv } from "../../utils/managed-runtime-env.js";
 import {
   coordinateModelConfig,
@@ -18,15 +15,15 @@ import type {
   PromptCachePolicy,
   ReasoningConfig,
   ReasoningCapabilities,
-} from "./types.js";
-import { ConfigError } from "./types.js";
-import { validateModelJson, validateReasoningConfig } from "./validation.js";
+} from "ohbaby-llm";
+import { ConfigError } from "ohbaby-llm";
+import { validateModelJson, validateReasoningConfig } from "ohbaby-llm";
 import { writeFileAtomically } from "../secrets/atomic-file.js";
 import { writeEnvSecret } from "../secrets/env-secrets.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import { defaultApiKeyEnvForProvider, nonEmptyApiKey } from "./api-key.js";
 
-import { modelProfileRouteKey } from "./model-profile.js";
+import { modelProfileRouteKey } from "ohbaby-llm";
 
 const DEFAULT_INTERFACE_PROVIDER: InterfaceProviderKind = "openai-compatible";
 

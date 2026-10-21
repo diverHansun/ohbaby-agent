@@ -1,4 +1,4 @@
-import type { ReasoningCapabilities } from "../../packages/ohbaby-agent/src/config/llm/types.js";
+import type { ReasoningCapabilities } from "ohbaby-llm";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,11 +19,8 @@ import type {
   LifecycleEvent,
   LifecycleResult,
 } from "../../packages/ohbaby-agent/src/core/lifecycle/index.js";
-import {
-  createLLMClient,
-  type LLMClientInstance,
-  type TokenUsage,
-} from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import { createLLMClient } from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import { type LLMClientInstance, type TokenUsage } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -43,7 +40,7 @@ import { createPermissionState } from "../../packages/ohbaby-agent/src/permissio
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+} from "ohbaby-llm";
 import {
   createToolScheduler,
   type Tool,

@@ -12,6 +12,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: "ohbaby-llm",
+        replacement: resolve(__dirname, "./packages/ohbaby-llm/src/index.ts"),
+      },
+      {
         find: "react/jsx-dev-runtime",
         replacement: resolve(
           __dirname,

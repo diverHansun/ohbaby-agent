@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { InMemorySubagentExecutionStore } from "../../agents/subagents/execution-store.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,

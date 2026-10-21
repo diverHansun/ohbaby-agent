@@ -18,7 +18,7 @@ import type {
   LLMClientInstance,
   ProviderRequest,
   ProviderStreamEvent,
-} from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+} from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,

@@ -2,11 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
+} from "ohbaby-llm";
 import {
   createRemoteUiBackendClient,
   startDaemonServer,

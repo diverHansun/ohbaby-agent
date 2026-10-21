@@ -33,7 +33,7 @@ import type {
   ReferenceToolTerminalStatus,
 } from "./testing/context-reference-model.js";
 import type { ContextManager, PreparedModelRequest } from "./types.js";
-import type { ModelMessage } from "../llm-client/index.js";
+import type { ModelMessage } from "ohbaby-llm";
 
 const SESSION_ID = "reference-session";
 const DIRECTORY = "/reference-workspace";

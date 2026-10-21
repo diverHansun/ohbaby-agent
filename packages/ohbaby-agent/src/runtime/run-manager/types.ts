@@ -1,5 +1,5 @@
-import type { ReasoningConfig } from "../../config/llm/types.js";
-import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
+import type { ReasoningConfig } from "ohbaby-llm";
+import type { ReasoningIntent } from "ohbaby-llm";
 import type {
   LifecycleEvent,
   LifecycleResult,

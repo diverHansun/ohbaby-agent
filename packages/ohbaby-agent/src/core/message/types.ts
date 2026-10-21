@@ -1,9 +1,30 @@
-import type { ModelRequestRecord } from "../llm-client/types.js";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
-import type { ModelState } from "../../services/interface-providers/native-state.js";
-import type { ModelMessage, TokenUsage } from "../llm-client/index.js";
+import type { ModelState } from "ohbaby-llm";
+import type { ModelMessage, ModelRequestAttempt, TokenUsage } from "ohbaby-llm";
 
 export type MessageRole = "user" | "assistant" | "system";
+
+/** A model request attempt attributed to one step of an agent run. */
+export type AgentStepRequestRecord = ModelRequestAttempt & {
+  readonly runId: string;
+  readonly messageId: string;
+  readonly step: number;
+  readonly purpose: "agent-step";
+  /** Immutable current-run input membership of this exact prepared request. */
+  readonly inputIds?: readonly string[];
+  readonly endTimeSource?: "recovery";
+};
+
+/** A compact attempt owns a future summary, without inventing an ordinary run. */
+export type SummaryRequestRecord = ModelRequestAttempt & {
+  readonly compactionId: string;
+  readonly messageId: string;
+  readonly purpose: "context-summary";
+  readonly inputIds?: readonly string[];
+  readonly endTimeSource?: "recovery";
+};
+
+export type ModelRequestRecord = AgentStepRequestRecord | SummaryRequestRecord;
 
 export interface MessageTime {
   readonly created: number;

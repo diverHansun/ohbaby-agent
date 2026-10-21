@@ -5,15 +5,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManager, AgentRegistry } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
 import type { AgentsConfig } from "../../config/agents/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../core/message/index.js";
 import { createPermissionState } from "../../permission/index.js";
-import { createAnthropicProvider } from "../../services/interface-providers/anthropic.js";
-import { createOpenAICompatibleProvider } from "../../services/interface-providers/openai-compatible.js";
-import { createOpenAIResponsesProvider } from "../../services/interface-providers/openai-responses.js";
+import { createAnthropicProvider } from "ohbaby-llm";
+import { createOpenAICompatibleProvider } from "ohbaby-llm";
+import { createOpenAIResponsesProvider } from "ohbaby-llm";
 import { SkillRegistry } from "../../skill/index.js";
 import { createUiRuntimeComposition } from "./composition.js";
 import { createHostLocalSandboxManager } from "./host-local-environment.js";

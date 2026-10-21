@@ -5,10 +5,7 @@ import type {
   SubagentExecutionStore,
   ExecutionTerminalResult,
 } from "./subagents/execution-store.js";
-import {
-  mergeReasoningIntent,
-  type ReasoningIntent,
-} from "../services/interface-providers/reasoning.js";
+import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
 import type {
   AgentInstanceFactory,
   AgentRunResult,

@@ -1,7 +1,4 @@
-import {
-  mergeReasoningIntent,
-  type ReasoningIntent,
-} from "../services/interface-providers/reasoning.js";
+import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AgentInstance,

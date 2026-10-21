@@ -1,54 +1,26 @@
 # providers 模块的测试策略
 
-## 测试目标
+## 测试目标与位置
 
-验证 provider 层的两类职责：
+测试位于 `packages/ohbaby-llm/src/providers/`，验证自有请求到 wire 参数的转换、原始流到 `InterfaceProviderStreamEvent` 的归一化，以及协议校验和用量合同。执行结果由本议题验收记录维护。
 
-1. 是否把统一请求参数正确转换为厂商原生请求
-2. 是否把厂商原生流事件正确归一为 `ProviderStreamEvent`
+| 文件（相对该目录）                                                          | 主要职责                                                                                    |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `index.test.ts`                                                             | 显式三协议 factory、缺省 Chat、未知 kind 拒绝                                               |
+| `openai-compatible.test.ts`、`openai-compatible-native.integration.test.ts` | Chat 请求与增量、原生状态重放                                                               |
+| `openai-responses.unit.test.ts`                                             | Responses 请求投影、事件顺序与终态校验、`store: false` 和不发送 continuation/cache 控制字段 |
+| `anthropic.test.ts`、`anthropic-native.integration.test.ts`                 | Messages、system、tools、流事件及原生块重放                                                 |
+| `model-contract.unit.test.ts`、`native-state.unit.test.ts`                  | 自有消息模型、同源和 native 投影合同                                                        |
+| `reasoning.unit.test.ts`                                                    | 推理意图、路由能力与请求参数                                                                |
+| `token-usage.unit.test.ts`、`responses-token-usage.unit.test.ts`            | inclusive input、cache 明细、reasoning 子项、缺失与非法值、诊断回调                         |
 
-## 当前测试范围
+## 跨模块合同
 
-### OpenAI-compatible provider
+依赖 agent 配置或上下文的 `packages/ohbaby-agent/src/core/context/prompt-cache-wire.contract.test.ts`、`packages/ohbaby-agent/src/core/lifecycle/openai-responses.integration.test.ts`，从 `ohbaby-llm` 导入被测接口。agent `core/llm-client/sdk-retry.integration.test.ts` 使用真实 SDK 和本地 fetch stub 验证 SDK 重试关闭、项目层 HTTP 尝试预算、取消及原始流活动；这些文件不能搬入本包形成反向依赖。
 
-当前测试文件：`packages/ohbaby-agent/src/services/providers/openai-compatible.test.ts`
+## 测试边界
 
-覆盖点：
-
-- 请求参数构造：`model`、`messages`、`temperature`、`max_tokens`
-- `stream_options: { include_usage: true }` 是否附带
-- tools 是否透传
-- `function_call` 是否归一为 `tool_calls`
-- `rawFinishReason` 是否保留原始值
-
-### Anthropic provider
-
-当前测试文件：`packages/ohbaby-agent/src/services/providers/anthropic.test.ts`
-
-覆盖点：
-
-- OpenAI-compatible messages → Anthropic Messages 请求转换
-- assistant `tool_calls` → `tool_use` block 转换
-- tool message → `tool_result` block 转换
-- `content_block_delta` / `message_delta` 的归一化
-- `pause_turn` 是否通过 `rawFinishReason` 保留
-- 默认不依赖 `eager_input_streaming`
-
-## 建议继续补充的场景
-
-1. **Anthropic 非法 tool arguments**
-   - assistant 历史消息里的 `tool_calls[*].function.arguments` 不是合法 JSON 时应抛出明确错误
-
-2. **OpenAI-compatible 空 keepalive chunk**
-   - 确认空 `tool_calls` / 空 `choices` 不会产生多余事件
-
-3. **非中断错误传播**
-   - `streamChatCompletion()` 出现普通 API 错误时，不应被误判为 abort
-
-4. **未知 provider id 的行为**
-   - 当前实现默认走 OpenAI-compatible provider，建议补测试固定这个行为
-
-## 测试边界原则
-
-- provider 单测只验证“协议转换”和“事件归一化”
-- `completeMessage` 累积、`ParsedToolCall[]` 解析、中断后部分结果返回，属于 `core/llm-client` 的职责
+- provider 测试验证 wire 参数、事件归一化、native 校验和 SDK 错误识别，不执行工具或启动 agent。
+- 正文/推理/工具累积、最终 `ParsedToolCall[]`、取消快照、项目重试与空闲看门狗属于 client 测试。
+- `provider` id 不决定协议；新增测试应使用显式 `interfaceProvider`，不能恢复按 anthropic/claude 字符串猜测协议的旧约定。
+- 使用本地 fixture 或 fetch stub。真实付费请求只由显式 opt-in smoke 脚本运行，不是普通单元或集成测试的前置条件。

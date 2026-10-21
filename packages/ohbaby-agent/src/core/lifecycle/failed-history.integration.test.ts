@@ -9,13 +9,13 @@ import {
   readTokenUsageMetadata,
 } from "../message/index.js";
 import type { ContextManager } from "../context/index.js";
-import type { LLMClientInstance } from "../llm-client/types.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type { ToolSchedulerInstance } from "../tool-scheduler/index.js";
-import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 import { serializeHistoryMessages } from "../context/serializer.js";
 import { serializeHistory } from "../context/serialization.js";
 import { ensureInterruptionFact } from "../message/interruption.js";
-import { ProviderStreamIdleTimeoutError } from "../llm-client/idle-watchdog.js";
+import { ProviderStreamIdleTimeoutError } from "ohbaby-llm";
 
 function fixture(
   events: InterfaceProviderStreamEvent[],

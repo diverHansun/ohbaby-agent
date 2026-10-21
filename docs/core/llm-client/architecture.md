@@ -1,88 +1,45 @@
 # llm-client 模块架构设计
 
-## 当前状态
+## 位置与依赖
 
-`core/llm-client` 是配置绑定的 provider-aware 流式执行层。它位于 `config/llm`、`services/interface-providers` 与上层 lifecycle/message/runtime 之间。
-
-公开职责：
-
-- `createLLMClient()`：读取 `config/llm`，调用 `services/interface-providers.createInterfaceProvider()` 创建 provider 实例，并保留当前模型配置。
-- `streamChatCompletion()`：构造 `InterfaceProviderRequest`，调用 provider，消费归一化的 `InterfaceProviderStreamEvent`，累积流式文本与 tool call 参数，生成 `StreamingResponse`。
+流式执行层位于 `packages/ohbaby-llm/src/client/`，协议层位于同包 `src/providers/`，纯配置合同位于 `src/config/`。消费者统一从 `ohbaby-llm` 导入；包只依赖厂商 SDK 和 Zod，没有 runtime workspace 依赖。
 
 ```text
-config/llm
-  -> core/llm-client.createLLMClient()
-  -> services/interface-providers.createInterfaceProvider()
+agent config/llm（文件与环境变量 IO）
+  -> agent core/llm-client/createLLMClient（配置与日志接线）
+  -> ohbaby-llm/createLLMClientFromConfig（接收已校验 LLMConfig）
+  -> createInterfaceProvider（连接级配置）
 
-upper runtime/lifecycle
-  -> core/llm-client.streamChatCompletion()
-  -> provider.streamChatCompletion()
-  -> normalized InterfaceProviderStreamEvent
-  -> accumulated StreamingResponse
+runtime / Lifecycle / Context
+  -> ohbaby-llm/streamResponse（请求快照、缓存、重试、空闲保护）
+  -> provider.streamResponse（SDK 与协议转换）
+  -> InterfaceProviderStreamEvent
+  -> StreamingResponse（中间展示与最终快照）
 ```
 
-## 职责边界
+agent 的 `createLLMClient` 签名不变，配置默认从当前项目目录及其 `.env` 加载，具体读取由 agent config 模块执行。包装层将 token usage 诊断回调接入 agent logger。独立消费者直接把已解析的配置交给 `createLLMClientFromConfig`；工厂返回的 `config` 不包含明文 `apiKey`。
 
-`core/llm-client` 负责：
+## 请求与协议边界
 
-- 绑定已加载的 LLM 配置。
-- 持有 provider 实例。
-- 为单次请求填充 model、temperature、maxTokens、messages、tools。
-- 将 provider stream 聚合成当前完整消息。
-- 在完成态解析 tool call arguments。
-- 在 abort 分支返回可用的 partial result。
+`streamResponse` 使用自有 `ModelMessage` 和 `ModelToolDefinition`，按请求快照决定 model、temperature、maxTokens、reasoning 和 prompt cache 策略。请求级覆盖不修改共享 client 配置。
 
-`core/llm-client` 不负责：
+provider 接口的核心是 `streamResponse(request)` 与 `isAbortError(error)`。provider 持有 SDK client，将自有消息转换为 wire 参数，再将原始事件转成 `InterfaceProviderStreamEvent`；client 层不直接处理厂商 chunk。
 
-- 不直接处理 OpenAI chunk、Anthropic SSE 等厂商原生事件。
-- 不创建或管理 session/message/run 持久化。
-- 不执行工具。
-- 不做 token 估算或上下文压缩。
-- 不维护模型元数据表。
+- `openai-compatible` 为缺省协议；`anthropic` 和 `openai-responses` 由 `interfaceProvider` 显式选择，未知 kind 抛错。`provider` 字符串是路由标识，不决定协议。
+- 三协议支持各自的 native 输出与同源重放。成功耗尽后的 `modelState` 保留协议特殊状态，并校验其与共享投影的一致性；无法支持或不一致的协议数据拒绝通过。
+- Responses 发送完整输入和 `store: false`，不使用 `previous_response_id`；其 prompt cache 策略仍为 observe-only。
 
-## 与 Providers 的关系
+## 流累积与完成边界
 
-provider 层只暴露稳定的小接口：
+client 层累积正文、推理、工具调用原始 JSON 和 usage。provider 终态是完成候选；只有迭代器正常耗尽、工具参数解析和 native 校验通过后，才产出唯一正常最终快照。晚到错误可以使候选失效；无终态 EOF 和无本地信号的 provider abort 不伪造成功。
 
-```typescript
-interface InterfaceProviderInstance<TClient = unknown> {
-  id: string;
-  kind: "openai-compatible" | "openai-responses" | "anthropic";
-  client: TClient;
-  streamChatCompletion(
-    request: InterfaceProviderRequest,
-  ): Promise<AsyncIterable<InterfaceProviderStreamEvent>>;
-  isAbortError(error: unknown): boolean;
-}
-```
+本地取消返回真实已有片段，`streamStopReason` 为 `user_aborted`，不合成占位正文、不发布可执行参数。调用方仍需耗尽生成器，再决定是否接受结果和执行工具。
 
-llm-client 不知道 provider 内部如何调用 SDK，只消费归一化事件。
-
-当前的 kind 选择与能力边界：
-
-- `openai-compatible` 仍是缺省，使用 Chat Completions；`anthropic` 仍须显式选择。
-- `openai-responses` 是第三个、仅手工配置后才会启用的 kind；factory 必须显式分支，未知 kind 不得回落到 Chat。
-- core 输入消息仍是 Chat-shaped `ChatCompletionMessageParam`。Responses adapter 在 provider 边界投影它；这不是内部 canonical message 协议。
-- Responses 本轮为无状态完整 replay（`store: false`，不传 `previous_response_id`），并且 prompt cache 只 observe usage，不发送 Responses cache 控制字段；它尚未与 Chat cache 对齐。
-- 原生 reasoning/output-item continuation、assistant `phase`、refusal、annotation、hosted/custom tools 不在这个共享接口中表达，adapter 必须 fail-closed。lifecycle、context 和持久化没有因该 kind 改造。
+三个内置 adapter 的 SDK 重试均关闭（`maxRetries: 0`）。项目层默认额外 5 次，仅在没有有效输出、错误可重试时重放；详见 [目标与职责](./goals-duty.md#重试边界)。context overflow、摘要 transport 恢复和工具执行属于 agent；请求观测经回调交给上层保存。
 
 ## 与 llm-model 的关系
 
-`services/llm-model` 只提供模型元数据、token 估算和上下文限制。llm-client 不调用其 token 估算逻辑，也不把 provider 返回的真实 `TokenUsage` 和估算值混用。
-
-命名边界：
-
-- `core/llm-client.ChatCompletionMessage`：provider/lifecycle 输入消息边界。
-- `services/llm-model.TokenCountMessage`：token 估算输入结构。
-
-两个类型不应混名，也不应互相承担对方职责。
-
-## 设计取舍
-
-1. 当前消息输入继续沿用 Chat-shaped `ChatCompletionMessageParam`，降低共享层改动；Responses adapter 将其投影为 wire 请求，但本轮不将它 canonical 化。
-2. provider 创建只绑定连接级配置，model/temperature/maxTokens 在请求时传入。
-3. tool call 参数只在完成态解析，避免流式片段中间态误解析。
-4. abort 判断委托给 provider，partial response 构造保留在 llm-client。
+agent `services/llm-model` 提供模型元数据、文本 token 估算和 UI reasoning 能力视图。`ohbaby-llm` 不依赖它，也不把估算值与 provider 返回的真实 `TokenUsage` 混用。结构化历史估算由 agent `core/context` 在领域消息上完成。
 
 ## 请求空闲看门狗（2026-10-15）
 

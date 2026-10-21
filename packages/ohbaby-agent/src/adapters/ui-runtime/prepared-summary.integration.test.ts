@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createContextSummaryClient } from "./prompt-context.js";
-import type {
-  LLMClientInstance,
-  SummaryRequestRecord,
-} from "../../core/llm-client/types.js";
-import type { InterfaceProviderRequest } from "../../services/interface-providers/types.js";
-import { resolvePreparedRequestSettings } from "../../core/llm-client/streaming.js";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { SummaryRequestRecord } from "../../core/message/types.js";
+import type { InterfaceProviderRequest } from "ohbaby-llm";
+import { resolvePreparedRequestSettings } from "ohbaby-llm";
 
 describe("prepared summary request", () => {
   it("sends the frozen normal settings and tool history, keeping summary usage out of ordinary ownership", async () => {
@@ -28,7 +26,7 @@ describe("prepared summary request", () => {
           await Promise.resolve();
           sent.push(request);
           return (async function* (): AsyncGenerator<
-            import("../../services/interface-providers/types.js").InterfaceProviderStreamEvent
+            import("ohbaby-llm").InterfaceProviderStreamEvent
           > {
             await Promise.resolve();
             yield {

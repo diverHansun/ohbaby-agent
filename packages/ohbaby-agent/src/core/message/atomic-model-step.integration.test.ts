@@ -10,7 +10,7 @@ import {
   initDatabase,
   schema,
 } from "../../services/database/index.js";
-import type { ModelState } from "../../services/interface-providers/native-state.js";
+import type { ModelState } from "ohbaby-llm";
 import { createDatabaseMessageStore } from "./database-store.js";
 import { createInMemoryMessageStore } from "./store.js";
 import { createMessageManager } from "./manager.js";

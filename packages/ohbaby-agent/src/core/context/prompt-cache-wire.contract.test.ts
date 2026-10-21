@@ -4,23 +4,23 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages";
 import type { ChatCompletionChunk } from "openai/resources/chat/completions/completions";
 import { describe, expect, it, vi } from "vitest";
-import { resolvePromptCacheRequest } from "../../core/llm-client/prompt-cache.js";
+import { resolvePromptCacheRequest } from "ohbaby-llm";
 import type { PromptCachePolicy } from "../../config/index.js";
-import { renderReminderText } from "../../core/message/origin.js";
-import { PRIMARY_BASE_PROMPT } from "../../core/system-prompt/prompts/primary/base.js";
+import { renderReminderText } from "../message/origin.js";
+import { PRIMARY_BASE_PROMPT } from "../system-prompt/prompts/primary/base.js";
 import { computeBudgetReport } from "../../goals/budget.js";
 import { renderGoalTurnPrompt } from "../../goals/injection.js";
 import { createGoalTools } from "../../goals/tools.js";
 import type { GoalSnapshot } from "../../goals/types.js";
-import { createAnthropicProvider } from "./anthropic.js";
-import { createOpenAICompatibleProvider } from "./openai-compatible.js";
-import { createOpenAIResponsesProvider } from "./openai-responses.js";
+import { createAnthropicProvider } from "ohbaby-llm";
+import { createOpenAICompatibleProvider } from "ohbaby-llm";
+import { createOpenAIResponsesProvider } from "ohbaby-llm";
 import type {
   InterfaceProviderPromptCache,
   LLMRequestPurpose,
   InterfaceProviderStreamEvent,
   ModelMessage,
-} from "./types.js";
+} from "ohbaby-llm";
 
 function emptyStream<T>(): AsyncGenerator<T, void, unknown> {
   return (async function* (): AsyncGenerator<T, void, unknown> {

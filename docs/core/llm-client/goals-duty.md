@@ -2,87 +2,40 @@
 
 ## 当前状态
 
-- 当前实现围绕 `createLLMClient()` 与 `streamChatCompletion()` 两个入口展开
-- provider 抽象已落地，厂商协议差异由 `services/interface-providers` 负责
-- llm-client 当前定位为“provider-aware 的流式执行与累积层”
-- `openai-compatible` 仍是缺省；`openai-responses` 是仅显式配置才会创建的第三 kind，不通过 URL 或 UI 自动推断。
+源码位于 `packages/ohbaby-llm/src/client/`，通过 `ohbaby-llm` 包根入口公开。该包还包含 `src/providers/` 的协议适配器，以及 `src/config/` 的配置类型、纯校验和模型 profile 函数。包不依赖其他 workspace 包。
 
-## 设计目标
+- `createLLMClientFromConfig(config, options?)` 同步接收已解析、已校验的 `LLMConfig`，创建 provider 并返回 `LLMClientInstance`。
+- `streamResponse()` 接收自有 `ModelMessage` 和 `ModelToolDefinition`，消费 provider 的规范化事件，产出 `StreamingResponse`。
+- `ohbaby-agent` 保留异步 `createLLMClient(options?)` 包装层，负责 `getLLMConfig()`、项目 `.env` 路径和诊断日志接线，再调用纯配置工厂。原有 agent 公开导出保持兼容；新工厂直接从 `ohbaby-llm` 导入。
 
-1. **向上层提供稳定的流式调用入口**
-   - 调用方只关心 messages、tools、signal 和 `StreamingResponse`
+## 设计目标与职责
 
-2. **对 provider 输出的增量事件做统一累积**
-   - 调用方不需要自己拼接文本或工具参数分片
+1. **提供统一流式入口**：调用方使用自有消息、工具定义和取消信号，协议转换由同包的 providers 完成。
+2. **累积文本、推理与工具片段**：中间 `messageSnapshot` 供展示；工具 JSON 在正常流耗尽后解析。
+3. **明确完成边界**：只有流耗尽并通过终态和 native 投影校验才发布正常最终快照；保留统一 `finishReason` 和原始 `rawFinishReason`。
+4. **区分取消与失败**：有本地取消信号时返回已有真实片段和 `user_aborted`；无终态 EOF、协议错误和无本地依据的 provider abort 属于失败。
+5. **维护调用层保护**：保留 prompt cache 策略和键、请求观测回调、空闲看门狗及既有有界重试。
+6. **传递真实用量和原生状态**：规范化 usage，成功耗尽后输出经校验的 `modelState`；不把推理或原生状态混进正文。
 
-3. **在完成态产出可执行的工具调用参数**
-   - 仅在工具参数完整后解析 JSON
+## 重试边界
 
-4. **在中断时尽量保留结果**
-   - 用户主动中断时返回最后一条部分结果，而不是直接抛异常
+三个内置 adapter 均显式设置 SDK `maxRetries: 0`，关闭 SDK 重试；项目层默认额外重试 5 次，适用于尚无正文、推理、工具片段或完成信号，且错误属于既有名单的尝试。名单包括 408、429、5xx、指定连接错误和空闲超时。默认指数退避从 500 ms 开始、基数上限 10,000 ms，带抖动；显式 Retry-After 上限 60,000 ms。请求可通过 `retry` 覆盖策略。
 
-5. **同时保留共享语义与厂商原始语义**
-   - 通过 `finishReason` 输出统一完成原因
-   - 通过 `rawFinishReason` 保留 provider 原始值
-
-## 职责
-
-### 1. 创建 provider 绑定的 client 实例
-
-- 调用 `getLLMConfig()` 获取配置
-- 调用 `createInterfaceProvider({ id, interfaceProvider, apiKey, baseUrl })`
-- 返回 `LLMClientInstance { provider, config }`
-
-### 2. 构造单次流式请求参数
-
-- 从 `llmClient.config` 读取 `model`、`temperature`、`maxTokens`
-- 组合 `messages`、可选 `tools` 和 `signal`
-- 构造 `InterfaceProviderRequest`
-
-### 3. 累积 provider 归一化事件
-
-- 累积 `textDelta`
-- 累积 `toolCallDeltas[*].argumentsDelta`
-- 持续构造 `completeMessage`
-
-### 4. 在完成态解析工具参数
-
-- 在出现完成信号后对已拼接的 arguments 做 `JSON.parse`
-- 输出 `ParsedToolCall[]`
-
-### 5. 处理中断与错误传播
-
-- 用 `provider.isAbortError()` 判断中断错误
-- 中断时返回部分结果
-- 其他错误原样抛出
+出现有效输出后项目层不重放。context overflow 交回 agent Lifecycle 的强制压缩恢复；摘要 transport 中断保留来源，交回 agent Context 的既有摘要恢复。`retry` 帧报告项目层重试；默认单次步骤请求通道最多 6 次 HTTP 尝试，不计上层 overflow 或摘要恢复。
 
 ## 非职责
 
-1. **不负责配置文件校验**
-   - 仍由 `config/llm` 负责
-
-2. **不负责厂商原生协议转换**
-   - 原生请求构造和流事件归一化由 `services/interface-providers` 负责
-   - Responses adapter 只接收可投影的 Chat-shaped messages/function tools；它不把原生 output item 变成共享 canonical 状态
-
-3. **不执行工具调用**
-   - 只返回解析后的 tool call 数据
-
-4. **不做 token 估算或预算决策**
-   - 仅透传精确 usage
-
-5. **不做 retry、fallback、上下文裁剪等策略**
-   - 这些属于更上层的 orchestration 逻辑
-
-6. **不承载 Responses 原生 continuation 或 cache 对齐**
-   - 不保存 `previous_response_id`，不改变 lifecycle/context/SQLite；Responses cache 目前只 observe usage，不发送控制字段
-   - reasoning、assistant `phase`、refusal、annotation 与 hosted/custom tools 没有共享表达，必须在 provider 边界 fail-closed
+- 配置文件和环境变量的读取、配置单例与写回、网络探测、系统代理安装仍在 agent。`ohbaby-llm/src/config/` 只提供纯类型、校验和 profile 函数；工厂不会自行校验或加载文件。
+- session/message/run 持久化、工具权限与执行、上下文裁剪和 overflow 恢复由上层负责。回调可由上层保存请求观测，但包本身不读写数据库。观测只描述请求尝试本身，run、step、compaction 等归属字段由上层在回调里补充。
+- token 估算、模型元数据和 UI reasoning 能力视图仍在 agent 的 `services/llm-model/`；本包传递 provider 真实 usage。
+- 不做 provider fallback，不新增自动续写，不把 `isComplete` 或已解析工具参数当作运行成功或工具执行授权。
 
 ## 与其他模块的关系
 
-| 模块 | 关系 | 说明 |
-|------|------|------|
-| `config/llm` | 依赖 | 提供连接级与默认调用参数 |
-| `services/interface-providers` | 依赖 | 创建 provider，并产出归一化流事件 |
-| `tokenCounting` | 协作 | 上层可消费 `StreamingResponse.tokenUsage` |
-| `agents` / `conversation` | 被依赖 | 通过 llm-client 与模型交互 |
+| 模块                                                       | 关系                                             |
+| ---------------------------------------------------------- | ------------------------------------------------ |
+| `ohbaby-llm/src/providers`                                 | 同包协议边界，创建 SDK client 并输出规范化事件   |
+| `ohbaby-llm/src/config`                                    | 同包纯配置合同与校验函数                         |
+| agent `config/llm`、`core/llm-client/create-llm-client.ts` | 读取配置并调用工厂，接入诊断回调                 |
+| agent Lifecycle / Context / runtime                        | 调用流接口、接受结果、保存和恢复                 |
+| agent `services/llm-model`                                 | 提供上层预算所需估算和模型能力视图，不被本包依赖 |

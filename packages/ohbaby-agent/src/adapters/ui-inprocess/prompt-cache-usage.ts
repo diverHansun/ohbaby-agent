@@ -1,5 +1,5 @@
 import type { UiPromptCacheUsage } from "ohbaby-sdk";
-import type { TokenUsage } from "../../core/llm-client/index.js";
+import type { TokenUsage } from "ohbaby-llm";
 
 interface PromptCacheUsageTotals {
   readonly accountedInputTokens: number;

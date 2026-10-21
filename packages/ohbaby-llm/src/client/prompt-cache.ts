@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
-import type { PromptCachePolicy } from "../../config/index.js";
-import type { ModelMessage } from "../../services/interface-providers/types.js";
+import type { PromptCachePolicy } from "../config/types.js";
+import type { ModelMessage } from "../providers/types.js";
 import type {
   InterfaceProviderKind,
   InterfaceProviderPromptCache,
   LLMRequestPurpose,
   PromptCacheRequestStrategy,
-} from "../../services/interface-providers/index.js";
-import { scopedSessionKey } from "../../utils/scoped-session.js";
+} from "../providers/index.js";
 
 interface PromptCacheCapabilityInput {
   readonly baseUrl: string;
@@ -188,6 +187,16 @@ export function resolvePromptCacheStrategy(
     "observe-only",
     `no trusted cache-control capability for ${endpoint} (${input.provider})`,
   );
+}
+
+function scopedSessionKey(input: {
+  readonly contextScopeId?: string;
+  readonly sessionId: string;
+}): string {
+  const sessionId = encodeURIComponent(input.sessionId);
+  return input.contextScopeId === undefined
+    ? sessionId
+    : `${sessionId}::${encodeURIComponent(input.contextScopeId)}`;
 }
 
 export function createScopedPromptCacheKey(input: {

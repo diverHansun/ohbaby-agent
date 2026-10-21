@@ -2,11 +2,11 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LLMClientInstance } from "../core/llm-client/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-} from "../services/interface-providers/index.js";
+} from "ohbaby-llm";
 import { ensureDefaultWorkspaceDirectory } from "../paths/index.js";
 import {
   closeDatabase,

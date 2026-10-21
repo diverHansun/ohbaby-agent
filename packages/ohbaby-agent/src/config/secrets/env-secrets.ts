@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import { setEnvFileValue } from "../llm/env-file.js";
-import { ConfigError } from "../llm/types.js";
+import { ConfigError } from "ohbaby-llm";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import { writeFileAtomically } from "./atomic-file.js";
 
