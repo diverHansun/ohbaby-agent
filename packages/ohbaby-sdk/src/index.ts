@@ -1,3 +1,4 @@
+export type { DaemonStartupIntent } from "./contract/daemon-startup-intent.js";
 export type {
   UiSessionCreationResult,
   SubmitPromptOptions,

@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { CoreAPI } from "ohbaby-sdk";
+import type { CoreAPI, DaemonStartupIntent } from "ohbaby-sdk";
 import { createRPC } from "ohbaby-sdk";
 import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
@@ -101,15 +101,6 @@ export interface RunOhbabyCliDependencies {
     },
   ) => ReturnType<CliCommandRuntime["startDaemonServer"]>;
   readonly stopDaemonFromState?: CliCommandRuntime["stopDaemonFromState"];
-}
-
-interface DaemonStartupIntent {
-  readonly startupSessionMode?: { readonly type: "continue" | "fresh" };
-  readonly resumeSessionId?: string;
-  readonly initialPermission?: {
-    readonly level: "default" | "full-access";
-    readonly mode: "plan" | "auto";
-  };
 }
 
 interface RemoteDaemonClientOptions {

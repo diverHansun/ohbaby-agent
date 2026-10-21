@@ -109,6 +109,7 @@ packages/ohbaby-sdk/src/
 ├── contract/                # client、DTO、事件与协议纯 helper
 │   ├── client.ts
 │   ├── events.ts
+│   ├── daemon-startup-intent.ts # CLI、Server、Web 共用启动意图
 │   ├── snapshot.ts
 │   ├── prompt.ts
 │   ├── permission.ts

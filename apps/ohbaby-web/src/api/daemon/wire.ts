@@ -1,4 +1,5 @@
 import type {
+  DaemonStartupIntent,
   UiEvent,
   SessionSyncState,
   UiSessionControl,
@@ -28,14 +29,7 @@ import type {
   UiSnapshot,
 } from "ohbaby-sdk";
 
-export interface WebStartupIntent {
-  readonly startupSessionMode?: { readonly type: "continue" | "fresh" };
-  readonly resumeSessionId?: string;
-  readonly initialPermission?: {
-    readonly level: "default" | "full-access";
-    readonly mode: "plan" | "auto";
-  };
-}
+export type WebStartupIntent = DaemonStartupIntent;
 
 export interface OhbabyBootstrapConfig {
   readonly baseUrl: string;
