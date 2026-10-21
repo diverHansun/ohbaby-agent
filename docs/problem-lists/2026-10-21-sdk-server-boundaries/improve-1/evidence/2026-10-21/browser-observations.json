@@ -1,0 +1,15 @@
+{
+  "commit": "d78fc65f",
+  "sessionId": "session_1792579258111_st2lbn1",
+  "firstPrompt": "Read fixture.txt and report the result.",
+  "tool": {"name":"read", "file":"fixture.txt", "phase":"ended", "outcome":"success", "output":"OHBABY_COMPILED_WEB_FIXTURE_5"},
+  "followup": "OHBABY_COMPILED_WEB_FOLLOWUP",
+  "beforeRefresh": {"toolFinal":1,"followupFinal":1,"followupUser":1},
+  "afterRefresh": {"toolFinal":1,"followupFinal":1,"followupUser":1},
+  "activeSessionStable":true,
+  "runtimeMarkersVisible":false,
+  "title":"Compiled E2E fixture",
+  "offlineSimulationMs":2500,
+  "afterOfflineRestore":{"toolFinal":1,"followupFinal":1},
+  "note":"Actual Playwright UI input, tool expansion, followup, offline/online and reload. Counts read from DOM; idle offline test alone does not demonstrate live missing-event replay, covered separately by existing daemon integration tests."
+}

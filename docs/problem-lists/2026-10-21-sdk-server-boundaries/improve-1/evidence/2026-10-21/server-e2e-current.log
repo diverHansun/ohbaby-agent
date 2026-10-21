@@ -1,0 +1,52 @@
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.neverBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+
+ RUN  v2.1.9 /Users/hansun025/Projects/code-cli/ohbaby-agent
+
+ ❯ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts (6 tests | 1 failed | 1 skipped) 1287ms
+   × goal execution through the HTTP daemon > separates two goal turns from their live and replay display while preserving runtime context, title and silent counters 218ms
+     → expected '<system-reminder>\nCurrent working di…' to contain '<untrusted_objective>\nVerify the cob…'
+   ✓ goal execution through the HTTP daemon > counts blocked reports by admitted run, preserves the final reply, and atomically resumes with fresh audit 448ms
+ ✓ packages/ohbaby-server/src/runtime/daemon/model-idle.e2e.test.ts (4 tests | 3 skipped) 155ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts > goal execution through the HTTP daemon > separates two goal turns from their live and replay display while preserving runtime context, title and silent counters
+AssertionError: expected '<system-reminder>\nCurrent working di…' to contain '<untrusted_objective>\nVerify the cob…'
+
+- Expected
++ Received
+
+- <untrusted_objective>
+- Verify the cobalt telescope handoff within exactly 2 turns
+-
+-   汇总每轮结果，并注明来源
+- </untrusted_objective>
++ <system-reminder>
++ Current working directory: /var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-goal-e2e-x8eh7C/workspace
++ Platform: darwin
++ OS version: Darwin Kernel Version 27.0.0: Tue Aug 11 21:06:40 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T6050
++ Date: 2026-10-21
++ Git repository: false
++ </system-reminder>
++ <system-reminder>
++ Current mode: auto.
++ </system-reminder>
+
+ ❯ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:322:26
+    320|           ];
+    321|           turnPrompts.forEach((text, index) => {
+    322|             expect(text).toContain(
+       |                          ^
+    323|               `<untrusted_objective>\n${objective}\n</untrusted_object…
+    324|             );
+ ❯ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:321:23
+ ❯ withDaemon packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:91:5
+ ❯ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:266:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 5 passed | 4 skipped (10)
+   Start at  18:38:37
+   Duration  3.13s (transform 756ms, setup 0ms, collect 1.49s, tests 1.44s, environment 0ms, prepare 42ms)
+

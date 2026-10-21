@@ -1,0 +1,25 @@
+{
+  "commit": "d78fc65f",
+  "transport": "real PTY with compiled CLI and compiled HTTP daemon",
+  "provider": "injected local fixture",
+  "prompt": "BOUNDARIES_TUI_PROMPT",
+  "reply": "BOUNDARIES_TUI_OK",
+  "freshPromptReplyObserved": true,
+  "continueHistoryObserved": true,
+  "firstExitCode": 0,
+  "continueExit": {
+    "chunk_id": "a5d777",
+    "wall_time_seconds": 0.000031417,
+    "exit_code": 0,
+    "original_token_count": 33,
+    "output": "\u001b[?25h\u001b[?2004l\u001b[?1006l\u001b[?1000l\u001b[?25h\u001b[?1049l\u001b[?25h    │ BOUNDARIES_TUI_PROMPT\r\n\r\n    BOUNDARIES_TUI_OK\r\n\r\n    Total 0s\r\n\r\n\u001b[?25h"
+  },
+  "continueLaunch": {
+    "chunk_id": "1c841a",
+    "wall_time_seconds": 1.001794125,
+    "session_id": 3086,
+    "original_token_count": 658,
+    "output": "\u001b]11;?\u001b\\\u001b]10;?\u001b\\\u001b[c\u001b[?1049h\u001b[?25l\u001b[?2026h\u001b[?25l     ██████╗ ██╗  ██╗██████╗  █████╗ ██████╗ ██╗   ██╗\r\n    ██╔═══██╗██║  ██║██╔══██╗██╔══██╗██╔══██╗╚██╗ ██╔╝\r\n    ██║   ██║███████║██████╔╝███████║██████╔╝ ╚████╔╝\r\n    ██║   ██║██╔══██║██╔══██╗██╔══██║██╔══██╗  ╚██╔╝\r\n    ╚██████╔╝██║  ██║██████╔╝██║  ██║██████╔╝   ██║\r\n     ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═════╝    ╚═╝\r\n\r\n    Ctrl+G subagents · 0 executions\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n    ────────────────────────────────────────────────────────────────────────\r\n    Syncing session…\r\n    ────────────────────────────────────────────────────────────────────────\r\n     >\r\n    ────────────────────────────────────────────────────────────────────────\r\n    unknown                                                     auto/default\r\n    unknown · unknown                                                      —\r\n\u001b[?2026l\u001b[?2004h\u001b[?1000h\u001b[?1006h\u001b[?2026h\u001b[23A\u001b[5G\u001b[KCtrl+G subagents · 0 executions\r\n\u001b[1G\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[E\u001b[1G\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[?2026l\u001b[?2026h\u001b[23A\u001b[E\u001b[1G\u001b[K    │ BOUNDARIES_TUI_PROMPT\r\n\u001b[E\u001b[1G\u001b[K    BOUNDARIES_TUI_OK\r\n\u001b[E\u001b[1G\u001b[K    Total 0s\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[5G\u001b[K/private/var/folders/md/0szgs…undaries-tui-YIbnxa/workspace auto/default\r\n\u001b[5G\u001b[Kfixture · n/a                                               27% 9k/32.8k\r\n\u001b[?2026l\u001b[?2026h\u001b[23A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G\u001b[K\r\n\u001b[5G\u001b[K────────────────────────────────────────────────────────────────────────\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[?2026l"
+  },
+  "daemonStopped": true
+}

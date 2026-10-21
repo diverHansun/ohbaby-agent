@@ -1,0 +1,7 @@
+E2E_READY {"pid":7187,"url":"http://127.0.0.1:51482/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-compiled-web-e2e-T1Yo1O%2Fworkspace"}
+E2E_UI_PENDING Complete E01-E05 in the browser, then submit one JSON evidence line.
+E2E_UI_EVIDENCE_SCHEMA {"activeSessionStable":true,"followupFinalAfterRefresh":1,"followupFinalBeforeRefresh":1,"followupUserAfterRefresh":1,"runtimeMarkersVisible":false,"titleContainsRuntimeMarker":false,"toolFinalAfterRefresh":1,"toolFinalBeforeRefresh":1,"toolPanelCompleted":true}
+E2E_UI_EVIDENCE_PASS {"activeSessionStable":true,"followupFinalAfterRefresh":1,"followupFinalBeforeRefresh":1,"followupUserAfterRefresh":1,"runtimeMarkersVisible":false,"titleContainsRuntimeMarker":false,"toolFinalAfterRefresh":1,"toolFinalBeforeRefresh":1,"toolPanelCompleted":true}
+E2E_BACKEND_PASS {"keyPresent":true,"keyStable":true,"requestCount":3,"runtimePartCounts":[1,1,1],"titleRequests":1,"toolResultConsumed":true}
+E2E_CLEANUP_PASS {"finalStatus":"stopped","pidReleased":true,"portReleased":true}
+E2E_DIAGNOSTICS_PASS {"eventCount":5,"events":["diagnostics.started","migration.config.completed","migration.data.completed","server.started","server.stopped"],"file":"2026-10-21T10-40-24-544Z-7187-fd57053f.jsonl"}
