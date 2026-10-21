@@ -4,8 +4,14 @@ import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,
   getAgentPackageVersion,
+  commitSessionProjectMove,
+  getGlobalSession,
+  isDefaultWorkspaceDirectory,
+  listGlobalSessions,
   listKnownSessionProjectRoots,
   McpManager,
+  planSessionProjectMove,
+  searchGlobalSessions,
   NOOP_LOGGER,
   beginDatabaseShutdown,
   createShutdownOptions,
@@ -458,6 +464,7 @@ async function restoreWorkspaceInRunningDaemon(input: {
   readonly scopeRoot: string;
   readonly stateFile: JsonDaemonStateFile;
 }): Promise<void> {
+  if (isDefaultWorkspaceDirectory(input.scopeRoot)) return;
   const state = await input.stateFile.read();
   const url = state === undefined ? undefined : urlFromState(state);
   if (!url || !state?.authToken) {
@@ -531,7 +538,8 @@ async function startFreshDaemon(input: {
       const backend = createBackend(input.scopeRoot);
       const releaseDatabase = retainLocalDaemonDatabase();
       const workspaceRegistry = createWorkspaceRegistryIfAvailable();
-      await workspaceRegistry?.open(input.scopeRoot);
+      if (!isDefaultWorkspaceDirectory(input.scopeRoot))
+        await workspaceRegistry?.open(input.scopeRoot);
       server = createDaemonHttpServer({
         authToken: input.authToken,
         backend,
@@ -539,6 +547,14 @@ async function startFreshDaemon(input: {
         host: input.options.host ?? DEFAULT_HOST,
         listKnownWorkspaceScopes: () => listKnownSessionProjectRoots(),
         logger,
+        sessionCatalog: {
+          list: (query) => listGlobalSessions(query),
+          search: (query) => searchGlobalSessions(query),
+          get: (sessionId) => getGlobalSession(sessionId),
+          planMove: (sessionId, projectDirectory) =>
+            planSessionProjectMove(sessionId, projectDirectory),
+          commitMove: (plan) => commitSessionProjectMove(plan),
+        },
         workspaceRegistry,
         onClientConnected: (clientId) => {
           supervisor.clientConnected(clientId);

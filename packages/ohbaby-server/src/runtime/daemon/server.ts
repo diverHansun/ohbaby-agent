@@ -9,6 +9,9 @@ import {
   createSessionIdGenerator,
   createShutdownOptions,
   collectCleanup,
+  ensureDefaultWorkspaceDirectory,
+  isDefaultWorkspaceDirectory,
+  type SessionProjectMovePlan,
   type CleanupResult,
   type CleanupTaskResult,
   type ShutdownOptions,
@@ -37,6 +40,18 @@ import {
   WorkspaceScopeError,
 } from "../workspace-scope.js";
 import { isAuthorizedDaemonRequest } from "../../auth/token.js";
+import {
+  moveSessionProject,
+  type GlobalSessionCatalog,
+} from "../../coordination/session-project-move.js";
+import {
+  globalSessionErrorStatus,
+  parseGlobalSessionLimit,
+  parseSessionProjectUpdate,
+  toUiGlobalSession,
+  toUiGlobalSessionPage,
+  toUiSessionSearchPage,
+} from "../../protocols/global-sessions.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;
@@ -57,6 +72,7 @@ export interface DaemonHttpServerOptions {
     | readonly string[];
   readonly logger?: Logger;
   readonly now?: () => number;
+  readonly sessionCatalog?: GlobalSessionCatalog;
   readonly workspaceRegistry?: WorkspaceRegistryStore;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
@@ -70,6 +86,8 @@ export interface DaemonHttpServerOptions {
 
 export type WorkspaceBackend = UiBackendClient &
   UiPromptQueueExecutionPort & {
+    /** Persistent workspaces take over a moved session's queued prompts. */
+    adoptSessionProjectMove?(plan: SessionProjectMovePlan): Promise<void>;
     closeAdmission?(): void;
     dispose?(
       options?: ShutdownOptions,
@@ -105,6 +123,7 @@ type NormalizedDaemonHttpServerOptions = Omit<
 
 interface WorkspaceAppInstance {
   readonly appHandle: DaemonServerAppHandle;
+  readonly backend: WorkspaceBackend;
   closeAdmission(): void;
   dispose(options?: ShutdownOptions): Promise<void>;
 }
@@ -201,6 +220,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     }
     return {
       appHandle,
+      backend,
       closeAdmission(): void {
         backend.closeAdmission?.();
       },
@@ -246,6 +266,13 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       this.listDirectoryPickerDirectory(context),
     );
     this.app.get("/v1/connections", (context) => this.listConnections(context));
+    this.app.get("/v1/sessions/search", (context) =>
+      this.searchGlobalSessions(context),
+    );
+    this.app.get("/v1/sessions", (context) => this.listGlobalSessions(context));
+    this.app.post("/v1/sessions/:sessionId/project", (context) =>
+      this.moveSessionProject(context),
+    );
     const dispatch = (context: Context): Promise<Response> =>
       this.dispatchWorkspaceRequest(context);
     this.app.all("/api/rpc", dispatch);
@@ -306,12 +333,22 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         401,
       );
     }
-    const loaded = new Set(this.instanceStore?.loadedScopeKeys() ?? []);
+    // The default workspace runs sessions without a project; it is never
+    // listed or registered as one.
+    const defaultWorkspace = {
+      directory: await ensureDefaultWorkspaceDirectory(),
+    };
+    const loaded = new Set(
+      (this.instanceStore?.loadedScopeKeys() ?? []).filter(
+        (directory) => !isDefaultWorkspaceDirectory(directory),
+      ),
+    );
     const available = new Set<string>(loaded);
     for (const directory of (await this.options.listKnownWorkspaceScopes?.()) ??
       []) {
       try {
-        available.add(await resolveWorkspaceScope(directory));
+        const scope = await resolveWorkspaceScope(directory);
+        if (!isDefaultWorkspaceDirectory(scope)) available.add(scope);
       } catch (error) {
         if (!(error instanceof WorkspaceScopeError)) {
           throw error;
@@ -327,11 +364,15 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
             Number(right.loaded) - Number(left.loaded) ||
             left.directory.localeCompare(right.directory),
         );
-      return context.json({ ok: true, scopes });
+      return context.json({ defaultWorkspace, ok: true, scopes });
     }
 
     for (const entry of registry.list()) {
-      if (entry.visibility !== "visible" || available.has(entry.scopeKey)) {
+      if (
+        entry.visibility !== "visible" ||
+        available.has(entry.scopeKey) ||
+        isDefaultWorkspaceDirectory(entry.scopeKey)
+      ) {
         continue;
       }
       try {
@@ -348,7 +389,11 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     await registry.ensureDiscovered([...available]);
     const scopes = registry
       .list()
-      .filter((entry) => entry.visibility === "visible")
+      .filter(
+        (entry) =>
+          entry.visibility === "visible" &&
+          !isDefaultWorkspaceDirectory(entry.scopeKey),
+      )
       .map((entry) => ({
         available: available.has(entry.scopeKey),
         directory: entry.scopeKey,
@@ -356,7 +401,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         loaded: loaded.has(entry.scopeKey),
         position: entry.position,
       }));
-    return context.json({ ok: true, scopes });
+    return context.json({ defaultWorkspace, ok: true, scopes });
   }
 
   private async readDirectoryBody(
@@ -416,6 +461,18 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   ): Promise<Response> {
     try {
       const directory = await resolveWorkspaceScope(requestedDirectory);
+      if (isDefaultWorkspaceDirectory(directory)) {
+        return context.json(
+          {
+            error: {
+              code: "DEFAULT_WORKSPACE_NOT_PROJECT",
+              message: "The default workspace cannot be opened as a project",
+            },
+            ok: false,
+          },
+          400,
+        );
+      }
       const entry = await this.options.workspaceRegistry?.open(directory);
       return context.json({
         ...options,
@@ -524,6 +581,110 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       );
     }
     return context.json({ directory: input.directory, ok: true });
+  }
+
+  private unauthorized(context: Context): Response | undefined {
+    return this.isAuthorized(context)
+      ? undefined
+      : context.json({ error: { message: "Unauthorized" }, ok: false }, 401);
+  }
+
+  /** Global session routes report typed failures; anything else is a server error. */
+  private globalSessionFailure(context: Context, error: unknown): Response {
+    const status = globalSessionErrorStatus(error);
+    if (status === 500) throw error;
+    const failure = error as {
+      readonly code: string;
+      readonly message: string;
+    };
+    return context.json(
+      { error: { code: failure.code, message: failure.message }, ok: false },
+      status,
+    );
+  }
+
+  private globalSessionCatalog(
+    context: Context,
+  ): GlobalSessionCatalog | Response {
+    return (
+      this.unauthorized(context) ??
+      this.options.sessionCatalog ??
+      context.json(
+        {
+          error: {
+            code: "SESSION_CATALOG_UNAVAILABLE",
+            message: "Global session catalog is not configured",
+          },
+          ok: false,
+        },
+        501,
+      )
+    );
+  }
+
+  private listGlobalSessions(context: Context): Response {
+    const catalog = this.globalSessionCatalog(context);
+    if (catalog instanceof Response) return catalog;
+    try {
+      const page = catalog.list({
+        limit: parseGlobalSessionLimit(context.req.query("limit")),
+        cursor: context.req.query("cursor"),
+      });
+      return context.json({ ok: true, ...toUiGlobalSessionPage(page) });
+    } catch (error) {
+      return this.globalSessionFailure(context, error);
+    }
+  }
+
+  private searchGlobalSessions(context: Context): Response {
+    const catalog = this.globalSessionCatalog(context);
+    if (catalog instanceof Response) return catalog;
+    try {
+      const page = catalog.search({
+        query: context.req.query("q") ?? "",
+        limit: parseGlobalSessionLimit(context.req.query("limit")),
+        cursor: context.req.query("cursor"),
+      });
+      return context.json({ ok: true, ...toUiSessionSearchPage(page) });
+    } catch (error) {
+      return this.globalSessionFailure(context, error);
+    }
+  }
+
+  private async moveSessionProject(context: Context): Promise<Response> {
+    const catalog = this.globalSessionCatalog(context);
+    if (catalog instanceof Response) return catalog;
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json(
+        {
+          error: { code: "INVALID_JSON", message: "Expected a JSON body" },
+          ok: false,
+        },
+        400,
+      );
+    }
+    try {
+      const session = await moveSessionProject(
+        {
+          catalog,
+          resolveScope: resolveWorkspaceScope,
+          isDefaultWorkspace: isDefaultWorkspaceDirectory,
+          discoverProject: (directory) =>
+            this.options.workspaceRegistry?.ensureDiscovered([directory]) ??
+            Promise.resolve(),
+          loadQueueOwner: async (directory) =>
+            (await this.instanceStore?.load(directory))?.backend,
+        },
+        context.req.param("sessionId") ?? "",
+        parseSessionProjectUpdate(body),
+      );
+      return context.json({ ok: true, session: toUiGlobalSession(session) });
+    } catch (error) {
+      return this.globalSessionFailure(context, error);
+    }
   }
 
   private listConnections(context: Context): Response {
@@ -679,6 +840,7 @@ export function createDaemonHttpServer(
     host: options.host ?? DEFAULT_HOST,
     listKnownWorkspaceScopes: options.listKnownWorkspaceScopes,
     logger: options.logger,
+    sessionCatalog: options.sessionCatalog,
     workspaceRegistry: options.workspaceRegistry,
     now: options.now ?? Date.now,
     onClientConnected: options.onClientConnected,

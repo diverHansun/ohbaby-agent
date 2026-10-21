@@ -28,6 +28,7 @@ import {
   isConnectModelInterfaceProvider,
   isUiReasoningConfig,
   isUiPromptNamingSource,
+  SESSION_MOVED_ERROR_CODE,
   UI_REASONING_STATUSES,
   supportsWebOverlayCommandInvocation,
   supportsWebPassthroughCommandInvocation,
@@ -212,7 +213,8 @@ function promptRejectionBody(message: string): unknown {
 function promptAdmissionStatus(error: unknown): 400 | 409 | 429 | 500 {
   const code = isRecord(error) ? error.code : undefined;
   if (code === "QUEUE_FULL") return 429;
-  if (code === "IDEMPOTENCY_CONFLICT") return 409;
+  if (code === "IDEMPOTENCY_CONFLICT" || code === SESSION_MOVED_ERROR_CODE)
+    return 409;
   if (
     code === "PROMPT_SUBMISSION_REJECTED" ||
     code === "INVALID_CLIENT_REQUEST_ID" ||
@@ -252,6 +254,7 @@ function promptMutationStatus(error: unknown): 400 | 403 | 404 | 409 | 429 {
     code === "CURRENT_RUN_INPUT_CONFLICT" ||
     code === "STEER_INPUT_NOT_RECOVERABLE" ||
     code === "SESSION_SCOPE_CHANGED" ||
+    code === SESSION_MOVED_ERROR_CODE ||
     code === "PROMPT_NOT_QUEUED" ||
     code === "PROMPT_VERSION_CONFLICT" ||
     code === "IDEMPOTENCY_CONFLICT" ||

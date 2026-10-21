@@ -18,6 +18,19 @@ export type {
 } from "./client.js";
 export { submitPromptAndWait } from "./client.js";
 export {
+  SESSION_MOVED_ERROR_CODE,
+  globalSessionRequestDirectory,
+} from "./global-sessions.js";
+export type {
+  UiDefaultWorkspace,
+  UiGlobalSession,
+  UiGlobalSessionPage,
+  UiSessionProjectUpdate,
+  UiSessionSearchMatchType,
+  UiSessionSearchPage,
+  UiSessionSearchResult,
+} from "./global-sessions.js";
+export {
   buildUiCommandDetails,
   executeRecordedUiCommand,
   summarizeUiCommandError,

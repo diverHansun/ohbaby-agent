@@ -178,6 +178,9 @@ export async function acceptDaemonPrompt(input: {
       const selected = sessions.find(
         (session) => session.id === input.options?.sessionId,
       );
+      // A session moved to another directory reports where to resend.
+      if (!selected)
+        await input.backend.assertSessionRoutable?.(input.options.sessionId);
       if (!selected || selected.parentId || selected.isSubagent)
         throw new Error("Prompt requires an available root session");
       input.clientViews.assertBinding(input.clientId, previous, "prompt");
@@ -293,6 +296,8 @@ export async function executeCommandForClient(input: {
       const selected = sessions.find(
         (session) => session.id === invocation.sessionId,
       );
+      if (!selected)
+        await input.backend.assertSessionRoutable?.(invocation.sessionId);
       if (!selected || selected.parentId || selected.isSubagent)
         throw new Error("Prompt requires an available root session");
       input.clientViews.assertBinding(input.clientId, previous, "prompt");

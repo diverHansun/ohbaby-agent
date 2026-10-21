@@ -48,6 +48,7 @@ function spawnServe(input: {
   readonly dataHome?: string;
   readonly dbPath?: string;
   readonly homeDirectory: string;
+  readonly ohbabyHome?: string;
   readonly workdir: string;
 }): ChildProcessWithoutNullStreams {
   const mainUrl = pathToFileURL(
@@ -142,6 +143,9 @@ function spawnServe(input: {
   const childEnvironment: NodeJS.ProcessEnv = {
     ...process.env,
     OHBABY_TEST_INPUT: JSON.stringify(input),
+    ...(input.ohbabyHome === undefined
+      ? {}
+      : { OHBABY_HOME: input.ohbabyHome }),
   };
   if (input.dataHome !== undefined) {
     if (process.platform === "win32") {
@@ -336,6 +340,36 @@ async function startedCount(path: string): Promise<number> {
 }
 
 describe("global single serve across real processes", () => {
+  it("reuses the default workspace without registering it as a project", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-real-default-reuse-"));
+    cleanupDirectories.push(root);
+    const ohbabyHome = join(root, "config");
+    const workdir = join(ohbabyHome, "workspace", "default");
+    await mkdir(workdir, { recursive: true });
+    const common = {
+      authToken: "default_workspace_reuse_test",
+      dbPath: join(root, "agent.db"),
+      homeDirectory: join(root, "home"),
+      ohbabyHome,
+      workdir,
+    };
+
+    const firstChild = spawnServe(common);
+    const first = await waitForReady(firstChild);
+    expect(first.reused).toBe(false);
+    const secondChild = spawnServe(common);
+    const second = await waitForReady(secondChild);
+    await waitForExit(secondChild);
+
+    expect(second.reused).toBe(true);
+    expect(new URL(second.url).origin).toBe(new URL(first.url).origin);
+    const scopes = await fetch(`${new URL(first.url).origin}/v1/scopes`, {
+      headers: { authorization: `Bearer ${common.authToken}` },
+    });
+    expect(scopes.status).toBe(200);
+    expect(await scopes.json()).toMatchObject({ scopes: [] });
+  }, 20_000);
+
   it("migrates legacy platform data before a direct server start opens SQLite", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-data-migrate-"));
     cleanupDirectories.push(root);

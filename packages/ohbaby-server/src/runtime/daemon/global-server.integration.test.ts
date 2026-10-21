@@ -2,19 +2,26 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
+  CoreSession,
+  SessionProjectMovePlan,
   WorkspaceRegistryEntry,
   WorkspaceRegistryStore,
 } from "ohbaby-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { daemonAuthHeader } from "../../auth/token.js";
+import type { GlobalSessionCatalog } from "../../coordination/session-project-move.js";
 import {
   DirectoryBrowserError,
   type DirectoryBrowser,
 } from "../directory-browser.js";
 import { createDaemonHttpServer, type WorkspaceBackend } from "./server.js";
 
-function createBackend(dispose = vi.fn()): WorkspaceBackend {
+function createBackend(
+  dispose = vi.fn(),
+  adoptSessionProjectMove?: WorkspaceBackend["adoptSessionProjectMove"],
+): WorkspaceBackend {
   return {
+    ...(adoptSessionProjectMove ? { adoptSessionProjectMove } : {}),
     dispose,
     getSessionIndex: vi.fn(() => Promise.resolve([])),
     getPermissionSnapshot: vi.fn(
@@ -97,6 +104,8 @@ function createRegistry(
     },
   };
 }
+
+const anyDirectory: unknown = expect.any(String);
 
 describe("global daemon workspace routing", () => {
   const cleanupDirs: string[] = [];
@@ -282,6 +291,7 @@ describe("global daemon workspace routing", () => {
       });
       expect(initial.status).toBe(200);
       await expect(initial.json()).resolves.toEqual({
+        defaultWorkspace: { directory: anyDirectory },
         ok: true,
         scopes: [
           {
@@ -312,6 +322,7 @@ describe("global daemon workspace routing", () => {
         headers: { authorization },
       });
       await expect(afterLoad.json()).resolves.toEqual({
+        defaultWorkspace: { directory: anyDirectory },
         ok: true,
         scopes: [
           {
@@ -393,7 +404,11 @@ describe("global daemon workspace routing", () => {
         method: "POST",
       });
       const scopes = await fetch(`${server.url}/v1/scopes`, { headers });
-      await expect(scopes.json()).resolves.toEqual({ ok: true, scopes: [] });
+      await expect(scopes.json()).resolves.toEqual({
+        defaultWorkspace: { directory: anyDirectory },
+        ok: true,
+        scopes: [],
+      });
 
       const unauthorized = await fetch(`${server.url}/v1/scopes/open`, {
         body: JSON.stringify({ directory: child }),
@@ -596,6 +611,225 @@ describe("global daemon workspace routing", () => {
       });
     } finally {
       await reader?.cancel();
+      await server.stop();
+    }
+  });
+});
+
+function coreSession(overrides: Partial<CoreSession> = {}): CoreSession {
+  return {
+    id: "s1",
+    projectId: "global",
+    projectRoot: "/repo/a",
+    projectDirectory: "/repo/a",
+    title: "First",
+    agentName: "default",
+    createdAt: 0,
+    updatedAt: 1_000,
+    status: "active",
+    stats: { messageCount: 2 },
+    childrenIds: [],
+    isSubagent: false,
+    ...overrides,
+  };
+}
+
+describe("global daemon session routes", () => {
+  const cleanupDirs: string[] = [];
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await Promise.all(
+      cleanupDirs
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
+    );
+  });
+
+  async function createRepos(): Promise<{
+    readonly home: string;
+    readonly repoA: string;
+    readonly repoB: string;
+  }> {
+    const home = await mkdtemp(join(tmpdir(), "ohbaby-global-sessions-"));
+    cleanupDirs.push(home);
+    vi.stubEnv("OHBABY_HOME", join(home, ".ohbaby"));
+    await mkdir(join(home, "repo-a", ".git"), { recursive: true });
+    await mkdir(join(home, "repo-b", ".git"), { recursive: true });
+    return {
+      home,
+      repoA: await realpath(join(home, "repo-a")),
+      repoB: await realpath(join(home, "repo-b")),
+    };
+  }
+
+  it("returns the default workspace without listing or opening it as a project", async () => {
+    const { home, repoA } = await createRepos();
+    const registry = createRegistry(() => 1);
+    const defaultWorkspace = await realpath(
+      await mkdir(join(home, ".ohbaby", "workspace", "default"), {
+        recursive: true,
+      }).then(() => join(home, ".ohbaby", "workspace", "default")),
+    );
+    const server = createDaemonHttpServer({
+      authToken: "token",
+      backend: createBackend(),
+      createWorkspaceBackend: () => createBackend(),
+      listKnownWorkspaceScopes: () => [repoA, defaultWorkspace],
+      port: 0,
+      scopeRoot: repoA,
+      workspaceRegistry: registry,
+    });
+    await server.start();
+    try {
+      const headers = { authorization: daemonAuthHeader("token") };
+      // A loaded default-workspace instance must not leak into the project list.
+      await fetch(`${server.url}/v1/sessions/index`, {
+        headers: { ...headers, "x-ohbaby-directory": defaultWorkspace },
+      });
+      const scopes = await fetch(`${server.url}/v1/scopes`, { headers });
+      const body = (await scopes.json()) as {
+        readonly defaultWorkspace: { readonly directory: string };
+        readonly scopes: readonly { readonly directory: string }[];
+      };
+      expect(body.defaultWorkspace.directory).toBe(defaultWorkspace);
+      expect(body.scopes.map((scope) => scope.directory)).toEqual([repoA]);
+      expect(
+        registry.list().some((entry) => entry.scopeKey === defaultWorkspace),
+      ).toBe(false);
+
+      const open = await fetch(`${server.url}/v1/scopes/open`, {
+        body: JSON.stringify({ directory: defaultWorkspace }),
+        headers,
+        method: "POST",
+      });
+      expect(open.status).toBe(400);
+      await expect(open.json()).resolves.toMatchObject({
+        error: { code: "DEFAULT_WORKSPACE_NOT_PROJECT" },
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("lists, searches and moves sessions without a workspace header", async () => {
+    const { repoA, repoB } = await createRepos();
+    const registry = createRegistry(() => 1);
+    const adopt = vi.fn(() => Promise.resolve());
+    const list = vi.fn(() => ({
+      sessions: [
+        coreSession({ pendingProjectRoot: repoB, projectDirectory: repoB }),
+      ],
+      nextCursor: "next",
+    }));
+    const search = vi.fn(() => ({
+      hits: [
+        {
+          session: coreSession(),
+          matchType: "message" as const,
+          snippet: "hit",
+          messageId: "m1",
+        },
+      ],
+    }));
+    const planMove = vi.fn(
+      (
+        sessionId: string,
+        projectDirectory: string | null,
+      ): SessionProjectMovePlan => ({
+        sessionId,
+        binding:
+          projectDirectory === null
+            ? {}
+            : { projectDirectory, pendingProjectRoot: projectDirectory },
+        queueRoot: projectDirectory ?? repoA,
+        needsQueueHandover: projectDirectory !== null,
+      }),
+    );
+    const catalog: GlobalSessionCatalog = {
+      list,
+      search,
+      get: () =>
+        coreSession({ projectDirectory: repoB, pendingProjectRoot: repoB }),
+      planMove,
+      commitMove: () =>
+        Promise.resolve(coreSession({ projectDirectory: undefined })),
+    };
+    const server = createDaemonHttpServer({
+      authToken: "token",
+      backend: createBackend(),
+      createWorkspaceBackend: () => createBackend(vi.fn(), adopt),
+      port: 0,
+      scopeRoot: repoA,
+      sessionCatalog: catalog,
+      workspaceRegistry: registry,
+    });
+    await server.start();
+    try {
+      const headers = { authorization: daemonAuthHeader("token") };
+      expect((await fetch(`${server.url}/v1/sessions`)).status).toBe(401);
+
+      const listed = await fetch(
+        `${server.url}/v1/sessions?limit=2&cursor=abc`,
+        {
+          headers,
+        },
+      );
+      await expect(listed.json()).resolves.toMatchObject({
+        ok: true,
+        nextCursor: "next",
+        sessions: [
+          {
+            id: "s1",
+            projectDirectory: repoB,
+            workingDirectory: "/repo/a",
+            pendingWorkingDirectory: repoB,
+          },
+        ],
+      });
+      expect(list).toHaveBeenCalledWith({ limit: 2, cursor: "abc" });
+      expect(
+        (await fetch(`${server.url}/v1/sessions?limit=0`, { headers })).status,
+      ).toBe(400);
+
+      const searched = await fetch(`${server.url}/v1/sessions/search?q=a%20b`, {
+        headers,
+      });
+      await expect(searched.json()).resolves.toMatchObject({
+        results: [{ matchType: "message", snippet: "hit", messageId: "m1" }],
+      });
+      expect(search).toHaveBeenCalledWith({
+        query: "a b",
+        limit: undefined,
+        cursor: undefined,
+      });
+
+      const post = (body: unknown): Promise<Response> =>
+        fetch(`${server.url}/v1/sessions/s1/project`, {
+          body: JSON.stringify(body),
+          headers,
+          method: "POST",
+        });
+      const moved = await post({ projectDirectory: join(repoB, ".") });
+      await expect(moved.json()).resolves.toMatchObject({
+        session: { projectDirectory: repoB, pendingWorkingDirectory: repoB },
+      });
+      expect(planMove).toHaveBeenCalledWith("s1", repoB);
+      expect(adopt).toHaveBeenCalledTimes(1);
+      expect(registry.list().some((entry) => entry.scopeKey === repoB)).toBe(
+        true,
+      );
+
+      await expect(
+        (await post({ projectDirectory: null })).json(),
+      ).resolves.toMatchObject({
+        session: { projectDirectory: null },
+      });
+      expect((await post({})).status).toBe(400);
+      expect((await post({ projectDirectory: "/missing/dir" })).status).toBe(
+        400,
+      );
+    } finally {
       await server.stop();
     }
   });

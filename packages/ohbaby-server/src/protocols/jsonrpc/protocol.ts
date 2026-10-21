@@ -82,6 +82,8 @@ export type DaemonRpcResponse =
         readonly attempts?: number;
         readonly limit?: number;
         readonly terminalReason?: string;
+        /** SESSION_MOVED: the directory that runs the session's next turn. */
+        readonly targetDirectory?: string;
       };
     };
 
@@ -236,6 +238,9 @@ export function createDaemonRpcFailure(
       ...(typeof detail.limit === "number" ? { limit: detail.limit } : {}),
       ...(typeof detail.terminalReason === "string"
         ? { terminalReason: detail.terminalReason }
+        : {}),
+      ...(typeof detail.targetDirectory === "string"
+        ? { targetDirectory: detail.targetDirectory }
         : {}),
     },
     id,
