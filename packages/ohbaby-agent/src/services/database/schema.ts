@@ -10,6 +10,8 @@ export const schema = {
     id: "id",
     projectId: "project_id",
     projectRoot: "project_root",
+    projectDirectory: "project_directory",
+    pendingProjectRoot: "pending_project_root",
     agent: "agent",
     parentId: "parent_id",
     title: "title",

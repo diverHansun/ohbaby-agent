@@ -204,6 +204,7 @@ describe("services/database", () => {
       { version: "022_retained_prompt_admission" },
       { version: "023_prompt_naming_source" },
       { version: "024_prompt_resend_parent" },
+      { version: "025_session_project_binding" },
     ]);
   });
 

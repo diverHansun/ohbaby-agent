@@ -105,8 +105,24 @@ export * from "./shell/index.js";
 export * from "./snapshot/index.js";
 export { getAgentPackageVersion } from "./package-version.js";
 export {
+  GLOBAL_SESSION_PAGE_DEFAULT_LIMIT,
+  GLOBAL_SESSION_PAGE_MAX_LIMIT,
+  InvalidGlobalSessionCursorError,
+  SessionMovedError,
+  SessionProjectMoveError,
+  commitSessionProjectMove,
   createSessionIdGenerator,
+  listGlobalSessions,
   listKnownSessionProjectRoots,
+  getGlobalSession,
+  planSessionProjectMove,
+  searchGlobalSessions,
+  sessionTargetProjectRoot,
+  type GlobalSessionPage,
+  type Session as CoreSession,
+  type SessionProjectMovePlan,
+  type SessionSearchHit,
+  type SessionSearchPage,
 } from "./services/session/index.js";
 export * from "./services/workspace-registry/index.js";
 export * from "./skill/index.js";

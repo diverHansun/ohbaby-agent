@@ -10,15 +10,23 @@ import {
   SessionNotFoundError,
 } from "./errors.js";
 import {
+  isSessionInProjectRoot,
   normalizeSessionProjectRoot,
-  sameSessionProjectRoot,
+  withSessionExecutionRoot,
 } from "./project-root.js";
-import type { ListSessionOptions, Session, SessionStore } from "./types.js";
+import type {
+  ListSessionOptions,
+  Session,
+  SessionExecutionRootInput,
+  SessionStore,
+} from "./types.js";
 
-interface SessionRow {
+export interface SessionRow {
   readonly id: string;
   readonly project_id: string;
   readonly project_root: string;
+  readonly project_directory: string | null;
+  readonly pending_project_root: string | null;
   readonly agent: string | null;
   readonly parent_id: string | null;
   readonly title: string | null;
@@ -46,8 +54,12 @@ export function listKnownSessionProjectRoots(
 ): readonly string[] {
   const rows = database
     .prepare<ProjectRootRow>(
-      `SELECT project_root, MAX(updated_at) AS latest_updated_at
-       FROM ${schema.session.tableName}
+      `SELECT project_root, MAX(updated_at) AS latest_updated_at FROM (
+         SELECT project_root, updated_at FROM ${schema.session.tableName}
+         UNION ALL
+         SELECT pending_project_root AS project_root, updated_at
+         FROM ${schema.session.tableName} WHERE pending_project_root IS NOT NULL
+       )
        WHERE project_root <> ''
        GROUP BY project_root
        ORDER BY latest_updated_at DESC, project_root ASC`,
@@ -61,6 +73,82 @@ export function listKnownSessionProjectRoots(
     }
   }
   return [...projectRoots.values()];
+}
+
+export interface SessionProjectBinding {
+  /** Sidebar project; undefined removes the session from every project. */
+  readonly projectDirectory?: string;
+  /** Next-turn execution directory; undefined cancels a pending change. */
+  readonly pendingProjectRoot?: string;
+}
+
+/**
+ * Writes the project binding directly. Run inside the caller's transaction
+ * when queued prompts move with it; the execution directory never changes here.
+ */
+export function writeSessionProjectBinding(
+  db: DatabaseConnection,
+  sessionId: string,
+  binding: SessionProjectBinding,
+  updatedAt: number,
+): Session {
+  const result = db
+    .prepare(
+      `UPDATE ${schema.session.tableName}
+       SET project_directory = ?, pending_project_root = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+    .run(
+      binding.projectDirectory ?? null,
+      binding.pendingProjectRoot ?? null,
+      updatedAt,
+      sessionId,
+    );
+  if (result.changes !== 1) {
+    throw new SessionNotFoundError(sessionId);
+  }
+  const row = db
+    .prepare<SessionRow>(
+      `SELECT * FROM ${schema.session.tableName} WHERE id = ?`,
+    )
+    .get(sessionId);
+  if (!row) {
+    throw new SessionNotFoundError(sessionId);
+  }
+  return rowToSession(row);
+}
+
+/**
+ * The default workspace is never a project. Migration 025 cannot know its
+ * path, so sessions that ran there before the upgrade are fixed at startup.
+ * Safe to repeat: new sessions never get this binding.
+ */
+export function clearDefaultWorkspaceProjectBindings(
+  db: DatabaseConnection,
+  defaultWorkspaceDirectories: readonly string[],
+): number {
+  let changed = 0;
+  for (const directory of new Set(defaultWorkspaceDirectories)) {
+    changed += db
+      .prepare(
+        `UPDATE ${schema.session.tableName}
+         SET project_directory = NULL WHERE project_directory = ?`,
+      )
+      .run(directory).changes;
+  }
+  return changed;
+}
+
+export function readSessionRow(
+  db: DatabaseConnection,
+  sessionId: string,
+): Session | null {
+  const row = db
+    .prepare<SessionRow>(
+      `SELECT * FROM ${schema.session.tableName} WHERE id = ?`,
+    )
+    .get(sessionId);
+  return row ? rowToSession(row) : null;
 }
 
 interface DatabaseSessionStoreOptions {
@@ -97,12 +185,18 @@ function decodeData(row: SessionRow): SessionData {
   return JSON.parse(row.data) as SessionData;
 }
 
-function rowToSession(row: SessionRow): Session {
+export function rowToSession(row: SessionRow): Session {
   const data = decodeData(row);
   return {
     id: row.id,
     projectId: row.project_id,
     projectRoot: row.project_root,
+    ...(row.project_directory === null
+      ? {}
+      : { projectDirectory: row.project_directory }),
+    ...(row.pending_project_root === null
+      ? {}
+      : { pendingProjectRoot: row.pending_project_root }),
     title: row.title ?? "",
     agentName: row.agent ?? "default",
     createdAt: row.created_at,
@@ -148,12 +242,14 @@ export function createDatabaseSessionStore(
     try {
       db.prepare(
         `INSERT INTO ${schema.session.tableName}
-          (id, project_id, project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, project_id, project_root, project_directory, pending_project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         session.id,
         session.projectId,
         session.projectRoot,
+        session.projectDirectory ?? null,
+        session.pendingProjectRoot ?? null,
         session.agentName,
         session.parentId ?? null,
         session.title,
@@ -175,12 +271,15 @@ export function createDatabaseSessionStore(
   function writeRow(session: Session): void {
     db.prepare(
       `UPDATE ${schema.session.tableName}
-       SET project_id = ?, project_root = ?, agent = ?, parent_id = ?, title = ?, status = ?,
+       SET project_id = ?, project_root = ?, project_directory = ?, pending_project_root = ?,
+           agent = ?, parent_id = ?, title = ?, status = ?,
            created_at = ?, updated_at = ?, message_count = ?, last_message_at = ?, data = ?
        WHERE id = ?`,
     ).run(
       session.projectId,
       session.projectRoot,
+      session.projectDirectory ?? null,
+      session.pendingProjectRoot ?? null,
       session.agentName,
       session.parentId ?? null,
       session.title,
@@ -197,11 +296,13 @@ export function createDatabaseSessionStore(
   function upsertRow(session: Session): void {
     db.prepare(
       `INSERT INTO ${schema.session.tableName}
-        (id, project_id, project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, project_id, project_root, project_directory, pending_project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id,
         project_root = excluded.project_root,
+        project_directory = excluded.project_directory,
+        pending_project_root = excluded.pending_project_root,
         agent = excluded.agent,
         parent_id = excluded.parent_id,
         title = excluded.title,
@@ -215,6 +316,8 @@ export function createDatabaseSessionStore(
       session.id,
       session.projectId,
       session.projectRoot,
+      session.projectDirectory ?? null,
+      session.pendingProjectRoot ?? null,
       session.agentName,
       session.parentId ?? null,
       session.title,
@@ -398,9 +501,7 @@ export function createDatabaseSessionStore(
           const limit = normalizeLimit(options.limit);
           if (transaction) {
             return listTransactionSessions(transaction)
-              .filter((session) =>
-                sameSessionProjectRoot(session.projectRoot, projectRoot),
-              )
+              .filter((session) => isSessionInProjectRoot(session, projectRoot))
               .filter(
                 (session) =>
                   options.status === undefined ||
@@ -427,9 +528,7 @@ export function createDatabaseSessionStore(
             .all(...params);
           return rows
             .map(rowToSession)
-            .filter((session) =>
-              sameSessionProjectRoot(session.projectRoot, projectRoot),
-            )
+            .filter((session) => isSessionInProjectRoot(session, projectRoot))
             .slice(0, limit)
             .map(cloneSession);
         });
@@ -527,6 +626,30 @@ export function createDatabaseSessionStore(
           };
           if (transaction) {
             transaction.removals.delete(sessionId);
+            transaction.upserts.set(sessionId, cloneSession(updated));
+          } else {
+            writeRow(updated);
+          }
+          return cloneSession(updated);
+        }, transaction);
+      },
+
+      recordExecutionRoot(
+        sessionId: string,
+        input: SessionExecutionRootInput,
+      ): Promise<Session> {
+        return withWriteBoundary(() => {
+          const existing = transaction
+            ? getTransactionSession(transaction, sessionId)
+            : getRow(sessionId);
+          if (!existing) {
+            throw new SessionNotFoundError(sessionId);
+          }
+          const updated: Session = {
+            ...withSessionExecutionRoot(existing, input),
+            updatedAt: input.updatedAt,
+          };
+          if (transaction) {
             transaction.upserts.set(sessionId, cloneSession(updated));
           } else {
             writeRow(updated);

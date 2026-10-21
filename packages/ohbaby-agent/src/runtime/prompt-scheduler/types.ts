@@ -207,6 +207,15 @@ export interface PromptSubmissionStore {
     window?: PromptHistoryWindow,
   ): Promise<readonly PromptSubmissionRecord[]>;
   listScopesWithQueued(): Promise<readonly string[]>;
+  /**
+   * Moves a session's queued prompts to this owner and scope, keeping ids,
+   * text and order. `beforeAdopt` runs in the same write transaction.
+   */
+  adoptQueuedSession(input: {
+    readonly sessionId: string;
+    readonly scopeKey: string;
+    readonly beforeAdopt?: () => void;
+  }): Promise<number>;
   recoverInterrupted(scopeKey: string): Promise<number>;
 }
 

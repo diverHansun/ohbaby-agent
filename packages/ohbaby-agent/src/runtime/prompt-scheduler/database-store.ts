@@ -703,6 +703,29 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       .map(promptSubmissionRowToRecord);
   }
 
+  async adoptQueuedSession(input: {
+    readonly sessionId: string;
+    readonly scopeKey: string;
+    readonly beforeAdopt?: () => void;
+  }): Promise<number> {
+    return this.transaction((db) => {
+      input.beforeAdopt?.();
+      return db
+        .prepare(
+          `UPDATE ${this.tableName}
+           SET scope_key = ?, owner_id = ?, owner_pid = ?, updated_at = ?
+           WHERE session_id = ? AND status = 'queued'`,
+        )
+        .run(
+          input.scopeKey,
+          this.ownerId,
+          this.ownerPid,
+          this.now(),
+          input.sessionId,
+        ).changes;
+    });
+  }
+
   async listScopesWithQueued(): Promise<readonly string[]> {
     return this.db
       .prepare<{ readonly scope_key: string }>(

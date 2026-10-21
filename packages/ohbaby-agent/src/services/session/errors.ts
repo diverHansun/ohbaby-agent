@@ -12,6 +12,19 @@ export class DuplicateSessionError extends Error {
   }
 }
 
+/** The session's next turn belongs to another workspace directory. */
+export class SessionMovedError extends Error {
+  readonly code = "SESSION_MOVED";
+
+  constructor(
+    readonly sessionId: string,
+    readonly targetDirectory: string,
+  ) {
+    super("Session belongs to another workspace");
+    this.name = "SessionMovedError";
+  }
+}
+
 export class InvalidSessionLimitError extends RangeError {
   constructor() {
     super("Session list limit must be a non-negative integer");

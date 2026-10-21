@@ -3,8 +3,16 @@ import {
   InvalidSessionLimitError,
   SessionNotFoundError,
 } from "./errors.js";
-import { sameSessionProjectRoot } from "./project-root.js";
-import type { ListSessionOptions, Session, SessionStore } from "./types.js";
+import {
+  isSessionInProjectRoot,
+  withSessionExecutionRoot,
+} from "./project-root.js";
+import type {
+  ListSessionOptions,
+  Session,
+  SessionExecutionRootInput,
+  SessionStore,
+} from "./types.js";
 
 function cloneSession(session: Session): Session {
   return structuredClone(session);
@@ -78,9 +86,7 @@ export function createInMemorySessionStore(): SessionStore {
     ): Promise<Session[]> {
       const limit = normalizeLimit(options.limit);
       const items = Array.from(sessions.values())
-        .filter((session) =>
-          sameSessionProjectRoot(session.projectRoot, projectRoot),
-        )
+        .filter((session) => isSessionInProjectRoot(session, projectRoot))
         .filter(
           (session) =>
             options.status === undefined || session.status === options.status,
@@ -148,6 +154,22 @@ export function createInMemorySessionStore(): SessionStore {
       };
       sessions.set(sessionId, cloneSession(updated));
 
+      return Promise.resolve(cloneSession(updated));
+    },
+
+    recordExecutionRoot(
+      sessionId: string,
+      input: SessionExecutionRootInput,
+    ): Promise<Session> {
+      const existing = sessions.get(sessionId);
+      if (!existing) {
+        return Promise.reject(new SessionNotFoundError(sessionId));
+      }
+      const updated = {
+        ...withSessionExecutionRoot(existing, input),
+        updatedAt: input.updatedAt,
+      };
+      sessions.set(sessionId, cloneSession(updated));
       return Promise.resolve(cloneSession(updated));
     },
 

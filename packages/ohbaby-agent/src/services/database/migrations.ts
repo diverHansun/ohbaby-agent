@@ -630,4 +630,17 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
     version: "024_prompt_resend_parent",
     sql: `ALTER TABLE prompt_submission ADD COLUMN resend_of_prompt_id TEXT;`,
   },
+  {
+    // project_root stays the execution directory. project_directory is the
+    // nullable sidebar project; pending_project_root is the next-turn directory.
+    // Every existing session starts in the project it runs in. SQL cannot know
+    // the default workspace path; the persistent backend clears that binding
+    // at startup (clearDefaultWorkspaceProjectBindings).
+    version: "025_session_project_binding",
+    sql: `
+      ALTER TABLE session ADD COLUMN project_directory TEXT;
+      ALTER TABLE session ADD COLUMN pending_project_root TEXT;
+      UPDATE session SET project_directory = project_root WHERE project_root <> '';
+    `,
+  },
 ];

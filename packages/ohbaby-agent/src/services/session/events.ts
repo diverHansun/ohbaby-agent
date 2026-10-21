@@ -11,6 +11,8 @@ const SessionSchema: z.ZodType<Session> = z.object({
   id: z.string(),
   projectId: z.string(),
   projectRoot: z.string(),
+  projectDirectory: z.string().optional(),
+  pendingProjectRoot: z.string().optional(),
   title: z.string(),
   agentName: z.string(),
   createdAt: z.number(),

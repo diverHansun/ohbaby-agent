@@ -12,7 +12,12 @@ export interface Session {
   readonly reasoning?: ReasoningConfig;
   readonly id: string;
   readonly projectId: string;
+  /** Execution directory used by the current or most recent turn. */
   readonly projectRoot: string;
+  /** Sidebar project; absent means the session has no project. */
+  readonly projectDirectory?: string;
+  /** Execution directory for the next turn after a project change. */
+  readonly pendingProjectRoot?: string;
   readonly title: string;
   readonly agentName: string;
   readonly createdAt: number;
@@ -54,6 +59,12 @@ export interface UpdateSessionPatch {
   readonly title?: string;
   readonly status?: SessionStatus;
   readonly agentName?: string;
+}
+
+export interface SessionExecutionRootInput {
+  readonly projectId: string;
+  readonly projectRoot: string;
+  readonly updatedAt: number;
 }
 
 export interface SessionStatsDelta {
@@ -100,6 +111,11 @@ export interface SessionManager {
     condition?: { readonly expectedTitle: string },
   ): Promise<Session>;
   incrementStats(sessionId: string, delta: SessionStatsDelta): Promise<Session>;
+  /**
+   * Records the directory a starting turn runs in. A pending change to that
+   * directory is now applied; a newer pending target is kept.
+   */
+  recordExecutionRoot(sessionId: string, projectRoot: string): Promise<Session>;
   remove(sessionId: string, options?: RemoveSessionOptions): Promise<void>;
 }
 
@@ -124,6 +140,10 @@ export interface SessionStore {
     sessionId: string,
     patch: Partial<Session>,
     condition?: { readonly expectedTitle: string },
+  ): Promise<Session>;
+  recordExecutionRoot(
+    sessionId: string,
+    input: SessionExecutionRootInput,
   ): Promise<Session>;
   remove(sessionId: string): Promise<void>;
   withTransaction<T>(

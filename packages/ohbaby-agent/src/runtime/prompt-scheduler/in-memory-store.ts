@@ -503,6 +503,27 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       .map(clone);
   }
 
+  async adoptQueuedSession(input: {
+    readonly sessionId: string;
+    readonly scopeKey: string;
+    readonly beforeAdopt?: () => void;
+  }): Promise<number> {
+    input.beforeAdopt?.();
+    let changed = 0;
+    for (const record of this.records.values()) {
+      if (record.sessionId !== input.sessionId || record.status !== "queued")
+        continue;
+      this.records.set(record.promptId, {
+        ...record,
+        scopeKey: input.scopeKey,
+        ownerId: this.ownerId,
+        ownerPid: this.ownerPid,
+      });
+      changed += 1;
+    }
+    return changed;
+  }
+
   async listScopesWithQueued(): Promise<readonly string[]> {
     return [
       ...new Set(

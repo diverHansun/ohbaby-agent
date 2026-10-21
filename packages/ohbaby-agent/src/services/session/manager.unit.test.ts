@@ -132,6 +132,13 @@ class RejectingInsertStore implements SessionStore {
     return this.inner.update(sessionId, patch);
   }
 
+  recordExecutionRoot(
+    sessionId: string,
+    input: Parameters<SessionStore["recordExecutionRoot"]>[1],
+  ): Promise<Session> {
+    return this.inner.recordExecutionRoot(sessionId, input);
+  }
+
   remove(sessionId: string): Promise<void> {
     return this.inner.remove(sessionId);
   }
@@ -156,6 +163,7 @@ describe("SessionManager", () => {
       id: "session_test_1",
       projectId: "project:D:/repo",
       projectRoot: "root:D:/repo",
+      projectDirectory: "root:D:/repo",
       title: "Implement daemon",
       agentName: "coder",
       createdAt: 1_000,
@@ -193,6 +201,7 @@ describe("SessionManager", () => {
       id: "root_session",
       projectId: "project:D:/repo",
       projectRoot: "root:D:/repo",
+      projectDirectory: "root:D:/repo",
       title: "Root",
       agentName: "build",
       createdAt: 1_000,

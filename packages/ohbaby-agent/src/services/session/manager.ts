@@ -1,5 +1,7 @@
 import { createBus, type BusInstance } from "../../bus/index.js";
+import { isDefaultWorkspaceDirectory } from "../../paths/index.js";
 import { createSessionIdGenerator } from "./id-generator.js";
+import { sameSessionProjectRoot } from "./project-root.js";
 import { SessionEvent } from "./events.js";
 import { createInMemorySessionStore } from "./store.js";
 import {
@@ -73,21 +75,28 @@ function createSessionRecord(input: {
   readonly project: ProjectInfo;
   readonly options: CreateSessionOptions;
   readonly now: number;
-  readonly parentId?: string;
+  readonly parent?: Session;
 }): Session {
+  // Subagents keep their parent's project; the default workspace has none.
+  const projectDirectory = input.parent
+    ? input.parent.projectDirectory
+    : isDefaultWorkspaceDirectory(input.project.rootPath)
+      ? undefined
+      : input.project.rootPath;
   return {
     id: input.id,
     projectId: input.project.id,
     projectRoot: input.project.rootPath,
+    ...(projectDirectory === undefined ? {} : { projectDirectory }),
     title: input.options.title ?? defaultTitle(input.now),
     agentName: input.options.agentName ?? DEFAULT_AGENT_NAME,
     createdAt: input.now,
     updatedAt: input.now,
     status: "active",
     stats: { messageCount: 0 },
-    parentId: input.parentId,
+    parentId: input.parent?.id,
     childrenIds: [],
-    isSubagent: input.parentId !== undefined,
+    isSubagent: input.parent !== undefined,
   };
 }
 
@@ -120,7 +129,7 @@ export function createSessionManager(
       project,
       options: createOptions,
       now: createdAt,
-      parentId: parent?.id,
+      parent,
     });
 
     let updatedParent: Session | undefined;
@@ -155,9 +164,13 @@ export function createSessionManager(
         status: "active",
       });
 
+      // Non-Git directories share one project id; reuse only this directory's session.
       return (
         sessions.find(
-          (session) => !session.isSubagent && session.stats.messageCount === 0,
+          (session) =>
+            !session.isSubagent &&
+            session.stats.messageCount === 0 &&
+            sameSessionProjectRoot(session.projectRoot, project.rootPath),
         ) ?? null
       );
     },
@@ -240,6 +253,20 @@ export function createSessionManager(
           lastMessageAt: delta.lastMessageAt ?? updatedAt,
         },
         updatedAt,
+      });
+      options.bus.publish(SessionEvent.Updated, { session: updated });
+      return updated;
+    },
+
+    async recordExecutionRoot(
+      sessionId: string,
+      projectRoot: string,
+    ): Promise<Session> {
+      const project = await options.projectResolver.fromDirectory(projectRoot);
+      const updated = await options.store.recordExecutionRoot(sessionId, {
+        projectId: project.id,
+        projectRoot: project.rootPath,
+        updatedAt: now(),
       });
       options.bus.publish(SessionEvent.Updated, { session: updated });
       return updated;
