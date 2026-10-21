@@ -19,8 +19,8 @@
    │ browser   ├──► web 适配器 ──────┘   排队/审批/        (sdk 契约)   (createPersistent
    │ (web UI)  │     REST + SSE        事件分发+replay                  UiBackendClient)
    └──────────┘
-   横切: auth(token / CORS) 作为 Hono 中间件包在所有路由外侧
-   装配: transport 用 Hono 把 适配器路由 + 中间件 组装成一个 HTTP server
+   横切: 路由显式校验 token；外层全局 dispatcher 处理 workspace（CORS middleware 仍属规划）
+   装配: app/create-app 按顺序挂协议路由；transport 绑定端口
    生命周期: lifecycle/foreground 启动这一整套; detached 是降级抽屉
 ```
 
@@ -28,11 +28,11 @@
 
 | 子组件                | 职责                                                                                 | 追溯   |
 | --------------------- | ------------------------------------------------------------------------------------ | ------ |
-| **transport**         | 用 Hono 装配 HTTP server：挂载各协议路由、套中间件、绑定监听                         | D1     |
+| **transport**         | 绑定已装配的 Hono app、管理监听与关闭                         | D1     |
 | **protocols/jsonrpc** | jsonrpc 信封解析 + RPC handler + remote client（供 CLI/attach/测试）                 | D2, D5 |
 | **protocols/web**     | 浏览器用 REST + SSE 路由                                                             | D2     |
 | **coordination**      | 单写者协调：prompt-queue、permission-router、event-bus（seqNum + 环形缓冲 + replay） | D3     |
-| **auth**              | Hono 中间件：token（fail-closed）、CORS（origin 白名单）                             | D4     |
+| **auth**              | token 校验 helper（fail-closed）；独立 Hono 中间件仍属后续规划                             | D4     |
 | **lifecycle**         | foreground 启动/停止（主路径）；detached 降级抽屉                                    | D6, N6 |
 
 依赖方向恒为 `protocols → coordination → CoreApiHost(sdk 契约)`，无环（G5）。`ohbaby-server` 只依赖 `ohbaby-agent` 拿 `createPersistentUiBackendClient` + `ohbaby-sdk` 契约类型；`ohbaby-agent` 不反向依赖 `ohbaby-server`。
@@ -80,12 +80,20 @@ Prompt transport 只有两个 primitive：接单 `submitPromptAccepted` 与查�
 ```
 packages/ohbaby-server/src/
 ├── index.ts                    对外窄导出面：daemon lifecycle、remote client、必要类型
-├── app/create-app.ts           Hono app；装配 REST、RPC、SSE、静态资源与 gateway
+├── app/
+│   ├── create-app.ts           单 workspace 组合根、生命周期、鉴权与有序路由注册
+│   ├── openapi.ts              手写信息性 OpenAPI 3.1 文档
+│   ├── sse-hub.ts              SSE 连接、重放、广播与断线清理
+│   └── static-assets.ts        静态资源、MIME 与 HTML bootstrap 注入
 ├── transport/node-listen.ts    绑定 Node 端口与优雅关闭
 ├── protocols/jsonrpc/
 │   ├── protocol.ts             SDK 派生的 method/params 信封与校验
 │   ├── rpc-route.ts            /api/rpc adapter
 │   └── client.ts               remote UiBackendClient
+├── protocols/web/
+│   ├── request-helpers.ts      请求体限额、解析与错误响应 helper
+│   └── routes/                context + system/events/sessions/subagents/
+│                              prompts/commands/model/permissions
 ├── coordination/
 │   ├── prompt-backend.ts       Prompt 接单/owner 协调
 │   ├── client-view.ts          per-client snapshot/event 投影
@@ -98,6 +106,8 @@ packages/ohbaby-server/src/
     └── workspace-scope.ts      scope canonicalization 与校验
 ```
 
+- `DaemonServerAppRuntime` 实现协议层的 `DaemonRouteContext`，提供同一 backend、协调器、EventBus 和客户端集合；`permissionEpoch` 通过 getter 读取运行时当前值。路由模块不引用 `app/`，不持有 `InstanceStore`。`runtime/daemon/server.ts` 继续负责外层全局 dispatcher。
+- 路由按原有连续段注册；同一领域可以有多个 register 函数。`GET /` 与最后的 `GET /*` 留在组合根，API 鉴权仍在各 handler 中，未引入新的中间件框架。
 - **对外稳定接口**：仅 `index.ts`（`startServer` + remote client）。其余为内部实现。
 - **命名体现角色**：`app` / `transport` / `protocols` / `coordination` / `auth` / `runtime` 是职责名，不是重复业务层。
 - **协议 seam（不建空目录）**：未来 ACP/A2A 各为 `protocols/` 下新增一个兄弟目录，架在同一 `CoreApiHost` 上即可。本期不建空壳（N4/YAGNI），仅在此记录扩展位。

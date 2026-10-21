@@ -4,66 +4,59 @@
 >
 > 前置：[`00-scope-and-deltas.md`](./00-scope-and-deltas.md)（Δ1/Δ2/Δ6/Δ9）、父目录 [`../architecture.md`](../architecture.md)。
 
-> **当前实现注**：per-scope `createDaemonServerApp()` 继续作为单 workspace 的高内聚 app 组合根；`runtime/daemon/server.ts` 在其外层承担全局 workspace dispatcher 与 InstanceStore 路由。下文的拆分树是迁移目标模型，不要求为追求目录形状而重构已工作的边界。
+> **当前实现（2026-10-21）**：`createDaemonServerApp()` 是单 workspace 的 app 组合根，按既有顺序注册拆出的协议路由；`runtime/daemon/server.ts` 继续承担全局 workspace dispatcher 与 InstanceStore 路由。下面 §1–2 描述已落地结构，§4 的独立中间件管线仍是后续规划。
 
 ---
 
-## 1. 目标文件布局（在现有结构上演进）
+## 1. 当前文件布局
 
 ```
 packages/ohbaby-server/src/
 ├── app/
-│   ├── create-app.ts         (新) 组装 Hono app：挂中间件 + 各 protocols 路由；返回 { app, dispose }
-│   └── create-app.ts         手写信息性 OpenAPI 3.1 `/doc`
+│   ├── create-app.ts         组合根、字段、生命周期、鉴权与 mountRoutes 调度
+│   ├── openapi.ts            手写信息性 OpenAPI 3.1 `/doc`
+│   ├── sse-hub.ts            DaemonSseHub：连接、重放、广播、断线清理
+│   └── static-assets.ts      静态资源、MIME、HTML bootstrap 注入
 ├── transport/
-│   ├── in-process.ts         (新) 给 app.fetch 包一层友好句柄（web/app + 测试用，不开端口）
-│   └── node-listen.ts        (新) @hono/node-server 绑定监听 + 优雅关闭 + 端口回退
-├── middleware/
-│   ├── auth.ts               (现 auth/token.ts 升级为 Hono 中间件，fail-closed)
-│   ├── cors.ts               (新) origin 白名单，scope 到 web 路由
-│   └── workspace.ts          (新) x-ohbaby-directory → InstanceRef（见 04）
+│   └── node-listen.ts       @hono/node-server 监听与关闭
 ├── protocols/
 │   ├── jsonrpc/
-│   │   ├── protocol.ts       (保留)
-│   │   ├── rpc-route.ts      (新) 由 server.ts 的 callBackend 抽出，挂 Hono 路由
-│   │   └── client.ts         (保留) remote UiBackendClient
+│   │   ├── protocol.ts      RPC 信封与校验
+│   │   ├── rpc-route.ts     backend dispatcher + registerRpcRoute
+│   │   └── client.ts        remote UiBackendClient
 │   └── web/
-│       └── routes.ts         (新) 见 02
-├── coordination/
-│   ├── prompt-queue.ts       (保留；修 S8)
-│   ├── permission-router.ts  (保留；修 S9)
-│   ├── client-view.ts        (新) 由 server.ts 抽出的 per-client 视图投影（见 05）
-│   └── event-bus.ts          (新) seqNum + 环形缓冲 + replay（见 03）
-└── lifecycle/
-    └── server-main.ts        (现 runtime/daemon/main.ts 演进) startServer 组合根
+│       ├── request-helpers.ts  请求体限额、解析、错误响应
+│       └── routes/
+│           ├── context.ts   单 workspace DaemonRouteContext
+│           ├── system.ts    /doc、health、shutdown
+│           ├── events.ts    客户端初始化、snapshot、两种 SSE 端点
+│           ├── sessions.ts  会话读取、变更、中止（多个连续段）
+│           ├── subagents.ts 子代理读取、conversation、watch
+│           ├── prompts.ts   receipt、提示词变更与 edit-lease
+│           ├── commands.ts  命令目录与执行
+│           ├── model.ts     模型与搜索设置
+│           └── permissions.ts 交互回应、权限设置与回应
+├── coordination/            client-view、permission-router、event-bus 等
+├── auth/token.ts            Bearer token 校验
+└── runtime/
+    ├── daemon/              全局 dispatcher、启动/停止与进程发现
+    ├── instance-store.ts    per-workspace runtime
+    └── workspace-scope.ts   workspace 解析
 ```
 
-> `runtime/daemon/server.ts` 迁移后**清空**：路由部分 → `app/` + `protocols/*/`，per-client 视图 → `coordination/client-view.ts`，监听部分 → `transport/node-listen.ts`。`runtime/daemon/{supervisor,state-file,pid-file}` 仍是 detached 降级抽屉（N6），不在本阶段动。
+`transport/in-process.ts`、`middleware/` 与 `lifecycle/server-main.ts` 是历史目标布局，当前未因这次结构拆分而新增。`runtime/daemon/server.ts` 保留全局职责，不清空或迁入单 workspace app。
 
 ---
 
-## 2. `create-app`：唯一组装点
+## 2. `create-app`：单 workspace 组合根
 
-`create-app.ts` 是 app 的**组合根**，纯函数式装配，**不自己监听端口**：
+`createDaemonServerApp(options): DaemonServerAppHandle` 的入口与 `{ app, start, dispose }` 句柄保持不变。它装配同一个 Hono app，不自行监听端口；外层负责 workspace 分派。
 
-```
-createServerApp(deps): { app: Hono; dispose: () => Promise<void> }
-  deps:
-    instanceStore   // 多项目 backend 解析（见 04），单项目时退化为固定 backend
-    authToken?      // 未配置 = fail-closed 仍要求显式 allow（见 §4）
-    corsOrigins?    // web 路由的 origin 白名单
-    packageVersion?
-```
+`DaemonServerAppRuntime` 实现 `protocols/web/routes/context.ts` 的 `DaemonRouteContext`。协议层只依赖实际需要的 backend、协调器、EventBus、鉴权与生命周期方法。可变集合沿用同一个引用，`permissionEpoch` 通过 getter 实时读取；`/doc` 经 context 方法调用组合根提供的文档构造函数，因此 `protocols/` 不反向引用 `app/`。
 
-装配步骤（声明式，替代 `if (pathname===...)`）：
-1. 全局中间件：请求日志（结构化）、错误兜底。
-2. `GET /health`：无鉴权或轻鉴权的存活探针。
-3. web 路由组（带 cors + auth + workspace 中间件）—— 见 [`02`](./02-web-api-surface.md)。
-4. jsonrpc 兼容路由组（带 auth + workspace 中间件）—— §5。
-5. event SSE 端点（带 auth + workspace + replay）—— 见 [`03`](./03-event-replay.md)。
-6. `GET /doc`：由 `create-app.ts` 手写的信息性 OpenAPI 3.1；当前没有 zod/生成 client 链。
+`mountRoutes()` 的顺序是正确性约束：先保留 `/v1/*` 活跃刷新中间件和 `onError`，随后依次注册 system、RPC、旧 SSE、client 初始化、session 读取、subagent、prompt receipt、snapshot、Web SSE、commands、model、session 变更、prompt 变更、edit-lease、interaction、permission、session abort，最后是静态资源 `GET /`、`GET /*`。同一领域分散的段使用多个 register 函数；两个路径循环仍保留原顺序。路由继续显式鉴权，未改为中间件。
 
-`create-app` **只返回 app + dispose**，对「在不在端口上跑」一无所知。这是 Δ2 的关键：同一个 app 既能被 `app.fetch(req)` 直接调，也能被 `node-listen` 挂到端口。
+`start()` 订阅 backend 事件并加载当前 permission epoch；`dispose()` 先中止 waiters、取消订阅，再委托 SSE hub 直接关闭连接、清理计时器/集合/协调状态/重放缓存，最后复位 started。订阅失败仍走 disconnect 流程，并保留 `queueMicrotask` 重新订阅；它与正常 shutdown 的直接 close 语义不同。
 
 ---
 
@@ -71,16 +64,17 @@ createServerApp(deps): { app: Hono; dispose: () => Promise<void> }
 
 | 传输 | 入口 | 用途 | 是否开端口 |
 |------|------|------|-----------|
-| **in-process fetch** | `transport/in-process.ts` 包 `app.fetch` | web/app dev 内嵌、**契约测试 harness** | ❌ |
+| **in-process fetch** | 直接调用 `app.fetch` / `app.request` | web/app dev 内嵌、**契约测试 harness** | ❌ |
 | **node listen** | `transport/node-listen.ts`（`@hono/node-server`） | `ohbaby serve` | ✅ |
 
 ```
 // in-process（测试 / 内嵌）
-const { app } = createServerApp(deps)
-const res = await app.request("/v1/sessions", { headers: { "x-ohbaby-directory": dir } })
+const { app, start } = createDaemonServerApp(options)
+await start() // 初始化 backend 订阅
+const res = await app.request("/api/health", { headers: { authorization: `Bearer ${token}` } })
 
 // listen（ohbaby serve）
-const handle = await startServer(deps)   // lifecycle/server-main.ts
+const handle = await startServer(deps)   // runtime/daemon/main.ts
 // handle: { url, authToken, stop() }    // 打印 url+token+停止方式（G4）
 ```
 
@@ -94,7 +88,9 @@ const handle = await startServer(deps)   // lifecycle/server-main.ts
 
 ---
 
-## 4. 中间件管线与次序
+## 4. 后续中间件管线与次序（尚未按独立文件落地）
+
+以下是独立中间件的设计目标，不是当前文件清单。当前鉴权仍由 handler 显式调用，workspace 在外层 dispatcher 中处理，CORS 白名单 middleware 仍是后续规划。这次只拆分现有函数与路由，不实现这条目标管线。
 
 次序是正确性的一部分（鉴权必须在业务之前，CORS 预检必须最先）：
 
@@ -115,9 +111,9 @@ const handle = await startServer(deps)   // lifecycle/server-main.ts
 
 ## 5. jsonrpc 兼容路由（Δ9）
 
-现有 `server.ts` 的 `callBackend(...)` 把 jsonrpc method 映射到 `UiBackendClient`。本阶段：
+`protocols/jsonrpc/rpc-route.ts` 的 `callDaemonBackend(...)` 把 jsonrpc method 映射到 backend；`registerRpcRoute(app, ctx)` 现在负责挂载原有 `POST /api/rpc` handler：
 
-- `callBackend` 拆出为 `protocols/jsonrpc/rpc-route.ts`，挂为 `POST /api/rpc` 的 Hono handler。
+- `registerRpcRoute` 保留鉴权、请求体限额、控制器注册与 finally 清理、绑定通知和原错误映射。`MAX_REQUEST_BODY_BYTES` 移到 `protocols/web/request-helpers.ts`，并继续从 `rpc-route.ts` re-export。
 - per-client 视图逻辑（`snapshotForClient` 等）**不留在这里**，移到 `coordination/client-view.ts`，由 rpc-route 与 web routes 共同调用（见 [`05`](./05-consumption-path-unification.md)）。
 - `/api/events`（旧 SSE）保留为兼容端点，但其事件源切到新的 event-bus（获得 replay 能力）。
 - `/api/health`、`/api/shutdown` 保留。

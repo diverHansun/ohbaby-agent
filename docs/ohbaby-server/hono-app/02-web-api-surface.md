@@ -17,6 +17,8 @@
 
 ## 2. 资源映射（UiBackendClient → REST）
 
+当前 handlers 位于 `protocols/web/routes/` 的 system、events、sessions、subagents、prompts、commands、model、permissions 八个模块，由组合根按原连续段注册。`context.ts` 提供单 workspace 的 `DaemonRouteContext`；不依赖全局 `InstanceStore`，也不反向 import `app/`。共享请求解析与错误映射在 `protocols/web/request-helpers.ts`，请求体上限仍是 1 MiB。
+
 现有 backend 能力（取自 `server.ts` 的 `callBackend`）逐一映射：
 
 | backend 能力                 | REST 端点                                            | 说明                                                                                                                                  |
@@ -47,7 +49,7 @@
 
 > `:id` 依 route 分别表示 sessionId、promptId、interactionId 或 permission requestId。所有 workspace 端点都由全局 dispatcher 读取 `x-ohbaby-directory`、解析目标项目并转发到对应 per-scope app（见 [`04`](./04-multi-project-runtime.md)）。
 
-> **非 backend-capability 的端点**另在它处定义：`GET /api/health`（存活探针）、`GET /v1/connections`（连接观测）以及 `GET /doc`。`/doc` 是 `create-app.ts` 手写的信息性 OpenAPI 3.1 文档，不是代码生成链。
+> **非 backend-capability 的端点**另在它处定义：`GET /api/health`（存活探针）、`GET /v1/connections`（连接观测）以及 `GET /doc`。`/doc` 由 system 路由经 context 获取 `app/openapi.ts` 中手写的信息性 OpenAPI 3.1 文档，不是代码生成链。
 
 `POST /v1/model` 与 `POST /v1/model/context-window-probe` 的 JSON body 共用协议字段 `interfaceProvider`，只接受 `openai-compatible`、`openai-responses`、`anthropic`。显式合法值优先于 `baseUrl` 推断；缺字段时保留 URL 推断，OpenAI 形状地址默认 Chat Completions。空字符串、`null` 或其他非法显式值返回 `400`。更新 key、窗口或输出上限时应继续传递原协议。
 

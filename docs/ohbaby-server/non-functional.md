@@ -29,6 +29,7 @@
 - **不静默失败**：replay 窗口外、auth 拒绝、CORS 拒绝都要有明确响应/信号，前端可据此动作。
 - **连接状态可感知**：建议经 sdk 暴露 `ConnectionState`（connected/reconnecting/closed），让前端区分"在连/断开/已关"。
 - **server 端结构化日志**：记录连接建立/断开、replay 区间、auth 拒绝原因，便于回溯一次会话的投递路径。default CLI（in-process）无此负担。
+- **SSE 资源所有权**：`app/sse-hub.ts` 集中持有连接、重放缓存与断线计时器；正常 shutdown 直接 close，权限订阅故障走 disconnect，保持各自原有清理与回调次序。共享客户端集合不复制，permission epoch 实时读取。
 - **断连不自动重放 prompt**：可自动重连传输，但 prompt 必须用户重提（避免重复执行/扣费，N3）。
 
 ---
@@ -41,7 +42,7 @@
 | detached 后台常驻打磨 | 同上，foreground 已覆盖本机 web/attach |
 | 领域事件投影层（A1） | CLI+web 共用 UiEvent 无痛点，YAGNI（N5）；ACP/A2A 接入时再补 |
 | 队列吞吐优化（S8 fresh-lane） | 正确性已满足，吞吐非本期瓶颈，记 backlog |
-| OpenAPI / 协议文档自动化 | 当前只有 `create-app.ts` 手写信息性 `/doc`；`@hono/zod-openapi` 和生成 client 仍未到投资点。Browser client 直接实现 SDK 合同。见 [`hono-app/02`](./hono-app/02-web-api-surface.md) §4 |
+| OpenAPI / 协议文档自动化 | 当前只有 `app/openapi.ts` 手写信息性 `/doc`；`@hono/zod-openapi` 和生成 client 仍未到投资点。Browser client 直接实现 SDK 合同。见 [`hono-app/02`](./hono-app/02-web-api-surface.md) §4 |
 
 > 提醒：以上是**刻意延后**，不是遗漏缺陷。
 

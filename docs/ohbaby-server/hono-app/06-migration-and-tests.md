@@ -8,6 +8,8 @@
 
 ## 1. 新增依赖
 
+> **当前补充（2026-10-21）**：下面 M1–M6 保留历史迁移步骤。当前单 workspace app 已完成纯结构拆分，未新增依赖或 middleware；全局 dispatcher 保留在 `runtime/daemon/server.ts`。最新实际布局见 [`01`](./01-app-assembly-and-transport.md)。
+
 加入 `packages/ohbaby-server/package.json` `dependencies`：
 
 | 依赖                | 用途                                                  |
@@ -51,9 +53,9 @@
 - sdk 增 `ConnectionState` + remote client 重连感知。
 - 门：replay 单测（窗内补发 / 窗外 resync）；断线重连集成测试。
 
-### M5 · CORS + web REST/SSE（已落地；OpenAPI 未采用）
+### M5 · CORS + web REST/SSE（surface 已落地；独立 middleware 仍待后续）
 
-- `middleware/cors.ts`（仅挂 web 路由）。
+- 历史规划的 CORS 白名单与 `middleware/cors.ts` 未落地，仍是后续项。
 - Hono app 中的 `/v1` routes **复用 client-view + event-bus**，业务 DTO 对齐 SDK。
 - 没有引入 `@hono/zod-openapi` 或生成 client；`GET /doc` 是手写信息性 OpenAPI 3.1。Browser client 直接实现 SDK 合同。
 - 门：web 路由契约测试；跨 transport 等价测试（[`05`](./05-consumption-path-unification.md) §3.1）作为漂移回归门；CORS 预检测试。
@@ -70,6 +72,13 @@
 ---
 
 ## 3. 测试矩阵
+
+2026-10-21 的结构拆分沿用既有测试，不为纯搬移新增测试。验收包括：
+
+- `app/create-app.unit.test.ts`、`app/session-export.integration.test.ts`、`coordination/permission-lifecycle.integration.test.ts`、`coordination/prompt-admission.integration.test.ts` 不改内容通过；以该结构拆分开始时的基线校验。
+- `runtime/daemon/server.integration.test.ts` 覆盖 Last-Event-ID、过期重连、交互清理与重叠连接；其余 server 测试、Web wire 与 CLI 回归通过。
+- 同一输入构造的 Hono 注册顺序清单、`/doc` 响应与 server 导出名不变；静态兜底仍最后注册。`protocols/` 不引用 `app/`，路由不引入 `InstanceStore`。
+- 类型检查、lint、格式检查、串行全量测试与构建通过；真实浏览器、TUI 和 server E2E 由整批验收补充。
 
 | 层                   | 覆盖                                                                           | 落点                                       |
 | -------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |

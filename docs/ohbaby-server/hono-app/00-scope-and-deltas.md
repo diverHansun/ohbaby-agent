@@ -8,6 +8,8 @@
 
 ## 1. 当前包真实状态（基线）
 
+> **2026-10-21 结构更新**：单 workspace app 已按职责拆为 `app/create-app.ts`、`openapi.ts`、`sse-hub.ts`、`static-assets.ts` 与 `protocols/web/{request-helpers,routes/*}`；JSON-RPC handler 由 `registerRpcRoute` 注册。端点、注册顺序、鉴权和 SSE 生命周期语义未变。全局 dispatcher 仍在 `runtime/daemon/server.ts`，独立 middleware 仍是规划。当前布局见 [`01`](./01-app-assembly-and-transport.md)。
+
 > 本节记录进入 Hono 迁移前的历史基线，不是 2026-07-11 的当前实现清单；当前实施状态见本目录 README 顶部。
 
 `packages/ohbaby-server/src`：

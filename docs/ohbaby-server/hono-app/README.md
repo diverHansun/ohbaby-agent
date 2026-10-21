@@ -4,7 +4,9 @@
 >
 > 触发条件：`docs/problem-lists/server/04` 的「触发点 A」（引入第一个重协议依赖 Hono）已成立，且 web/app 端进入设计。
 
-> **实施状态（2026-08-14）**：Hono app、REST/SSE、手写信息性 `/doc`、用户级 pid/state、InstanceStore、fail-closed workspace 路由、全局面板 known/loaded/switch、真实双进程/双写发布门与 `serve ps` 均已落地。没有 `@hono/zod-openapi` 或 OpenAPI 生成 client。下文中的“当前包真实状态”“目标文件布局”保留为迁移设计基线。
+> **结构更新（2026-10-21）**：`create-app.ts` 保留单 workspace 装配、生命周期与鉴权；OpenAPI、SSE hub、静态资源以及八个 Web 路由模块已按原行为拆出。`protocols/jsonrpc/rpc-route.ts` 注册 RPC handler，protocol 层通过 `DaemonRouteContext` 消费运行时能力。实际布局见 [`01`](./01-app-assembly-and-transport.md)；全局 dispatcher 未移动，独立 middleware 仍是后续规划。
+
+> **实施状态（2026-08-14）**：Hono app、REST/SSE、手写信息性 `/doc`、用户级 pid/state、InstanceStore、fail-closed workspace 路由、全局面板 known/loaded/switch、真实双进程/双写发布门与 `serve ps` 均已落地。没有 `@hono/zod-openapi` 或 OpenAPI 生成 client。00 的历史基线与 06 的迁移步骤保留为设计记录；01 的当前布局已同步结构拆分。
 
 ---
 

@@ -1,36 +1,21 @@
-import { parseSessionExportInput } from "../session-export.js";
-import {
-  subagentReadForClient,
-  subagentConversationReadForClient,
-  watchSubagentConversationForClient,
-  unwatchSubagentConversationForClient,
-} from "../../coordination/session-access.js";
-import {
-  createOrReuseClientSession,
-  parseSessionCreationOptions,
-  abortForClient,
-  parseSessionQuery,
-  receiptForClient,
-  sessionReadForClient,
-  sessionRecoveryCapability,
-} from "../../coordination/session-access.js";
+import type { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { isUiReasoningConfig, isUiPromptNamingSource } from "ohbaby-sdk";
-import type {
-  SubmitPromptOptions,
-  UiAcquirePromptEditLeaseInput,
-  UiBackendClient,
-  UiEvent,
-  UiCancelQueuedPromptInput,
-  UiEditQueuedPromptInput,
-  UiResubmitRetainedPromptInput,
-  UiReleasePromptEditLeaseInput,
-  UiRenewPromptEditLeaseInput,
-} from "ohbaby-sdk";
 import {
   parseNewSessionCommandArgs,
   type UiPromptQueueExecutionPort,
 } from "ohbaby-agent";
+import type {
+  SubmitPromptOptions,
+  UiAcquirePromptEditLeaseInput,
+  UiBackendClient,
+  UiCancelQueuedPromptInput,
+  UiEditQueuedPromptInput,
+  UiEvent,
+  UiReleasePromptEditLeaseInput,
+  UiRenewPromptEditLeaseInput,
+  UiResubmitRetainedPromptInput,
+} from "ohbaby-sdk";
+import { isUiPromptNamingSource, isUiReasoningConfig } from "ohbaby-sdk";
 import {
   DaemonForbiddenError,
   isDaemonForbiddenError,
@@ -46,17 +31,41 @@ import {
 } from "../../coordination/permission-access.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
-  acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
-  executeCommandForClient,
+  acquirePromptEditLeaseForClient,
   cancelQueuedPromptForClient,
-  steerQueuedPromptForClient,
-  resendSteerInputForClient,
   editQueuedPromptForClient,
-  resubmitRetainedPromptForClient,
+  executeCommandForClient,
   releasePromptEditLeaseForClient,
   renewPromptEditLeaseForClient,
+  resendSteerInputForClient,
+  resubmitRetainedPromptForClient,
+  steerQueuedPromptForClient,
 } from "../../coordination/prompt-backend.js";
+import {
+  abortForClient,
+  createOrReuseClientSession,
+  parseSessionCreationOptions,
+  parseSessionQuery,
+  receiptForClient,
+  sessionReadForClient,
+  sessionRecoveryCapability,
+  subagentConversationReadForClient,
+  subagentReadForClient,
+  unwatchSubagentConversationForClient,
+  watchSubagentConversationForClient,
+} from "../../coordination/session-access.js";
+import {
+  parseSessionExportInput,
+  sessionExportErrorStatus,
+} from "../session-export.js";
+import {
+  MAX_REQUEST_BODY_BYTES,
+  readRequestTextWithLimit,
+  requestTooLargeBody,
+  unauthorizedBody,
+} from "../web/request-helpers.js";
+import type { DaemonRouteContext } from "../web/routes/context.js";
 import {
   createDaemonRpcFailure,
   createDaemonRpcSuccess,
@@ -65,7 +74,7 @@ import {
   type DaemonRpcResponse,
 } from "./protocol.js";
 
-export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+export { MAX_REQUEST_BODY_BYTES } from "../web/request-helpers.js";
 
 type ExecuteCommandInvocation = Parameters<
   UiBackendClient["executeCommand"]
@@ -780,4 +789,101 @@ export function createDaemonRpcSuccessResponse(
   result: unknown,
 ): DaemonRpcResponse {
   return createDaemonRpcSuccess(request.id, result);
+}
+
+export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
+  app.post("/api/rpc", async (context) => {
+    if (!ctx.isAuthorized(context.req.header("authorization"))) {
+      return context.json(unauthorizedBody(), 401);
+    }
+
+    const body = await readRequestTextWithLimit(context.req.raw);
+    if (!body.ok) {
+      return context.json(requestTooLargeBody(), 413);
+    }
+
+    const parsed = parseDaemonRpcBody(body.body);
+    if (parsed.failure || !parsed.request) {
+      return context.json(parsed.failure, 400);
+    }
+
+    if (
+      !context.req.raw.signal.aborted &&
+      ctx.clientViews.isRegistered(parsed.request.clientId)
+    )
+      ctx.touchClientActivity(parsed.request.clientId);
+    try {
+      const controller = new AbortController();
+      const abort = (): void => {
+        controller.abort();
+      };
+      if (context.req.raw.signal.aborted) controller.abort();
+      context.req.raw.signal.addEventListener("abort", abort, { once: true });
+      ctx.waitControllers.add(controller);
+      const priorGeneration = ctx.clientViews.isRegistered(
+        parsed.request.clientId,
+      )
+        ? ctx.clientViews.binding(parsed.request.clientId, ctx.permissionEpoch)
+            .bindingGeneration
+        : undefined;
+      try {
+        const result = await callDaemonBackend({
+          backend: ctx.commandBackend("server-rpc", {
+            clientId: parsed.request.clientId,
+            transportRequestId: parsed.request.id,
+          }),
+          clientViews: ctx.clientViews,
+          createSessionId: ctx.createSessionId,
+          permissionRouter: ctx.permissionRouter,
+          permissionEpoch: ctx.permissionEpoch,
+          emitCommandEvent: (event) => {
+            ctx.broadcast(ctx.eventBus.publish(event));
+          },
+          request: parsed.request,
+          signal: controller.signal,
+        });
+        if (parsed.request.method === "initializeClient") {
+          ctx.knownClientIds.add(parsed.request.clientId);
+          ctx.registeredWebClientIds.add(parsed.request.clientId);
+          ctx.touchClientActivity(parsed.request.clientId);
+        }
+        return context.json(
+          createDaemonRpcSuccessResponse(parsed.request, result),
+        );
+      } finally {
+        if (
+          ctx.clientViews.isRegistered(parsed.request.clientId) &&
+          !ctx.clientViews.isPromptBindingProvisional(
+            parsed.request.clientId,
+          ) &&
+          ctx.clientViews.binding(parsed.request.clientId, ctx.permissionEpoch)
+            .bindingGeneration !== priorGeneration &&
+          parsed.request.method !== "initializeClient"
+        )
+          ctx.notifyBinding(parsed.request.clientId);
+        context.req.raw.signal.removeEventListener("abort", abort);
+        ctx.waitControllers.delete(controller);
+      }
+    } catch (error) {
+      const status =
+        parsed.request.method === "exportSession"
+          ? sessionExportErrorStatus(error)
+          : isRecord(error) && error.code === "SESSION_SCOPE_CHANGED"
+            ? 409
+            : isRecord(error) && error.code === "SESSION_RECOVERY_UNSUPPORTED"
+              ? 426
+              : isRecord(error) && error.code === "INVALID_SESSION_QUERY"
+                ? 400
+                : isDaemonForbiddenError(error)
+                  ? 403
+                  : isRecord(error) &&
+                      error.code === "INVALID_CLIENT_REQUEST_ID"
+                    ? 400
+                    : 500;
+      return context.json(
+        createDaemonRpcFailure(parsed.request.id, error),
+        status,
+      );
+    }
+  });
 }

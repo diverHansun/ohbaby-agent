@@ -1,10 +1,14 @@
 # 03 · 事件分发与 SSE replay（event-bus）
 
-> 修 S1：当前 SSE 断线即丢事件，浏览器刷新/弱网会让前后端状态发散——这是**正确性** bug，不是体验问题。本文定义 event-bus：单调序号 + 环形缓冲 + 断线补发，以及 sdk 侧的 `ConnectionState`。
+> 历史背景：迁移前 SSE 断线即丢事件，浏览器刷新/弱网会让前后端状态发散——这是**正确性** bug，不是体验问题。本文定义 event-bus：单调序号 + 环形缓冲 + 断线补发，以及 sdk 侧的 `ConnectionState`。
 >
 > 前置：[`01`](./01-app-assembly-and-transport.md)、父目录 [`../data-model.md`](../data-model.md)、[`../dfd-interface.md`](../dfd-interface.md) 流 B。
 
 ---
+
+> **当前实现（2026-10-21）**：`coordination/event-bus.ts` 持有有界事件窗口；`app/sse-hub.ts` 的 `DaemonSseHub` 持有连接、按 seqNum 缓存的客户端投影、断线保留计时器与过期 client 标记，并负责帧编码、Last-Event-ID 解析、广播和重放。REST/RPC 路由经 context 委托 hub，沿用同一组协调器和客户端集合；permission epoch 每次读取运行时 getter。下面的“现状”是原迁移前基线。
+>
+> 正常 `dispose()` 直接关闭连接后清理计时器、集合、协调状态与 replay，不触发 disconnect 回调或新增计时器。权限订阅故障则逐连接走 `disconnectClient`，随后保留微任务重新订阅。连接重叠、保留期过期、交互取消和重放投影的原语义均保留。
 
 ## 1. 问题回顾（S1）
 
