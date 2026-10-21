@@ -25,7 +25,7 @@
 └─────────────────────┘          └─────────────────────┘
 ```
 
-SDK 内部由六类能力组成：
+SDK 内部由五类能力组成：
 
 | 组件 | 职责 |
 |------|------|
@@ -34,9 +34,8 @@ SDK 内部由六类能力组成：
 | Catalog resolver | 基于 backend catalog 做匹配、alias 解析和补全过滤 |
 | Client contracts | Query、Prompt Command、Queue Command 与完整 backend 能力组合 |
 | In-process RPC seam | 在保留 JSON clone、异步、错误与 AbortSignal 边界的同时，把 connected implementation 作为 method receiver 调用 |
-| Observation contract | `UiCommandRecord`、recorder 端口、脱敏 builder 与 fail-open helper |
 
-Observation contract 只描述“记录什么”和“如何 best-effort 提交”，不决定“写到哪里”。默认 Agent/Server composition 注入本地 no-op；需要持久化或转发的集成者显式注入 recorder，并由创建者管理 drain/flush。任何低层 recorder 都不得隐式选择 stdout/stderr。
+Agent host 的 observation contract 只描述“记录什么”和“如何 best-effort 提交”，不决定“写到哪里”。默认 Agent/Server composition 注入本地 no-op；需要持久化或转发的集成者显式注入 recorder，并由创建者管理 drain/flush。任何低层 recorder 都不得隐式选择 stdout/stderr。
 
 ### 子代理连续会话读取
 
@@ -105,7 +104,7 @@ Slash command 解析拆成纯词法解析和 catalog resolver。
 
 ```
 packages/ohbaby-sdk/src/
-├── index.ts                 # 对外出口，保留全部既有导出
+├── index.ts                 # 对外出口，不再公开 agent host 命令记录
 ├── contract/                # client、DTO、事件与协议纯 helper
 │   ├── client.ts
 │   ├── events.ts
@@ -132,12 +131,11 @@ packages/ohbaby-sdk/src/
 │   ├── permission-sync.ts
 │   ├── subagent-reader.ts
 │   └── subagent-conversation-reader.ts
-├── slash-command/           # 命令契约、解析、解析结果与记录
+├── slash-command/           # 命令契约、解析与解析结果
 │   ├── types.ts
 │   ├── parse.ts
 │   ├── resolve.ts
-│   ├── web-passthrough.ts
-│   └── command-record.ts
+│   └── web-passthrough.ts
 ├── in-process-rpc/          # 进程内传输 seam，不是网络 JSON-RPC
 │   ├── types.ts
 │   └── proxy.ts
@@ -148,13 +146,14 @@ packages/ohbaby-sdk/src/
 
 测试与被测源文件放在同一目录。`contract/` 不依赖 `sync/`、`util/` 或 `in-process-rpc/`。`contract/` 可以引用 `slash-command/types.ts`；该文件引用 `contract/prompt.ts`，目录层面双向但文件级无环。目录用于明确职责，不增加新的 barrel 或公开子路径。
 
+命令执行记录由 `ohbaby-agent/src/host/command-record.ts` 所有，SDK 不再公开记录函数或类型。Server 从 agent 根入口取得 `UiCommandCorrelation`、`UiCommandRecord`、`UiCommandRecorder` 三个类型；记录函数保持 agent 内部使用。
+
 ### 对外稳定接口
 
 - `UiBackendClient`
 - `UiQueryClient` / `UiCommandClient`
 - `UiPromptCommandClient` / `UiPromptQueueCommandClient`
 - `UiPromptReceipt` / `UiPromptCompletion`
-- `UiCommandRecord` / `UiCommandRecorder`
 - `UiEvent`
 - `UiSnapshot`
 - `UiCommandSpec`

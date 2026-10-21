@@ -1,4 +1,4 @@
-import type { UiCommandRecord, UiCommandRecorder } from "ohbaby-sdk";
+import type { UiCommandRecord, UiCommandRecorder } from "./command-record.js";
 
 const DEFAULT_CAPACITY = 256;
 

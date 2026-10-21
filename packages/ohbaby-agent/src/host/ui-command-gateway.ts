@@ -1,14 +1,14 @@
 import {
   executeRecordedUiCommand,
-  submitPromptAndWait as composeSubmitPromptAndWait,
-} from "ohbaby-sdk";
+  type UiCommandCorrelation,
+  type UiCommandEntryPoint,
+  type UiCommandMethod,
+  type UiCommandObservationDiagnostic,
+  type UiCommandRecorder,
+} from "./command-record.js";
+import { submitPromptAndWait as composeSubmitPromptAndWait } from "ohbaby-sdk";
 import type {
   UiBackendClient,
-  UiCommandCorrelation,
-  UiCommandEntryPoint,
-  UiCommandMethod,
-  UiCommandObservationDiagnostic,
-  UiCommandRecorder,
   UiPromptCompletion,
   UiSubmitPromptAndWaitOptions,
 } from "ohbaby-sdk";

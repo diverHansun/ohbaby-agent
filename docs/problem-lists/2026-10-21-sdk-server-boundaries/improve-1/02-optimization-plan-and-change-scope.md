@@ -4,20 +4,21 @@
 
 ## 2.1 方案总览
 
-本轮只调整文件组织，不改任何运行时行为。分三个阶段，每个阶段单独提交、单独通过测试：
+本轮调整文件组织，不改运行时行为。Stage 1b 按补充决定收窄 SDK 公开导出。实施顺序为 Stage 1 → Stage 2 → Stage 1b → Stage 3，各阶段单独提交、单独通过测试：
 
 1. **Stage 1**：sdk 内部按职责分目录，`rpc/` 改名为 `in-process-rpc/`。
 2. **Stage 2**：`DaemonStartupIntent` 收进 sdk，删除 CLI 和 Web 的副本。
-3. **Stage 3**：`create-app.ts` 拆成几个文件，路由按业务分组。
+3. **Stage 1b**：命令执行记录从 sdk 移到 agent。
+4. **Stage 3**：`create-app.ts` 拆成几个文件，路由按业务分组。
 
-Stage 1 和 Stage 2 都改 sdk，按顺序做；Stage 3 只动 server，可以和前两个并行。
+Stage 1、2、1b 按顺序做；Stage 1b 与 Stage 3 都涉及 `create-app.ts`，本轮串行实施。
 
 ```
 ohbaby-sdk/src/（Stage 1 之后）
 ├── index.ts               唯一公开入口，导出名不变
 ├── contract/              前后端共享的类型，以及针对这些类型的纯函数
 ├── sync/                  前端用的有状态同步器
-├── slash-command/         斜杠命令（原有）+ command-record.ts
+├── slash-command/         斜杠命令（原有）；command-record.ts 在 Stage 1b 移到 agent
 ├── in-process-rpc/        原 rpc/，进程内模拟进程边界
 └── util/                  时长格式化、回环地址判断
 
@@ -59,7 +60,7 @@ ohbaby-server/src/（Stage 3 之后）
 | SSE 部分 | 提取为 `DaemonSseHub` 类，由运行时持有 | 这约 430 行有自己的状态（连接集合、重放缓冲、断线计时器），本身就是一个内聚的单元 | 留在运行时类里 | 运行时里的调用改为委托 |
 | `POST /api/rpc` | 处理函数挪进 `rpc-route.ts` 的 `registerRpcRoute` | `rpc-route.ts` 已经有这个路由用到的全部 helper；与 hono-app/01 §5 一致 | 放进 `protocols/web/routes/` | 无 |
 | 鉴权 | 保持每个路由内联调用 | 改成中间件会改变行为，不属于纯结构重构 | 本轮改中间件 | 登记为后续候选 |
-| 测试 | 现有测试一律不改 | 它们只通过公开 API 测试，是检验行为不变的安全网 | 按新文件拆测试 | `create-app.unit.test.ts` 仍有 5062 行，留给后续 |
+| 测试 | Stage 3 不改现有测试；Stage 1b 仅改必要 import | 它们只通过公开 API 测试，是检验行为不变的安全网 | 按新文件拆测试 | `create-app.unit.test.ts` 仍有 5062 行，留给后续 |
 
 ## 2.3 分阶段实施
 
@@ -110,6 +111,27 @@ ohbaby-server/src/（Stage 3 之后）
 - 代码中只剩 sdk 一份定义（命令见 04 S2-1）。
 - typecheck、lint、test 全部通过。Web 构建通过（命令见 04 S2-3）。
 
+### Stage 1b：`command-record.ts` 移到 agent
+
+> 2026-10-21 实施中补充。Stage 1、2 已经提交，Stage 1 按原计划把它放进了 `slash-command/`；本阶段再把它移出 sdk。它会改 `create-app.ts` 的 import，最好在 Stage 3 动 `create-app.ts` 之前完成；如果 Stage 3 已经开始，就在 Stage 3 的分支上一并处理。
+
+**目标**：sdk 不再包含命令执行记录的逻辑，它回到唯一的使用方 agent。
+
+**做法**：
+
+- `git mv packages/ohbaby-sdk/src/slash-command/command-record.ts packages/ohbaby-agent/src/host/command-record.ts`，单测 `command-record.unit.test.ts` 一起移动。文件内容不变（它不引用 sdk 的其他文件）。
+- `packages/ohbaby-sdk/src/index.ts`：删除 `command-record` 的两段导出（3 个函数、9 个类型）。
+- agent 内部：`host/ui-command-gateway.ts`、`host/command-recorder.ts`、`host/core-api-factory.ts` 及相关测试（`ui-command-gateway.unit.test.ts`、`command-recorder.unit.test.ts`、`core-api-factory.unit.test.ts`、`adapters/ui-inprocess.contract.test.ts`）改为从 `./command-record.js` 或相对路径引入。
+- `packages/ohbaby-agent/src/index.ts`：用 `export type` 导出 server 需要的类型，至少包括 `UiCommandCorrelation`、`UiCommandRecord`、`UiCommandRecorder`。3 个函数只在 agent 内部使用，不导出。
+- server：`app/create-app.ts:45-46` 的 `UiCommandCorrelation`、`UiCommandRecorder` 和 `create-app.unit.test.ts` 的 `UiCommandRecord` 改为 `import type … from "ohbaby-agent"`。server 已经静态依赖 agent（同一文件就从 agent 引入了 `createUiCommandGateway`），不增加新的依赖方向。
+- 类型名保持原样（仍带 `Ui` 前缀），本阶段不改名，减少改动面。
+
+**完成定义**：
+
+- sdk 中没有 `command-record` 的残留，CLI 和 Web 不受影响（命令见 04 S1b-1）。
+- typecheck、lint、test 全部通过。
+- sdk 导出名清单与 Stage 1 之前相比，只少了这 12 个名字，并多了 Stage 2 的 `DaemonStartupIntent`（04 S1-1）。
+
 ### Stage 3：拆分 `create-app.ts`
 
 **目标**：`create-app.ts` 只保留运行时类的字段、生命周期、`mountRoutes()` 调度和鉴权 helper，行为零变化。
@@ -133,7 +155,7 @@ ohbaby-server/src/（Stage 3 之后）
 
 **完成定义**：
 
-- 01 §1.4.5 的四个测试文件不改一行就全部通过，`packages/ohbaby-server` 的其他测试也通过。
+- 相对 Stage 1b 完成后的基线，01 §1.4.5 的四个测试文件不改一行就全部通过，`packages/ohbaby-server` 的其他测试也通过。
 - 拆分前后路由清单一致（验证方法见 04 S3-2）。
 - `create-app.ts` 不超过 700 行，除静态资源的两条外不再直接注册路由；`protocols/` 不引用 `app/`（04 S3-5、S3-7）。
 
@@ -145,13 +167,16 @@ ohbaby-server/src/（Stage 3 之后）
 | `packages/ohbaby-server/src/app/` | `openapi.ts`、`sse-hub.ts`、`static-assets.ts` | `create-app.ts` | — | Stage 3 |
 | `packages/ohbaby-server/src/protocols/web/` | `request-helpers.ts`；`routes/context.ts` 和 8 个路由模块 | — | — | Stage 3 |
 | `packages/ohbaby-server/src/protocols/jsonrpc/` | — | `protocol.ts`（Stage 2）、`rpc-route.ts`（Stage 3） | — | |
+| `packages/ohbaby-sdk/src/slash-command/` | — | — | `command-record.ts` 及其单测（移到 agent） | Stage 1b |
+| `packages/ohbaby-agent/src/host/` | `command-record.ts` 及其单测 | 相关文件改 import；agent `index.ts` 导出类型 | — | Stage 1b |
+| `packages/ohbaby-server/src/app/` | — | `create-app.ts` 及其单测改为从 agent 引入命令记录类型 | — | Stage 1b |
 | `packages/ohbaby-cli/src/bin.ts` | — | 改为引入 sdk 类型 | 私有 `DaemonStartupIntent` | Stage 2 |
 | `apps/ohbaby-web/src/api/daemon/wire.ts` | — | `WebStartupIntent` 改为别名 | 原定义 | Stage 2 |
 | `docs/` | — | 见 §2.9 的 D 项 | — | 各阶段完成后同步 |
 
 ## 2.5 接口、迁移与兼容
 
-- **npm 包接口**：`ohbaby-sdk` 只多导出一个类型 `DaemonStartupIntent`；`ohbaby-server` 导出不变。不需要调整发布顺序。
+- **npm 包接口**：`ohbaby-sdk` 多导出一个类型 `DaemonStartupIntent`，少导出 `command-record` 的 3 个函数和 9 个类型；`ohbaby-agent` 新增导出命令记录相关的类型；`ohbaby-server` 导出不变。仓库内只有 agent 和 server 用到被移走的名字。外部使用者可将 `UiCommandCorrelation`、`UiCommandRecord`、`UiCommandRecorder` 改为从 `ohbaby-agent` 类型引入；其余被移除的名字不再作为公开 API，3 个函数仅供 agent 内部使用。这个公开接口变化需写进下一次发布说明。不需要调整发布顺序。
 - **HTTP 与 JSON-RPC 接口**：不变。
 - **数据**：不涉及。
 - **迁移**：不需要。每个 Stage 都可以单独 revert。
@@ -175,6 +200,7 @@ ohbaby-server/src/（Stage 3 之后）
 | JSON-RPC 协议与客户端留在 server | §2.2；Stage 2 只挪 `DaemonStartupIntent` |
 | `DaemonStartupIntent` 收进 sdk，删两份副本 | Stage 2 |
 | sdk 分目录，`index.ts` 唯一入口 | Stage 1 |
+| `command-record.ts` 移到 agent | Stage 1b |
 | `create-app.ts` 纯结构拆分，唯一组装点不变 | Stage 3 |
 | 路由放 `protocols/web/routes/` | Stage 3、§2.1 |
 | 现有测试不改 | Stage 3 完成定义 |
@@ -210,6 +236,8 @@ ohbaby-server/src/（Stage 3 之后）
 | C8 | 代码 | 同上 | `createOpenApiDocument` | L571-1126 | 挪到 `app/openapi.ts` | 体积最大的单块 |
 | C9 | 代码 | 同上 | `POST /api/rpc` 处理函数 | L1353-1450 | 挪进 `rpc-route.ts` 的 `registerRpcRoute` | JSON-RPC 入口 |
 | C10 | 代码 | `packages/ohbaby-server/src/protocols/web/routes/context.ts`（新） | `DaemonRouteContext` | — | 定义路由共享依赖接口，`permissionEpoch` 用 getter | 所有路由模块的依赖边界 |
+| C11 | 代码 | `packages/ohbaby-sdk/src/slash-command/command-record.ts` | `executeRecordedUiCommand` 等 3 个函数、9 个类型 | 整个文件 | 移到 `packages/ohbaby-agent/src/host/command-record.ts`；sdk `index.ts` 删除对应导出；agent `index.ts` 导出 server 需要的类型 | 改变 sdk 和 agent 的公开导出 |
+| C12 | 代码 | `packages/ohbaby-server/src/app/create-app.ts` | `UiCommandCorrelation`、`UiCommandRecorder` 的 import | L45-46 | 改为 `import type … from "ohbaby-agent"` | server 唯一用到这组类型的生产代码 |
 | D1 | 文档 | `docs/ohbaby-sdk/architecture.md` | §1 组件表、§3 文件布局 | — | 更新为分目录后的结构和 `in-process-rpc/` | sdk 权威架构文档 |
 | D2 | 文档 | `docs/ohbaby-server/architecture.md` | §3 文件树 | — | 加入 `app/` 新文件和 `protocols/web/routes/` | server 权威架构文档 |
 | D3 | 文档 | `docs/ohbaby-server/hono-app/01-app-assembly-and-transport.md` | §1 目标布局、§2、当前实现注 | — | 标明路由部分已落地，`middleware/*` 仍是目标 | 防止目标态和现状混淆 |

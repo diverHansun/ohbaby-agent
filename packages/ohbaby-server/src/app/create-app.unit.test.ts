@@ -1,3 +1,4 @@
+import type { UiCommandRecord } from "ohbaby-agent";
 import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -7,7 +8,6 @@ import type {
   UiBackendClient,
   UiCompactSessionResult,
   UiCompactSessionUsage,
-  UiCommandRecord,
   UiConnectModelResult,
   UiCurrentModelConfig,
   UiEventHandler,

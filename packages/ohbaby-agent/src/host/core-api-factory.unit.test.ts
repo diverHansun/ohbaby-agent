@@ -1,5 +1,6 @@
+import type { UiCommandRecord } from "./command-record.js";
 import { describe, expect, it, vi } from "vitest";
-import { createRPC, type CoreAPI, type UiCommandRecord } from "ohbaby-sdk";
+import { createRPC, type CoreAPI } from "ohbaby-sdk";
 
 describe("buildCoreAPIImpl", () => {
   it("closes admission synchronously and bounds backend cleanup with the caller deadline", async () => {

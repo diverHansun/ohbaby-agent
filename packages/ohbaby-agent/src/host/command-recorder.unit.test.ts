@@ -1,5 +1,5 @@
+import type { UiCommandRecord } from "./command-record.js";
 import { describe, expect, it, vi } from "vitest";
-import type { UiCommandRecord } from "ohbaby-sdk";
 import { createStructuredUiCommandRecorder } from "./command-recorder.js";
 
 function record(

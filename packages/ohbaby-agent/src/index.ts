@@ -1,3 +1,8 @@
+export type {
+  UiCommandCorrelation,
+  UiCommandRecord,
+  UiCommandRecorder,
+} from "./host/command-record.js";
 export { createInProcessUiBackendClient } from "./adapters/ui-inprocess.js";
 export type { UiPromptQueueExecutionPort } from "./adapters/ui-inprocess.js";
 export {

@@ -112,7 +112,7 @@ ohbaby-agent adapter
 | Interaction response | UI surface                  | 只表达用户选择，不执行业务                                                                                                                                |
 | UiCommandRecord      | 最外层 Agent/Server gateway | 对 started/completed 分别 best-effort 提交并复用 operationId；raw backend 不记录；默认 composition 提交给本地 no-op，只有显式 recorder 集成才产生外部 I/O |
 
-显式 recorder 是借入端口：Agent/Server 不探测或调用 `flush()` 等端口外方法。创建带队列 recorder 的集成者负责其 sink、diagnostic 与完整生命周期。
+命令记录合同与实现属于 `ohbaby-agent/src/host/command-record.ts`，SDK 不导出记录接口；server 从 agent 根入口取得所需三个记录类型。显式 recorder 是借入端口：Agent/Server 不探测或调用 `flush()` 等端口外方法。创建带队列 recorder 的集成者负责其 sink、diagnostic 与完整生命周期。
 
 ---
 

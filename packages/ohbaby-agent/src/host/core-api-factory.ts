@@ -1,9 +1,5 @@
-import type {
-  CoreAPI,
-  SDKAPI,
-  UiCommandRecorder,
-  UiSnapshot,
-} from "ohbaby-sdk";
+import type { UiCommandRecorder } from "./command-record.js";
+import type { CoreAPI, SDKAPI, UiSnapshot } from "ohbaby-sdk";
 import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,

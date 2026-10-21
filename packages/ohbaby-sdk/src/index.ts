@@ -31,22 +31,6 @@ export type {
   UiSessionSearchPage,
   UiSessionSearchResult,
 } from "./contract/global-sessions.js";
-export {
-  buildUiCommandDetails,
-  executeRecordedUiCommand,
-  summarizeUiCommandError,
-} from "./slash-command/command-record.js";
-export type {
-  ExecuteRecordedUiCommandOptions,
-  UiCommandCorrelation,
-  UiCommandDetails,
-  UiCommandEntryPoint,
-  UiCommandErrorSummary,
-  UiCommandMethod,
-  UiCommandObservationDiagnostic,
-  UiCommandRecord,
-  UiCommandRecorder,
-} from "./slash-command/command-record.js";
 export { isUiPromptNamingSource } from "./contract/prompt.js";
 export type {
   UiAcceptedSteerOutcome,

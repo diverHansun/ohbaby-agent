@@ -1,15 +1,11 @@
+import type { UiCommandRecord } from "../host/command-record.js";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  UiBackendClient,
-  UiCommandRecord,
-  UiEvent,
-  UiSnapshot,
-} from "ohbaby-sdk";
+import type { UiBackendClient, UiEvent, UiSnapshot } from "ohbaby-sdk";
 import { createUiCommandGateway } from "../host/ui-command-gateway.js";
 import type {
   InterfaceProviderRequest,

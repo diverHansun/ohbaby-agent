@@ -20,10 +20,11 @@
 | sdk `rpc/` 改名 | 改为 `in-process-rpc/`。`createRPC`、`CoreAPI`、`SDKAPI` 的名字和签名不变 |
 | JSON-RPC 协议与客户端放哪 | 继续留在 `ohbaby-server`。理由：Web 端不用 JSON-RPC，走自己的 REST `/v1/*`；客户端唯一的使用者是 CLI 的远程 TUI，而 CLI 本来就要加载 server；现有文档 server D5、N5 和 route-a §5 都把远程客户端和 wire 格式划给 server |
 | `DaemonStartupIntent` | 收进 sdk 作为共享契约，删除 CLI（`bin.ts`）和 Web（`wire.ts` 的 `WebStartupIntent`）里的两份副本。route-a §5 已把这一项列为可选的 SDK 增量 |
-| sdk 分目录 | 按职责分成 `contract/`、`sync/`、`in-process-rpc/`、`slash-command/` 等几个子目录（具体见 02）。`index.ts` 仍是唯一公开入口，导出名不变，不新增子路径导出 |
+| sdk 分目录 | 按职责分成 `contract/`、`sync/`、`in-process-rpc/`、`slash-command/` 等几个子目录（具体见 02）。`index.ts` 仍是唯一公开入口，导出名不变（`command-record` 一项除外，见下一行），不新增子路径导出 |
+| `command-record.ts` | 2026-10-21 实施中补充确认：移出 sdk，放进 agent 的 `host/`。它是执行命令并记录结果的逻辑，函数只有 agent 的 `ui-command-gateway.ts` 使用，类型只有 agent 和 server 使用，CLI 和 Web 都不用，不属于前后端契约。sdk 因此少导出这一组名字 |
 | `create-app.ts` 拆分程度 | 纯结构拆分：OpenAPI 文档、请求解析 helper、SSE 广播、按业务分组的路由模块各自成文件。`createDaemonServerApp` 仍是唯一组装点，行为零变化 |
 | 路由模块放哪 | `protocols/web/routes/<领域>.ts`，与 `docs/ohbaby-server/hono-app/01` 的目标布局一致 |
-| 现有测试 | `create-app` 的 4 个测试文件只通过 `createDaemonServerApp` 测试，拆分时不改，作为行为不变的安全网 |
+| 现有测试 | `create-app` 的 4 个测试文件只通过 `createDaemonServerApp` 测试，Stage 1b 只改命令记录类型 import，随后拆分时不改，作为行为不变的安全网 |
 | 关键改动清单 | 用户要求在 02 中列出，承重项带符号和行号快照 |
 | 实施时间 | `codex/workspaceless-settings` 合入 `main` 之后。开工前按当时代码核对行号 |
 

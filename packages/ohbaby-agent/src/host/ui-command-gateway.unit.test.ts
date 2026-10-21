@@ -1,10 +1,6 @@
+import type { UiCommandRecord, UiCommandRecorder } from "./command-record.js";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  UiBackendClient,
-  UiCommandRecord,
-  UiCommandRecorder,
-  UiPromptCompletion,
-} from "ohbaby-sdk";
+import type { UiBackendClient, UiPromptCompletion } from "ohbaby-sdk";
 import { createUiCommandGateway } from "./ui-command-gateway.js";
 import type { UiPromptQueueExecutionPort } from "../adapters/ui-inprocess.js";
 

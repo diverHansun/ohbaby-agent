@@ -36,7 +36,8 @@ apps/ohbaby-web ─────────────────────�
 |---|---|---|
 | 契约：类型与针对这些类型的纯函数 | `client.ts`、`events.ts`、`snapshot.ts`、`prompt.ts`、`permission.ts`、`interaction.ts`、`subagent.ts`、`compact.ts`、`connect-model.ts`、`connect-search.ts`、`context-window.ts`、`prompt-cache-usage.ts`、`global-sessions.ts`、`error-code.ts`、`workspace-directory-header.ts`、`session-view.ts`、`execution.ts`、`run-inputs.ts`、`prompt-queue-order.ts` | 前后端共享的 DTO、事件联合类型、类型守卫和投影函数 |
 | 有状态的前端同步器 | `session-sync.ts`（343 行）、`permission-sync.ts`（395）、`subagent-reader.ts`（169）、`subagent-conversation-reader.ts`（631） | 前端用来维护会话、权限、子代理视图的状态机 |
-| 命令 | `slash-command/*`、`command-record.ts`（347） | 斜杠命令解析与命令执行记录 |
+| 命令 | `slash-command/*` | 斜杠命令的类型、输入解析、补全匹配、Web 可执行命令白名单。解析和匹配函数只被 TUI 和 Web 使用，类型由 agent 产出、前端消费 |
+| 命令执行记录 | `command-record.ts`（347） | `executeRecordedUiCommand`、`buildUiCommandDetails`、`summarizeUiCommandError` 和 9 个类型。函数只被 agent 的 `host/ui-command-gateway.ts` 使用；类型被 agent（`host/command-recorder.ts`、`host/core-api-factory.ts`）和 server（`app/create-app.ts:45-46`，即 `UiCommandCorrelation`、`UiCommandRecorder`）使用；CLI 和 Web 都不用。它属于后端执行侧的逻辑，放在 sdk 是位置错误（2026-10-21 实施中发现） |
 | 进程内 RPC | `rpc/proxy.ts`（`createRPC`，L175）、`rpc/types.ts`（`CoreAPI`、`SDKAPI`） | 本地模式下模拟进程边界 |
 | 通用工具 | `duration.ts`、`loopback-host.ts` | 时长格式化、回环地址判断 |
 
@@ -152,7 +153,8 @@ Web 端（`apps/ohbaby-web`）的生产代码不引用 server，走的是 REST `
 
 | 包 | 影响 |
 |---|---|
-| `ohbaby-sdk` | 文件移动、`rpc/` 改名、新增 `DaemonStartupIntent`；`index.ts` 改内部路径，导出名只增不减 |
+| `ohbaby-sdk` | 文件移动、`rpc/` 改名、新增 `DaemonStartupIntent`；`index.ts` 改内部路径；移出 `command-record.ts` 后少导出 3 个函数和 9 个类型，其余导出名不变 |
+| `ohbaby-agent` | 接收 `command-record.ts`，并从包入口导出 server 需要的类型 |
 | `ohbaby-server` | `create-app.ts` 拆分；`protocol.ts` 改为从 sdk 引入并 re-export `DaemonStartupIntent`；`rpc-route.ts` 承接 `/api/rpc` 路由 |
 | `ohbaby-cli` | `bin.ts` 删除私有 `DaemonStartupIntent`，改为从 sdk 类型引入 |
 | `apps/ohbaby-web` | `wire.ts` 的 `WebStartupIntent` 改为 sdk 类型的别名或直接替换 |
@@ -169,6 +171,7 @@ Web 端（`apps/ohbaby-web`）的生产代码不引用 server，走的是 REST `
 | `DaemonStartupIntent` 三份副本 | DRY：同一个契约知识出现三次，且必须保持一致 | 真实重复，收进共享契约包 |
 | sdk 平铺 | 内聚：按职责分组能让读者一眼看出层次 | 轻度问题；分组即可，不要拆太细 |
 | JSON-RPC 客户端留在 server | 稳定依赖与 YAGNI：没有使用者需要脱离 server 的客户端 | 合理，不改 |
+| `command-record.ts` 放在 sdk | 内聚与职责边界：sdk 只放前后端共享的契约，执行侧逻辑应跟着唯一的使用方 | 位置错误，移到 agent |
 | 鉴权内联在每个路由里 | 横切关注点适合放中间件 | 值得改，但会改变行为，不放进本轮的纯结构重构 |
 
 ## 1.8 与既有文档的关系

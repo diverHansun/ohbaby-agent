@@ -13,8 +13,6 @@
 5. 验证事件命名空间保持一致。
 6. 验证 Prompt completion 只有四种严格终态，scheduler close/fault/abort 不悬空 waiter。
 7. 验证 client 能力拆分、accepted + wait 唯一组合和 fake-RPC signal 的 out-of-band 传递。
-8. 验证 command record 的 operationId、phase、correlation、脱敏和 fail-open 语义。
-9. 验证默认 Agent/Server composition 不把 command observation 写入 stdout/stderr，且该策略不依赖 `NODE_ENV`。
 
 ---
 
@@ -48,9 +46,9 @@
 
 按共享 mapper/scheduler 与各 driver 关键路径分层覆盖 in-process、persistent 和 remote：接单回执立即返回；四种业务终态在共享管线中 resolve，各 driver 验证其关键终态与传输路径；存储/传输/等待中止 reject；关闭或 fault 后既有和新增 waiter 都不会悬空。
 
-### 2.5 Command record 对抗测试
+### 2.5 Command record 测试归属
 
-覆盖 returned/threw、recorder 同步失败、慢 sink、clock/ID/details/diagnostic 自身抛错；断言正文、apiKey、token、env 值、stack 和响应正文不会进入 record。Agent host、Server REST、Server RPC 各记录一次，`submitPromptAndWait` 与 skill 内部接单不重复记录。structured recorder 缺 sink 必须在构造期失败，未注入 diagnostic 时 sink 失败保持静默；默认 composition 还需通过显式 `NODE_ENV=production` 的子进程捕获 stdout/stderr，并覆盖 dispose 后的 late output。
+命令记录属于 agent host，源码和 `command-record.unit.test.ts` 同置于 `packages/ohbaby-agent/src/host/`，不再属于 SDK 测试。该测试覆盖 returned/threw、recorder 同步失败、慢 sink、clock/ID/details/diagnostic 自身抛错；断言正文、apiKey、token、env 值、stack 和响应正文不会进入 record。Agent host、Server REST、Server RPC 各记录一次，`submitPromptAndWait` 与 skill 内部接单不重复记录。structured recorder 缺 sink 必须在构造期失败，未注入 diagnostic 时 sink 失败保持静默；默认 composition 还需通过显式 `NODE_ENV=production` 的子进程捕获 stdout/stderr，并覆盖 dispose 后的 late output。
 
 ---
 
@@ -88,7 +86,7 @@ it('resolves command aliases from catalog only', () => {
 |----------|------------|
 | parser/resolver 纯函数 | backend command 执行 |
 | DTO/event 类型 | Ink UI 渲染 |
-| command record 纯合同和脱敏 | 生产日志平台的持久化保证 |
+| catalog 与命令类型合同 | agent host 命令记录、脱敏与 recorder 投递 |
 | catalog 匹配规则 | provider/model 业务校验 |
 
 ---

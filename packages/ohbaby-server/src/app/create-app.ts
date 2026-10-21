@@ -1,3 +1,4 @@
+import type { UiCommandCorrelation, UiCommandRecorder } from "ohbaby-agent";
 import {
   parseSessionExportInput,
   sessionExportErrorStatus,
@@ -42,8 +43,6 @@ import {
   type UiSlashCommandInvocation,
   type UiSnapshot,
   type UiUnsubscribe,
-  type UiCommandCorrelation,
-  type UiCommandRecorder,
 } from "ohbaby-sdk";
 import {
   createUiCommandGateway,

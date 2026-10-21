@@ -15,7 +15,7 @@
 
 ### Stage 1
 
-**S1-1 sdk 导出名不变。** `index.ts` 有 `export *`，不能直接比对文本。用一个临时脚本（不必入库）通过 TypeScript compiler API 解析 `packages/ohbaby-sdk/src/index.ts`，用 `checker.getExportsOfModule()` 列出全部导出名并排序，改动前后各跑一次，结果完全一致。
+**S1-1 sdk 导出名不变。** `index.ts` 有 `export *`，不能直接比对文本。用一个临时脚本（不必入库）通过 TypeScript compiler API 解析 `packages/ohbaby-sdk/src/index.ts`，用 `checker.getExportsOfModule()` 列出全部导出名并排序，改动前后各跑一次。Stage 1 单独看时结果完全一致；整轮做完后，与 Stage 1 之前相比只允许两处差异：多了 `DaemonStartupIntent`（Stage 2），少了 `command-record` 的 12 个名字（Stage 1b：`buildUiCommandDetails`、`executeRecordedUiCommand`、`summarizeUiCommandError`、`ExecuteRecordedUiCommandOptions`、`UiCommandCorrelation`、`UiCommandDetails`、`UiCommandEntryPoint`、`UiCommandErrorSummary`、`UiCommandMethod`、`UiCommandObservationDiagnostic`、`UiCommandRecord`、`UiCommandRecorder`）。
 
 **S1-2 旧 `rpc/` 路径无残留。** 下面的命令没有输出：
 
@@ -30,6 +30,23 @@ rg -n 'from "\.\./(sync|util|in-process-rpc)/' packages/ohbaby-sdk/src/contract
 ```
 
 **S1-4 进程内 RPC 行为。** `in-process-rpc/proxy.unit.test.ts`（原 `rpc/proxy.unit.test.ts`）全部通过。
+
+### Stage 1b
+
+**S1b-1 sdk 无残留，前端不受影响。** 第一条命令没有输出；第二条命令只命中 `packages/ohbaby-agent` 和 `packages/ohbaby-server`，不命中 `packages/ohbaby-cli`、`apps/ohbaby-web`、`packages/ohbaby-sdk`：
+
+```bash
+rg -n 'command-record|executeRecordedUiCommand|buildUiCommandDetails|summarizeUiCommandError' packages/ohbaby-sdk/src
+rg -ln 'UiCommandRecorder|UiCommandCorrelation|UiCommandRecord\b|executeRecordedUiCommand' packages apps --glob '!**/dist/**' --glob '!**/node_modules/**'
+```
+
+**S1b-2 server 从 agent 取类型。** 下面的命令没有输出（import 跨多行，所以用 `-U` 多行匹配；改动前它会命中 `create-app.ts` 和 `create-app.unit.test.ts`）：
+
+```bash
+rg -U -l 'import (type )?\{[^}]*UiCommand(Recorder|Correlation|Record)\b[^}]*\} from "ohbaby-sdk"' packages/ohbaby-server/src
+```
+
+**S1b-3 命令记录行为不变。** 随文件移动的 `command-record.unit.test.ts`，以及 agent 的 `ui-command-gateway.unit.test.ts`、`command-recorder.unit.test.ts`、`core-api-factory.unit.test.ts` 和 server 的 `create-app.unit.test.ts` 中命令记录相关用例全部通过。
 
 ### Stage 2
 
@@ -51,7 +68,7 @@ pnpm --filter "ohbaby-web..." build
 
 ### Stage 3
 
-**S3-1 `createDaemonServerApp` 行为不变。** 01 §1.4.5 的四个测试文件不做任何修改即全部通过，`git diff --stat` 中不出现这四个文件。
+**S3-1 `createDaemonServerApp` 行为不变。** 相对 Stage 1b 提交后的基线，01 §1.4.5 的四个测试文件不做任何修改即全部通过；Stage 3 的 `git diff --stat` 中不出现这四个文件。整轮只允许 Stage 1b 调整 `create-app.unit.test.ts` 的命令记录类型 import，测试断言不变。
 
 **S3-2 路由清单完全一致。** 拆分前后各构造一次 app，读取 Hono 的 `app.routes`，按注册顺序列出 `method + path`，两份清单逐行一致（包括中间件 `use /v1/*`）。可以写成临时脚本，不必入库。
 
@@ -85,12 +102,14 @@ rg -n 'from "(\.\./)+app/' packages/ohbaby-server/src/protocols
 | Stage | 用例 |
 |---|---|
 | Stage 1 | S1-1、S1-2、S1-3、S1-4 |
+| Stage 1b | S1b-1、S1b-2、S1b-3；S1-1 的整轮对比 |
 | Stage 2 | S2-1、S2-2、S2-3、S2-4 |
 | Stage 3 | S3-1 至 S3-7 |
 
 ## 4.4 集成边界
 
-- **sdk → 各包**：只通过 `index.ts`。S1-1 保证这个边界不变。
+- **sdk → 各包**：只通过 `index.ts`。S1-1 保证这个边界只按计划变化。
+- **agent → server（命令记录类型）**：server 改为从 agent 取类型，S1b-2 覆盖。
 - **server → CLI**：CLI 动态加载 `ohbaby-server` 的导出（`bin.ts:360-388`）。S2-2 和 `daemon-*` 集成测试覆盖。
 - **server → Web**：REST `/v1/*` 和 SSE。S3-1、S3-2 保证接口不变，S3-4 手工确认。
 - **运行时类 → 路由模块**：通过 `DaemonRouteContext`。typecheck 保证接口完整。

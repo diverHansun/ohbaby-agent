@@ -33,7 +33,7 @@
 | UiCompletedPromptSubmission | Entity snapshot | endedAt 必有；failed/interrupted 必有结构化 error |
 | UiCommandRecord | Value Object | 同 operationId 的两个 phase，details 只来自方法级白名单 |
 
-SDK 本身不管理这些对象的生命周期。生命周期归 backend 或 UI 本地 store。
+`UiCommandRecord` 属于 agent host，列于此处仅说明与共享合同的边界；server 从 agent 根入口取得该类型。SDK 本身不管理这些对象的生命周期。生命周期归 backend 或 UI 本地 store。
 
 ---
 
@@ -112,7 +112,7 @@ Backend 不指定 `ModelDialog` 之类 UI 组件名，只描述交互语义。
 | UiCommandInvocation | UI surface | - | backend 消费 |
 | UiInteractionRequest | backend command runtime | backend command runtime | UI 通过 response 完成 |
 | UiEvent | backend adapter | - | UI 订阅并更新本地状态 |
-| UiCommandRecord | Agent/Server 外部 gateway | recorder sink | SDK 定义记录合同、recorder 端口、方法级脱敏 builder 与 fail-open helper |
+| UiCommandRecord | Agent/Server 外部 gateway | recorder sink | agent host 定义记录合同、recorder 端口、方法级脱敏 builder 与 fail-open helper；SDK 不再提供这些导出 |
 
 ---
 
