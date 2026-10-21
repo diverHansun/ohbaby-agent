@@ -1,6 +1,6 @@
 # ohbaby-sdk 与 ohbaby-server 结构整理
 
-2026-10-21 完成首轮代码改造，实施分支为 `codex/sdk-server-boundaries`，基线为 `7bc75168`。已分批提交，尚未合并或推送，等待用户审查。测试结果及一项已在基线复现的 E2E 失败见 [05 验收记录](improve-1/05-implementation-acceptance.md)。
+2026-10-21 完成首轮代码改造，实施分支为 `codex/sdk-server-boundaries`，基线为 `7bc75168`。已分批提交，用户已确认修复既有 E2E 后合入本地 `main`；不推送远端。测试结果及既有 E2E 的修复记录见 [05 验收记录](improve-1/05-implementation-acceptance.md)。
 
 本议题整理 `ohbaby-sdk` 和 `ohbaby-server` 两个包的文件组织，保持运行时行为。公开导出仅按确认的范围调整：SDK 新增 `DaemonStartupIntent`，移除 command-record 的 12 个名字；agent 公开其中 3 个类型。起因是用户审视包职责时提出三点：sdk 和 server 各有一个 rpc 目录，容易混淆；sdk 文件大多平铺，看不出分层；server 的可维护性需要改善。
 
@@ -21,7 +21,7 @@
 
 JSON-RPC 的协议和远程客户端继续留在 server，理由见 [00 §2](improve-1/00-discussion.md)。其余不在本轮的内容见 [02 §2.8](improve-1/02-optimization-plan-and-change-scope.md)。
 
-LLM 客户端抽包是另一个议题，见 [ohbaby-llm 抽包](../2026-10-21-llm-package-extraction/README.md)，在本议题之后实施。
+LLM 客户端抽包是另一个议题，后续会新建分支实施 ohbaby-llm 抽包。前端重构方案尚未确定，等后端工作完成后再讨论。
 
 ## 文档地图
 

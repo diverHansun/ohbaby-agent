@@ -218,7 +218,7 @@ ohbaby-server/src/（Stage 3 之后）
 | Web 改用 sdk 提供的 REST 客户端 | Web 保留自己的 wire 层（`docs/ohbaby-web/goals-duty.md` ND4） | 不计划 |
 | sdk 增加子路径导出 | 没有按需加载的需求 | 有需求时再做 |
 | JSON-RPC 协议或客户端挪进 sdk | 见 00 §3 | 不计划 |
-| LLM 客户端抽包 | 另一个议题 | [ohbaby-llm 抽包](../../2026-10-21-llm-package-extraction/README.md) |
+| LLM 客户端抽包 | 另一个议题 | ohbaby-llm 抽包（后续独立分支） |
 
 ## 2.9 关键改动清单
 

@@ -1,0 +1,13 @@
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.neverBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+
+ RUN  v2.1.9 /Users/hansun025/Projects/code-cli/ohbaby-agent
+
+ ✓ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts (6 tests | 1 skipped) 1432ms
+   ✓ goal execution through the HTTP daemon > separates two goal turns from their live and replay display while preserving runtime context, title and silent counters 303ms
+   ✓ goal execution through the HTTP daemon > counts blocked reports by admitted run, preserves the final reply, and atomically resumes with fresh audit 510ms
+ ✓ packages/ohbaby-server/src/runtime/daemon/model-idle.e2e.test.ts (4 tests | 3 skipped) 155ms
+
+ Test Files  2 passed (2)
+      Tests  6 passed | 4 skipped (10)
+   Start at  19:28:55
+   Duration  3.20s (transform 724ms, setup 0ms, collect 1.42s, tests 1.59s, environment 0ms, prepare 41ms)

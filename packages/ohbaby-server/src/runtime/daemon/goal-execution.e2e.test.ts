@@ -18,7 +18,9 @@ import { loadEnvFile } from "../../../../ohbaby-agent/src/config/llm/loaders.js"
 import { createDatabaseMessageStore } from "../../../../ohbaby-agent/src/core/message/database-store.js";
 import {
   getMessageOrigin,
+  getReminderAnchorId,
   isModelContextPart,
+  isSystemReminderMessage,
 } from "../../../../ohbaby-agent/src/core/message/origin.js";
 import type { LLMClientInstance } from "../../../../ohbaby-agent/src/core/llm-client/types.js";
 import { createSqliteGoalPersistence } from "../../../../ohbaby-agent/src/goals/persistence.js";
@@ -49,6 +51,7 @@ async function withDaemon(
     client: RemoteClient;
     events: UiEvent[];
     persistence: GoalPersistencePort;
+    workdir: string;
     reconnect: () => RemoteClient;
   }) => Promise<void>,
 ): Promise<void> {
@@ -92,6 +95,7 @@ async function withDaemon(
       client,
       events,
       persistence: createSqliteGoalPersistence(getDatabase()),
+      workdir,
       reconnect: () => {
         const reconnected = createRemoteUiBackendClient({
           authToken,
@@ -173,14 +177,56 @@ function uiMessageText(message: UiMessage): string {
 
 function lastUserText(request: InterfaceProviderRequest): string {
   const message = request.messages
-    .filter((item) => item.role === "user")
+    .filter(
+      (item) =>
+        item.role === "user" &&
+        (typeof item.content === "string" ||
+          !item.content.some(
+            (part) => "source" in part && part.source === "system-reminder",
+          )),
+    )
     .at(-1);
-  if (!message) throw new Error("Expected user input in the model request");
+  if (message?.content === undefined || message.content === null)
+    throw new Error("Expected user input in the model request");
   return typeof message.content === "string"
     ? message.content
     : message.content
         .map((part) => ("text" in part ? part.text : ""))
         .join("\n");
+}
+
+// Unchanged environment/mode snapshots are separate from user input and reused.
+function expectRuntimeReminder(
+  request: InterfaceProviderRequest,
+  workdir: string,
+): void {
+  const reminders = request.messages.filter(
+    (message) =>
+      message.role === "user" &&
+      typeof message.content !== "string" &&
+      message.content.some(
+        (part) => "source" in part && part.source === "system-reminder",
+      ),
+  );
+  expect(reminders).toEqual([
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          source: "system-reminder",
+          text: expect.stringContaining(
+            `Current working directory: ${workdir}`,
+          ) as unknown,
+        },
+        {
+          type: "text",
+          source: "system-reminder",
+          text: "<system-reminder>\nCurrent mode: auto.\n</system-reminder>",
+        },
+      ],
+    },
+  ]);
 }
 
 describe("goal execution through the HTTP daemon", () => {
@@ -265,7 +311,7 @@ describe("goal execution through the HTTP daemon", () => {
     };
     await withDaemon(
       llmClient,
-      async ({ client, events, persistence, reconnect }) => {
+      async ({ client, events, persistence, reconnect, workdir }) => {
         try {
           const session = await client.createSession();
           await createGoal(client, session.id, objective);
@@ -314,18 +360,17 @@ describe("goal execution through the HTTP daemon", () => {
             );
           });
           expect(requests).toHaveLength(3);
-          const turnPrompts = [
-            lastUserText(requests[0]),
-            lastUserText(requests[2]),
-          ];
-          turnPrompts.forEach((text, index) => {
+          const turnRequests = [requests[0], requests[2]];
+          turnRequests.forEach((request, index) => {
+            const text = lastUserText(request);
             expect(text).toContain(
               `<untrusted_objective>\n${objective}\n</untrusted_objective>`,
             );
             expect(text).toContain(
               `Progress: ${String(index + 1)} continuation turns`,
             );
-            expect(text).toContain("<environment_context>");
+            expect(text).not.toContain("<system-reminder>");
+            expectRuntimeReminder(request, workdir);
             expect(text).not.toContain("Goal started");
             expect(text).not.toContain("Goal auto-continue");
             expect(text.match(/<untrusted_objective>/gu)).toHaveLength(1);
@@ -346,9 +391,12 @@ describe("goal execution through the HTTP daemon", () => {
             /Goal started|Goal auto-continue/u,
           );
           expect(view.session.title).toBe("Verify cobalt telescope handoff");
-          const stored = (
-            await createDatabaseMessageStore().listBySession(session.id)
-          ).filter((message) => message.info.role === "user");
+          const history = await createDatabaseMessageStore().listBySession(
+            session.id,
+          );
+          const stored = history.filter(
+            (message) => getMessageOrigin(message) === "user",
+          );
           expect(stored).toHaveLength(2);
           stored.forEach((message, index) => {
             expect(getMessageOrigin(message)).toBe("user");
@@ -362,12 +410,37 @@ describe("goal execution through the HTTP daemon", () => {
               uiMessageText(replayUserMessages[index]),
             );
             expect(body.metadata).not.toHaveProperty("kind");
-            const runtime = message.parts.filter(isModelContextPart);
-            expect(runtime).toHaveLength(1);
-            if (runtime[0]?.type !== "text")
-              throw new Error("Expected runtime context part");
-            expect(runtime[0].text).toContain("<environment_context>");
+            expect(message.parts.filter(isModelContextPart)).toHaveLength(0);
+            expect(body.text).not.toContain("<system-reminder>");
           });
+          // The unchanged environment/mode snapshot is persisted once, anchored
+          // to the first assistant response, and reused by the second goal turn.
+          const reminders = history.filter(isSystemReminderMessage);
+          expect(reminders).toHaveLength(1);
+          const anchor = history.find(
+            (message) => message.info.id === getReminderAnchorId(reminders[0]),
+          );
+          if (anchor?.info.role !== "assistant")
+            throw new Error("Expected assistant anchor for persisted reminder");
+          expect(anchor.info.parentId).toBe(stored[0].info.id);
+          expect(anchor.info.runId).toEqual(expect.any(String));
+          expect(anchor.info.runId).toBe(reminders[0].info.runId);
+          expect(reminders[0].parts).toMatchObject([
+            {
+              type: "text",
+              synthetic: true,
+              metadata: { reminderType: "environment" },
+              text: expect.stringContaining(
+                `Current working directory: ${workdir}`,
+              ) as unknown,
+            },
+            {
+              type: "text",
+              synthetic: true,
+              metadata: { reminderType: "mode" },
+              text: "<system-reminder>\nCurrent mode: auto.\n</system-reminder>",
+            },
+          ]);
           if (view.goal.status !== "ready" || !view.goal.value)
             throw new Error("Expected blocked goal projection");
           const stoppedGoal = view.goal.value;
@@ -421,12 +494,12 @@ describe("goal execution through the HTTP daemon", () => {
               })
             ).prompt.status,
           ).toBe("succeeded");
-          expect(lastUserText(requests[3]).startsWith(ordinary)).toBe(true);
+          expect(lastUserText(requests[3])).toBe(ordinary);
           expect(lastUserText(requests[3])).not.toContain(objective);
           expect(lastUserText(requests[3])).not.toMatch(
             /currently paused|<untrusted_objective>|\/goal resume/u,
           );
-          expect(lastUserText(requests[3])).toContain("<environment_context>");
+          expectRuntimeReminder(requests[3], workdir);
           const explicitGoal = requests[4].messages.find(
             (message) =>
               message.role === "tool" && message.callId === "read_blocked_goal",

@@ -1,0 +1,55 @@
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.neverBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+
+ RUN  v2.1.9 /Users/hansun025/Projects/code-cli/ohbaby-agent
+
+ ❯ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts (6 tests | 1 failed | 5 skipped) 213ms
+   × goal execution through the HTTP daemon > separates two goal turns from their live and replay display while preserving runtime context, title and silent counters 213ms
+     → expected [] to deeply equal [ { role: 'user', content: [ …(2) ] } ]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts > goal execution through the HTTP daemon > separates two goal turns from their live and replay display while preserving runtime context, title and silent counters
+AssertionError: expected [] to deeply equal [ { role: 'user', content: [ …(2) ] } ]
+
+- Expected
++ Received
+
+- Array [
+-   Object {
+-     "content": Array [
+-       Object {
+-         "source": "system-reminder",
+-         "text": StringContaining "Current working directory: /var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-goal-e2e-WD9NNw/workspace",
+-         "type": "text",
+-       },
+-       Object {
+-         "source": "system-reminder",
+-         "text": "<system-reminder>
+- Current mode: auto.
+- </system-reminder>",
+-         "type": "text",
+-       },
+-     ],
+-     "role": "user",
+-   },
+- ]
++ Array []
+
+ ❯ expectRuntimeReminder packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:210:21
+    208|       ),
+    209|   );
+    210|   expect(reminders).toEqual([
+       |                     ^
+    211|     {
+    212|       role: "user",
+ ❯ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:372:13
+ ❯ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:363:24
+ ❯ withDaemon packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:94:5
+ ❯ packages/ohbaby-server/src/runtime/daemon/goal-execution.e2e.test.ts:311:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  19:13:12
+   Duration  1.58s (transform 775ms, setup 0ms, collect 1.23s, tests 213ms, environment 0ms, prepare 29ms)
