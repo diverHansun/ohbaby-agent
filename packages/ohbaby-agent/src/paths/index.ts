@@ -15,4 +15,12 @@ export {
   resolveProjectOhbabyRoot,
   type OhbabyPathOptions,
 } from "./ohbaby-home.js";
+export {
+  DEFAULT_WORKSPACE_DIR_MODE,
+  defaultWorkspaceBoundary,
+  ensureDefaultWorkspaceDirectory,
+  isDefaultWorkspaceDirectory,
+  isSameCanonicalDirectory,
+  resolveDefaultWorkspaceDirectory,
+} from "./default-workspace.js";
 export { resolveReadPathWithLegacy } from "./read-fallback.js";

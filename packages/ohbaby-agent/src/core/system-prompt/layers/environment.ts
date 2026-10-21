@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+  defaultWorkspaceBoundary,
+  isSameCanonicalDirectory,
+} from "../../../paths/index.js";
 import type { EnvironmentInfo } from "../types.js";
 
 export interface EnvironmentDetectionOptions {
@@ -31,6 +35,7 @@ export function formatEnvironmentDate(date: Date): string {
 
 async function defaultIsGitRepo(directory: string): Promise<boolean> {
   let current = path.resolve(directory);
+  const boundary = defaultWorkspaceBoundary(current);
 
   for (;;) {
     try {
@@ -40,6 +45,9 @@ async function defaultIsGitRepo(directory: string): Promise<boolean> {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
       // A missing .git entry may still belong to a repository higher up.
+    }
+    if (boundary !== undefined && isSameCanonicalDirectory(current, boundary)) {
+      return false;
     }
 
     const parent = path.dirname(current);
