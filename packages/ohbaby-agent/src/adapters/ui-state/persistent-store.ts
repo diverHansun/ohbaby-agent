@@ -35,7 +35,7 @@ import type {
 } from "../../runtime/run-ledger/index.js";
 import {
   resolveSessionDisplayTitle,
-  sameSessionProjectRoot,
+  isSessionInProjectRoot,
   type Session,
   type SessionManager,
 } from "../../services/session/index.js";
@@ -446,7 +446,8 @@ export function createPersistentUiStateStore(
   }
 
   function isInCurrentProject(session: Session, projectRoot: string): boolean {
-    return sameSessionProjectRoot(session.projectRoot, projectRoot);
+    // A session moving here is visible before its first turn in this workspace.
+    return isSessionInProjectRoot(session, projectRoot);
   }
 
   async function readUiSession(session: Session): Promise<UiSession> {

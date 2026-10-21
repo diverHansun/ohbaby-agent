@@ -250,4 +250,9 @@ export interface UiBackendClient extends UiQueryClient, UiCommandClient {
   releaseSubagentConversation?(
     input: UiSubagentConversationUnwatchQuery,
   ): Promise<void>;
+  /**
+   * Internal: rejects with code SESSION_MOVED and `targetDirectory` when the
+   * session's next turn belongs to another workspace directory.
+   */
+  assertSessionRoutable?(sessionId: string): Promise<void>;
 }

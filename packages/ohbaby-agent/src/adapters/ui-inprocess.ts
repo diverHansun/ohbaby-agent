@@ -146,9 +146,12 @@ import {
   sessionTitleIntent,
   generateSessionTitle,
   isDefaultSessionTitle,
+  isSessionInProjectRoot,
   resolveSessionDisplayTitle,
   sameSessionProjectRoot,
   SessionEvent,
+  SessionMovedError,
+  sessionTargetProjectRoot,
 } from "../services/session/index.js";
 import {
   createPermissionManager,
@@ -378,6 +381,9 @@ export interface InProcessUiBackendClient
   >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
+  /** Re-reads the durable prompt queue after another workspace handed prompts over. */
+  wakePromptQueue(): void;
+  assertSessionRoutable(sessionId: string): Promise<void>;
   /** Read inside the session owner boundary; does not steer or reserve execution. */
   getActiveGoalRunForSteer(
     sessionId: string,
@@ -1302,6 +1308,10 @@ export function createInProcessUiBackendClient(
     goalId: string,
     epoch: number,
   ): Promise<GoalTurnOutcome> {
+    // A moved session continues in its target workspace. Ending this
+    // generation keeps the persisted goal; the target resumes it.
+    if ((await movedSessionTarget(sessionId)) !== undefined)
+      return { status: "not_admitted" };
     await sharedGoalService.initSession(sessionId);
     let ticket: GoalTurnTicket | null = null;
     for (;;) {
@@ -2208,24 +2218,24 @@ export function createInProcessUiBackendClient(
   async function validatePermissionRoot(
     sessionId: string,
   ): Promise<UiSessionIndexEntry> {
-    if (options.sessionManager) {
-      const core = await options.sessionManager.get(sessionId);
-      if (core && !isPrimarySession(core))
-        throw permissionError(
-          "PERMISSION_SCOPE_CHANGED",
-          "Select a primary session to manage permissions",
-        );
-    }
+    const core = await options.sessionManager?.get(sessionId);
+    if (core && !isPrimarySession(core))
+      throw permissionError(
+        "PERMISSION_SCOPE_CHANGED",
+        "Select a primary session to manage permissions",
+      );
     const session = (await getSessionIndex()).find(
       (item) => item.id === sessionId,
     );
+    const projectRoot = await resolveProjectRoot();
+    // Permissions follow membership, like viewing: a moving session's
+    // current turn and its target workspace may both ask.
     if (
       !session ||
-      (session.projectRoot !== undefined &&
-        !sameSessionProjectRoot(
-          session.projectRoot,
-          await resolveProjectRoot(),
-        ))
+      (core
+        ? !isSessionInProjectRoot(core, projectRoot)
+        : session.projectRoot !== undefined &&
+          !sameSessionProjectRoot(session.projectRoot, projectRoot))
     )
       throw permissionError(
         "PERMISSION_SCOPE_CHANGED",
@@ -2583,7 +2593,9 @@ export function createInProcessUiBackendClient(
     const projectRoot = await resolveProjectRoot();
     if (
       session.projectRoot &&
-      !sameSessionProjectRoot(session.projectRoot, projectRoot)
+      !(core
+        ? isSessionInProjectRoot(core, projectRoot)
+        : sameSessionProjectRoot(session.projectRoot, projectRoot))
     )
       throw new Error("Session belongs to another workspace");
     await options.sessionManager?.update(input.sessionId, {
@@ -2661,7 +2673,7 @@ export function createInProcessUiBackendClient(
           .filter(
             (session) =>
               isPrimarySession(session) &&
-              sameSessionProjectRoot(session.projectRoot, projectRoot),
+              isSessionInProjectRoot(session, projectRoot),
           )
           .sort(sortCoreSessionsByUpdatedAtDesc)
           .map(async (session) => ({
@@ -2845,19 +2857,43 @@ export function createInProcessUiBackendClient(
     await publishSessionIndexInvalidation();
   }
 
+  /** The database decides where a session's next turn runs; a pending project change wins. */
+  async function movedSessionTarget(
+    sessionId: string,
+  ): Promise<string | undefined> {
+    const session = await options.sessionManager?.get(sessionId);
+    if (!session) return undefined;
+    const target = sessionTargetProjectRoot(session);
+    return sameSessionProjectRoot(target, await resolveProjectRoot())
+      ? undefined
+      : target;
+  }
+
+  async function assertSessionRoutable(sessionId: string): Promise<void> {
+    const target = await movedSessionTarget(sessionId);
+    if (target !== undefined) throw new SessionMovedError(sessionId, target);
+  }
+
+  /**
+   * Viewing needs only membership: while a moved session finishes its turn
+   * here, both this and the target workspace show it. Starting a turn
+   * (prompt, compact) must happen in the target directory.
+   */
   async function assertCanUseAsPrimarySession(
     sessionId: string | undefined,
-    operation: "compact" | "prompt" = "prompt",
+    operation: "compact" | "prompt" | "view" = "prompt",
   ): Promise<void> {
     if (!sessionId || !options.sessionManager) {
       return;
     }
     const session = await options.sessionManager.get(sessionId);
-    if (
+    if (operation !== "view") {
+      await assertSessionRoutable(sessionId);
+    } else if (
       session &&
-      !sameSessionProjectRoot(session.projectRoot, await resolveProjectRoot())
+      !isSessionInProjectRoot(session, await resolveProjectRoot())
     ) {
-      throw new Error("Session belongs to another workspace");
+      throw new SessionMovedError(sessionId, sessionTargetProjectRoot(session));
     }
     if (session?.isSubagent === true || session?.parentId !== undefined) {
       const action =
@@ -3372,7 +3408,34 @@ export function createInProcessUiBackendClient(
         });
         shouldGenerateSessionTitle = session.title === temporaryTitle;
       }
-      const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
+      const resolvedProjectRoot = existingCoreSession
+        ? sessionTargetProjectRoot(existingCoreSession)
+        : (session.projectRoot ?? baseProjectRoot);
+      if (
+        existingCoreSession &&
+        !sameSessionProjectRoot(
+          existingCoreSession.projectRoot,
+          resolvedProjectRoot,
+        )
+      ) {
+        // The session arrives from another directory. Its last turn there must
+        // finish first; this view may have been seeded while it was running.
+        const active = await sourceLedger.getActiveRuns(session.id);
+        if (active.length > 0)
+          throw new SessionRunBusyError(
+            session.id,
+            active.map((run) => run.runId),
+          );
+        if (sourceProjection.owner.hasViewOrPendingSeed(session.id)) {
+          await sourceProjection.owner.rebuild(session.id);
+          publish({
+            type: "session.updated",
+            session: cloneSession(
+              sourceProjection.owner.read(session.id).session,
+            ),
+          });
+        }
+      }
       submittedSessionId = session.id;
       if (promptSessionId !== session.id) {
         activePromptsBySession.delete(promptSessionId);
@@ -3458,6 +3521,20 @@ export function createInProcessUiBackendClient(
         if (result.runId !== runId) {
           throw new Error(
             `Agent service created unexpected run id: ${result.runId}`,
+          );
+        }
+        // The run ledger has admitted this turn; only now does a pending
+        // project change become the session's execution directory.
+        if (
+          existingCoreSession &&
+          !sameSessionProjectRoot(
+            existingCoreSession.projectRoot,
+            resolvedProjectRoot,
+          )
+        ) {
+          await options.sessionManager?.recordExecutionRoot?.(
+            session.id,
+            resolvedProjectRoot,
           );
         }
         await submitOptions?.onRunStarted?.(runId);
@@ -3898,7 +3975,7 @@ export function createInProcessUiBackendClient(
       listSessions: listSessionsFromState,
       async selectSession(sessionId: string): Promise<void> {
         await ready;
-        await assertCanUseAsPrimarySession(sessionId);
+        await assertCanUseAsPrimarySession(sessionId, "view");
         await initializeSessionView(sessionId);
         const session = await stateStore.getSession(sessionId);
         if (!session) {
@@ -4171,6 +4248,10 @@ export function createInProcessUiBackendClient(
       };
     },
     getActiveGoalRunForSteer,
+    wakePromptQueue(): void {
+      promptScheduler.wake();
+    },
+    assertSessionRoutable,
     closeAdmission,
     dispose(
       shutdown: ShutdownOptions = createShutdownOptions(),

@@ -6,6 +6,7 @@ import {
 } from "../runtime/shutdown.js";
 import { createSessionExecutionRecovery } from "../runtime/execution-recovery/session.js";
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
@@ -18,6 +19,7 @@ import {
   createMessageManager,
 } from "../core/message/index.js";
 import { Project } from "../project/index.js";
+import { resolveDefaultWorkspaceDirectory } from "../paths/index.js";
 import {
   closeDatabase,
   getDatabase,
@@ -25,8 +27,11 @@ import {
   type DatabaseConnection,
 } from "../services/database/index.js";
 import {
+  clearDefaultWorkspaceProjectBindings,
   createDatabaseSessionStore,
   createSessionManager,
+  writeSessionProjectBinding,
+  type SessionProjectMovePlan,
 } from "../services/session/index.js";
 import { createSqliteGoalPersistence } from "../goals/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
@@ -96,8 +101,23 @@ export interface PersistentUiBackendClient
   >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
+  /**
+   * Commits a project change whose queued prompts this workspace takes over:
+   * the binding and the queue move in one write, then the queue is re-read.
+   */
+  adoptSessionProjectMove(plan: SessionProjectMovePlan): Promise<void>;
   closeAdmission(): void;
   dispose(options?: ShutdownOptions): Promise<CleanupResult>;
+}
+
+/** Stored roots may use either the resolved or the real path of the default workspace. */
+function defaultWorkspaceForms(): readonly string[] {
+  const directory = resolveDefaultWorkspaceDirectory();
+  try {
+    return [directory, realpathSync.native(directory)];
+  } catch {
+    return [directory];
+  }
 }
 
 function numericNow(now?: () => Date): () => number {
@@ -210,7 +230,7 @@ function createSnapshotExecutor(input: {
 function withStartupRecovery(
   client: InProcessUiBackendClient,
   recovery: Promise<unknown>,
-): PersistentUiBackendClient {
+): Omit<PersistentUiBackendClient, "adoptSessionProjectMove"> {
   let recovered = false;
   let startupFailureReported = false;
   const startup = recovery.then(() => {
@@ -272,6 +292,10 @@ function withStartupRecovery(
     ): ReturnType<InProcessUiBackendClient["getPromptReceipt"]> {
       await ready();
       return client.getPromptReceipt(input);
+    },
+    async assertSessionRoutable(sessionId): Promise<void> {
+      await ready();
+      await client.assertSessionRoutable(sessionId);
     },
     async initializeSession(sessionId): Promise<void> {
       await ready();
@@ -645,6 +669,7 @@ export function createPersistentUiBackendClient(
   const now = numericNow(options.now);
   initDatabase({ dbPath: options.dbPath, now });
   const db = getDatabase();
+  clearDefaultWorkspaceProjectBindings(db, defaultWorkspaceForms());
   const bus = options.bus ?? createBus();
   const messageManager = createMessageManager({
     bus,
@@ -742,47 +767,59 @@ export function createPersistentUiBackendClient(
     });
   });
 
-  return withStartupRecovery(
-    createInProcessUiBackendClient({
-      agentManager: options.agentManager,
-      bus,
-      ...(options.createSubagentId
-        ? { createSubagentId: options.createSubagentId }
-        : {}),
-      createLLMClient: options.createLLMClient,
-      createRunId: options.createRunId,
-      createPromptUserMessageId: () => `message_${randomUUID()}`,
-      goalPersistence: createSqliteGoalPersistence(db, now),
-      hookExecutor,
-      initialSnapshot: options.initialSnapshot,
-      startupReady,
-      llmClient: options.llmClient,
-      logger: options.logger,
-      diagnosticsFilePath: options.diagnosticsFilePath,
-      messageManager,
-      now: options.now,
-      projectDirectory: options.projectDirectory,
-      promptScopeKey,
-      recoverExecutionSession,
-      assertExecutionRecoveryReady(sessionId): void {
-        if (recoveryFailures.has(sessionId))
-          throw recoveryFailures.get(sessionId);
-      },
-      promptQueueOwnerClientId: backendOwnerId,
-      currentRunInputStore,
-      promptSubmissionStore,
-      runLedger,
-      sessionManager,
-      stateStore,
-      streamBridge: options.streamBridge,
-      subagentInstanceStore,
-      subagentExecutionStore,
-      subagentOwnerId: backendOwnerId,
-      subagentOwnerPid: process.pid,
-      workdir: options.workdir,
-    }),
+  const inProcessClient = createInProcessUiBackendClient({
+    agentManager: options.agentManager,
+    bus,
+    ...(options.createSubagentId
+      ? { createSubagentId: options.createSubagentId }
+      : {}),
+    createLLMClient: options.createLLMClient,
+    createRunId: options.createRunId,
+    createPromptUserMessageId: () => `message_${randomUUID()}`,
+    goalPersistence: createSqliteGoalPersistence(db, now),
+    hookExecutor,
+    initialSnapshot: options.initialSnapshot,
     startupReady,
-  );
+    llmClient: options.llmClient,
+    logger: options.logger,
+    diagnosticsFilePath: options.diagnosticsFilePath,
+    messageManager,
+    now: options.now,
+    projectDirectory: options.projectDirectory,
+    promptScopeKey,
+    recoverExecutionSession,
+    assertExecutionRecoveryReady(sessionId): void {
+      if (recoveryFailures.has(sessionId))
+        throw recoveryFailures.get(sessionId);
+    },
+    promptQueueOwnerClientId: backendOwnerId,
+    currentRunInputStore,
+    promptSubmissionStore,
+    runLedger,
+    sessionManager,
+    stateStore,
+    streamBridge: options.streamBridge,
+    subagentInstanceStore,
+    subagentExecutionStore,
+    subagentOwnerId: backendOwnerId,
+    subagentOwnerPid: process.pid,
+    workdir: options.workdir,
+  });
+  const client = withStartupRecovery(inProcessClient, startupReady);
+  return Object.assign(client, {
+    async adoptSessionProjectMove(plan: SessionProjectMovePlan): Promise<void> {
+      // Startup recovery owns this scope's queue until it has finished.
+      await startupReady;
+      await promptSubmissionStore.adoptQueuedSession({
+        sessionId: plan.sessionId,
+        scopeKey: promptScopeKey,
+        beforeAdopt: () => {
+          writeSessionProjectBinding(db, plan.sessionId, plan.binding, now());
+        },
+      });
+      inProcessClient.wakePromptQueue();
+    },
+  });
 }
 
 export { closeDatabase as closePersistentUiBackendDatabase };

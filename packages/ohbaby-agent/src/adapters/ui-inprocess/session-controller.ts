@@ -9,7 +9,12 @@ export type InProcessSessionManager = Pick<
   SessionManager,
   "create" | "get" | "listByProject" | "listByProjectRoot" | "update"
 > &
-  Partial<Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">>;
+  Partial<
+    Pick<
+      SessionManager,
+      "findReusableEmptyPrimary" | "incrementStats" | "recordExecutionRoot"
+    >
+  >;
 
 export interface ResolveSessionForNewPromptInput {
   readonly createSession: (id?: string) => Promise<UiSession>;

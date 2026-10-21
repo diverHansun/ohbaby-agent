@@ -4,7 +4,11 @@ import {
 } from "../services/interface-providers/reasoning.js";
 import type { ReasoningConfig } from "../config/llm/types.js";
 import type { AgentInstanceFactory } from "../core/agents/index.js";
-import type { Session, SessionManager } from "../services/session/index.js";
+import {
+  sessionTargetProjectRoot,
+  type Session,
+  type SessionManager,
+} from "../services/session/index.js";
 import { AgentManager } from "./manager.js";
 import {
   assertNoStaticModelConfig,
@@ -49,7 +53,8 @@ export class AgentService {
       instanceId: session.id,
       maxSteps: params.maxSteps ?? runtimeAgent.config.maxSteps,
       modelId: this.options.modelId,
-      projectRoot: session.projectRoot,
+      // A pending project change takes effect with this turn.
+      projectRoot: sessionTargetProjectRoot(session),
       sessionId: session.id,
       type: "primary",
     });

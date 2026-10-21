@@ -888,6 +888,11 @@ export class WorkspacePromptScheduler {
     );
   }
 
+  /** Re-reads the durable queue, e.g. after another workspace handed prompts over. */
+  wake(): void {
+    this.requestDrain();
+  }
+
   close(): void {
     for (const unsubscribe of this.executionSubscriptions.values())
       unsubscribe();
