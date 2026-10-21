@@ -8,7 +8,7 @@
  * Consumers import only what they need. The module provides three categories:
  * 1. Functions: createLLMClient, streamResponse
  * 2. Types: LLMClientInstance, StreamingResponse, etc.
- * 3. Error Classes: APIUserAbortError (for convenience)
+ * 3. Error helpers: isAbortError, isContextOverflowError
  */
 
 export {
@@ -18,7 +18,11 @@ export {
 
 // Export core functions
 export { createLLMClientFromConfig } from "./client.js";
-export { isContextOverflowError, ToolCallParseError } from "./errors.js";
+export {
+  isAbortError,
+  isContextOverflowError,
+  ToolCallParseError,
+} from "./errors.js";
 export {
   DEFAULT_PROVIDER_RETRY_POLICY,
   ProviderRetryExhaustedError,
@@ -56,6 +60,8 @@ export type {
   PromptCacheRequestStrategy,
 } from "../providers/index.js";
 
-// Re-export error class for convenience
-// Allows consumers to: import { APIUserAbortError } from '@/core/llm-client'
+/**
+ * @deprecated Only matches OpenAI SDK aborts; Anthropic throws its own class.
+ * Use `isAbortError(error)` instead.
+ */
 export { APIUserAbortError } from "openai";

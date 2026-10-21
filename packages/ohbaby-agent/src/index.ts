@@ -106,7 +106,7 @@ export * from "./core/system-prompt/index.js";
  * Consumers import only what they need. The module provides three categories:
  * 1. Functions: createLLMClient, streamResponse
  * 2. Types: LLMClientInstance, StreamingResponse, etc.
- * 3. Error Classes: APIUserAbortError (for convenience)
+ * 3. Error Classes: APIUserAbortError (deprecated in ohbaby-llm; prefer isAbortError there)
  */
 
 export {
@@ -155,8 +155,7 @@ export type {
   PromptCacheRequestStrategy,
 } from "ohbaby-llm";
 
-// Re-export error class for convenience
-// Allows consumers to: import { APIUserAbortError } from '@/core/llm-client'
+// Kept for compatibility; deprecated in ohbaby-llm in favor of isAbortError.
 export { APIUserAbortError } from "ohbaby-llm";
 
 export * from "./mcp/index.js";
