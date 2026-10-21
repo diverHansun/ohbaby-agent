@@ -9,10 +9,8 @@ import {
   RequestAttemptObserver,
 } from "./request-observation.js";
 import type {
+  ModelRequestAttempt,
   ModelRequestObservation,
-  ModelRequestRecord,
-  AgentStepRequestRecord,
-  SummaryRequestRecord,
   PreparedRequestSettings,
 } from "./types.js";
 import { APIConnectionError as OpenAIConnectionError } from "openai";
@@ -95,12 +93,6 @@ class RetrySleepAbortedError extends Error {
     super("Retry sleep aborted");
     this.name = "RetrySleepAbortedError";
   }
-}
-
-function isRunRequestObservation(
-  fact: ModelRequestObservation<ModelRequestRecord>,
-): fact is ModelRequestObservation {
-  return "runId" in fact.request;
 }
 
 function sortedToolCalls(
@@ -310,14 +302,15 @@ export async function* streamResponse(
   messages: readonly ModelMessage[],
   options?: {
     preparedSettings?: PreparedRequestSettings;
-    summaryOwner?: Pick<
-      SummaryRequestRecord,
-      "compactionId" | "messageId" | "attempt" | "inputIds"
-    >;
-    onSummaryRequestRecord?: (record: SummaryRequestRecord) => void;
-    requestOwner?: Pick<AgentStepRequestRecord, "runId" | "messageId" | "step">;
-    /** Persist input membership and recheck run eligibility before each attempt. */
-    beforeRequestAttempt?: (request: AgentStepRequestRecord) => Promise<void>;
+    /**
+     * Awaited before each attempt opens; a rejection fails the request with
+     * `ModelObservationError` instead of sending it.
+     */
+    beforeRequestAttempt?: (request: ModelRequestAttempt) => Promise<void>;
+    /**
+     * Awaited for each start, first-text and end transition. The same
+     * observations are also yielded on the stream as `requestObservation`.
+     */
     onRequestObservation?: (
       observation: ModelRequestObservation,
     ) => Promise<void>;
@@ -385,9 +378,13 @@ export async function* streamResponse(
       });
       return;
     }
+    // Attempts are recorded only when the caller observes them.
+    const observed =
+      options?.beforeRequestAttempt !== undefined ||
+      options?.onRequestObservation !== undefined;
     const controller = new AbortController();
     const signal = callerSignal
-      ? options?.requestOwner
+      ? observed
         ? AbortSignal.any([callerSignal, controller.signal])
         : callerSignal
       : controller.signal;
@@ -405,36 +402,18 @@ export async function* streamResponse(
     let reasoningTokens: number | undefined;
     let validatingProtocol = false;
 
-    const requestRecord: ModelRequestRecord | undefined = options?.summaryOwner
+    const requestRecord: ModelRequestAttempt | undefined = observed
       ? {
-          ...options.summaryOwner,
           requestId: randomUUID(),
-          purpose: "context-summary",
+          attempt: failedAttempts + 1,
           startedAt: 0,
           outcome: "running",
         }
-      : options?.requestOwner
-        ? {
-            ...options.requestOwner,
-            requestId: randomUUID(),
-            attempt: failedAttempts + 1,
-            purpose: "agent-step",
-            startedAt: 0,
-            outcome: "running",
-          }
-        : undefined;
+      : undefined;
     const observer = new RequestAttemptObserver(
       requestRecord,
       async (fact) => {
-        if (fact.request.purpose === "context-summary") {
-          if (fact.type === "request-ended")
-            options?.onSummaryRequestRecord?.(fact.request);
-        } else {
-          await options?.onRequestObservation?.({
-            ...fact,
-            request: fact.request,
-          });
-        }
+        await options?.onRequestObservation?.(fact);
       },
       signal,
     );
@@ -472,12 +451,7 @@ export async function* streamResponse(
     };
     try {
       const beforeRequestAttempt = options?.beforeRequestAttempt;
-      if (beforeRequestAttempt) {
-        if (!requestRecord || !("runId" in requestRecord)) {
-          throw new ModelObservationError(
-            new Error("Attempt admission requires a request owner"),
-          );
-        }
+      if (beforeRequestAttempt && requestRecord) {
         const admission = await observer.receive(
           Promise.resolve()
             .then(() => beforeRequestAttempt(requestRecord))
@@ -544,7 +518,7 @@ export async function* streamResponse(
       if (provider.streamStart === "iterator")
         await observer.waitStarted(first);
       await observer.flush();
-      for (const fact of observer.drain().filter(isRunRequestObservation))
+      for (const fact of observer.drain())
         yield {
           messageSnapshot: { content: null },
           isComplete: false,
@@ -553,7 +527,7 @@ export async function* streamResponse(
       let next = await first;
       for (;;) {
         await observer.flush();
-        for (const fact of observer.drain().filter(isRunRequestObservation))
+        for (const fact of observer.drain())
           yield {
             messageSnapshot: { content: null },
             isComplete: false,
@@ -664,7 +638,7 @@ export async function* streamResponse(
       if (signal.aborted) {
         observer.end("aborted");
         await observer.flush();
-        for (const fact of observer.drain().filter(isRunRequestObservation))
+        for (const fact of observer.drain())
           yield {
             messageSnapshot: { content: null },
             isComplete: false,
@@ -734,7 +708,7 @@ export async function* streamResponse(
       validatingProtocol = false;
       observer.end("success");
       await observer.flush();
-      for (const fact of observer.drain().filter(isRunRequestObservation))
+      for (const fact of observer.drain())
         yield {
           messageSnapshot: { content: null },
           isComplete: false,
@@ -756,7 +730,7 @@ export async function* streamResponse(
     } catch (caughtError) {
       observer.end(signal.aborted ? "aborted" : "error");
       await observer.flush();
-      for (const fact of observer.drain().filter(isRunRequestObservation))
+      for (const fact of observer.drain())
         yield {
           messageSnapshot: { content: null },
           isComplete: false,

@@ -253,27 +253,26 @@ export interface StreamingResponse {
   tokenUsage?: StreamingTokenUsage;
 }
 
-/** One observable adapter invocation; provider-internal retries are not counted. */
-export interface AgentStepRequestRecord {
-  /** Provider-reported usage; absence means unknown, not zero. */
-  readonly usage?: TokenUsage;
-  readonly endTimeSource?: "recovery";
-  /** Immutable current-run input membership of this exact prepared request. */
-  readonly inputIds?: readonly string[];
+/**
+ * One observable adapter invocation; provider-internal retries are not counted.
+ *
+ * The client only measures the attempt. Callers that need to attribute it to
+ * their own work (a run, a step, a compaction) attach those fields themselves.
+ */
+export interface ModelRequestAttempt {
   readonly requestId: string;
-  readonly runId: string;
-  readonly messageId: string;
-  readonly step: number;
+  /** 1-based attempt number within this `streamResponse` call. */
   readonly attempt: number;
-  readonly purpose: "agent-step";
   readonly startedAt: number;
   readonly firstTextAt?: number;
   readonly endedAt?: number;
+  /** Provider-reported usage; absence means unknown, not zero. */
+  readonly usage?: TokenUsage;
   readonly outcome: "running" | "success" | "error" | "aborted";
 }
-export interface ModelRequestObservation<T = AgentStepRequestRecord> {
+export interface ModelRequestObservation {
   readonly type: "request-started" | "first-text" | "request-ended";
-  readonly request: T;
+  readonly request: ModelRequestAttempt;
 }
 
 /** Resolved ordinary-request settings, snapshotted before context maintenance. */
@@ -283,14 +282,3 @@ export type PreparedRequestSettings = Readonly<
     "model" | "temperature" | "reasoning" | "maxTokens"
   >
 >;
-
-/** A compact attempt owns a future summary, without inventing an ordinary run. */
-export type SummaryRequestRecord = Omit<
-  AgentStepRequestRecord,
-  "runId" | "step" | "purpose"
-> & {
-  readonly compactionId: string;
-  readonly purpose: "context-summary";
-};
-
-export type ModelRequestRecord = AgentStepRequestRecord | SummaryRequestRecord;

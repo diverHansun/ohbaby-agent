@@ -1,7 +1,8 @@
 import { renderReminderText } from "../message/origin.js";
 import { isRuntimeInputSnapshotChanged } from "./runtime-input-error.js";
-import type { AgentStepRequestRecord } from "ohbaby-llm";
+import type { AgentStepRequestRecord } from "../message/types.js";
 import { ModelObservationError } from "ohbaby-llm";
+import type { ModelRequestAttempt, ModelRequestObservation } from "ohbaby-llm";
 import { ToolBatchEventQueue } from "./tool-event-queue.js";
 import { ToolDeliveryError } from "../tool-scheduler/index.js";
 import { randomUUID } from "node:crypto";
@@ -1457,6 +1458,21 @@ export class Lifecycle {
         timestamp: Date.now(),
       };
     };
+    // The client measures attempts; the agent attributes them to this step.
+    const stepRequest = (
+      attempt: ModelRequestAttempt,
+    ): AgentStepRequestRecord => {
+      // streamResponse reports this as a ModelObservationError.
+      if (params.runId === undefined)
+        throw new Error("Attempt admission requires a request owner");
+      return {
+        ...attempt,
+        runId: params.runId,
+        messageId: assistantMessage.id,
+        step,
+        purpose: "agent-step",
+      };
+    };
     try {
       for await (const response of streamResponse(
         requestClient,
@@ -1466,9 +1482,12 @@ export class Lifecycle {
           purpose: "agent-step",
           ...(currentRunInputs
             ? {
-                beforeRequestAttempt: (request: AgentStepRequestRecord) =>
+                beforeRequestAttempt: (attempt: ModelRequestAttempt) =>
                   currentRunInputs.admitRequestAttempt(
-                    { ...request, inputIds: input.request.inputIds ?? [] },
+                    {
+                      ...stepRequest(attempt),
+                      inputIds: input.request.inputIds ?? [],
+                    },
                     params.signal,
                   ),
               }
@@ -1476,34 +1495,30 @@ export class Lifecycle {
           ...(params.runId === undefined
             ? {}
             : {
-                requestOwner: {
-                  runId: params.runId,
-                  messageId: assistantMessage.id,
-                  step,
-                },
                 onRequestObservation: async (
-                  fact: import("ohbaby-llm").ModelRequestObservation,
+                  fact: ModelRequestObservation,
                 ): Promise<void> => {
+                  const request = stepRequest(fact.request);
                   const saved = this.deps.messageManager.updateMessage(
                     assistantMessage.id,
-                    { modelRequests: [fact.request] },
+                    { modelRequests: [request] },
                   );
-                  this.activeModelRequests.set(fact.request.requestId, {
-                    request: fact.request,
+                  this.activeModelRequests.set(request.requestId, {
+                    request,
                     saved,
                   });
                   try {
                     await saved;
-                    if (fact.request.outcome === "success")
+                    if (request.outcome === "success")
                       await params.currentRunInputs?.confirmRequestSuccess(
-                        fact.request.requestId,
+                        request.requestId,
                       );
                   } catch (error) {
-                    this.activeModelRequests.delete(fact.request.requestId);
+                    this.activeModelRequests.delete(request.requestId);
                     throw error;
                   }
-                  if (fact.request.endedAt !== undefined)
-                    this.activeModelRequests.delete(fact.request.requestId);
+                  if (request.endedAt !== undefined)
+                    this.activeModelRequests.delete(request.requestId);
                 },
               }),
           reasoning: mergeReasoningIntent(params.reasoning),
@@ -1516,7 +1531,8 @@ export class Lifecycle {
         },
       )) {
         if (response.requestObservation) {
-          const { type, request } = response.requestObservation;
+          const { type } = response.requestObservation;
+          const request = stepRequest(response.requestObservation.request);
           const timestamp =
             type === "request-started"
               ? request.startedAt

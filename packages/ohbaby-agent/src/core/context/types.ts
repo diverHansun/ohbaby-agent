@@ -1,4 +1,5 @@
-import type { PreparedRequestSettings, SummaryRequestRecord } from "ohbaby-llm";
+import type { PreparedRequestSettings } from "ohbaby-llm";
+import type { SummaryRequestRecord } from "../message/types.js";
 import type { ReasoningIntent } from "ohbaby-llm";
 import type { ModelOrigin } from "ohbaby-llm";
 import type { BusInstance } from "../../bus/index.js";

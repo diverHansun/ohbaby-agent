@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createContextSummaryClient } from "./prompt-context.js";
-import type { LLMClientInstance, SummaryRequestRecord } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { SummaryRequestRecord } from "../../core/message/types.js";
 import type { InterfaceProviderRequest } from "ohbaby-llm";
 import { resolvePreparedRequestSettings } from "ohbaby-llm";
 

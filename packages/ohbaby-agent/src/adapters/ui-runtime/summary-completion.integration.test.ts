@@ -9,7 +9,8 @@ import {
 } from "../../core/message/index.js";
 import { createAnthropicProvider } from "ohbaby-llm";
 import { createContextSummaryClient } from "./prompt-context.js";
-import type { LLMClientInstance, SummaryRequestRecord } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { SummaryRequestRecord } from "../../core/message/types.js";
 import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 
 describe("summary completion through the production stream accumulator", () => {

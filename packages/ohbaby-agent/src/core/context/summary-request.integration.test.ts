@@ -6,7 +6,7 @@ import { COMPRESSION_PROMPT } from "./compression-prompt.js";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 import { describe, expect, it, vi } from "vitest";
 import { ProviderStreamInterruptedError } from "ohbaby-llm";
-import type { SummaryRequestRecord } from "ohbaby-llm";
+import type { SummaryRequestRecord } from "../message/types.js";
 import { createBus } from "../../bus/index.js";
 import {
   createInMemoryMessageStore,

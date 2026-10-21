@@ -2,7 +2,7 @@ import { RuntimeInputSnapshotChangedError } from "./runtime-input-error.js";
 import { createPromptCacheUsageTracker } from "../../adapters/ui-inprocess/prompt-cache-usage.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import * as llmStreaming from "ohbaby-llm";
-import type { AgentStepRequestRecord } from "ohbaby-llm";
+import type { AgentStepRequestRecord } from "../message/types.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,

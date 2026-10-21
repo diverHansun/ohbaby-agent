@@ -9,11 +9,9 @@ export {
 } from "./client/prompt-cache.js";
 export { ModelObservationError } from "./client/request-observation.js";
 export type {
-  AgentStepRequestRecord,
+  ModelRequestAttempt,
   ModelRequestObservation,
-  ModelRequestRecord,
   PreparedRequestSettings,
-  SummaryRequestRecord,
 } from "./client/types.js";
 export {
   ModelStateSchema,

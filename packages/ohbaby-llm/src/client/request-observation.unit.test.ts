@@ -21,7 +21,6 @@ const config: LLMClientInstance["config"] = {
   baseUrl: "http://localhost",
   maxTokens: 128,
 };
-const owner = { runId: "run", step: 1, messageId: "message" };
 
 describe("request attempt observations", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -53,7 +52,6 @@ describe("request attempt observations", () => {
       const consuming = (async (): Promise<void> => {
         for await (const _ of streamResponse(client, [], {
           signal: abort.signal,
-          requestOwner: owner,
           beforeRequestAttempt: async (record) => {
             admittedId = record.requestId;
             entered.resolve();
@@ -103,7 +101,6 @@ describe("request attempt observations", () => {
     };
     const consuming = async (): Promise<void> => {
       for await (const _ of streamResponse(client, [], {
-        requestOwner: owner,
         beforeRequestAttempt: async () => {
           throw new Error("input ledger unavailable");
         },
@@ -137,7 +134,6 @@ describe("request attempt observations", () => {
     const consuming = (async (): Promise<void> => {
       for await (const _ of streamResponse(client, [], {
         signal: abort.signal,
-        requestOwner: owner,
         onRequestObservation: async (fact) => {
           if (fact.type === "request-started") started.resolve();
         },
@@ -182,7 +178,6 @@ describe("request attempt observations", () => {
     };
     const running = (async (): Promise<void> => {
       for await (const _ of streamResponse(client, [], {
-        requestOwner: owner,
         onRequestObservation: async (fact) => {
           facts.push(fact);
           if (fact.type === "request-started") await startSave.promise;
@@ -238,7 +233,6 @@ describe("request attempt observations", () => {
     const run = (async (): Promise<void> => {
       for await (const _ of streamResponse(client, [], {
         signal: abort.signal,
-        requestOwner: owner,
         onRequestObservation: async (fact) => {
           facts.push(fact);
           if (fact.type === "request-started") await save.promise;
@@ -270,7 +264,7 @@ describe("request attempt observations", () => {
       endedAt: abortedAt,
     });
   });
-  it("does not invoke an adapter after cancellation during owner preparation", async () => {
+  it("does not invoke an adapter after cancellation during request preparation", async () => {
     const abort = new AbortController();
     abort.abort();
     let calls = 0;
@@ -289,13 +283,17 @@ describe("request attempt observations", () => {
         isAbortError: () => false,
       },
     };
+    const facts: ModelRequestObservation[] = [];
     for await (const _ of streamResponse(client, [], {
       signal: abort.signal,
-      requestOwner: owner,
+      onRequestObservation: async (fact) => {
+        facts.push(fact);
+      },
     })) {
       /* consume */
     }
     expect(calls).toBe(0);
+    expect(facts).toEqual([]);
   });
   it.each(["call", "iterator"] as const)(
     "starts %s I/O before waiting for its start save",
@@ -331,7 +329,6 @@ describe("request attempt observations", () => {
         for await (const _ of streamResponse(client, [], {
           purpose: "agent-step",
           sessionId: "session",
-          requestOwner: owner,
           onRequestObservation: async (fact) => {
             facts.push(fact);
             if (fact.type === "request-started") await save.promise;
@@ -351,10 +348,12 @@ describe("request attempt observations", () => {
         "request-ended",
       ]);
       expect(facts[0].request).toMatchObject({
-        ...owner,
-        purpose: "agent-step",
+        attempt: 1,
         outcome: "running",
       });
+      // The client reports measurements only; attribution belongs to callers.
+      expect(facts[0].request).not.toHaveProperty("runId");
+      expect(facts[0].request).not.toHaveProperty("purpose");
       expect(facts[2].request.outcome).toBe("success");
       expect(facts[2].request.firstTextAt).toBeTypeOf("number");
       expect(facts[2].request.endedAt).toBeTypeOf("number");
@@ -381,7 +380,6 @@ describe("request attempt observations", () => {
       },
     };
     for await (const _ of streamResponse(client, [], {
-      requestOwner: owner,
       retry: { initialDelayMs: 0 },
       onRequestObservation: async (f) => {
         facts.push(f);
@@ -402,7 +400,6 @@ describe("request attempt observations", () => {
     await expect(
       (async (): Promise<void> => {
         for await (const _ of streamResponse(client, [], {
-          requestOwner: owner,
           onRequestObservation: async () => {
             throw Object.assign(new Error("save failed"), { status: 503 });
           },

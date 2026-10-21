@@ -45,4 +45,17 @@ Lifecycle 等生成器耗尽之后再发布一次 `llm:complete`。length/filter
 
 `TokenUsage`／`StreamingTokenUsage` 增加可选 `reasoningTokens`，是 `outputTokens` 子项，不重复计入 `totalTokens = inputTokens + outputTokens`。缺失、非法或大于 output 的明细保持未知，明确的 0 保留；任一请求明细缺失时，Run 聚合明细也未知。cache breakdown 仍属于 inclusive input。
 
-`ModelRequestRecord.usage?: TokenUsage` 是记录的可选字段，旧记录可读且不补零。普通请求与摘要请求分别使用 `AgentStepRequestRecord` 和 `SummaryRequestRecord`；请求记录回调由包提供，具体持久化与事务提交归 agent 管理。
+请求记录的 `usage?: TokenUsage` 是可选字段，旧记录可读且不补零。普通请求与摘要请求的记录类型由 agent 定义，见下节；包只提供观测回调，具体持久化与事务提交归 agent 管理。
+
+## 请求尝试观测（2026-10-21，llm 包去 agent 概念）
+
+包只描述一次请求尝试本身，类型是 `ModelRequestAttempt`，字段为 `requestId`、`attempt`、`startedAt`、`firstTextAt?`、`endedAt?`、`usage?` 和 `outcome`。`ModelRequestObservation` 携带这个类型，不再带 run、step 或 compaction 字段。
+
+调用方传入 `beforeRequestAttempt` 或 `onRequestObservation` 时，包才会记录尝试。观测会被等待保存，并在流里以 `requestObservation` 原样产出。
+
+归属字段由 agent 自己补。`AgentStepRequestRecord`、`SummaryRequestRecord` 和 `ModelRequestRecord` 定义在 agent 的 `core/message/types.ts`：
+
+- lifecycle 在回调里补 `runId`、`messageId`、`step` 和 `purpose: "agent-step"`；
+- 摘要请求只保留 `request-ended`，补 `compactionId`、摘要 `messageId`、压缩层的 `attempt`、`inputIds` 和 `purpose: "context-summary"`。
+
+落库格式与改动前一致。

@@ -39,7 +39,6 @@ function deferred<T>(): {
 }
 
 const messages = [{ role: "user" as const, content: "test" }];
-const owner = { runId: "run-idle", messageId: "message-idle", step: 1 };
 const retry = { maxRetriesPerStep: 1, initialDelayMs: 20, maxDelayMs: 20 };
 const never = <T>(): Promise<T> =>
   new Promise(() => {
@@ -127,7 +126,6 @@ function collect(
       for await (const item of streamResponse(client, messages, {
         idleTimeoutMs: 100,
         retry,
-        requestOwner: owner,
         onRequestObservation: async (record) => {
           records.push(record);
         },
@@ -235,7 +233,7 @@ describe("streamResponse idle protection", () => {
     );
     const run = collect(client, {
       purpose: "context-summary",
-      requestOwner: undefined,
+      onRequestObservation: undefined,
       retry: { maxRetriesPerStep: 0 },
     });
     await vi.advanceTimersByTimeAsync(100);

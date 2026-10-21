@@ -1,4 +1,4 @@
-import type { AgentStepRequestRecord } from "ohbaby-llm";
+import type { AgentStepRequestRecord } from "../message/types.js";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type {
   DisplayReasoningOwner,

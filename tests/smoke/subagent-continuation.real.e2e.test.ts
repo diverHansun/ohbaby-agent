@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import type { ModelRequestRecord } from "ohbaby-llm";
+import type { ModelRequestRecord } from "../../packages/ohbaby-agent/src/core/message/types.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";

@@ -53,7 +53,8 @@ import type {
   PrepareTurnInput,
   TokenCounter,
 } from "./types.js";
-import type { PreparedRequestSettings, SummaryRequestRecord } from "ohbaby-llm";
+import type { PreparedRequestSettings } from "ohbaby-llm";
+import type { SummaryRequestRecord } from "../message/types.js";
 import { isContextOverflowError } from "ohbaby-llm";
 import {
   isRetryableProviderError,

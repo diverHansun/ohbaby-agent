@@ -1,4 +1,4 @@
-import type { AgentStepRequestRecord } from "ohbaby-llm";
+import type { AgentStepRequestRecord } from "../../core/message/types.js";
 import type { ToolExecutionObservation } from "../../core/tool-scheduler/types.js";
 import type { AgentRunEventSource } from "../../core/agents/index.js";
 import type { LifecycleEvent } from "../../core/lifecycle/index.js";
