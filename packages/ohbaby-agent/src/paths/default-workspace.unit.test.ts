@@ -1,6 +1,7 @@
 import {
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   stat,
@@ -37,22 +38,28 @@ describe("default workspace", () => {
     );
   });
 
-  it("creates the directory once with private permissions", async () => {
+  it("creates the directory once with private permissions on POSIX", async () => {
     const created = await ensureDefaultWorkspaceDirectory();
     expect(created).toBe(await realpath(resolveDefaultWorkspaceDirectory()));
-    expect((await stat(created)).mode & 0o777).toBe(0o700);
+    const createdStat = await stat(created);
+    expect(createdStat.isDirectory()).toBe(true);
+    // Windows does not expose POSIX directory permission bits.
+    if (process.platform !== "win32") {
+      expect(createdStat.mode & 0o777).toBe(0o700);
+    }
     await expect(ensureDefaultWorkspaceDirectory()).resolves.toBe(created);
   });
 
   it("keeps existing contents and permissions", async () => {
     const directory = resolveDefaultWorkspaceDirectory();
     await mkdir(directory, { recursive: true, mode: 0o755 });
+    const originalMode = (await stat(directory)).mode & 0o777;
     await writeFile(join(directory, "notes.md"), "keep");
 
     await ensureDefaultWorkspaceDirectory();
 
-    expect((await stat(directory)).mode & 0o777).toBe(0o755);
-    expect((await stat(join(directory, "notes.md"))).isFile()).toBe(true);
+    expect((await stat(directory)).mode & 0o777).toBe(originalMode);
+    expect(await readFile(join(directory, "notes.md"), "utf8")).toBe("keep");
   });
 
   it("is never absorbed by a Git repository in a parent directory", async () => {
