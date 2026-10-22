@@ -1,3 +1,4 @@
+import { SkillLoader } from "../skill/loader.js";
 import {
   mkdir,
   mkdtemp,
@@ -886,5 +887,142 @@ describe("settings propagation through the shared production backend", () => {
     await client.dispose();
     expect(activeMcpSubscriptions).toBe(0);
     expect(activeSkillSubscriptions).toBe(0);
+  });
+  it("refreshes a status-preloaded MCP manager before the first prompt after a config edit", async () => {
+    const workdir = join(root, "status-preloaded");
+    await mkdir(workdir);
+    const config = (name: string): McpServersConfig => ({
+      mcpServers: {
+        [name]: {
+          type: "stdio",
+          command: "fake",
+          args: [],
+          enabled: true,
+          trust: false,
+          timeout: 5000,
+        },
+      },
+    });
+    const file = join(globalRoot, "mcp", "settings.json");
+    await json(file, config("old"));
+    let disconnected = 0;
+    McpManager.getInstance(workdir, {
+      createClient: (name) => localMcp(name, () => disconnected++),
+    });
+    const compositions: Awaited<
+      ReturnType<typeof compositionModule.createUiRuntimeComposition>
+    >[] = [];
+    const compose = compositionModule.createUiRuntimeComposition;
+    vi.spyOn(
+      compositionModule,
+      "createUiRuntimeComposition",
+    ).mockImplementation(async (options) => {
+      const runtime = await compose(options);
+      compositions.push(runtime);
+      return runtime;
+    });
+    const client = backend(workdir, []);
+    expect(
+      (await client.getSettingsMcpStatus()).map((server) => server.name),
+    ).toEqual(["old"]);
+    await json(file, config("new"));
+    // Reading initialized status must not reconnect or apply the saved file.
+    expect(
+      (await client.getSettingsMcpStatus()).map((server) => server.name),
+    ).toEqual(["old"]);
+    expect(disconnected).toBe(0);
+    expect(
+      (
+        await client.submitPromptAndWait("First prompt", {
+          sessionId: "pre-read",
+        })
+      ).prompt.status,
+    ).toBe("succeeded");
+    const names = (await compositions[0].listToolSummaries()).map(
+      (tool) => tool.name,
+    );
+    expect(names).toContain("mcp_s3_new_t4_echo");
+    expect(names).not.toContain("mcp_s3_old_t4_echo");
+    expect(disconnected).toBe(1);
+    expect(
+      (await client.getSettingsMcpStatus()).map((server) => server.name),
+    ).toEqual(["new"]);
+    await client.submitPromptAndWait("Same config", { sessionId: "pre-read" });
+    expect(disconnected).toBe(1);
+  });
+  it("keeps settings Skills and the live model catalog synchronized through the shared registry", async () => {
+    const workdir = join(root, "settings-skills");
+    const directory = join(workdir, ".ohbaby", "skills");
+    const original = await skill(
+      directory,
+      "original-skill",
+      "Original description",
+    );
+    const requests: InterfaceProviderRequest[] = [];
+    const compose = compositionModule.createUiRuntimeComposition;
+    let runtime: Awaited<ReturnType<typeof compose>> | undefined;
+    vi.spyOn(
+      compositionModule,
+      "createUiRuntimeComposition",
+    ).mockImplementation(async (options) => {
+      runtime = await compose(options);
+      return runtime;
+    });
+    const client = backend(workdir, requests);
+    await client.submitPromptAndWait("Initial", { sessionId: "skills-read" });
+    const activeRuntime = runtime;
+    if (!activeRuntime) throw new Error("Runtime was not created");
+    expect(
+      (await client.getSettingsSkills()).map((entry) => entry.name),
+    ).toEqual(["original-skill"]);
+    await skill(directory, "new-skill", "New description");
+    await skill(directory, "original-skill", "Changed description");
+    expect(
+      (await client.getSettingsSkills()).map((entry) => entry.description),
+    ).toEqual(["New description", "Changed description"]);
+    expect(JSON.stringify(await activeRuntime.listToolSummaries())).toContain(
+      "new-skill: New description",
+    );
+    expect(JSON.stringify(await activeRuntime.listToolSummaries())).toContain(
+      "original-skill: Changed description",
+    );
+    await client.submitPromptAndWait("Updated", { sessionId: "skills-read" });
+    expect(JSON.stringify(requests.at(-1)?.tools)).toContain(
+      "original-skill: Changed description",
+    );
+    expect(JSON.stringify(requests.at(-1)?.tools)).toContain(
+      "new-skill: New description",
+    );
+    await rm(dirname(original), { recursive: true });
+    expect(
+      (await client.getSettingsSkills()).map((entry) => entry.name),
+    ).toEqual(["new-skill"]);
+    expect(
+      JSON.stringify(await activeRuntime.listToolSummaries()),
+    ).not.toContain("original-skill");
+    await client.submitPromptAndWait("Deleted", { sessionId: "skills-read" });
+    expect(JSON.stringify(requests.at(-1)?.tools)).not.toContain(
+      "original-skill",
+    );
+  });
+
+  it("does not reparse unchanged Skill frontmatter on repeated settings reads", async () => {
+    const workdir = join(root, "unchanged-settings-skills");
+    await skill(
+      join(workdir, ".ohbaby", "skills"),
+      "cached-skill",
+      "Cached description",
+    );
+    const scan = vi.spyOn(SkillLoader.prototype, "scan");
+    const client = backend(workdir, []);
+    expect(
+      (await client.getSettingsSkills()).map((entry) => entry.name),
+    ).toEqual(["cached-skill"]);
+    const count = scan.mock.calls.length;
+    expect(count).toBe(1);
+    expect(
+      (await client.getSettingsSkills()).map((entry) => entry.name),
+    ).toEqual(["cached-skill"]);
+    expect(scan.mock.calls.length).toBe(count);
   });
 });

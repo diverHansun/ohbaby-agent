@@ -278,3 +278,13 @@ export { getUnconsumedSteers } from "./contract/run-inputs.js";
 export { compareUiPromptQueueOrder } from "./contract/prompt-queue-order.js";
 
 export { isUiCommandCompletion } from "./slash-command/types.js";
+
+export type {
+  UiSettingsMcpTool,
+  UiSettingsMcpServer,
+  UiSettingsSkill,
+  UiSettingsAgent,
+  UiSettingsMcpStatusResponse,
+  UiSettingsSkillsResponse,
+  UiSettingsAgentsResponse,
+} from "./contract/settings.js";

@@ -1,3 +1,11 @@
+import { AgentRegistry } from "../agents/registry.js";
+import { loadAgentConfigWithOrigins } from "../config/agents/loaders.js";
+import {
+  readSettingsMcpStatus,
+  readSettingsSkills,
+  readSettingsAgents,
+  type InstanceSettingsReader,
+} from "../services/settings/reader.js";
 import {
   slashSkillUsage,
   slashSkillName,
@@ -159,7 +167,7 @@ import {
 import type { PermissionResponse as CorePermissionResponse } from "../permission/index.js";
 import { Project } from "../project/index.js";
 import { IrisError } from "../utils/index.js";
-import type { AgentManager } from "../agents/index.js";
+import { AgentManager } from "../agents/index.js";
 import {
   InMemorySubagentInstanceStore,
   type SubagentInstanceStore,
@@ -365,7 +373,8 @@ export interface InProcessUiBackendClient
   extends
     Omit<UiBackendClient, keyof UiSessionRecoveryClient>,
     UiPromptQueueExecutionPort,
-    UiSessionRecoveryClient {
+    UiSessionRecoveryClient,
+    InstanceSettingsReader {
   listSubagentExecutions: NonNullable<
     UiBackendClient["listSubagentExecutions"]
   >;
@@ -1010,6 +1019,9 @@ export function createInProcessUiBackendClient(
     return entry;
   }
 
+  let appliedMcpVersion: string | undefined;
+  let skillDirectoriesSignature: string | undefined;
+
   const runtimeController = new InProcessRuntimeController({
     clearPendingPermissionsForRun,
     getConfigVersion: async (): Promise<SettingsConfigVersions> =>
@@ -1045,7 +1057,11 @@ export function createInProcessUiBackendClient(
             throw error;
         }
       }
-      if (changedDomains?.includes("mcp"))
+      const mcpVersion = (await settingsConfigVersion(baseProjectRoot)).mcp;
+      if (
+        changedDomains?.includes("mcp") ||
+        (appliedMcpVersion !== undefined && appliedMcpVersion !== mcpVersion)
+      )
         await McpManager.getInstance(baseProjectRoot).reload();
       const llmClient = await resolveLLMClient(baseProjectRoot);
       const skillRegistryWasLoaded = skillRegistryPromise !== undefined;
@@ -1054,12 +1070,12 @@ export function createInProcessUiBackendClient(
         changedDomains?.includes("skills") ||
         (changedDomains === undefined && skillRegistryWasLoaded)
       ) {
-        await skillRegistry.reload(
-          await loadConfiguredSkillDirectories({
-            projectDirectory: baseProjectRoot,
-            onNotice: publishNotice,
-          }),
-        );
+        const directories = await loadConfiguredSkillDirectories({
+          projectDirectory: baseProjectRoot,
+          onNotice: publishNotice,
+        });
+        await skillRegistry.reload(directories);
+        skillDirectoriesSignature = JSON.stringify(directories);
       }
       const runtimeRunIdFactory =
         options.createRunId ??
@@ -1112,6 +1128,7 @@ export function createInProcessUiBackendClient(
         subagentOwnerPid: options.subagentOwnerPid,
         workdir: baseProjectRoot,
       });
+      appliedMcpVersion = mcpVersion;
       runtime.goals.attachTurnRunner({
         runTurn: runGoalTurn,
         finishTurn: finishGoalTurn,
@@ -2462,12 +2479,14 @@ export function createInProcessUiBackendClient(
   function getSkillRegistry(): Promise<SkillRegistry> {
     skillRegistryPromise ??= (async (): Promise<SkillRegistry> => {
       const projectRoot = await resolveProjectRoot();
+      const directories = await loadConfiguredSkillDirectories({
+        projectDirectory: projectRoot,
+        onNotice: publishNotice,
+      });
+      skillDirectoriesSignature = JSON.stringify(directories);
       return new SkillRegistry({
         loader: new SkillLoader({
-          directories: await loadConfiguredSkillDirectories({
-            projectDirectory: projectRoot,
-            onNotice: publishNotice,
-          }),
+          directories,
           logger: createSkillLogger(),
           projectDirectory: projectRoot,
         }),
@@ -4157,6 +4176,56 @@ export function createInProcessUiBackendClient(
   // The eager startup promise remains observable through initialize and writes.
   void ready.catch(() => undefined);
   return {
+    getSettingsMcpStatus(): ReturnType<
+      InstanceSettingsReader["getSettingsMcpStatus"]
+    > {
+      return coordinateModelConfig(undefined, async () => {
+        const projectRoot = await resolveProjectRoot();
+        const version = (await settingsConfigVersion(projectRoot)).mcp;
+        const status = await readSettingsMcpStatus(
+          McpManager.getInstance(projectRoot),
+        );
+        // Record only the first initialization. Reading an existing manager never
+        // applies a changed file. Runtime assembly/reconnect owns later versions.
+        appliedMcpVersion ??= version;
+        return status;
+      });
+    },
+    getSettingsSkills(): ReturnType<
+      InstanceSettingsReader["getSettingsSkills"]
+    > {
+      return coordinateModelConfig(undefined, async () => {
+        const registry = await getSkillRegistry();
+        const directories = await loadConfiguredSkillDirectories({
+          projectDirectory: await resolveProjectRoot(),
+          onNotice: publishNotice,
+        });
+        const signature = JSON.stringify(directories);
+        if (signature !== skillDirectoriesSignature) {
+          await registry.reload(directories);
+          skillDirectoriesSignature = signature;
+        }
+        return readSettingsSkills(registry);
+      });
+    },
+    getSettingsAgents(): ReturnType<
+      InstanceSettingsReader["getSettingsAgents"]
+    > {
+      return coordinateModelConfig(undefined, async () => {
+        const projectDirectory = await resolveProjectRoot();
+        const manager =
+          options.agentManager ??
+          new AgentManager({
+            registry: new AgentRegistry({
+              configLoader: (): ReturnType<typeof loadAgentConfigWithOrigins> =>
+                loadAgentConfigWithOrigins({ projectDirectory }),
+            }),
+          });
+        if (!options.agentManager || !runtimeController.getRuntimeIfStarted())
+          await manager.initialize();
+        return readSettingsAgents(manager);
+      });
+    },
     initialize: () => ready,
     initializeSession: (sessionId) => enterSession(sessionId, true),
     getSubagentConversationView: (input) => subagentConversations.read(input),

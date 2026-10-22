@@ -1,3 +1,4 @@
+import { loadAgentConfigWithOrigins } from "../../config/agents/loaders.js";
 import { createSkillUsageReminderProvider } from "../../services/reminder/skill-usage.js";
 import type { Logger } from "../../observability/logger.js";
 import {
@@ -99,7 +100,6 @@ import {
   getDefaultSkillDirectories,
   getSearchConfig,
   loadSkillConfigLenient,
-  loadAgentConfig,
   toSearchProviderConfig,
 } from "../../config/index.js";
 import {
@@ -294,8 +294,8 @@ export async function createUiRuntimeComposition(
     options.agentManager ??
     new AgentManager({
       registry: new AgentRegistry({
-        configLoader: (): ReturnType<typeof loadAgentConfig> =>
-          loadAgentConfig({ projectDirectory: options.workdir }),
+        configLoader: (): ReturnType<typeof loadAgentConfigWithOrigins> =>
+          loadAgentConfigWithOrigins({ projectDirectory: options.workdir }),
       }),
     });
   await agentManager.initialize();

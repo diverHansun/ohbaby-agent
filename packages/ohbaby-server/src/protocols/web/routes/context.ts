@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type {
   UiCommandCorrelation,
+  InstanceSettingsReader,
   UiPromptQueueExecutionPort,
 } from "ohbaby-agent";
 import type { UiBackendClient } from "ohbaby-sdk";
@@ -14,7 +15,9 @@ import type { PermissionRouter } from "../../../coordination/permission-router.j
 /** Per-workspace dependencies shared by the ordered REST and RPC handlers. */
 export interface DaemonRouteContext {
   readonly options: {
-    readonly backend: UiBackendClient & UiPromptQueueExecutionPort;
+    readonly backend: UiBackendClient &
+      UiPromptQueueExecutionPort &
+      Partial<InstanceSettingsReader>;
     readonly packageVersion?: string;
     readonly onShutdown?: () => Promise<void> | void;
   };

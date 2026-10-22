@@ -1,3 +1,5 @@
+import type { InstanceSettingsReader } from "ohbaby-agent";
+import { registerSettingsRoutes } from "../protocols/web/routes/settings.js";
 import { Hono, type Context } from "hono";
 import { randomUUID } from "node:crypto";
 import {
@@ -62,7 +64,9 @@ import { DaemonSseHub } from "./sse-hub.js";
 import { serveWebAsset, type WebAssetsOptions } from "./static-assets.js";
 
 export interface DaemonServerAppOptions {
-  readonly backend: UiBackendClient & UiPromptQueueExecutionPort;
+  readonly backend: UiBackendClient &
+    UiPromptQueueExecutionPort &
+    Partial<InstanceSettingsReader>;
   readonly authToken?: string;
   readonly clientDisconnectRetentionMs?: number;
   readonly commandRecorder?: UiCommandRecorder | false;
@@ -302,6 +306,7 @@ class DaemonServerAppRuntime implements DaemonRouteContext {
     registerEventRoutes(this.app, this);
     registerCommandRoutes(this.app, this);
     registerModelRoutes(this.app, this);
+    registerSettingsRoutes(this.app, this);
     registerSessionMutationRoutes(this.app, this);
     registerPromptMutationRoutes(this.app, this);
     registerPromptLeaseRoutes(this.app, this);

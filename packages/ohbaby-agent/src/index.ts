@@ -208,3 +208,5 @@ export {
 } from "./services/database/index.js";
 
 export { installSystemProxy } from "./utils/network-proxy/index.js";
+
+export type { InstanceSettingsReader } from "./services/settings/reader.js";

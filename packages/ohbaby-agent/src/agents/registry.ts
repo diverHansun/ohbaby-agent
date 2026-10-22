@@ -1,11 +1,12 @@
 import { SUBAGENT_DISABLED_TOOLS } from "../core/tool-scheduler/index.js";
-import { loadAgentConfig } from "../config/agents/index.js";
+import { loadAgentConfigWithOrigins } from "../config/agents/loaders.js";
 import { BUILTIN_AGENTS } from "./builtin/index.js";
 import { SUBAGENT_ROLES } from "./roles.js";
 import {
   assertNoStaticModelConfig,
   type AgentConfig,
   type AgentMode,
+  type AgentOrigin,
   type AgentsConfig,
 } from "./types.js";
 
@@ -19,7 +20,7 @@ export interface AgentRegistryOptions {
 }
 
 async function loadDefaultAgentConfig(): Promise<AgentsConfig> {
-  return loadAgentConfig();
+  return loadAgentConfigWithOrigins();
 }
 
 function cloneAgent(agent: AgentConfig): AgentConfig {
@@ -84,6 +85,7 @@ export class AgentRegistry {
   private readonly options: AgentRegistryOptions;
   private readonly agents = new Map<string, AgentConfig>();
   private initialized = false;
+  private readonly origins = new Map<string, AgentOrigin>();
 
   constructor(options: AgentRegistryOptions = {}) {
     this.options = options;
@@ -91,23 +93,28 @@ export class AgentRegistry {
 
   async initialize(): Promise<void> {
     const merged = new Map<string, AgentConfig>();
+    const origins = new Map<string, AgentOrigin>();
     for (const agent of this.options.builtinAgents ?? BUILTIN_AGENTS) {
       validateAgent(agent, "builtinAgents");
       merged.set(agent.name, cloneAgent(agent));
+      origins.set(agent.name, "builtin");
     }
 
     const configLoader = this.options.configLoader ?? loadDefaultAgentConfig;
     const userConfig = await configLoader();
-    for (const agent of Object.values(userConfig.agents)) {
+    for (const [configName, agent] of Object.entries(userConfig.agents)) {
       validateAgent(agent, "configLoader");
       assertUserAgentCanOverride(agent.name);
       merged.set(agent.name, cloneAgent(agent));
+      origins.set(agent.name, userConfig.origins?.[configName] ?? "global");
     }
 
     this.agents.clear();
+    this.origins.clear();
     for (const [name, agent] of merged) {
       if (shouldExpose(agent)) {
         this.agents.set(name, agent);
+        this.origins.set(name, origins.get(name) ?? "builtin");
       }
     }
     this.initialized = true;
@@ -125,6 +132,13 @@ export class AgentRegistry {
     return agents.filter(
       (agent) => agent.mode === filter.mode || agent.mode === "all",
     );
+  }
+
+  listWithOrigins(): (AgentConfig & { readonly origin: AgentOrigin })[] {
+    return this.list().map((agent) => ({
+      ...agent,
+      origin: this.origins.get(agent.name) ?? "builtin",
+    }));
   }
 
   isInitialized(): boolean {

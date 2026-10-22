@@ -1,5 +1,9 @@
-import type { McpServerConfig, McpServersConfig } from "../../config/index.js";
-import { loadMcpConfig } from "../../config/index.js";
+import type { McpServerConfig } from "../../config/index.js";
+import {
+  loadMcpConfigWithOrigins,
+  type McpConfigWithOrigins,
+  type McpConfigOrigin,
+} from "../../config/mcp/loaders.js";
 import { McpClient } from "./client.js";
 import { adaptMcpTool } from "../integration/tool-adapter.js";
 import type {
@@ -44,11 +48,12 @@ export class McpManager {
     McpPluginServerContribution
   >();
   private readonly serverConfigs = new Map<string, McpServerConfig>();
+  private readonly origins = new Map<string, McpConfigOrigin>();
   private readonly statuses = new Map<string, McpClientStatus>();
   private readonly listeners = new Set<McpManagerChangeListener>();
   private readonly loadConfig: (
     workspaceId: string,
-  ) => Promise<McpServersConfig>;
+  ) => Promise<McpConfigWithOrigins>;
   private readonly createClient: (
     serverName: string,
     config: McpServerConfig,
@@ -66,8 +71,8 @@ export class McpManager {
   ) {
     this.loadConfig =
       options.loadConfig ??
-      ((projectDirectory: string): Promise<McpServersConfig> =>
-        loadMcpConfig({ projectDirectory }));
+      ((projectDirectory: string): Promise<McpConfigWithOrigins> =>
+        loadMcpConfigWithOrigins({ projectDirectory }));
     this.createClient =
       options.createClient ??
       ((serverName: string, config: McpServerConfig): McpClientLike =>
@@ -242,6 +247,21 @@ export class McpManager {
     return Object.fromEntries(this.statuses);
   }
 
+  async getServerDetails(): Promise<
+    readonly {
+      name: string;
+      origin: McpConfigOrigin;
+      config: McpServerConfig;
+    }[]
+  > {
+    await this.ensureInitialized();
+    return [...this.serverConfigs].map(([name, config]) => ({
+      name,
+      config,
+      origin: this.origins.get(name) ?? "global",
+    }));
+  }
+
   onChange(listener: McpManagerChangeListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -285,6 +305,7 @@ export class McpManager {
     );
     this.clients.clear();
     this.serverConfigs.clear();
+    this.origins.clear();
     this.statuses.clear();
     this.tools = null;
     this.initialized = false;
@@ -325,6 +346,7 @@ export class McpManager {
     const tasks = Object.entries(config.mcpServers).map(
       async ([serverName, serverConfig]) => {
         this.serverConfigs.set(serverName, serverConfig);
+        this.origins.set(serverName, config.origins?.[serverName] ?? "global");
         if (!serverConfig.enabled) {
           this.statuses.set(serverName, { status: "disabled" });
           return;
@@ -356,16 +378,20 @@ export class McpManager {
     await Promise.all(tasks);
   }
 
-  private mergePluginServers(config: McpServersConfig): McpServersConfig {
+  private mergePluginServers(
+    config: McpConfigWithOrigins,
+  ): McpConfigWithOrigins {
+    const origins = { ...config.origins };
     const mcpServers = { ...config.mcpServers };
     for (const servers of this.pluginServerConfigs.values()) {
       for (const [serverName, serverConfig] of Object.entries(servers)) {
         if (!(serverName in mcpServers)) {
           mcpServers[serverName] = serverConfig;
+          origins[serverName] = "plugin";
         }
       }
     }
-    return { mcpServers };
+    return { mcpServers, origins };
   }
 
   private async invalidateAfterConfigChange(): Promise<void> {
@@ -390,6 +416,7 @@ export class McpManager {
       const staleClients = Array.from(this.clients.values());
       this.clients.clear();
       this.serverConfigs.clear();
+      this.origins.clear();
       this.statuses.clear();
       this.tools = null;
       this.initialized = false;

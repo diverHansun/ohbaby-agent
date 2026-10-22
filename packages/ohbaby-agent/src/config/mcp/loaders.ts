@@ -114,9 +114,22 @@ export function mergeMcpConfigs(
   };
 }
 
+export type McpConfigOrigin = "global" | "project" | "plugin";
+
+export type McpConfigWithOrigins = McpServersConfig & {
+  readonly origins?: Readonly<Record<string, McpConfigOrigin>>;
+};
+
 export async function loadMcpConfig(
   options: LoadMcpConfigOptions = {},
 ): Promise<McpServersConfig> {
+  const { mcpServers } = await loadMcpConfigWithOrigins(options);
+  return { mcpServers };
+}
+
+export async function loadMcpConfigWithOrigins(
+  options: LoadMcpConfigOptions = {},
+): Promise<McpConfigWithOrigins> {
   const globalPath =
     options.globalPath ??
     (await resolveReadPathWithLegacy(
@@ -134,5 +147,15 @@ export async function loadMcpConfig(
     loadMcpConfigFromPath(projectPath),
   ]);
 
-  return mergeMcpConfigs(globalConfig, projectConfig);
+  return {
+    ...mergeMcpConfigs(globalConfig, projectConfig),
+    origins: Object.fromEntries<"global" | "project">([
+      ...Object.keys(globalConfig.mcpServers).map(
+        (name) => [name, "global"] as const,
+      ),
+      ...Object.keys(projectConfig.mcpServers).map(
+        (name) => [name, "project"] as const,
+      ),
+    ]),
+  };
 }

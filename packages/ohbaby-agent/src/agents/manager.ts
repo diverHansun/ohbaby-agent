@@ -92,6 +92,10 @@ export class AgentManager implements AgentToolConfigProvider {
     return this.registry.list(filter);
   }
 
+  listWithOrigins(): ReturnType<AgentRegistry["listWithOrigins"]> {
+    return this.registry.listWithOrigins();
+  }
+
   getDefault(): string {
     const primaryAgents = this.registry.list({ mode: "primary" });
     const explicitDefault = primaryAgents.find(

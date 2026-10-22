@@ -54,7 +54,10 @@ export function assertNoStaticModelConfig(
   }
 }
 
+export type AgentOrigin = "builtin" | "global" | "project";
+
 export interface AgentsConfig {
+  readonly origins?: Readonly<Record<string, AgentOrigin>>;
   readonly agents: Readonly<Record<string, AgentConfig>>;
 }
 

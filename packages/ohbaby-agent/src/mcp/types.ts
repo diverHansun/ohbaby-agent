@@ -1,4 +1,5 @@
-import type { McpServerConfig, McpServersConfig } from "../config/index.js";
+import type { McpConfigWithOrigins } from "../config/mcp/loaders.js";
+import type { McpServerConfig } from "../config/index.js";
 import type {
   Tool,
   ToolExecutionContext,
@@ -259,7 +260,7 @@ export interface McpClientOptions {
 }
 
 export interface McpManagerOptions {
-  readonly loadConfig?: (workspaceId: string) => Promise<McpServersConfig>;
+  readonly loadConfig?: (workspaceId: string) => Promise<McpConfigWithOrigins>;
   readonly createClient?: (
     serverName: string,
     config: McpServerConfig,

@@ -111,9 +111,20 @@ export function mergeAgentConfigs(
   };
 }
 
+export type AgentConfigWithOrigins = AgentsConfig & {
+  readonly origins?: Readonly<Record<string, "global" | "project">>;
+};
+
 export async function loadAgentConfig(
   options: LoadAgentConfigOptions = {},
 ): Promise<AgentsConfig> {
+  const { agents } = await loadAgentConfigWithOrigins(options);
+  return { agents };
+}
+
+export async function loadAgentConfigWithOrigins(
+  options: LoadAgentConfigOptions = {},
+): Promise<AgentConfigWithOrigins> {
   const globalPath =
     options.globalPath ??
     (await resolveReadPathWithLegacy(
@@ -131,5 +142,15 @@ export async function loadAgentConfig(
     loadAgentsConfigFromPath(projectPath),
   ]);
 
-  return mergeAgentConfigs(globalConfig, projectConfig);
+  return {
+    ...mergeAgentConfigs(globalConfig, projectConfig),
+    origins: Object.fromEntries<"global" | "project">([
+      ...Object.keys(globalConfig.agents).map(
+        (name) => [name, "global"] as const,
+      ),
+      ...Object.keys(projectConfig.agents).map(
+        (name) => [name, "project"] as const,
+      ),
+    ]),
+  };
 }
