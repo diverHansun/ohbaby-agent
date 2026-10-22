@@ -113,7 +113,7 @@ describe("model configuration commit", () => {
     expect(saved.defaultModel).toBe("D");
     expect(
       saved.models.map((profile: { model: string }) => profile.model),
-    ).toEqual(["B", "C", "D"]);
+    ).toEqual(["A", "B", "C", "D"]);
   });
   it("uses externally edited disk secrets at new admission while preserving explicit caller env", async () => {
     const input = await setup();

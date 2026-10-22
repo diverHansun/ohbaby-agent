@@ -70,7 +70,7 @@ it("discovers reasoning strengths in the background when model metadata only say
   });
   expect(calls.some((url) => url.endsWith("/chat/completions"))).toBe(true);
 });
-it("reports saved without waiting for metadata and discards late previous-connection results", async () => {
+it("reports saved without waiting and retains independent previous-entry results without selecting it", async () => {
   const root = await mkdtemp(join(tmpdir(), "reasoning-background-"));
   dirs.push(root);
   let answerA!: (r: Response) => void;
@@ -154,7 +154,7 @@ it("reports saved without waiting for metadata and discards late previous-connec
   expect(
     config.models?.find((p: { model: string }) => p.model === "a")
       ?.reasoningCapabilities,
-  ).toBeUndefined();
+  ).toMatchObject({ mode: "effort", efforts: ["high"] });
 });
 it("clears an incompatible persisted global intent after confirmed capability discovery", async () => {
   const root = await mkdtemp(join(tmpdir(), "reasoning-reset-"));

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setActiveLLMConfig } from "../writer.js";
 import type { ModelJsonConfig, ModelJsonModelProfile } from "ohbaby-llm";
-import { resolveRequestReasoning } from "ohbaby-llm";
+import { capabilitiesFor } from "ohbaby-llm";
+import { loadProjectedModelJson } from "../model-document.js";
 
 it("preserves independent routes and legacy profiles, and resolves the exact route first", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ohbaby-route-"));
@@ -65,25 +66,29 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
     });
     const written = await read();
     expect(written.models).toHaveLength(5);
-    expect(written.models).toEqual(
-      expect.arrayContaining([
-        chat,
-        other,
-        generic,
-        caseDistinct,
-        { ...responses, baseUrl: `${baseUrl}/`, contextWindowTokens: 200000 },
-      ]),
-    );
+    expect(written.models?.[0]).toMatchObject({
+      ...chat,
+      baseUrl: `${baseUrl}/`,
+      interfaceProvider: "openai-responses",
+      contextWindowTokens: 200000,
+    });
+    expect(written.models?.slice(1)).toMatchObject([
+      responses,
+      other,
+      generic,
+      caseDistinct,
+    ]);
+    const projected = await loadProjectedModelJson({ modelJsonPath: path });
     expect(
-      resolveRequestReasoning({
+      capabilitiesFor({
         provider: "gateway",
         model: "Dual",
         baseUrl,
         interfaceProvider: "openai-responses",
         maxTokens: 8192,
-        modelProfiles: [...(written.models ?? []), generic],
-      }).mode,
-    ).toBe("effort");
+        modelProfiles: projected.models,
+      }).capability?.mode,
+    ).toBe("binary");
     await setActiveLLMConfig({
       provider: "gateway",
       model: "Dual",
@@ -92,7 +97,9 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
       clearActiveModelProfile: true,
       modelJsonPath: path,
     });
-    expect((await read()).models).toEqual([chat, other, generic, caseDistinct]);
+    expect((await read()).models).toHaveLength(5);
+    expect((await read()).models?.[0].contextWindowTokens).toBe(128000);
+    expect((await read()).models?.slice(1)).toEqual(written.models?.slice(1));
     await setActiveLLMConfig({
       provider: "gateway",
       model: "Dual",
@@ -199,7 +206,7 @@ it.each([
   },
 );
 
-it("budget refresh preserves the last exact duplicate capability override", async () => {
+it("legacy connect refreshes the first duplicate entry and retains its sibling", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ohbaby-duplicate-"));
   const path = join(dir, "model.json");
   const baseUrl = "https://gateway.invalid/v1";
@@ -246,9 +253,16 @@ it("budget refresh preserves the last exact duplicate capability override", asyn
       modelJsonPath: path,
     });
     const written = JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig;
-    expect(written.models).toEqual([
-      { ...profile, contextWindowTokens: 200000 },
-    ]);
+    expect(written.models).toHaveLength(2);
+    expect(written.models?.[0]).toMatchObject({
+      ...profile,
+      contextWindowTokens: 200000,
+      reasoningCapabilities: {
+        ...profile.reasoningCapabilities,
+        efforts: ["medium"],
+      },
+    });
+    expect(written.models?.[1]).toMatchObject(profile);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

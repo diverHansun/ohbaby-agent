@@ -420,7 +420,7 @@ describe("applyActiveModelConfig", () => {
     );
   });
 
-  it("uses a provider-derived api key env when key value is provided without a name", async () => {
+  it("uses an entry-specific api key env when key value is provided without a name", async () => {
     const result = await applyActiveModelConfig({
       apiKey: "sk-local-proxy-secret",
       baseUrl: "http://127.0.0.1:1234/v1",
@@ -431,11 +431,12 @@ describe("applyActiveModelConfig", () => {
       provider: "lm-studio",
     } as unknown as Parameters<typeof applyActiveModelConfig>[0]);
 
-    expect(result.apiKeyEnv).toBe("LM_STUDIO_API_KEY");
+    expect(result.apiKeyEnv).toMatch(/^OHBABY_MODEL_PROFILE_.*_API_KEY$/u);
+    if (!result.apiKeyEnv) throw new Error("Missing saved reference");
     await expect(fs.readFile(envPath, "utf-8")).resolves.toBe(
-      "LM_STUDIO_API_KEY=sk-local-proxy-secret\n",
+      `${result.apiKeyEnv}=sk-local-proxy-secret\n`,
     );
-    expect(process.env.LM_STUDIO_API_KEY).toBe("sk-local-proxy-secret");
+    expect(process.env[result.apiKeyEnv]).toBe("sk-local-proxy-secret");
   });
 
   it("uses detected context window over a user-provided value", async () => {
@@ -478,7 +479,7 @@ describe("applyActiveModelConfig", () => {
   });
 
   it.each(["same route", "switching back to a saved route"])(
-    "preserves discovered reasoning when %s",
+    "refreshes automatic reasoning from new metadata when %s",
     async (scenario) => {
       const target = {
         provider: "zenmux",
@@ -561,7 +562,7 @@ describe("applyActiveModelConfig", () => {
         saved.models.find(
           (profile) => profile.interfaceProvider === "openai-responses",
         )?.reasoningCapabilities,
-      ).toEqual(target.reasoningCapabilities);
+      ).toEqual({ mode: "none", wire: "none", supportsDisabled: true });
       expect(
         saved.models.find(
           (profile) => profile.interfaceProvider === "openai-compatible",

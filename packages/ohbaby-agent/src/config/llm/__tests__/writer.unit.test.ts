@@ -5,6 +5,7 @@ import { setActiveLLMConfig } from "../index.js";
 vi.mock("node:fs/promises");
 
 interface WrittenModelJson {
+  readonly activeProfileId: string;
   readonly provider: string;
   readonly defaultModel: string;
   readonly apiConfig: {
@@ -86,7 +87,7 @@ describe("setActiveLLMConfig", () => {
     expect(modelJsonWrite).toBeDefined();
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
-    expect(modelJson).toEqual({
+    expect(modelJson).toMatchObject({
       provider: "custom",
       defaultModel: "glm-4.5",
       apiConfig: {
@@ -107,6 +108,7 @@ describe("setActiveLLMConfig", () => {
     );
 
     expect(result).toEqual({
+      profileId: modelJson.activeProfileId,
       provider: "custom",
       model: "glm-4.5",
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
@@ -141,6 +143,7 @@ describe("setActiveLLMConfig", () => {
     });
     expect(findWriteCall((file) => file.includes(".env.tmp-"))).toBeUndefined();
     expect(result).toEqual({
+      profileId: modelJson.activeProfileId,
       provider: "lmstudio",
       model: "local-model",
       baseUrl: "http://127.0.0.1:1234/v1",
@@ -195,7 +198,13 @@ describe("setActiveLLMConfig", () => {
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
     expect(modelJson.llmParams).toEqual(existingModelJson.llmParams);
-    expect(modelJson.models).toEqual(existingModelJson.models);
+    expect(modelJson.models).toHaveLength(3);
+    expect(modelJson.models?.[0]).toMatchObject({
+      ...existingModelJson.models[0],
+      needsConfiguration: true,
+    });
+    expect(modelJson.models?.[1]).toMatchObject({ model: "gpt-4" });
+    expect(modelJson.models?.[2]).toMatchObject({ model: "qwen-plus" });
     expect(modelJson.apiConfig.interfaceProvider).toBe("openai-compatible");
 
     const envWrite = findWriteCall((file) => file.endsWith(".env"));
@@ -224,11 +233,14 @@ describe("setActiveLLMConfig", () => {
     const written = parseModelJsonWrite(
       findWriteCall((file) => file.includes("model.json")),
     );
-    expect(written.llmParams).toEqual({ maxTokens: 4096 });
+    expect(written.llmParams).toEqual({
+      maxTokens: 4096,
+      contextWindowTokens: 128000,
+    });
   });
 
   it.each(["enabled", "disabled"] as const)(
-    "should preserve promptCache=%s during an unrelated active-model rewrite",
+    "should preserve promptCache=%s when editing the same saved entry",
     async (promptCache) => {
       const existingModelJson = {
         provider: "openai",
@@ -246,7 +258,7 @@ describe("setActiveLLMConfig", () => {
 
       const result = await setActiveLLMConfig({
         provider: "openai",
-        model: "gpt-4.1",
+        model: "gpt-4",
         baseUrl: "https://api.openai.com/v1",
         modelJsonPath: "D:/repo/.ohbaby/model.json",
       });
@@ -315,22 +327,21 @@ describe("setActiveLLMConfig", () => {
       maxTokens: 8192,
       contextWindowTokens: 200_000,
     });
-    expect(modelJson.models).toEqual([
-      existingModelJson.models[0],
-      {
-        provider: "openai",
-        model: "gpt-4o",
-        contextWindowTokens: 128_000,
-      },
-      {
-        provider: "zenmux",
-        model: "anthropic/claude-sonnet-4.6",
-        baseUrl: "https://zenmux.ai/api/anthropic",
-        interfaceProvider: "anthropic",
-        contextWindowTokens: 200_000,
-        maxOutputTokens: 8192,
-      },
-    ]);
+    expect(modelJson.models).toHaveLength(4);
+    expect(modelJson.models?.[0]).toMatchObject({
+      ...existingModelJson.models[0],
+      needsConfiguration: true,
+    });
+    expect(modelJson.models?.[1]).toMatchObject(existingModelJson.models[1]);
+    expect(modelJson.models?.[2]).toMatchObject({ model: "old-model" });
+    expect(modelJson.models?.[3]).toMatchObject({
+      provider: "zenmux",
+      model: "anthropic/claude-sonnet-4.6",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      contextWindowTokens: 200000,
+      maxOutputTokens: 8192,
+    });
   });
 
   it("should clear stale active context window tokens when requested", async () => {
@@ -382,14 +393,18 @@ describe("setActiveLLMConfig", () => {
     expect(modelJson.llmParams).toEqual({
       temperature: 0.1,
       maxTokens: 32_768,
+      contextWindowTokens: 128000,
     });
-    expect(modelJson.models).toEqual([
-      existingModelJson.models[0],
-      {
-        provider: "openai",
-        model: "gpt-4o",
-        contextWindowTokens: 128_000,
-      },
-    ]);
+    expect(modelJson.models).toHaveLength(4);
+    expect(modelJson.models?.[0]).toMatchObject(existingModelJson.models[0]);
+    expect(modelJson.models?.[1]).toMatchObject(existingModelJson.models[1]);
+    expect(modelJson.models?.[2]).toMatchObject({
+      model: "gpt-4.1",
+      contextWindowTokens: 1000000,
+    });
+    expect(modelJson.models?.[3]).toMatchObject({
+      model: "unknown-model",
+      contextWindowTokens: 128000,
+    });
   });
 });

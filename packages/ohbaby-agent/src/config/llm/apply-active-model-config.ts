@@ -1,10 +1,19 @@
+import {
+  readModelDocument,
+  loadProjectedModelJson,
+  configurationComplete,
+} from "./model-document.js";
+import {
+  modelEntryGeneration,
+  writeModelEntryMetadata,
+  type ModelSettingsOptions,
+} from "./writer.js";
 import { capabilitiesFor } from "ohbaby-llm";
 import { reasoningCapabilityView } from "../../services/llm-model/reasoning-view.js";
 import type { UiReasoningCapabilityView } from "ohbaby-sdk";
 import { modelProfileRouteKey, normalizedEndpoint } from "ohbaby-llm";
 import {
   coordinateModelConfig,
-  modelConfigVersion,
   outsideModelConfigCoordination,
 } from "./config-coordination.js";
 import { getModelJsonPath } from "./loaders.js";
@@ -14,17 +23,16 @@ import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../services/llm-model/modelProfile
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import type { InterfaceProviderKind, ReasoningConfig } from "ohbaby-llm";
 import { ConfigError } from "ohbaby-llm";
-import { validateReasoningConfig, validateModelJson } from "ohbaby-llm";
+import { validateReasoningConfig } from "ohbaby-llm";
 import {
   probeContextWindow,
   type ContextWindowSource,
   type ProbeContextWindowResult,
 } from "./context-window-probe.js";
 import { probeReasoningCapabilities } from "./reasoning-active-probe.js";
-import { loadEnvFile, loadModelJson } from "./loaders.js";
+import { loadEnvFile } from "./loaders.js";
 import { reloadLLMConfig, setActiveLLMConfig } from "./index.js";
 import {
-  defaultApiKeyEnvForProvider,
   firstNonEmptyApiKey,
   nonEmptyApiKey,
   OPTIONAL_API_KEY_PLACEHOLDER,
@@ -119,11 +127,11 @@ export async function probeActiveModelContextWindow(
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     envPath,
   });
-  const modelJsonPath = input.modelJsonPath ?? getModelJsonPath();
   let current;
   try {
-    const raw = await loadModelJson({ modelJsonPath });
-    validateModelJson(raw);
+    const raw = await loadProjectedModelJson({
+      modelJsonPath: input.modelJsonPath,
+    });
     current = raw;
   } catch {
     /* A draft can be probed before any model is saved. */
@@ -141,24 +149,14 @@ export async function probeActiveModelContextWindow(
     (current.apiConfig.interfaceProvider ?? "openai-compatible") ===
       interfaceProvider &&
     currentKey?.value === apiKey.value;
+  const currentId = current?.models?.at(0)?.id;
   const probe =
-    matches && current
-      ? await startModelDiscovery({
-          provider: current.provider,
-          model,
-          baseUrl,
-          interfaceProvider,
-          apiKey: apiKey.value,
-          apiKeyEnv: current.apiConfig.apiKeyEnv,
-          modelJsonPath,
+    matches && current && currentId
+      ? await startModelEntryDiscovery(currentId, {
+          modelJsonPath: input.modelJsonPath,
           envPath,
-          projectRoot: input.projectRoot ?? process.cwd(),
-          contextWindowTokens:
-            current.llmParams.contextWindowTokens ??
-            DEFAULT_CONTEXT_WINDOW_TOKENS,
-          maxOutputTokens: current.llmParams.maxTokens,
-          version: await modelConfigVersion(modelJsonPath, envPath),
           onDiscovery: input.onDiscovery,
+          allowActiveProbe: true,
         })
       : await probeContextWindow({
           apiKey: apiKey.value,
@@ -256,13 +254,8 @@ export async function applyActiveModelConfig(
   const provider = requireNonEmpty(input.provider, "Provider required");
   const model = requireNonEmpty(input.model, "Model name required");
   const baseUrl = validateBaseUrl(input.baseUrl);
-  const explicitApiKey = nonEmptyApiKey(input.apiKey);
   const providedApiKeyEnv = validateOptionalApiKeyEnv(input.apiKeyEnv);
-  const apiKeyEnv =
-    providedApiKeyEnv ??
-    (explicitApiKey === undefined
-      ? undefined
-      : defaultApiKeyEnvForProvider(provider));
+  const apiKeyEnv = providedApiKeyEnv;
   const interfaceProvider = validateInterfaceProvider(input.interfaceProvider);
   const contextWindowTokens = validateOptionalPositiveInteger(
     input.contextWindowTokens,
@@ -302,7 +295,7 @@ export async function applyActiveModelConfig(
     baseUrl,
     interfaceProvider,
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
-    ...(explicitApiKey === undefined ? {} : { apiKey: explicitApiKey }),
+    ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
     contextWindowTokens: resolvedContextWindow.contextWindowTokens,
     ...(maxOutputTokens === undefined
       ? {}
@@ -320,24 +313,11 @@ export async function applyActiveModelConfig(
   });
 
   if (input.deferMetadata) {
-    const version = await modelConfigVersion(
-      writeResult.modelJsonPath,
-      envPath,
-    );
-    void startModelDiscovery({
-      provider,
-      model,
-      baseUrl,
-      interfaceProvider,
-      apiKey: apiKey.value,
-      apiKeyEnv,
+    void startModelEntryDiscovery(writeResult.profileId, {
       modelJsonPath: writeResult.modelJsonPath,
       envPath,
-      projectRoot: input.projectRoot,
-      contextWindowTokens: resolvedContextWindow.contextWindowTokens,
-      maxOutputTokens,
-      version,
       onDiscovery: input.onDiscovery,
+      allowActiveProbe: true,
     });
   }
 
@@ -358,7 +338,9 @@ export async function applyActiveModelConfig(
     provider,
     baseUrl,
     interfaceProvider,
-    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
+    ...(writeResult.apiKeyEnv === undefined
+      ? {}
+      : { apiKeyEnv: writeResult.apiKeyEnv }),
     model,
     contextWindowTokens: resolvedContextWindow.contextWindowTokens,
     contextWindowSource: resolvedContextWindow.contextWindowSource,
@@ -423,7 +405,7 @@ function validateBaseUrl(value: string): string {
       baseUrl: value,
     });
   }
-  return trimmed.replace(/\/+$/u, "");
+  return normalizedEndpoint(trimmed);
 }
 
 function validateApiKeyEnv(value: string): string {
@@ -499,157 +481,139 @@ async function resolveApiKey(input: {
 
 interface ActiveDiscovery {
   readonly controller: AbortController;
-  version: string;
+  readonly generation: number;
   status: "detecting" | "identified" | "unknown";
   reason?: string;
 }
 const activeDiscoveries = new Map<string, ActiveDiscovery>();
+function discoveryKey(id: string, options: ModelSettingsOptions): string {
+  return `${resolve(options.modelJsonPath ?? getModelJsonPath())}\0${id}`;
+}
 export async function currentDiscoveryState(
-  modelPath = getModelJsonPath(),
-  envPath = getGlobalEnvPath(),
+  modelPath?: string,
+  _envPath?: string,
 ): Promise<
   | { status: "detecting" | "identified" | "unknown"; reason?: string }
   | undefined
 > {
-  const state = activeDiscoveries.get(resolve(modelPath));
-  return state?.version === (await modelConfigVersion(modelPath, envPath))
+  const document = await readModelDocument({ modelJsonPath: modelPath });
+  if (!document.activeProfileId) return undefined;
+  const options = { modelJsonPath: modelPath };
+  const state = activeDiscoveries.get(
+    discoveryKey(document.activeProfileId, options),
+  );
+  return state?.generation ===
+    modelEntryGeneration(document.activeProfileId, options)
     ? {
         status: state.status,
         ...(state.reason ? { reason: state.reason } : {}),
       }
     : undefined;
 }
-function startModelDiscovery(input: {
-  provider: string;
-  model: string;
-  baseUrl: string;
-  interfaceProvider: InterfaceProviderKind;
-  apiKey: string;
-  apiKeyEnv?: string;
-  modelJsonPath: string;
-  envPath: string;
-  projectRoot: string;
-  contextWindowTokens: number;
-  maxOutputTokens?: number;
-  version: string;
-  onDiscovery?: () => void | Promise<void>;
-}): Promise<ProbeContextWindowResult> {
-  const key = resolve(input.modelJsonPath);
-  activeDiscoveries.get(key)?.controller.abort();
-  const state: ActiveDiscovery = {
-    controller: new AbortController(),
-    version: input.version,
-    status: "detecting",
-  };
-  activeDiscoveries.set(key, state);
-  // Start after the saving turn: never inherit a live publication lock into network work.
+/** Same scheduler for global candidate saves and the legacy active-model adapter. */
+export async function startModelEntryDiscovery(
+  id: string,
+  options: ModelSettingsOptions & { allowActiveProbe?: boolean } = {},
+): Promise<ProbeContextWindowResult> {
+  const snapshot = await coordinateModelConfig(
+    options.modelJsonPath,
+    async () => {
+      const document = await readModelDocument(options);
+      const entry = document.models.find((e) => e.id === id);
+      if (!entry || !configurationComplete(entry)) return undefined;
+      const key = discoveryKey(id, options);
+      activeDiscoveries.get(key)?.controller.abort();
+      const state: ActiveDiscovery = {
+        controller: new AbortController(),
+        generation: modelEntryGeneration(id, options),
+        status: "detecting",
+      };
+      activeDiscoveries.set(key, state);
+      const credential = await resolveApiKey({
+        apiKeyEnv: entry.apiKeyEnv,
+        envPath: options.envPath ?? getGlobalEnvPath(),
+      });
+      return {
+        entry,
+        key,
+        state,
+        apiKey: credential.value,
+        maxTokens: document.llmParams.maxTokens,
+        routeKey: modelProfileRouteKey(entry, entry.provider),
+      };
+    },
+  );
+  if (!snapshot) return {};
+  const { entry, key, state, apiKey, maxTokens, routeKey } = snapshot;
+  const isCurrent = (): boolean =>
+    activeDiscoveries.get(key) === state && !state.controller.signal.aborted;
   return new Promise((resolveResult) =>
     outsideModelConfigCoordination(() =>
       setTimeout(() => {
         void (async (): Promise<ProbeContextWindowResult> => {
-          const metadata = await probeContextWindow({
-            ...input,
+          if (!isCurrent()) return { reasoningReason: "cancelled" };
+          const input = {
+            provider: entry.provider,
+            model: entry.model,
+            baseUrl: entry.baseUrl,
+            interfaceProvider: entry.interfaceProvider,
+            apiKey,
             signal: state.controller.signal,
-          });
-          const savedModel = await loadModelJson({
-            modelJsonPath: input.modelJsonPath,
-          });
-          validateModelJson(savedModel);
-          const routeKey = modelProfileRouteKey(input, input.provider);
-          const exactProfiles = savedModel.models?.filter(
-            (profile) =>
-              modelProfileRouteKey(profile, savedModel.provider) === routeKey,
-          );
-          const savedCapabilities =
-            exactProfiles?.at(-1)?.reasoningCapabilities;
+          };
+          const metadata = await probeContextWindow(input);
+          const explicit =
+            entry.reasoningCapabilities && !entry.reasoningCapabilitySource
+              ? entry.reasoningCapabilities
+              : undefined;
           const known = capabilitiesFor({
-            provider: input.provider,
-            model: input.model,
-            baseUrl: input.baseUrl,
-            interfaceProvider: input.interfaceProvider,
-            maxTokens: input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-            modelProfiles: exactProfiles,
+            ...input,
+            maxTokens,
+            modelProfiles: [entry],
           }).capability;
-          const activeCapabilities =
-            savedCapabilities ||
-            metadata.reasoningCapabilities ||
-            known ||
-            state.controller.signal.aborted
-              ? undefined
-              : await probeReasoningCapabilities({
-                  ...input,
-                  signal: state.controller.signal,
-                });
+          const active =
+            options.allowActiveProbe &&
+            !known &&
+            !metadata.reasoningCapabilities &&
+            isCurrent()
+              ? await probeReasoningCapabilities(input)
+              : undefined;
           const probe = {
             ...metadata,
             reasoningCapabilities:
-              savedCapabilities ??
-              metadata.reasoningCapabilities ??
-              activeCapabilities,
+              explicit ?? metadata.reasoningCapabilities ?? active,
           };
-          await coordinateModelConfig(input.modelJsonPath, async () => {
-            if (
-              activeDiscoveries.get(key) !== state ||
-              state.controller.signal.aborted ||
-              (await modelConfigVersion(input.modelJsonPath, input.envPath)) !==
-                input.version
-            )
-              return;
-            if (probe.reasoningCapabilities || probe.contextWindowTokens) {
-              await setActiveLLMConfig({
-                provider: input.provider,
-                model: input.model,
-                baseUrl: input.baseUrl,
-                interfaceProvider: input.interfaceProvider,
-                apiKeyEnv: input.apiKeyEnv,
-                modelJsonPath: input.modelJsonPath,
-                envPath: input.envPath,
-                contextWindowTokens:
-                  probe.contextWindowTokens ?? input.contextWindowTokens,
-                maxOutputTokens: input.maxOutputTokens,
-                updateActiveModelProfile: true,
-                discoveredReasoningCapabilities: savedCapabilities
-                  ? undefined
-                  : probe.reasoningCapabilities,
-                ...(activeCapabilities
-                  ? {
-                      discoveredReasoningCapabilitySource:
-                        "active-probe" as const,
-                    }
-                  : {}),
-              });
-              state.version = await modelConfigVersion(
-                input.modelJsonPath,
-                input.envPath,
-              );
-              await reloadLLMConfig({
-                modelJsonPath: input.modelJsonPath,
-                envPath: input.envPath,
-                projectDirectory: input.projectRoot,
-              });
-            }
-            state.status = probe.reasoningReason
-              ? "unknown"
-              : probe.reasoningCapabilities || known
-                ? "identified"
-                : "unknown";
-            state.reason = probe.reasoningReason;
-          });
+          if (!isCurrent()) return probe;
+          let wrote = false;
           if (
-            activeDiscoveries.get(key) === state &&
-            !state.controller.signal.aborted
+            probe.contextWindowTokens !== undefined ||
+            probe.reasoningCapabilities
           )
-            await input.onDiscovery?.();
+            wrote = await writeModelEntryMetadata(
+              id,
+              { generation: state.generation, routeKey },
+              {
+                contextWindowTokens: probe.contextWindowTokens,
+                reasoningCapabilities: probe.reasoningCapabilities,
+                reasoningCapabilitySource: active
+                  ? "active-probe"
+                  : "model-metadata",
+              },
+              options,
+            );
+          if (modelEntryGeneration(id, options) !== state.generation)
+            return probe;
+          state.status = probe.reasoningReason
+            ? "unknown"
+            : probe.reasoningCapabilities || known
+              ? "identified"
+              : "unknown";
+          state.reason = probe.reasoningReason;
+          if (wrote || options.allowActiveProbe) await options.onDiscovery?.();
           return probe;
-        })().then(resolveResult, async () => {
+        })().then(resolveResult, () => {
           if (activeDiscoveries.get(key) === state) {
             state.status = "unknown";
             state.reason = "discovery-failed";
-            try {
-              await input.onDiscovery?.();
-            } catch {
-              /* View refresh failure must not create an unhandled rejection. */
-            }
           }
           resolveResult({ reasoningReason: "network-error" });
         });

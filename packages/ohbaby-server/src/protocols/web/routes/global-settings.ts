@@ -1,5 +1,6 @@
 import type {
   UiSettingsAboutResponse,
+  UiSettingsModelsResponse,
   UiSettingsSearchResponse,
   UiSettingsGlobalMcpServersResponse,
   UiSettingsMcpServerUpdateResponse,
@@ -7,6 +8,15 @@ import type {
 } from "ohbaby-sdk";
 import type { Hono, Context } from "hono";
 import {
+  readModelSettings,
+  createModelEntry,
+  updateModelEntry,
+  selectModelEntry,
+  deleteModelEntry,
+  deleteModelProvider,
+  ModelEntryCreateSchema,
+  ModelEntryPatchSchema,
+  ModelEntrySelectSchema,
   readSearchSettings,
   updateSearchSettings,
   SearchSettingsPatchSchema,
@@ -46,6 +56,28 @@ export function registerGlobalSettingsRoutes(
           typeof error === "object" && error !== null && "code" in error
             ? error.code
             : undefined;
+        if (code === "MODEL_NOT_FOUND")
+          return context.json(
+            {
+              ok: false,
+              error: {
+                code: "MODEL_NOT_FOUND",
+                message: "Model entry not found",
+              },
+            },
+            404,
+          );
+        if (code === "MODEL_CONFIG_INCOMPLETE")
+          return context.json(
+            {
+              ok: false,
+              error: {
+                code: "MODEL_CONFIG_INCOMPLETE",
+                message: "Model configuration incomplete",
+              },
+            },
+            400,
+          );
         if (code === "MCP_SERVER_NOT_FOUND")
           return context.json(webErrorBody("Global MCP server not found"), 404);
         if (
@@ -56,6 +88,107 @@ export function registerGlobalSettingsRoutes(
         return context.json(webErrorBody("Unable to access settings"), 500);
       }
     };
+  const modelOptions = {
+    onDiscovery: (): Promise<void> => ctx.notify(["model"]),
+  };
+  app.get(
+    "/v1/settings/models",
+    handle(async (context) =>
+      context.json({
+        ok: true,
+        ...(await readModelSettings()),
+      } satisfies UiSettingsModelsResponse),
+    ),
+  );
+  app.post(
+    "/v1/settings/models/profiles",
+    handle(async (context) => {
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const result = await createModelEntry(
+        ModelEntryCreateSchema.parse(parsed.value),
+        modelOptions,
+      );
+      await ctx.notify(["model"]);
+      return context.json({
+        ok: true,
+        ...result,
+      } satisfies UiSettingsModelsResponse);
+    }),
+  );
+  app.patch(
+    "/v1/settings/models/profiles/:id",
+    handle(async (context) => {
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const result = await updateModelEntry(
+        context.req.param("id") ?? "",
+        ModelEntryPatchSchema.parse(parsed.value),
+        modelOptions,
+      );
+      await ctx.notify(["model"]);
+      return context.json({
+        ok: true,
+        ...result,
+      } satisfies UiSettingsModelsResponse);
+    }),
+  );
+  app.post(
+    "/v1/settings/models/active",
+    handle(async (context) => {
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const result = await selectModelEntry(
+        ModelEntrySelectSchema.parse(parsed.value).id,
+        modelOptions,
+      );
+      await ctx.notify(["model"]);
+      return context.json({
+        ok: true,
+        ...result,
+      } satisfies UiSettingsModelsResponse);
+    }),
+  );
+  app.delete(
+    "/v1/settings/models/profiles/:id",
+    handle(async (context) => {
+      const result = await deleteModelEntry(
+        context.req.param("id") ?? "",
+        modelOptions,
+      );
+      await ctx.notify(["model"]);
+      return context.json({
+        ok: true,
+        ...result,
+      } satisfies UiSettingsModelsResponse);
+    }),
+  );
+  app.delete(
+    "/v1/settings/models/providers/:providerId",
+    handle(async (context) => {
+      const result = await deleteModelProvider(
+        context.req.param("providerId") ?? "",
+        modelOptions,
+      );
+      await ctx.notify(["model"]);
+      return context.json({
+        ok: true,
+        ...result,
+      } satisfies UiSettingsModelsResponse);
+    }),
+  );
   app.get(
     "/v1/settings/about",
     handle(async (context) =>

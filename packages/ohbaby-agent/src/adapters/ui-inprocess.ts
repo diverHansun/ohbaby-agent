@@ -225,9 +225,8 @@ import {
   applyActiveModelConfig,
   probeActiveModelContextWindow,
 } from "../config/llm/apply-active-model-config.js";
-import { loadModelJson } from "../config/llm/loaders.js";
+import { loadProjectedModelJson } from "../config/llm/model-document.js";
 import { ConfigError } from "ohbaby-llm";
-import { validateModelJson } from "ohbaby-llm";
 import type { ModelJsonConfig } from "ohbaby-llm";
 import {
   reloadSearchConfig,
@@ -2514,19 +2513,25 @@ export function createInProcessUiBackendClient(
   }
 
   async function currentModelFromOptions(): Promise<CommandModelSummary | null> {
-    const client = options.llmClient ?? (await resolveLLMClient());
-    return {
-      active: true,
-      ...(client.config.apiKeyEnv === undefined
-        ? {}
-        : { apiKeyEnv: client.config.apiKeyEnv }),
-      baseUrl: client.config.baseUrl,
-      id: `${client.config.provider}:${client.config.model}`,
-      interfaceProvider: client.config.interfaceProvider,
-      label: client.config.model,
-      model: client.config.model,
-      provider: client.config.provider,
-    };
+    try {
+      const client = options.llmClient ?? (await resolveLLMClient());
+      return {
+        active: true,
+        ...(client.config.apiKeyEnv === undefined
+          ? {}
+          : { apiKeyEnv: client.config.apiKeyEnv }),
+        baseUrl: client.config.baseUrl,
+        id: `${client.config.provider}:${client.config.model}`,
+        interfaceProvider: client.config.interfaceProvider,
+        label: client.config.model,
+        model: client.config.model,
+        provider: client.config.provider,
+      };
+    } catch (error) {
+      if (error instanceof ConfigError && error.code === "FILE_NOT_FOUND")
+        return null;
+      throw error;
+    }
   }
 
   function connectModelConfigFromRuntimeConfig(
@@ -2574,8 +2579,7 @@ export function createInProcessUiBackendClient(
       };
     }
     try {
-      const rawConfig = await loadModelJson();
-      validateModelJson(rawConfig);
+      const rawConfig = await loadProjectedModelJson();
       return {
         ...connectModelConfigFromModelJson(rawConfig),
         reasoning: reasoningCapabilityView(
@@ -2601,8 +2605,7 @@ export function createInProcessUiBackendClient(
 
   async function currentReasoningOptions(): Promise<ResolveRequestReasoningOptions> {
     if (options.llmClient) return options.llmClient.config;
-    const raw = await loadModelJson();
-    validateModelJson(raw);
+    const raw = await loadProjectedModelJson();
     return {
       provider: raw.provider,
       model: raw.defaultModel,

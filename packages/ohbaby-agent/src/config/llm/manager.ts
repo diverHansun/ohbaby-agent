@@ -10,10 +10,10 @@ import { inferConnectModelInterfaceProvider } from "ohbaby-sdk";
  * Coordinates loading, validation, caching, and hot-reload.
  */
 
-import type { LLMConfig, ModelJsonConfig } from "ohbaby-llm";
+import type { LLMConfig } from "ohbaby-llm";
 import { ConfigError } from "ohbaby-llm";
-import { loadModelJson, loadApiKey, loadEnvFile } from "./loaders.js";
-import { validateModelJson } from "ohbaby-llm";
+import { loadApiKey, loadEnvFile } from "./loaders.js";
+import { loadProjectedModelJson } from "./model-document.js";
 import {
   firstNonEmptyApiKey,
   OPTIONAL_API_KEY_PLACEHOLDER,
@@ -37,25 +37,6 @@ interface CachedLLMConfig {
   readonly modelJsonPath?: string;
   readonly envPath?: string;
   readonly env?: NodeJS.ProcessEnv;
-}
-
-function resolveModelProfiles(
-  modelJson: ModelJsonConfig,
-): NonNullable<LLMConfig["modelProfiles"]> | undefined {
-  const profiles: NonNullable<LLMConfig["modelProfiles"]>[number][] = [];
-
-  if (modelJson.llmParams.contextWindowTokens !== undefined) {
-    profiles.push({
-      contextWindowTokens: modelJson.llmParams.contextWindowTokens,
-      maxOutputTokens: modelJson.llmParams.maxTokens,
-      model: modelJson.defaultModel,
-      provider: modelJson.provider,
-    });
-  }
-
-  profiles.push(...(modelJson.models ?? []));
-
-  return profiles.length > 0 ? profiles : undefined;
 }
 
 /**
@@ -141,10 +122,13 @@ class LLMConfigManager {
     return result;
   }
 
-  /**
-   * Get the last error that occurred during loading.
-   * Returns null if no error has occurred or after successful load.
-   */
+  /** A completed settings write invalidates cached clients for the next load. */
+  invalidate(): void {
+    this.cachedConfig = null;
+    this.lastError = null;
+  }
+
+  /** Last loading error, cleared after a successful load or settings write. */
   getLastError(): ConfigError | null {
     return this.lastError;
   }
@@ -178,16 +162,11 @@ class LLMConfigManager {
       Pick<LLMConfigLoadOptions, "modelJsonPath" | "envPath">,
   ): Promise<LLMConfig> {
     try {
-      // Load raw configuration from file
-      const rawConfig = await loadModelJson({
+      const modelJson = await loadProjectedModelJson({
         ...(options.modelJsonPath === undefined
           ? {}
           : { modelJsonPath: options.modelJsonPath }),
       });
-
-      // Validate structure and values
-      validateModelJson(rawConfig);
-      const modelJson = rawConfig;
 
       // Load API key from environment when configured.
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;
@@ -209,7 +188,7 @@ class LLMConfigManager {
             OPTIONAL_API_KEY_PLACEHOLDER);
 
       // Build final config
-      const modelProfiles = resolveModelProfiles(modelJson);
+      const modelProfiles = modelJson.models;
       const config: LLMConfig = {
         provider: modelJson.provider,
         model: modelJson.defaultModel,

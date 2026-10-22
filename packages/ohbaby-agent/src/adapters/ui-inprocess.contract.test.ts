@@ -2353,8 +2353,8 @@ describe("createInProcessUiBackendClient", () => {
         JSON.stringify({
           apiConfig: {
             baseUrl: "https://old.example/v1",
-            interfaceProvider: "openai-compatible",
             promptCache: "disabled",
+            interfaceProvider: "openai-compatible",
           },
           defaultModel: "old-model",
           llmParams: { maxTokens: 4096, temperature: 0.7 },
@@ -2405,7 +2405,6 @@ describe("createInProcessUiBackendClient", () => {
           apiKeyEnv: "ZENMUX_API_KEY",
           baseUrl: "https://zenmux.example/v1",
           interfaceProvider: "openai-compatible",
-          promptCache: "disabled",
         },
         defaultModel: "anthropic/claude-sonnet-4.6",
         llmParams: {
@@ -2415,6 +2414,10 @@ describe("createInProcessUiBackendClient", () => {
         provider: "zenmux",
       });
       expect(modelJson).not.toHaveProperty("apiKey");
+      expect((modelJson.models as Record<string, unknown>[])[0]).toMatchObject({
+        model: "old-model",
+        promptCache: "disabled",
+      });
       expect(await readFile(globalEnvPath, "utf-8")).toContain(
         "ZENMUX_API_KEY=sk-connect-contract",
       );
@@ -2425,7 +2428,7 @@ describe("createInProcessUiBackendClient", () => {
           modelJsonPath,
           projectDirectory: projectRoot,
         }),
-      ).resolves.toMatchObject({ promptCache: "disabled" });
+      ).resolves.toMatchObject({ promptCache: "auto" });
       expect(events.some((event) => event.type === "model.invalidated")).toBe(
         true,
       );

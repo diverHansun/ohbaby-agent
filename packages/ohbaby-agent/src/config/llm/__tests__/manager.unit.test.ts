@@ -87,18 +87,13 @@ describe("LLMConfigManager", () => {
         maxTokens: 4096,
         contextWindowTokens: 128_000,
         modelProfiles: [
-          {
-            contextWindowTokens: 128_000,
-            maxOutputTokens: 4096,
+          expect.objectContaining({
             model: "gpt-4",
             provider: "openai",
-          },
-          {
-            contextWindowTokens: 256_000,
-            maxOutputTokens: 32_000,
-            model: "gpt-4o",
-            provider: "openai",
-          },
+            baseUrl: "https://api.openai.com/v1",
+            interfaceProvider: "openai-compatible",
+            contextWindowTokens: 128000,
+          }),
         ],
       });
     });

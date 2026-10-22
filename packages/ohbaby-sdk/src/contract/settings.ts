@@ -142,3 +142,66 @@ export interface UiSettingsAboutResponse {
   readonly diagnosticsFile?: string;
   readonly defaultWorkspace: string;
 }
+
+export interface UiSettingsModelCreate {
+  readonly provider: string;
+  readonly model: string;
+  readonly baseUrl: string;
+  readonly interfaceProvider:
+    | "openai-compatible"
+    | "openai-responses"
+    | "anthropic";
+  readonly promptCache?: "auto" | "enabled" | "disabled";
+  readonly label?: string;
+  readonly apiKeyEnv?: string | null;
+  readonly apiKey?: string;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+}
+export type UiSettingsModelPatch = Partial<
+  Omit<UiSettingsModelCreate, "label">
+> & { readonly label?: string | null };
+export interface UiSettingsModelSelect {
+  readonly id: string;
+}
+export interface UiSettingsModel {
+  readonly id: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly label?: string;
+  readonly baseUrl?: string;
+  readonly interfaceProvider?: UiSettingsModelCreate["interfaceProvider"];
+  readonly promptCache?: UiSettingsModelCreate["promptCache"];
+  readonly apiKeyEnv?: string;
+  readonly apiKeyConfigured: boolean;
+  readonly configurationComplete: boolean;
+  readonly contextWindowTokens: number;
+  readonly maxOutputTokens?: number;
+  readonly reasoning: import("./connect-model.js").UiReasoningCapabilityView;
+}
+export interface UiSettingsModels {
+  readonly active: {
+    readonly id: string;
+    readonly provider: string;
+    readonly model: string;
+  } | null;
+  readonly params: {
+    readonly maxTokens: number;
+    readonly temperature?: number;
+    readonly contextWindowTokens?: number;
+    readonly reasoning?: {
+      readonly enabled?: boolean;
+      readonly effort?: string;
+    };
+  };
+  readonly models: readonly UiSettingsModel[];
+}
+export interface UiSettingsModelsResponse extends UiSettingsModels {
+  readonly ok: true;
+}
+/** Mutations return the same complete ordered settings projection. */
+export type UiSettingsModelCreateResponse = UiSettingsModelsResponse;
+export type UiSettingsModelPatchResponse = UiSettingsModelsResponse;
+export type UiSettingsModelSelectResponse = UiSettingsModelsResponse;
+export type UiSettingsModelDeleteResponse = UiSettingsModelsResponse;
+export type UiSettingsModelProviderDeleteResponse = UiSettingsModelsResponse;

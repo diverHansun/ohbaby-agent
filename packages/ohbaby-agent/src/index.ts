@@ -227,3 +227,15 @@ export {
   McpServerPatchSchema,
 } from "./config/mcp/writer.js";
 export type { SettingsDomain } from "./config/llm/config-coordination.js";
+
+export {
+  readModelSettings,
+  createModelEntry,
+  updateModelEntry,
+  selectModelEntry,
+  deleteModelEntry,
+  deleteModelProvider,
+  ModelEntryCreateSchema,
+  ModelEntryPatchSchema,
+  ModelEntrySelectSchema,
+} from "./config/llm/writer.js";

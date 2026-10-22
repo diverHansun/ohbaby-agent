@@ -611,3 +611,135 @@ it.each([
     });
   },
 );
+
+it("global model CRUD preserves independent ids and publishes candidate metadata changes to every loaded instance", async () => {
+  const aEvents = await eventStream(join(root, "a"), "models-a");
+  await mkdir(join(root, "b"));
+  const bEvents = await eventStream(join(root, "b"), "models-b");
+  const replies: import("node:http").ServerResponse[] = [];
+  const upstream = createServer((_req, res) => {
+    replies.push(res);
+  });
+  await new Promise<void>((resolve) =>
+    upstream.listen(0, "127.0.0.1", resolve),
+  );
+  const port = (upstream.address() as { port: number }).port;
+  const profile = {
+    provider: "team/work",
+    model: "vendor/model",
+    baseUrl: `http://127.0.0.1:${String(port)}/v1`,
+    interfaceProvider: "openai-compatible",
+    apiKey: "model-secret-sentinel",
+  };
+  try {
+    const created = await request("models/profiles", "POST", profile);
+    expect(created.status).toBe(200);
+    const first =
+      (await created.json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    expect(first.active).toBeNull();
+    expect(first.models).toHaveLength(1);
+    expect(JSON.stringify(first)).not.toContain("model-secret-sentinel");
+    const second = (await (
+      await request("models/profiles", "POST", { ...profile, label: "second" })
+    ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    expect(second.models).toHaveLength(2);
+    expect(second.models[0].id).not.toBe(second.models[1].id);
+    await vi.waitFor(() => {
+      expect(replies).toHaveLength(2);
+    });
+    const beforeA = aEvents().length;
+    const beforeB = bEvents().length;
+    for (const reply of replies) {
+      reply.setHeader("content-type", "application/json");
+      reply.end(
+        JSON.stringify({
+          data: [
+            { id: "vendor/model", context_length: 64000, reasoning: false },
+          ],
+        }),
+      );
+    }
+    await vi.waitFor(() => {
+      expect(aEvents().slice(beforeA)).toContain('"domains":["model"]');
+      expect(bEvents().slice(beforeB)).toContain('"domains":["model"]');
+    });
+    const updated = (await (
+      await request(`models/profiles/${first.models[0].id}`, "PATCH", {
+        label: "edited",
+        interfaceProvider: "openai-responses",
+      })
+    ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    expect(updated.models[0].id).toBe(first.models[0].id);
+    expect(updated.models[1].label).toBe("second");
+    const selected = (await (
+      await request("models/active", "POST", { id: second.models[1].id })
+    ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    expect(selected.active?.id).toBe(second.models[1].id);
+    expect((await request("models/profiles/missing", "DELETE")).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await request("models/profiles", "POST", {
+          ...profile,
+          apiKeyEnv: "bad-env",
+        })
+      ).status,
+    ).toBe(400);
+    const removed = (await (
+      await request(
+        `models/providers/${encodeURIComponent(profile.provider)}`,
+        "DELETE",
+      )
+    ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    expect(removed.models).toEqual([]);
+    expect(removed.active).toBeNull();
+    const disk = JSON.parse(
+      await readFile(join(home, "model.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(disk.apiConfig).toBeUndefined();
+    expect(await readFile(join(home, ".env"), "utf8")).toContain(
+      "model-secret-sentinel",
+    );
+    expect(
+      (
+        await request(
+          `models/providers/${encodeURIComponent(profile.provider)}`,
+          "DELETE",
+        )
+      ).status,
+    ).toBe(404);
+  } finally {
+    for (const reply of replies) reply.end();
+    upstream.closeAllConnections();
+    await new Promise<void>((resolve) =>
+      upstream.close(() => {
+        resolve();
+      }),
+    );
+  }
+});
+it("returns MODEL_CONFIG_INCOMPLETE for legacy history and redacts successful model URLs", async () => {
+  await json(join(home, "model.json"), {
+    provider: "legacy",
+    defaultModel: "active",
+    apiConfig: { baseUrl: "http://localhost:1/v1" },
+    llmParams: { maxTokens: 8192 },
+    models: [{ id: "old", model: "history", contextWindowTokens: 12000 }],
+  });
+  const response = await request("models/active", "POST", { id: "old" });
+  expect(response.status).toBe(400);
+  expect(await response.text()).toContain("MODEL_CONFIG_INCOMPLETE");
+  const saved = await request("models/profiles", "POST", {
+    provider: "custom",
+    model: "m",
+    baseUrl: "http://url-secret@localhost:1/v1?%74oken=encoded-secret",
+    interfaceProvider: "openai-compatible",
+    apiKey: "key-secret",
+  });
+  expect(saved.status).toBe(200);
+  const text = await saved.text();
+  expect(text).not.toMatch(/url-secret|encoded-secret|key-secret/);
+  const got = await (await request("models")).text();
+  expect(got).not.toMatch(/url-secret|encoded-secret|key-secret/);
+});

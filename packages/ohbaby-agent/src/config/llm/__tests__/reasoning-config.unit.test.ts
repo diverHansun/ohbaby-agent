@@ -139,18 +139,16 @@ describe("reasoning configuration", () => {
       updateActiveModelProfile: true,
       contextWindowTokens: 20000,
     });
-    expect(
-      (JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig).models,
-    ).toEqual([
-      {
-        provider: "openai",
-        model: "gpt-5.2",
-        baseUrl: "https://api.openai.com/v1",
-        interfaceProvider: "openai-compatible",
-        contextWindowTokens: 20000,
-        reasoningCapabilities: capabilities,
-      },
-    ]);
+    const written = JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig;
+    expect(written.models).toHaveLength(2);
+    expect(written.models?.[0]).toMatchObject({
+      provider: "openai",
+      model: "gpt-5.2",
+      baseUrl: "https://api.openai.com/v1",
+      interfaceProvider: "openai-compatible",
+      contextWindowTokens: 20000,
+      reasoningCapabilities: capabilities,
+    });
   });
   it("rejects invalid writer reasoning before object merge can hide it", async () => {
     const path = await modelPath();
