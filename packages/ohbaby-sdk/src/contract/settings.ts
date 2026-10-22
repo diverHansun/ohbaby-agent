@@ -205,3 +205,12 @@ export type UiSettingsModelPatchResponse = UiSettingsModelsResponse;
 export type UiSettingsModelSelectResponse = UiSettingsModelsResponse;
 export type UiSettingsModelDeleteResponse = UiSettingsModelsResponse;
 export type UiSettingsModelProviderDeleteResponse = UiSettingsModelsResponse;
+
+/** Discover the saved target without selecting it; unknown is a successful result. */
+export interface UiSettingsModelProbe {
+  readonly id: string;
+}
+export interface UiSettingsModelProbeResponse {
+  readonly ok: true;
+  readonly reasoning: import("./connect-model.js").UiReasoningCapabilityView;
+}

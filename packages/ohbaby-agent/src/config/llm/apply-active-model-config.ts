@@ -521,6 +521,10 @@ export async function startModelEntryDiscovery(
       const document = await readModelDocument(options);
       const entry = document.models.find((e) => e.id === id);
       if (!entry || !configurationComplete(entry)) return undefined;
+      const credential = await resolveApiKey({
+        apiKeyEnv: entry.apiKeyEnv,
+        envPath: options.envPath ?? getGlobalEnvPath(),
+      });
       const key = discoveryKey(id, options);
       activeDiscoveries.get(key)?.controller.abort();
       const state: ActiveDiscovery = {
@@ -529,10 +533,6 @@ export async function startModelEntryDiscovery(
         status: "detecting",
       };
       activeDiscoveries.set(key, state);
-      const credential = await resolveApiKey({
-        apiKeyEnv: entry.apiKeyEnv,
-        envPath: options.envPath ?? getGlobalEnvPath(),
-      });
       return {
         entry,
         key,
@@ -542,7 +542,9 @@ export async function startModelEntryDiscovery(
         routeKey: modelProfileRouteKey(entry, entry.provider),
       };
     },
-  );
+  ).catch(() => null);
+  // Background discovery must not reject after the foreground save succeeded.
+  if (snapshot === null) return { reasoningReason: "network-error" };
   if (!snapshot) return {};
   const { entry, key, state, apiKey, maxTokens, routeKey } = snapshot;
   const isCurrent = (): boolean =>
@@ -562,13 +564,15 @@ export async function startModelEntryDiscovery(
           };
           const metadata = await probeContextWindow(input);
           const explicit =
-            entry.reasoningCapabilities && !entry.reasoningCapabilitySource
+            entry.reasoningCapabilities &&
+            entry.reasoningCapabilitySource !== "model-metadata" &&
+            entry.reasoningCapabilitySource !== "active-probe"
               ? entry.reasoningCapabilities
               : undefined;
           const known = capabilitiesFor({
             ...input,
             maxTokens,
-            modelProfiles: [entry],
+            modelProfiles: explicit ? [entry] : [],
           }).capability;
           const active =
             options.allowActiveProbe &&
@@ -579,8 +583,11 @@ export async function startModelEntryDiscovery(
               : undefined;
           const probe = {
             ...metadata,
+            reasoningReason:
+              known || active ? undefined : metadata.reasoningReason,
             reasoningCapabilities:
-              explicit ?? metadata.reasoningCapabilities ?? active,
+              explicit ??
+              (known ? undefined : (metadata.reasoningCapabilities ?? active)),
           };
           if (!isCurrent()) return probe;
           let wrote = false;

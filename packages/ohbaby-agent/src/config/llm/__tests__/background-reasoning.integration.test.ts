@@ -68,6 +68,11 @@ it("discovers reasoning strengths in the background when model metadata only say
     efforts: ["medium", "high"],
     supportsDisabled: false,
   });
+  const { currentDiscoveryState } =
+    await import("../apply-active-model-config.js");
+  expect(
+    await currentDiscoveryState(join(root, "model.json"), join(root, "env")),
+  ).toEqual({ status: "identified" });
   expect(calls.some((url) => url.endsWith("/chat/completions"))).toBe(true);
 });
 it("reports saved without waiting and retains independent previous-entry results without selecting it", async () => {

@@ -17,6 +17,7 @@ import {
   type ReasoningCapabilities,
 } from "ohbaby-llm";
 import type {
+  UiReasoningCapabilityView,
   UiSettingsModelCreate,
   UiSettingsModelPatch,
   UiSettingsModels,
@@ -205,6 +206,19 @@ function clearAutomaticCapabilities(entry: ModelEntry): void {
     delete entry.reasoningCapabilities;
     delete entry.reasoningCapabilitySource;
   }
+}
+function clearIncompatibleReasoningPreference(
+  document: ModelDocument,
+  entry: ModelEntry | undefined,
+): void {
+  if (!entry || !configurationComplete(entry)) return;
+  const capability = capabilitiesFor({
+    ...entry,
+    maxTokens: document.llmParams.maxTokens,
+    modelProfiles: [entry],
+  }).capability;
+  if (!compatibleReasoningPreference(document.llmParams.reasoning, capability))
+    delete document.llmParams.reasoning;
 }
 async function projectSettings(
   document: ModelDocument,
@@ -411,6 +425,8 @@ export function updateModelEntry(
     ].some((key) => Object.hasOwn(patch, key));
     const secret = await patchEntry(document, entry, patch, options);
     if (connectionChanged) clearAutomaticCapabilities(entry);
+    if (document.activeProfileId === id)
+      clearIncompatibleReasoningPreference(document, entry);
     await persistDocument(document, options, secret);
     if (connectionChanged) bumpGeneration(id, options);
     if (configurationComplete(entry))
@@ -428,10 +444,28 @@ export function selectModelEntry(
     if (!configurationComplete(entry))
       throw new ModelSettingsError("MODEL_CONFIG_INCOMPLETE");
     document.activeProfileId = id;
+    clearIncompatibleReasoningPreference(document, entry);
     await persistDocument(document, options);
     return projectSettings(document, options);
   });
 }
+/** Refresh one saved entry without changing the active selection. */
+export async function probeModelEntry(
+  id: string,
+  options: ModelSettingsOptions = {},
+): Promise<UiReasoningCapabilityView> {
+  await coordinateModelConfig(options.modelJsonPath, async () => {
+    const entry = requireEntry(await readModelDocument(options), id);
+    if (!configurationComplete(entry))
+      throw new ModelSettingsError("MODEL_CONFIG_INCOMPLETE");
+  });
+  await startModelEntryDiscovery(id, { ...options, allowActiveProbe: true });
+  const result = await readModelSettings(options);
+  const entry = result.models.find((model) => model.id === id);
+  if (!entry) throw new ModelSettingsError("MODEL_NOT_FOUND");
+  return entry.reasoning;
+}
+
 async function deleteEntries(
   predicate: (entry: ModelEntry) => boolean,
   options: ModelSettingsOptions,
@@ -440,7 +474,10 @@ async function deleteEntries(
     const document = await readModelDocument(options);
     const removed = document.models.filter(predicate);
     if (!removed.length) throw new ModelSettingsError("MODEL_NOT_FOUND");
-    if (removed.some((entry) => entry.id === document.activeProfileId)) {
+    const activeRemoved = removed.some(
+      (entry) => entry.id === document.activeProfileId,
+    );
+    if (activeRemoved) {
       const index = document.models.findIndex(
         (entry) => entry.id === document.activeProfileId,
       );
@@ -453,6 +490,11 @@ async function deleteEntries(
       )?.id;
     }
     document.models = document.models.filter((entry) => !predicate(entry));
+    if (activeRemoved)
+      clearIncompatibleReasoningPreference(
+        document,
+        document.models.find((entry) => entry.id === document.activeProfileId),
+      );
     await persistDocument(document, options);
     for (const entry of removed) bumpGeneration(entry.id, options);
     return projectSettings(document, options);
@@ -551,19 +593,8 @@ export async function setActiveLLMConfig(
     synchronizeModelSnapshot(document);
     if (!configurationComplete(entry))
       throw new ModelSettingsError("MODEL_CONFIG_INCOMPLETE");
-    const capability = capabilitiesFor({
-      provider: entry.provider,
-      model: entry.model,
-      baseUrl: entry.baseUrl,
-      interfaceProvider: entry.interfaceProvider,
-      maxTokens: document.llmParams.maxTokens,
-      modelProfiles: [entry],
-    }).capability;
-    if (
-      input.reasoning === undefined &&
-      !compatibleReasoningPreference(document.llmParams.reasoning, capability)
-    )
-      delete document.llmParams.reasoning;
+    if (input.reasoning === undefined)
+      clearIncompatibleReasoningPreference(document, entry);
     await persistDocument(document, input, secret);
     if (changed) bumpGeneration(entry.id, input);
     return {
@@ -613,19 +644,8 @@ export function writeModelEntryMetadata(
       entry.reasoningCapabilitySource =
         metadata.reasoningCapabilitySource ?? "model-metadata";
     }
-    if (document.activeProfileId === id) {
-      const capability = capabilitiesFor({
-        ...entry,
-        baseUrl: entry.baseUrl,
-        interfaceProvider: entry.interfaceProvider,
-        maxTokens: document.llmParams.maxTokens,
-        modelProfiles: [entry],
-      }).capability;
-      if (
-        !compatibleReasoningPreference(document.llmParams.reasoning, capability)
-      )
-        delete document.llmParams.reasoning;
-    }
+    if (document.activeProfileId === id)
+      clearIncompatibleReasoningPreference(document, entry);
     await persistDocument(document, options);
     return true;
   });

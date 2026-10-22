@@ -233,9 +233,12 @@ export {
   createModelEntry,
   updateModelEntry,
   selectModelEntry,
+  probeModelEntry,
   deleteModelEntry,
   deleteModelProvider,
   ModelEntryCreateSchema,
   ModelEntryPatchSchema,
   ModelEntrySelectSchema,
 } from "./config/llm/writer.js";
+
+export { startModelEntryDiscovery } from "./config/llm/apply-active-model-config.js";

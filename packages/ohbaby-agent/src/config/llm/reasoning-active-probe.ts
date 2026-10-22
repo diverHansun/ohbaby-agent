@@ -1,4 +1,8 @@
-import type { InterfaceProviderKind, ReasoningCapabilities } from "ohbaby-llm";
+import {
+  normalizedEndpoint,
+  type InterfaceProviderKind,
+  type ReasoningCapabilities,
+} from "ohbaby-llm";
 import { buildModelMetadataUrl } from "./context-window-probe.js";
 
 const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -18,11 +22,12 @@ interface ProbeInput {
 export async function probeReasoningCapabilities(
   input: ProbeInput,
 ): Promise<ReasoningCapabilities | undefined> {
+  const officialOpenAI =
+    normalizedEndpoint(input.baseUrl) === "https://api.openai.com/v1";
   const wire =
     input.interfaceProvider === "anthropic"
       ? "anthropic-adaptive"
-      : input.interfaceProvider === "openai-responses" ||
-          input.provider === "openai"
+      : input.interfaceProvider === "openai-responses" || officialOpenAI
         ? "openai"
         : "reasoning";
   const endpoint = new URL(buildModelMetadataUrl(input));
@@ -60,8 +65,7 @@ export async function probeReasoningCapabilities(
               : { reasoning: { effort } }
             : { thinking: { type: "adaptive" }, output_config: { effort } };
     const outputLimit =
-      input.interfaceProvider === "openai-compatible" &&
-      input.provider === "openai"
+      input.interfaceProvider === "openai-compatible" && officialOpenAI
         ? { max_completion_tokens: 32 }
         : input.interfaceProvider === "openai-responses"
           ? { max_output_tokens: 32 }

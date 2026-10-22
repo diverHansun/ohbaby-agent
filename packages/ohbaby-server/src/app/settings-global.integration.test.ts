@@ -662,6 +662,8 @@ it("global model CRUD preserves independent ids and publishes candidate metadata
     await vi.waitFor(() => {
       expect(aEvents().slice(beforeA)).toContain('"domains":["model"]');
       expect(bEvents().slice(beforeB)).toContain('"domains":["model"]');
+      expect(aEvents().slice(beforeA)).toContain('"type":"model.invalidated"');
+      expect(bEvents().slice(beforeB)).toContain('"type":"model.invalidated"');
     });
     const updated = (await (
       await request(`models/profiles/${first.models[0].id}`, "PATCH", {
@@ -730,6 +732,12 @@ it("returns MODEL_CONFIG_INCOMPLETE for legacy history and redacts successful mo
   const response = await request("models/active", "POST", { id: "old" });
   expect(response.status).toBe(400);
   expect(await response.text()).toContain("MODEL_CONFIG_INCOMPLETE");
+  const probe = await request("models/probe", "POST", { id: "old" });
+  expect(probe.status).toBe(400);
+  expect(await probe.json()).toMatchObject({
+    ok: false,
+    error: { code: "MODEL_CONFIG_INCOMPLETE" },
+  });
   const saved = await request("models/profiles", "POST", {
     provider: "custom",
     model: "m",
@@ -742,4 +750,112 @@ it("returns MODEL_CONFIG_INCOMPLETE for legacy history and redacts successful mo
   expect(text).not.toMatch(/url-secret|encoded-secret|key-secret/);
   const got = await (await request("models")).text();
   expect(got).not.toMatch(/url-secret|encoded-secret|key-secret/);
+});
+
+it("global target probes and active selection refresh through HTTP, emitting both model events without a directory header", async () => {
+  const events = await eventStream(join(root, "a"), "probe-events");
+  let posts = 0;
+  let effort = "high";
+  const upstream = createServer((req, res) => {
+    if (req.method === "GET") {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          data: [{ id: "probe-model", context_length: 48000 }],
+        }),
+      );
+      return;
+    }
+    void (async (): Promise<void> => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req)
+        chunks.push(Buffer.from(chunk as Uint8Array));
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+        reasoning?: { effort?: string; enabled?: boolean };
+      };
+      posts++;
+      res
+        .writeHead(
+          body.reasoning?.effort === effort || body.reasoning?.enabled === false
+            ? 200
+            : 400,
+        )
+        .end();
+    })();
+  });
+  await new Promise<void>((resolve) =>
+    upstream.listen(0, "127.0.0.1", resolve),
+  );
+  try {
+    const created = await request("models/profiles", "POST", {
+      provider: "openai",
+      model: "probe-model",
+      baseUrl: `http://127.0.0.1:${String((upstream.address() as { port: number }).port)}/v1`,
+      interfaceProvider: "openai-compatible",
+      apiKeyEnv: null,
+    });
+    const saved =
+      (await created.json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    const id = saved.models[0].id;
+    await vi.waitFor(async () => {
+      const current = (await (
+        await request("models")
+      ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+      expect(current.models[0].contextWindowTokens).toBe(48000);
+    });
+    expect(posts).toBe(0);
+    const offset = events().length;
+    const probed = await request("models/probe", "POST", { id });
+    expect(probed.status).toBe(200);
+    expect(await probed.json()).toMatchObject({
+      ok: true,
+      reasoning: {
+        status: "identified",
+        source: "active-probe",
+        efforts: ["high"],
+      },
+    });
+    expect(posts).toBe(8);
+    expect(
+      (
+        (await (
+          await request("models")
+        ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse
+      ).active,
+    ).toBeNull();
+    await vi.waitFor(() => {
+      expect(events().slice(offset)).toContain('"type":"settings.changed"');
+      expect(events().slice(offset)).toContain('"domains":["model"]');
+      expect(events().slice(offset)).toContain('"type":"model.invalidated"');
+    });
+    effort = "low";
+    expect((await request("models/active", "POST", { id })).status).toBe(200);
+    await vi.waitFor(async () => {
+      const current = (await (
+        await request("models")
+      ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+      expect(current.active?.id).toBe(id);
+      expect(current.models[0].reasoning.efforts).toEqual(["low"]);
+    });
+    expect(posts).toBe(16);
+    expect(
+      (await request("models/probe", "POST", { id: "missing" })).status,
+    ).toBe(404);
+    expect((await request("models/probe", "POST", {})).status).toBe(400);
+    expect(
+      (
+        await fetch(`${required(server).url}/v1/settings/models/probe`, {
+          method: "POST",
+          body: JSON.stringify({ id }),
+        })
+      ).status,
+    ).toBe(401);
+  } finally {
+    upstream.closeAllConnections();
+    await new Promise<void>((resolve) =>
+      upstream.close(() => {
+        resolve();
+      }),
+    );
+  }
 });

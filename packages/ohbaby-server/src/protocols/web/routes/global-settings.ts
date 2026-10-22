@@ -1,6 +1,7 @@
 import type {
   UiSettingsAboutResponse,
   UiSettingsModelsResponse,
+  UiSettingsModelProbeResponse,
   UiSettingsSearchResponse,
   UiSettingsGlobalMcpServersResponse,
   UiSettingsMcpServerUpdateResponse,
@@ -12,6 +13,8 @@ import {
   createModelEntry,
   updateModelEntry,
   selectModelEntry,
+  probeModelEntry,
+  startModelEntryDiscovery,
   deleteModelEntry,
   deleteModelProvider,
   ModelEntryCreateSchema,
@@ -150,15 +153,33 @@ export function registerGlobalSettingsRoutes(
           webErrorBody(parsed.message),
           parsed.status as 400 | 413,
         );
-      const result = await selectModelEntry(
-        ModelEntrySelectSchema.parse(parsed.value).id,
-        modelOptions,
-      );
+      const { id } = ModelEntrySelectSchema.parse(parsed.value);
+      const result = await selectModelEntry(id, modelOptions);
+      void startModelEntryDiscovery(id, {
+        ...modelOptions,
+        allowActiveProbe: true,
+      });
       await ctx.notify(["model"]);
       return context.json({
         ok: true,
         ...result,
       } satisfies UiSettingsModelsResponse);
+    }),
+  );
+  app.post(
+    "/v1/settings/models/probe",
+    handle(async (context) => {
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const { id } = ModelEntrySelectSchema.parse(parsed.value);
+      return context.json({
+        ok: true,
+        reasoning: await probeModelEntry(id, modelOptions),
+      } satisfies UiSettingsModelProbeResponse);
     }),
   );
   app.delete(

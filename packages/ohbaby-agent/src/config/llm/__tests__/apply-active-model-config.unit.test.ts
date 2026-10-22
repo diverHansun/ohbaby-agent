@@ -484,7 +484,7 @@ describe("applyActiveModelConfig", () => {
       const target = {
         provider: "zenmux",
         model: "openai/gpt-5.6-luna",
-        baseUrl: "https://zenmux.ai/api/v1",
+        baseUrl: "https://custom.example/v1",
         interfaceProvider: "openai-responses",
         contextWindowTokens: 100_000,
         reasoningCapabilitySource: "active-probe",
@@ -571,7 +571,7 @@ describe("applyActiveModelConfig", () => {
     },
   );
 
-  it("reuses saved reasoning capabilities without another active reasoning probe", async () => {
+  it("retains saved automatic evidence when a fresh fallback cannot confirm any strength", async () => {
     await fs.mkdir(path.dirname(modelJsonPath), { recursive: true });
     await fs.writeFile(
       modelJsonPath,
@@ -605,7 +605,7 @@ describe("applyActiveModelConfig", () => {
       Promise.resolve(
         new Response(
           init?.method === "POST"
-            ? JSON.stringify({ error: "unexpected active probe" })
+            ? JSON.stringify({ error: "unsupported effort" })
             : JSON.stringify({ data: [] }),
           { status: init?.method === "POST" ? 400 : 200 },
         ),
@@ -633,7 +633,14 @@ describe("applyActiveModelConfig", () => {
       (fetchMock.mock.calls as [string, RequestInit?][]).filter(
         ([, init]) => init?.method === "POST",
       ),
-    ).toHaveLength(0);
+    ).toHaveLength(7);
+    const retained = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
+      models: { reasoningCapabilities: { efforts: string[] } }[];
+    };
+    expect(retained.models[0].reasoningCapabilities.efforts).toEqual([
+      "low",
+      "medium",
+    ]);
   });
 
   it("does not use a legacy generic profile to skip discovery for a new protocol", async () => {

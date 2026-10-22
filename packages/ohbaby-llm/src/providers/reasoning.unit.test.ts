@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  capabilitiesFor,
   mergeReasoningIntent,
   resolveRequestReasoning,
   toAnthropicReasoningWire,
@@ -151,7 +152,7 @@ describe("request reasoning resolution", () => {
   it.each([
     { model: "gpt-5.2-unknown" },
     { baseUrl: "https://unverified.example/v1" },
-    { provider: "other" },
+    { interfaceProvider: "anthropic" as const },
   ])(
     "does not infer capabilities from similar names or arbitrary endpoints %j",
     (patch) => {
@@ -335,4 +336,82 @@ describe("Stage C reliable defaults and service defaults", () => {
       }),
     ).toThrow(/Unsupported/);
   });
+});
+
+describe("official route rules ignore provider labels", () => {
+  it.each([
+    [
+      "https://api.openai.com/v1/",
+      "gpt-5.2",
+      "openai-responses",
+      "openai",
+      ["low", "medium", "high", "xhigh"],
+    ],
+    [
+      "https://api.anthropic.com/v1",
+      "claude-sonnet-4-6",
+      "anthropic",
+      "anthropic-adaptive",
+      ["low", "medium", "high", "max"],
+    ],
+    [
+      "https://zenmux.ai/api/v1",
+      "deepseek/deepseek-v4-flash",
+      "openai-compatible",
+      "reasoning",
+      ["high", "max"],
+    ],
+    [
+      "https://zenmux.ai/api/v1",
+      "openai/gpt-5.6-luna",
+      "openai-responses",
+      "openai",
+      ["low", "medium", "high", "xhigh", "max"],
+    ],
+    [
+      "https://zenmux.ai/api/anthropic",
+      "anthropic/claude-sonnet-5",
+      "anthropic",
+      "anthropic-adaptive",
+      ["low", "medium", "high", "xhigh", "max"],
+    ],
+  ] as const)(
+    "matches %s %s %s under a custom label",
+    (baseUrl, model, interfaceProvider, wire, efforts) => {
+      expect(
+        capabilitiesFor({
+          provider: "My upstream / alias",
+          baseUrl,
+          model,
+          interfaceProvider,
+          maxTokens: 8192,
+        }).capability,
+      ).toMatchObject({ mode: "effort", wire, efforts });
+    },
+  );
+});
+
+it("official builtins outrank old automatic profiles while explicit overrides remain authoritative", () => {
+  const profile = {
+    provider: "alias",
+    model: "gpt-5.2",
+    contextWindowTokens: 128000,
+    reasoningCapabilities: {
+      mode: "none",
+      wire: "none",
+      supportsDisabled: true,
+    } as const,
+  };
+  const route = { ...openai, provider: "alias" };
+  expect(
+    capabilitiesFor({
+      ...route,
+      modelProfiles: [
+        { ...profile, reasoningCapabilitySource: "active-probe" },
+      ],
+    }).source,
+  ).toBe("builtin:openai/gpt-5.2");
+  expect(
+    capabilitiesFor({ ...route, modelProfiles: [profile] }).capability?.mode,
+  ).toBe("none");
 });

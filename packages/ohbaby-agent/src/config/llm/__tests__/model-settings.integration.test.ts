@@ -59,6 +59,7 @@ describe("independent model settings", () => {
     const before = await disk();
     before.llmParams.temperature = 0.3;
     before.llmParams.maxTokens = 1234;
+    before.llmParams.reasoning = { enabled: true, effort: "high" };
     await writeFile(opts.modelJsonPath, JSON.stringify(before));
     await updateModelEntry(
       b.id,
@@ -79,6 +80,9 @@ describe("independent model settings", () => {
     expect(next.models[1].label).toBeUndefined();
     await selectModelEntry(b.id, opts);
     expect((await disk()).apiConfig?.interfaceProvider).toBe("anthropic");
+    expect((await disk()).llmParams.reasoning).toEqual(
+      before.llmParams.reasoning,
+    );
   });
   it("isolates replacement from shared model and legacy search references and detaches on clear", async () => {
     await writeFile(opts.envPath, "TAVILY_API_KEY=original\n");
@@ -368,4 +372,124 @@ it("validates inactive document parameters and active-id shape instead of silent
     }),
   );
   await expect(readModelSettings(opts)).rejects.toThrow();
+});
+
+it.each([
+  ["select", "none"],
+  ["select", "binary"],
+  ["delete-entry", "none"],
+  ["delete-entry", "binary"],
+  ["delete-provider", "none"],
+  ["delete-provider", "binary"],
+] as const)(
+  "%s immediately adapts old reasoning effort to the known %s successor",
+  async (operation, mode) => {
+    await writeFile(
+      opts.modelJsonPath,
+      JSON.stringify({
+        activeProfileId: "a",
+        provider: "a",
+        defaultModel: "a",
+        apiConfig: {
+          baseUrl: route.baseUrl,
+          interfaceProvider: route.interfaceProvider,
+        },
+        llmParams: {
+          maxTokens: 8192,
+          reasoning: { enabled: true, effort: "high" },
+        },
+        models: [
+          {
+            ...route,
+            id: "a",
+            provider: "a",
+            model: "a",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "effort",
+              wire: "reasoning",
+              efforts: ["high"],
+              supportsDisabled: true,
+            },
+          },
+          {
+            ...route,
+            id: "b",
+            provider: "b",
+            model: "b",
+            contextWindowTokens: 64000,
+            reasoningCapabilities: {
+              mode,
+              wire: mode === "none" ? "none" : "thinking",
+              supportsDisabled: true,
+            },
+          },
+        ],
+      }),
+    );
+    if (operation === "select") await selectModelEntry("b", opts);
+    else if (operation === "delete-entry") await deleteModelEntry("a", opts);
+    else await deleteModelProvider("a", opts);
+    const { reloadLLMConfig } = await import("../index.js");
+    const { resolveRequestReasoning } = await import("ohbaby-llm");
+    const config = await reloadLLMConfig({ ...opts, projectDirectory: dir });
+    expect(config.model).toBe("b");
+    expect(resolveRequestReasoning(config).mode).toBe(mode);
+    expect((await disk()).llmParams.reasoning).toBeUndefined();
+  },
+);
+
+it("patching the current official model immediately clears an incompatible effort while candidate PATCH preserves it", async () => {
+  let metadataRequests = 0;
+  vi.stubGlobal("fetch", () => {
+    metadataRequests++;
+    return Promise.resolve(Response.json({ data: [] }));
+  });
+  try {
+    await writeFile(
+      opts.modelJsonPath,
+      JSON.stringify({
+        activeProfileId: "current",
+        provider: "My official upstream",
+        defaultModel: "gpt-5.2",
+        apiConfig: {
+          baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-responses",
+        },
+        llmParams: {
+          maxTokens: 8192,
+          reasoning: { enabled: true, effort: "high" },
+        },
+        models: ["current", "candidate"].map((id) => ({
+          id,
+          provider: "My official upstream",
+          model: "gpt-5.2",
+          baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-responses",
+          contextWindowTokens: 128000,
+        })),
+      }),
+    );
+    const { reloadLLMConfig } = await import("../index.js");
+    const { resolveRequestReasoning } = await import("ohbaby-llm");
+    const load = (): ReturnType<typeof reloadLLMConfig> =>
+      reloadLLMConfig({ ...opts, projectDirectory: dir });
+    expect(resolveRequestReasoning(await load()).effort).toBe("high");
+    await updateModelEntry("candidate", { model: "gpt-4o" }, opts);
+    expect((await disk()).llmParams.reasoning).toEqual({
+      enabled: true,
+      effort: "high",
+    });
+    expect(resolveRequestReasoning(await load()).effort).toBe("high");
+    await updateModelEntry("current", { model: "gpt-4o" }, opts);
+    const config = await load();
+    expect(config.model).toBe("gpt-4o");
+    expect(resolveRequestReasoning(config).mode).toBe("none");
+    expect((await disk()).llmParams.reasoning).toBeUndefined();
+  } finally {
+    await vi.waitFor(() => {
+      expect(metadataRequests).toBe(2);
+    });
+    vi.unstubAllGlobals();
+  }
 });

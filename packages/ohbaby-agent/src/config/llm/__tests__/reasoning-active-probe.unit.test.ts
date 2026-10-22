@@ -27,7 +27,9 @@ it("identifies only strengths accepted by the exact Chat model after a rejected 
           : 400,
     });
   });
-  expect(await probeReasoningCapabilities(input)).toEqual({
+  expect(
+    await probeReasoningCapabilities({ ...input, provider: "openai" }),
+  ).toEqual({
     mode: "effort",
     wire: "reasoning",
     supportsDisabled: true,
@@ -117,7 +119,11 @@ it("uses Chat reasoning_effort and max_completion_tokens for native OpenAI model
     });
   });
   expect(
-    await probeReasoningCapabilities({ ...input, provider: "openai" }),
+    await probeReasoningCapabilities({
+      ...input,
+      provider: "custom",
+      baseUrl: "https://api.openai.com/v1/",
+    }),
   ).toEqual({
     mode: "effort",
     wire: "openai",

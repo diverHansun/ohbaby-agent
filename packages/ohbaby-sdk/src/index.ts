@@ -298,6 +298,8 @@ export type {
   UiSettingsModelCreate,
   UiSettingsModelPatch,
   UiSettingsModelSelect,
+  UiSettingsModelProbe,
+  UiSettingsModelProbeResponse,
   UiSettingsModel,
   UiSettingsModels,
   UiSettingsModelsResponse,

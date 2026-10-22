@@ -1655,6 +1655,120 @@ describe("createDaemonServerApp", () => {
           "/v1/snapshot",
         ]),
       );
+
+      const globalRoutes = {
+        "/v1/settings/about": ["get"],
+        "/v1/settings/search": ["get", "put"],
+        "/v1/settings/mcp/servers": ["get"],
+        "/v1/settings/mcp/servers/{name}": ["put", "delete"],
+        "/v1/settings/models": ["get"],
+        "/v1/settings/models/profiles": ["post"],
+        "/v1/settings/models/profiles/{id}": ["patch", "delete"],
+        "/v1/settings/models/providers/{providerId}": ["delete"],
+        "/v1/settings/models/active": ["post"],
+        "/v1/settings/models/probe": ["post"],
+      };
+      const instanceRoutes = {
+        "/v1/settings/mcp/status": ["get"],
+        "/v1/settings/mcp/reconnect": ["post"],
+        "/v1/settings/skills": ["get"],
+        "/v1/settings/agents": ["get"],
+      };
+      for (const [path, methods] of Object.entries({
+        ...globalRoutes,
+        ...instanceRoutes,
+      })) {
+        for (const method of methods) {
+          const operation = (
+            body.paths[path] as
+              | Record<
+                  string,
+                  { parameters?: { name: string; required?: boolean }[] }
+                >
+              | undefined
+          )?.[method];
+          expect(operation, `${method} ${path}`).toMatchObject({
+            security: [{ daemonBearer: [] }],
+            responses: {
+              "200": {
+                content: {
+                  "application/json": { schema: expect.any(Object) as unknown },
+                },
+              },
+              "401": expect.any(Object) as unknown,
+              "500": expect.any(Object) as unknown,
+            },
+          });
+          const header = operation?.parameters?.find(
+            (parameter) => parameter.name === "x-ohbaby-directory",
+          );
+          if (path in instanceRoutes)
+            expect(header).toMatchObject({ required: true });
+          else expect(header).toBeUndefined();
+        }
+      }
+      expect(body).toMatchObject({
+        components: {
+          securitySchemes: { daemonBearer: { type: "http", scheme: "bearer" } },
+          schemas: {
+            SettingsModelCreate: {
+              required: ["provider", "model", "baseUrl", "interfaceProvider"],
+              properties: {
+                apiKey: { type: "string", writeOnly: true },
+                apiKeyEnv: { type: ["string", "null"] },
+              },
+            },
+            SettingsModelPatch: {
+              properties: { label: { type: ["string", "null"] } },
+            },
+            SettingsModelProbeResponse: {
+              properties: {
+                reasoning: {
+                  $ref: "#/components/schemas/ReasoningCapabilityView",
+                },
+              },
+            },
+            SettingsModel: {
+              properties: { apiKeyConfigured: { type: "boolean" } },
+            },
+          },
+        },
+      });
+      expect(body.paths["/v1/settings/models/probe"]).toMatchObject({
+        post: {
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/SettingsModelTarget" },
+              },
+            },
+          },
+          responses: {
+            "400": expect.any(Object) as unknown,
+            "404": expect.any(Object) as unknown,
+            "413": expect.any(Object) as unknown,
+          },
+        },
+      });
+      expect(
+        body.paths["/v1/settings/models/providers/{providerId}"],
+      ).toMatchObject({
+        delete: {
+          parameters: [{ name: "providerId", in: "path", required: true }],
+        },
+      });
+      expect(body.paths["/v1/settings/mcp/servers/{name}"]).toMatchObject({
+        put: { parameters: [{ name: "name", in: "path", required: true }] },
+      });
+      expect(body.paths["/v1/settings/mcp/reconnect"]).toMatchObject({
+        post: {
+          responses: {
+            "409": expect.any(Object) as unknown,
+            "503": expect.any(Object) as unknown,
+          },
+        },
+      });
     } finally {
       await handle.dispose();
     }

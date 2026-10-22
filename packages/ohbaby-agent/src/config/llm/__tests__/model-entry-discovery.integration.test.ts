@@ -11,6 +11,7 @@ import {
   readModelSettings,
 } from "../writer.js";
 import { readModelDocument } from "../model-document.js";
+import * as modelDocument from "../model-document.js";
 let dir: string;
 let server: ReturnType<typeof createServer>;
 let baseUrl: string;
@@ -102,8 +103,16 @@ it("returns saved before metadata, discovers candidates independently without PO
   await vi.waitFor(() => {
     expect(requests).toHaveLength(2);
   });
-  answer(1, 22222, ["high"]);
-  answer(0, 11111, ["low"]);
+  answer(
+    requests.findIndex((request) => request.key === "Bearer b"),
+    22222,
+    ["high"],
+  );
+  answer(
+    requests.findIndex((request) => request.key === "Bearer a"),
+    11111,
+    ["low"],
+  );
   await vi.waitFor(() => {
     expect(notifications).toBe(2);
   });
@@ -158,8 +167,14 @@ it("late results cannot resurrect deletion or override a later active selection"
   });
   await selectModelEntry(b.id, opts);
   await deleteModelEntry(a.id, opts);
-  answer(0, 999999);
-  answer(1, 22222);
+  answer(
+    requests.findIndex((request) => request.key === "Bearer a"),
+    999999,
+  );
+  answer(
+    requests.findIndex((request) => request.key === "Bearer b"),
+    22222,
+  );
   await vi.waitFor(() => {
     expect(notifications).toBeGreaterThanOrEqual(1);
   });
@@ -300,4 +315,29 @@ it("concurrent legacy saves discover their atomically saved entries without reta
   expect(document.activeProfileId).toBe(b.id);
   expect(document.apiConfig?.baseUrl).toBe(`${endpoint}/b/v1`);
   expect(document.llmParams.contextWindowTokens).toBe(22222);
+});
+
+it("contains discovery preparation failure after a successful save without losing the saved entry", async () => {
+  const entry = await add("a");
+  await vi.waitFor(() => {
+    expect(requests).toHaveLength(1);
+  });
+  answer(0, 12345);
+  await vi.waitFor(() => {
+    expect(notifications).toBe(1);
+  });
+  const { startModelEntryDiscovery } =
+    await import("../apply-active-model-config.js");
+  const read = vi
+    .spyOn(modelDocument, "readModelDocument")
+    .mockRejectedValueOnce(new Error("fixture read I/O failure"));
+  try {
+    await expect(
+      startModelEntryDiscovery(entry.id, { ...opts, allowActiveProbe: true }),
+    ).resolves.toEqual({ reasoningReason: "network-error" });
+    expect((await readModelDocument(opts)).models[0].id).toBe(entry.id);
+    expect(requests).toHaveLength(1);
+  } finally {
+    read.mockRestore();
+  }
 });

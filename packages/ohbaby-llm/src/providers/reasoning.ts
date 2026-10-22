@@ -105,85 +105,87 @@ export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
       Number(b.interfaceProvider !== undefined) -
       Number(b.baseUrl !== undefined),
   );
+  let automatic:
+    | { capability: ReasoningCapabilities; source: string }
+    | undefined;
   if (matching && matching.length > 0) {
     const capability = matching[matching.length - 1].reasoningCapabilities;
     if (capability === undefined)
       return fail("Missing model reasoning capabilities");
     validateReasoningCapabilities(capability);
-    return {
+    const selected = {
       capability,
       source:
         matching[matching.length - 1].reasoningCapabilitySource ??
         "local-model-profile",
     };
+    if (explicitProfiles?.length) return selected;
+    automatic = selected;
   }
   const endpoint = normalizedEndpoint(options.baseUrl);
   // Verified route profiles: Zenmux reasoning guide and the exact model pages.
   // https://zenmux.ai/docs/guide/advanced/reasoning.html
   // Live regression evidence lives in the native-reasoning harness.
-  if (options.provider === "zenmux") {
-    const common = {
-      mode: "effort" as const,
-      supportsDisabled: true,
-      temperature: "unsupported" as const,
-    };
-    if (endpoint === "https://zenmux.ai/api/v1") {
-      if (
-        options.model === "deepseek/deepseek-v4-flash" &&
-        options.interfaceProvider === "openai-compatible"
-      )
-        return {
-          capability: {
-            ...common,
-            wire: "reasoning",
-            efforts: ["high", "max"],
-          },
-          source: "builtin:zenmux/deepseek-v4-flash",
-        };
-      if (
-        options.model === "openai/gpt-5.6-luna" &&
-        options.interfaceProvider !== "anthropic"
-      )
-        return {
-          capability: {
-            ...common,
-            // The exact model page confirms levels, not a disable control.
-            // https://zenmux.ai/openai/gpt-5.6-luna
-            supportsDisabled: false,
-            wire:
-              options.interfaceProvider === "openai-responses"
-                ? "openai"
-                : "reasoning",
-            efforts:
-              options.interfaceProvider === "openai-responses"
-                ? ["low", "medium", "high", "xhigh", "max"]
-                : ["low", "medium", "high"],
-          },
-          source: "builtin:zenmux/gpt-5.6-luna",
-        };
-    }
+  const common = {
+    mode: "effort" as const,
+    supportsDisabled: true,
+    temperature: "unsupported" as const,
+  };
+  if (endpoint === "https://zenmux.ai/api/v1") {
     if (
-      endpoint === "https://zenmux.ai/api/anthropic" &&
-      options.model === "anthropic/claude-sonnet-5" &&
-      options.interfaceProvider === "anthropic"
+      options.model === "deepseek/deepseek-v4-flash" &&
+      options.interfaceProvider === "openai-compatible"
     )
       return {
         capability: {
           ...common,
-          // Sonnet 5 adaptive thinking is always on.
-          // https://zenmux.ai/anthropic/claude-sonnet-5
-          supportsDisabled: false,
-          wire: "anthropic-adaptive",
-          efforts: ["low", "medium", "high", "xhigh", "max"],
+          wire: "reasoning",
+          efforts: ["high", "max"],
         },
-        source: "builtin:zenmux/claude-sonnet-5",
+        source: "builtin:zenmux/deepseek-v4-flash",
+      };
+    if (
+      options.model === "openai/gpt-5.6-luna" &&
+      options.interfaceProvider !== "anthropic"
+    )
+      return {
+        capability: {
+          ...common,
+          // The exact model page confirms levels, not a disable control.
+          // https://zenmux.ai/openai/gpt-5.6-luna
+          supportsDisabled: false,
+          wire:
+            options.interfaceProvider === "openai-responses"
+              ? "openai"
+              : "reasoning",
+          efforts:
+            options.interfaceProvider === "openai-responses"
+              ? ["low", "medium", "high", "xhigh", "max"]
+              : ["low", "medium", "high"],
+        },
+        source: "builtin:zenmux/gpt-5.6-luna",
       };
   }
+  if (
+    endpoint === "https://zenmux.ai/api/anthropic" &&
+    options.model === "anthropic/claude-sonnet-5" &&
+    options.interfaceProvider === "anthropic"
+  )
+    return {
+      capability: {
+        ...common,
+        // Sonnet 5 adaptive thinking is always on.
+        // https://zenmux.ai/anthropic/claude-sonnet-5
+        supportsDisabled: false,
+        wire: "anthropic-adaptive",
+        efforts: ["low", "medium", "high", "xhigh", "max"],
+      },
+      source: "builtin:zenmux/claude-sonnet-5",
+    };
   // Exact identities only. Sources describe capabilities, not arbitrary proxy routes.
   // https://developers.openai.com/api/docs/models/gpt-5.2
   // https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.2
   if (
-    options.provider === "openai" &&
     endpoint === "https://api.openai.com/v1" &&
     options.interfaceProvider !== "anthropic"
   ) {
@@ -224,7 +226,6 @@ export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
   // https://platform.claude.com/docs/en/build-with-claude/effort
   // https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking
   if (
-    options.provider === "anthropic" &&
     ["https://api.anthropic.com", "https://api.anthropic.com/v1"].includes(
       endpoint,
     ) &&
@@ -242,7 +243,7 @@ export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
         source: "builtin:anthropic/adaptive-thinking",
       };
   }
-  return { source: "unknown" };
+  return automatic ?? { source: "unknown" };
 }
 function fail(message: string): never {
   throw new ConfigError(message, "INVALID_FIELD");
