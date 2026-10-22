@@ -7295,15 +7295,15 @@ it("keeps expired retained edit text associated and lets Esc restore the draft w
 it("keeps the default in-process TUI header quiet during a healthy entry check", async () => {
   // eslint-disable-next-line no-restricted-syntax -- Contract verifies the real default backend entry gate through the TUI.
   const { createInProcessUiBackendClient } = await import("ohbaby-agent");
-  let resume: (() => void) | undefined;
+  const recoveryEntered = createDeferred<undefined>();
+  const resumeRecovery = createDeferred<undefined>();
   let checking = false;
   const client = createInProcessUiBackendClient({
     initialSnapshot: snapshot(),
     recoverExecutionSession: async () => {
       if (!checking) return false;
-      await new Promise<void>((resolve) => {
-        resume = resolve;
-      });
+      recoveryEntered.resolve(undefined);
+      await resumeRecovery.promise;
       return false;
     },
   });
@@ -7320,18 +7320,17 @@ it("keeps the default in-process TUI header quiet during a healthy entry check",
     await flush();
     checking = true;
     const entry = client.initializeSession("session_1");
-    await vi.waitFor(() => {
-      expect(resume).toBeDefined();
-    });
+    // Project discovery can exceed waitFor's default timeout on Windows CI.
+    await recoveryEntered.promise;
     await flush();
     expect(app.lastFrame()).toContain("local draft");
     expect(app.lastFrame()).not.toContain("Checking execution records");
-    resume?.();
+    resumeRecovery.resolve(undefined);
     await entry;
     await flush();
     expect(app.lastFrame()).not.toContain("Checking execution records");
   } finally {
-    resume?.();
+    resumeRecovery.resolve(undefined);
     await client.dispose();
   }
 });
