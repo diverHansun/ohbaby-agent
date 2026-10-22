@@ -7,9 +7,9 @@
 | 轮次 | 范围 | 当前状态 |
 |---|---|---|
 | [improve-1](improve-1/00-discussion.md) | 默认工作区、会话归属与目录切换、全局列表与搜索，以及对应 Web 接入 | 工作区后端主体已落地；SDK 全局客户端方法和 Web 接入 G1 等尚未完成，详见 [05](improve-1/05-implementation-acceptance.md) |
-| [improve-2](improve-2/00-discussion.md) | 设置后端：独立模型配置与全局默认模型、全局 MCP 管理、搜索配置、Skills/Agents 只读、关于、变更通知及生效 | 已整理确认后的规划，尚未实施；本轮不做前端 |
+| [improve-2](improve-2/00-discussion.md) | 设置后端：独立模型配置与全局默认模型、全局 MCP 管理、搜索配置、Skills/Agents 只读、关于、变更通知及生效 | 后端实现、最终验证、子代理和 Pi 审查已完成，等待用户审查；本轮不做前端，见 [05](improve-2/05-implementation-acceptance.md) |
 
-设置的现行方案以 improve-2 为准，取代 improve-1 的原设置批次。improve-1 的工作区 Web 接入仍留在原轮；设置页面入口和布局以后讨论。improve-2 不依赖 G1 完成，不提前创建其实施验收文档。
+设置的现行方案以 improve-2 为准，取代 improve-1 的原设置批次。improve-1 的工作区 Web 接入仍留在原轮；设置页面入口和布局以后讨论。improve-2 不依赖 G1 完成，实施和验收证据单独记录在其 05。
 
 ## improve-2 已确认的边界
 
@@ -30,14 +30,14 @@
 | 方案与改动面 | [02](improve-1/02-optimization-plan-and-change-scope.md) | [02](improve-2/02-optimization-plan-and-change-scope.md) |
 | 参考项目 | [03](improve-1/03-reference-projects.md) | [03](improve-2/03-reference-projects.md) |
 | 测试与验收标准 | [04](improve-1/04-test-and-acceptance.md) | [04](improve-2/04-test-and-acceptance.md) |
-| 实施验收 | [05](improve-1/05-implementation-acceptance.md)，尚未整轮闭环 | 实施后再创建，目前不存在 |
+| 实施验收 | [05](improve-1/05-implementation-acceptance.md)，尚未整轮闭环 | [05](improve-2/05-implementation-acceptance.md)，等待用户最终审查 |
 
-每轮的 02 是实施依据，04 是验收依据。improve-2 代码现状基线为 `231eb8e1`；本次只整理规划文档，不写业务代码。
+每轮的 02 是实施依据，04 是验收依据。improve-2 代码基线为 `231eb8e1`，已在本地分支 `codex/settings-backend-2026-10-22` 分批实施；不 merge、不 push，等待用户审查。
 
 ## 相关文档
 
 - [Web 会话侧栏整理（2026-09-30）](../2026-09-30-web-session-sidebar/README.md)：替换单目录分组，保留置顶等已落地能力。
 - [全局单 Daemon](../2026-07-11-global-single-daemon/README.md)：沿用 `InstanceStore` 与请求级目录头。
-- [多项目运行时](../../ohbaby-server/hono-app/04-multi-project-runtime.md)：设置实施后同步。
+- [多项目运行时](../../ohbaby-server/hono-app/04-multi-project-runtime.md)：已同步 Settings 全局读写与实例生效机制。
 - [Web 架构](../../ohbaby-web/architecture.md)、[UI 组件约定](../../ohbaby-web/ui/components.md)。
 - `daemon-workspace-scope` 已归档，不作为依据。

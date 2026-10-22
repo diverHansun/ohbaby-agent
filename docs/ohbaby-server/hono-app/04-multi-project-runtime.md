@@ -48,6 +48,7 @@ ohbaby 采两者之合：**opencode 的请求级 workspace 路由 + kimi 的全�
 - web/app 端在每个 workspace 请求与 SSE 连接带 `x-ohbaby-directory`；header 缺失或路径非法返回 400，生产环境不回退 query/cwd。
 - jsonrpc `/api/rpc`、`/v1/events` 一律经同一中间件解析 scope。
 - `/api/health`、`/api/shutdown` 与静态资源是全局路由，不要求 workspace header。per-scope app 的 `GET /doc` 返回手写信息性 OpenAPI；经全局 dispatcher 访问时遵循该 dispatcher 的 workspace 解析规则。
+- Settings 的模型、搜索、全局 MCP 文件管理和 about 也是全局接口：有 `InstanceStore` 时在 dispatcher 前按精确路径挂载，校验 token，不要求目录头或 client 注册。MCP 状态/重连、Skills、Agents 则需要目录头，仍经同一个 dispatcher。完整路径见 [`02`](./02-web-api-surface.md#settings-http-资源)。
 
 ### scope 规则（落实用户选择：git-root 感知）
 
@@ -76,6 +77,31 @@ ohbaby 采两者之合：**opencode 的请求级 workspace 路由 + kimi 的全�
 新增概念（更新到父目录 [`../data-model.md`](../data-model.md)）：
 - **WorkspaceInstance**：一个 workspace scope 的 backend + 协调状态集合，按 scopeKey 隔离。
 - **ServerRegistry**：机器级的「当前运行的 server」记录（见 §5）。
+
+### 全局设置与实例生效时机
+
+Settings 只写全局文件；项目 MCP、Agents、Skills 配置是读取时的覆盖，不提供项目配置写入接口。模型列表及当前默认模型也是全局配置，不维护会话级模型选择。所有模型/搜索凭据继续保存在全局 `.env`，agent 的现有进程内协调队列涵盖读取、写入及失败回滚；单文件原子替换不等于跨进程事务。
+
+全局写入成功后，通过 `InstanceStore.loadedScopeKeys()` 与 `get()` 向已有 backend 发布 `settings.changed`，不加载未打开的项目。model 分区还发布既有 `model.invalidated`；只改搜索 key 时只发布 search 变更。通知本身不构造 runtime、不重载 MCP、不标记版本已应用；通知失败也不会把已成功保存的配置变成保存失败。未加载实例首次启动直接读最新文件。
+
+每个实例在既有运行准入处比较六个分区的文件哈希：
+
+| 分区 | 检查的配置 | 下一轮应用 |
+|---|---|---|
+| model | 全局 `model.json` | 重新加载当前模型投影 |
+| env | 全局 `.env` | 刷新模型及搜索凭据 |
+| search | 生效的 `tools/search.json` | 刷新原有进程级搜索缓存 |
+| mcp | 全局与该项目的 `mcp/settings.json` | 重载该实例 MCP 连接并等待工具更新 |
+| agents | 全局与该项目的 `agents/settings.json` | 按实例目录重新组装 agent 注册表 |
+| skills | 全局与该项目的 `skills/settings.json` | 用配置目录刷新该实例共享 Skill 注册表 |
+
+版本检查与各加载器使用相同的目录和旧路径回退规则。当前轮、子代理或后台工具仍使用已获取的 runtime；空闲后才应用新的配置，等待提示为 “Waiting to apply settings”。只改模型或搜索不会重连 MCP。注入 `llmClient` 或 `createLLMClient` 的宿主仍检查其它分区，保留原有客户端优先级，不因 model/env 变化改用默认 LLM 加载器。
+
+全局保存 MCP 后，即使 A、B 两个项目都空闲，也不主动重连。已初始化项目的状态读取继续显示已应用的连接；尚未初始化项目第一次读状态时才按最新配置连接。A、B 各自在下一轮应用文件变化。需要立即验证时，客户端对当前目录调用 `POST /v1/settings/mcp/reconnect`：忙碌检查和重连共用既有 admission barrier，活动轮次、运行租约、子代理或后台工具未结束时返回 409 `INSTANCE_BUSY`，新轮次不能插到检查与重连之间。连接和工具列表刷新完成后才返回，并只确认该实例实际应用的 mcp 哈希，保留其它分区的待生效状态，下一轮不重复重连。
+
+Skill 文件的更新、增删不依赖设置文件哈希：每轮准备模型工具、读取列表或显式按名称查找时，先比较 `SKILL.md` 路径和修改时间签名，未变就用缓存，变化后才重新解析元数据并等待工具刷新。正文仍按调用读盘。设置页和模型共用一个注册表，不需要先打开设置页、点击刷新或重启；不增加文件监听器、后台轮询或第二份缓存。runtime 释放时取消 MCP 与 Skill 的刷新订阅。
+
+手改配置同样会由下一轮版本检查发现，因此通知只影响界面刷新的及时性，不决定实际运行配置是否正确。旧实例层 `/connect` 和模型写入入口只向本实例发布 `model.invalidated`；旧搜索 key 写入入口不发布 `settings.changed`。这些旧入口不跨实例广播，其它实例仍在下一轮发现文件变化。
 
 ---
 
