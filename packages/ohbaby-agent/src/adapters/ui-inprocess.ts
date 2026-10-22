@@ -5,6 +5,7 @@ import {
   readSettingsSkills,
   readSettingsAgents,
   type InstanceSettingsReader,
+  type InstanceSettingsControl,
 } from "../services/settings/reader.js";
 import {
   slashSkillUsage,
@@ -374,7 +375,8 @@ export interface InProcessUiBackendClient
     Omit<UiBackendClient, keyof UiSessionRecoveryClient>,
     UiPromptQueueExecutionPort,
     UiSessionRecoveryClient,
-    InstanceSettingsReader {
+    InstanceSettingsReader,
+    InstanceSettingsControl {
   listSubagentExecutions: NonNullable<
     UiBackendClient["listSubagentExecutions"]
   >;
@@ -4176,6 +4178,28 @@ export function createInProcessUiBackendClient(
   // The eager startup promise remains observable through initialize and writes.
   void ready.catch(() => undefined);
   return {
+    async notifySettingsChanged(domains): Promise<void> {
+      publish({ type: "settings.changed", domains });
+      if (domains.includes("model")) await publishModelInvalidation();
+    },
+    async reconnectSettingsMcp(): ReturnType<
+      InstanceSettingsReader["getSettingsMcpStatus"]
+    > {
+      const projectRoot = await resolveProjectRoot();
+      const manager = McpManager.getInstance(projectRoot);
+      let status: Awaited<
+        ReturnType<InstanceSettingsReader["getSettingsMcpStatus"]>
+      > = [];
+      await runtimeController.reconnectMcp(async () => {
+        // Publication coordination covers the snapshot, reload, and acknowledgement.
+        const version = (await settingsConfigVersion(projectRoot)).mcp;
+        await manager.reload();
+        status = await readSettingsMcpStatus(manager);
+        appliedMcpVersion = version;
+        return version;
+      });
+      return status;
+    },
     getSettingsMcpStatus(): ReturnType<
       InstanceSettingsReader["getSettingsMcpStatus"]
     > {

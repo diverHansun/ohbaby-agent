@@ -14,16 +14,18 @@ import { getGlobalEnvPath } from "../../utils/project-env.js";
 import { resolveSearchJsonPath } from "../tools/search/loaders.js";
 
 // Coordination is process-local. Atomic file replacement protects each file;
-// concurrent independent writers and crashes across two files are not transactions.
+// cross-process writers and crashes across two files are not transactions.
 const queues = new Map<string, Promise<void>>();
 const heldPaths = new AsyncLocalStorage<{ key: string; active: boolean }>();
 const inconsistentPaths = new Set<string>();
 
 export async function coordinateModelConfig<T>(
-  path: string | undefined,
+  _path: string | undefined,
   work: () => Promise<T>,
 ): Promise<T> {
-  const key = resolve(path ?? getModelJsonPath());
+  // Every model path can share the global secret file. One publication queue
+  // also covers search and rollback; path-specific queues can lose saved keys.
+  const key = "settings-publication";
   const held = heldPaths.getStore();
   if (held?.key === key && held.active) return work();
   const previous = queues.get(key) ?? Promise.resolve();

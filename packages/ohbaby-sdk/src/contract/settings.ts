@@ -53,3 +53,92 @@ export interface UiSettingsAgentsResponse {
   readonly ok: true;
   readonly agents: readonly UiSettingsAgent[];
 }
+
+export interface UiSettingsSearchDefaults {
+  readonly searchDepth: "basic" | "advanced";
+  readonly maxResults: number;
+  readonly topic: "general" | "news" | "finance";
+  readonly timeout: number;
+}
+export interface UiSettingsSearch {
+  readonly provider: "tavily";
+  readonly apiKeyEnv: string | null;
+  readonly apiKeyConfigured: boolean;
+  readonly baseUrl?: string;
+  readonly defaults: UiSettingsSearchDefaults;
+}
+export interface UiSettingsSearchUpdate {
+  readonly provider?: "tavily";
+  readonly apiKeyEnv?: string | null;
+  /** Omitted keeps the saved credential; empty clears target usage. */
+  readonly apiKey?: string;
+  readonly baseUrl?: string | null;
+  readonly defaults?: Partial<UiSettingsSearchDefaults>;
+}
+export interface UiSettingsSearchResponse extends UiSettingsSearch {
+  readonly ok: true;
+}
+export interface UiSettingsSecretPatch {
+  readonly set?: Readonly<Record<string, string>>;
+  readonly unset?: readonly string[];
+}
+export type UiSettingsMcpTransport =
+  | "stdio"
+  | "http"
+  | "http_streamable"
+  | "sse";
+export interface UiSettingsGlobalMcpServer {
+  readonly name: string;
+  readonly transport: UiSettingsMcpTransport;
+  readonly enabled: boolean;
+  readonly trust: boolean;
+  readonly timeout: number;
+  readonly includeTools?: readonly string[];
+  readonly excludeTools?: readonly string[];
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly cwd?: string;
+  readonly url?: string;
+  readonly envKeys: readonly string[];
+  readonly headerKeys: readonly string[];
+}
+export interface UiSettingsMcpServerUpdate {
+  readonly transport?: UiSettingsMcpTransport;
+  readonly enabled?: boolean;
+  readonly trust?: boolean;
+  readonly timeout?: number;
+  readonly includeTools?: readonly string[];
+  readonly excludeTools?: readonly string[];
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly cwd?: string;
+  readonly url?: string;
+  readonly env?: UiSettingsSecretPatch;
+  readonly headers?: UiSettingsSecretPatch;
+}
+export interface UiSettingsGlobalMcpServersResponse {
+  readonly ok: true;
+  readonly servers: readonly UiSettingsGlobalMcpServer[];
+}
+export interface UiSettingsMcpServerUpdateResponse extends UiSettingsGlobalMcpServer {
+  readonly ok: true;
+  readonly overriddenIn: readonly string[];
+}
+export interface UiSettingsMcpServerDeleteResponse {
+  readonly ok: true;
+}
+/** Reconnect takes no body and requires the workspace header. */
+export type UiSettingsMcpReconnectResponse = UiSettingsMcpStatusResponse;
+export interface UiSettingsInstanceBusyResponse {
+  readonly ok: false;
+  readonly error: { readonly code: "INSTANCE_BUSY"; readonly message: string };
+}
+export interface UiSettingsAboutResponse {
+  readonly ok: true;
+  readonly version: string;
+  readonly ohbabyHome: string;
+  /** Directory containing the active diagnostic file, when logging is enabled. */
+  readonly logDirectory?: string;
+  readonly diagnosticsFile?: string;
+  readonly defaultWorkspace: string;
+}

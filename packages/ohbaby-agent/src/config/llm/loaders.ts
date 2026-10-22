@@ -1,3 +1,4 @@
+import { coordinateModelConfig } from "./config-coordination.js";
 /**
  * Configuration loading functions.
  * Handles file I/O and environment variable access.
@@ -40,39 +41,41 @@ function getLegacyModelJsonPath(homeDirectory?: string): string {
 export async function loadModelJson(
   options: LoadModelJsonOptions = {},
 ): Promise<unknown> {
-  const configPath =
-    options.modelJsonPath ??
-    (await resolveReadPathWithLegacy(getModelJsonPath(), [
-      getLegacyModelJsonPath(),
-    ]));
+  return coordinateModelConfig(options.modelJsonPath, async () => {
+    const configPath =
+      options.modelJsonPath ??
+      (await resolveReadPathWithLegacy(getModelJsonPath(), [
+        getLegacyModelJsonPath(),
+      ]));
 
-  let content: string;
-  try {
-    content = await fs.readFile(configPath, "utf-8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    let content: string;
+    try {
+      content = await fs.readFile(configPath, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new ConfigError(
+          `Configuration file not found: ${configPath}. Create ~/.ohbaby/model.json before starting ohbaby-agent.`,
+          "FILE_NOT_FOUND",
+          { path: configPath },
+        );
+      }
       throw new ConfigError(
-        `Configuration file not found: ${configPath}. Create ~/.ohbaby/model.json before starting ohbaby-agent.`,
-        "FILE_NOT_FOUND",
-        { path: configPath },
+        `Failed to read configuration file: ${(error as Error).message}`,
+        "LOAD_FAILED",
+        { path: configPath, cause: error },
       );
     }
-    throw new ConfigError(
-      `Failed to read configuration file: ${(error as Error).message}`,
-      "LOAD_FAILED",
-      { path: configPath, cause: error },
-    );
-  }
 
-  try {
-    return JSON.parse(content);
-  } catch (error) {
-    throw new ConfigError(
-      `Invalid JSON in configuration file: ${(error as Error).message}`,
-      "INVALID_JSON",
-      { path: configPath, cause: error },
-    );
-  }
+    try {
+      return JSON.parse(content) as unknown;
+    } catch (error) {
+      throw new ConfigError(
+        `Invalid JSON in configuration file: ${(error as Error).message}`,
+        "INVALID_JSON",
+        { path: configPath, cause: error },
+      );
+    }
+  });
 }
 
 /**
@@ -89,19 +92,21 @@ export function loadApiKey(
 export async function loadEnvFile(
   envPath: string,
 ): Promise<Record<string, string>> {
-  let content: string;
-  try {
-    content = await fs.readFile(envPath, "utf-8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {};
+  return coordinateModelConfig(undefined, async () => {
+    let content: string;
+    try {
+      content = await fs.readFile(envPath, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return {};
+      }
+      throw new ConfigError(
+        `Failed to read .env file: ${(error as Error).message}`,
+        "LOAD_FAILED",
+        { path: envPath, cause: error },
+      );
     }
-    throw new ConfigError(
-      `Failed to read .env file: ${(error as Error).message}`,
-      "LOAD_FAILED",
-      { path: envPath, cause: error },
-    );
-  }
 
-  return parseEnvFile(content);
+    return parseEnvFile(content);
+  });
 }

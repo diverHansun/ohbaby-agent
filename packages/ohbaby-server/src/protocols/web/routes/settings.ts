@@ -7,6 +7,42 @@ export function registerSettingsRoutes(
   app: Hono,
   ctx: DaemonRouteContext,
 ): void {
+  app.post("/v1/settings/mcp/reconnect", async (context) => {
+    if (!ctx.isAuthorized(context.req.header("authorization")))
+      return context.json(webErrorBody("Unauthorized"), 401);
+    if (!context.req.header(WORKSPACE_DIRECTORY_HEADER)?.trim())
+      return context.json(webErrorBody("x-ohbaby-directory is required"), 400);
+    const reconnect = ctx.options.backend.reconnectSettingsMcp;
+    if (!reconnect)
+      return context.json(
+        webErrorBody("Settings reconnect is unavailable"),
+        503,
+      );
+    try {
+      return context.json({
+        ok: true,
+        servers: await reconnect.call(ctx.options.backend),
+      });
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "INSTANCE_BUSY"
+      )
+        return context.json(
+          {
+            ok: false,
+            error: {
+              code: "INSTANCE_BUSY",
+              message: "Instance has active work",
+            },
+          },
+          409,
+        );
+      return context.json(webErrorBody("Unable to reconnect MCP"), 500);
+    }
+  });
   const reads = [
     ["/v1/settings/mcp/status", "getSettingsMcpStatus", "servers"],
     ["/v1/settings/skills", "getSettingsSkills", "skills"],

@@ -19,7 +19,12 @@ function isAssignmentForKey(line: string, key: string): boolean {
     return false;
   }
 
-  return trimmedStart.slice(0, assignmentIndex).trim() === key;
+  return (
+    trimmedStart
+      .slice(0, assignmentIndex)
+      .trim()
+      .replace(/^export\s+/u, "") === key
+  );
 }
 
 export function parseEnvFile(content: string): Record<string, string> {
@@ -57,4 +62,11 @@ export function setEnvFileValue(
   }
 
   return `${nextLines.join("\n")}\n`;
+}
+
+export function removeEnvFileValue(content: string, key: string): string {
+  return content
+    .split(/(?<=\n)/u)
+    .filter((line) => !isAssignmentForKey(line, key))
+    .join("");
 }

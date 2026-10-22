@@ -22,3 +22,9 @@ export function runtimeEnvValue(
     ? undefined
     : value;
 }
+
+export function removeManagedRuntimeEnv(name: string): void {
+  if (managedValues.has(name) && process.env[name] === managedValues.get(name))
+    Reflect.deleteProperty(process.env, name);
+  managedValues.delete(name);
+}

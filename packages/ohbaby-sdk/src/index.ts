@@ -97,6 +97,7 @@ export type {
 } from "./contract/connect-search.js";
 export type {
   UiEvent,
+  UiSettingsChangedEvent,
   UiContextWindowUpdatedEvent,
   UiGoalUpdatedEvent,
   UiTodoUpdatedEvent,
@@ -280,6 +281,20 @@ export { compareUiPromptQueueOrder } from "./contract/prompt-queue-order.js";
 export { isUiCommandCompletion } from "./slash-command/types.js";
 
 export type {
+  UiSettingsSearchDefaults,
+  UiSettingsSearch,
+  UiSettingsSearchUpdate,
+  UiSettingsSearchResponse,
+  UiSettingsSecretPatch,
+  UiSettingsMcpTransport,
+  UiSettingsGlobalMcpServer,
+  UiSettingsMcpServerUpdate,
+  UiSettingsGlobalMcpServersResponse,
+  UiSettingsMcpServerUpdateResponse,
+  UiSettingsMcpServerDeleteResponse,
+  UiSettingsMcpReconnectResponse,
+  UiSettingsInstanceBusyResponse,
+  UiSettingsAboutResponse,
   UiSettingsMcpTool,
   UiSettingsMcpServer,
   UiSettingsSkill,

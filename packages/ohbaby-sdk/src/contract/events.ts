@@ -220,7 +220,20 @@ export interface UiSessionResyncRequiredEvent {
   readonly unsupported?: boolean;
 }
 
+export interface UiSettingsChangedEvent {
+  readonly type: "settings.changed";
+  readonly domains: readonly (
+    | "model"
+    | "env"
+    | "search"
+    | "mcp"
+    | "agents"
+    | "skills"
+  )[];
+}
+
 export type UiEvent =
+  | UiSettingsChangedEvent
   | UiSubagentConversationEvent
   | UiSessionResyncRequiredEvent
   | UiSessionRecoveryEvent

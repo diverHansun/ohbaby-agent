@@ -1,3 +1,10 @@
+import { dirname } from "node:path";
+import { registerGlobalSettingsRoutes } from "../../protocols/web/routes/global-settings.js";
+import type {
+  InstanceSettingsReader,
+  InstanceSettingsControl,
+  SettingsDomain,
+} from "ohbaby-agent";
 import {
   isLoopbackHost,
   WORKSPACE_DIRECTORY_ENCODING_HEADER,
@@ -78,6 +85,7 @@ export interface DaemonHttpServerOptions {
   readonly onClientDisconnected?: (clientId: string) => void;
   readonly onShutdown?: () => Promise<void> | void;
   readonly packageVersion?: string;
+  readonly diagnosticsFile?: string;
   readonly port?: number;
   readonly permissionRouter?: PermissionRouter;
   readonly scopeRoot?: string;
@@ -85,7 +93,8 @@ export interface DaemonHttpServerOptions {
 }
 
 export type WorkspaceBackend = UiBackendClient &
-  UiPromptQueueExecutionPort & {
+  UiPromptQueueExecutionPort &
+  Partial<InstanceSettingsReader & InstanceSettingsControl> & {
     /** Persistent workspaces take over a moved session's queued prompts. */
     adoptSessionProjectMove?(plan: SessionProjectMovePlan): Promise<void>;
     closeAdmission?(): void;
@@ -196,6 +205,20 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     });
   }
 
+  private async notifySettingsChanged(
+    domains: readonly SettingsDomain[],
+  ): Promise<void> {
+    const store = this.instanceStore;
+    if (!store) return;
+    // Failed creation/delivery must not turn a completed disk save into a failure.
+    await Promise.allSettled(
+      store.loadedScopeKeys().map(async (key) => {
+        const instance = await store.get(key);
+        await instance?.backend.notifySettingsChanged?.(domains);
+      }),
+    );
+  }
+
   private async createWorkspaceInstance(
     scopeKey: string,
   ): Promise<WorkspaceAppInstance> {
@@ -255,6 +278,18 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       this.app.all("*", (context) => this.appHandle.app.fetch(context.req.raw));
       return;
     }
+
+    registerGlobalSettingsRoutes(this.app, {
+      isAuthorized: (header) =>
+        isAuthorizedDaemonRequest(header, this.options.authToken),
+      loadedDirectories: () => this.instanceStore?.loadedScopeKeys() ?? [],
+      notify: (domains) => this.notifySettingsChanged(domains),
+      packageVersion: this.options.packageVersion,
+      diagnosticsFile: this.options.diagnosticsFile,
+      logDirectory: this.options.diagnosticsFile
+        ? dirname(this.options.diagnosticsFile)
+        : undefined,
+    });
 
     this.app.get("/v1/scopes", (context) => this.listScopes(context));
     this.app.post("/v1/scopes/open", (context) => this.openScope(context));
@@ -847,6 +882,7 @@ export function createDaemonHttpServer(
     onClientDisconnected: options.onClientDisconnected,
     onShutdown: options.onShutdown,
     packageVersion: options.packageVersion,
+    diagnosticsFile: options.diagnosticsFile,
     permissionRouter: options.permissionRouter ?? new PermissionRouter(),
     port: options.port ?? DEFAULT_PORT,
     scopeRoot: options.scopeRoot,

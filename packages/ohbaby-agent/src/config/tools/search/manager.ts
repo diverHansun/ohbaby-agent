@@ -1,3 +1,5 @@
+import { coordinateModelConfig } from "../../llm/config-coordination.js";
+import { SearchConfigError } from "./types.js";
 import { resolveSearchJsonPath, loadSearchJson } from "./loaders.js";
 import { validateApiKey, validateSearchJson } from "./validation.js";
 import type { SearchConfig, SearchConfigLoadOptions } from "./types.js";
@@ -38,15 +40,23 @@ export class SearchConfigManager {
       return this.cachedConfig.config;
     }
 
-    return this.performLoad(env, searchJsonPath);
+    return coordinateModelConfig(undefined, () =>
+      this.performLoad(env, searchJsonPath),
+    );
   }
 
   async reload(options: SearchConfigLoadOptions = {}): Promise<SearchConfig> {
     this.cachedConfig = null;
-    return this.performLoad(
-      options.env ?? process.env,
-      await resolveSearchJsonPath(options.searchJsonPath),
+    return coordinateModelConfig(undefined, async () =>
+      this.performLoad(
+        options.env ?? process.env,
+        await resolveSearchJsonPath(options.searchJsonPath),
+      ),
     );
+  }
+
+  invalidate(): void {
+    this.cachedConfig = null;
   }
 
   isCached(): boolean {
@@ -59,6 +69,11 @@ export class SearchConfigManager {
   ): Promise<SearchConfig> {
     const rawConfig = await loadSearchJson(searchJsonPath);
     const searchJson = validateSearchJson(rawConfig ?? {}, searchJsonPath);
+    if (searchJson.apiKeyEnv === null)
+      throw new SearchConfigError({
+        code: "MISSING_API_KEY",
+        message: "Search API key is not configured",
+      });
     const explicitValue = runtimeEnvValue(searchJson.apiKeyEnv, env);
     const fileValues =
       explicitValue === undefined && env === process.env

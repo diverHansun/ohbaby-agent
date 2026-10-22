@@ -193,3 +193,100 @@ describe("runtime model admission", () => {
     (await admission).release();
   });
 });
+
+it("holds reconnect through tool refresh, rejects leases/background activity, and acknowledges only MCP", async () => {
+  let current = versions("A");
+  const reasons: string[] = [];
+  const created: (readonly string[] | undefined)[] = [];
+  const controller = new InProcessRuntimeController({
+    clearPendingPermissionsForRun: (): Promise<void> => Promise.resolve(),
+    updateStatus: (): Promise<void> => Promise.resolve(),
+    publishNotice: vi.fn(),
+    getConfigVersion: (): Promise<SettingsConfigVersions> =>
+      Promise.resolve(current),
+    createRuntime: (domains): Promise<UiRuntimeComposition> => {
+      created.push(domains);
+      return Promise.resolve({
+        getActivityReasons: () => reasons,
+        dispose: (): Promise<void> => Promise.resolve(),
+      } as unknown as UiRuntimeComposition);
+    },
+  });
+  const lease = await controller.acquireRuntime();
+  await expect(
+    controller.reconnectMcp(() => Promise.resolve("new")),
+  ).rejects.toMatchObject({ code: "INSTANCE_BUSY" });
+  lease.release();
+  for (const reason of [
+    "background subagents",
+    "pending tools",
+    "background shell jobs",
+  ]) {
+    reasons.push(reason);
+    await expect(
+      controller.reconnectMcp(() => Promise.resolve("new")),
+    ).rejects.toMatchObject({ code: "INSTANCE_BUSY" });
+    reasons.pop();
+  }
+  current = { ...current, mcp: "new" };
+  let entered!: () => void;
+  const enteredGate = new Promise<void>((r) => {
+    entered = r;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const reconnect = controller.reconnectMcp(async () => {
+    entered();
+    await gate;
+    return "new";
+  });
+  await enteredGate;
+  let admitted = false;
+  const next = controller.acquireRuntime().then((value) => {
+    admitted = true;
+    return value;
+  });
+  await new Promise((r) => setTimeout(r, 10));
+  expect(admitted).toBe(false);
+  release();
+  await reconnect;
+  (await next).release();
+  expect(created).toEqual([undefined]);
+  current = { ...current, model: "B", mcp: "newer" };
+  await controller.reconnectMcp(() => Promise.resolve("newer"));
+  (await controller.acquireRuntime()).release();
+  expect(created).toEqual([undefined, ["model"]]);
+});
+it("does not acknowledge failed or newer unapplied MCP versions and releases admission after failure", async () => {
+  let current = versions("A");
+  const created: (readonly string[] | undefined)[] = [];
+  const controller = new InProcessRuntimeController({
+    clearPendingPermissionsForRun: (): Promise<void> => Promise.resolve(),
+    updateStatus: (): Promise<void> => Promise.resolve(),
+    publishNotice: vi.fn(),
+    getConfigVersion: (): Promise<SettingsConfigVersions> =>
+      Promise.resolve(current),
+    createRuntime: (domains): Promise<UiRuntimeComposition> => {
+      created.push(domains);
+      return Promise.resolve({
+        getActivityReasons: () => [],
+        dispose: (): Promise<void> => Promise.resolve(),
+      } as unknown as UiRuntimeComposition);
+    },
+  });
+  (await controller.acquireRuntime()).release();
+  current = { ...current, mcp: "failed-version" };
+  await expect(
+    controller.reconnectMcp(() =>
+      Promise.reject(new Error("tools refresh failed")),
+    ),
+  ).rejects.toThrow("tools refresh failed");
+  (await controller.acquireRuntime()).release();
+  expect(created).toEqual([undefined, ["mcp"]]);
+  current = { ...current, mcp: "newer-version" };
+  await controller.reconnectMcp(() => Promise.resolve("older-applied-version"));
+  (await controller.acquireRuntime()).release();
+  expect(created).toEqual([undefined, ["mcp"], ["mcp"]]);
+});

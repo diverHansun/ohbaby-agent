@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import type {
   UiCommandCorrelation,
   InstanceSettingsReader,
+  InstanceSettingsControl,
   UiPromptQueueExecutionPort,
 } from "ohbaby-agent";
 import type { UiBackendClient } from "ohbaby-sdk";
@@ -17,7 +18,7 @@ export interface DaemonRouteContext {
   readonly options: {
     readonly backend: UiBackendClient &
       UiPromptQueueExecutionPort &
-      Partial<InstanceSettingsReader>;
+      Partial<InstanceSettingsReader & InstanceSettingsControl>;
     readonly packageVersion?: string;
     readonly onShutdown?: () => Promise<void> | void;
   };

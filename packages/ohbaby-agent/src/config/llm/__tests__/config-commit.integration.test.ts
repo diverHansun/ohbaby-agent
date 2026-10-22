@@ -145,3 +145,42 @@ describe("model configuration commit", () => {
     }
   });
 });
+it("direct model readers wait for publication rollback instead of observing an uncommitted model", async () => {
+  const { loadModelJson } = await import("../loaders.js");
+  const input = await setup();
+  let enter!: () => void;
+  const entered = new Promise<void>((r) => {
+    enter = r;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  vi.spyOn(secrets, "writeEnvSecret").mockImplementationOnce(async () => {
+    enter();
+    await gate;
+    throw new Error("controlled env failure");
+  });
+  const save = setActiveLLMConfig({
+    ...input,
+    model: "uncommitted",
+    apiKeyEnv: "STAGE3_READ",
+    apiKey: "test-only",
+  }).catch((e: unknown) => e);
+  await entered;
+  let returned = false;
+  const read = loadModelJson({ modelJsonPath: input.modelJsonPath }).then(
+    (value) => {
+      returned = true;
+      return value;
+    },
+  );
+  try {
+    await new Promise((r) => setTimeout(r, 20));
+    expect(returned).toBe(false);
+  } finally {
+    release();
+    await save;
+  }
+  expect(await read).toMatchObject({ defaultModel: "A" });
+});

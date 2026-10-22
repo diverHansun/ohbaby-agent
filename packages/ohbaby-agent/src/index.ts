@@ -209,4 +209,21 @@ export {
 
 export { installSystemProxy } from "./utils/network-proxy/index.js";
 
-export type { InstanceSettingsReader } from "./services/settings/reader.js";
+export type {
+  InstanceSettingsReader,
+  InstanceSettingsControl,
+} from "./services/settings/reader.js";
+
+export {
+  readSearchSettings,
+  updateSearchSettings,
+  SearchSettingsPatchSchema,
+} from "./config/tools/search/writer.js";
+export {
+  readGlobalMcpServers,
+  updateGlobalMcpServer,
+  deleteGlobalMcpServer,
+  globalMcpOverriddenIn,
+  McpServerPatchSchema,
+} from "./config/mcp/writer.js";
+export type { SettingsDomain } from "./config/llm/config-coordination.js";

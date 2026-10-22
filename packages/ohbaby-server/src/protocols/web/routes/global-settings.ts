@@ -1,0 +1,144 @@
+import type {
+  UiSettingsAboutResponse,
+  UiSettingsSearchResponse,
+  UiSettingsGlobalMcpServersResponse,
+  UiSettingsMcpServerUpdateResponse,
+  UiSettingsMcpServerDeleteResponse,
+} from "ohbaby-sdk";
+import type { Hono, Context } from "hono";
+import {
+  readSearchSettings,
+  updateSearchSettings,
+  SearchSettingsPatchSchema,
+  readGlobalMcpServers,
+  updateGlobalMcpServer,
+  deleteGlobalMcpServer,
+  globalMcpOverriddenIn,
+  McpServerPatchSchema,
+  resolveOhbabyHome,
+  ensureDefaultWorkspaceDirectory,
+  getAgentPackageVersion,
+  type SettingsDomain,
+} from "ohbaby-agent";
+import { readJsonWithLimit, webErrorBody } from "../request-helpers.js";
+
+interface GlobalSettingsRoutesContext {
+  isAuthorized(header: string | undefined): boolean;
+  loadedDirectories(): readonly string[];
+  notify(domains: readonly SettingsDomain[]): Promise<void>;
+  readonly packageVersion?: string;
+  readonly diagnosticsFile?: string;
+  readonly logDirectory?: string;
+}
+export function registerGlobalSettingsRoutes(
+  app: Hono,
+  ctx: GlobalSettingsRoutesContext,
+): void {
+  const handle =
+    (work: (context: Context) => Promise<Response>) =>
+    async (context: Context): Promise<Response> => {
+      if (!ctx.isAuthorized(context.req.header("authorization")))
+        return context.json(webErrorBody("Unauthorized"), 401);
+      try {
+        return await work(context);
+      } catch (error) {
+        const code =
+          typeof error === "object" && error !== null && "code" in error
+            ? error.code
+            : undefined;
+        if (code === "MCP_SERVER_NOT_FOUND")
+          return context.json(webErrorBody("Global MCP server not found"), 404);
+        if (
+          code === "VALIDATION_FAILED" ||
+          (error instanceof Error && error.name === "ZodError")
+        )
+          return context.json(webErrorBody("Invalid settings"), 400);
+        return context.json(webErrorBody("Unable to access settings"), 500);
+      }
+    };
+  app.get(
+    "/v1/settings/about",
+    handle(async (context) =>
+      context.json({
+        ok: true,
+        version: ctx.packageVersion ?? getAgentPackageVersion(),
+        ohbabyHome: resolveOhbabyHome(),
+        defaultWorkspace: await ensureDefaultWorkspaceDirectory(),
+        ...(ctx.diagnosticsFile
+          ? { diagnosticsFile: ctx.diagnosticsFile }
+          : {}),
+        ...(ctx.logDirectory ? { logDirectory: ctx.logDirectory } : {}),
+      } satisfies UiSettingsAboutResponse),
+    ),
+  );
+  app.get(
+    "/v1/settings/search",
+    handle(async (context) =>
+      context.json({
+        ok: true,
+        ...(await readSearchSettings()),
+      } satisfies UiSettingsSearchResponse),
+    ),
+  );
+  app.put(
+    "/v1/settings/search",
+    handle(async (context) => {
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const patch = SearchSettingsPatchSchema.parse(parsed.value);
+      const settings = await updateSearchSettings(patch);
+      await ctx.notify(["search"]);
+      return context.json({
+        ok: true,
+        ...settings,
+      } satisfies UiSettingsSearchResponse);
+    }),
+  );
+  app.get(
+    "/v1/settings/mcp/servers",
+    handle(async (context) =>
+      context.json({
+        ok: true,
+        servers: await readGlobalMcpServers(),
+      } satisfies UiSettingsGlobalMcpServersResponse),
+    ),
+  );
+  app.put(
+    "/v1/settings/mcp/servers/:name",
+    handle(async (context) => {
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const patch = McpServerPatchSchema.parse(parsed.value);
+      const name = context.req.param("name") ?? "";
+      const server = await updateGlobalMcpServer(name, patch);
+      const overriddenIn = await globalMcpOverriddenIn(
+        name,
+        ctx.loadedDirectories(),
+      );
+      await ctx.notify(["mcp"]);
+      return context.json({
+        ok: true,
+        ...server,
+        overriddenIn,
+      } satisfies UiSettingsMcpServerUpdateResponse);
+    }),
+  );
+  app.delete(
+    "/v1/settings/mcp/servers/:name",
+    handle(async (context) => {
+      await deleteGlobalMcpServer(context.req.param("name") ?? "");
+      await ctx.notify(["mcp"]);
+      return context.json({
+        ok: true,
+      } satisfies UiSettingsMcpServerDeleteResponse);
+    }),
+  );
+}

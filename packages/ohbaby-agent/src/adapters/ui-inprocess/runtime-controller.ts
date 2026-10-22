@@ -38,6 +38,13 @@ function getErrorMessage(error: unknown): string {
 
 export class RuntimeSwitchPendingError extends Error {}
 
+export class InstanceBusyError extends Error {
+  readonly code = "INSTANCE_BUSY";
+  constructor() {
+    super("Instance has active work");
+  }
+}
+
 export class InProcessRuntimeController {
   private admissionBarrier: Promise<void> = Promise.resolve();
   private admittedWork = 0;
@@ -116,6 +123,34 @@ export class InProcessRuntimeController {
           },
         };
       }
+    } finally {
+      unlock();
+    }
+  }
+
+  /** Explicit reconnect shares prompt admission, without acquiring its own work lease. */
+  async reconnectMcp(reload: () => Promise<string>): Promise<void> {
+    const previous = this.admissionBarrier;
+    let unlock!: () => void;
+    this.admissionBarrier = new Promise<void>((resolve) => {
+      unlock = resolve;
+    });
+    await previous;
+    try {
+      if (this.isClosed()) throw new Error("Runtime is shutting down");
+      // An in-flight initialization can itself require publication coordination.
+      const runtime = await this.runtimePromise;
+      await this.coordinate(async () => {
+        if (this.isClosed()) throw new Error("Runtime is shutting down");
+        if (
+          this.admittedWork > 0 ||
+          (runtime?.getActivityReasons().length ?? 0) > 0
+        )
+          throw new InstanceBusyError();
+        const mcp = await reload();
+        if (this.runtimeVersion !== undefined)
+          this.runtimeVersion = { ...this.runtimeVersion, mcp };
+      });
     } finally {
       unlock();
     }

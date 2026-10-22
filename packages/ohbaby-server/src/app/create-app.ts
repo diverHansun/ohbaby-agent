@@ -1,4 +1,7 @@
-import type { InstanceSettingsReader } from "ohbaby-agent";
+import type {
+  InstanceSettingsReader,
+  InstanceSettingsControl,
+} from "ohbaby-agent";
 import { registerSettingsRoutes } from "../protocols/web/routes/settings.js";
 import { Hono, type Context } from "hono";
 import { randomUUID } from "node:crypto";
@@ -66,7 +69,7 @@ import { serveWebAsset, type WebAssetsOptions } from "./static-assets.js";
 export interface DaemonServerAppOptions {
   readonly backend: UiBackendClient &
     UiPromptQueueExecutionPort &
-    Partial<InstanceSettingsReader>;
+    Partial<InstanceSettingsReader & InstanceSettingsControl>;
   readonly authToken?: string;
   readonly clientDisconnectRetentionMs?: number;
   readonly commandRecorder?: UiCommandRecorder | false;

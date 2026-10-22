@@ -48,7 +48,7 @@ export function getProjectMcpConfigPath(
   );
 }
 
-function getLegacyGlobalMcpConfigPath(homeDirectory?: string): string {
+export function getLegacyGlobalMcpConfigPath(homeDirectory?: string): string {
   return path.join(
     resolveLegacyOhbabyHome({ homeDirectory }),
     MCP_CONFIG_DIR_NAME,
@@ -56,7 +56,7 @@ function getLegacyGlobalMcpConfigPath(homeDirectory?: string): string {
   );
 }
 
-function getLegacyProjectMcpConfigPath(
+export function getLegacyProjectMcpConfigPath(
   projectDirectory = process.cwd(),
 ): string {
   return path.join(

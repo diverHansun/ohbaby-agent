@@ -1,4 +1,7 @@
-import type { InstanceSettingsReader } from "../services/settings/reader.js";
+import type {
+  InstanceSettingsReader,
+  InstanceSettingsControl,
+} from "../services/settings/reader.js";
 import {
   collectCleanup,
   createShutdownOptions,
@@ -84,7 +87,11 @@ export interface PersistentUiBackendOptions extends Omit<
 }
 
 export interface PersistentUiBackendClient
-  extends UiBackendClient, UiPromptQueueExecutionPort, InstanceSettingsReader {
+  extends
+    UiBackendClient,
+    UiPromptQueueExecutionPort,
+    InstanceSettingsReader,
+    InstanceSettingsControl {
   listSubagentExecutions: NonNullable<
     UiBackendClient["listSubagentExecutions"]
   >;
@@ -250,6 +257,8 @@ function withStartupRecovery(
   }
 
   return {
+    notifySettingsChanged: (domains) => client.notifySettingsChanged(domains),
+    reconnectSettingsMcp: () => client.reconnectSettingsMcp(),
     getSettingsMcpStatus: () => client.getSettingsMcpStatus(),
     getSettingsSkills: () => client.getSettingsSkills(),
     getSettingsAgents: () => client.getSettingsAgents(),

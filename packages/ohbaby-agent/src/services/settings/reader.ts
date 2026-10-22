@@ -1,10 +1,12 @@
+import type { SettingsDomain } from "../../config/llm/config-coordination.js";
 import type {
   UiSettingsAgent,
   UiSettingsMcpServer,
   UiSettingsSkill,
 } from "ohbaby-sdk";
 import type { AgentManager } from "../../agents/manager.js";
-import type { McpServerConfig } from "../../config/mcp/types.js";
+import { redactSettingsError } from "../../config/secrets/redaction.js";
+export { redactSettingsError } from "../../config/secrets/redaction.js";
 import type { McpManager } from "../../mcp/core/manager.js";
 import type { SkillRegistry } from "../../skill/registry.js";
 
@@ -13,59 +15,6 @@ export interface InstanceSettingsReader {
   getSettingsMcpStatus(): Promise<readonly UiSettingsMcpServer[]>;
   getSettingsSkills(): Promise<readonly UiSettingsSkill[]>;
   getSettingsAgents(): Promise<readonly UiSettingsAgent[]>;
-}
-
-export function redactSettingsError(
-  error: string,
-  configs: readonly McpServerConfig[] = [],
-): string {
-  const secrets: string[] = [];
-  for (const config of configs) {
-    if (config.type === "stdio") {
-      secrets.push(...Object.values(config.env ?? {}));
-      for (const [index, argument] of config.args.entries()) {
-        const credentialArgument =
-          /^--?(api[-_]?key|(?:access[-_]?|refresh[-_]?)?token|password|secret|credential|authorization|headers?)(?:=(.*))?$/i.exec(
-            argument,
-          );
-        if (credentialArgument) {
-          const value =
-            credentialArgument.at(2) ?? config.args.at(index + 1) ?? "";
-          secrets.push(value);
-          if (/^headers?$/i.test(credentialArgument.at(1) ?? "")) {
-            const separator = value.indexOf(":");
-            if (separator >= 0) secrets.push(value.slice(separator + 1).trim());
-          }
-        }
-      }
-    } else {
-      secrets.push(...Object.values(config.headers ?? {}));
-      const url = new URL(config.url);
-      secrets.push(
-        url.username,
-        url.password,
-        decodeURIComponent(url.username),
-        decodeURIComponent(url.password),
-      );
-      for (const [key, value] of url.searchParams) {
-        if (/key|token|password|secret|credential|authorization/i.test(key))
-          secrets.push(value);
-      }
-    }
-  }
-  let message = error;
-  for (const secret of secrets
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length)) {
-    message = message.replaceAll(secret, "[REDACTED]");
-  }
-  return message
-    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[REDACTED]@")
-    .replace(/(\bBearer\s+)[^\s,;"']+/gi, "$1[REDACTED]")
-    .replace(
-      /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential|authorization)["']?\s*[:=]\s*["']?)[^\s&,;"']+/gi,
-      "$1[REDACTED]",
-    );
 }
 
 export async function readSettingsMcpStatus(
@@ -127,4 +76,10 @@ export function readSettingsAgents(
     hidden: agent.hidden ?? false,
     origin: agent.origin,
   }));
+}
+
+/** Internal HTTP/event capabilities, deliberately absent from JSON-RPC. */
+export interface InstanceSettingsControl {
+  notifySettingsChanged(domains: readonly SettingsDomain[]): Promise<void>;
+  reconnectSettingsMcp(): Promise<readonly UiSettingsMcpServer[]>;
 }

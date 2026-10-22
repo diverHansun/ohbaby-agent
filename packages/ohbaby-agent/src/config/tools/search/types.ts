@@ -48,6 +48,7 @@ export const SearchJsonConfigSchema = z
       .trim()
       .min(1)
       .regex(ENV_VAR_NAME_PATTERN, "must be an environment variable name")
+      .nullable()
       .optional()
       .default("TAVILY_API_KEY"),
     baseUrl: z.string().url().optional(),

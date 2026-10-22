@@ -563,6 +563,7 @@ async function startFreshDaemon(input: {
           supervisor.clientDisconnected(clientId);
         },
         onShutdown: () => supervisor.stopAndExit("requested"),
+        diagnosticsFile: input.diagnosticsHandle?.logFilePath,
         packageVersion: input.packageVersion,
         port: input.port,
         scopeRoot: input.scopeRoot,
