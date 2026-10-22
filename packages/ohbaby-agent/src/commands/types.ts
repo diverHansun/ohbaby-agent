@@ -52,6 +52,8 @@ export type CommandMcpServerStatus =
 export interface CommandMcpServerSummary {
   readonly name: string;
   readonly status: CommandMcpServerStatus;
+  readonly error?: string;
+  readonly toolCount?: number;
 }
 
 export interface CommandModelSummary {

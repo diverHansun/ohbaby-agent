@@ -57,9 +57,18 @@ export function sanitizeCommandMcpServerSummary(
   if (!isRecord(server)) {
     return null;
   }
-  const { name, status } = server;
+  const { name, status, error, toolCount } = server;
   if (typeof name !== "string" || !isCommandMcpServerStatus(status)) {
     return null;
   }
-  return { name, status };
+  return {
+    name,
+    status,
+    ...(typeof error === "string" ? { error } : {}),
+    ...(typeof toolCount === "number" &&
+    Number.isInteger(toolCount) &&
+    toolCount >= 0
+      ? { toolCount }
+      : {}),
+  };
 }

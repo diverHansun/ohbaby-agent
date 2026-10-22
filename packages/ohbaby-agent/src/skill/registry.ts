@@ -22,6 +22,8 @@ export class SkillRegistry implements SkillRegistryPort {
   private readonly loader: SkillLoaderPort;
   private cache: Map<string, SkillInfo> | undefined;
   private loading: Promise<Map<string, SkillInfo>> | undefined;
+  private signature: string | undefined;
+  private refreshing: Promise<void> | undefined;
   private readonly listeners = new Set<SkillRegistryChangeListener>();
 
   constructor(options: SkillRegistryOptions = {}) {
@@ -32,7 +34,10 @@ export class SkillRegistry implements SkillRegistryPort {
     if (this.cache) {
       return this.cache;
     }
-    this.loading ??= this.loader.scan();
+    this.loading ??= (async (): Promise<Map<string, SkillInfo>> => {
+      this.signature = await this.loader.getSignature?.();
+      return this.loader.scan();
+    })();
     this.cache = await this.loading;
     this.loading = undefined;
     return this.cache;
@@ -43,6 +48,7 @@ export class SkillRegistry implements SkillRegistryPort {
   }
 
   async get(name: string): Promise<SkillInfo | undefined> {
+    await this.refresh();
     return (await this.getCache()).get(name);
   }
 
@@ -86,13 +92,15 @@ export class SkillRegistry implements SkillRegistryPort {
   ): void {
     this.loader.registerPluginSkills?.(pluginId, directories);
     this.invalidate();
-    this.notifyChanged();
+    // Synchronous plugin callbacks cannot await consumers; tool refresh reports
+    // its warning at the composition boundary. Explicit reloads still reject.
+    void this.notifyChanged().catch(() => undefined);
   }
 
   deregisterPlugin(pluginId: string): void {
     this.loader.deregisterPlugin?.(pluginId);
     this.invalidate();
-    this.notifyChanged();
+    void this.notifyChanged().catch(() => undefined);
   }
 
   onChange(listener: SkillRegistryChangeListener): () => void {
@@ -107,16 +115,32 @@ export class SkillRegistry implements SkillRegistryPort {
     this.loading = undefined;
   }
 
-  async reload(): Promise<void> {
-    this.cache = await this.loader.scan();
-    this.loading = undefined;
-    this.notifyChanged();
+  /** Entry point for production reads; notification consumers use cached lists. */
+  refresh(): Promise<void> {
+    this.refreshing ??= (async (): Promise<void> => {
+      const signature = await this.loader.getSignature?.();
+      if (!this.cache || signature !== this.signature) await this.reload();
+    })().finally(() => {
+      this.refreshing = undefined;
+    });
+    return this.refreshing;
   }
 
-  private notifyChanged(): void {
-    for (const listener of this.listeners) {
-      void listener();
-    }
+  async reload(directories?: readonly SkillSearchDirectory[]): Promise<void> {
+    if (directories) this.loader.setDirectories?.(directories);
+    const signature = await this.loader.getSignature?.();
+    const next = await this.loader.scan();
+    const changed =
+      JSON.stringify([...next.values()].sort(byName)) !==
+      JSON.stringify([...(this.cache?.values() ?? [])].sort(byName));
+    this.cache = next;
+    this.signature = signature;
+    this.loading = undefined;
+    if (changed) await this.notifyChanged();
+  }
+
+  private async notifyChanged(): Promise<void> {
+    await Promise.all([...this.listeners].map(async (listener) => listener()));
   }
 }
 

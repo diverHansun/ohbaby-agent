@@ -10,15 +10,21 @@ import {
 } from "../ui-runtime/run-stream-adapter.js";
 import type { UiRuntimeComposition } from "../ui-runtime/types.js";
 import type { NoticeDraft } from "./types.js";
+import type {
+  SettingsConfigVersions,
+  SettingsDomain,
+} from "../../config/llm/config-coordination.js";
 
 export type { RunStreamProjection };
 
 export interface InProcessRuntimeControllerOptions {
   readonly clearPendingPermissionsForRun: (runId: string) => Promise<void>;
   readonly coordinateAdmission?: <T>(work: () => Promise<T>) => Promise<T>;
-  readonly getConfigVersion?: () => Promise<string>;
+  readonly getConfigVersion?: () => Promise<SettingsConfigVersions>;
   readonly onRuntimeReplaced?: () => void;
-  readonly createRuntime: () => Promise<UiRuntimeComposition>;
+  readonly createRuntime: (
+    changedDomains?: readonly SettingsDomain[],
+  ) => Promise<UiRuntimeComposition>;
   readonly publishNotice: (notice: NoticeDraft) => void;
   readonly updateStatus: (status: UiRunStatus) => Promise<void>;
 }
@@ -42,7 +48,15 @@ export class InProcessRuntimeController {
     this.closed = true;
     this.resolvedRuntime?.closeAdmission?.();
   }
-  private runtimeVersion: string | undefined;
+  private runtimeVersion: SettingsConfigVersions | undefined;
+
+  private changedDomains(
+    version: SettingsConfigVersions | undefined,
+  ): SettingsDomain[] {
+    return (Object.keys(version ?? {}) as SettingsDomain[]).filter(
+      (domain) => this.runtimeVersion?.[domain] !== version?.[domain],
+    );
+  }
 
   /** A rejected admission stays in the durable submission queue, outside runtime activity. */
   async acquireRuntime(): Promise<{
@@ -64,17 +78,17 @@ export class InProcessRuntimeController {
         const admitted = await this.coordinate(async () => {
           if (this.isClosed()) throw new Error("Runtime is shutting down");
           const version = await this.options.getConfigVersion?.();
-          if (this.runtimeVersion !== version) {
+          if (this.changedDomains(version).length > 0) {
             const reasons = [...runtime.getActivityReasons()];
             if (this.admittedWork > 0)
               reasons.unshift("current tasks or context summaries");
             if (reasons.length > 0) {
-              const message = `Waiting to switch model: ${reasons.join(", ")}`;
+              const message = `Waiting to apply settings: ${reasons.join(", ")}`;
               if (this.waitingMessage !== message)
                 this.options.publishNotice({
                   key: "runtime:model-switch",
                   level: "info",
-                  title: "Model saved",
+                  title: "Settings saved",
                   message,
                 });
               this.waitingMessage = message;
@@ -174,9 +188,14 @@ export class InProcessRuntimeController {
       .then(() =>
         this.coordinate(async () => {
           if (this.isClosed()) throw new Error("Runtime is shutting down");
-          this.runtimeVersion = await this.options.getConfigVersion?.();
+          const version = await this.options.getConfigVersion?.();
           if (this.isClosed()) throw new Error("Runtime is shutting down");
-          const runtime = await this.options.createRuntime();
+          const runtime = await this.options.createRuntime(
+            this.runtimeVersion === undefined
+              ? undefined
+              : this.changedDomains(version),
+          );
+          this.runtimeVersion = version;
           this.resolvedRuntime = runtime;
           if (this.isClosed()) runtime.closeAdmission?.();
           return runtime;

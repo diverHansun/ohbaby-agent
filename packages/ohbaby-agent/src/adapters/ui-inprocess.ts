@@ -42,7 +42,8 @@ import { reasoningCapabilityView } from "../services/llm-model/reasoning-view.js
 import { currentDiscoveryState } from "../config/llm/apply-active-model-config.js";
 import {
   coordinateModelConfig,
-  modelConfigVersion,
+  settingsConfigVersion,
+  type SettingsConfigVersions,
 } from "../config/llm/config-coordination.js";
 import { reloadLLMConfig } from "../config/llm/index.js";
 import { createPermissionProjection } from "./app-events/permission-projection.js";
@@ -200,7 +201,11 @@ import {
   createInMemoryUiStateStore,
 } from "./ui-state/index.js";
 import type { UiStateStore } from "./ui-state/index.js";
-import { createUiRuntimeComposition } from "./ui-runtime/composition.js";
+import {
+  createUiRuntimeComposition,
+  loadConfiguredSkillDirectories,
+} from "./ui-runtime/composition.js";
+import { McpManager } from "../mcp/core/manager.js";
 import type { HostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
 import type { UiRuntimeComposition } from "./ui-runtime/types.js";
 import {
@@ -217,6 +222,7 @@ import { validateModelJson } from "ohbaby-llm";
 import type { ModelJsonConfig } from "ohbaby-llm";
 import {
   reloadSearchConfig,
+  SearchConfigError,
   setSearchApiKey as writeSearchApiKey,
 } from "../config/tools/search/index.js";
 import { InProcessEventRouter } from "./ui-inprocess/event-router.js";
@@ -1006,22 +1012,55 @@ export function createInProcessUiBackendClient(
 
   const runtimeController = new InProcessRuntimeController({
     clearPendingPermissionsForRun,
-    ...(!options.llmClient
-      ? {
-          getConfigVersion: modelConfigVersion,
-          coordinateAdmission: <T>(work: () => Promise<T>): Promise<T> =>
-            coordinateModelConfig(undefined, work),
-        }
-      : {}),
+    getConfigVersion: async (): Promise<SettingsConfigVersions> =>
+      settingsConfigVersion(await resolveProjectRoot()),
+    coordinateAdmission: <T>(work: () => Promise<T>): Promise<T> =>
+      coordinateModelConfig(undefined, work),
     onRuntimeReplaced: (): void => {
       contextWindowUsage.clear();
     },
-    createRuntime: async (): Promise<UiRuntimeComposition> => {
+    createRuntime: async (changedDomains): Promise<UiRuntimeComposition> => {
       const baseProjectRoot = await resolveProjectRoot();
-      if (!options.llmClient && !options.createLLMClient)
+      if (
+        !options.llmClient &&
+        !options.createLLMClient &&
+        (changedDomains === undefined ||
+          changedDomains.some(
+            (domain) => domain === "model" || domain === "env",
+          ))
+      )
         await reloadLLMConfig({ projectDirectory: baseProjectRoot });
+      if (
+        changedDomains === undefined ||
+        changedDomains.some((domain) => domain === "search" || domain === "env")
+      ) {
+        try {
+          await reloadSearchConfig();
+        } catch (error) {
+          // Search remains optional; a missing key must not prevent chat admission.
+          if (
+            !(error instanceof SearchConfigError) ||
+            !["MISSING_API_KEY", "EMPTY_API_KEY"].includes(error.code)
+          )
+            throw error;
+        }
+      }
+      if (changedDomains?.includes("mcp"))
+        await McpManager.getInstance(baseProjectRoot).reload();
       const llmClient = await resolveLLMClient(baseProjectRoot);
+      const skillRegistryWasLoaded = skillRegistryPromise !== undefined;
       const skillRegistry = await getSkillRegistry();
+      if (
+        changedDomains?.includes("skills") ||
+        (changedDomains === undefined && skillRegistryWasLoaded)
+      ) {
+        await skillRegistry.reload(
+          await loadConfiguredSkillDirectories({
+            projectDirectory: baseProjectRoot,
+            onNotice: publishNotice,
+          }),
+        );
+      }
       const runtimeRunIdFactory =
         options.createRunId ??
         (usesPersistentStateStore() ? undefined : (): string => runIds.next());
@@ -2425,6 +2464,10 @@ export function createInProcessUiBackendClient(
       const projectRoot = await resolveProjectRoot();
       return new SkillRegistry({
         loader: new SkillLoader({
+          directories: await loadConfiguredSkillDirectories({
+            projectDirectory: projectRoot,
+            onNotice: publishNotice,
+          }),
           logger: createSkillLogger(),
           projectDirectory: projectRoot,
         }),
@@ -3986,7 +4029,9 @@ export function createInProcessUiBackendClient(
     },
     skills: {
       async listUserInvocable() {
-        return (await getSkillRegistry()).listUserInvocable();
+        const registry = await getSkillRegistry();
+        await registry.refresh();
+        return registry.listUserInvocable();
       },
       async loadPrompt(name: string): Promise<string> {
         const registry = await getSkillRegistry();

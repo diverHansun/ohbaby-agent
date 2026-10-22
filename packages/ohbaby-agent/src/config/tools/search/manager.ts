@@ -1,6 +1,9 @@
-import { getSearchJsonPath, loadSearchJson } from "./loaders.js";
+import { resolveSearchJsonPath, loadSearchJson } from "./loaders.js";
 import { validateApiKey, validateSearchJson } from "./validation.js";
 import type { SearchConfig, SearchConfigLoadOptions } from "./types.js";
+import { loadEnvFile } from "../../llm/loaders.js";
+import { getGlobalEnvPath } from "../../../utils/project-env.js";
+import { runtimeEnvValue } from "../../../utils/managed-runtime-env.js";
 
 interface CachedSearchConfig {
   readonly config: SearchConfig;
@@ -27,7 +30,7 @@ export class SearchConfigManager {
 
   async load(options: SearchConfigLoadOptions = {}): Promise<SearchConfig> {
     const env = options.env ?? process.env;
-    const searchJsonPath = options.searchJsonPath ?? getSearchJsonPath();
+    const searchJsonPath = await resolveSearchJsonPath(options.searchJsonPath);
     if (
       this.cachedConfig?.searchJsonPath === searchJsonPath &&
       this.cachedConfig.env === env
@@ -42,7 +45,7 @@ export class SearchConfigManager {
     this.cachedConfig = null;
     return this.performLoad(
       options.env ?? process.env,
-      options.searchJsonPath ?? getSearchJsonPath(),
+      await resolveSearchJsonPath(options.searchJsonPath),
     );
   }
 
@@ -56,7 +59,19 @@ export class SearchConfigManager {
   ): Promise<SearchConfig> {
     const rawConfig = await loadSearchJson(searchJsonPath);
     const searchJson = validateSearchJson(rawConfig ?? {}, searchJsonPath);
-    const apiKey = validateApiKey(env, searchJson.apiKeyEnv);
+    const explicitValue = runtimeEnvValue(searchJson.apiKeyEnv, env);
+    const fileValues =
+      explicitValue === undefined && env === process.env
+        ? await loadEnvFile(getGlobalEnvPath())
+        : {};
+    const apiKey = validateApiKey(
+      {
+        ...env,
+        [searchJson.apiKeyEnv]:
+          explicitValue ?? fileValues[searchJson.apiKeyEnv],
+      },
+      searchJson.apiKeyEnv,
+    );
     const config: SearchConfig = {
       apiKey,
       apiKeyEnvName: searchJson.apiKeyEnv,

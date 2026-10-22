@@ -1,3 +1,4 @@
+import type { SettingsConfigVersions } from "../../config/llm/config-coordination.js";
 import { coordinateModelConfig } from "../../config/llm/config-coordination.js";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -5,6 +6,17 @@ import {
   RuntimeSwitchPendingError,
 } from "./runtime-controller.js";
 import type { UiRuntimeComposition } from "../ui-runtime/types.js";
+
+function versions(model: string): SettingsConfigVersions {
+  return {
+    model,
+    env: "env",
+    search: "search",
+    mcp: "mcp",
+    agents: "agents",
+    skills: "skills",
+  };
+}
 
 function fixture(): {
   controller: InProcessRuntimeController;
@@ -21,7 +33,8 @@ function fixture(): {
     clearPendingPermissionsForRun: (): Promise<void> => Promise.resolve(),
     updateStatus: (): Promise<void> => Promise.resolve(),
     publishNotice: vi.fn(),
-    getConfigVersion: (): Promise<string> => Promise.resolve(version),
+    getConfigVersion: (): Promise<SettingsConfigVersions> =>
+      Promise.resolve(versions(version)),
     createRuntime: (): Promise<UiRuntimeComposition> => {
       const model = version;
       created.push(model);
@@ -105,7 +118,8 @@ describe("runtime model admission", () => {
       clearPendingPermissionsForRun: (): Promise<void> => Promise.resolve(),
       updateStatus: (): Promise<void> => Promise.resolve(),
       publishNotice: vi.fn(),
-      getConfigVersion: (): Promise<string> => Promise.resolve(version),
+      getConfigVersion: (): Promise<SettingsConfigVersions> =>
+        Promise.resolve(versions(version)),
       createRuntime: (): Promise<UiRuntimeComposition> => {
         if (version === "B")
           return Promise.reject(new Error("Saved model B unavailable"));
@@ -150,7 +164,8 @@ describe("runtime model admission", () => {
       publishNotice: vi.fn(),
       coordinateAdmission: <T>(work: () => Promise<T>): Promise<T> =>
         coordinateModelConfig("/tmp/stage-b-admission-regression", work),
-      getConfigVersion: (): Promise<string> => Promise.resolve(version),
+      getConfigVersion: (): Promise<SettingsConfigVersions> =>
+        Promise.resolve(versions(version)),
       createRuntime: (): Promise<UiRuntimeComposition> =>
         Promise.resolve({
           getActivityReasons: (): readonly string[] => [],

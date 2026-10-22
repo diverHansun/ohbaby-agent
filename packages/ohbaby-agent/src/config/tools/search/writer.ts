@@ -1,7 +1,12 @@
 import { getGlobalEnvPath } from "../../../utils/project-env.js";
+import { setManagedRuntimeEnv } from "../../../utils/managed-runtime-env.js";
 import { writeFileAtomically } from "../../secrets/atomic-file.js";
 import { writeGlobalEnvSecret } from "../../secrets/env-secrets.js";
-import { getSearchJsonPath, loadSearchJson } from "./loaders.js";
+import {
+  getSearchJsonPath,
+  loadSearchJson,
+  resolveSearchJsonPath,
+} from "./loaders.js";
 import { validateSearchJson } from "./validation.js";
 import type { SearchJsonConfig } from "./types.js";
 
@@ -25,9 +30,13 @@ export async function setSearchApiKey(
 ): Promise<SetSearchApiKeyResult> {
   const searchJsonPath =
     input.searchJsonPath ?? getSearchJsonPath(input.homeDirectory);
-  const existingRaw = await loadSearchJson(searchJsonPath);
+  const readPath = await resolveSearchJsonPath(
+    input.searchJsonPath,
+    input.homeDirectory,
+  );
+  const existingRaw = await loadSearchJson(readPath);
   if (existingRaw !== null) {
-    validateSearchJson(existingRaw, searchJsonPath);
+    validateSearchJson(existingRaw, readPath);
   }
 
   const existingRecord = isRecord(existingRaw) ? existingRaw : {};
@@ -40,6 +49,7 @@ export async function setSearchApiKey(
     input.provider ??
     (existingRecord.provider === "tavily" ? existingRecord.provider : "tavily");
   const nextConfig = {
+    ...existingRecord,
     apiKeyEnv,
     provider,
   };
@@ -56,7 +66,7 @@ export async function setSearchApiKey(
     `${JSON.stringify(nextConfig, null, 2)}\n`,
   );
   if (input.apiKey !== undefined) {
-    process.env[apiKeyEnv] = input.apiKey;
+    setManagedRuntimeEnv(apiKeyEnv, input.apiKey);
   }
 
   return {

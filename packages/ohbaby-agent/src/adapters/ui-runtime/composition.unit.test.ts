@@ -387,6 +387,52 @@ function mcpTool(
 }
 
 describe("createUiRuntimeComposition skill tools", () => {
+  it("preserves MCP diagnostics and removes both change subscriptions on dispose", async () => {
+    const bus = createBus();
+    const mcpListeners = new Set<() => void | Promise<void>>();
+    const skillListeners = new Set<() => void | Promise<void>>();
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: {
+        getAllTools: () => Promise.resolve([]),
+        getStatus: () =>
+          Promise.resolve({
+            broken: { status: "failed", error: "local connection rejected" },
+            working: { status: "connected", toolCount: 2 },
+          }),
+        onChange(listener): () => void {
+          mcpListeners.add(listener);
+          return (): void => {
+            mcpListeners.delete(listener);
+          };
+        },
+      },
+      messageManager: {} as MessageManager,
+      permission: { ask: () => "once" },
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      skillRegistry: {
+        ...createMutableSkillRegistry([]),
+        onChange(listener): () => void {
+          skillListeners.add(listener);
+          return (): void => {
+            skillListeners.delete(listener);
+          };
+        },
+      },
+    });
+    expect(await composition.listMcpServerSummaries()).toEqual([
+      { name: "broken", status: "failed", error: "local connection rejected" },
+      { name: "working", status: "connected", toolCount: 2 },
+    ]);
+    await composition.dispose();
+    expect(mcpListeners.size).toBe(0);
+    expect(skillListeners.size).toBe(0);
+  });
   it("registers the renamed subagent tools without exposing legacy task tools", async () => {
     const bus = createBus();
     const composition = await createUiRuntimeComposition({
@@ -973,9 +1019,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
 
     await expect(composition.listMcpServerSummaries()).resolves.toEqual([
-      { name: "bad", status: "failed" },
+      { name: "bad", status: "failed", error: "boom" },
       { name: "disabled", status: "disabled" },
-      { name: "github", status: "connected" },
+      { name: "github", status: "connected", toolCount: 8 },
       { name: "local", status: "disconnected" },
     ]);
   });
@@ -1493,9 +1539,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
 
     refreshState.error = new Error("MCP discovery unavailable");
-    for (const listener of listeners) {
-      void listener();
-    }
+    await expect(
+      Promise.all([...listeners].map(async (listener) => listener())),
+    ).rejects.toThrow("MCP discovery unavailable");
 
     await vi.waitFor(async () => {
       expect(

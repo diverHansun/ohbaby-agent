@@ -784,3 +784,41 @@ describe("McpManager", () => {
     expect(McpManager.getInstance("workspace-a")).not.toBe(first);
   });
 });
+
+describe("MCP explicit reload completion", () => {
+  it("disconnects the previous client, initializes the new config, and awaits tool consumers", async () => {
+    let name = "old";
+    const gate = createDeferred();
+    const oldClient = createFakeClient({ name: "old" });
+    const disconnect = vi.spyOn(oldClient, "disconnect");
+    const manager = new McpManager("reload-workspace", {
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({ mcpServers: { [name]: oldClient.config } }),
+      createClient: (serverName): McpClientLike =>
+        serverName === "old"
+          ? oldClient
+          : createFakeClient({ name: serverName }),
+    });
+    await manager.getAllTools();
+    let visibleTools: readonly string[] = [];
+    manager.onChange(async () => {
+      const tools = await manager.getAllTools();
+      await gate.promise;
+      visibleTools = tools.map((tool) => tool.name);
+    });
+    name = "new";
+    let settled = false;
+    const reload = manager.reload().then(() => {
+      settled = true;
+    });
+    await vi.waitFor(async () => {
+      expect(await manager.getStatus()).toHaveProperty("new");
+    });
+    expect(settled).toBe(false);
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    await reload;
+    expect(visibleTools).toEqual(["mcp_s3_new_t4_echo"]);
+    await manager.dispose();
+  });
+});

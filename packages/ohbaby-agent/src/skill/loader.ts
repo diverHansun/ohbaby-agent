@@ -486,7 +486,7 @@ function safeResourcePath(resourcePath: string): string {
 }
 
 export class SkillLoader implements SkillLoaderPort {
-  private readonly directories: readonly NormalizedSkillSearchDirectory[];
+  private directories: readonly NormalizedSkillSearchDirectory[];
   private readonly logger: SkillLogger;
   private readonly pluginDirectories = new Map<
     string,
@@ -522,6 +522,25 @@ export class SkillLoader implements SkillLoaderPort {
 
   deregisterPlugin(pluginId: string): void {
     this.pluginDirectories.delete(pluginId);
+  }
+
+  setDirectories(directories: readonly SkillSearchDirectory[]): void {
+    this.directories = directories.map(normalizeDirectory);
+  }
+
+  async getSignature(): Promise<string> {
+    const files: readonly unknown[][] = await Promise.all(
+      this.allDirectories().map(async (directory) => {
+        const paths = await findSkillFiles(directory.path);
+        return Promise.all(
+          paths.map(async (file) => {
+            const stats = await lstatIfExists(file);
+            return [file, stats?.mtimeMs];
+          }),
+        );
+      }),
+    );
+    return JSON.stringify(files);
   }
 
   private allDirectories(): readonly NormalizedSkillSearchDirectory[] {

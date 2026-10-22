@@ -1,9 +1,17 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import {
+  resolveOhbabyHome,
+  resolveLegacyOhbabyHome,
+  resolveProjectOhbabyRoot,
+  resolveLegacyProjectOhbabyRoot,
+  resolveReadPathWithLegacy,
+} from "../../paths/index.js";
 import { getModelJsonPath } from "./loaders.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
+import { resolveSearchJsonPath } from "../tools/search/loaders.js";
 
 // Coordination is process-local. Atomic file replacement protects each file;
 // concurrent independent writers and crashes across two files are not transactions.
@@ -71,6 +79,60 @@ export function modelConfigVersion(
     return createHash("sha256")
       .update(JSON.stringify([model, env]))
       .digest("hex");
+  });
+}
+
+export type SettingsDomain =
+  | "model"
+  | "env"
+  | "search"
+  | "mcp"
+  | "agents"
+  | "skills";
+export type SettingsConfigVersions = Readonly<Record<SettingsDomain, string>>;
+
+/** Use the same current/legacy paths as the corresponding config loaders. */
+export function settingsConfigVersion(
+  projectDirectory: string,
+): Promise<SettingsConfigVersions> {
+  return coordinateModelConfig(undefined, async () => {
+    assertModelConfigConsistent();
+    const globalRoot = resolveOhbabyHome();
+    const legacyGlobalRoot = resolveLegacyOhbabyHome();
+    const projectRoot = resolveProjectOhbabyRoot(projectDirectory);
+    const legacyProjectRoot = resolveLegacyProjectOhbabyRoot(projectDirectory);
+    const read = async (
+      root: string,
+      legacyRoot: string,
+      ...segments: string[]
+    ): Promise<string | undefined> =>
+      readOptionalConfigFile(
+        await resolveReadPathWithLegacy(join(root, ...segments), [
+          join(legacyRoot, ...segments),
+        ]),
+      );
+    const hash = (values: readonly (string | undefined)[]): string =>
+      createHash("sha256").update(JSON.stringify(values)).digest("hex");
+    const layered = async (directory: string): Promise<string> =>
+      hash(
+        await Promise.all([
+          read(globalRoot, legacyGlobalRoot, directory, "settings.json"),
+          read(projectRoot, legacyProjectRoot, directory, "settings.json"),
+        ]),
+      );
+    const [model, env, search, mcp, agents, skills] = await Promise.all([
+      read(globalRoot, legacyGlobalRoot, "model.json").then((value) =>
+        hash([value]),
+      ),
+      readOptionalConfigFile(getGlobalEnvPath()).then((value) => hash([value])),
+      resolveSearchJsonPath()
+        .then(readOptionalConfigFile)
+        .then((value) => hash([value])),
+      layered("mcp"),
+      layered("agents"),
+      layered("skills"),
+    ]);
+    return { model, env, search, mcp, agents, skills };
   });
 }
 

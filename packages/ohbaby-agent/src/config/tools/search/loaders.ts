@@ -28,14 +28,22 @@ function getLegacySearchJsonPath(homeDirectory?: string): string {
   );
 }
 
+export async function resolveSearchJsonPath(
+  searchJsonPath?: string,
+  homeDirectory?: string,
+): Promise<string> {
+  return (
+    searchJsonPath ??
+    (await resolveReadPathWithLegacy(getSearchJsonPath(homeDirectory), [
+      getLegacySearchJsonPath(homeDirectory),
+    ]))
+  );
+}
+
 export async function loadSearchJson(
   searchJsonPath?: string,
 ): Promise<unknown> {
-  const resolvedPath =
-    searchJsonPath ??
-    (await resolveReadPathWithLegacy(getSearchJsonPath(), [
-      getLegacySearchJsonPath(),
-    ]));
+  const resolvedPath = await resolveSearchJsonPath(searchJsonPath);
   let content: string;
   try {
     content = await fs.readFile(resolvedPath, "utf8");

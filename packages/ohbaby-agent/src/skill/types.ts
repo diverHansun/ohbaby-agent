@@ -54,6 +54,8 @@ export interface SkillResourceContent {
 
 export interface SkillLoaderPort {
   scan(): Promise<Map<string, SkillInfo>>;
+  getSignature?(): Promise<string>;
+  setDirectories?(directories: readonly SkillSearchDirectory[]): void;
   loadContent(info: SkillInfo): Promise<SkillContent>;
   readResource?(
     info: SkillInfo,
@@ -84,5 +86,6 @@ export interface SkillRegistryPort {
   deregisterPlugin(pluginId: string): void;
   onChange(listener: SkillRegistryChangeListener): () => void;
   invalidate(): void;
-  reload(): Promise<void>;
+  refresh?(): Promise<void>;
+  reload(directories?: readonly SkillSearchDirectory[]): Promise<void>;
 }

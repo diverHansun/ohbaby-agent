@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, mkdir, writeFile, rm, utimes } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SkillLoader } from "./loader.js";
+import { describe, expect, it, vi } from "vitest";
 import { SkillNotFoundError } from "./errors.js";
 import { SkillRegistry } from "./registry.js";
 import type { SkillContent, SkillInfo } from "./types.js";
@@ -147,4 +153,98 @@ describe("SkillRegistry", () => {
     expect(scanCount).toBe(3);
     expect(changeCount).toBe(2);
   });
+});
+
+describe("Skill file refresh", () => {
+  it("rescans only when file signatures change and only notifies metadata changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-skill-signature-"));
+    const file = join(root, "base", "SKILL.md");
+    let revision = 0;
+    const write = async (description: string, body: string): Promise<void> => {
+      await mkdir(join(root, "base"), { recursive: true });
+      await writeFile(
+        file,
+        `---\nname: base\ndescription: ${description}\n---\n${body}`,
+      );
+      const stamp = new Date(Date.now() + ++revision * 1000);
+      await utimes(file, stamp, stamp);
+    };
+    try {
+      await write("First description", "First body");
+      const loader = new SkillLoader({
+        directories: [{ path: root, scope: "project" }],
+      });
+      const scan = vi.spyOn(loader, "scan");
+      const registry = new SkillRegistry({ loader });
+      let changes = 0;
+      registry.onChange(async () => {
+        changes += 1;
+        // Cached list reads inside consumers must never recursively refresh.
+        expect(await registry.listNames()).toEqual(["base"]);
+      });
+      await registry.refresh();
+      const firstChangeCount = changes;
+      await registry.refresh();
+      await registry.get("base");
+      expect(scan).toHaveBeenCalledTimes(1);
+      await write("First description", "Changed body");
+      expect((await registry.load("base")).content).toContain("Changed body");
+      expect(changes).toBe(firstChangeCount);
+      await write("Changed description", "Changed body");
+      expect((await registry.get("base"))?.description).toBe(
+        "Changed description",
+      );
+      expect(changes).toBe(firstChangeCount + 1);
+      await registry.refresh();
+      expect(scan).toHaveBeenCalledTimes(3);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Skill notification failures", () => {
+  it("consumes rejected consumers from both synchronous plugin notification entry points", async () => {
+    const moduleUrl = new URL("./registry.ts", import.meta.url).href;
+    const script = `
+      const { SkillRegistry } = await import(${JSON.stringify(moduleUrl)});
+      const unhandled = [];
+      process.on("unhandledRejection", (error) => { unhandled.push(error.message); });
+      const registry = new SkillRegistry();
+      registry.onChange(() => Promise.reject(new Error("consumer refresh failed")));
+      registry.registerPluginSkills("fixture", []);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      registry.deregisterPlugin("fixture");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      process.stdout.write(JSON.stringify(unhandled));
+    `;
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      "--import",
+      "tsx",
+      "--input-type=module",
+      "-e",
+      script,
+    ]);
+    expect(JSON.parse(stdout)).toEqual([]);
+  });
+
+  it.each(["refresh", "reload"] as const)(
+    "propagates an awaited %s consumer failure",
+    async (method) => {
+      const registry = new SkillRegistry({
+        loader: {
+          scan: (): Promise<Map<string, SkillInfo>> =>
+            Promise.resolve(new Map([[baseSkill.name, baseSkill]])),
+          loadContent: (info): Promise<SkillContent> =>
+            Promise.resolve(makeContent(info)),
+        },
+      });
+      registry.onChange(() =>
+        Promise.reject(new Error("awaited consumer failed")),
+      );
+      await expect(registry[method]()).rejects.toThrow(
+        "awaited consumer failed",
+      );
+    },
+  );
 });

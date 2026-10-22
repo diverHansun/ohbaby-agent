@@ -249,13 +249,19 @@ export class McpManager {
     };
   }
 
+  async reload(): Promise<void> {
+    await this.invalidateAfterConfigChange();
+    await this.ensureInitialized();
+    await this.notifyChanged();
+  }
+
   async registerPluginServers(
     pluginId: string,
     servers: McpPluginServerContribution,
   ): Promise<void> {
     this.pluginServerConfigs.set(pluginId, { ...servers });
     await this.invalidateAfterConfigChange();
-    this.notifyChanged();
+    await this.notifyChanged();
   }
 
   async deregisterPlugin(pluginId: string): Promise<void> {
@@ -263,7 +269,7 @@ export class McpManager {
       return;
     }
     await this.invalidateAfterConfigChange();
-    this.notifyChanged();
+    await this.notifyChanged();
   }
 
   async dispose(): Promise<void> {
@@ -414,12 +420,10 @@ export class McpManager {
     this.generation += 1;
     this.tools = null;
     this.statuses.set(serverName, client.getStatus());
-    this.notifyChanged();
+    void this.notifyChanged().catch(this.onError);
   }
 
-  private notifyChanged(): void {
-    for (const listener of this.listeners) {
-      void listener();
-    }
+  private async notifyChanged(): Promise<void> {
+    await Promise.all([...this.listeners].map(async (listener) => listener()));
   }
 }

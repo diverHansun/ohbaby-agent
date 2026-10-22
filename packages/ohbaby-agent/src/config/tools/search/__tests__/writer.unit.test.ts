@@ -61,7 +61,7 @@ describe("setSearchApiKey", () => {
     expect(process.env.TAVILY_API_KEY).toBe("tvly-test-secret");
   });
 
-  it("writes only provider and key env metadata while updating the key env", async () => {
+  it("preserves custom base URL and defaults while updating the key env", async () => {
     await writeJson(searchJsonPath, {
       apiKeyEnv: "OLD_KEY",
       baseUrl: "https://search.example.com",
@@ -87,9 +87,63 @@ describe("setSearchApiKey", () => {
     );
     expect(JSON.parse(await fs.readFile(searchJsonPath, "utf-8"))).toEqual({
       apiKeyEnv: "CUSTOM_TAVILY_KEY",
+      baseUrl: "https://search.example.com",
+      defaults: {
+        maxResults: 8,
+        searchDepth: "advanced",
+        timeout: 90,
+        topic: "finance",
+      },
       provider: "tavily",
     });
     expect(process.env.CUSTOM_TAVILY_KEY).toBe("custom-secret");
+  });
+
+  it("merges effective legacy settings for an explicit home while writing the current path", async () => {
+    const legacyPath = path.join(
+      tempHome,
+      ".ohbaby-agent",
+      "tools",
+      "search.json",
+    );
+    const legacy = {
+      baseUrl: "https://legacy-home.example",
+      defaults: { maxResults: 8 },
+    };
+    await writeJson(legacyPath, legacy);
+    const result = await setSearchApiKey({
+      homeDirectory: tempHome,
+      apiKeyEnv: "CUSTOM_TAVILY_KEY",
+    });
+    expect(result.searchJsonPath).toBe(searchJsonPath);
+    expect(JSON.parse(await fs.readFile(searchJsonPath, "utf8"))).toEqual({
+      ...legacy,
+      provider: "tavily",
+      apiKeyEnv: "CUSTOM_TAVILY_KEY",
+    });
+    expect(JSON.parse(await fs.readFile(legacyPath, "utf8"))).toEqual(legacy);
+  });
+
+  it("keeps explicit destination paths isolated from legacy fallback", async () => {
+    const legacyPath = path.join(
+      tempHome,
+      ".ohbaby-agent",
+      "tools",
+      "search.json",
+    );
+    await writeJson(legacyPath, {
+      baseUrl: "https://legacy.example",
+      defaults: { maxResults: 8 },
+    });
+    await setSearchApiKey({
+      homeDirectory: tempHome,
+      searchJsonPath,
+      apiKeyEnv: "CUSTOM_TAVILY_KEY",
+    });
+    expect(JSON.parse(await fs.readFile(searchJsonPath, "utf8"))).toEqual({
+      provider: "tavily",
+      apiKeyEnv: "CUSTOM_TAVILY_KEY",
+    });
   });
 
   it("rejects invalid apiKeyEnv values before writing secrets or search config", async () => {

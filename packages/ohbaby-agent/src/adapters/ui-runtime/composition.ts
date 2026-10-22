@@ -69,6 +69,7 @@ import {
 } from "../../services/session/index.js";
 import {
   AgentManager,
+  AgentRegistry,
   type AgentSessionStartResult,
   AgentService,
   DEFAULT_SUBAGENT_ROLE,
@@ -98,6 +99,7 @@ import {
   getDefaultSkillDirectories,
   getSearchConfig,
   loadSkillConfigLenient,
+  loadAgentConfig,
   toSearchProviderConfig,
 } from "../../config/index.js";
 import {
@@ -260,10 +262,10 @@ function mcpStatusToSummary(
   name: string,
   status: McpClientStatus,
 ): CommandMcpServerSummary {
-  return { name, status: status.status };
+  return { name, ...status };
 }
 
-async function loadConfiguredSkillDirectories(input: {
+export async function loadConfiguredSkillDirectories(input: {
   readonly onNotice?: UiRuntimeCompositionOptions["onNotice"];
   readonly projectDirectory?: string;
 }): Promise<readonly SkillSearchDirectory[]> {
@@ -288,7 +290,14 @@ async function loadConfiguredSkillDirectories(input: {
 export async function createUiRuntimeComposition(
   options: UiRuntimeCompositionOptions,
 ): Promise<UiRuntimeComposition> {
-  const agentManager = options.agentManager ?? new AgentManager();
+  const agentManager =
+    options.agentManager ??
+    new AgentManager({
+      registry: new AgentRegistry({
+        configLoader: (): ReturnType<typeof loadAgentConfig> =>
+          loadAgentConfig({ projectDirectory: options.workdir }),
+      }),
+    });
   await agentManager.initialize();
 
   const runLedger =
@@ -510,6 +519,7 @@ export async function createUiRuntimeComposition(
     readonly isSubagent: boolean;
     readonly sessionId: string;
   }): Promise<readonly ToolDefinition[]> {
+    await skillRegistry.refresh?.();
     const agentName = await resolvePromptAgentName(input);
     const tools = await toolScheduler.getAvailableTools({
       agentName,
@@ -1046,14 +1056,15 @@ export async function createUiRuntimeComposition(
   }
 
   await refreshSkillTools();
-  skillRegistry.onChange(() => {
-    void refreshSkillTools().catch((error: unknown) => {
+  const unsubscribeSkills = skillRegistry.onChange(() => {
+    return refreshSkillTools().catch((error: unknown) => {
       options.onNotice?.({
         key: `skill:tool-refresh:${formatUnknown(error)}`,
         level: "warning",
         message: formatUnknown(error),
         title: "Skill tool refresh failed",
       });
+      throw error;
     });
   });
 
@@ -1156,14 +1167,15 @@ export async function createUiRuntimeComposition(
       title: "MCP tool refresh failed",
     });
   });
-  mcpManager.onChange?.(() => {
-    void refreshMcpTools().catch((error: unknown) => {
+  const unsubscribeMcp = mcpManager.onChange?.(() => {
+    return refreshMcpTools().catch((error: unknown) => {
       options.onNotice?.({
         key: `mcp:tool-refresh:${formatUnknown(error)}`,
         level: "warning",
         message: formatUnknown(error),
         title: "MCP tool refresh failed",
       });
+      throw error;
     });
   });
   if (supportsMcpResourceAndPromptTools(mcpManager)) {
@@ -1344,6 +1356,8 @@ export async function createUiRuntimeComposition(
       closeAdmission();
       if (disposal) return disposal;
       unsubscribeSessionRemoved();
+      unsubscribeSkills();
+      unsubscribeMcp?.();
       permissionSource.dispose();
       todoService.dispose();
       todoWorkScopes.dispose();
