@@ -1026,6 +1026,56 @@ describe("createUiRuntimeComposition skill tools", () => {
     ]);
   });
 
+  it("redacts credentials from MCP errors in command summaries like the settings page", async () => {
+    const bus = createBus();
+    const workdir = await tempWorkdir();
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: {
+        getAllTools: () => Promise.resolve([]),
+        getServerDetails: () =>
+          Promise.resolve([
+            {
+              name: "remote",
+              config: {
+                type: "http",
+                url: "https://mcp.example/mcp",
+                headers: { "X-Api-Key": "header-secret-value" },
+                enabled: true,
+                trust: false,
+                timeout: 5000,
+              },
+            },
+          ]),
+        getStatus: () =>
+          Promise.resolve({
+            remote: {
+              error:
+                "connect failed: X-Api-Key header-secret-value rejected (Bearer sk-live-token)",
+              status: "failed",
+            },
+          }),
+      },
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir,
+    });
+
+    const [summary] = await composition.listMcpServerSummaries();
+    expect(summary).toMatchObject({ name: "remote", status: "failed" });
+    expect(JSON.stringify(summary)).not.toContain("header-secret-value");
+    expect(JSON.stringify(summary)).not.toContain("sk-live-token");
+  });
+
   it("starts primary sessions through the agent service stream path", async () => {
     const bus = createBus();
     const workdir = await tempWorkdir();

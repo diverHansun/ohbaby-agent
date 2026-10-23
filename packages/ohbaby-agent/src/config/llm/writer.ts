@@ -228,7 +228,11 @@ async function projectSettings(
   const active = document.models.find(
     (entry) => entry.id === document.activeProfileId,
   );
-  const secrets = Object.values(values);
+  // Only keys the entries actually reference; unrelated env values are not secrets here.
+  const secrets = document.models.flatMap((entry) => {
+    const value = entry.apiKeyEnv ? values[entry.apiKeyEnv] : undefined;
+    return value ? [value] : [];
+  });
   return {
     active: active
       ? { id: active.id, provider: active.provider, model: active.model }
@@ -429,7 +433,9 @@ export function updateModelEntry(
       clearIncompatibleReasoningPreference(document, entry);
     await persistDocument(document, options, secret);
     if (connectionChanged) bumpGeneration(id, options);
-    if (configurationComplete(entry))
+    // Budget/label edits keep their value and must not replace a running task,
+    // such as the active probe started when this entry was selected.
+    if (connectionChanged && configurationComplete(entry))
       void startModelEntryDiscovery(id, options);
     return projectSettings(document, options);
   });
@@ -616,7 +622,11 @@ export async function setActiveLLMConfig(
 /** Conditional metadata writeback; never selects/recreates the target or changes other entries. */
 export function writeModelEntryMetadata(
   id: string,
-  expected: { generation: number; routeKey: string },
+  expected: {
+    generation: number;
+    routeKey: string;
+    contextWindowTokens: number;
+  },
   metadata: {
     contextWindowTokens?: number;
     reasoningCapabilities?: ReasoningCapabilities;
@@ -634,7 +644,12 @@ export function writeModelEntryMetadata(
       modelProfileRouteKey(entry, entry.provider) !== expected.routeKey
     )
       return false;
-    if (metadata.contextWindowTokens !== undefined)
+    // A later manual budget edit wins over this task's older snapshot, without
+    // discarding the task's reasoning evidence or cancelling its active probe.
+    if (
+      metadata.contextWindowTokens !== undefined &&
+      entry.contextWindowTokens === expected.contextWindowTokens
+    )
       entry.contextWindowTokens = metadata.contextWindowTokens;
     if (
       metadata.reasoningCapabilities &&

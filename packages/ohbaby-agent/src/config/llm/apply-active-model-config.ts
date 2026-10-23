@@ -597,7 +597,11 @@ export async function startModelEntryDiscovery(
           )
             wrote = await writeModelEntryMetadata(
               id,
-              { generation: state.generation, routeKey },
+              {
+                generation: state.generation,
+                routeKey,
+                contextWindowTokens: entry.contextWindowTokens,
+              },
               {
                 contextWindowTokens: probe.contextWindowTokens,
                 reasoningCapabilities: probe.reasoningCapabilities,

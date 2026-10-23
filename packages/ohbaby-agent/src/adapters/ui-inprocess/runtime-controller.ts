@@ -22,6 +22,11 @@ export interface InProcessRuntimeControllerOptions {
   readonly coordinateAdmission?: <T>(work: () => Promise<T>) => Promise<T>;
   readonly getConfigVersion?: () => Promise<SettingsConfigVersions>;
   readonly onRuntimeReplaced?: () => void;
+  /** Reloads configuration that must match the recorded settings version. Runs under coordination. */
+  readonly prepareRuntime?: (
+    changedDomains?: readonly SettingsDomain[],
+  ) => Promise<void>;
+  /** Assembles the runtime outside coordination, so slow external connections cannot block other work. */
   readonly createRuntime: (
     changedDomains?: readonly SettingsDomain[],
   ) => Promise<UiRuntimeComposition>;
@@ -140,17 +145,16 @@ export class InProcessRuntimeController {
       if (this.isClosed()) throw new Error("Runtime is shutting down");
       // An in-flight initialization can itself require publication coordination.
       const runtime = await this.runtimePromise;
-      await this.coordinate(async () => {
-        if (this.isClosed()) throw new Error("Runtime is shutting down");
-        if (
-          this.admittedWork > 0 ||
-          (runtime?.getActivityReasons().length ?? 0) > 0
-        )
-          throw new InstanceBusyError();
-        const mcp = await reload();
-        if (this.runtimeVersion !== undefined)
-          this.runtimeVersion = { ...this.runtimeVersion, mcp };
-      });
+      // The admission barrier keeps new rounds out; MCP connections must not hold
+      // the process-wide settings coordination shared by every workspace.
+      if (
+        this.admittedWork > 0 ||
+        (runtime?.getActivityReasons().length ?? 0) > 0
+      )
+        throw new InstanceBusyError();
+      const mcp = await reload();
+      if (this.runtimeVersion !== undefined)
+        this.runtimeVersion = { ...this.runtimeVersion, mcp };
     } finally {
       unlock();
     }
@@ -220,22 +224,26 @@ export class InProcessRuntimeController {
       return this.runtimePromise;
     }
     const creation = this.resetBarrier
-      .then(() =>
-        this.coordinate(async () => {
+      .then(async () => {
+        // Snapshot the version and reload the configuration it describes together.
+        // A later edit only makes the recorded version older, which rebuilds again.
+        const { version, changed } = await this.coordinate(async () => {
           if (this.isClosed()) throw new Error("Runtime is shutting down");
           const version = await this.options.getConfigVersion?.();
-          if (this.isClosed()) throw new Error("Runtime is shutting down");
-          const runtime = await this.options.createRuntime(
+          const changed =
             this.runtimeVersion === undefined
               ? undefined
-              : this.changedDomains(version),
-          );
-          this.runtimeVersion = version;
-          this.resolvedRuntime = runtime;
-          if (this.isClosed()) runtime.closeAdmission?.();
-          return runtime;
-        }),
-      )
+              : this.changedDomains(version);
+          await this.options.prepareRuntime?.(changed);
+          return { version, changed };
+        });
+        if (this.isClosed()) throw new Error("Runtime is shutting down");
+        const runtime = await this.options.createRuntime(changed);
+        this.runtimeVersion = version;
+        this.resolvedRuntime = runtime;
+        if (this.isClosed()) runtime.closeAdmission?.();
+        return runtime;
+      })
       .catch((error: unknown) => {
         if (this.runtimePromise === creation) {
           this.runtimePromise = undefined;

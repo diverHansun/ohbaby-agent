@@ -52,6 +52,23 @@ describe("independent model settings", () => {
       /secret-a|secret-b/,
     );
   });
+  it("redacts base URLs only with referenced model keys, not unrelated short env values", async () => {
+    await writeFile(opts.envPath, "PORT=8080\nDEBUG=1\n");
+    const plain = await add({
+      baseUrl: "http://localhost:8080/v1",
+      apiKey: "secret-path-value",
+    });
+    expect(plain.baseUrl).toBe("http://localhost:8080/v1");
+    const leaky = await add({
+      baseUrl: "http://localhost:9/v1/leaky-path-secret",
+      apiKey: "leaky-path-secret",
+    });
+    expect(leaky.baseUrl).not.toContain("leaky-path-secret");
+    expect(
+      (await readModelSettings(opts)).models.find((e) => e.id === plain.id)
+        ?.baseUrl,
+    ).toBe("http://localhost:8080/v1");
+  });
   it("edits only the target and preserves id, order, active snapshot and global preferences", async () => {
     const a = await add({ label: "A" });
     const b = await add({ label: "B" });

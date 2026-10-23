@@ -90,6 +90,10 @@ export function readSearchSettings(
   });
 }
 
+/** Variables ohbaby creates for search; clearing may delete only these. */
+const MANAGED_SEARCH_KEY =
+  /^(?:TAVILY_API_KEY|OHBABY_SEARCH_API_KEY(?:_\d+)?)$/;
+
 export function updateSearchSettings(
   input: SearchSettingsPatch,
   options: SearchSettingsWriteOptions = {},
@@ -155,11 +159,16 @@ export function updateSearchSettings(
       envContent = setEnvFileValue(envContent, reference, apiKey);
       writtenReference = reference;
     } else if (apiKey === "" && next.apiKeyEnv !== null) {
-      if (modelReferences.has(next.apiKeyEnv)) next.apiKeyEnv = null;
-      else remove(next.apiKeyEnv);
+      // Delete only search's own managed variable; any other variable may belong to
+      // the user, MCP children or a model, so clearing just drops search's reference.
+      if (
+        !modelReferences.has(next.apiKeyEnv) &&
+        MANAGED_SEARCH_KEY.test(next.apiKeyEnv)
+      )
+        remove(next.apiKeyEnv);
+      else next.apiKeyEnv = null;
     }
-    if (existing.apiKeyEnv !== null && existing.apiKeyEnv !== next.apiKeyEnv)
-      remove(existing.apiKeyEnv);
+    // Repointing never deletes the previous variable: it still holds a saved key.
     validateSearchJson(next, destination);
     const originalSearch = await readOptionalConfigFile(destination);
     const envChanged = envContent !== (originalEnv ?? "");

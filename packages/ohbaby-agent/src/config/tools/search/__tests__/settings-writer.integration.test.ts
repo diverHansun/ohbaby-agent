@@ -219,3 +219,33 @@ it.each([
     expect((await saved()).baseUrl).toBe(url);
   },
 );
+it("repoints the key variable without deleting the previously saved value", async () => {
+  await writer.setSearchApiKey({ apiKey: "saved-search-key" });
+  await writer.updateSearchSettings({ apiKeyEnv: "OTHER_SEARCH_KEY" });
+  expect(await saved()).toMatchObject({ apiKeyEnv: "OTHER_SEARCH_KEY" });
+  expect(await readFile(join(home, ".env"), "utf8")).toContain(
+    "TAVILY_API_KEY=saved-search-key",
+  );
+});
+it("clearing never deletes a variable the user manages outside search", async () => {
+  vi.stubEnv("GITHUB_TOKEN", undefined);
+  vi.stubEnv("MY_SEARCH_TOKEN", undefined);
+  await writeFile(
+    join(home, ".env"),
+    "GITHUB_TOKEN=github-user-token\nMY_SEARCH_TOKEN=user-search-token\n",
+  );
+  await writer.updateSearchSettings({ apiKeyEnv: "GITHUB_TOKEN", apiKey: "" });
+  expect(await readFile(join(home, ".env"), "utf8")).toContain(
+    "GITHUB_TOKEN=github-user-token",
+  );
+  expect((await saved()).apiKeyEnv).toBeNull();
+  await writer.updateSearchSettings({ apiKeyEnv: "MY_SEARCH_TOKEN" });
+  await writer.updateSearchSettings({ apiKey: "" });
+  expect(await readFile(join(home, ".env"), "utf8")).toContain(
+    "MY_SEARCH_TOKEN=user-search-token",
+  );
+  expect((await saved()).apiKeyEnv).toBeNull();
+  expect(await writer.readSearchSettings()).toMatchObject({
+    apiKeyConfigured: false,
+  });
+});

@@ -1032,7 +1032,7 @@ export function createInProcessUiBackendClient(
     onRuntimeReplaced: (): void => {
       contextWindowUsage.clear();
     },
-    createRuntime: async (changedDomains): Promise<UiRuntimeComposition> => {
+    prepareRuntime: async (changedDomains): Promise<void> => {
       const baseProjectRoot = await resolveProjectRoot();
       if (
         !options.llmClient &&
@@ -1058,6 +1058,9 @@ export function createInProcessUiBackendClient(
             throw error;
         }
       }
+    },
+    createRuntime: async (changedDomains): Promise<UiRuntimeComposition> => {
+      const baseProjectRoot = await resolveProjectRoot();
       const mcpVersion = (await settingsConfigVersion(baseProjectRoot)).mcp;
       if (
         changedDomains?.includes("mcp") ||
@@ -4194,7 +4197,7 @@ export function createInProcessUiBackendClient(
         ReturnType<InstanceSettingsReader["getSettingsMcpStatus"]>
       > = [];
       await runtimeController.reconnectMcp(async () => {
-        // Publication coordination covers the snapshot, reload, and acknowledgement.
+        // Snapshot first: a later edit only leaves an older version recorded.
         const version = (await settingsConfigVersion(projectRoot)).mcp;
         await manager.reload();
         status = await readSettingsMcpStatus(manager);
@@ -4203,20 +4206,16 @@ export function createInProcessUiBackendClient(
       });
       return status;
     },
-    getSettingsMcpStatus(): ReturnType<
+    async getSettingsMcpStatus(): ReturnType<
       InstanceSettingsReader["getSettingsMcpStatus"]
     > {
-      return coordinateModelConfig(undefined, async () => {
-        const projectRoot = await resolveProjectRoot();
-        const version = (await settingsConfigVersion(projectRoot)).mcp;
-        const status = await readSettingsMcpStatus(
-          McpManager.getInstance(projectRoot),
-        );
-        // Record only the first initialization. Reading an existing manager never
-        // applies a changed file. Runtime assembly/reconnect owns later versions.
-        appliedMcpVersion ??= version;
-        return status;
+      const projectRoot = await resolveProjectRoot();
+      // Claim the first initialization's version before waiting for connections.
+      // A concurrent runtime must not label these connections with a newer hash.
+      await coordinateModelConfig(undefined, async () => {
+        appliedMcpVersion ??= (await settingsConfigVersion(projectRoot)).mcp;
       });
+      return readSettingsMcpStatus(McpManager.getInstance(projectRoot));
     },
     getSettingsSkills(): ReturnType<
       InstanceSettingsReader["getSettingsSkills"]

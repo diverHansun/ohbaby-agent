@@ -341,3 +341,43 @@ it("contains discovery preparation failure after a successful save without losin
     read.mockRestore();
   }
 });
+it("keeps a budget or label edit and does not restart discovery when the connection is unchanged", async () => {
+  const a = await add("a");
+  await vi.waitFor(() => {
+    expect(requests).toHaveLength(1);
+  });
+  answer(0, 200000);
+  await vi.waitFor(() => {
+    expect(notifications).toBe(1);
+  });
+  await updateModelEntry(
+    a.id,
+    { contextWindowTokens: 64000, label: "Edited" },
+    opts,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  // A restarted task would also replace (and so cancel) a selection's active probe.
+  expect(requests).toHaveLength(1);
+  const [entry] = (await readModelDocument(opts)).models;
+  expect(entry.contextWindowTokens).toBe(64000);
+  expect(entry.label).toBe("Edited");
+});
+
+it("preserves budget edited while metadata is still pending", async () => {
+  const a = await add("a");
+  await vi.waitFor(() => {
+    expect(requests).toHaveLength(1);
+  });
+  await updateModelEntry(
+    a.id,
+    { contextWindowTokens: 64000, label: "Manual" },
+    opts,
+  );
+  answer(0, 200000);
+  await vi.waitFor(() => {
+    expect(notifications).toBe(1);
+  });
+  const [entry] = (await readModelDocument(opts)).models;
+  expect(entry.contextWindowTokens).toBe(64000);
+  expect(entry.reasoningCapabilities?.efforts).toEqual(["low", "high"]);
+});

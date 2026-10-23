@@ -26,6 +26,7 @@ import {
 import * as compositionModule from "./ui-runtime/composition.js";
 import type { UiEvent } from "ohbaby-sdk";
 import { RuntimeSwitchPendingError } from "./ui-inprocess/runtime-controller.js";
+import { coordinateModelConfig } from "../config/llm/config-coordination.js";
 
 async function json(file: string, value: unknown): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
@@ -1024,5 +1025,230 @@ describe("settings propagation through the shared production backend", () => {
       (await client.getSettingsSkills()).map((entry) => entry.name),
     ).toEqual(["cached-skill"]);
     expect(scan.mock.calls.length).toBe(count);
+  });
+
+  describe("MCP connections stay outside the shared settings lock", () => {
+    function hangingMcp(
+      name: string,
+      release: Promise<void>,
+      connected: () => void,
+    ): McpClientLike {
+      return {
+        ...localMcp(name, () => undefined),
+        connect: (): Promise<void> => {
+          connected();
+          return release;
+        },
+      };
+    }
+    async function lockIsFree(): Promise<boolean> {
+      const result = await Promise.race([
+        coordinateModelConfig(undefined, () => Promise.resolve("free")),
+        new Promise<string>((resolve) =>
+          setTimeout(() => {
+            resolve("blocked");
+          }, 1000),
+        ),
+      ]);
+      return result === "free";
+    }
+    async function hangingProject(name: string): Promise<{
+      workdir: string;
+      release: () => void;
+      entered: Promise<void>;
+    }> {
+      const workdir = join(root, name);
+      await mkdir(workdir);
+      await json(join(workdir, ".ohbaby", "mcp", "settings.json"), {
+        mcpServers: {
+          slow: {
+            type: "stdio",
+            command: "fake",
+            args: [],
+            enabled: true,
+            trust: false,
+            timeout: 5000,
+          },
+        },
+      });
+      let connected!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        connected = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      McpManager.getInstance(workdir, {
+        createClient: (serverName): McpClientLike =>
+          hangingMcp(serverName, gate, connected),
+      });
+      return { workdir, release, entered };
+    }
+
+    it("reads MCP status without holding the settings lock while a server connects", async () => {
+      const { workdir, release, entered } = await hangingProject("slow-status");
+      const client = backend(workdir, []);
+      const status = client.getSettingsMcpStatus();
+      try {
+        await entered;
+        expect(await lockIsFree()).toBe(true);
+      } finally {
+        release();
+      }
+      expect((await status).map((server) => server.name)).toEqual(["slow"]);
+    });
+
+    it("admits another project's round while one project's runtime is connecting MCP", async () => {
+      const { workdir, release, entered } =
+        await hangingProject("slow-runtime");
+      const other = join(root, "fast-runtime");
+      await mkdir(other);
+      const slow = backend(workdir, []);
+      const fast = backend(other, []);
+      const pending = slow.submitPromptAndWait("Slow", { sessionId: "slow" });
+      try {
+        await entered;
+        expect(await lockIsFree()).toBe(true);
+        const result = await Promise.race([
+          fast.submitPromptAndWait("Fast", { sessionId: "fast" }),
+          new Promise<undefined>((resolve) =>
+            setTimeout(() => {
+              resolve(undefined);
+            }, 5000),
+          ),
+        ]);
+        expect(result?.prompt.status).toBe("succeeded");
+      } finally {
+        release();
+      }
+      expect((await pending).prompt.status).toBe("succeeded");
+    });
+
+    it("reconnects MCP without holding the settings lock while a server connects", async () => {
+      const workdir = join(root, "slow-reconnect");
+      await mkdir(workdir);
+      const file = join(workdir, ".ohbaby", "mcp", "settings.json");
+      await json(file, { mcpServers: {} });
+      let connected!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        connected = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      McpManager.getInstance(workdir, {
+        createClient: (serverName): McpClientLike =>
+          hangingMcp(serverName, gate, connected),
+      });
+      const client = backend(workdir, []);
+      await client.submitPromptAndWait("Warm up", { sessionId: "warm" });
+      await json(file, {
+        mcpServers: {
+          slow: {
+            type: "stdio",
+            command: "fake",
+            args: [],
+            enabled: true,
+            trust: false,
+            timeout: 5000,
+          },
+        },
+      });
+      const reconnect = client.reconnectSettingsMcp();
+      try {
+        await entered;
+        expect(await lockIsFree()).toBe(true);
+      } finally {
+        release();
+      }
+      expect((await reconnect).map((server) => server.name)).toEqual(["slow"]);
+    });
+  });
+  it("does not mark an old status initialization as the configuration of a newer first prompt", async () => {
+    const workdir = join(root, "status-prompt-race");
+    await mkdir(workdir);
+    const file = join(workdir, ".ohbaby", "mcp", "settings.json");
+    const config = (name: string): McpServersConfig => ({
+      mcpServers: {
+        [name]: {
+          type: "stdio",
+          command: "fake",
+          args: [],
+          enabled: true,
+          trust: false,
+          timeout: 5000,
+        },
+      },
+    });
+    await json(file, config("old"));
+    let connected!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      connected = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const manager = McpManager.getInstance(workdir, {
+      createClient: (name): McpClientLike => ({
+        ...localMcp(name, () => undefined),
+        connect: async (): Promise<void> => {
+          if (name === "old") {
+            connected();
+            await gate;
+          }
+        },
+      }),
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const client = backend(workdir, requests);
+    const status = client.getSettingsMcpStatus();
+    await entered;
+    await json(file, config("new"));
+    let runtimeStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      runtimeStarted = resolve;
+    });
+    const reload = manager.reload.bind(manager);
+    vi.spyOn(manager, "reload").mockImplementation(async () => {
+      runtimeStarted();
+      await reload();
+    });
+    const compositions: Awaited<
+      ReturnType<typeof compositionModule.createUiRuntimeComposition>
+    >[] = [];
+    const compose = compositionModule.createUiRuntimeComposition;
+    vi.spyOn(
+      compositionModule,
+      "createUiRuntimeComposition",
+    ).mockImplementation(async (options) => {
+      runtimeStarted();
+      const runtime = await compose(options);
+      compositions.push(runtime);
+      return runtime;
+    });
+    const prompt = client.submitPromptAndWait("First", { sessionId: "first" });
+    try {
+      await started;
+    } finally {
+      release();
+    }
+    await status;
+    expect((await prompt).prompt.status).toBe("succeeded");
+    expect(
+      (await client.submitPromptAndWait("Next", { sessionId: "next" })).prompt
+        .status,
+    ).toBe("succeeded");
+    for (const runtime of compositions) {
+      const names = (await runtime.listToolSummaries()).map(
+        (tool) => tool.name,
+      );
+      expect(names).toContain("mcp_s3_new_t4_echo");
+      expect(names).not.toContain("mcp_s3_old_t4_echo");
+    }
+    expect(compositions).toHaveLength(1);
+    expect(requests).toHaveLength(2);
   });
 });

@@ -124,6 +124,8 @@ import {
   ScopeToolSequence,
   type McpClientStatus,
 } from "../../mcp/index.js";
+import type { McpServerConfig } from "../../config/mcp/types.js";
+import { redactSettingsError } from "../../config/secrets/redaction.js";
 import {
   createMcpPromptTool,
   createMcpResourceTool,
@@ -214,6 +216,9 @@ export interface McpManagerPort {
   getAllTools(): Promise<readonly Tool[]>;
   getPrompt?: McpPromptReader["getPrompt"];
   getStatus?(): Promise<Record<string, McpClientStatus>>;
+  getServerDetails?(): Promise<
+    readonly { readonly name: string; readonly config: McpServerConfig }[]
+  >;
   onChange?(listener: () => void | Promise<void>): () => void;
   readResource?: McpResourceReader["readResource"];
 }
@@ -261,8 +266,12 @@ function createSkillLogger(
 function mcpStatusToSummary(
   name: string,
   status: McpClientStatus,
+  configs: readonly McpServerConfig[],
 ): CommandMcpServerSummary {
-  return { name, ...status };
+  // Same redaction as the settings page: errors reach TUI, Web and command records.
+  return status.status === "failed"
+    ? { name, ...status, error: redactSettingsError(status.error, configs) }
+    : { name, ...status };
 }
 
 export async function loadConfiguredSkillDirectories(input: {
@@ -1317,9 +1326,14 @@ export async function createUiRuntimeComposition(
       if (!statuses) {
         return [];
       }
+      const configs = (await mcpManager.getServerDetails?.())?.map(
+        (server) => server.config,
+      );
       return Object.entries(statuses)
         .sort(([left], [right]) => left.localeCompare(right))
-        .map(([name, status]) => mcpStatusToSummary(name, status));
+        .map(([name, status]) =>
+          mcpStatusToSummary(name, status, configs ?? []),
+        );
     },
 
     async listToolSummaries(

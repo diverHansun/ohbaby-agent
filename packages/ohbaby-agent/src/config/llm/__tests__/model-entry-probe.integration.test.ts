@@ -24,6 +24,7 @@ let accepted: string[];
 let ignoreControls: boolean;
 let calls: { path: string; key: string; body: Record<string, unknown> }[];
 let notices: number;
+let beforeProbeReply: (() => Promise<void>) | undefined;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "entry-probe-"));
   vi.stubEnv("OHBABY_HOME", root);
@@ -33,6 +34,7 @@ beforeEach(async () => {
   ignoreControls = false;
   calls = [];
   notices = 0;
+  beforeProbeReply = undefined;
   upstream = createServer((req, res) => {
     if (req.method === "GET") {
       res.setHeader("content-type", "application/json");
@@ -56,6 +58,7 @@ beforeEach(async () => {
         key: String(req.headers.authorization ?? req.headers["x-api-key"]),
         body,
       });
+      await beforeProbeReply?.();
       const reasoning = body.reasoning as
         | { effort?: string; enabled?: boolean }
         | undefined;
@@ -304,4 +307,43 @@ it("fresh metadata replaces an older metadata result without active probing", as
     source: "model-metadata",
   });
   expect(calls).toHaveLength(0);
+});
+
+it("keeps a running active probe and a later budget edit when only the label or budget changes", async () => {
+  const target = await add();
+  let entered!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  beforeProbeReply = async (): Promise<void> => {
+    if (calls.length === 1) {
+      entered();
+      await gate;
+    }
+  };
+  const pending = settings.probeModelEntry(target.id, options());
+  try {
+    await started;
+    await settings.updateModelEntry(
+      target.id,
+      { label: "During probe", contextWindowTokens: 32000 },
+      options(),
+    );
+  } finally {
+    release();
+  }
+  expect(await pending).toMatchObject({
+    status: "identified",
+    source: "active-probe",
+    efforts: ["medium", "high"],
+  });
+  const [entry] = (await readModelDocument()).models;
+  expect(entry.label).toBe("During probe");
+  expect(entry.contextWindowTokens).toBe(32000);
+  expect(entry.reasoningCapabilities?.efforts).toEqual(["medium", "high"]);
+  expect(calls).toHaveLength(8);
 });
