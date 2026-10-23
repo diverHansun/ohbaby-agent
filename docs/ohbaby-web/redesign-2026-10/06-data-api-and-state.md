@@ -43,21 +43,21 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 | `DELETE /v1/settings/models/providers/:providerId` | provider 组菜单 | provider 名做 URL 编码 |
 | `POST /v1/settings/models/active` | 行菜单 Set as default、ModelMenu | `{ id }`；返回完整列表 |
 | `GET /v1/settings/search`、`PUT /v1/settings/search` | SearchSection | PUT 只提交改过的字段 |
-| `GET /v1/settings/mcp/servers` | McpSection、McpEditor | 全局配置；env 和 header 只有名字 |
-| `PUT /v1/settings/mcp/servers/:name`、`DELETE …` | McpEditor、行开关 | 开关只提交 `{ enabled }`；PUT 遇到同名会新建或合并，不会返回 404，所以新增前由前端查重；响应里的 `overriddenIn` 前端不使用（D13） |
+| `GET /v1/settings/mcp/servers` | McpSection、McpDetails | 只读全局配置；env 和 header 只有名字，URL 使用服务端脱敏结果；进入 MCP 或 Refresh 时读取 |
 | `GET /v1/settings/about` | AboutSection | 进入时读取一次 |
 
 实例层（带目录头，目录见 §3.7）：
 
 | 接口 | 谁用 | 怎么用 |
 |---|---|---|
-| `GET /v1/settings/mcp/status` | McpSection 的状态列、McpEditor 的只读区 | 进入 MCP 时读取；按名字和全局列表合并，不看 `origin`（全局服务器被项目同名覆盖时，显示的是实际连接的状态）；全局列表里没有的名字不显示 |
-| `POST /v1/settings/mcp/reconnect` | Reconnect 按钮 | 返回最新状态；409 `INSTANCE_BUSY` 见 §4 |
+| `GET /v1/settings/mcp/status` | McpSection 的状态列、McpDetails | 进入 MCP 或 Refresh 时读取；按名字和全局列表合并，不看 `origin`（全局服务器被项目同名覆盖时，显示的是实际连接的状态）；全局列表里没有的名字不显示 |
 | `GET /v1/settings/skills` | SkillsSection | 只显示 `scope === "user"` 的条目（D13）。已知限制：全局 Skill 被项目里同名 Skill 覆盖时，列表里看不到它 |
 
 不使用：`POST /v1/settings/models/probe`（推理能力由后端在设为默认时自动探测，设置页不显示，D14）、`GET /v1/settings/agents`（没有 Agents 分区，D12）。
 
-**后端前置（D19）**：目前校验失败只返回 `Invalid settings`，没有错误码和出错字段；`MCP_SERVER_NOT_FOUND` 等错误也不带 `code`。第二批开工前，后端需要让设置接口的校验失败返回 `{ code: "VALIDATION_FAILED", fields: [{ path, message }] }`（不含字段值），并给全部设置错误带上 `code`；MCP 服务器名不合法时返回 400 而不是 500。这是对 improve-2 接口的小补充，需要在后端文档里登记。
+MCP 只读（D25）：Web 不调用 MCP 配置 PUT / DELETE 或 `POST /v1/settings/mcp/reconnect`。这些现有服务端接口保留，不为本次改版下线；前端不实现配置补丁、清空字段或重连流程。
+
+**后端前置（D19）**：目前校验失败只返回 `Invalid settings`，没有错误码和出错字段。第二批需要让 Models / Web search 写接口的校验失败返回 `{ code: "VALIDATION_FAILED", fields: [{ path, message }] }`（不含字段值），并给本期 Web 使用的设置读写接口统一错误码。MCP 写入、名称校验和重连接口的改进不再是前置条件。这是对 improve-2 接口的小补充，需要在后端文档里登记。
 
 ## 2. ViewModel
 
@@ -145,17 +145,15 @@ interface McpServerRow {
 规则：
 
 - 分组按 provider 第一次出现的位置排序，组内保持服务端顺序；不按名字重新排序。
-- 表单提交只带改过的字段，模型、搜索、MCP 都一样。`SecretChange` 的映射：`keep` 不传 `apiKey`；`{ replace }` 传新值；`clear` 传 `apiKey: ""`（后端里清除 key 与无 key 模式相同，没有单独选项）。
+- 模型和搜索表单只提交改过的字段。`SecretChange` 的映射：`keep` 不传 `apiKey`；`{ replace }` 传新值；`clear` 传 `apiKey: ""`（后端里清除 key 与无 key 模式相同，没有单独选项）。MCP 没有表单。
 - 新增模型时 Label 为空就不传（传空字符串会保存成空备注）；编辑时把已有备注清空，PATCH 传 `label: null`。
-- 已支持的清空：备注传 `label: null`，key 传 `apiKey: ""`，搜索 Base URL 传 `baseUrl: null`；MCP 的 Args、Include / Exclude tools 显式清空时传 `[]`（不能省略）。Key variable 的 `null` 会解除凭据引用，不能把普通空输入自动解释为“生成一个新变量名”；清除凭据统一走 SecretField。
-- Context window、Max output、Prompt cache、MCP 的 Start in 没有清除协议。本次暂采用前端校验：已有值被清空时在字段下说明并阻止保存，提供恢复原值；新增时可选字段留空则省略。不能静默忽略用户的清空操作后报告保存成功。范围选择见 README。
-- MCP 的 URL 读回来是脱敏的，没有修改就绝不提交，否则会把 `[REDACTED]` 写进配置。
+- 已支持的清空：备注传 `label: null`，key 传 `apiKey: ""`，搜索 Base URL 传 `baseUrl: null`。Key variable 的 `null` 会解除凭据引用，不能把普通空输入自动解释为“生成一个新变量名”；清除凭据统一走 SecretField。
+- 模型的 Context window、Max output、Prompt cache 没有清除协议。本次暂采用前端校验：已有值被清空时在字段下说明并阻止保存，提供恢复原值；新增时可选字段留空则省略。不能静默忽略用户的清空操作后报告保存成功。这是模型表单的处理建议，不涉及 MCP。
+- MCP 的 URL、命令、参数和其他配置都只用于展示；Environment / Headers 只列名字，不回显值，不构造任何配置写请求。
 - 数字字段为空就不传；不在前端补默认值，以服务端返回为准。
 - MCP 状态由全局列表和实例状态按名字合并：配置里 `enabled === false` → `off`；配置启用但状态是 `disabled` 或 `disconnected` → `not-connected`；状态里没有这个名字或状态读取失败 → `unknown`，显示 `—`。
-- Environment / Headers 的修改收集成 `{ set, unset }`，没有改动就不传。
-- MCP 的 Args 用多行输入，每行一个参数，不做 shell 拆分；Include / Exclude tools 用逗号分隔。
+- MCP 的 Args 每行显示一个参数，Include / Exclude tools 显示为只读名称列表。
 - 单位和范围跟后端一致：MCP 的 Timeout 是毫秒（默认 10000）；搜索的 Timeout 是秒（1–600，默认 60），Max results 是 1–20。标签里写明单位。
-- 切换 MCP 的 Transport 时，另一侧的字段（stdio 的 Command、Args、Start in，或其余的 URL、Headers）会被服务端清掉；表单切换时直接隐藏另一侧字段。
 
 ## 3. 服务端状态策略
 
@@ -184,7 +182,7 @@ interface McpServerRow {
 - 搜索：每次新请求都中止上一次；只认最后一次查询的结果。
 - 切换会话：沿用现有的 client generation 规则，旧 client 的响应和事件不会写进新会话。
 - 列表刷新：同一时刻只有一个在飞的刷新请求；新的触发会合并到下一次。
-- 列表归档和 MCP 启用开关是两个明确的先改后确认例外；均需防重复和失败回滚。改归属、模型删除等操作等服务端确认再更新。
+- 列表归档是明确的先改后确认例外，需防重复和失败回滚。改归属、模型删除等操作等服务端确认再更新；MCP 只读。
 
 ### 3.4 会话行的运行状态
 
@@ -215,13 +213,14 @@ interface McpServerRow {
 ### 3.7 设置数据（第二批）
 
 - **读取**：进入某个分区时读取该分区的数据，不预加载其他分区。模型列表在 store 里缓存，ModelMenu 打开时如果缓存超过 30 秒就重新读取。
-- **写入**：等服务端返回后再更新，不做乐观更新；写接口返回的结果直接替换缓存，不再额外读取。唯一的例外是 MCP 行开关：点击后先切换，失败时恢复。
+- **写入**：模型和搜索设置等服务端返回后再更新，不做乐观更新；写接口返回的结果直接替换缓存。MCP 没有写入流程。
 - **别处的改动**：当前实例的 SSE 收到 `settings.changed` 时，按 `domains` 让对应缓存失效；当前在看的分区立即重新读取。编辑子页有未保存的输入时只刷新只读区，不覆盖输入。`model.invalidated` 同样让模型缓存失效。
 - **实例层用哪个目录**：打开设置前所在会话的请求目录（有待生效目录时用它）；在草稿里用所选项目，没选用 `defaultWorkspace.directory`。目录只用于请求，页面上不显示。
 - **设置分区记忆**：上次停留的分区存在 localStorage；编辑子页不记忆，重新打开时回到列表。
 - **从草稿跳来再回去**：草稿点发送发现没有模型时，跳到设置 › Models，并在内存里记一个“返回草稿”标记（不写进 hash）。D20 自动设为默认成功后，如果标记还在，就回到草稿；切到其他分区、点 Back to app 或刷新页面都会清掉标记。
 - **草稿态收不到 `settings.changed`**：草稿态没有连接实例，也没有 SSE。所以除了事件，每次进入分区、窗口重新激活时也重新读取当前分区。
 - **事件接线**：检查并补齐 BrowserDaemonClient 到 runtime 的 `settings.changed` 转发；模型失效仍要更新实例模型状态。缓存按 domain 分开，MCP 状态和 Skills 再按设置目录分 key；迟到的读取不能覆盖写接口的新结果或另一个目录的数据。
+- **MCP 文件变更**：ohbaby 直接改配置文件后，前端不能只等待 `settings.changed`；进入分区、窗口重新激活、Refresh 都重读配置和状态。Refresh / Retry 只调用两个 GET，不触发重连。配置与实际状态分别缓存，配置读取成功不代表运行时已应用；配置删除后清除对应展开详情。
 
 ## 4. 错误到界面的映射
 
@@ -231,9 +230,8 @@ interface McpServerRow {
 | 执行目录不存在或不可读 | 实例层，打开会话时 | 消息区原因 + `Move to project…`（04 §2.2） |
 | 模型未配置 | 第一批：`/v1/model` 返回空；第二批：`GET /v1/settings/models` 的 `active` 为 `null` | 点发送时打开配置入口，不提前提示（04 §2.1） |
 | `VALIDATION_FAILED`（需后端补，§1.3） | 设置写接口 | 按 `fields[].path` 写在对应输入框下；找不到对应字段时写在 Save 旁 |
-| `MODEL_NOT_FOUND`、`MCP_SERVER_NOT_FOUND` | 模型写接口；MCP 只有 DELETE 会返回 | 条目已被别处删除：回到列表并刷新，不另外提示。编辑一个已被别处删除的 MCP 服务器再保存，会重新创建它，这是可以接受的 |
+| `MODEL_NOT_FOUND` | 模型写接口 | 条目已被别处删除：回到列表并刷新，不另外提示 |
 | `MODEL_CONFIG_INCOMPLETE` | 设为默认 | 打开该条目的编辑子页（04 §2.6） |
-| `INSTANCE_BUSY` | MCP Reconnect | 按钮旁 `Can't reconnect while a chat is running.` |
 | 改归属失败（目标项目无效等） | 全局层 | 行留在原处 + 右上角错误通知（04 §2.5） |
 | `INVALID_QUERY` | 搜索、列表 | 按未知错误处理（前端不会构造非法参数，出现就是 bug） |
 | 401 token 失效 | 任意 | 沿用现有处理 |
@@ -257,7 +255,7 @@ interface McpServerRow {
 | `no-model` | 模型未配置 | 04 §2.1 | 按需 |
 | `settings` | 3 个 provider、6 个模型（其中一个 Needs setup、一个是默认）；3 台 MCP 服务器（已连接、失败、停用）；若干全局 Skills；搜索已配置 key | UC-SETTINGS-02 至 05 | 第二批先做 |
 | `settings-empty` | 没有模型、没有 MCP 服务器、搜索未配置 | 04 §2.6 空态 | 第二批先做 |
-| `settings-errors` | 保存返回 `VALIDATION_FAILED`、Reconnect 返回 `INSTANCE_BUSY`、MCP 状态读取失败 | 04 §2.6、§4 | 第二批按需 |
+| `settings-errors` | 模型/搜索保存返回 `VALIDATION_FAILED`、MCP 配置或状态读取失败 | 04 §2.6、§4 | 第二批按需 |
 | `many` | 600 条会话，跨 4 个项目，多页 | 分页、Show more | 按需 |
 | `missing-dir` | 当前会话的执行目录不存在 | 04 §2.2 | 按需 |
 | `search` | 标题命中、正文命中、无结果三种关键词 | UC-SEARCH-01 | 按需 |

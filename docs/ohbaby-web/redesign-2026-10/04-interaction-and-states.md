@@ -17,7 +17,6 @@
 | 项目选择条（草稿） | default / hover / open | 无边框，hover 才有底色 | 换项目不清空输入框文字 |
 | 审批浮层 | expanded / collapsed / responding / multiple / syncing / sync-error | collapsed：消息区顶部一条；responding：所有选项按钮转圈且不可点；multiple：标题栏显示 `1 / N` 和上一条、下一条；syncing、sync-error：沿用现有提示和 Retry | 浮层出现时焦点移到第一个选项按钮；按钮由后端返回的选项决定，不写死数量；Esc 不作用于审批（避免和输入框的“两次 Esc 停止”冲突），折叠用标题栏的 `[-]` |
 | 通知 | entering / visible / leaving | 右上角叠放，左侧类型色点 | 只用于失败和需要用户处理的后台事件（D16）；错误类保留到用户关闭或问题消失。后端发来的说明性通知不显示，例如 key 为 `runtime:model-switch` 的 `Waiting to apply settings`。设置页里的通知出现在主区右上角，位置与对话区相同 |
-| 设置行开关（MCP 启用） | on / off / saving / error | saving：开关不可点；error：恢复原状态，行下写原因 | 点击即保存，不需要 Save |
 | 密钥字段（API key） | configured / not-set / editing / cleared | configured：显示 `Configured` + `Replace`、`Clear`；not-set：显示 `Not set` + `Add key`；editing：密码输入框 + `Cancel`；cleared：显示 `Not set`，保存后生效 | 不回显原文；保存成功后输入框清空。没有 key 就是无 key 模式，不另设选项 |
 | Save 按钮（设置） | disabled / ready / saving | 没有改动时 disabled；saving：转圈 | 成功后回到 disabled，不显示 `Saved` |
 
@@ -131,15 +130,15 @@
 
 | 状态 | 页面表现 | 用户操作 |
 |---|---|---|
-| 没有服务器 | 一行 `No MCP servers.`；`Add server` 在顶栏右侧 | 新增 |
-| 状态读取中 | 列表先按全局配置显示，状态位置空着；超过 300ms 显示小转圈 | 等待，可编辑 |
-| 正常 | 每行：名称、状态（`● N tools` / `● Failed` / `○ Off` / `○ Not connected` / `—`）、启用开关。配置里停用的一律显示 `Off`；配置启用但当前连接还没按新配置生效、或没有状态数据时显示 `Not connected` 或 `—`，不提示原因 | 启停、编辑 |
-| 状态读取失败 | 列表照常显示配置，状态位置写 `—`，顶栏 Reconnect 旁一行原因 + `Retry` | 重试 |
-| 保存后、生效前 | 状态仍是旧连接的结果，不提示；需要立即验证时点 Reconnect | Reconnect |
-| Reconnect 中 | 按钮转圈，列表不可编辑 | 等待 |
-| Reconnect 被拒（`INSTANCE_BUSY`） | 按钮旁一行 `Can't reconnect while a chat is running.` | 稍后重试 |
-| 编辑子页 | 上方只读：Status、失败原因（服务端已脱敏）、Tools 列表；下方表单；Environment / Headers 每个名字一行，显示 `Set`，可 Replace、Remove | 修改、保存、删除 |
-| 新增时名称重复 | Name 下写 `A server with this name already exists.`，Save 不可点（前端按全局列表检查；后端的 PUT 遇到同名会直接合并） | 改名 |
+| 没有服务器 | 一行 `No MCP servers.`；顶栏保留 Refresh | 刷新 |
+| 状态读取中 | 列表先按全局配置显示，状态位置空着；超过 300ms 显示小转圈 | 等待，可展开配置 |
+| 正常 | 每行：名称、状态文字（`N tools` / `Failed` / `Off` / `Not connected` / `—`）。配置里停用的一律显示 Off；配置启用但状态为 disabled/disconnected 时显示 Not connected，无状态数据时显示 `—` | 展开、收起 |
+| 状态读取失败 | 列表照常显示配置，状态位置写 `—`，Refresh 旁一行原因 + Retry | 重试 |
+| agent 修改配置后 | 重新进入、窗口激活或 Refresh 时读取最新配置和实际状态；连接仍可能沿用旧配置，不伪装成已生效，不额外提示 | 查看、刷新 |
+| Refresh 中 | 保留已有配置，按钮转圈且不可重复点击；只发读取请求 | 等待、展开详情 |
+| 展开详情 | 配置、实际状态、已脱敏失败原因和 Tools 列表均为只读文本；Environment / Headers 只列名字，不显示值 | 收起 |
+
+MCP 不提供添加、编辑、删除、启停、重连或手动调用工具的操作。Refresh / Retry 只读取数据，修改配置继续交给 ohbaby（D25）。
 
 **Web search**
 

@@ -270,7 +270,7 @@ pi-web 没有工具审批的界面，这里借它“询问用户”对话框的�
 
 ### 4.7 设置页（第二批）
 
-整体结构：打开设置时侧栏内容换成设置导航，主区显示分区内容；分区内是“列表 → 编辑子页”，借鉴 pi-web 设置页的列表加详情做法，但不做三栏。
+整体结构：打开设置时侧栏内容换成设置导航，主区显示分区内容。Models 是“列表 → 编辑子页”；MCP 是列表加原地展开的只读详情（D25）。借鉴 pi-web 的行式布局，不做三栏。
 
 ```
 +-----------------------------+--------------------------------------------------+
@@ -306,31 +306,31 @@ pi-web 没有工具审批的界面，这里借它“询问用户”对话框的�
 +--------------------------------------------------+
 ```
 
-MCP 列表与编辑子页：
+MCP 列表与只读详情：
 
 ```
 +--------------------------------------------------+
-| [=] | MCP                   Reconnect [Add server]|
+| [=] | MCP                              Refresh  |
 +--------------------------------------------------+
-|   github          ● 8 tools                  [on]|  <- 状态点 + 文字；行尾是启用开关
+| > github                              8 tools   |  <- 名称 + 状态文字；点一行展开
 |   ---------------------------------------------- |
-|   filesystem      ● Failed                   [on]|  <- 失败：--danger-ink 文字
+| > filesystem                          Failed    |  <- 失败：--danger-ink 文字
 |   ---------------------------------------------- |
-|   local-tool      ○ Off                     [off]|
+| > local-tool                          Off       |
 +--------------------------------------------------+
 
-编辑子页：上半部分只读（Status、失败原因、Tools 列表），下半部分是表单：
-Name（只在新增时可填，不能与已有服务器重名）、Transport（stdio / Streamable HTTP / HTTP / SSE，
-对应 stdio、http_streamable、http、sse；stdio 填 Command + Args，其余填 URL）、Environment / Headers
-（只列名字，每个名字可 Replace、Remove，另有 Add variable）、> More options（Start in、
-Timeout (ms)、Trust、Include tools、Exclude tools）、Delete 和 Save。
+原地展开的详情按行显示：Transport、Command + Args 或已脱敏 URL、Environment / Headers 名称、
+Start in、Timeout (ms)、Trust、Include / Exclude tools，以及实际连接的 Status、失败原因和 Tools。
+没有值的可选项不显示。配置使用普通文本，不使用输入框或开关；详情不用额外卡片包裹。
 ```
+
+MCP 只有展开/收起、Refresh 和读取失败后的 Retry；Refresh 只重新读取数据，不触发重连。不显示添加、编辑、删除、启停或 Save 按钮，也不常驻配置教程（D16、D25）。
 
 Web search 是一页表单（API key、> More options：Key variable、Base URL、Search depth、Max results、Topic、Timeout、Save）。Skills 是按来源分组的只读列表，点一行原地展开描述和路径。About 是只读的行，每行右侧一个复制图标。
 
 - 选中的导航项和会话行一样：左侧竖条加选中底色。
 - 内容区最大宽度初值 680px。列表和表单都是“标签 | 值或控件”的行，行之间用细线分隔，不用卡片包。
-- 主按钮（Save、Add model、Add server）是唯一的实心按钮，用 `--accent`；其余都是无边框文字按钮。Save 在没有改动时不可点。
+- 主按钮（Save、Add model）是唯一的实心按钮，用 `--accent`；其余都是无边框文字按钮。Save 在没有改动时不可点。
 - 字段的出错原因写在该输入框下方，`--danger-ink`，13px。
 - 不显示推理能力、不显示 key 原文，也不显示 provider 名以外的来源标签。
 

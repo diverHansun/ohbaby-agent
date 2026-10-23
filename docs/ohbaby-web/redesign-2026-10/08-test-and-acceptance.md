@@ -91,13 +91,14 @@
 - [ ] 删除普通模型不确认；删除默认模型和删除 provider 弹确认框，确认后列表与服务端返回一致（默认已顺延或为空）。
 - [ ] 字段不合法时原因写在对应输入框下，输入保留（依赖 D19 后端前置）。
 
-### UC-SETTINGS-03 管理 MCP 服务器（第二批）
+### UC-SETTINGS-03 查看 MCP 配置与状态（第二批）
 
 - [ ] 只列全局配置的服务器；状态显示 `N tools` / `Failed` / `Off` / `Not connected`；项目和插件来源的服务器不出现。
-- [ ] 行尾开关直接保存，失败时恢复原状态并写原因。
-- [ ] 编辑子页显示状态、失败原因和工具列表；Environment / Headers 只显示名字，Replace、Remove、Add 提交为 `{ set, unset }`；没改 URL 时请求里没有 `url`。
-- [ ] 新增服务器时名字与已有服务器重复，Save 不可点并在 Name 下说明。
-- [ ] 保存后不提示；点 Reconnect 后状态更新；有对话运行时 Reconnect 写 `Can't reconnect while a chat is running.`。
+- [ ] 点一行原地展开只读配置、连接状态、失败原因和工具列表；Environment / Headers 只显示名字，URL 使用脱敏结果。
+- [ ] 没有添加、编辑、删除、启停、保存或重连入口，没有 MCP 编辑路由；工具使用不要求用户触发 slash command。
+- [ ] Refresh / Retry 只重新读取配置和状态，网络中没有 MCP PUT / DELETE / reconnect POST。
+- [ ] ohbaby 修改配置文件后，即使没有 `settings.changed`，进入分区、重新激活窗口或 Refresh 仍能读取最新配置；实际连接状态单独显示，不把配置变更视为已生效。
+- [ ] 状态读取失败时保留配置，显示 `—` 和 Retry；空列表只显示 `No MCP servers.`。
 
 ### UC-SETTINGS-04 配置联网搜索（第二批）
 
@@ -150,7 +151,8 @@
 | 超过 100 条后，空项目组和未加载置顶仍能继续翻页；外部归档/隐藏/改归属后重新激活，旧页不留下失效行 | 06 §3.1–§3.2 | runtime integration |
 | 其他目录会话的归档/导出不切当前 SSE；当前会话归档失败保留主区 | improve-3 | integration |
 | 设置编辑页后退、直达链接、刷新、未知 hash；设置打开期间 SSE 不覆盖 hash | 01 §1.2 | integration + 浏览器 |
-| 旧 GET 不覆盖设置写入结果，MCP 状态按目录隔离；不能清空的字段阻止保存，可清空数组发送 [] | 06 §2.2、§3.7 | unit + integration |
+| 旧 GET 不覆盖模型/搜索写入结果，MCP 状态按目录隔离；模型不能清空的字段阻止保存 | 06 §2.2、§3.7 | unit + integration |
+| MCP 全程只读，无编辑表单、写入或重连请求；agent 文件修改后，无事件时也能通过主动读取更新 | D25、06 §3.7 | integration + 走查 |
 | 界面结构符合线框，品牌三色只在字标 | 03 §1、§4 | 走查 |
 
 ## 4. 视觉验收清单
@@ -171,7 +173,7 @@
 | 整体 | 全部 | 1440 | 与 Claude、Codex、Cursor 参考截图并排对比：中性偏暖白、侧栏深一档、玻璃只在浮起元素上、留白和密度接近；界面上除字标外没有金粉蓝 |
 | 设置页 · Models | `settings` | 1440、390 | 导航替换侧栏；按 provider 分组的行；Default、Needs setup 的层次；没有卡片 |
 | 设置页 · 模型编辑 | `settings` | 1440 | 字段顺序与线框一致；More options 折叠；只有 Save 是实心按钮；Delete 是危险色文字 |
-| 设置页 · MCP | `settings` | 1440 | 状态点加文字、行尾开关；编辑子页上方只读区和下方表单的分隔 |
-| 设置页 · 空态与错误 | `settings-empty`、`settings-errors` | 1440 | 空态各一行；字段错误在输入框下；Reconnect 被拒的位置 |
+| 设置页 · MCP | `settings` | 1440 | 名称与状态文字、原地展开的只读配置和工具列表；无输入框、开关或写操作按钮；Refresh 是文字按钮 |
+| 设置页 · 空态与错误 | `settings-empty`、`settings-errors` | 1440 | 空态各一行；模型/搜索字段错误在输入框下；MCP 状态读取失败时配置仍可查看 |
 
 检查点只判断“对不对”，不比像素。结论写进 09 验收文档。

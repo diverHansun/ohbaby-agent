@@ -23,7 +23,7 @@
 
 3. **token 与全局样式**：新增 `ui/styles/tokens.css`（03 §3）。`styles.css` 的引入顺序改为 tokens → base → shared → 各功能；各功能的 CSS 放在功能目录里（`shell/shell.css`、`sidebar/sidebar.css` 等），`styles/empty-state.css`、`conversation-layout.css` 迁入对应功能，删除 `styles/overrides.css`。字体换成系统字体加 JetBrains Mono；去掉三色波点、回弹动画，斜杠面板的金粉蓝分类色改为中性色（D5）。
 
-4. **基础组件**（`ui/shared/`）：`Menu`（参考 pi-web `components/SidebarMenu.tsx` 的定位和键盘逻辑，自己写成小文件，带单测）、`IconButton`、`Spinner`、`Notice` / `NoticeStack`、`Wordmark`。`Switch` 随 improve-4 的第一个真实使用者加入，避免先造空闲组件。
+4. **基础组件**（`ui/shared/`）：`Menu`（参考 pi-web `components/SidebarMenu.tsx` 的定位和键盘逻辑，自己写成小文件，带单测）、`IconButton`、`Spinner`、`Notice` / `NoticeStack`、`Wordmark`。MCP 改为只读后没有新增开关需求，本轮不预建 `Switch`。
 
 5. **外壳与侧栏**：
    - `AppShell`：两栏、收起、窄屏抽屉；断开提示由 `AppController` 提供。

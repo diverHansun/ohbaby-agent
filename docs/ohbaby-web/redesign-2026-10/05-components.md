@@ -36,12 +36,10 @@
 | `SettingsPage` | 功能区 | 设置导航 + 分区内容 + 子页路由（第二批） | `ui/settings/` | 新增 |
 | `SettingsNav` | 组合 | 设置导航（替换侧栏内容），含 Back to app | `ui/settings/` | 新增 |
 | `SettingsRow` | 基础 | “标签 \| 值或控件”一行，细线分隔；可点击时整行是按钮 | `ui/shared/` | 新增 |
-| `Switch` | 基础 | 开关 | `ui/shared/` | 新增 |
 | `ConfirmDialog` | 基础 | 确认框（标题、说明、确认和取消） | `ui/shared/` | 新增 |
 | `SecretField` | 组合 | API key 字段：Configured / Not set、Replace、Clear、Add key | `ui/settings/` | 新增 |
 | `ModelsSection` / `ModelEditor` | 功能区 / 组合 | 模型列表与编辑子页 | `ui/settings/` | 新增 |
-| `McpSection` / `McpEditor` | 功能区 / 组合 | MCP 列表与编辑子页 | `ui/settings/` | 新增 |
-| `SecretNameList` | 组合 | MCP 的 Environment / Headers：只列名字，Replace、Remove、Add | `ui/settings/` | 新增 |
+| `McpSection` / `McpDetails` | 功能区 / 组合 | MCP 配置与状态列表、原地展开的只读详情 | `ui/settings/mcp/` | 新增 |
 | `SearchSection`、`SkillsSection`、`AboutSection` | 功能区 | 单页表单与只读列表 | `ui/settings/` | 新增 |
 | `ModelMenu` | 组合 | 输入框控制行的模型菜单（第二批） | `ui/composer/` | 新增 |
 | `ConnectOverlay` | — | — | `ui/commands/` | 第二批删除（D18） |
@@ -137,11 +135,12 @@
 - **映射**（06 §2.2）：`keep` 不传 `apiKey`；`replace` 传新值；`clear` 传空字符串。后端里清除 key 和无 key 模式是同一回事，所以没有单独的 No API key 选项。
 - **约束**：输入框是 `type="password"`、`autocomplete="off"`；保存成功后清空。
 
-### McpEditor
+### McpDetails
 
-- **Purpose**：查看一台全局 MCP 服务器的状态并编辑配置。
-- **Anatomy**：上方只读区（Status、失败原因、Tools）；下方表单（Name 仅新增时、Transport、Command + Args 或 URL、Environment / Headers、More options）；底部 Delete 和 Save。
-- **约束**：表单字段与 `UiSettingsMcpServerUpdate` 一一对应，只提交改过的字段（URL 读回来是脱敏的，没改就绝不提交）；Environment / Headers 只提交补丁（`set`、`unset`），不回显值；改名不支持，要改名就删除后新增；新增时名称不能和全局列表里已有的重复。
+- **Purpose**：查看一台全局 MCP 服务器的配置、实际连接状态和工具列表。
+- **Anatomy**：在对应行下展开，配置按标签和值排成行，状态、失败原因和 Tools 独立展示；可选字段没有值时不显示。
+- **API**：接收只读配置 ViewModel 与当前实例的状态、工具列表，不接收保存、删除、启停或重连回调。
+- **约束**：Environment / Headers 只显示名字，URL 使用服务端脱敏结果；没有表单或开关。刷新由 `McpSection` 触发，只重读配置与状态。配置修改继续交给 ohbaby（D25）。
 
 ## 4. 组件与模式
 
@@ -150,4 +149,5 @@
 - **草稿首发**：`DraftHero` + `ProjectPicker` + `Composer`，由 `SessionScreen` 组合。
 - **侧栏搜索切换**：`Sidebar` 根据搜索框是否有内容，在会话树和 `SidebarSearch` 之间切换。
 - **撤销提示**：不做。服务端没有取消归档的接口；归档后行直接消失，不另外提示（D16）。
-- **列表加编辑子页**：`ModelsSection` + `ModelEditor`、`McpSection` + `McpEditor`，由 `SettingsPage` 按 hash 切换；编辑子页返回所属列表，Back to app 返回进入设置前的对话，history 规则见 01 §1.2。
+- **列表加编辑子页**：`ModelsSection` + `ModelEditor` 由 `SettingsPage` 按 hash 切换；编辑子页返回所属列表，Back to app 返回进入设置前的对话，history 规则见 01 §1.2。
+- **只读列表与详情**：`McpSection` + `McpDetails`，详情原地展开，展开状态留在组件内，不新增编辑路由。

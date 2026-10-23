@@ -1,18 +1,17 @@
 # improve-4 · 2. 方案与改动面：设置页
 
-> 依据：[01 §2.9、UC-SETTINGS-01 至 05](../01-use-cases-and-user-flows.md)、[03 §4.7](../03-ui-layout-and-style.md)、[04 §2.6](../04-interaction-and-states.md)、[05](../05-components.md)、[06 §1.3、§2.2、§3.7](../06-data-api-and-state.md)，决策 D12–D20。现状见 [01](01-current-state.md)，验收见 [04](04-test-and-acceptance.md)。
+> 依据：[01 §2.9、UC-SETTINGS-01 至 05](../01-use-cases-and-user-flows.md)、[03 §4.7](../03-ui-layout-and-style.md)、[04 §2.6](../04-interaction-and-states.md)、[05](../05-components.md)、[06 §1.3、§2.2、§3.7](../06-data-api-and-state.md)，决策 D12–D20、D25。现状见 [01](01-current-state.md)，验收见 [04](04-test-and-acceptance.md)。
 
 ## 目标
 
-整页设置：Models、MCP、Skills、Web search、About 五个分区；输入框的模型按钮直接选择全局默认模型；Web 端删掉 `/connect` 浮层。
+整页设置：Models、MCP、Skills、Web search、About 五个分区。MCP 只展示配置和状态，配置修改继续交给 ohbaby；输入框的模型按钮直接选择全局默认模型；Web 端删掉 `/connect` 浮层。
 
 ## 范围
 
 **Stage A · 后端前置（D19）**：
 
-- 设置写接口的校验失败返回 `{ ok: false, error: { code: "VALIDATION_FAILED", message, fields: [{ path, message }] } }`，不含字段值。
-- 所有设置错误都带 `code`（`MODEL_NOT_FOUND`、`MODEL_CONFIG_INCOMPLETE`、`MCP_SERVER_NOT_FOUND`、`INSTANCE_BUSY` 等）。
-- MCP 服务器名加格式校验，不合法返回 400。
+- Models / Web search 写接口的校验失败返回 `{ ok: false, error: { code: "VALIDATION_FAILED", message, fields: [{ path, message }] } }`，不含字段值。
+- 本期 Web 使用的设置读写接口错误都带 `code`（如 `MODEL_NOT_FOUND`、`MODEL_CONFIG_INCOMPLETE`）。不扩展 MCP 写入、名称校验或重连错误协议。
 - SDK `contract/settings.ts` 补错误类型；在设置议题的 improve-2 文档里登记这次补充。
 - `fields[].path` 采用字段路径数组（如 `["defaults", "timeout"]`），message 使用安全的字段级说明，不序列化原始 Zod issue、请求值或包含凭据的 URL；鉴权、缺目录、非法 JSON、超大请求和服务不可用也有稳定 code。
 
@@ -21,7 +20,7 @@
 1. **设置客户端**：`api/daemon/settings-client.ts`，扩展 improve-2 的最小模型读取能力；全局请求不带目录头，实例请求带“设置目录”（06 §3.7）。只依赖 SDK 类型，共用传输增加 PUT 和结构化错误 fields。
 2. **页面骨架**：`ui/settings/SettingsPage.tsx` 按 hash 切换分区和编辑子页；进入设置只 push 一条历史，内部切换 replace，history 与返回规则见 01 §1.2；`SettingsNav` 替换侧栏内容。
 3. **Models**：`ModelsSection`（按 provider 分组、行菜单、provider 组菜单、删除确认 D17）、`ModelEditor`（常用字段加 More options，只提交改过的字段，`SecretField`）、D20 自动设为默认、从草稿跳来时回草稿。
-4. **MCP**：`McpSection`（全局列表合并实例状态、行尾开关、Reconnect）、`McpEditor`（只读区加表单、`SecretNameList`、新增查重、URL 未改不提交）。
+4. **MCP**：`McpSection`（全局配置列表合并实例状态）、`McpDetails`（原地展开只读配置、失败原因和工具列表）。只接两个 GET；Refresh 重新读取，不触发重连。没有表单、启停开关、添加或删除入口，配置修改继续交给 ohbaby（D25）。
 5. **Skills、Web search、About**：各一个小组件。
 6. **输入框模型菜单**：`ui/composer/ModelMenu.tsx`，读全局模型列表，选中调用 `POST /v1/settings/models/active`；`ReasoningControl` 在模型变化后刷新。
 7. **删除旧入口**（D18）：删除 `ConnectOverlay` 及 `StructuredCommandOverlay` 中的挂载；SDK `web-passthrough.ts` 不再向 Web 暴露 `connectModel`、`connectSearch` 两个 action（TUI 的命令路径保持不变）；`UiBackendClient.connectModel` 保留给 TUI。没配模型时点发送改为打开设置 › Models。
@@ -29,18 +28,18 @@
 
 保留 `GET /v1/model` 及现有 `model.invalidated` 对实例状态和 ReasoningControl 的刷新；只移除旧配置写入口。设置缓存按 domain 和实例目录划分，独立文件组织；请求 generation 防止旧 GET 覆盖新写结果。表单字段清空按 06 §2.2 执行，不能把用户改动静默丢弃。
 
-不做：Agents 分区、项目级配置、MCP OAuth、推理能力展示与手动探测、`/v1/model` 等旧接口下线（00 Non-goals）。
+不做：Agents 分区、项目级配置、MCP 配置写入/启停/重连/OAuth、推理能力展示与手动探测、`/v1/model` 等旧接口下线（00 Non-goals）。现有 MCP 写入与重连服务端接口保留。
 
 ## 改动面
 
 | 位置 | 新增 | 修改 | 删除 |
 |---|---|---|---|
-| `ohbaby-server/src/protocols/web/routes/global-settings.ts`、`routes/settings.ts` | — | 错误码与字段信息、MCP 名称校验 | — |
+| `ohbaby-server/src/protocols/web/routes/global-settings.ts`、`routes/settings.ts` | — | 本期设置读写接口的错误码；Models / Web search 校验字段信息 | — |
 | `ohbaby-sdk/src/contract/settings.ts` | 错误类型 | — | — |
 | `api/daemon/` | — | 扩展 `settings-client.ts`；`http.ts` 增加 PUT、fields，去掉旧配置写调用；client 转发设置失效事件 | — |
 | `store/` | 按 domain 组织的设置缓存与选择器 | 统一入口接线 | — |
-| `ui/settings/` | `SettingsPage`、`SettingsNav`、各分区与编辑子页、`SecretField`、`SecretNameList`，每个分区一个子目录或一组小文件 | — | — |
-| `ui/shared/` | `SettingsRow`、`ConfirmDialog`、`Switch` | — | — |
+| `ui/settings/` | `SettingsPage`、`SettingsNav`、各分区、模型编辑子页、`SecretField`；`mcp/` 内为只读列表与详情 | — | — |
+| `ui/shared/` | `SettingsRow`、`ConfirmDialog` | — | — |
 | `ohbaby-sdk/src/slash-command/web-passthrough.ts` | — | Web 端不再提供 connect 两个 action | — |
 | `ui/composer/` | `ModelMenu.tsx` | `ComposerControls`、`ReasoningControl` | — |
 | `ui/commands/` | — | `slashCommands.ts`、`StructuredCommandOverlay.tsx` | `ConnectOverlay.tsx` |
@@ -51,6 +50,6 @@
 
 | 风险 | 应对 |
 |---|---|
-| 把脱敏的 MCP 地址或空字段原样提交 | 表单只提交改过的字段，映射函数单测覆盖（06 §2.2） |
+| MCP 配置变化后页面仍展示旧数据，或把新配置误当成已生效 | 进入、激活窗口和 Refresh 时分别重读配置与实际状态；测试覆盖 agent 直接修改文件且没有 SSE 通知的情况；断言 MCP 无写入或重连请求 |
 | key 出现在页面、日志或控制台 | 统一用 `SecretField`；只允许替换请求体携带新 key，不回显、不持久化、不记录请求正文；检查响应和日志脱敏 |
 | 删掉 `/connect` 后无处配置模型 | 设置页与旧浮层的删除在同一批上线 |
