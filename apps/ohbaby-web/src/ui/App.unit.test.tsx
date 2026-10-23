@@ -417,7 +417,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_600);
   });
 
-  it("shows the idle typewriter only while the composer is empty and unfocused", async () => {
+  it("uses a fixed placeholder instead of an animated typewriter", () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
@@ -426,27 +426,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     if (!(textarea instanceof HTMLTextAreaElement)) {
       throw new Error("textarea not found");
     }
-
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-composer-typewriter")),
-    );
-    expect(textarea.placeholder).toBe("");
-
-    await act(async () => {
-      textarea.focus();
-      await Promise.resolve();
-    });
-    expect(app.container.querySelector(".ohb-composer-typewriter")).toBeNull();
-
-    await act(async () => {
-      textarea.blur();
-      await Promise.resolve();
-    });
-    expect(
-      app.container.querySelector(".ohb-composer-typewriter"),
-    ).not.toBeNull();
-
-    await setTextareaValue(app.container, "a");
+    expect(textarea.placeholder).toMatch(/^(Ask anything|Reply)\.\.\.$/u);
     expect(app.container.querySelector(".ohb-composer-typewriter")).toBeNull();
   });
 
@@ -471,9 +451,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     }
     expect(stopButton.querySelector("span")).toBeNull();
     expect(stopButton.textContent).not.toContain("Stop");
-    expect(
-      runningApp.container.querySelector(".ohb-status-pill > span"),
-    ).toBeNull();
     await act(async () => {
       stopButton.click();
       await Promise.resolve();
@@ -517,11 +494,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     const runningApp = mountApp(running.runtime);
     const runningTextarea = runningApp.container.querySelector("textarea");
     expect(runningTextarea?.getAttribute("placeholder")).toBe(
-      "run in progress",
+      "Steer now or queue a follow-up...",
     );
-    expect(
-      runningApp.container.querySelector(".ohb-composer-typewriter"),
-    ).toBeNull();
 
     const unavailable = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
@@ -533,9 +507,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(unavailableTextarea?.getAttribute("placeholder")).toBe(
       "Draft while reconnecting…",
     );
-    expect(
-      unavailableApp.container.querySelector(".ohb-composer-typewriter"),
-    ).toBeNull();
   });
 
   it("does not send or prevent default while an IME is composing", async () => {
@@ -991,6 +962,26 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toBe("restored draft");
   });
 
+  it("shows the Lychee mark and the in-flow composer when no session is selected", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector(".ohb-main-body-empty")).not.toBeNull();
+    expect(
+      app.container.querySelector(".ohb-draft-hero .ohb-lychee-mark"),
+    ).not.toBeNull();
+    expect(
+      app.container.querySelector(".ohb-draft-hero .ohb-wordmark"),
+    ).toBeNull();
+    expect(app.container.querySelector(".ohb-composer-hero")).not.toBeNull();
+  });
+
   it("selects the receipt session after submitting from an empty project", async () => {
     const fake = createFakeRuntime({
       snapshot: {
@@ -1034,8 +1025,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     await setTextareaValue(app.container, "visible on the next frame");
     await pressTextareaKey(app.container, "Enter");
 
-    expect(app.container.querySelector(".ohb-app")?.className).toContain(
-      "ohb-app-main",
+    expect(app.container.querySelector(".ohb-main-body")?.className).toContain(
+      "ohb-main-body-chat",
     );
     expect(app.container.querySelector("textarea")?.textContent).toBe("");
     expect(textareaValue(app.container)).toBe("");
@@ -2830,7 +2821,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("keeps an empty context ring separated in a conversation header", () => {
+  it("shows an empty context ring in the main header", () => {
     const snapshot = snapshotWithStatus({ kind: "idle" });
     const fake = createFakeRuntime({
       snapshot: {
@@ -2849,14 +2840,11 @@ describe("OhbabyWebApp slash command interactions", () => {
       },
     });
     const app = mountApp(fake.runtime);
-    const statusbar = app.container.querySelector(".ohb-statusbar");
+    const header = app.container.querySelector(".ohb-main-header");
 
     expect(
-      statusbar?.querySelector(
-        'button[aria-label="Context usage unavailable"]',
-      ),
+      header?.querySelector('button[aria-label="Context usage unavailable"]'),
     ).not.toBeNull();
-    expect(statusbar?.querySelectorAll(".ohb-divider")).toHaveLength(2);
   });
 
   it("renders measured context usage in the conversation header", () => {
@@ -2891,7 +2879,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(
       app.container.querySelector(
-        '.ohb-statusbar button[aria-label^="25% context used"]',
+        '.ohb-main-header button[aria-label^="25% context used"]',
       ),
     ).not.toBeNull();
   });
@@ -2910,9 +2898,9 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(fake.setPermission).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(app.container.querySelector(".ohb-app")?.hasAttribute("inert")).toBe(
-      false,
-    );
+    expect(
+      app.container.querySelector(".ohb-shell")?.hasAttribute("inert"),
+    ).toBe(false);
     expect(document.activeElement).toBe(
       app.container.querySelector(".ohb-permission-toggle"),
     );
@@ -2937,9 +2925,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     const cancel = document.querySelector<HTMLButtonElement>(
       'button[title="Not now"]',
     );
-    expect(app.container.querySelector(".ohb-app")?.hasAttribute("inert")).toBe(
-      true,
-    );
+    expect(
+      app.container.querySelector(".ohb-shell")?.hasAttribute("inert"),
+    ).toBe(true);
 
     await act(async () => {
       confirm?.dispatchEvent(
@@ -3156,91 +3144,55 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container.querySelector(".ohb-sidebar-new .lucide-square-pen"),
     ).not.toBeNull();
     expect(
-      app.container.querySelector(".ohb-sidebar-new .lucide-plus"),
-    ).toBeNull();
-
-    expect(
-      app.container.querySelector(".ohb-sidebar")?.hasAttribute("inert"),
-    ).toBe(true);
-    await clickButton(app.container, "Expand sessions");
-    expect(
-      app.container.querySelector(".ohb-sidebar")?.hasAttribute("inert"),
+      app.container.querySelector(".ohb-shell-sidebar")?.hasAttribute("inert"),
     ).toBe(false);
+    await clickButton(app.container, "Collapse sidebar");
+    expect(
+      app.container.querySelector(".ohb-shell-sidebar")?.hasAttribute("inert"),
+    ).toBe(true);
+    await clickButton(app.container, "Open sidebar");
     expect(
       app.container.querySelector('button[aria-label="Select Session 2"]')
         ?.textContent,
     ).not.toContain("0 messages");
 
-    await clickButton(app.container, "New session");
+    await clickButton(app.container, "New chat");
     await clickButton(app.container, "Select Session 2");
 
     expect(fake.createSession).toHaveBeenCalledTimes(1);
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
   });
 
-  it("switches the selected workspace from the project rail", async () => {
+  it("switches the selected workspace from its sidebar project group", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
-    const project = app.container.querySelector(
-      'button[aria-label="Open repo-b"]',
-    );
-    if (!(project instanceof HTMLButtonElement)) {
-      throw new Error("project rail button not found");
-    }
 
-    await act(async () => {
-      project.click();
-      await Promise.resolve();
-    });
+    await clickButton(app.container, "/repo-b");
 
     expect(fake.switchWorkspace).toHaveBeenCalledWith("/repo-b");
   });
 
-  it("removes a project from the rail through its context menu", async () => {
+  it("hides a project through its group menu", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
-    const project = app.container.querySelector(
-      'button[aria-label="Open repo-b"]',
-    );
-    if (!(project instanceof HTMLButtonElement)) {
-      throw new Error("project rail button not found");
-    }
 
-    await act(async () => {
-      project.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          clientX: 20,
-          clientY: 30,
-        }),
-      );
-      await Promise.resolve();
-    });
-    const remove = Array.from(
-      app.container.querySelectorAll('[role="menuitem"]'),
-    ).find((element) => element.textContent === "Remove from project rail");
-    if (!(remove instanceof HTMLButtonElement)) {
-      throw new Error("remove project action not found");
-    }
-    await act(async () => {
-      remove.click();
-      await Promise.resolve();
-    });
+    await clickButton(app.container, "Project actions for repo-b");
+    await clickButton(document.body, "Hide project");
 
     expect(fake.hideWorkspace).toHaveBeenCalledWith("/repo-b");
   });
 
-  it("opens the web directory picker from the project rail", async () => {
+  it("opens the web directory picker from the sidebar", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Open project");
+    await clickButton(app.container, "Open folder…");
 
     await waitFor(
       () =>
@@ -3288,7 +3240,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     fake.openWorkspace.mockRejectedValueOnce(new Error("Scope unavailable"));
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Open project");
+    await clickButton(app.container, "Open folder…");
     await waitFor(
       () =>
         app.container
@@ -3413,20 +3365,23 @@ describe("OhbabyWebApp slash command interactions", () => {
       });
       fake.exportSession.mockRejectedValue(error);
       const app = mountApp(fake.runtime);
-      await clickButton(app.container, "Expand sessions");
       await clickButton(app.container, "Actions for Session 2");
-      await clickButton(document.body, "Export");
+      await clickButton(document.body, "Export…");
       await clickButton(document.body, "HTML");
-      expect(
-        app.container.querySelector(".ohb-error-banner")?.textContent,
-      ).toContain(expected);
+      await waitFor(() =>
+        Boolean(
+          app.container
+            .querySelector(".ohb-notice")
+            ?.textContent.includes(expected),
+        ),
+      );
       expect(fake.exportSession).toHaveBeenCalledWith("session_2", "html");
       expect(fake.selectSession).not.toHaveBeenCalled();
       expect(document.querySelector('[role="menu"]')).toBeNull();
     },
   );
 
-  it("archives sidebar sessions after confirmation without selecting the row", async () => {
+  it("archives sidebar sessions without confirmation or selecting the row", async () => {
     const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
     const fake = createFakeRuntime({
       snapshot: {
@@ -3444,45 +3399,14 @@ describe("OhbabyWebApp slash command interactions", () => {
         ],
       },
     });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const confirm = vi.spyOn(window, "confirm");
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Actions for Session 2");
     await clickButton(document.body, "Archive");
 
-    expect(confirm).toHaveBeenCalledWith("Archive this session?");
+    expect(confirm).not.toHaveBeenCalled();
     expect(fake.archiveSession).toHaveBeenCalledWith("session_2");
-    expect(fake.selectSession).not.toHaveBeenCalled();
-    confirm.mockRestore();
-  });
-
-  it("does not archive sidebar sessions when confirmation is cancelled", async () => {
-    const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
-    const fake = createFakeRuntime({
-      snapshot: {
-        ...snapshotWithStatus({ kind: "idle" }),
-        activeSessionId: "session_1",
-        sessions: [
-          first,
-          {
-            createdAt: timestamp,
-            id: "session_2",
-            messages: [],
-            title: "Session 2",
-            updatedAt: "2026-06-13T00:00:00.000Z",
-          },
-        ],
-      },
-    });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const app = mountApp(fake.runtime);
-
-    await clickButton(app.container, "Expand sessions");
-    await clickButton(app.container, "Actions for Session 2");
-    await clickButton(document.body, "Archive");
-
-    expect(fake.archiveSession).not.toHaveBeenCalled();
     expect(fake.selectSession).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
@@ -3498,7 +3422,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Select Session");
 
     expect(fake.selectSession).toHaveBeenCalledWith("session_1");
@@ -3544,7 +3467,6 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.textContent).not.toContain("loaded transcript");
 
-    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Select Session");
 
     await waitFor(() =>
@@ -4007,7 +3929,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     expect(
-      app.container.querySelector(".ohb-empty-status .ohb-goal-chip"),
+      app.container.querySelector(".ohb-main-header .ohb-goal-chip"),
     ).toBeNull();
     const strip = app.container.querySelector(".ohb-composer .ohb-goal-strip");
     expect(strip).not.toBeNull();
@@ -4045,10 +3967,12 @@ describe("OhbabyWebApp slash command interactions", () => {
       );
     });
     expect(
-      app.container.querySelector(".ohb-statusbar .ohb-goal-chip"),
+      app.container.querySelector(".ohb-main-header .ohb-goal-chip"),
     ).toBeNull();
     expect(
-      app.container.querySelector(".ohb-statusbar .ohb-context-usage-control"),
+      app.container.querySelector(
+        ".ohb-main-header .ohb-context-usage-control",
+      ),
     ).not.toBeNull();
     expect(
       app.container.querySelector(".ohb-composer .ohb-goal-strip")?.textContent,
@@ -6725,10 +6649,10 @@ it("temporarily hides the mounted composer and todo during root approval, retain
       ?.getAttribute("aria-expanded"),
   ).toBe("false");
   expect(document.activeElement).toBe(
-    app.container.querySelector(".ohb-permission-modal h2"),
+    app.container.querySelector(".ohb-approval-panel h2"),
   );
   const stop = app.container.querySelector<HTMLButtonElement>(
-    '.ohb-permission-modal [aria-label="Stop run"]',
+    '.ohb-approval-panel [aria-label="Stop run"]',
   );
   expect(stop).not.toBeNull();
   await act(async () => {
@@ -6762,7 +6686,7 @@ it("keeps the composer visible for an approval sync error without an actual requ
       requests: [],
     });
   });
-  expect(app.container.querySelector(".ohb-permission-modal")).toBeNull();
+  expect(app.container.querySelector(".ohb-approval-panel")).toBeNull();
   expect(
     app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
       .display,
@@ -6803,7 +6727,7 @@ it("reserves the measured approval height and updates it when the card resizes",
         0,
         0,
         700,
-        this.classList.contains("ohb-permission-modal") ? height : 0,
+        this.classList.contains("ohb-approval-panel") ? height : 0,
       );
     });
   const original = globalThis.ResizeObserver;
@@ -6834,8 +6758,7 @@ it("reserves the measured approval height and updates it when the card resizes",
         requests: [permissionRequest()],
       });
     });
-    const content =
-      app.container.querySelector<HTMLElement>(".ohb-app-content");
+    const content = app.container.querySelector<HTMLElement>(".ohb-main-body");
     expect(content?.style.getPropertyValue("--approval-space")).toBe("244px");
     act(() => {
       height = 340;
@@ -6908,7 +6831,7 @@ it("keeps the child shell read-only and returns focus to pending approval when i
     trigger?.click();
     await Promise.resolve();
   });
-  expect(app.container.querySelector(".ohb-permission-modal")).toBeNull();
+  expect(app.container.querySelector(".ohb-approval-panel")).toBeNull();
   expect(app.container.querySelector(".ohb-subagent-view")).not.toBeNull();
   expect(
     app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
@@ -6924,7 +6847,7 @@ it("keeps the child shell read-only and returns focus to pending approval when i
     await new Promise((resolve) => setTimeout(resolve, 30));
   });
   expect(document.activeElement).toBe(
-    app.container.querySelector(".ohb-permission-modal h2"),
+    app.container.querySelector(".ohb-approval-panel h2"),
   );
   expect(document.activeElement).not.toBe(trigger);
 });

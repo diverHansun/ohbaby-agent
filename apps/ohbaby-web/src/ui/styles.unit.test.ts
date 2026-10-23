@@ -1,93 +1,109 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const css = readStylesheet(new URL("./styles.css", import.meta.url));
+const entry = new URL("./styles.css", import.meta.url);
+const files = importedFiles(entry);
+const css = files.map((file) => readFileSync(file, "utf8")).join("\n");
 
 // Follow the bootstrap entry's imports in order so assertions inspect the same
 // rule sequence as the bundled stylesheet.
-function readStylesheet(url: URL): string {
-  return readFileSync(url, "utf8")
-    .replace(/\r\n?/gu, "\n")
-    .replace(/^@import "([^"]+)";$/gmu, (_statement, path: string) =>
-      readStylesheet(new URL(path, url)),
-    );
+function importedFiles(url: URL): URL[] {
+  const text = readFileSync(url, "utf8");
+  const imports = [...text.matchAll(/^@import "([^"]+)";$/gmu)].map(
+    (match) => new URL(match[1], url),
+  );
+  return imports.length === 0 ? [url] : imports.flatMap(importedFiles);
 }
 
-describe("web app layout styles", () => {
-  it("keeps the composer docked while only the transcript scrolls", () => {
-    expectCssRule(".ohb-sidebar", [
-      "height: 100vh",
-      "min-height: 0",
-      "overflow: hidden",
+function fileName(url: URL): string {
+  return url.pathname.split("/ui/")[1] ?? url.pathname;
+}
+
+describe("web stylesheet structure", () => {
+  it("loads tokens first, then the reset, then shared blocks and features", () => {
+    const order = files.map(fileName);
+    expect(order.slice(0, 3)).toEqual([
+      "styles/tokens.css",
+      "styles/base.css",
+      "shared/shared.css",
     ]);
-    expectCssRule(".ohb-app-content-main", [
-      "height: 100vh",
-      "min-height: 0",
-      "overflow: hidden",
-    ]);
-    expectCssRule(".ohb-stream", ["min-height: 0", "overflow-y: auto"]);
-    expectCssRule(".ohb-app-content-main > .ohb-composer", [
-      "bottom: 0",
-      "position: absolute",
-    ]);
+    expect(order).not.toContain("styles/overrides.css");
+    expect(
+      order.every(
+        (name) => !name.startsWith("styles/") || order.indexOf(name) < 2,
+      ),
+    ).toBe(true);
   });
 
-  it("keeps slash command rows aligned across command, args, and description columns", () => {
-    expectCssRule(".ohb-slash-row", [
-      "grid-template-columns: 7px minmax(128px, 144px) minmax(136px, 1fr) minmax(148px, 1fr)",
-    ]);
-    expectCssRule(".ohb-slash-row em", ["text-align: left"]);
-    expectCssRule(".ohb-slash-row-no-args", [
-      "grid-template-columns: 7px minmax(128px, 144px) minmax(0, 1fr)",
-    ]);
-    expectCssRule(".ohb-slash-row-no-args .ohb-slash-args", ["display: none"]);
-    expectCssRule(".ohb-slash-row-no-args .ohb-slash-description", [
-      "grid-column: 3",
-    ]);
+  it("keeps literal colors in tokens.css only", () => {
+    const literal = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(/iu;
+    for (const file of files) {
+      if (fileName(file) === "styles/tokens.css") continue;
+      const text = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//gu, "");
+      expect(literal.exec(text)?.[0], fileName(file)).toBeUndefined();
+    }
   });
 
-  it("keeps every skill card track bounded and truncatable", () => {
-    expectCssRule(".ohb-list-skill", [
-      "display: grid",
-      "grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr)",
-    ]);
-    expectCssRule(
-      ".ohb-list-skill strong,\n.ohb-list-skill > span,\n.ohb-list-skill small",
-      [
-        "min-width: 0",
-        "overflow: hidden",
-        "text-overflow: ellipsis",
-        "white-space: nowrap",
-      ],
+  it("uses the brand colors only for the wordmark", () => {
+    const users = files
+      .filter((file) => fileName(file) !== "styles/tokens.css")
+      .filter((file) => readFileSync(file, "utf8").includes("--brand-"))
+      .map(fileName);
+    expect(users).toEqual(["shared/shared.css"]);
+  });
+
+  it("falls back to solid surfaces without backdrop-filter", () => {
+    expect(css).toMatch(
+      /@supports not \(\(backdrop-filter: blur\(1px\)\) or \(-webkit-backdrop-filter: blur\(1px\)\)\)\s*\{\s*:root\s*\{[^}]*--bg-glass: var\(--bg-glass-solid\)/u,
     );
   });
 
-  it("keeps the animated placeholder behind and transparent to pointer input", () => {
-    expectCssRule(".ohb-composer-typewriter", [
-      "pointer-events: none",
-      "position: absolute",
-      "z-index: 0",
-    ]);
-    expectCssRule(".ohb-composer-typewriter-cursor", [
-      "display: inline-block",
-      "width: 1px",
-    ]);
+  it("stops motion under reduced motion except for spinners", () => {
+    expect(css).toContain(
+      "*:not(.ohb-spinner):not(.ohb-send-spinner):not(.ohb-stop-pending)",
+    );
+  });
+});
+
+describe("web layout styles", () => {
+  it("keeps the shell to the viewport while only the transcript scrolls", () => {
+    expectCssRule(".ohb-shell", ["height: 100dvh", "overflow: hidden"]);
+    expectCssRule(".ohb-main-body", ["min-height: 0", "position: relative"]);
+    expectCssRule(".ohb-stream", ["min-height: 0", "overflow-y: auto"]);
+    expectCssRule(".ohb-composer", ["bottom: 0", "position: absolute"]);
+    expectCssRule(".ohb-composer-hero", ["position: relative"]);
   });
 
-  it("keeps composer actions circular without changing overlay buttons", () => {
+  it("turns the sidebar into a drawer with a scrim on narrow windows", () => {
+    const narrow =
+      /@media \(max-width: 1023px\)\s*\{(?<body>[\s\S]*?)\n\}/u.exec(css)
+        ?.groups?.body ?? "";
+    expect(narrow).toMatch(/\.ohb-shell-sidebar\s*\{[^}]*position: absolute/u);
+    expect(narrow).toMatch(
+      /\.ohb-shell\.is-sidebar-open \.ohb-shell-scrim\s*\{[^}]*display: block/u,
+    );
+  });
+
+  it("keeps sidebar rows single-line and reveals row actions on hover", () => {
+    expectCssRule(".ohb-session-title", [
+      "overflow: hidden",
+      "white-space: nowrap",
+    ]);
+    expectCssRule(".ohb-session-actions", ["opacity: 0", "position: absolute"]);
+  });
+
+  it("keeps composer send and stop circular inside the card", () => {
     expectCssRule(".ohb-send-button,\n.ohb-stop-button", [
       "border-radius: 50%",
-      "height: 32px",
+      "height: 30px",
       "padding: 0",
-      "width: 32px",
+      "width: 30px",
     ]);
-    expectCssRule(".ohb-button", [
-      "background: #ffffff",
-      "border: 1px solid #e4e4e4",
-      "color: #6b6d73",
+    expectCssRule(".ohb-composer-input", [
+      "flex-direction: column",
+      "max-width: var(--content-width)",
     ]);
-    expectCssRule(".ohb-button-primary", ["border-radius: 8px"]);
-    expectCssRule(".ohb-composer-input", ["flex-direction: column"]);
+    expectCssRule(".ohb-composer-bar", ["display: flex"]);
   });
 
   it("supports a bounded, contained composer textarea scroll", () => {
@@ -96,179 +112,59 @@ describe("web app layout styles", () => {
       "max-height: 154px",
       "overflow-y: auto",
       "overscroll-behavior: contain",
-      "padding: 0",
     ]);
   });
 
-  it("renders status and tool names without nested chrome", () => {
-    expectCssRule(".ohb-status-pill", [
-      "background: transparent",
-      "border: 0",
-      "padding: 0",
+  it("keeps slash command rows aligned without category dots", () => {
+    expectCssRule(".ohb-slash-row", [
+      "grid-template-columns: minmax(128px, 144px) minmax(136px, 1fr) minmax(148px, 1fr)",
     ]);
-    expectCssRule(".ohb-status-running", ["animation: ohb-pulse"]);
-    expectCssRule(".ohb-status-resyncing", ["animation: none"]);
-    expectCssRule(".ohb-tool-panel button span:first-child", [
-      "background: transparent",
-      "border: 0",
-      "padding: 0",
+    expectCssRule(".ohb-slash-row-no-args", [
+      "grid-template-columns: minmax(128px, 144px) minmax(0, 1fr)",
     ]);
-    expectCssRule(".ohb-tool-panel", [
-      "background: transparent",
-      "border: 0",
-      "margin: 2px 0",
+    expectCssRule(".ohb-slash-row-no-args .ohb-slash-description", [
+      "grid-column: 2",
     ]);
-    expectCssRule(".ohb-tool-panel button", ["padding: 3px 8px"]);
+    expect(css).not.toContain(".ohb-slash-dot");
+  });
+
+  it("keeps every skill card track bounded and truncatable", () => {
+    expectCssRule(".ohb-list-skill", [
+      "display: grid",
+      "grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr)",
+    ]);
   });
 
   it("reveals the tool disclosure arrow only on interaction or while open", () => {
-    expectCssRule(".ohb-tool-summary", ["flex: 1", "min-width: 0"]);
-    expectCssRule(".ohb-tool-chevron", [
-      "flex: none",
-      "height: 14px",
-      "opacity: 0",
-      "width: 14px",
-    ]);
+    expectCssRule(".ohb-tool-chevron", ["opacity: 0"]);
     expectCssRule(
       '.ohb-tool-panel button:hover .ohb-tool-chevron,\n.ohb-tool-panel button:focus-visible .ohb-tool-chevron,\n.ohb-tool-panel button[aria-expanded="true"] .ohb-tool-chevron',
       ["opacity: 1"],
     );
   });
 
-  it("colors only tool names by semantic type and failure", () => {
-    expectCssRule(".ohb-tool-blue button span:first-child", ["color: #5b6bb0"]);
-    expectCssRule(".ohb-tool-gold button span:first-child", ["color: #8f6d22"]);
-    expectCssRule(".ohb-tool-green button span:first-child", [
-      "color: #3f7d5c",
+  it("floats the approval panel in the message area and reserves its height", () => {
+    expectCssRule(".ohb-approval-layer", [
+      "pointer-events: none",
+      "position: absolute",
     ]);
-    expectCssRule(".ohb-tool-red button span:first-child", ["color: #c23d38"]);
-  });
-
-  it("styles user prompts as inset blue bubbles and assistant replies as bare text", () => {
-    expectCssRule(".ohb-message-user", ["align-items: flex-end"]);
-    expectCssRule(".ohb-message-user-bubble", [
-      "background: #eaf4ff",
-      "border-radius: 14px",
-      "max-width: 76%",
+    expectCssRule(".ohb-approval-panel", [
+      "pointer-events: auto",
+      "width: min(560px, 100%)",
     ]);
-    expectCssRule(".ohb-message-assistant-bare", ["width: 100%"]);
-  });
-
-  it("centers one-line composer text without changing multiline sizing", () => {
-    expectCssRule(".ohb-composer-input", [
-      "align-items: stretch",
-      "max-width: 800px",
-    ]);
-    expectCssRule(".ohb-composer-bar", ["display: flex"]);
-    expectCssRule(".ohb-composer-text", [
-      "align-items: center",
-      "min-height: 22px",
-    ]);
-    expect(css).not.toMatch(/\.ohb-prompt\s*\{/u);
-    expectCssRule(".ohb-prompt-queue", ["position: relative"]);
-  });
-
-  it("shortens only the conversation header", () => {
-    expectCssRule(".ohb-statusbar", ["min-height: 44px", "padding: 8px 24px"]);
-    expectCssRule(".ohb-sidebar-header", ["min-height: 58px"]);
-    const narrowHeader =
-      /@media \(max-width: 720px\)[\s\S]*?\.ohb-statusbar\s*\{(?<body>[^}]*)\}/u.exec(
-        css,
-      )?.groups?.body;
-    expect(narrowHeader).toContain("padding: 8px 16px");
-  });
-
-  it("animates the sidebar and respects reduced motion", () => {
-    expectCssRule(".ohb-sidebar", ["transition:", "flex-basis"]);
-    expect(css).toContain("prefers-reduced-motion: reduce");
-  });
-
-  it("keeps the new-session action inset and borderless", () => {
-    expectCssRule(".ohb-sidebar > .ohb-sidebar-new", [
-      "min-width: 0",
-      "width: calc(100% - 28px)",
-    ]);
-    expect(css).toMatch(
-      /\.ohb-sidebar-new\s*\{[^}]*background:\s*transparent;[^}]*border:\s*0;/u,
+    expectCssRule(
+      ".ohb-main-body.has-approval .ohb-root-conversation > .ohb-stream",
+      ["padding-bottom: var(--approval-space, 176px)"],
     );
-    expectCssRule(".ohb-sidebar-new:hover", ["background: #eceef2"]);
   });
 
-  it("presents full-access confirmation as a restrained modal", () => {
-    expectCssRule(".ohb-full-access-layer", [
-      "inset: 0",
-      "position: fixed",
-      "z-index: 80",
-    ]);
-    expectCssRule(".ohb-full-access-dialog", [
-      "border-radius: 18px",
-      "max-width: 460px",
-    ]);
-  });
-
-  it("defines isolated permission button consequence styles", () => {
-    expectCssRule(".ohb-perm-btn", [
-      "align-items: center",
-      "border: 1px solid transparent",
-      "border-radius: 8px",
-      "display: inline-flex",
-      "font-size: 13px",
-      "font-weight: 500",
-      "gap: 7px",
-      "justify-content: center",
-      "min-height: 36px",
-      "padding: 0 13px",
-    ]);
-    expectCssRule(".ohb-perm-allow-primary", [
-      "background: #5f86c4",
-      "border-color: #5278bb",
-      "color: #ffffff",
-    ]);
-    expectCssRule(".ohb-perm-allow-primary:hover", ["background: #5278bb"]);
-    expectCssRule(".ohb-perm-allow-secondary", [
-      "background: #eef2f9",
-      "border-color: #d8e1f0",
-      "color: #4a6ba6",
-    ]);
-    expectCssRule(".ohb-perm-allow-secondary:hover", ["background: #e3ebf6"]);
-    expectCssRule(".ohb-perm-deny", [
-      "background: #faf3e4",
-      "border-color: #ead7ad",
-      "color: #8f6f2f",
-    ]);
-    expectCssRule(".ohb-perm-deny:hover", ["background: #f4ead2"]);
-    expectCssRule(".ohb-perm-abort", [
-      "background: rgba(196, 117, 107, 0.16)",
-      "border-color: #c4756b",
-      "color: #a0493d",
-      "margin-left: 6px",
-    ]);
-    expectCssRule(".ohb-perm-abort:hover", [
-      "background: rgba(196, 117, 107, 0.24)",
-    ]);
-  });
-
-  it("keeps the directory picker contained as a modal with a scrollable directory list", () => {
+  it("keeps modal layers fixed above the page", () => {
+    expectCssRule(".ohb-full-access-layer", ["inset: 0", "position: fixed"]);
     expectCssRule(".ohb-directory-picker-layer", [
       "inset: 0",
       "position: fixed",
-      "z-index: 60",
     ]);
-    expectCssRule(".ohb-directory-picker-dialog", [
-      "max-height: 84vh",
-      "overflow: hidden",
-      "width: 640px",
-    ]);
-    expectCssRule(".ohb-directory-picker-body", [
-      "min-height: 220px",
-      "overflow-y: auto",
-    ]);
-    expectCssRule(".ohb-directory-picker-list", ["display: grid", "gap: 4px"]);
-    expectCssRule(".ohb-directory-picker-breadcrumb", [
-      "overflow-x: auto",
-      "white-space: nowrap",
-    ]);
-    expectCssRule(".ohb-directory-picker-breadcrumb span", ["flex: 0 0 auto"]);
+    expectCssRule(".ohb-directory-picker-body", ["overflow-y: auto"]);
   });
 });
 
@@ -277,7 +173,7 @@ function expectCssRule(
   declarations: readonly string[],
 ): void {
   const rulePattern = new RegExp(
-    `${escapeRegExp(selector)}\\s*\\{(?<body>[^}]*)\\}`,
+    `(?:^|\\}|\\*/)\\s*${escapeRegExp(selector)}\\s*\\{(?<body>[^}]*)\\}`,
   );
   const ruleBody = rulePattern.exec(css)?.groups?.body;
 

@@ -1,7 +1,7 @@
 .ohb-directory-picker-layer {
   align-items: center;
   animation: ohb-fade 140ms ease;
-  background: rgba(30, 34, 44, 0.3);
+  background: var(--bg-selected);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -12,10 +12,10 @@
 
 .ohb-directory-picker-dialog {
   animation: ohb-pop 160ms ease;
-  background: #ffffff;
-  border: 1px solid #ececec;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: 0 24px 70px rgba(30, 34, 44, 0.28);
+  box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
   max-height: 84vh;
@@ -26,7 +26,7 @@
 
 .ohb-directory-picker-header {
   align-items: center;
-  border-bottom: 1px solid #f1f1f1;
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex: none;
   gap: 11px;
@@ -35,10 +35,10 @@
 
 .ohb-directory-picker-header > span {
   align-items: center;
-  background: #eef2f9;
-  border: 1px solid #d8e1f0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
-  color: #4a6ba6;
+  color: var(--text-muted);
   display: inline-flex;
   height: 26px;
   justify-content: center;
@@ -46,7 +46,7 @@
 }
 
 .ohb-directory-picker-header h2 {
-  color: #26282d;
+  color: var(--text);
   font-size: 15px;
   line-height: 1;
   margin: 0;
@@ -54,10 +54,10 @@
 
 .ohb-directory-picker-header > button {
   align-items: center;
-  background: #ffffff;
-  border: 1px solid #ececec;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 7px;
-  color: #8a8d94;
+  color: var(--text-dim);
   display: inline-flex;
   height: 30px;
   justify-content: center;
@@ -73,7 +73,7 @@
 
 .ohb-directory-picker-breadcrumb {
   align-items: center;
-  color: #6b6d73;
+  color: var(--text-muted);
   display: flex;
   font-size: 12px;
   gap: 5px;
@@ -99,7 +99,7 @@
 .ohb-directory-picker-back {
   background: transparent;
   border: 0;
-  color: #4a6ba6;
+  color: var(--text-muted);
   font: inherit;
   padding: 0;
 }
@@ -119,10 +119,10 @@
 
 .ohb-directory-picker-list > button {
   align-items: center;
-  background: #ffffff;
+  background: var(--bg-elevated);
   border: 1px solid transparent;
   border-radius: 8px;
-  color: #303238;
+  color: var(--text);
   display: flex;
   font-size: 13px;
   gap: 9px;
@@ -133,8 +133,8 @@
 }
 
 .ohb-directory-picker-list > button:hover:not(:disabled) {
-  background: #f5f8ff;
-  border-color: #d8e1f0;
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
 }
 
 .ohb-directory-picker-list > button span {
@@ -144,22 +144,22 @@
 }
 
 .ohb-directory-picker-list > button svg:last-child {
-  color: #a4a7ad;
+  color: var(--text-dim);
   margin-left: auto;
 }
 
 .ohb-directory-picker-status {
-  color: #777a81;
+  color: var(--text-muted);
   font-size: 13px;
   margin: 12px 0;
 }
 
 .ohb-directory-picker-error {
   align-items: center;
-  background: #fbeeec;
-  border: 1px solid #f0d6d1;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
-  color: #a8554c;
+  color: var(--danger-ink);
   display: flex;
   font-size: 13px;
   gap: 12px;
@@ -173,8 +173,8 @@
 }
 
 .ohb-directory-picker-error button {
-  background: #ffffff;
-  border: 1px solid #e9c2bc;
+  background: var(--bg-elevated);
+  border: 1px solid var(--danger-border);
   border-radius: 6px;
   color: inherit;
   font-size: 12px;
@@ -182,7 +182,7 @@
 }
 
 .ohb-directory-picker-actions {
-  border-top: 1px solid #f1f1f1;
+  border-top: 1px solid var(--border);
   display: flex;
   flex: none;
   gap: 8px;
@@ -191,19 +191,19 @@
 }
 
 .ohb-directory-picker-actions button {
-  background: #ffffff;
-  border: 1px solid #dfe0e3;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 7px;
-  color: #555860;
+  color: var(--text-muted);
   font-size: 13px;
   min-height: 32px;
   padding: 0 12px;
 }
 
 .ohb-directory-picker-actions button:last-child {
-  background: #5f86c4;
-  border-color: #5278bb;
-  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--border-strong);
+  color: var(--text-on-accent);
 }
 
 .ohb-directory-picker-actions button:disabled,

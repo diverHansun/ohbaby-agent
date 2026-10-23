@@ -32,7 +32,6 @@ export function SlashPalette(props: {
               }}
               type="button"
             >
-              <span className={`ohb-slash-dot ohb-slash-dot-${item.accent}`} />
               <span>{item.label}</span>
               <small className="ohb-slash-args">{item.argsHint}</small>
               <em className="ohb-slash-description">{item.description}</em>

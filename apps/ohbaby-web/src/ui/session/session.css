@@ -1,0 +1,265 @@
+/* Conversation view layout: composer placement, empty-state hero, thinking
+   indicator, todo dock and the slow-load hint. */
+.ohb-root-conversation {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+}
+
+/* In a chat the composer floats over the bottom of the stream; a fade keeps
+   scrolled text from showing through around the card. */
+.ohb-composer {
+  background: linear-gradient(to top, var(--bg) 70%, transparent);
+  bottom: 0;
+  left: 0;
+  padding: 20px 24px 16px;
+  position: absolute;
+  right: 0;
+  z-index: 30;
+}
+
+.ohb-composer-hero {
+  background: none;
+  max-width: var(--content-width);
+  padding: 0;
+  position: relative;
+  width: 100%;
+  z-index: 10;
+}
+
+/* Empty state (D23): wordmark, project slot, then the composer card. */
+.ohb-draft-hero {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.ohb-main-body.is-loading .ohb-draft-hero {
+  visibility: hidden;
+}
+
+.ohb-project-slot {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 13px;
+  gap: 6px;
+  max-width: min(420px, 80vw);
+  min-height: 28px;
+  padding: 0 12px;
+}
+
+.ohb-project-slot > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.ohb-project-slot:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* A slow first read occupies conversation whitespace without moving the composer. */
+.ohb-conversation-loading {
+  color: var(--text-dim);
+  font-size: 13.5px;
+  inset-inline: 24px;
+  pointer-events: none;
+  position: absolute;
+  text-align: center;
+  top: 30%;
+}
+
+/* Thinking: three neutral dots breathing in turn, then the label and timer. */
+.ohb-thinking {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 13.5px;
+  gap: 10px;
+}
+
+.ohb-thinking > span:first-child {
+  display: flex;
+  gap: 4px;
+}
+
+.ohb-thinking > span:first-child span {
+  animation: ohb-breathe 1.2s ease-in-out infinite;
+  background: var(--text-dim);
+  border-radius: 50%;
+  height: 5px;
+  width: 5px;
+}
+
+.ohb-thinking > span:first-child span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.ohb-thinking > span:first-child span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.ohb-compacting > span:first-child {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ohb-thinking > span:nth-child(3) {
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.ohb-compact-notice {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* Todo dock: a flat tray attached above the composer card. */
+.ohb-todo-dock {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  margin: 0 auto -8px;
+  max-width: calc(var(--content-width) - 32px);
+  padding: 8px 10px 16px;
+  position: relative;
+  width: calc(100% - 32px);
+  z-index: 1;
+}
+
+.ohb-todo-dock > header {
+  display: block;
+}
+
+.ohb-todo-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  padding: 0 4px 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.ohb-todo-toggle:focus-visible {
+  border-radius: var(--radius-xs);
+}
+
+.ohb-todo-title {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ohb-todo-progress {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  justify-self: end;
+}
+
+.ohb-todo-chevron {
+  color: var(--text-dim);
+  margin-left: 6px;
+  transition: transform var(--duration-fast) var(--ease);
+}
+
+.ohb-todo-dock-collapsed .ohb-todo-chevron {
+  transform: rotate(-90deg);
+}
+
+.ohb-todo-dock-collapsed .ohb-todo-toggle {
+  padding-bottom: 4px;
+}
+
+.ohb-todo-preview {
+  overflow: hidden;
+}
+
+.ohb-todo-preview .ohb-todo-item > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-todo-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 176px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.ohb-todo-item {
+  align-items: flex-start;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  line-height: 1.45;
+  min-width: 0;
+  padding: 4px 6px;
+}
+
+.ohb-todo-marker {
+  flex: none;
+  font-family: var(--font-mono);
+  text-align: center;
+  width: 13px;
+}
+
+.ohb-todo-pending .ohb-todo-marker {
+  color: var(--text-dim);
+}
+
+.ohb-todo-in_progress {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-todo-completed {
+  color: var(--text-dim);
+}
+
+.ohb-todo-completed > span:last-child {
+  text-decoration: line-through;
+}
+
+.ohb-todo-completed .ohb-todo-marker {
+  color: var(--success-ink);
+}
+
+.ohb-main-body.has-todos .ohb-stream {
+  padding-bottom: calc(350px + var(--steer-recovery-space, 0px));
+}
+
+@media (max-width: 720px) {
+  .ohb-composer {
+    padding: 16px 12px 12px;
+  }
+
+  .ohb-composer-hero {
+    padding: 0;
+  }
+
+  .ohb-todo-dock {
+    max-width: none;
+  }
+
+  .ohb-main-body.has-todos .ohb-stream {
+    padding-bottom: calc(370px + var(--steer-recovery-space, 0px));
+  }
+}

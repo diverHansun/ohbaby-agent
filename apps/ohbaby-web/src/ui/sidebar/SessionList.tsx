@@ -1,4 +1,3 @@
-import { SquarePen } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -9,14 +8,8 @@ import {
   useSyncExternalStore,
   type ReactElement,
 } from "react";
-import type { WorkspaceSnapshot } from "../../api/daemon/wire.js";
-import { compactHomePath, workspaceLabel } from "../workspace/ProjectRail.js";
-import type { ViewModel } from "./selectors.js";
-import {
-  getSessionPinsStore,
-  sessionPinsKey,
-  sortPinnedSessions,
-} from "./session-pins.js";
+import type { ViewModel } from "../session/selectors.js";
+import { getSessionPinsStore, sortPinnedSessions } from "./session-pins.js";
 import {
   SessionActionsMenu,
   type SessionExportFormat,
@@ -25,38 +18,30 @@ import {
 import { SessionRow } from "./SessionRow.js";
 import { useSessionReorder } from "./use-session-reorder.js";
 
-interface SidebarProps {
-  readonly open: boolean;
-  readonly serverUrl?: string;
+export interface SessionListProps {
+  readonly scopeKey: string;
   readonly onArchiveSession: (sessionId: string) => Promise<boolean>;
   readonly onExportSession: (
     sessionId: string,
     format: SessionExportFormat,
   ) => void;
-  readonly onCreateSession: () => void;
   readonly onSelectSession: (sessionId: string) => void;
+  /** Where focus goes when an archived row leaves no next row behind. */
+  readonly fallbackFocus: () => HTMLElement | null;
   readonly view: ViewModel;
-  readonly workspace: WorkspaceSnapshot;
 }
+
 interface SessionMenu {
   readonly sessionId: string;
   readonly anchor: SessionMenuAnchor;
   readonly trigger: HTMLButtonElement;
 }
 
-export function SessionSidebar(props: SidebarProps): ReactElement {
-  const scopeKey = sessionPinsKey(
-    props.serverUrl,
-    props.workspace.selectedDirectory ?? "",
-  );
-  return (
-    <ProjectSessionSidebar key={scopeKey} {...props} scopeKey={scopeKey} />
-  );
-}
-
-function ProjectSessionSidebar(
-  props: SidebarProps & { readonly scopeKey: string },
-): ReactElement {
+/**
+ * Sessions of the current project, with pins, the row menu and focus repair
+ * after archiving. Keyed by the pins scope so switching projects starts clean.
+ */
+export function SessionList(props: SessionListProps): ReactElement {
   const pinsStore = useMemo(
     () => getSessionPinsStore(props.scopeKey),
     [props.scopeKey],
@@ -74,7 +59,6 @@ function ProjectSessionSidebar(
   );
   const [menu, setMenu] = useState<SessionMenu | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const newRef = useRef<HTMLButtonElement>(null);
   const mounted = useRef(true);
   const archivedFocus = useRef<{
     trigger: HTMLButtonElement;
@@ -89,9 +73,11 @@ function ProjectSessionSidebar(
       return;
     archivedFocus.current = null;
     if (document.activeElement === document.body) {
-      (pending.next?.isConnected ? pending.next : newRef.current)?.focus({
-        preventScroll: true,
-      });
+      (pending.next?.isConnected ? pending.next : props.fallbackFocus())?.focus(
+        {
+          preventScroll: true,
+        },
+      );
     }
   }, []);
   useLayoutEffect(() => {
@@ -127,8 +113,8 @@ function ProjectSessionSidebar(
     };
   }, []);
   useEffect(() => {
-    if (!props.open || props.view.composer.disabled) setMenu(null);
-  }, [props.open, props.view.composer.disabled]);
+    if (props.view.composer.disabled) setMenu(null);
+  }, [props.view.composer.disabled]);
   const closeMenu = useCallback(
     (restoreFocus: boolean): void => {
       if (restoreFocus && menu?.trigger.isConnected)
@@ -137,10 +123,9 @@ function ProjectSessionSidebar(
     },
     [menu],
   );
-  const menuSession =
-    props.open && !props.view.composer.disabled
-      ? sessions.find((session) => session.id === menu?.sessionId)
-      : undefined;
+  const menuSession = !props.view.composer.disabled
+    ? sessions.find((session) => session.id === menu?.sessionId)
+    : undefined;
   const isPinned = (id: string): boolean => Object.hasOwn(preferences.pins, id);
   const setPin = (
     id: string,
@@ -175,67 +160,35 @@ function ProjectSessionSidebar(
   };
 
   return (
-    <aside
-      aria-hidden={!props.open}
-      className={`ohb-sidebar${props.open ? "" : " is-collapsed"}`}
-      inert={!props.open}
-    >
-      <header className="ohb-sidebar-header">
-        <div className="ohb-project-header">
-          <strong>
-            {workspaceLabel(props.workspace.selectedDirectory ?? "")}
-          </strong>
-          <small title={props.workspace.selectedDirectory ?? ""}>
-            {compactHomePath(props.workspace.selectedDirectory ?? "")}
-          </small>
-        </div>
-      </header>
-      <button
-        ref={newRef}
-        className="ohb-sidebar-new"
-        disabled={props.view.composer.disabled}
-        onClick={props.onCreateSession}
-        title="New session"
-        type="button"
-      >
-        <SquarePen aria-hidden="true" size={15} />
-        <span>New session</span>
-      </button>
-      <section className="ohb-sidebar-section">
-        <div className="ohb-sidebar-section-title">Sessions</div>
-        {preferences.error ? (
-          <p className="ohb-session-pin-error" role="status">
-            Pins could not be saved. Changes last until refresh.
-          </p>
-        ) : null}
-        <div ref={listRef} className="ohb-sidebar-list">
-          {sessions.length ? (
-            sessions.map((session) => (
-              <SessionRow
-                key={session.id}
-                session={session}
-                active={session.id === props.view.activeSession?.id}
-                disabled={props.view.composer.disabled}
-                pinned={isPinned(session.id)}
-                menuOpen={menuSession?.id === session.id}
-                reordering={reordering || !props.open}
-                onSelect={() => {
-                  if (session.id !== props.view.activeSession?.id)
-                    props.onSelectSession(session.id);
-                }}
-                onUnpin={(focus) => {
-                  setPin(session.id, false, focus);
-                }}
-                onMenu={(anchor, trigger) => {
-                  setMenu({ sessionId: session.id, anchor, trigger });
-                }}
-              />
-            ))
-          ) : (
-            <div className="ohb-sidebar-empty">No sessions yet</div>
-          )}
-        </div>
-      </section>
+    <>
+      {preferences.error ? (
+        <p className="ohb-session-pin-error" role="status">
+          Pins could not be saved. Changes last until refresh.
+        </p>
+      ) : null}
+      <div ref={listRef} className="ohb-sidebar-list">
+        {sessions.map((session) => (
+          <SessionRow
+            key={session.id}
+            session={session}
+            active={session.id === props.view.activeSession?.id}
+            disabled={props.view.composer.disabled}
+            pinned={isPinned(session.id)}
+            menuOpen={menuSession?.id === session.id}
+            reordering={reordering}
+            onSelect={() => {
+              if (session.id !== props.view.activeSession?.id)
+                props.onSelectSession(session.id);
+            }}
+            onUnpin={(focus) => {
+              setPin(session.id, false, focus);
+            }}
+            onMenu={(anchor, trigger) => {
+              setMenu({ sessionId: session.id, anchor, trigger });
+            }}
+          />
+        ))}
+      </div>
       {menu && menuSession ? (
         <SessionActionsMenu
           anchor={menu.anchor}
@@ -254,6 +207,6 @@ function ProjectSessionSidebar(
           }}
         />
       ) : null}
-    </aside>
+    </>
   );
 }

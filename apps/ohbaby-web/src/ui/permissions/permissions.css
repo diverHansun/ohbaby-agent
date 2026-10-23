@@ -1,122 +1,198 @@
-.ohb-permission-layer {
-  bottom: 12px;
-  left: 24px;
+/* Approval panel (03 §4.6): floats at the bottom of the message area, about
+   560px wide, no page scrim. Collapsed it shrinks to its title row. */
+.ohb-approval-layer {
+  bottom: 16px;
+  display: flex;
+  justify-content: center;
+  left: 16px;
   pointer-events: none;
   position: absolute;
-  right: 24px;
+  right: 16px;
   z-index: 18;
 }
 
-.ohb-app-content-main .ohb-permission-layer {
-  position: absolute;
-}
-
-.ohb-permission-modal {
-  align-items: center;
-  animation: ohb-slide-up 160ms ease-out;
-  background: #f5f8ff;
-  border: 1px solid #d8e1f0;
-  border-radius: 9px;
-  display: flex;
-  gap: 14px;
-  margin: 0 auto;
-  max-width: 720px;
-  padding: 13px 15px;
+.ohb-approval-panel {
+  animation: ohb-slide-up var(--duration) var(--ease);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  max-height: calc(100dvh - 120px);
+  overflow-y: auto;
   pointer-events: auto;
+  width: min(560px, 100%);
 }
 
-.ohb-permission-copy {
+.ohb-approval-header {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  padding: 10px 8px 10px 16px;
+}
+
+.ohb-approval-heading {
   flex: 1;
   min-width: 0;
+}
+
+.ohb-approval-source {
+  color: var(--text-dim);
+  display: block;
+  font-size: 11.5px;
+  margin-bottom: 2px;
+}
+
+.ohb-approval-heading h2 {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
-.ohb-permission-copy h2 {
-  font-size: 14px;
-  line-height: 1.3;
-  margin: 0;
+.ohb-approval-panel.is-collapsed .ohb-approval-heading h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ohb-permission-copy p,
-.ohb-permission-copy span {
-  color: #8a8d94;
-  display: block;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+.ohb-approval-heading h2:focus {
+  outline: none;
+}
+
+.ohb-approval-pager {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
   font-size: 12px;
-  margin: 3px 0 0;
+  gap: 2px;
+}
+
+.ohb-approval-detail {
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 10px 16px;
+  white-space: pre-wrap;
 }
 
 .ohb-permission-actions {
+  align-items: center;
   display: flex;
-  flex: none;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 12px;
+}
+
+.ohb-permission-actions > [role="status"] {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-right: auto;
+}
+
+.ohb-permission-actions > [role="status"] button,
+.ohb-permission-sync button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 6px;
+  text-decoration: underline;
 }
 
 .ohb-perm-btn {
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   display: inline-flex;
   font-size: 13px;
   font-weight: 500;
   gap: 7px;
   justify-content: center;
-  min-height: 36px;
-  padding: 0 13px;
+  min-height: 32px;
+  padding: 0 12px;
+  transition: background var(--duration-fast) var(--ease);
 }
 
 .ohb-perm-allow-primary {
-  background: #5f86c4;
-  border-color: #5278bb;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--accent-contrast);
 }
 
-.ohb-perm-allow-primary:hover {
-  background: #5278bb;
+.ohb-perm-allow-primary:not(:disabled):hover {
+  background: var(--accent-hover);
 }
 
-.ohb-perm-allow-secondary {
-  background: #eef2f9;
-  border-color: #d8e1f0;
-  color: #4a6ba6;
-}
-
-.ohb-perm-allow-secondary:hover {
-  background: #e3ebf6;
-}
-
+.ohb-perm-allow-secondary,
 .ohb-perm-deny {
-  background: #faf3e4;
-  border-color: #ead7ad;
-  color: #8f6f2f;
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
-.ohb-perm-deny:hover {
-  background: #f4ead2;
+.ohb-perm-allow-secondary:not(:disabled):hover,
+.ohb-perm-deny:not(:disabled):hover {
+  background: var(--bg-hover);
+}
+
+/* Deny sits first on the left, away from the approving choices. */
+.ohb-perm-deny {
+  margin-right: auto;
+  order: -1;
 }
 
 .ohb-perm-abort {
-  background: rgba(196, 117, 107, 0.16);
-  border-color: #c4756b;
-  color: #a0493d;
-  margin-left: 6px;
+  background: transparent;
+  border-color: var(--danger-border);
+  color: var(--danger-ink);
 }
 
-.ohb-perm-abort:hover {
-  background: rgba(196, 117, 107, 0.24);
+.ohb-perm-abort:not(:disabled):hover {
+  background: var(--danger-soft);
 }
 
-.ohb-app-content.has-approval .ohb-root-conversation > .ohb-stream {
+.ohb-permission-actions .ohb-stop-button {
+  border-radius: 50%;
+  height: 32px;
+  width: 32px;
+}
+
+.ohb-permission-sync {
+  align-items: center;
+  color: var(--danger-ink);
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  margin: 8px auto 0;
+  max-width: var(--content-width);
+  padding: 0 16px;
+  width: 100%;
+}
+
+.ohb-permission-sync button {
+  color: var(--danger-ink);
+}
+
+.ohb-main-body.has-approval .ohb-root-conversation > .ohb-stream {
   padding-bottom: var(--approval-space, 176px);
 }
-.ohb-permission-modal h2:focus {
-  outline: none;
-}
-.ohb-permission-modal {
-  box-sizing: border-box;
-  max-height: calc(100dvh - 80px);
-  overflow-y: auto;
-}
-.ohb-permission-actions {
-  flex-wrap: wrap;
+
+@media (max-width: 639px) {
+  .ohb-approval-layer {
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+  }
 }

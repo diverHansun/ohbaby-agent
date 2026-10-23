@@ -3,8 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createOhbabyWebStore } from "../../store/store.js";
-import { SessionSidebar } from "./SessionSidebar.js";
-import { selectViewModel } from "./selectors.js";
+import { selectViewModel } from "../session/selectors.js";
+import { Sidebar } from "./Sidebar.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -24,13 +24,27 @@ const entries = ["A", "B", "C"].map((id, i) => ({
 function render(scope = directory, sessions = entries): void {
   act(() => {
     root.render(
-      <SessionSidebar
-        open
+      <Sidebar
         onArchiveSession={archive}
         onExportSession={exportSession}
         onCreateSession={() => undefined}
         onSelectSession={select}
-        workspace={{ selectedDirectory: scope, scopes: [] }}
+        onCollapse={() => undefined}
+        onSwitchProject={() => undefined}
+        onHideProject={() => undefined}
+        onOpenFolder={() => undefined}
+        workspace={{
+          selectedDirectory: scope,
+          scopes: [
+            {
+              available: true,
+              directory: scope,
+              lastOpenedAt: 0,
+              loaded: true,
+              position: 0,
+            },
+          ],
+        }}
         view={{
           ...selectViewModel(createOhbabyWebStore().getSnapshot()),
           sessionIndex: sessions,
@@ -115,7 +129,7 @@ it.each(["HTML", "JSONL"])(
   (format) => {
     click("Actions for Chat B");
     const trigger = button("Actions for Chat B");
-    click("Export");
+    click("Export…");
     click(format);
     expect(exportSession).toHaveBeenCalledOnce();
     expect(exportSession).toHaveBeenCalledWith("B", format.toLowerCase());
@@ -125,7 +139,7 @@ it.each(["HTML", "JSONL"])(
   },
 );
 
-it("keeps submenu navigation separate and restores focus one level per Escape", () => {
+it("switches to the export list in place and goes back one level per Escape", () => {
   click("Actions for Chat B");
   const press = (key: string): void => {
     act(() => {
@@ -134,19 +148,19 @@ it("keeps submenu navigation separate and restores focus one level per Escape", 
       );
     });
   };
-  press("End");
-  expect(document.activeElement).toBe(button("Export"));
+  press("ArrowDown");
+  expect(document.activeElement).toBe(button("Export…"));
   press("ArrowRight");
+  expect(document.activeElement).toBe(button("Export"));
+  press("ArrowDown");
   expect(document.activeElement).toBe(button("HTML"));
-  press("ArrowUp");
+  press("End");
   expect(document.activeElement).toBe(button("JSONL"));
   press("Home");
-  expect(document.activeElement).toBe(button("HTML"));
-  press("End");
-  expect(document.activeElement).toBe(button("JSONL"));
+  expect(document.activeElement).toBe(button("Export"));
   press("Escape");
   expect(document.querySelectorAll('[role="menu"]')).toHaveLength(1);
-  expect(document.activeElement).toBe(button("Export"));
+  expect(document.activeElement).toBe(button("Export…"));
   press("Home");
   expect(document.activeElement).toBe(button("Pin"));
   press("Escape");
@@ -172,9 +186,9 @@ it("restores menu focus on Escape and supports keyboard context opening", () => 
       new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
     );
   });
-  expect(button("Archive")).toBe(document.activeElement);
+  expect(button("Export…")).toBe(document.activeElement);
   act(() => {
-    button("Archive").dispatchEvent(
+    button("Export…").dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
   });

@@ -16,7 +16,7 @@ function FullAccessConfirmDialog(props: {
   }, []);
 
   useLayoutEffect(() => {
-    const app = document.querySelector(".ohb-app");
+    const app = document.querySelector(".ohb-shell");
     const wasInert = app?.hasAttribute("inert") ?? false;
     app?.setAttribute("inert", "");
     return (): void => {

@@ -10,8 +10,8 @@
 }
 
 .ohb-stream::-webkit-scrollbar-thumb {
-  background: #e4e4e4;
-  border: 3px solid #fafafa;
+  background: var(--bg-selected);
+  border: 3px solid var(--border);
   border-radius: 6px;
 }
 
@@ -35,7 +35,7 @@
 }
 
 .ohb-message-compaction .ohb-message-body {
-  color: #727782;
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -44,14 +44,14 @@
 }
 
 .ohb-message-body {
-  color: #2b2d33;
+  color: var(--text);
   font-size: 15px;
   line-height: 1.62;
   min-width: 0;
 }
 
 .ohb-message-user-bubble {
-  background: #eaf4ff;
+  background: var(--bg-subtle);
   border-radius: 14px;
   max-width: 76%;
   padding: 11px 15px;
@@ -76,8 +76,8 @@
 }
 
 .ohb-message-pending-label {
-  color: #aeb2ba;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
   font-size: 11px;
   position: absolute;
   right: 0;
@@ -85,17 +85,17 @@
 }
 
 .ohb-message-prompt-error-text {
-  color: #a8554c;
+  color: var(--danger-ink);
   display: block;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   margin: -10px 24px 0;
 }
 
 .ohb-markdown a,
 .ohb-markdown a:visited {
-  color: #53677d;
-  text-decoration-color: rgba(83, 103, 125, 0.45);
+  color: var(--text-muted);
+  text-decoration-color: var(--border);
   text-decoration-line: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
@@ -103,7 +103,7 @@
 
 .ohb-markdown a:hover,
 .ohb-markdown a:focus-visible {
-  color: #3b4d61;
+  color: var(--text-muted);
   text-decoration-color: currentColor;
 }
 
@@ -114,9 +114,9 @@
 }
 
 .ohb-markdown code {
-  background: #f1f1f2;
+  background: var(--bg-hover);
   border-radius: 4px;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   padding: 1px 5px;
 }
@@ -157,7 +157,7 @@
 .ohb-streaming-text,
 .ohb-reasoning,
 .ohb-tool-panel pre {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.65;
   margin: 0;
@@ -170,7 +170,7 @@
 }
 
 .ohb-reasoning {
-  color: #6b6d73;
+  color: var(--text-muted);
 }
 
 .ohb-reasoning > pre {
@@ -193,7 +193,7 @@
   background: transparent;
   border: 0;
   border-radius: 7px;
-  color: #54565c;
+  color: var(--text-muted);
   display: flex;
   gap: 10px;
   padding: 3px 8px;
@@ -202,23 +202,23 @@
 }
 
 .ohb-tool-panel button:hover {
-  background: rgba(76, 86, 104, 0.055);
+  background: var(--bg-hover);
 }
 
 .ohb-tool-panel button span:first-child {
   background: transparent;
   border: 0;
   flex: none;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
   padding: 0;
 }
 
 .ohb-tool-summary {
-  color: #73767d;
+  color: var(--text-muted);
   flex: 1;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   min-width: 0;
   overflow: hidden;
@@ -231,8 +231,7 @@
   flex: none;
   height: 14px;
   opacity: 0;
-  transition:
-    opacity 140ms ease,
+  transition: opacity 140ms ease,
     transform 140ms ease;
   width: 14px;
 }
@@ -244,7 +243,7 @@
 }
 
 .ohb-tool-details {
-  background: rgba(76, 86, 104, 0.045);
+  background: var(--bg-hover);
   border-radius: 7px;
   display: grid;
   gap: 10px;
@@ -259,16 +258,16 @@
 }
 
 .ohb-tool-details section > span {
-  color: #969aa3;
+  color: var(--text-dim);
   display: block;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   margin-bottom: 4px;
   text-transform: uppercase;
 }
 
 .ohb-tool-details pre {
-  color: #64676f;
+  color: var(--text-muted);
   max-height: 420px;
   overflow-wrap: anywhere;
   overflow-x: hidden;
@@ -288,26 +287,21 @@
 }
 
 .ohb-tool-details pre::-webkit-scrollbar-thumb {
-  background: rgba(76, 86, 104, 0.18);
+  background: var(--bg-selected);
   border: 2px solid transparent;
   border-radius: 6px;
   background-clip: padding-box;
 }
 
-.ohb-tool-blue button span:first-child {
-  color: #5b6bb0;
-}
-
-.ohb-tool-gold button span:first-child {
-  color: #8f6d22;
-}
-
+/* Tool names stay neutral; only a failure is coloured (D5). */
+.ohb-tool-blue button span:first-child,
+.ohb-tool-gold button span:first-child,
 .ohb-tool-green button span:first-child {
-  color: #3f7d5c;
+  color: var(--text-muted);
 }
 
 .ohb-tool-red button span:first-child {
-  color: #c23d38;
+  color: var(--danger-ink);
 }
 
 .ohb-chevron-open {
@@ -339,7 +333,7 @@
 }
 
 .ohb-run-header {
-  border-bottom: 1px solid rgb(43 45 51 / 9%);
+  border-bottom: 1px solid var(--border);
   padding-bottom: 8px;
   /* Leave 12px after the line within the stream's shared 26px gap. */
   margin: 4px 0 -14px;
@@ -363,8 +357,7 @@
   height: 16px;
   flex: none;
   opacity: 0;
-  transition:
-    opacity 140ms ease,
+  transition: opacity 140ms ease,
     transform 140ms ease;
 }
 
@@ -395,5 +388,56 @@
 @media (prefers-reduced-motion: reduce) {
   .ohb-run-chevron {
     transition: none;
+  }
+}
+
+/* A running tool's label shimmers; durations stay quiet. */
+.ohb-tool-panel button span.ohb-tool-executing {
+  animation: ohb-tool-shimmer 2.4s linear infinite;
+  background: linear-gradient(
+    100deg,
+    currentColor 35%,
+    var(--text-dim) 50%,
+    currentColor 65%
+  );
+  background-clip: text;
+  background-size: 250% 100%;
+  -webkit-text-fill-color: transparent;
+}
+
+@keyframes ohb-tool-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.ohb-tool-duration,
+.ohb-prompt-duration {
+  font-size: 0.85em;
+  opacity: 0.6;
+}
+
+.ohb-prompt-duration {
+  margin: 4px 0 16px;
+}
+
+@media (max-width: 720px) {
+  .ohb-stream {
+    padding-bottom: calc(176px + var(--steer-recovery-space, 0px));
+  }
+
+  .ohb-message-user-bubble {
+    max-width: 92%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ohb-tool-panel button span.ohb-tool-executing {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
   }
 }

@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import type { UiPermissionRequest } from "ohbaby-sdk";
-import { PermissionModal } from "./PermissionModal.js";
+import { ApprovalPanel } from "./ApprovalPanel.js";
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,7 +33,7 @@ it("focuses each request title, blocks duplicate responses through the next snap
   const render = (permissions: readonly UiPermissionRequest[]): void => {
     act(() => {
       root.render(
-        <PermissionModal
+        <ApprovalPanel
           disabled={false}
           syncing={false}
           permissions={permissions}
@@ -88,7 +88,7 @@ it("allows an explicit retry after response failure", async () => {
   try {
     act(() => {
       root.render(
-        <PermissionModal
+        <ApprovalPanel
           disabled={false}
           syncing={false}
           permissions={[request]}
@@ -126,7 +126,7 @@ it("retains a successful response lock while temporarily hidden by a child conve
   const render = (visible: boolean): void => {
     act(() => {
       root.render(
-        <PermissionModal
+        <ApprovalPanel
           visible={visible}
           disabled={false}
           syncing={false}
@@ -140,17 +140,62 @@ it("retains a successful response lock while temporarily hidden by a child conve
   try {
     render(true);
     await act(async () => {
-      element.querySelector<HTMLButtonElement>("button")?.click();
+      element
+        .querySelector<HTMLButtonElement>(".ohb-permission-actions button")
+        ?.click();
       await Promise.resolve();
     });
     render(false);
     expect(element.querySelector('[role="dialog"]')).toBeNull();
     render(true);
-    expect(element.querySelector<HTMLButtonElement>("button")?.disabled).toBe(
-      true,
-    );
+    expect(
+      element.querySelector<HTMLButtonElement>(".ohb-permission-actions button")
+        ?.disabled,
+    ).toBe(true);
     expect(document.activeElement).toBe(element.querySelector("h2"));
     expect(onRespond).toHaveBeenCalledOnce();
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    element.remove();
+  }
+});
+
+it("collapses to its title row and expands back without losing the request", () => {
+  const element = document.createElement("div");
+  document.body.append(element);
+  const root = createRoot(element);
+  try {
+    act(() => {
+      root.render(
+        <ApprovalPanel
+          disabled={false}
+          syncing={false}
+          permissions={[request, { ...request, id: "two" }]}
+          onRetry={() => undefined}
+          onRespond={() => Promise.resolve(true)}
+        />,
+      );
+    });
+    const dialog = element.querySelector('[role="dialog"]');
+    expect(dialog?.getAttribute("aria-modal")).toBe("false");
+    expect(element.textContent).toContain("1 / 2");
+    act(() => {
+      element
+        .querySelector<HTMLButtonElement>('[aria-label="Collapse approval"]')
+        ?.click();
+    });
+    expect(element.querySelector(".ohb-permission-actions")).toBeNull();
+    expect(element.querySelector("h2")?.textContent).toBe("Allow first task?");
+    act(() => {
+      element
+        .querySelector<HTMLButtonElement>('[aria-label="Expand approval"]')
+        ?.click();
+    });
+    expect(
+      element.querySelector(".ohb-permission-actions button"),
+    ).not.toBeNull();
   } finally {
     act(() => {
       root.unmount();

@@ -87,6 +87,18 @@ describe("ContextUsageControl", () => {
     );
   });
 
+  it("turns the ring amber at 70% and red at 90%", () => {
+    const at = (ratio: number): string | undefined =>
+      render({
+        ...usage(false),
+        contextWindowRatio: ratio,
+        currentTokens: ratio * 100_000,
+      }).querySelector(".ohb-context-usage-control")?.className;
+    expect(at(0.69)).not.toMatch(/is-high|is-critical/u);
+    expect(at(0.7)).toContain("is-high");
+    expect(at(0.9)).toContain("is-critical");
+  });
+
   it("opens a total-only detail without inventing composition rows", () => {
     const container = render(usage(false));
     const trigger = container.querySelector(".ohb-context-ring-button");

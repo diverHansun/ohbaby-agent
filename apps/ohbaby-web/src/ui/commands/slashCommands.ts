@@ -15,7 +15,6 @@ import type { CommandNotice } from "../../api/daemon/wire.js";
 
 export interface SlashPaletteItem {
   readonly command: UiWebCommandSpec;
-  readonly accent: "blue" | "gold" | "pink";
   readonly action: UiWebCommandSpec["action"];
   readonly argsHint: string;
   readonly categoryLabel: string;
@@ -75,7 +74,6 @@ export function createSlashPaletteItems(
     const showCategory = categoryLabel !== previousCategory;
     previousCategory = categoryLabel;
     return {
-      accent: slashCommandAccent(command.category),
       action: command.action,
       argsHint: command.argsHint ?? "",
       categoryLabel,
@@ -360,16 +358,6 @@ function isSetupOverlay(command: UiWebCommandSpec): boolean {
   return (
     command.action === "connectModel" || command.action === "connectSearch"
   );
-}
-
-function slashCommandAccent(category: string): SlashPaletteItem["accent"] {
-  if (category === "session") {
-    return "gold";
-  }
-  if (category === "system") {
-    return "pink";
-  }
-  return "blue";
 }
 
 function formatContextWindow(

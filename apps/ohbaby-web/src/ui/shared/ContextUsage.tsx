@@ -73,6 +73,15 @@ export function ContextUsageControl(props: {
   }, [open]);
 
   const percent = usage ? usagePercent(usage) : null;
+  // The ring turns amber at 70% and red at 90% (03 §4.2); colour only, no badge.
+  const level =
+    percent === null
+      ? ""
+      : percent >= 90
+        ? " is-critical"
+        : percent >= 70
+          ? " is-high"
+          : "";
   const circumference = 2 * Math.PI * 6;
   const progress = usage
     ? clamp01(usage.contextWindowRatio) * circumference
@@ -85,7 +94,7 @@ export function ContextUsageControl(props: {
 
   return (
     <div
-      className={`ohb-context-usage-control${open ? " is-open" : ""}${usage ? "" : " is-unavailable"}`}
+      className={`ohb-context-usage-control${open ? " is-open" : ""}${usage ? "" : " is-unavailable"}${level}`}
       ref={rootRef}
     >
       <button

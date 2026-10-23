@@ -143,6 +143,8 @@ export interface StoreSnapshot {
   readonly sessionIndex: readonly UiSessionIndexEntry[];
   readonly connectionState: ConnectionState;
   readonly currentModel: UiCurrentModelConfig | null;
+  /** True once the current model was read; `currentModel: null` then means none is configured. */
+  readonly currentModelLoaded: boolean;
   readonly error: string | null;
   readonly view: ViewState;
 }

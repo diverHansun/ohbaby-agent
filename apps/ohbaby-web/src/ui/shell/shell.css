@@ -1,0 +1,165 @@
+/* Two-column shell (03 §4.1): sidebar + main area. On narrow windows the sidebar
+   is a drawer over the main area. */
+.ohb-shell {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+}
+
+.ohb-shell-sidebar {
+  flex: none;
+  overflow: hidden;
+  transition: width var(--duration) var(--ease);
+  width: 0;
+  z-index: 40;
+}
+
+.ohb-shell.is-sidebar-open .ohb-shell-sidebar {
+  width: var(--sidebar-width);
+}
+
+.ohb-shell-scrim {
+  display: none;
+}
+
+.ohb-shell-main {
+  background: var(--bg);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+}
+
+.ohb-shell.is-sidebar-open .ohb-shell-main {
+  border-left: 1px solid var(--border);
+}
+
+/* Main header: a quiet row with the project name; no border, no status dots. */
+.ohb-main-header {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 8px;
+  height: var(--header-height);
+  padding: 0 12px 0 16px;
+}
+
+.ohb-shell:not(.is-sidebar-open) .ohb-main-header {
+  padding-left: 8px;
+}
+
+.ohb-main-header-title {
+  align-items: baseline;
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ohb-main-header-name {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-main-header-path {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-main-header-meta {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 10px;
+}
+
+.ohb-connection-state {
+  color: var(--warning-ink);
+  font-size: 12px;
+}
+
+.ohb-connection-disconnected {
+  color: var(--danger-ink);
+}
+
+/* Main body: fills the area under the header; in a chat the composer floats at its bottom. */
+.ohb-main-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.ohb-main-body-empty {
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px 10vh;
+}
+
+.ohb-bootstrap-error {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100vh;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.ohb-bootstrap-error p {
+  color: var(--danger-ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin: 0;
+  max-width: min(620px, 88vw);
+}
+
+@media (max-width: 1023px) {
+  .ohb-shell-sidebar {
+    bottom: 0;
+    left: 0;
+    position: absolute;
+    top: 0;
+    transform: translateX(-100%);
+    transition: transform var(--duration) var(--ease);
+    width: min(var(--sidebar-width), 85vw);
+  }
+
+  .ohb-shell.is-sidebar-open .ohb-shell-sidebar {
+    box-shadow: var(--shadow-modal);
+    transform: translateX(0);
+    width: min(var(--sidebar-width), 85vw);
+  }
+
+  .ohb-shell.is-sidebar-open .ohb-shell-scrim {
+    background: var(--bg-scrim);
+    display: block;
+    inset: 0;
+    position: absolute;
+    z-index: 35;
+  }
+
+  .ohb-shell.is-sidebar-open .ohb-shell-main {
+    border-left: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .ohb-main-header-path {
+    display: none;
+  }
+}

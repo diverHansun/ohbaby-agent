@@ -78,6 +78,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     sessionIndex: [],
     connectionState: "connecting",
     currentModel: null,
+    currentModelLoaded: false,
     error: null,
     view: createInitialViewState(),
   });
@@ -637,10 +638,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       publish({ ...snapshot, connectionState: state });
     },
     setCurrentModel(model): void {
-      if (snapshot.currentModel === model) {
+      if (snapshot.currentModel === model && snapshot.currentModelLoaded) {
         return;
       }
-      publish({ ...snapshot, currentModel: model });
+      publish({ ...snapshot, currentModel: model, currentModelLoaded: true });
     },
     setError(error): void {
       if (snapshot.error === error) {

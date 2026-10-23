@@ -3,7 +3,7 @@ import type { SessionSyncState, UiSessionView } from "ohbaby-sdk";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionSyncNotice } from "./SessionStatus.js";
+import { SessionSyncNotice } from "./SessionBanners.js";
 import {
   INITIAL_LOAD_BANNER_DELAY_MS,
   isSessionRecovery,
