@@ -50,7 +50,7 @@
 | prompt 失败恢复                   | receipt 前失败仅在当前 draft 为空时恢复；accepted failed/interrupted 保留 submission 用户行并内联错误                                                                                                                                                                                                                                                  |
 | prompt reload projection          | 无 local state 时，starting/running/failed/interrupted 仍可由 snapshot 独立重建                                                                                                                                                                                                                                                                        |
 | active run follow-up              | 有草稿时主槽显示 Send；发送清空草稿后恢复 Stop，admission 不再保留第二颗 busy Send；follow-up 不插 conversation optimistic 行，queued 后只出现在 Queue                                                                                                                                                                                                 |
-| composer density / chrome         | 主槽为无字圆形纸飞机/方块/转圈图标；编辑 queued prompt 点纸飞机只调用 `editQueuedPrompt`，成功更新原条目并继续调度，不新增 prompt；输入框无 `>`、单行占位及正文垂直居中、最多 7 个视觉行，之后只在 textarea 内滚动；多行圆钮仍贴右下，思考控件紧邻圆钮左侧且窄屏不挤压输入；所有工具卡箭头固定 14px 不被长摘要挤缩；会话顶栏约 44px，侧栏顶保持约 58px |
+| composer density / chrome         | 主槽为无字圆形纸飞机/方块/转圈图标；编辑 queued prompt 点纸飞机只调用 `editQueuedPrompt`，成功更新原条目并继续调度，不新增 prompt；输入框无 `>`、单行占位及正文垂直居中、最多 7 个视觉行，之后只在 textarea 内滚动；多行圆钮仍贴右下，思考控件紧邻圆钮左侧且窄屏不挤压输入；所有工具卡箭头固定 14px 不被长摘要挤缩；顶栏与侧栏顶部同高（`--header-height`，44px），连成一条 |
 | starting-window follow-up         | 首轮已有 `starting`、run 尚未出现时，follow-up 仍只进入 Queue，不重复投影到 conversation                                                                                                                                                                                                                                                               |
 | pending session isolation         | admission pending 期间切换 existing/new session，local row 与 startup Thinking 不得串到另一会话                                                                                                                                                                                                                                                        |
 | mixed timeline ordering           | 较早的 failed/interrupted provisional 与后续 formal message 按 `createdAt` 合并排序；reload 后顺序不变                                                                                                                                                                                                                                                 |
@@ -114,16 +114,19 @@
 | --- | --- |
 | `selectors.unit.test.ts` | `session/selectors.unit.test.ts` |
 | `use-session-sync-banner.unit.test.tsx` | `session/use-session-sync-banner.unit.test.tsx` |
-| `TypewriterPlaceholder.unit.test.tsx` | `composer/TypewriterPlaceholder.unit.test.tsx` |
 | `ime.unit.test.ts` | `composer/ime.unit.test.ts` |
 | `streamScroll.unit.test.ts` | `conversation/streamScroll.unit.test.ts` |
 | `tool-card.unit.test.tsx` | `conversation/tool-card.unit.test.tsx` |
 | `slashCommands.unit.test.ts` | `commands/slashCommands.unit.test.ts` |
 | `ContextUsage.unit.test.tsx` | `shared/ContextUsage.unit.test.tsx` |
+| `session/SessionSidebar.unit.test.tsx` | `sidebar/Sidebar.unit.test.tsx` |
+| `permissions/PermissionModal.unit.test.tsx` | `permissions/ApprovalPanel.unit.test.tsx` |
+
+redesign improve-1 删除了 `TypewriterPlaceholder` 和 `SessionStatus` 及其测试：打字机占位符不再保留，顶栏由 `shell/MainHeader.tsx` 取代，相关断言改写进 `App.unit.test.tsx`。
 
 `workspace/directory-picker/DirectoryPickerDialog.unit.test.tsx` 与组件相邻。`composer/Composer.unit.test.tsx` 增加局部 prefill 保护：用户编辑后即使文字改回原值也拒绝旧 revision；合法回填持久化且同一身份只消费一次；Tab 补全走同一更新路径，持久化并推进 revision。textarea 高度与实际输入交互继续由 App 流程保护，不虚设尚不存在的独立测试文件。
 
-`styles.unit.test.ts` 留在 UI 根目录并读取实际 CSS 入口/导入块。`ui/styles.css` 的 14 个连续块保持原级联顺序；静态样式断言不能代替构建与浏览器检查。runtime 独立后，既有 `api/daemon/` client/workspace/session/permission integration 测试继续覆盖实际连接链路；文件迁移不增加第二条连接或新的同步状态层。
+`styles.unit.test.ts` 留在 UI 根目录，沿 `ui/styles.css` 的导入顺序读取实际 CSS：先 `styles/tokens.css`、再 `base.css` 和 `shared/`，然后是各功能目录自己的样式；断言字面量颜色只出现在 `tokens.css`、品牌色只用于字标、不支持 `backdrop-filter` 时退回实底。`styles/overrides.css` 已删除。静态样式断言不能代替构建与浏览器检查；开发时可在 `vite dev` 下用 `?mock=fresh|typical|running|approval|no-model` 查看固定场景（`src/dev/`，生产构建不包含）。runtime 独立后，既有 `api/daemon/` client/workspace/session/permission integration 测试继续覆盖实际连接链路；文件迁移不增加第二条连接或新的同步状态层。
 
 Web 测试与阶段验收的映射见 [improve-3/03](./improve-3/03-test-criteria.md)。跨包 New session 行为、唯一验收 ID 与最终结果只在[中央 improve-2.1](../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)记录；本文列测试职责，不声明本轮运行通过。
 

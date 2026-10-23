@@ -20,7 +20,8 @@
 | `IconButton` | 基础 | 只有图标的按钮，带可读名称 | `ui/shared/` | 新增 |
 | `Spinner` | 基础 | 转圈 | `ui/shared/` | 新增（替换三色波点） |
 | `Notice` / `NoticeStack` | 基础 | 对话区右上角的通知（失败、后台事件） | `ui/shared/` | 新增 |
-| `Wordmark` | 基础 | 三色字标，`size: "sm" \| "md"` | `ui/shared/` | 由 `SessionStatus` 中的字标抽出 |
+| `Wordmark` | 基础 | 三色字标，`size: "sm" \| "md"`；`sm` 用于侧栏，`md` 只用于启动失败页 | `ui/shared/` | 由 `SessionStatus` 中的字标抽出 |
+| `LycheeMark` | 基础 | Lychee 单色线性图标，`size`，颜色取 `--brand-lychee`（D26） | `ui/shared/` | 新增 |
 | `AppController` | 功能区 | runtime 接线、视图切换、目录选择，向外壳提供区域内容 | `ui/shell/` | 新增 |
 | `AppShell` | 组合 | 侧栏 + 主区布局、收起、窄屏抽屉 | `ui/shell/` | 新增 |
 | `Sidebar` | 功能区 | 顶栏、会话树或搜索结果、底部设置入口 | `ui/sidebar/` | 改写自 `SessionSidebar` |
@@ -29,7 +30,7 @@
 | `SessionMenu` | 组合 | 会话菜单与项目列表两级视图 | `ui/sidebar/` | 改写自 `SessionActionsMenu` |
 | `SidebarSearch` | 功能区 | 搜索框、结果列表、分页 | `ui/search/` | 新增 |
 | `MainHeader` | 组合 | 主区顶栏：侧栏开关、标题、目录、上下文用量 | `ui/shell/` | 改写自 `SessionStatus` 的顶栏部分 |
-| `DraftHero` | 组合 | 草稿态的字标 + 项目选择条 | `ui/session/` | 改写自空态 hero |
+| `DraftHero` | 组合 | 草稿态的 Lychee 标识 + 项目选择条 | `ui/session/` | 改写自空态 hero |
 | `ProjectPicker` | 组合 | 草稿里的项目选择条和下拉 | `ui/composer/` | 新增 |
 | `ComposerControls` | 组合 | 输入卡片内底部的控制行 | `ui/composer/` | 从 `Composer` 拆出 |
 | `ApprovalPanel` | 组合 | 消息区内的审批浮层 | `ui/permissions/` | 改写自 `PermissionModal` |
