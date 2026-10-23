@@ -1,0 +1,236 @@
+/* Shared building blocks: wordmark, Lychee mark, icon button, spinner, menu,
+   notices and the inline error banner. */
+.ohb-wordmark {
+  display: inline-flex;
+  font-family: var(--font-wordmark);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  user-select: none;
+}
+
+.ohb-wordmark span:nth-child(1) {
+  color: var(--brand-oh);
+}
+
+.ohb-wordmark span:nth-child(2) {
+  color: var(--brand-ba);
+}
+
+.ohb-wordmark span:nth-child(3) {
+  color: var(--brand-by);
+}
+
+.ohb-wordmark-sm {
+  font-size: 18px;
+}
+
+.ohb-wordmark-md {
+  font-size: 34px;
+}
+
+/* Lychee, the agent's mark in the empty state; the one brand colour besides the wordmark. */
+.ohb-lychee-mark {
+  color: var(--brand-lychee);
+  display: block;
+  flex: none;
+}
+
+.ohb-icon-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text-dim);
+  display: inline-flex;
+  flex: none;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+  width: 28px;
+}
+
+.ohb-icon-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-spinner {
+  animation: ohb-spin 0.9s linear infinite;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  border-top-color: var(--accent);
+  display: inline-block;
+  flex: none;
+}
+
+/* Menu: fixed popup rendered into body (shared/Menu.tsx). */
+.ohb-menu {
+  animation: ohb-pop var(--duration-fast) var(--ease);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 176px;
+  padding: 4px;
+  position: fixed;
+  z-index: 150;
+}
+
+.ohb-menu [role="menuitem"] {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.ohb-menu [role="menuitem"] svg {
+  color: var(--text-dim);
+  flex: none;
+}
+
+.ohb-menu [role="menuitem"]:hover,
+.ohb-menu [role="menuitem"]:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.ohb-menu-arrow {
+  margin-left: auto;
+}
+
+.ohb-menu-back {
+  color: var(--text-muted);
+}
+
+.ohb-menu-separator {
+  background: var(--border);
+  height: 1px;
+  margin: 4px 6px;
+}
+
+/* Notices: top-right, failures and background events only (D16). */
+.ohb-notice-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  position: fixed;
+  right: 16px;
+  top: calc(var(--header-height) + 10px);
+  z-index: 200;
+}
+
+.ohb-notice {
+  align-items: flex-start;
+  animation: ohb-slide-up var(--duration) var(--ease);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-menu);
+  color: var(--text);
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  line-height: 1.45;
+  padding: 10px 10px 10px 14px;
+}
+
+.ohb-notice-dot {
+  background: var(--text-dim);
+  border-radius: 50%;
+  flex: none;
+  height: 7px;
+  margin-top: 6px;
+  width: 7px;
+}
+
+.ohb-notice-error .ohb-notice-dot {
+  background: var(--danger);
+}
+
+.ohb-notice-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ohb-notice-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+  display: inline-flex;
+  flex: none;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+
+.ohb-notice-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* Inline error: where it happened, reason plus a way out. */
+.ohb-error-banner {
+  align-items: center;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  color: var(--danger-ink);
+  display: flex;
+  font-size: 13px;
+  gap: 12px;
+  line-height: 1.45;
+  margin: 8px auto;
+  max-width: var(--content-width);
+  padding: 8px 10px 8px 12px;
+  width: calc(100% - 32px);
+}
+
+.ohb-error-banner > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ohb-error-banner button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--danger-ink);
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 4px 6px;
+}
+
+.ohb-error-banner button:hover {
+  background: var(--danger-soft);
+}
+
+.ohb-composer .ohb-error-banner {
+  margin: 0 auto 8px;
+  width: 100%;
+}
