@@ -79,7 +79,8 @@
   right: 0;
   top: calc(100% + 7px);
   transform: translateY(-2px);
-  transition: opacity 120ms ease,
+  transition:
+    opacity 120ms ease,
     transform 120ms ease;
   visibility: hidden;
   white-space: nowrap;
@@ -100,9 +101,9 @@
 }
 
 .ohb-context-tooltip span {
-  color: var(--text-dim);
+  color: var(--text-on-accent-muted);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .ohb-context-popover {
@@ -230,7 +231,6 @@
 .ohb-context-composition-row > span:last-child {
   color: var(--text-dim);
 }
-
 
 @media (max-width: 720px) {
   .ohb-context-popover {

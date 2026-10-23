@@ -4481,6 +4481,31 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector(".ohb-goal-chip")).toBeNull();
   });
 
+  it("keeps the slash palette and its catalog through unrelated store refreshes", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["status", "compact"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/status"));
+    const calls = fake.listCommands.mock.calls.length;
+
+    act(() => {
+      fake.store.setCurrentModel({
+        provider: "zhipu",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
+        model: "glm-4.7",
+      });
+    });
+    await flushTimers();
+
+    expect(slashPaletteText(app.container)).toContain("/status");
+    expect(fake.listCommands.mock.calls.length).toBe(calls);
+  });
+
   it("shows compact failures in the error banner", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),

@@ -15,7 +15,14 @@ import {
  * on narrow windows the sidebar becomes a drawer over the main area.
  */
 export function AppShell(props: {
-  readonly renderSidebar: (close: () => void) => ReactNode;
+  /**
+   * `close` collapses the sidebar; `dismissDrawer` closes it only while it is a
+   * drawer (narrow windows), for actions that move the user to the main area.
+   */
+  readonly renderSidebar: (
+    close: () => void,
+    dismissDrawer: () => void,
+  ) => ReactNode;
   readonly renderHeader: (
     sidebarOpen: boolean,
     openSidebar: () => void,
@@ -34,18 +41,19 @@ export function AppShell(props: {
   const open = useCallback(() => {
     setOpen(true);
   }, [setOpen]);
+  const dismissDrawer = useCallback(() => {
+    if (isNarrowViewport()) close();
+  }, [close]);
   return (
     <div className={`ohb-shell${sidebarOpen ? " is-sidebar-open" : ""}`}>
       <div className="ohb-shell-sidebar" inert={!sidebarOpen}>
-        {props.renderSidebar(close)}
+        {props.renderSidebar(close, dismissDrawer)}
       </div>
       {sidebarOpen ? (
         <div
           className="ohb-shell-scrim"
           aria-hidden="true"
-          onClick={() => {
-            if (isNarrowViewport()) close();
-          }}
+          onClick={dismissDrawer}
         />
       ) : null}
       <main className="ohb-shell-main">

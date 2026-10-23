@@ -45,7 +45,9 @@ export function AppController(props: {
   const client = runtime.client;
   const [notices, setNotices] = useState<readonly NoticeItem[]>([]);
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
-  // Text typed before any folder is open; handed to the conversation once one is.
+  const [workspaceActionCount, setWorkspaceActionCount] = useState(0);
+  // Keep the folderless composer mounted until connecting and restoring the
+  // selected session finish. A client can exist before its draft scope is ready.
   const [pendingDraft, setPendingDraft] = useState("");
 
   const pushError = useCallback((error: unknown): void => {
@@ -69,6 +71,17 @@ export function AppController(props: {
       }
     },
     [pushError],
+  );
+  const runWorkspaceAction = useCallback(
+    async (action: () => Promise<void>): Promise<boolean> => {
+      setWorkspaceActionCount((count) => count + 1);
+      try {
+        return await runAction(action);
+      } finally {
+        setWorkspaceActionCount((count) => count - 1);
+      }
+    },
+    [runAction],
   );
 
   useEffect(() => {
@@ -100,25 +113,27 @@ export function AppController(props: {
 
   const selectDirectory = useCallback(
     async (directory: string): Promise<void> => {
-      if (await runAction(() => runtime.openWorkspace(directory))) {
+      if (await runWorkspaceAction(() => runtime.openWorkspace(directory))) {
         setDirectoryPickerOpen(false);
       }
     },
-    [runAction, runtime],
+    [runWorkspaceAction, runtime],
   );
 
   return (
     <AppShell
-      renderSidebar={(close) => (
+      renderSidebar={(close, dismissDrawer) => (
         <Sidebar
           serverUrl={runtime.serverUrl}
           view={view}
           workspace={workspace}
           onCollapse={close}
           onCreateSession={() => {
+            dismissDrawer();
             void runAction(() => runtime.createSession());
           }}
           onSelectSession={(sessionId) => {
+            dismissDrawer();
             void runAction(() => runtime.selectSession(sessionId));
           }}
           onArchiveSession={(sessionId) =>
@@ -126,7 +141,7 @@ export function AppController(props: {
           }
           onExportSession={exportSession}
           onSwitchProject={(directory) => {
-            void runAction(() => runtime.switchWorkspace(directory));
+            void runWorkspaceAction(() => runtime.switchWorkspace(directory));
           }}
           onHideProject={(directory) => {
             void runAction(() => runtime.hideWorkspace(directory));
@@ -147,6 +162,7 @@ export function AppController(props: {
             undefined
           }
           header={view.header}
+          hasClient={client !== null}
           sessionId={view.activeSession?.id ?? null}
           onOpenContextUsage={() => {
             const sessionId = view.activeSession?.id;
@@ -158,7 +174,7 @@ export function AppController(props: {
         />
       )}
       main={
-        client ? (
+        client && (pendingDraft.length === 0 || workspaceActionCount === 0) ? (
           <SessionScreen
             client={client}
             runtime={runtime}

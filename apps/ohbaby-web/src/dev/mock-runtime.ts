@@ -24,6 +24,9 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
           return (): Promise<unknown> =>
             Promise.resolve({ commands: [], version: "mock" });
         if (key === "respondPermission" || key === "abortRun") return resolved;
+        // Event subscriptions are synchronous and return an unsubscribe function.
+        if (typeof key === "string" && key.startsWith("subscribe"))
+          return (): (() => void) => () => undefined;
         return (): Promise<never> =>
           Promise.reject(
             new Error(`mock runtime: ${String(key)} is not available`),

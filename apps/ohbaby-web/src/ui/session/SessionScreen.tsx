@@ -129,21 +129,24 @@ export function SessionScreen({
     [modelMissing, openModelSetup, submitText],
   );
 
+  // Stable identity: the slash palette refetches its catalog when this changes.
+  const listCommands = useCallback(() => runtime.listWebCommands(), [runtime]);
+
   const contentRef = useRef<HTMLDivElement>(null);
   const interactions = useSessionInteractions({ client, view, contentRef });
   const { viewingSubagent, approvalDialogVisible, childExpanded } =
     interactions;
 
-  // Hand the folderless draft over once, after the composer restored its scope.
+  // The shell waits for workspace restoration before mounting this handoff.
+  // Prefill once, after the composer has restored that final draft scope.
   const initialDraftRef = useRef(initialDraft);
-  const onInitialDraftConsumedRef = useRef(onInitialDraftConsumed);
   useEffect(() => {
     const text = initialDraftRef.current;
     if (!text) return;
     initialDraftRef.current = undefined;
     prefillComposer(text);
-    onInitialDraftConsumedRef.current?.();
-  }, [prefillComposer]);
+    onInitialDraftConsumed?.();
+  }, [prefillComposer, onInitialDraftConsumed]);
 
   const showMain =
     !view.isEmpty ||
@@ -241,7 +244,7 @@ export function SessionScreen({
           onEditRevision={overlays.trackComposerRevision}
           isPromptAdmitting={isPromptAdmitting}
           prefill={overlays.composerPrefill}
-          onListCommands={() => runtime.listWebCommands()}
+          onListCommands={listCommands}
           onSetPermission={setPermission}
           onStructuredCommand={overlays.openStructuredCommand}
           onSubmit={submit}

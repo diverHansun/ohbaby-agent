@@ -13,9 +13,10 @@ const ABNORMAL_CONNECTION: readonly HeaderModel["connectionKind"][] = [
 ];
 
 /**
- * Glass top bar of the main area: sidebar toggle when the sidebar is closed,
+ * Top bar of the main area: sidebar toggle when the sidebar is closed,
  * the chat title, its working directory and context usage. Connection state is
- * shown only when it is not healthy (D6).
+ * shown only when a folder's instance exists and is not healthy (D6); with no
+ * folder open there is nothing to connect to, so nothing is shown.
  */
 export function MainHeader(props: {
   readonly sidebarOpen: boolean;
@@ -23,10 +24,13 @@ export function MainHeader(props: {
   readonly title?: string;
   readonly workingDirectory?: string;
   readonly header: HeaderModel;
+  readonly hasClient: boolean;
   readonly sessionId: string | null;
   readonly onOpenContextUsage?: () => void;
 }): ReactElement {
-  const abnormal = ABNORMAL_CONNECTION.includes(props.header.connectionKind);
+  const abnormal =
+    props.hasClient &&
+    ABNORMAL_CONNECTION.includes(props.header.connectionKind);
   return (
     <header className="ohb-main-header">
       {props.sidebarOpen ? null : (
