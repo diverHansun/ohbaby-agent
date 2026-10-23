@@ -13,6 +13,7 @@ import type {
 import { nativeOutputForMessage, type ModelOrigin } from "./native-state.js";
 import { toResponsesReasoningWire } from "./reasoning.js";
 import { mapResponsesStream } from "./openai-responses-stream.js";
+import { openAIClientIsolation, withoutEnvCustomHeaders } from "./sdk-env.js";
 
 function rejectRequest(reason: string): never {
   throw new Error(`Responses request: ${reason}`);
@@ -176,11 +177,16 @@ function buildRequestParams(
 export function createOpenAIResponsesProvider(
   options: CreateInterfaceProviderOptions,
 ): InterfaceProviderInstance<OpenAI> {
-  const client = new OpenAI({
-    apiKey: options.apiKey,
-    baseURL: options.baseUrl,
-    maxRetries: 0,
-  });
+  const client = withoutEnvCustomHeaders(
+    "OPENAI_CUSTOM_HEADERS",
+    () =>
+      new OpenAI({
+        apiKey: options.apiKey,
+        baseURL: options.baseUrl,
+        ...openAIClientIsolation(),
+        maxRetries: 0,
+      }),
+  );
   return {
     id: options.id,
     kind: "openai-responses",

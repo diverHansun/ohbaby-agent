@@ -25,6 +25,7 @@ import type {
   InterfaceProviderStreamEvent,
 } from "./types.js";
 import { toAnthropicReasoningWire } from "./reasoning.js";
+import { withoutEnvCustomHeaders } from "./sdk-env.js";
 import { createAnthropicUsageAccumulator } from "./token-usage.js";
 
 interface ConvertedAnthropicMessages {
@@ -716,11 +717,18 @@ export function createAnthropicProvider(
 ): InterfaceProviderInstance<Anthropic> {
   const reportTokenUsage =
     options.tokenUsageReporter ?? ((_diagnostic): void => undefined);
-  const client = new Anthropic({
-    apiKey: options.apiKey,
-    baseURL: options.baseUrl,
-    maxRetries: 0,
-  });
+  const client = withoutEnvCustomHeaders(
+    "ANTHROPIC_CUSTOM_HEADERS",
+    () =>
+      new Anthropic({
+        apiKey: options.apiKey,
+        // The SDK would otherwise send the shell's ANTHROPIC_AUTH_TOKEN as a
+        // Bearer header to whatever upstream this model is configured for.
+        authToken: null,
+        baseURL: options.baseUrl,
+        maxRetries: 0,
+      }),
+  );
 
   return {
     id: options.id,

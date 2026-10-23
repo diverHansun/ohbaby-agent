@@ -20,6 +20,7 @@ import {
   type ModelOrigin,
 } from "./native-state.js";
 import { toChatReasoningWire } from "./reasoning.js";
+import { openAIClientIsolation, withoutEnvCustomHeaders } from "./sdk-env.js";
 import { normalizeOpenAICompatibleUsage } from "./token-usage.js";
 
 function mapFinishReason(
@@ -436,11 +437,16 @@ export function createOpenAICompatibleProvider(
 ): InterfaceProviderInstance<OpenAI> {
   const reportTokenUsage =
     options.tokenUsageReporter ?? ((_diagnostic): void => undefined);
-  const client = new OpenAI({
-    apiKey: options.apiKey,
-    baseURL: options.baseUrl,
-    maxRetries: 0,
-  });
+  const client = withoutEnvCustomHeaders(
+    "OPENAI_CUSTOM_HEADERS",
+    () =>
+      new OpenAI({
+        apiKey: options.apiKey,
+        baseURL: options.baseUrl,
+        ...openAIClientIsolation(),
+        maxRetries: 0,
+      }),
+  );
 
   return {
     id: options.id,
