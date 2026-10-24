@@ -1,4 +1,5 @@
 import type {
+  UiGlobalSession,
   UiCurrentModelConfig,
   UiMessage,
   UiPermissionRequest,
@@ -15,7 +16,13 @@ export interface MockScenario {
   readonly snapshot: UiSnapshot;
   readonly workspace: WorkspaceSnapshot;
   readonly model: UiCurrentModelConfig | null;
+  /** The global list, newest first; the mock pages it 100 rows at a time. */
+  readonly sessions: readonly UiGlobalSession[];
+  /** Seeded into the global pin set when this browser has none yet. */
+  readonly pins?: Readonly<Record<string, number>>;
 }
+
+export const DEFAULT_WORKSPACE = "/Users/demo/.ohbaby/workspace";
 
 const now = Date.now();
 const iso = (minutesAgo: number): string =>
@@ -249,22 +256,171 @@ function running(withApproval: boolean): UiSnapshot {
   };
 }
 
+const agentProject = "/Users/demo/Projects/ohbaby-agent";
+const piProject = "/Users/demo/Projects/pi-web";
+const notesProject = "/Users/demo/notes";
+const archiveProject = "/Users/demo/Projects/archive-tool";
+
+function globalRow(
+  id: string,
+  title: string,
+  minutesAgo: number,
+  projectDirectory: string | null,
+  extra: Partial<UiGlobalSession> = {},
+): UiGlobalSession {
+  return {
+    id,
+    title,
+    status: "active",
+    createdAt: iso(minutesAgo + 30),
+    updatedAt: iso(minutesAgo),
+    messageCount: 4,
+    projectDirectory,
+    workingDirectory: projectDirectory ?? DEFAULT_WORKSPACE,
+    ...extra,
+  };
+}
+
+function byRecency(
+  rows: readonly UiGlobalSession[],
+): readonly UiGlobalSession[] {
+  return [...rows].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+}
+
+/** 3 projects (one with 30 chats), 5 chats without a project, 2 pinned (06 §5). */
+function typicalSessions(): readonly UiGlobalSession[] {
+  const rows: UiGlobalSession[] = history.map((entry, index) =>
+    globalRow(entry.id, entry.title, (index + 1) * 600, agentProject),
+  );
+  for (let index = rows.length; index < 30; index++)
+    rows.push(
+      globalRow(
+        `agent_${String(index)}`,
+        `Earlier agent task ${String(index + 1)}`,
+        (index + 1) * 900,
+        agentProject,
+      ),
+    );
+  ["Port the session tree", "Search snippet styling", "Pinned layout"].forEach(
+    (title, index) => {
+      rows.push(
+        globalRow(`pi_${String(index)}`, title, 45 + index * 400, piProject),
+      );
+    },
+  );
+  ["Reading list", "Meeting notes"].forEach((title, index) => {
+    rows.push(
+      globalRow(
+        `notes_${String(index)}`,
+        title,
+        3000 + index * 2000,
+        notesProject,
+      ),
+    );
+  });
+  [
+    "Quick question",
+    "Translate a paragraph",
+    "Regex for ISO dates",
+    "What is a CRDT?",
+    "Weekend plan",
+  ].forEach((title, index) => {
+    rows.push(
+      globalRow(`loose_${String(index)}`, title, 5 + index * 700, null),
+    );
+  });
+  return byRecency(rows);
+}
+
+/** 600 chats across 4 projects, so Show more has to page (06 §5 many). */
+function manySessions(): readonly UiGlobalSession[] {
+  const projects = [agentProject, piProject, notesProject];
+  return byRecency(
+    Array.from({ length: 600 }, (_, index) =>
+      globalRow(
+        `many_${String(index)}`,
+        `Chat ${String(index + 1)}`,
+        index * 37,
+        // The fourth project's chats are old and rare, so it fills late.
+        index % 20 === 0
+          ? archiveProject
+          : (projects[index % 3] ?? agentProject),
+      ),
+    ),
+  );
+}
+
+const typicalPins = { agent_12: now - 2, pi_1: now - 1 };
+
 export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
   fresh: () => ({
     snapshot: { ...base, activeSessionId: null, sessions: [] },
-    workspace,
+    workspace: { scopes: [], selectedDirectory: DEFAULT_WORKSPACE },
     model,
+    sessions: [],
   }),
   typical: () => ({
     snapshot: { ...base, activeSessionId: null, sessions: history },
     workspace,
     model,
+    sessions: typicalSessions(),
+    pins: typicalPins,
   }),
-  running: () => ({ snapshot: running(false), workspace, model }),
-  approval: () => ({ snapshot: running(true), workspace, model }),
+  many: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: {
+      ...workspace,
+      scopes: [
+        ...workspace.scopes,
+        {
+          available: true,
+          directory: "/Users/demo/Projects/archive-tool",
+          lastOpenedAt: 0,
+          loaded: false,
+          position: 3,
+        },
+      ],
+    },
+    model,
+    sessions: manySessions(),
+  }),
+  running: () => ({
+    snapshot: running(false),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, agentProject),
+      ...typicalSessions(),
+    ]),
+  }),
+  approval: () => ({
+    snapshot: running(true),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, agentProject),
+      ...typicalSessions(),
+    ]),
+  }),
+  // Moved to pi-web while running: this turn stays in ohbaby-agent (06 §5).
+  "pending-move": () => ({
+    snapshot: running(false),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, piProject, {
+        workingDirectory: agentProject,
+        pendingWorkingDirectory: piProject,
+      }),
+      ...typicalSessions(),
+    ]),
+  }),
   "no-model": () => ({
     snapshot: { ...base, activeSessionId: null, sessions: history },
     workspace,
     model: null,
+    sessions: typicalSessions(),
   }),
 };

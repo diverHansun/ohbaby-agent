@@ -3,7 +3,22 @@ import type { OhbabyWebRuntime } from "../runtime/index.js";
 import { createDraftStore } from "../store/draft.js";
 import { createGlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore } from "../store/store.js";
-import { mockScenarios } from "./mock-scenarios.js";
+import { globalSessionPinsKey } from "../ui/sidebar/session-pins.js";
+import { DEFAULT_WORKSPACE, mockScenarios } from "./mock-scenarios.js";
+
+const MOCK_PAGE = 100;
+
+/** Seeds the scenario's pins once, so a viewer's own pin changes persist. */
+function seedPins(pins: Readonly<Record<string, number>> | undefined): void {
+  if (!pins) return;
+  try {
+    const key = globalSessionPinsKey(undefined);
+    if (localStorage.getItem(key) === null)
+      localStorage.setItem(key, JSON.stringify(pins));
+  } catch {
+    // Pins are decoration in the mock.
+  }
+}
 
 /**
  * Dev-only runtime that renders a fixed scenario without a daemon. Mutating
@@ -16,21 +31,31 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   store.setCurrentModel(scenario.model);
   store.setConnectionState("live");
   const catalog = createGlobalCatalogStore();
-  const directory = scenario.workspace.selectedDirectory;
-  catalog.setProjects(scenario.workspace.scopes, "/home/you/.ohbaby/workspace");
-  catalog.replaceSessions(
-    scenario.snapshot.sessions.map((session) => ({
-      id: session.id,
-      title: session.title,
-      status: "active" as const,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      messageCount: session.messages.length,
-      projectDirectory: directory,
-      workingDirectory: directory ?? "/home/you/.ohbaby/workspace",
-    })),
-    undefined,
-  );
+  catalog.setProjects(scenario.workspace.scopes, DEFAULT_WORKSPACE);
+  const page = (offset: number): void => {
+    const rows = scenario.sessions.slice(offset, offset + MOCK_PAGE);
+    const next = offset + MOCK_PAGE;
+    const cursor = next < scenario.sessions.length ? String(next) : undefined;
+    if (offset === 0) catalog.replaceSessions(rows, cursor);
+    else catalog.appendSessions(rows, cursor);
+  };
+  page(0);
+  seedPins(scenario.pins);
+  const loadMoreSessions: OhbabyWebRuntime["loadMoreSessions"] = async (
+    enough,
+  ) => {
+    catalog.setLoadingMore(true);
+    try {
+      let cursor = catalog.getSnapshot().nextCursor;
+      while (cursor !== undefined && !enough(catalog.getSnapshot().sessions)) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        page(Number(cursor));
+        cursor = catalog.getSnapshot().nextCursor;
+      }
+    } finally {
+      catalog.setLoadingMore(false);
+    }
+  };
 
   const resolved = (): Promise<void> => Promise.resolve();
   const client = new Proxy<Record<string, unknown>>(
@@ -82,7 +107,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     openFolder: (folder) => Promise.resolve(folder),
     openSession: resolved,
     refreshCatalog: resolved,
-    loadMoreSessions: resolved,
+    loadMoreSessions,
     selectSession: resolved,
     submitPrompt: () =>
       Promise.reject(new Error("mock runtime: prompts are not sent")),
