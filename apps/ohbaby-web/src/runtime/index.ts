@@ -8,6 +8,7 @@ import {
   type UiGlobalSession,
   type UiPromptReceipt,
   type UiSessionExport,
+  type UiSessionSearchPage,
   type UiSlashCommandInvocation,
   type UiWebCommandCatalog,
 } from "ohbaby-sdk";
@@ -50,6 +51,16 @@ export interface OhbabyWebRuntime {
   abortSession(sessionId: string, runId?: string): Promise<void>;
   /** `directory` defaults to the session's request directory. */
   archiveSession(sessionId: string, directory?: string): Promise<void>;
+  moveSession(
+    sessionId: string,
+    projectDirectory: string | null,
+  ): Promise<void>;
+  searchSessions(input: {
+    query: string;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<UiSessionSearchPage>;
   exportSession(
     sessionId: string,
     format: "html" | "jsonl",
@@ -247,7 +258,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     this.catalog.removeSession(sessionId);
     const settle = this.global.beginWrite();
     try {
-      if (target === this.instance.directory && this.instance.client)
+      if (wasOpen && target === this.instance.directory && this.instance.client)
         await this.instance.client.archiveSession({ sessionId });
       else
         await (await this.global.scopedHttp(target)).archiveSession(sessionId);
@@ -261,6 +272,22 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     // The server may bind another session after archiving; the draft wins.
     if (wasOpen && this.instance.selection === generation)
       await this.openDraft(null).catch(() => undefined);
+  }
+
+  moveSession(
+    sessionId: string,
+    projectDirectory: string | null,
+  ): Promise<void> {
+    return this.global.moveSession(sessionId, projectDirectory);
+  }
+
+  searchSessions(input: {
+    query: string;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<UiSessionSearchPage> {
+    return this.global.searchSessions(input);
   }
 
   async exportSession(

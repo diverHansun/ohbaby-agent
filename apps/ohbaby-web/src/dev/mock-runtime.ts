@@ -1,4 +1,9 @@
-import type { UiBackendClient, UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiBackendClient,
+  UiSnapshot,
+  UiSessionSearchPage,
+  UiSessionSearchResult,
+} from "ohbaby-sdk";
 import type { OhbabyWebRuntime } from "../runtime/index.js";
 import { createDraftStore } from "../store/draft.js";
 import { createGlobalCatalogStore } from "../store/global-catalog.js";
@@ -22,7 +27,7 @@ function seedPins(pins: Readonly<Record<string, number>> | undefined): void {
 
 /**
  * Dev-only runtime that renders a fixed scenario without a daemon. Mutating
- * calls resolve without effect; anything else rejects with a clear message.
+ * sidebar operations update in-memory fixtures; prompts never reach a model.
  */
 export function createMockRuntime(name: string): OhbabyWebRuntime {
   const scenario = (mockScenarios[name] ?? mockScenarios.typical)();
@@ -30,12 +35,19 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   installSnapshot(store, scenario.snapshot);
   store.setCurrentModel(scenario.model);
   store.setConnectionState("live");
+  let sessions = [...scenario.sessions];
+  let workspace = scenario.workspace;
+  const hidden = new Set<string>();
   const catalog = createGlobalCatalogStore();
   catalog.setProjects(scenario.workspace.scopes, DEFAULT_WORKSPACE);
   const page = (offset: number): void => {
-    const rows = scenario.sessions.slice(offset, offset + MOCK_PAGE);
+    const visible = sessions.filter(
+      (row) =>
+        row.status !== "archived" && !hidden.has(row.projectDirectory ?? ""),
+    );
+    const rows = visible.slice(offset, offset + MOCK_PAGE);
     const next = offset + MOCK_PAGE;
-    const cursor = next < scenario.sessions.length ? String(next) : undefined;
+    const cursor = next < visible.length ? String(next) : undefined;
     if (offset === 0) catalog.replaceSessions(rows, cursor);
     else catalog.appendSessions(rows, cursor);
   };
@@ -90,29 +102,99 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     retryUnknownPrompts: resolved,
     forgetUnknownPrompt: () => undefined,
     abortSession: resolved,
-    archiveSession: resolved,
+    archiveSession: (id): Promise<void> => {
+      sessions = sessions.filter((row) => row.id !== id);
+      catalog.removeSession(id);
+      return Promise.resolve();
+    },
+    moveSession: (id, directory): Promise<void> => {
+      const previous = sessions.find((row) => row.id === id);
+      if (!previous) return Promise.reject(new Error("Chat no longer exists"));
+      const moved = {
+        ...previous,
+        projectDirectory: directory,
+        ...(directory === null ? {} : { pendingWorkingDirectory: directory }),
+      };
+      sessions = sessions.map((row) => (row.id === id ? moved : row));
+      catalog.upsertSession(moved);
+      return Promise.resolve();
+    },
+    searchSessions: ({
+      query,
+      cursor,
+      signal,
+    }): Promise<UiSessionSearchPage> => {
+      if (signal?.aborted)
+        return Promise.reject(new DOMException("Aborted", "AbortError"));
+      if (query === "error")
+        return Promise.reject(new Error("Search is temporarily unavailable."));
+      const needle = query.trim().toLowerCase();
+      const found: UiSessionSearchResult[] = [];
+      for (const session of sessions) {
+        if (session.status === "archived") continue;
+        const snippet = `A previous message about sidebar layout. <img src=x onerror=alert(1)> stays plain text.`;
+        if (session.title.toLowerCase().includes(needle))
+          found.push({ session, matchType: "title", snippet: session.title });
+        else if (snippet.toLowerCase().includes(needle))
+          found.push({ session, matchType: "message", snippet });
+      }
+      found.sort(
+        (a, b) =>
+          Number(a.matchType === "message") - Number(b.matchType === "message"),
+      );
+      const start = Number(cursor ?? 0);
+      return Promise.resolve({
+        results: found.slice(start, start + 20),
+        ...(start + 20 < found.length
+          ? { nextCursor: String(start + 20) }
+          : {}),
+      });
+    },
     exportSession: () => Promise.reject(new Error("mock runtime: export")),
     createSession: resolved,
     dispose: resolved,
     executeSlashCommand: () =>
       Promise.reject(new Error("mock runtime: slash commands")),
-    getWorkspaceSnapshot: () => scenario.workspace,
+    getWorkspaceSnapshot: () => workspace,
     getDirectoryPickerRoots: () =>
       Promise.resolve({ ok: true, roots: [{ directory: "/", name: "/" }] }),
-    hideWorkspace: resolved,
+    hideWorkspace: (directory): Promise<void> => {
+      hidden.add(directory);
+      workspace = {
+        ...workspace,
+        scopes: workspace.scopes.filter(
+          (scope) => scope.directory !== directory,
+        ),
+      };
+      catalog.removeProject(directory);
+      return Promise.resolve();
+    },
     listDirectoryPicker: (directory) =>
       Promise.resolve({ ok: true, directory, parent: null, children: [] }),
     listWebCommands: () => Promise.resolve({ commands: [], version: "mock" }),
     openDraft: resolved,
     openFolder: (folder) => Promise.resolve(folder),
-    openSession: resolved,
+    openSession: (id): Promise<void> => {
+      const row = sessions.find((entry) => entry.id === id);
+      if (!row) return Promise.resolve();
+      const existing = scenario.snapshot.sessions.find(
+        (entry) => entry.id === id,
+      );
+      installSnapshot(store, {
+        ...scenario.snapshot,
+        activeSessionId: id,
+        status: { kind: "idle" },
+        sessions: [{ ...row, messages: existing?.messages ?? [] }],
+      });
+      return Promise.resolve();
+    },
     refreshCatalog: resolved,
     loadMoreSessions,
     selectSession: resolved,
     getSelectionGeneration: () => 0,
     submitPrompt: () =>
       Promise.reject(new Error("mock runtime: prompts are not sent")),
-    subscribeWorkspaces: () => () => undefined,
+    subscribeWorkspaces: (listener) => catalog.subscribe(listener),
   };
 }
 

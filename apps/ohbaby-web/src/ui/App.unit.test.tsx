@@ -4914,6 +4914,8 @@ function createFakeRuntime(input: {
       forgetUnknownPrompt: vi.fn(),
       abortSession,
       archiveSession,
+      moveSession: () => Promise.resolve(),
+      searchSessions: () => Promise.resolve({ results: [] }),
       exportSession,
       client,
       createSession,

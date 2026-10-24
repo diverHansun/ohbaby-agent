@@ -29,6 +29,8 @@ export interface GlobalCatalogStore {
     defaultWorkspace: string | null,
   ): void;
   failProjects(): void;
+  /** Removes a confirmed hidden project and its cached group rows together. */
+  removeProject(directory: string): void;
   /** Replaces the whole loaded range with a fresh, complete read. */
   replaceSessions(
     sessions: readonly UiGlobalSession[],
@@ -74,6 +76,16 @@ export function createGlobalCatalogStore(): GlobalCatalogStore {
     },
     setProjects: (projects, defaultWorkspace): void => {
       publish({ projects, defaultWorkspace, projectsStatus: "ready" });
+    },
+    removeProject: (directory): void => {
+      publish({
+        projects: snapshot.projects.filter(
+          (project) => project.directory !== directory,
+        ),
+        sessions: snapshot.sessions.filter(
+          (session) => session.projectDirectory !== directory,
+        ),
+      });
     },
     failProjects: (): void => {
       publish({ projectsStatus: "error" });

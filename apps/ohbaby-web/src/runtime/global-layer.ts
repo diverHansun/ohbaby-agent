@@ -1,4 +1,4 @@
-import type { UiGlobalSession } from "ohbaby-sdk";
+import type { UiGlobalSession, UiSessionSearchPage } from "ohbaby-sdk";
 import { GlobalSessionsClient } from "../api/daemon/global-sessions.js";
 import {
   createDaemonHttpClient,
@@ -51,8 +51,10 @@ export class GlobalLayer {
 
   /** Reads the project list; throws so startup can detect a missing control plane. */
   async refreshProjects(): Promise<void> {
+    const writes = this.writes;
     try {
       const response = await this.http.listWorkspaceScopes();
+      if (writes !== this.writes) return;
       this.catalog.setProjects(
         response.scopes,
         response.defaultWorkspace?.directory ?? null,
@@ -103,10 +105,17 @@ export class GlobalLayer {
           cursor !== undefined && pages < MAX_PAGES_PER_LOAD;
           pages++
         ) {
+          const writes = this.writes;
           const page = await this.sessions.listSessions({
             cursor,
             limit: PAGE_SIZE,
           });
+          // A page read before a row change must not resurrect hidden or
+          // archived rows. Keep the cursor so a failed refresh can be retried.
+          if (writes !== this.writes || this.writesInFlight > 0) {
+            void this.refresh();
+            return;
+          }
           this.catalog.appendSessions(page.sessions, page.nextCursor);
           cursor = page.nextCursor;
           if (enough(this.catalog.getSnapshot().sessions)) break;
@@ -145,6 +154,34 @@ export class GlobalLayer {
 
   async hideScope(directory: string): Promise<void> {
     await this.http.hideWorkspace(directory);
+    this.noteWrite();
+    this.catalog.removeProject(directory);
+  }
+
+  async moveSession(
+    sessionId: string,
+    projectDirectory: string | null,
+  ): Promise<void> {
+    const settle = this.beginWrite();
+    try {
+      const session = await this.sessions.moveSession(
+        sessionId,
+        projectDirectory,
+      );
+      this.catalog.upsertSession(session);
+    } finally {
+      settle();
+      void this.refresh();
+    }
+  }
+
+  searchSessions(input: {
+    query: string;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<UiSessionSearchPage> {
+    return this.sessions.searchSessions(input);
   }
 
   getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse> {

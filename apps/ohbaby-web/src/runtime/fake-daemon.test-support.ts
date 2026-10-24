@@ -54,6 +54,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
     { directory: string; selected: string | null; generation: number }
   >();
   let created = 0;
+  const hidden = new Set<string>();
   const owner = (session: WorldSession): string =>
     session.pendingWorkingDirectory ?? session.workingDirectory;
   const global = (session: WorldSession): UiGlobalSession => ({
@@ -130,17 +131,22 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
         return Response.json({
           ok: true,
           defaultWorkspace: { directory: DEFAULT },
-          scopes: ["/a", "/b"].map((value, position) => ({
-            available: true,
-            directory: value,
-            lastOpenedAt: 0,
-            loaded: false,
-            position,
-          })),
+          scopes: ["/a", "/b"]
+            .filter((value) => !hidden.has(value))
+            .map((value, position) => ({
+              available: true,
+              directory: value,
+              lastOpenedAt: 0,
+              loaded: false,
+              position,
+            })),
         });
       if (path === "/v1/sessions" && request.method === "GET") {
         const active = [...sessions.values()]
-          .filter((session) => !session.archived)
+          .filter(
+            (session) =>
+              !session.archived && !hidden.has(session.projectDirectory ?? ""),
+          )
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         const offset = Number(url.searchParams.get("cursor") ?? "0");
         const limit = Number(url.searchParams.get("limit") ?? "100");
@@ -157,6 +163,34 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
             ? { nextCursor: String(offset + limit) }
             : {}),
         });
+      }
+      if (path === "/v1/scopes/hide") {
+        hidden.add((body as { directory: string }).directory);
+        return Response.json({ ok: true });
+      }
+      if (path === "/v1/sessions/search") {
+        const query = url.searchParams.get("q") ?? "";
+        return Response.json({
+          ok: true,
+          results: [...sessions.values()]
+            .filter((value) => value.title.includes(query))
+            .map((value) => ({
+              session: global(value),
+              matchType: "title",
+              snippet: value.title,
+            })),
+        });
+      }
+      const move = /^\/v1\/sessions\/([^/]+)\/project$/.exec(path);
+      if (move?.[1]) {
+        const value = sessions.get(decodeURIComponent(move[1]));
+        if (!value) throw new Error("Missing session");
+        const project = (body as { projectDirectory: string | null })
+          .projectDirectory;
+        value.projectDirectory = project;
+        if (project === null) delete value.pendingWorkingDirectory;
+        else value.pendingWorkingDirectory = project;
+        return Response.json({ ok: true, session: global(value) });
       }
       if (directory && daemon.unavailable.has(directory))
         return Response.json(

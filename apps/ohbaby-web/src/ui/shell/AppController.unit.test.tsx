@@ -238,9 +238,10 @@ describe("AppController new-chat draft", () => {
     expect(openDraft).not.toHaveBeenCalled();
   });
 
-  it("shows no project picker once a session is open", () => {
+  it("shows no project picker once a session is open", async () => {
     const runtime = createMockRuntime("running");
     const container = mount(runtime);
+    await settle();
     expect(container.querySelector(".ohb-project-picker")).toBeNull();
   });
 
@@ -254,7 +255,7 @@ describe("AppController new-chat draft", () => {
 });
 
 describe("AppController on a narrow window", () => {
-  it("closes the sidebar drawer after a session is chosen", () => {
+  it("closes the sidebar drawer after a session is chosen", async () => {
     vi.stubGlobal(
       "matchMedia",
       (query: string): Partial<MediaQueryList> => ({
@@ -279,6 +280,7 @@ describe("AppController on a narrow window", () => {
       button(container, "Select Refactor the session sidebar").click();
     });
     expect(shell()?.classList.contains("is-sidebar-open")).toBe(false);
+    await settle();
   });
 });
 
