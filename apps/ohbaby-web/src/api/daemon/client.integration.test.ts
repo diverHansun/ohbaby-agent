@@ -297,49 +297,6 @@ describe("ohbaby-web daemon client", () => {
           }),
         );
       }
-      if (url.endsWith("/v1/model/context-window-probe")) {
-        return Promise.resolve(
-          Response.json({
-            ok: true,
-            probe: {
-              contextWindowSource: "default",
-              contextWindowTokens: 128_000,
-            },
-          }),
-        );
-      }
-      if (url.endsWith("/v1/model") && init.method === "POST") {
-        return Promise.resolve(
-          Response.json({
-            model: {
-              apiKeyEnv: "ZHIPU_API_KEY",
-              baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-              contextWindowSource: "default",
-              contextWindowTokens: 128_000,
-              envPath: ".env",
-              interfaceProvider: "openai-compatible",
-              model: "glm-4.7",
-              modelJsonPath: "model.json",
-              provider: "zhipu",
-              saved: true,
-            },
-            ok: true,
-          }),
-        );
-      }
-      if (url.endsWith("/v1/settings/search-api-key")) {
-        return Promise.resolve(
-          Response.json({
-            ok: true,
-            search: {
-              apiKeyEnv: "TAVILY_API_KEY",
-              envPath: ".env",
-              provider: "tavily",
-              searchJsonPath: "search.json",
-            },
-          }),
-        );
-      }
       if (url.endsWith("/v1/sessions/session_1/context-window")) {
         return Promise.resolve(
           Response.json({
@@ -634,34 +591,26 @@ describe("ohbaby-web daemon client", () => {
       model: "glm-4.7",
       provider: "zhipu",
     });
-    await expect(
-      client.probeModelContextWindow({
-        apiKeyEnv: "ZHIPU_API_KEY",
-        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-        interfaceProvider: "openai-compatible",
-        model: "glm-4.7",
-        provider: "zhipu",
-      }),
-    ).resolves.toMatchObject({ contextWindowTokens: 128_000 });
+    // Model and search setup moved to the settings dialog (D18).
     await expect(
       client.connectModel({
-        apiKeyEnv: "ZHIPU_API_KEY",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
         interfaceProvider: "openai-compatible",
         model: "glm-4.7",
         provider: "zhipu",
       }),
-    ).resolves.toMatchObject({ model: "glm-4.7" });
-    expect(runtime.store.getSnapshot().currentModel).toMatchObject({
-      model: "glm-4.7",
-      provider: "zhipu",
-    });
+    ).rejects.toThrow("Settings");
     await expect(
-      client.setSearchApiKey({
-        apiKeyEnv: "TAVILY_API_KEY",
-        provider: "tavily",
-      }),
-    ).resolves.toMatchObject({ provider: "tavily" });
+      client.setSearchApiKey({ provider: "tavily" }),
+    ).rejects.toThrow("Settings");
+    expect(
+      requests.some(
+        (request) =>
+          request.url.endsWith("/v1/settings/search-api-key") ||
+          request.url.endsWith("/v1/model/context-window-probe") ||
+          (request.method === "POST" && request.url.endsWith("/v1/model")),
+      ),
+    ).toBe(false);
     await expect(
       client.getContextWindowUsage({ sessionId: "session_1" }),
     ).resolves.toMatchObject({ sessionId: "session_1" });

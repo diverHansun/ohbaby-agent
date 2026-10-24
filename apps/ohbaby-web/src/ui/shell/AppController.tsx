@@ -19,6 +19,8 @@ import type {
   SidebarSessionItem,
 } from "../../store/sidebar-groups.js";
 import type { SessionExportFormat } from "../sidebar/SessionMenu.js";
+import { SettingsDialog } from "../settings/SettingsDialog.js";
+import { useSettingsDialog } from "../settings/useSettingsDialog.js";
 import { DirectoryPickerDialog } from "../workspace/directory-picker/DirectoryPickerDialog.js";
 import { AppShell } from "./AppShell.js";
 import { MainHeader } from "./MainHeader.js";
@@ -59,6 +61,14 @@ export function AppController(props: {
     [runtime],
   );
   const [notices, setNotices] = useState<readonly NoticeItem[]>([]);
+  const settingsDialog = useSettingsDialog(runtime.settings);
+  const { open: openSettings } = settingsDialog;
+  const openModelSettings = useCallback(
+    (fromDraft: boolean): void => {
+      openSettings({ section: "models", fromDraft });
+    },
+    [openSettings],
+  );
   // Where the folder picker was opened: from the draft it also selects the
   // new project; from the sidebar it only registers it (06 §1.1).
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState<
@@ -230,6 +240,9 @@ export function AppController(props: {
           onRetry={() => {
             void runtime.refreshCatalog();
           }}
+          onOpenSettings={(trigger) => {
+            openSettings({ trigger });
+          }}
           onLoadMore={(enough) => runtime.loadMoreSessions(enough)}
         />
       )}
@@ -261,6 +274,7 @@ export function AppController(props: {
             client={client}
             runtime={runtime}
             draftPicker={draftPicker}
+            onOpenModelSettings={openModelSettings}
           />
         ) : (
           <DraftFallback
@@ -283,6 +297,15 @@ export function AppController(props: {
               );
             }}
           />
+          {settingsDialog.state.mounted ? (
+            <SettingsDialog
+              settings={runtime.settings}
+              state={settingsDialog.state}
+              onClose={settingsDialog.close}
+              onSelectSection={settingsDialog.selectSection}
+              onShowNav={settingsDialog.showNav}
+            />
+          ) : null}
           {directoryPickerOpen !== null ? (
             <DirectoryPickerDialog
               directoryPicker={runtime}

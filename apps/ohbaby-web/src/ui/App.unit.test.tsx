@@ -16,6 +16,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OhbabyWebRuntime } from "../runtime/index.js";
 import type { OhbabyWebStore } from "../store/store.js";
+import { createMockSettingsApi } from "../dev/mock-settings.js";
+import { SettingsLayer } from "../runtime/settings-layer.js";
 import { createDraftStore } from "../store/draft.js";
 import { createGlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore } from "../store/store.js";
@@ -2795,7 +2797,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    fake.listCommands.mockResolvedValue(catalog(["status", "connect"]));
+    fake.listCommands.mockResolvedValue(catalog(["status", "goal"]));
     const app = mountApp(fake.runtime);
 
     await setTextareaValue(app.container, "/");
@@ -2805,15 +2807,15 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container.querySelectorAll<HTMLButtonElement>(".ohb-slash-row"),
     );
     const statusRow = rows.find((row) => row.textContent.includes("/status"));
-    const connectRow = rows.find((row) => row.textContent.includes("/connect"));
+    const goalRow = rows.find((row) => row.textContent.includes("/goal"));
     expect(statusRow?.classList.contains("ohb-slash-row-no-args")).toBe(true);
     expect(statusRow?.querySelector(".ohb-slash-args")).not.toBeNull();
     expect(
       statusRow?.querySelector(".ohb-slash-description")?.textContent,
     ).toBe("Show backend status");
-    expect(connectRow?.classList.contains("ohb-slash-row-no-args")).toBe(false);
-    expect(connectRow?.querySelector(".ohb-slash-args")?.textContent).toBe(
-      "[--provider <name>] [--model <name>]",
+    expect(goalRow?.classList.contains("ohb-slash-row-no-args")).toBe(false);
+    expect(goalRow?.querySelector(".ohb-slash-args")?.textContent).toBe(
+      "[<objective> | status]",
     );
   });
 
@@ -3513,353 +3515,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     expect(app.container.textContent).toContain("resume this session");
     expect(fake.selectSession).toHaveBeenCalledWith("session_1");
-  });
-
-  it("opens the structured connect overlay from the slash palette", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect", "status"]));
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    await setInputValue(app.container, "Provider", "zhipu");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://open.bigmodel.cn/api/paas/v4",
-    );
-    await setInputValue(app.container, "API key env", "ZHIPU_API_KEY");
-    await setInputValue(app.container, "Model", "glm-4.7");
-    await clickButton(app.container, "Save model");
-
-    expect(fake.connectModel).toHaveBeenCalledWith({
-      apiKeyEnv: "ZHIPU_API_KEY",
-      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-      interfaceProvider: "openai-compatible",
-      model: "glm-4.7",
-      provider: "zhipu",
-    });
-    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
-  });
-
-  it("warns about a duplicate Chat request path before saving without blocking the save", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await setInputValue(app.container, "Provider", "fixture");
-    await setInputValue(app.container, "Model", "model");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://fixture.test/v1/chat/completions",
-    );
-    expect(app.container.textContent).toMatch(/request path/i);
-    await clickButton(app.container, "Save model");
-    expect(fake.connectModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        baseUrl: "https://fixture.test/v1/chat/completions",
-        interfaceProvider: "openai-compatible",
-      }),
-    );
-  });
-
-  it("uses provider-neutral guidance for an empty model configuration", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    expect(
-      Array.from(
-        app.container.querySelectorAll(".ohb-structured-grid input"),
-      ).map((input) => input.getAttribute("placeholder")),
-    ).toEqual([
-      "Enter provider name",
-      "Enter model identifier",
-      "Enter provider API base URL",
-      "Enter API key environment variable name",
-      "Optional; saved to .env when provided",
-      "Optional; auto-detected when blank",
-      "Optional; uses provider default when blank",
-    ]);
-    expect(app.container.textContent).not.toMatch(/zhipu|glm-4\.7|bigmodel/i);
-  });
-
-  it("shows backend connect warnings after saving from the structured overlay", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    fake.connectModel.mockResolvedValueOnce({
-      apiKeyEnv: "ZHIPU_API_KEY",
-      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-      contextWindowSource: "default",
-      contextWindowTokens: 128_000,
-      envPath: ".env",
-      interfaceProvider: "openai-compatible",
-      model: "glm-4.7",
-      modelJsonPath: "model.json",
-      provider: "zhipu",
-      saved: true,
-      warning:
-        "API key env ZHIPU_API_KEY is configured but no value was found.",
-    });
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    await setInputValue(app.container, "Provider", "zhipu");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://open.bigmodel.cn/api/paas/v4",
-    );
-    await setInputValue(app.container, "API key env", "ZHIPU_API_KEY");
-    await setInputValue(app.container, "Model", "glm-4.7");
-    await clickButton(app.container, "Save model");
-
-    await waitFor(() =>
-      app.container.textContent.includes(
-        "API key env ZHIPU_API_KEY is configured but no value was found.",
-      ),
-    );
-    expect(app.container.textContent).toContain("warning");
-  });
-
-  it("infers the initial missing protocol once and preserves it after URL changes", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await setInputValue(app.container, "Provider", "fixture");
-    await setInputValue(app.container, "Model", "model");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://fixture.test/anthropic",
-    );
-    const input = Array.from(app.container.querySelectorAll("input")).find(
-      (candidate) => candidate.value === "https://fixture.test/anthropic",
-    );
-    if (!input) throw new Error("Base URL input missing");
-    await act(async () => {
-      input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-      await Promise.resolve();
-    });
-    await setInputValue(app.container, "Base URL", "https://fixture.test/v1");
-    await clickButton(app.container, "Save model");
-    expect(fake.connectModel).toHaveBeenCalledWith(
-      expect.objectContaining({ interfaceProvider: "anthropic" }),
-    );
-  });
-
-  it("prefills the saved Responses protocol and preserves it when changing URL and key", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    // eslint-disable-next-line @typescript-eslint/unbound-method -- This client method is a Vitest mock.
-    vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
-      provider: "fixture",
-      model: "model",
-      baseUrl: "https://fixture.test/v1",
-      interfaceProvider: "openai-responses",
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector('select[aria-label="Protocol"]')),
-    );
-    expect(
-      app.container.querySelector<HTMLSelectElement>(
-        'select[aria-label="Protocol"]',
-      )?.value,
-    ).toBe("openai-responses");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://fixture.test/anthropic",
-    );
-    await setInputValue(app.container, "API key env", "FIXTURE_KEY");
-    await clickButton(app.container, "Save model");
-    expect(fake.connectModel).toHaveBeenCalledWith(
-      expect.objectContaining({ interfaceProvider: "openai-responses" }),
-    );
-  });
-
-  it("keeps dirty protocol and fields when current-model initialization resolves late", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    const current =
-      deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
-    // eslint-disable-next-line @typescript-eslint/unbound-method -- This client method is a Vitest mock.
-    vi.mocked(fake.client.getCurrentModel).mockReturnValue(current.promise);
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await setInputValue(app.container, "Provider", "draft");
-    await setInputValue(app.container, "Model", "draft-model");
-    await setInputValue(app.container, "Base URL", "https://draft.test/v1");
-    await act(async () => {
-      current.resolve({
-        provider: "saved",
-        model: "saved-model",
-        baseUrl: "https://saved.test/anthropic",
-        interfaceProvider: "anthropic",
-      });
-      await Promise.resolve();
-    });
-    await clickButton(app.container, "Save model");
-    expect(fake.connectModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "draft",
-        model: "draft-model",
-        interfaceProvider: "openai-compatible",
-      }),
-    );
-  });
-
-  it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
-    "preserves selected %s protocol while editing connection fields",
-    async (protocol) => {
-      const fake = createFakeRuntime({
-        snapshot: snapshotWithStatus({ kind: "idle" }),
-      });
-      fake.listCommands.mockResolvedValue(catalog(["connect"]));
-      const app = mountApp(fake.runtime);
-      await setTextareaValue(app.container, "/");
-      await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-      await pressTextareaKey(app.container, "Enter");
-      await waitFor(() =>
-        Boolean(app.container.querySelector(".ohb-structured-overlay")),
-      );
-      const select = app.container.querySelector<HTMLSelectElement>(
-        'select[aria-label="Protocol"]',
-      );
-      if (!select) throw new Error("Protocol select was not rendered");
-      expect(Array.from(select.options).map((option) => option.value)).toEqual([
-        "openai-compatible",
-        "openai-responses",
-        "anthropic",
-      ]);
-      await act(async () => {
-        select.value = protocol;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-        await Promise.resolve();
-      });
-      await setInputValue(app.container, "Provider", "fixture");
-      await setInputValue(app.container, "Model", "fixture-model");
-      await setInputValue(
-        app.container,
-        "Base URL",
-        "https://fixture.test/anthropic",
-      );
-      await setInputValue(app.container, "API key env", "FIXTURE_KEY");
-      await setInputValue(app.container, "Context window", "8192");
-      await setInputValue(app.container, "Max output", "1024");
-      await clickButton(app.container, "Save model");
-      expect(fake.connectModel).toHaveBeenCalledWith(
-        expect.objectContaining({ interfaceProvider: protocol }),
-      );
-    },
-  );
-
-  it("submits structured connect overlay without API key env", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    await setInputValue(app.container, "Provider", "lmstudio");
-    await setInputValue(app.container, "Base URL", "http://127.0.0.1:1234/v1");
-    await setInputValue(app.container, "Model", "local-model");
-    await clickButton(app.container, "Save model");
-
-    expect(fake.connectModel).toHaveBeenCalledWith({
-      baseUrl: "http://127.0.0.1:1234/v1",
-      interfaceProvider: "openai-compatible",
-      model: "local-model",
-      provider: "lmstudio",
-    });
-  });
-
-  it("opens the structured search overlay from the slash palette", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect-search"]));
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() =>
-      slashPaletteText(app.container).includes("/connect-search"),
-    );
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    await setInputValue(app.container, "API key env", "TAVILY_API_KEY");
-    await setInputValue(app.container, "API key", "tvly-test");
-    await clickButton(app.container, "Save search key");
-
-    expect(fake.setSearchApiKey).toHaveBeenCalledWith({
-      apiKey: "tvly-test",
-      apiKeyEnv: "TAVILY_API_KEY",
-      provider: "tavily",
-    });
-    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
   it("opens the structured compact overlay from the slash palette", async () => {
@@ -4939,6 +4594,10 @@ function createFakeRuntime(input: {
       loadMoreSessions: () => Promise.resolve(),
       catalog: globalCatalog,
       draft: createDraftStore(),
+      settings: new SettingsLayer(
+        createMockSettingsApi("settings", () => Promise.resolve()),
+        () => "/repo-a",
+      ),
       submitPrompt: (text, options) =>
         client.submitPromptAccepted(text, options),
       selectSession,
@@ -5092,12 +4751,7 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
     commands: ids.map((id) => ({
       ...(id === "goal"
         ? { acceptsArguments: true, argsHint: "[<objective> | status]" }
-        : id === "connect"
-          ? {
-              acceptsArguments: true,
-              argsHint: "[--provider <name>] [--model <name>]",
-            }
-          : {}),
+        : {}),
       action: catalogAction(id),
       argumentMode: catalogArgumentMode(id),
       category: catalogCategory(id),
@@ -5106,13 +4760,9 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
           ? "Use Hansun knowledge base"
           : id === "skills"
             ? "List available skills"
-            : id === "connect"
-              ? "Connect model"
-              : id === "connect-search"
-                ? "Connect search"
-                : id === "compact"
-                  ? "Compact session"
-                  : "Show backend status",
+            : id === "compact"
+              ? "Compact session"
+              : "Show backend status",
       executionKind:
         id === "skill.hansun-db"
           ? "skill"
@@ -5128,14 +4778,7 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
   };
 }
 
-type CatalogId =
-  | "compact"
-  | "connect"
-  | "connect-search"
-  | "goal"
-  | "skill.hansun-db"
-  | "skills"
-  | "status";
+type CatalogId = "compact" | "goal" | "skill.hansun-db" | "skills" | "status";
 
 function catalogAction(
   id: CatalogId,
@@ -5143,10 +4786,6 @@ function catalogAction(
   switch (id) {
     case "compact":
       return "compactSession";
-    case "connect":
-      return "connectModel";
-    case "connect-search":
-      return "connectSearch";
     case "goal":
       return "openGoalPanel";
     case "skill.hansun-db":
@@ -5173,9 +4812,6 @@ function catalogCategory(id: CatalogId): string {
     case "compact":
     case "goal":
       return "session";
-    case "connect":
-    case "connect-search":
-      return "setup";
     case "skill.hansun-db":
     case "skills":
       return "skill";
@@ -5475,36 +5111,6 @@ async function clickButton(
   });
 }
 
-async function setInputValue(
-  container: ParentNode,
-  labelText: string,
-  value: string,
-): Promise<void> {
-  const labels = Array.from(container.querySelectorAll("label"));
-  const label = labels.find(
-    (candidate) => candidate.querySelector("span")?.textContent === labelText,
-  );
-  const input = label?.querySelector("input");
-  if (!(input instanceof HTMLInputElement)) {
-    throw new Error(`input not found: ${labelText}`);
-  }
-  const descriptor = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    "value",
-  );
-  await act(async () => {
-    if (descriptor?.set) {
-      // eslint-disable-next-line @typescript-eslint/unbound-method -- React controlled inputs need the native input setter in jsdom tests.
-      const setValue = descriptor.set;
-      Reflect.apply(setValue, input, [value]);
-    } else {
-      input.value = value;
-    }
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await Promise.resolve();
-  });
-}
-
 function deferred<T>(): {
   readonly promise: Promise<T>;
   readonly resolve: (value: T) => void;
@@ -5704,103 +5310,6 @@ it("keeps the reasoning selector for an identified model that cannot disable rea
     Array.from(select?.options ?? []).map((option) => option.text),
   ).toEqual(["On"]);
 });
-it("ignores a late probe after a newer edited model probe resolves", async () => {
-  const fake = createFakeRuntime({
-    snapshot: snapshotWithStatus({ kind: "idle" }),
-  });
-  fake.listCommands.mockResolvedValue(catalog(["connect"]));
-  const first =
-    deferred<Awaited<ReturnType<UiBackendClient["probeModelContextWindow"]>>>();
-  vi.mocked(fake.client.probeModelContextWindow)
-    .mockReturnValueOnce(first.promise)
-    .mockResolvedValueOnce({
-      contextWindowTokens: 222222,
-      contextWindowSource: "detected",
-    });
-  const app = mountApp(fake.runtime);
-  await setTextareaValue(app.container, "/");
-  await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-  await pressTextareaKey(app.container, "Enter");
-  await waitFor(() =>
-    Boolean(app.container.querySelector(".ohb-structured-overlay")),
-  );
-  await setInputValue(app.container, "Provider", "p");
-  await setInputValue(app.container, "Model", "a");
-  await setInputValue(app.container, "Base URL", "https://p.test/v1");
-  await clickButton(app.container, "Probe context");
-  await setInputValue(app.container, "Model", "b");
-  await clickButton(app.container, "Probe context");
-  await act(async () => {
-    first.resolve({
-      contextWindowTokens: 111111,
-      contextWindowSource: "detected",
-    });
-    await Promise.resolve();
-  });
-  expect(app.container.textContent).not.toContain("111");
-});
-
-it.each(["late initialization", "draft edit during save"])(
-  "keeps the saved headline after %s",
-  async (scenario) => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    const initial =
-      deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
-    const saved =
-      deferred<Awaited<ReturnType<UiBackendClient["connectModel"]>>>();
-    if (scenario === "late initialization")
-      vi.mocked(fake.client.getCurrentModel).mockReturnValue(initial.promise);
-    fake.connectModel.mockReturnValue(saved.promise);
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await setInputValue(app.container, "Provider", "new-provider");
-    await setInputValue(app.container, "Model", "new-model");
-    await setInputValue(app.container, "Base URL", "https://new.test/v1");
-    await clickButton(app.container, "Save model");
-    if (scenario === "draft edit during save")
-      await setInputValue(app.container, "Model", "unsaved-draft");
-    await act(async () => {
-      saved.resolve({
-        provider: "new-provider",
-        model: "new-model",
-        baseUrl: "https://new.test/v1",
-        interfaceProvider: "openai-compatible",
-        saved: true,
-        modelJsonPath: "model.json",
-        envPath: ".env",
-        contextWindowSource: "default",
-        contextWindowTokens: 128000,
-      });
-      await Promise.resolve();
-    });
-    await act(async () => {
-      initial.resolve({
-        provider: "old-provider",
-        model: "old-model",
-        baseUrl: "https://old.test/v1",
-        interfaceProvider: "openai-compatible",
-      });
-      await Promise.resolve();
-    });
-    expect(app.container.textContent).toContain(
-      "Current model: new-provider · new-model",
-    );
-    if (scenario === "draft edit during save") {
-      await clickButton(app.container, "Save model");
-      expect(fake.connectModel).toHaveBeenLastCalledWith(
-        expect.objectContaining({ model: "unsaved-draft" }),
-      );
-    }
-  },
-);
 it("clears old workspace reasoning while the new client metadata is pending", async () => {
   const first = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),

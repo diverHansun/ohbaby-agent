@@ -347,3 +347,194 @@
   margin: 0 auto 8px;
   width: 100%;
 }
+
+/* Buttons for dialogs and forms: one solid primary action, the rest are
+   borderless text buttons (03 §4.7). */
+.ohb-primary-button {
+  align-items: center;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--accent-contrast);
+  display: inline-flex;
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 6px;
+  height: 32px;
+  justify-content: center;
+  padding: 0 14px;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.ohb-primary-button:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+.ohb-primary-button:disabled {
+  opacity: 0.32;
+}
+
+.ohb-text-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  display: inline-flex;
+  flex: none;
+  font-size: 13px;
+  height: 28px;
+  padding: 0 8px;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+
+.ohb-text-button:not(:disabled):hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-text-button.is-danger {
+  color: var(--danger-ink);
+}
+
+.ohb-text-button.is-danger:not(:disabled):hover {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+}
+
+.ohb-menu [role="menuitem"].is-danger {
+  color: var(--danger-ink);
+}
+
+/* ConfirmDialog: above menus and the settings dialog (03 §3.4). */
+.ohb-confirm-layer {
+  align-items: center;
+  animation: ohb-fade var(--duration-fast) var(--ease);
+  background: var(--bg-scrim);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 170;
+}
+
+.ohb-confirm-dialog {
+  animation: ohb-pop var(--duration-fast) var(--ease);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-modal);
+  max-width: 100%;
+  padding: 20px 20px 16px;
+  width: 400px;
+}
+
+.ohb-confirm-dialog h2 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.ohb-confirm-dialog p {
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+
+.ohb-confirm-dialog .ohb-confirm-error {
+  color: var(--danger-ink);
+}
+
+.ohb-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.ohb-confirm-actions .ohb-text-button {
+  height: 32px;
+  padding: 0 12px;
+}
+
+/* SettingsRow: label | value or control, a hairline below. */
+.ohb-settings-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  min-height: 44px;
+  position: relative;
+}
+
+.ohb-settings-row-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  display: flex;
+  flex: 1;
+  gap: 12px;
+  min-height: 44px;
+  min-width: 0;
+  padding: 8px 0;
+  text-align: left;
+}
+
+.ohb-settings-row.is-clickable .ohb-settings-row-main {
+  border-radius: var(--radius-sm);
+  margin: 0 -8px;
+  padding: 8px;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.ohb-settings-row.is-clickable .ohb-settings-row-main:hover {
+  background: var(--bg-hover);
+}
+
+.ohb-settings-row-label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ohb-settings-row-title {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-settings-row-description {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ohb-settings-row-value {
+  align-items: center;
+  color: var(--text-dim);
+  display: inline-flex;
+  flex: none;
+  font-size: 13px;
+  gap: 6px;
+}
+
+.ohb-settings-row.is-muted .ohb-settings-row-title {
+  color: var(--text-dim);
+}
+
+.ohb-settings-row-control {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}

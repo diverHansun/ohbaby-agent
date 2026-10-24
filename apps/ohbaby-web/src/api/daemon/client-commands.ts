@@ -153,33 +153,19 @@ export class ClientCommands {
     return response.model;
   }
 
-  async probeModelContextWindow(
-    input: Parameters<UiBackendClient["probeModelContextWindow"]>[0],
-  ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
-    const response = await this.sync.http.probeModelContextWindow(input);
-    return response.probe;
+  /** Model and search setup are settings-dialog writes on the Web (D18). */
+  probeModelContextWindow(): ReturnType<
+    UiBackendClient["probeModelContextWindow"]
+  > {
+    return Promise.reject(settingsOnly());
   }
 
-  async connectModel(
-    input: Parameters<UiBackendClient["connectModel"]>[0],
-  ): ReturnType<UiBackendClient["connectModel"]> {
-    const scopeTicket = this.sync.scopeTicket;
-    const ticket = this.sync.nextModelTicket();
-    const response = await this.sync.http.connectModel(input);
-    if (
-      !this.sync.closed &&
-      scopeTicket === this.sync.scopeTicket &&
-      ticket === this.sync.modelTicket
-    )
-      this.sync.store.setCurrentModel(response.model);
-    return response.model;
+  connectModel(): ReturnType<UiBackendClient["connectModel"]> {
+    return Promise.reject(settingsOnly());
   }
 
-  async setSearchApiKey(
-    input: Parameters<UiBackendClient["setSearchApiKey"]>[0],
-  ): ReturnType<UiBackendClient["setSearchApiKey"]> {
-    const response = await this.sync.http.setSearchApiKey(input);
-    return response.search;
+  setSearchApiKey(): ReturnType<UiBackendClient["setSearchApiKey"]> {
+    return Promise.reject(settingsOnly());
   }
 
   async getContextWindowUsage(
@@ -229,4 +215,8 @@ export class ClientCommands {
     this.sync.sessionSync.resync();
     void this.sync.refreshIndex();
   }
+}
+
+function settingsOnly(): Error {
+  return new Error("Configure models and web search in Settings.");
 }

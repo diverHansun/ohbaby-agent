@@ -10,6 +10,7 @@ import {
   PanelLeft,
   SquarePen,
   Search,
+  Settings,
 } from "lucide-react";
 import {
   type ReactElement,
@@ -35,6 +36,7 @@ import {
 } from "../../store/sidebar-groups.js";
 import { SidebarSearch } from "../search/SidebarSearch.js";
 import { IconButton } from "../shared/IconButton.js";
+import { useDelayed } from "../shared/use-delayed.js";
 import { Wordmark } from "../shared/Wordmark.js";
 import {
   readCollapsedProjects,
@@ -81,6 +83,7 @@ export interface SidebarProps {
   readonly onHideProject: (directory: string) => void;
   readonly onOpenFolder: () => void;
   readonly onRetry: () => void;
+  readonly onOpenSettings: (trigger: HTMLElement) => void;
   readonly onLoadMore: (
     enough: (sessions: readonly UiGlobalSession[]) => boolean,
   ) => Promise<void>;
@@ -88,7 +91,7 @@ export interface SidebarProps {
 
 /**
  * Wordmark, New chat and every chat across projects (03 §4.4): Pinned, then
- * projects, then No project. Each group shows 6 rows (Pinned 8) and Show more
+ * projects, then No project; Settings sits at the bottom. Each group shows 6 rows (Pinned 8) and Show more
  * adds 20, paging the global list when the loaded rows are not enough.
  */
 export function Sidebar(props: SidebarProps): ReactElement {
@@ -365,6 +368,19 @@ export function Sidebar(props: SidebarProps): ReactElement {
           ) : null}
         </SidebarSearch>
       </div>
+      <div className="ohb-sidebar-footer">
+        <button
+          type="button"
+          className="ohb-sidebar-nav-item ohb-sidebar-settings"
+          aria-haspopup="dialog"
+          onClick={(event) => {
+            props.onOpenSettings(event.currentTarget);
+          }}
+        >
+          <Settings aria-hidden="true" size={15} />
+          <span>Settings</span>
+        </button>
+      </div>
     </aside>
   );
 }
@@ -411,22 +427,4 @@ function useMinuteClock(): number {
     };
   }, []);
   return now;
-}
-
-/** True once `flag` has stayed true for `delay` ms. */
-function useDelayed(flag: boolean, delay: number): boolean {
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    if (!flag) {
-      setShown(false);
-      return;
-    }
-    const timer = setTimeout(() => {
-      setShown(true);
-    }, delay);
-    return (): void => {
-      clearTimeout(timer);
-    };
-  }, [flag, delay]);
-  return shown;
 }

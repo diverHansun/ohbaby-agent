@@ -343,21 +343,11 @@ function compareSlashCommands(
 }
 
 function categoryLabelForCommand(command: UiWebCommandSpec): string {
-  return isSetupOverlay(command)
-    ? "Setup"
-    : (CATEGORY_LABELS[command.category] ?? "Command");
+  return CATEGORY_LABELS[command.category] ?? "Command";
 }
 
 function categoryOrderForCommand(command: UiWebCommandSpec): number {
-  return isSetupOverlay(command)
-    ? CATEGORY_ORDER.setup
-    : (CATEGORY_ORDER[command.category] ?? 100);
-}
-
-function isSetupOverlay(command: UiWebCommandSpec): boolean {
-  return (
-    command.action === "connectModel" || command.action === "connectSearch"
-  );
+  return CATEGORY_ORDER[command.category] ?? 100;
 }
 
 function formatContextWindow(

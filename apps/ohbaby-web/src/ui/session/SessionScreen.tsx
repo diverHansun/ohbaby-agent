@@ -30,11 +30,14 @@ export function SessionScreen({
   client,
   runtime,
   draftPicker,
+  onOpenModelSettings,
 }: {
   readonly runtime: OhbabyWebRuntime;
   readonly client: UiBackendClient;
   /** Project picker for a new-chat draft; hidden once a session is bound. */
   readonly draftPicker?: ReactNode;
+  /** Opens Settings › Models; `fromDraft` when a draft send found no model. */
+  readonly onOpenModelSettings: (fromDraft: boolean) => void;
 }): ReactElement {
   const {
     storeSnapshot,
@@ -106,24 +109,23 @@ export function SessionScreen({
       clearActionError,
       setActionError,
     });
-  // Without a configured model, sending opens the model setup instead of failing (D16).
+  // Without a configured model, sending opens Settings › Models instead of
+  // failing (D16). A failed read of the model is not "missing".
   const modelMissing =
     storeSnapshot.currentModelLoaded && storeSnapshot.currentModel === null;
-  const { openOverlayForSlashText, prefillComposer } = overlays;
-  const openModelSetup = useCallback((): void => {
-    void openOverlayForSlashText("/connect");
-  }, [openOverlayForSlashText]);
+  const { prefillComposer } = overlays;
+  const inDraft = view.composer.activeSessionId === undefined;
   const submit = useCallback(
     async (
       ...args: Parameters<typeof submitText>
     ): ReturnType<typeof submitText> => {
       if (modelMissing && !args[0].startsWith("/")) {
-        openModelSetup();
+        onOpenModelSettings(inDraft);
         return false;
       }
       return submitText(...args);
     },
-    [modelMissing, openModelSetup, submitText],
+    [modelMissing, onOpenModelSettings, inDraft, submitText],
   );
 
   // Stable identity: the slash palette refetches its catalog when this changes.
@@ -250,7 +252,9 @@ export function SessionScreen({
               approvalDialogVisible,
           }}
           modelLabel={modelMissing ? "Choose model" : view.header.modelLabel}
-          onOpenModel={openModelSetup}
+          onOpenModel={() => {
+            onOpenModelSettings(false);
+          }}
           activeGoal={view.activeGoal}
           onExecuteGoalCommand={(input) => runtime.executeSlashCommand(input)}
           onOpenGoalPanel={overlays.openGoalPanel}

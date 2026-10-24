@@ -600,6 +600,19 @@ export class ClientSync {
         }
         if (event.event.type === "model.invalidated") {
           void this.refreshModel();
+          // Subscribers such as the reasoning control and the settings
+          // cache reread on their own.
+          this.notifyUiEvent(event.event);
+          return;
+        }
+        if (event.event.type === "settings.changed") {
+          this.notifyUiEvent(event.event);
+          if (
+            seqNum !== undefined &&
+            Number.isSafeInteger(seqNum) &&
+            seqNum >= 0
+          )
+            this.events.setLastEventId(seqNum);
           return;
         }
         if (event.event.type === "session.resync-required") {

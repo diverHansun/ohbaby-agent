@@ -96,6 +96,7 @@ function render(overrides: Partial<SidebarProps> = {}): void {
         onHideProject={() => undefined}
         onOpenFolder={() => undefined}
         onRetry={() => undefined}
+        onOpenSettings={() => undefined}
         onLoadMore={loadMore}
         {...overrides}
       />,
@@ -439,7 +440,9 @@ it("moves a running chat only after confirmation and shows a pending spinner", a
   click("Move to project…");
   expect(button("repo(current)").disabled).toBe(true);
   act(() => {
-    const destination = document.querySelector<HTMLButtonElement>('[role="menuitem"][title="/other"]');
+    const destination = document.querySelector<HTMLButtonElement>(
+      '[role="menuitem"][title="/other"]',
+    );
     if (!destination) throw new Error("Missing destination project");
     destination.click();
   });
@@ -474,7 +477,10 @@ it("filters a long project list, unwinds Escape one level at a time and restores
   if (!filter) throw new Error("Missing project filter");
   expect(document.activeElement).toBe(filter);
   act(() => {
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    );
     if (!descriptor?.set) throw new Error("Missing input value setter");
     descriptor.set.call(filter, "project-8");
     filter.dispatchEvent(new Event("input", { bubbles: true }));

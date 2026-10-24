@@ -22,8 +22,10 @@ import { createDraftStore, type DraftStore } from "../store/draft.js";
 import type { GlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore, type OhbabyWebStore } from "../store/store.js";
 import { sessionMovedTarget, waitForSessionReady } from "./session-moved.js";
+import { SettingsClient } from "../api/daemon/settings-client.js";
 import { GlobalLayer } from "./global-layer.js";
 import { InstanceLayer } from "./instance-layer.js";
+import { SettingsLayer } from "./settings-layer.js";
 
 /** A prompt is resent at most twice after `SESSION_MOVED` (three tries in all). */
 const MAX_MOVED_RESENDS = 2;
@@ -38,6 +40,8 @@ export interface OhbabyWebRuntime {
   /** Projects and the global session list; survives switches. */
   readonly catalog: GlobalCatalogStore;
   readonly draft: DraftStore;
+  /** Settings cache, reads and writes; survives switches like the catalog. */
+  readonly settings: SettingsLayer;
   retryPermissions(): void;
   retrySession(): void;
   loadEarlierHistory(): Promise<void>;
@@ -107,6 +111,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   readonly store = createOhbabyWebStore();
   readonly draft = createDraftStore();
   readonly ready: Promise<void>;
+  readonly settings: SettingsLayer;
   private readonly global: GlobalLayer;
   private readonly instance: InstanceLayer;
   private workspaceSnapshot: WorkspaceSnapshot = {
@@ -123,7 +128,12 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   ) {
     this.global = new GlobalLayer(config, fetchImpl);
     this.instance = new InstanceLayer(config, fetchImpl, this.store);
+    this.settings = new SettingsLayer(
+      new SettingsClient(config, fetchImpl),
+      () => this.settingsDirectory(),
+    );
     this.watchCatalogTriggers();
+    this.watchSettingsEvents();
     this.ready = this.initialize();
   }
 
@@ -590,6 +600,48 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       .projects.some(
         (project) => project.directory === directory && !project.available,
       );
+  }
+
+  /**
+   * Instance settings (MCP status, Skills) are read where the user is: the
+   * open chat's request directory, or the draft's directory (06 §3.7).
+   */
+  private settingsDirectory(): string | null {
+    const bound = this.boundSessionId();
+    if (bound === null) return this.draftDirectory();
+    return this.requestDirectory(bound) ?? this.instance.directory;
+  }
+
+  /**
+   * Change events of the connected instance expire settings caches. Agent
+   * edits to config files may send none, so focus rereads visible sections.
+   */
+  private watchSettingsEvents(): void {
+    let client: UiBackendClient | undefined;
+    let unsubscribe: (() => void) | undefined;
+    const follow = (): void => {
+      if (this.instance.client === client) return;
+      unsubscribe?.();
+      client = this.instance.client;
+      unsubscribe = client?.subscribeEvents((event) => {
+        if (event.type === "settings.changed")
+          this.settings.invalidate(event.domains);
+        else if (event.type === "model.invalidated")
+          this.settings.invalidate(["model"]);
+      });
+    };
+    follow();
+    this.cleanups.push(this.instance.subscribe(follow), () => {
+      unsubscribe?.();
+    });
+    if (typeof window === "undefined") return;
+    const onVisible = (): void => {
+      if (document.visibilityState === "visible") this.settings.reactivate();
+    };
+    window.addEventListener("focus", onVisible);
+    this.cleanups.push(() => {
+      window.removeEventListener("focus", onVisible);
+    });
   }
 
   /** Directory a new-chat draft runs in: its project, else the default workspace. */

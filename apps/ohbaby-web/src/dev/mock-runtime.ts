@@ -8,8 +8,11 @@ import type { OhbabyWebRuntime } from "../runtime/index.js";
 import { createDraftStore } from "../store/draft.js";
 import { createGlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore } from "../store/store.js";
+import { SettingsLayer } from "../runtime/settings-layer.js";
+import { selectSettings } from "../store/settings-cache.js";
 import { globalSessionPinsKey } from "../ui/sidebar/session-pins.js";
 import { DEFAULT_WORKSPACE, mockScenarios } from "./mock-scenarios.js";
+import { createMockSettingsApi } from "./mock-settings.js";
 
 const MOCK_PAGE = 100;
 
@@ -70,6 +73,41 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   };
 
   const resolved = (): Promise<void> => Promise.resolve();
+  // `&delay=<ms>` slows settings requests so loading states can be seen.
+  const delayMs = Number(
+    new URLSearchParams(location.search).get("delay") ?? 0,
+  );
+  const settings = new SettingsLayer(
+    createMockSettingsApi(
+      name,
+      () => new Promise((resolve) => setTimeout(resolve, delayMs)),
+    ),
+    () => DEFAULT_WORKSPACE,
+  );
+  // Stands in for `model.invalidated`: the instance model follows the default.
+  settings.cache.subscribe(() => {
+    const models = selectSettings(settings.cache.getSnapshot(), "models").data;
+    if (!models) return;
+    const active = models.models.find(
+      (entry) => entry.id === models.active?.id,
+    );
+    if (
+      (active?.model ?? null) ===
+      (store.getSnapshot().currentModel?.model ?? null)
+    )
+      return;
+    store.setCurrentModel(
+      active
+        ? {
+            provider: active.provider,
+            model: active.model,
+            baseUrl: active.baseUrl ?? "",
+            contextWindowTokens: active.contextWindowTokens,
+            interfaceProvider: active.interfaceProvider ?? "openai-compatible",
+          }
+        : null,
+    );
+  });
   const client = new Proxy<Record<string, unknown>>(
     {},
     {
@@ -96,6 +134,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     store,
     catalog,
     draft: createDraftStore(),
+    settings,
     retryPermissions: () => undefined,
     retrySession: () => undefined,
     loadEarlierHistory: resolved,

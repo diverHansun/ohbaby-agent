@@ -4,10 +4,6 @@ import type { ReactElement } from "react";
 import { useEffect, useRef } from "react";
 import { CompactOverlayBody } from "./CompactOverlay.js";
 import {
-  ConnectModelOverlayBody,
-  ConnectSearchOverlayBody,
-} from "./ConnectOverlay.js";
-import {
   DEFAULT_GOAL_PANEL_INTENT,
   GoalOverlayBody,
   type GoalPanelIntent,
@@ -15,7 +11,7 @@ import {
 } from "./GoalControl.js";
 import { type SlashPaletteItem } from "./slashCommands.js";
 
-type StructuredOverlayKind = "compact" | "connect" | "connect-search" | "goal";
+type StructuredOverlayKind = "compact" | "goal";
 
 export interface StructuredCommandRequest {
   readonly item: SlashPaletteItem;
@@ -29,14 +25,7 @@ export interface StructuredOverlayState {
 }
 
 export function StructuredCommandOverlay(props: {
-  readonly client: Pick<
-    UiBackendClient,
-    | "getCurrentModel"
-    | "probeModelContextWindow"
-    | "connectModel"
-    | "setSearchApiKey"
-    | "getContextWindowUsage"
-  >;
+  readonly client: Pick<UiBackendClient, "getContextWindowUsage">;
   readonly compacting: boolean;
   readonly onClose: () => void;
   readonly onCompact: (sessionId: string) => void;
@@ -93,11 +82,7 @@ export function StructuredCommandOverlay(props: {
             <X size={16} />
           </button>
         </header>
-        {props.overlay.kind === "connect" ? (
-          <ConnectModelOverlayBody client={props.client} />
-        ) : props.overlay.kind === "connect-search" ? (
-          <ConnectSearchOverlayBody client={props.client} />
-        ) : props.overlay.kind === "goal" ? (
+        {props.overlay.kind === "goal" ? (
           <GoalOverlayBody
             intent={props.overlay.goalIntent ?? DEFAULT_GOAL_PANEL_INTENT}
             onExecuteSlashCommand={props.onExecuteSlashCommand}
@@ -126,10 +111,6 @@ export function structuredOverlayKindForAction(
   switch (action) {
     case "compactSession":
       return "compact";
-    case "connectModel":
-      return "connect";
-    case "connectSearch":
-      return "connect-search";
     case "executeCommand":
       return null;
     case "openGoalPanel":
@@ -141,10 +122,6 @@ function structuredOverlayTitle(kind: StructuredOverlayKind): string {
   switch (kind) {
     case "compact":
       return "Compact context";
-    case "connect":
-      return "Connect model";
-    case "connect-search":
-      return "Connect search";
     case "goal":
       return "Goal";
   }

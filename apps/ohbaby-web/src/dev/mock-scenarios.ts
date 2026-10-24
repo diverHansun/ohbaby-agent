@@ -435,6 +435,26 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
       ...typicalSessions(),
     ]),
   }),
+  // Settings data comes from mock-settings.ts under the same names (06 §5).
+  settings: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model,
+    sessions: typicalSessions(),
+    pins: typicalPins,
+  }),
+  "settings-empty": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: { scopes: [], selectedDirectory: DEFAULT_WORKSPACE },
+    model: null,
+    sessions: [],
+  }),
+  "settings-errors": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model,
+    sessions: typicalSessions(),
+  }),
   "no-model": () => ({
     snapshot: { ...base, activeSessionId: null, sessions: history },
     workspace,

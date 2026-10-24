@@ -135,12 +135,10 @@ describe("web slash passthrough helpers", () => {
   });
 
   it("defines structured overlay commands separately from passthrough", () => {
-    expect(WEB_OVERLAY_COMMAND_IDS).toEqual([
-      "connect",
-      "connect-search",
-      "compact",
-      "goal",
-    ]);
+    // Model and search setup live in the Web settings dialog (D18).
+    expect(WEB_OVERLAY_COMMAND_IDS).toEqual(["compact", "goal"]);
+    expect(WEB_OVERLAY_COMMAND_IDS).not.toContain("connect");
+    expect(WEB_OVERLAY_COMMAND_IDS).not.toContain("connect-search");
     expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("connect");
     expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("connect-search");
     expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("compact");
@@ -273,16 +271,6 @@ describe("web slash passthrough helpers", () => {
           action: "openGoalPanel",
           executionKind: "overlay",
           id: "goal",
-        }),
-        expect.objectContaining({
-          action: "connectModel",
-          executionKind: "overlay",
-          id: "connect",
-        }),
-        expect.objectContaining({
-          action: "connectSearch",
-          executionKind: "overlay",
-          id: "connect-search",
         }),
         expect.objectContaining({
           action: "executeCommand",

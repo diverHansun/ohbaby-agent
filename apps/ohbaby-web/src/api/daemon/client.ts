@@ -314,22 +314,18 @@ export class BrowserDaemonClient implements UiBackendClient {
     return this.commands.getCurrentModel();
   }
 
-  probeModelContextWindow(
-    input: Parameters<UiBackendClient["probeModelContextWindow"]>[0],
-  ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
-    return this.commands.probeModelContextWindow(input);
+  probeModelContextWindow(): ReturnType<
+    UiBackendClient["probeModelContextWindow"]
+  > {
+    return this.commands.probeModelContextWindow();
   }
 
-  connectModel(
-    input: Parameters<UiBackendClient["connectModel"]>[0],
-  ): ReturnType<UiBackendClient["connectModel"]> {
-    return this.commands.connectModel(input);
+  connectModel(): ReturnType<UiBackendClient["connectModel"]> {
+    return this.commands.connectModel();
   }
 
-  setSearchApiKey(
-    input: Parameters<UiBackendClient["setSearchApiKey"]>[0],
-  ): ReturnType<UiBackendClient["setSearchApiKey"]> {
-    return this.commands.setSearchApiKey(input);
+  setSearchApiKey(): ReturnType<UiBackendClient["setSearchApiKey"]> {
+    return this.commands.setSearchApiKey();
   }
 
   getContextWindowUsage(

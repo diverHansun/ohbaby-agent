@@ -2112,16 +2112,6 @@ describe("createDaemonServerApp", () => {
               id: "status",
             },
             {
-              action: "connectModel",
-              executionKind: "overlay",
-              id: "connect",
-            },
-            {
-              action: "connectSearch",
-              executionKind: "overlay",
-              id: "connect-search",
-            },
-            {
               action: "compactSession",
               executionKind: "overlay",
               id: "compact",

@@ -5,6 +5,13 @@ import {
 } from "../api/daemon/session-recovery.test-utils.js";
 
 export const DEFAULT = "/default";
+
+type SettingsHandler = (
+  method: string,
+  path: string,
+  directory: string | undefined,
+  body: unknown,
+) => Response | undefined | Promise<Response | undefined>;
 const encoder = new TextEncoder();
 
 export interface WorldSession {
@@ -45,6 +52,10 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
   readonly running: Set<string>;
   /** When set, the next list response is computed, then held until it resolves. */
   holdNextList: Promise<void> | null;
+  /** Pushes a `ui.event` to every open event stream of `directory`. */
+  emit(directory: string, event: unknown, seqNum?: number): void;
+  /** Answers `/v1/settings/*` routes; an undefined answer falls through. */
+  settings: SettingsHandler | null;
 } {
   const sessions = new Map(initial.map((session) => [session.id, session]));
   const requests: LoggedRequest[] = [];
@@ -54,6 +65,10 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
     { directory: string; selected: string | null; generation: number }
   >();
   let created = 0;
+  const streams = new Map<
+    ReadableStreamDefaultController<Uint8Array>,
+    string
+  >();
   const hidden = new Set<string>();
   const owner = (session: WorldSession): string =>
     session.pendingWorkingDirectory ?? session.workingDirectory;
@@ -88,7 +103,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
     runs: [],
     status: { kind: "idle" },
   });
-  const daemon = {
+  const daemon: ReturnType<typeof fakeDaemon> = {
     sessions,
     requests,
     abortedStreams,
@@ -99,7 +114,17 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
     unavailable: new Set<string>(),
     running: new Set<string>(),
     holdNextList: null as Promise<void> | null,
-    fetch: (async (input, init = {}) => {
+    settings: null,
+    emit(directory: string, event: unknown, seqNum?: number): void {
+      for (const [controller, streamDirectory] of streams)
+        if (streamDirectory === directory)
+          controller.enqueue(
+            encoder.encode(
+              `${seqNum === undefined ? "" : `id: ${String(seqNum)}\n`}data: ${JSON.stringify({ type: "ui.event", event })}\n\n`,
+            ),
+          );
+    },
+    fetch: async (input, init = {}) => {
       // Answer asynchronously, like the network.
       await Promise.resolve();
       const request = new Request(input, init);
@@ -118,6 +143,15 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
         clientId,
         body,
       });
+      if (path.startsWith("/v1/settings/") && daemon.settings) {
+        const answer = await daemon.settings(
+          request.method,
+          path,
+          directory,
+          body,
+        );
+        if (answer) return answer;
+      }
       if (daemon.failing.has(path))
         return Response.json(
           { ok: false, error: { message: "unavailable" } },
@@ -211,6 +245,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
         return new Response(
           new ReadableStream<Uint8Array>({
             start(controller): void {
+              streams.set(controller, client.directory);
               controller.enqueue(
                 encoder.encode(
                   `data: ${JSON.stringify({ type: "hello", clientId, ...binding() })}\n\n`,
@@ -220,6 +255,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
                 "abort",
                 () => {
                   abortedStreams.push(client.directory);
+                  streams.delete(controller);
                   controller.close();
                 },
                 { once: true },
@@ -358,7 +394,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
           },
         });
       throw new Error(`Unexpected request ${request.method} ${path}`);
-    }) as typeof fetch,
+    },
   };
   return daemon;
 }

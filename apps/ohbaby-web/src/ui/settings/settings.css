@@ -1,0 +1,529 @@
+/* Settings dialog (03 §4.7): a centred card over a light scrim, section
+   navigation on the left, flat rows with hairlines on the right. Phones get
+   the whole screen and one pane at a time (03 §5). */
+.ohb-settings-layer {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 100;
+}
+
+.ohb-settings-layer[hidden] {
+  display: none;
+}
+
+.ohb-settings-scrim {
+  animation: ohb-fade var(--duration) var(--ease);
+  background: var(--bg-scrim);
+  inset: 0;
+  position: absolute;
+}
+
+.ohb-settings-dialog {
+  animation: ohb-pop var(--duration) var(--ease);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  height: min(80vh, 720px);
+  max-height: calc(100dvh - 48px);
+  overflow: hidden;
+  position: relative;
+  width: min(960px, 100%);
+}
+
+.ohb-settings-header {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex: none;
+  gap: 6px;
+  height: 56px;
+  padding: 0 14px 0 24px;
+}
+
+.ohb-settings-header h1 {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.ohb-settings-title-section,
+.ohb-settings-back {
+  display: none;
+}
+
+.ohb-settings-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.ohb-settings-nav {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.ohb-settings-nav-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  display: flex;
+  font-size: 13.5px;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+  width: 100%;
+}
+
+.ohb-settings-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-settings-nav-item[aria-current="page"] {
+  background: var(--bg-selected);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.ohb-settings-nav-chevron {
+  color: var(--text-dim);
+  display: none;
+}
+
+.ohb-settings-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 40px 40px;
+}
+
+.ohb-settings-section,
+.ohb-settings-editor {
+  margin: 0 auto;
+  max-width: 680px;
+}
+
+.ohb-settings-section-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+
+.ohb-settings-section-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.ohb-settings-section-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.ohb-settings-status {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  justify-content: space-between;
+  margin: 12px 0;
+}
+
+.ohb-settings-status.is-error {
+  color: var(--danger-ink);
+}
+
+.ohb-settings-status-detail {
+  color: var(--text-dim);
+}
+
+/* Provider groups: a small uppercase label, its menu revealed on hover. */
+.ohb-settings-group {
+  margin-top: 16px;
+}
+
+.ohb-settings-group-title {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 11px;
+  font-weight: 600;
+  height: 28px;
+  justify-content: space-between;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ohb-settings-hover-action {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.ohb-settings-group-title:hover .ohb-settings-hover-action,
+.ohb-settings-row:hover .ohb-settings-hover-action,
+.ohb-settings-hover-action:focus-visible,
+.ohb-settings-hover-action[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.ohb-settings-row-note {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+.ohb-settings-badge {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.ohb-settings-row-error {
+  color: var(--danger-ink);
+  font-size: 13px;
+  margin: 6px 0 8px;
+}
+
+/* Model editor sub-page */
+.ohb-settings-editor-header {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin: -4px 0 8px -6px;
+  min-height: 32px;
+}
+
+.ohb-settings-editor-header h3 {
+  align-items: center;
+  display: flex;
+  font-size: 15px;
+  font-weight: 500;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+}
+
+.ohb-settings-editor-header h3 > span[aria-hidden] {
+  color: var(--text-dim);
+}
+
+.ohb-settings-crumb {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  font-size: 15px;
+  padding: 2px 4px;
+}
+
+.ohb-settings-crumb:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-settings-crumb-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Forms: label | control rows with hairlines; errors under the control. */
+.ohb-settings-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.ohb-field-row {
+  align-items: start;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 160px minmax(0, 1fr);
+  padding: 10px 0;
+}
+
+.ohb-field-label {
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 32px;
+}
+
+.ohb-field-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.ohb-field-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ohb-settings-input,
+.ohb-settings-select {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: 13.5px;
+  height: 32px;
+  max-width: 400px;
+  padding: 0 10px;
+  transition: border-color var(--duration-fast) var(--ease);
+  width: 100%;
+}
+
+.ohb-settings-input::placeholder {
+  color: var(--text-dim);
+}
+
+.ohb-settings-input:focus,
+.ohb-settings-select:focus {
+  border-color: var(--text-dim);
+  outline: none;
+}
+
+.ohb-settings-input:focus-visible,
+.ohb-settings-select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ohb-field-row.is-invalid .ohb-settings-input,
+.ohb-field-row.is-invalid .ohb-settings-select {
+  border-color: var(--danger-border);
+}
+
+.ohb-field-error {
+  align-items: center;
+  color: var(--danger-ink);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 4px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.ohb-field-error .ohb-text-button {
+  height: 22px;
+  padding: 0 6px;
+}
+
+.ohb-secret-field {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  max-width: 400px;
+  min-height: 32px;
+}
+
+.ohb-secret-field .ohb-settings-input {
+  flex: 1;
+}
+
+.ohb-secret-state {
+  color: var(--text);
+  font-size: 13.5px;
+  margin-right: 8px;
+}
+
+.ohb-secret-state.is-empty {
+  color: var(--text-dim);
+}
+
+.ohb-more-options {
+  border-bottom: 1px solid var(--border);
+}
+
+.ohb-more-options-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 13.5px;
+  gap: 6px;
+  height: 44px;
+  padding: 0;
+  width: 100%;
+}
+
+.ohb-more-options-toggle:hover {
+  color: var(--text);
+}
+
+.ohb-more-options-chevron {
+  transition: transform var(--duration-fast) var(--ease);
+}
+
+.ohb-more-options-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.ohb-more-options-body .ohb-field-row:last-child {
+  border-bottom: 0;
+}
+
+.ohb-settings-form-footer {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.ohb-settings-form-status {
+  color: var(--danger-ink);
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+}
+
+/* Narrow desktops: the card narrows with the window. */
+@media (max-width: 1023px) {
+  .ohb-settings-body {
+    grid-template-columns: 188px minmax(0, 1fr);
+  }
+
+  .ohb-settings-content {
+    padding: 20px 24px 32px;
+  }
+}
+
+/* Phones: full screen, the section list first, then one section with Back. */
+@media (max-width: 639px) {
+  .ohb-settings-layer {
+    padding: 0;
+  }
+
+  .ohb-settings-dialog {
+    border: 0;
+    border-radius: 0;
+    height: 100dvh;
+    max-height: none;
+    width: 100%;
+  }
+
+  .ohb-settings-header {
+    gap: 4px;
+    height: 52px;
+    padding: 0 6px 0 16px;
+  }
+
+  .ohb-settings-dialog[data-pane="section"] .ohb-settings-header {
+    padding-left: 6px;
+  }
+
+  .ohb-settings-dialog[data-pane="section"] .ohb-settings-back {
+    display: inline-flex;
+  }
+
+  .ohb-settings-dialog[data-pane="section"] .ohb-settings-title-root {
+    display: none;
+  }
+
+  .ohb-settings-dialog[data-pane="section"] .ohb-settings-title-section {
+    display: inline;
+  }
+
+  .ohb-settings-body {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .ohb-settings-dialog[data-pane="nav"] .ohb-settings-content,
+  .ohb-settings-dialog[data-pane="section"] .ohb-settings-nav {
+    display: none;
+  }
+
+  .ohb-settings-nav {
+    border-right: 0;
+    padding: 8px;
+  }
+
+  .ohb-settings-nav-item {
+    color: var(--text);
+    font-size: 15px;
+    min-height: 48px;
+  }
+
+  .ohb-settings-nav-item[aria-current="page"] {
+    background: transparent;
+    font-weight: 400;
+  }
+
+  .ohb-settings-nav-chevron {
+    display: block;
+  }
+
+  .ohb-settings-content {
+    overflow: visible;
+    padding: 16px 16px 32px;
+  }
+
+  .ohb-settings-section-header h2 {
+    display: none;
+  }
+
+  .ohb-settings-section-header {
+    justify-content: flex-end;
+    min-height: 0;
+  }
+
+  .ohb-field-row {
+    gap: 6px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ohb-field-label {
+    line-height: 1.4;
+  }
+
+  .ohb-settings-input,
+  .ohb-settings-select,
+  .ohb-secret-field {
+    font-size: 16px;
+    height: 44px;
+    max-width: none;
+  }
+
+  .ohb-settings-row,
+  .ohb-settings-row-main {
+    min-height: 52px;
+  }
+
+  .ohb-settings-hover-action {
+    opacity: 1;
+  }
+
+  .ohb-primary-button,
+  .ohb-settings-form-footer .ohb-text-button {
+    height: 44px;
+  }
+}

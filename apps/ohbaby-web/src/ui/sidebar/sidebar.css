@@ -57,6 +57,13 @@
   padding: 4px 8px 16px;
 }
 
+/* Bottom of the sidebar: the settings entry (D2). */
+.ohb-sidebar-footer {
+  border-top: 1px solid var(--border);
+  flex: none;
+  padding: 6px 8px 8px;
+}
+
 .ohb-sidebar-section-title {
   align-items: center;
   color: var(--text-dim);
