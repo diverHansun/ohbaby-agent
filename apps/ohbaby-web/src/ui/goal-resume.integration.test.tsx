@@ -10,7 +10,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryGoalPersistence } from "../../../../packages/ohbaby-agent/src/goals/persistence.js";
-import { createOhbabyWebRuntime } from "../runtime.js";
+import { createOhbabyWebRuntime } from "../runtime/index.js";
 import { OhbabyWebApp } from "./App.js";
 
 (

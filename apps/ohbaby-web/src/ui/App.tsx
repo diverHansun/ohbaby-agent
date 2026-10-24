@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
-import type { OhbabyWebRuntime } from "../runtime.js";
+import type { OhbabyWebRuntime } from "../runtime/index.js";
 import { AppController } from "./shell/AppController.js";
 import { Wordmark } from "./shared/Wordmark.js";
 

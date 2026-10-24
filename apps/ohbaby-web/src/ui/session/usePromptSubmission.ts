@@ -1,7 +1,7 @@
 import type { UiBackendClient, UiReasoningConfig } from "ohbaby-sdk";
 import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
+import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import type { PromptProjectionModel } from "../conversation/ConversationStream.js";
 import {
   hasActiveTurnForSession,

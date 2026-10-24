@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
+import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { selectViewModel } from "./selectors.js";
 import { useSessionSyncBanner } from "./use-session-sync-banner.js";
 

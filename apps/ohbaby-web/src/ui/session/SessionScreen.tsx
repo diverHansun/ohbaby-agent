@@ -1,7 +1,7 @@
 import { getUnconsumedSteers, type UiBackendClient } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
+import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { CommandNoticeList } from "../commands/CommandResultModal.js";
 import { StructuredCommandOverlay } from "../commands/StructuredCommandOverlay.js";
 import { Composer } from "../composer/Composer.js";

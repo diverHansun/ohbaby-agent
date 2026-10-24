@@ -1,5 +1,5 @@
 import type { UiBackendClient, UiSnapshot } from "ohbaby-sdk";
-import type { OhbabyWebRuntime } from "../runtime.js";
+import type { OhbabyWebRuntime } from "../runtime/index.js";
 import { createOhbabyWebStore } from "../store/store.js";
 import { mockScenarios } from "./mock-scenarios.js";
 

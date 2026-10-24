@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
+import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import type { SessionSyncBanner } from "./use-session-sync-banner.js";
 
 /** Loading and recovery state of the open conversation; silent when it is healthy. */

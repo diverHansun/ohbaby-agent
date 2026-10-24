@@ -2,7 +2,7 @@ import type { UiBackendClient, UiWebCommandCatalog } from "ohbaby-sdk";
 import { parseSlashCommandInput, resolveSlashCommand } from "ohbaby-sdk";
 import type { RefObject } from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
+import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import {
   DEFAULT_GOAL_PANEL_INTENT,
   type GoalPanelIntent,

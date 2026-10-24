@@ -6,7 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
+import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { FolderlessDraft } from "../session/FolderlessDraft.js";
 import { selectViewModel } from "../session/selectors.js";
 import { SessionScreen } from "../session/SessionScreen.js";

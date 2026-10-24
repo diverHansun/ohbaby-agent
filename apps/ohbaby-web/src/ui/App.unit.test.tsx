@@ -14,7 +14,7 @@ import { createSessionSync, type UiSessionView } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { OhbabyWebRuntime } from "../runtime.js";
+import type { OhbabyWebRuntime } from "../runtime/index.js";
 import type { OhbabyWebStore } from "../store/store.js";
 import { createOhbabyWebStore } from "../store/store.js";
 import { OhbabyWebApp } from "./App.js";

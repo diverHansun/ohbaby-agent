@@ -1,6 +1,6 @@
 import type { UiSnapshot } from "ohbaby-sdk";
 import { useEffect, useRef, useState } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
+import type { OhbabyWebRuntime } from "../../runtime/index.js";
 
 interface StopRequest {
   readonly sessionId: string;

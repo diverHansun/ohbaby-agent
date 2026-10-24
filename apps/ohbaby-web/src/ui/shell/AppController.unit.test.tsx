@@ -5,7 +5,7 @@ import type { UiBackendClient } from "ohbaby-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSnapshot } from "../../api/daemon/wire.js";
 import { createMockRuntime } from "../../dev/mock-runtime.js";
-import type { OhbabyWebRuntime } from "../../runtime.js";
+import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { OhbabyWebApp } from "../App.js";
 
 (

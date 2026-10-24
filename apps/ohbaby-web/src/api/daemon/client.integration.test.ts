@@ -6,7 +6,7 @@ import {
 } from "./session-recovery.test-utils.js";
 import { createBrowserDaemonClient } from "./client.js";
 import { createOhbabyWebStore } from "../../store/store.js";
-import { createOhbabyWebRuntime } from "../../runtime.js";
+import { createOhbabyWebRuntime } from "../../runtime/index.js";
 import type { OhbabyBootstrapConfig, WebSseEvent } from "./wire.js";
 
 const encoder = new TextEncoder();
