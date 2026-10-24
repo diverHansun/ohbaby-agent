@@ -11,7 +11,7 @@ export function DraftHero(props: {
 }): ReactElement {
   return (
     <div className="ohb-draft-hero">
-      <LycheeMark size={52} />
+      <LycheeMark size={56} />
       {props.picker}
     </div>
   );

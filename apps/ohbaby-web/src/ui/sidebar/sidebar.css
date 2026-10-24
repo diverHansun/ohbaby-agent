@@ -171,14 +171,6 @@
   background: var(--bg-hover);
 }
 
-.ohb-group-count {
-  color: var(--text-dim);
-  font-size: 11.5px;
-  font-weight: 400;
-  margin-left: auto;
-  padding-right: 6px;
-}
-
 .ohb-group-footer {
   display: flex;
   gap: 4px;

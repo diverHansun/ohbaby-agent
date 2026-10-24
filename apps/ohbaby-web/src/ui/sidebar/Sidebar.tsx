@@ -235,7 +235,6 @@ export function Sidebar(props: SidebarProps): ReactElement {
             current={group.project.directory === activeProject}
             available={group.project.available}
             expanded={!collapsed.has(group.key)}
-            loadedCount={group.sessions.length}
             onToggle={() => {
               toggle(group.key);
             }}
@@ -279,7 +278,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
   );
 }
 
-/** A foldable section heading (Pinned, No project) with its loaded count. */
+/** A foldable section heading (Pinned, No project). */
 function SidebarSection(props: {
   readonly title: string;
   readonly group: SidebarGroup;
@@ -303,9 +302,6 @@ function SidebarSection(props: {
           />
           {props.title}
         </span>
-        {props.group.sessions.length > 0 ? (
-          <span className="ohb-group-count">{props.group.sessions.length}</span>
-        ) : null}
       </button>
       {props.expanded ? props.children : null}
     </section>

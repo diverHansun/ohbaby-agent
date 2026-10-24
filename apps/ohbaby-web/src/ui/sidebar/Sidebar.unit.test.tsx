@@ -369,10 +369,13 @@ it("does not page when the loaded rows already fill the next step", () => {
   expect(loadMore).not.toHaveBeenCalled();
 });
 
-it("remembers folded groups and shows their loaded count", () => {
+it("remembers folded groups and shows no counts", () => {
   click("repo");
   expect(order()).toEqual([]);
-  expect(container.querySelector(".ohb-group-count")?.textContent).toBe("3");
+  expect(container.querySelector(".ohb-group-count")).toBeNull();
+  expect(container.querySelector(".ohb-project-toggle")?.textContent).toBe(
+    "repo",
+  );
   act(() => {
     root.unmount();
   });

@@ -5,9 +5,8 @@ import { anchorBelow, Menu, type MenuAnchor } from "../shared/Menu.js";
 import { workspaceLabel } from "../workspace/workspace-labels.js";
 
 /**
- * A project heading and its sessions. The heading folds the group; a folded
- * group shows how many rows are loaded. Hover reveals New chat in the
- * project and the project menu (Hide project).
+ * A project heading and its sessions. The heading folds the group; hover
+ * reveals New chat in the project and the project menu (Hide project).
  */
 export function ProjectGroup(props: {
   readonly directory: string;
@@ -15,7 +14,6 @@ export function ProjectGroup(props: {
   readonly current: boolean;
   readonly available: boolean;
   readonly expanded: boolean;
-  readonly loadedCount: number;
   readonly onToggle: () => void;
   readonly onNewChat?: () => void;
   readonly onHide: () => void;
@@ -53,9 +51,6 @@ export function ProjectGroup(props: {
             />
           )}
           <span className="ohb-project-name">{label}</span>
-          {!props.expanded && props.loadedCount > 0 ? (
-            <span className="ohb-group-count">{props.loadedCount}</span>
-          ) : null}
         </button>
         <span className="ohb-project-actions">
           {props.onNewChat ? (
