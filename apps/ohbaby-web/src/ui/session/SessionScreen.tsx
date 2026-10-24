@@ -5,6 +5,7 @@ import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { CommandNoticeList } from "../commands/CommandResultModal.js";
 import { StructuredCommandOverlay } from "../commands/StructuredCommandOverlay.js";
 import { Composer } from "../composer/Composer.js";
+import { ModelMenu } from "../composer/ModelMenu.js";
 import { TodoDock } from "../conversation/TodoDock.js";
 import { ApprovalPanel } from "../permissions/ApprovalPanel.js";
 import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
@@ -31,6 +32,7 @@ export function SessionScreen({
   runtime,
   draftPicker,
   onOpenModelSettings,
+  onError,
 }: {
   readonly runtime: OhbabyWebRuntime;
   readonly client: UiBackendClient;
@@ -38,6 +40,8 @@ export function SessionScreen({
   readonly draftPicker?: ReactNode;
   /** Opens Settings › Models; `fromDraft` when a draft send found no model. */
   readonly onOpenModelSettings: (fromDraft: boolean) => void;
+  /** Failures away from where the user is looking: the top-right notices. */
+  readonly onError: (error: unknown) => void;
 }): ReactElement {
   const {
     storeSnapshot,
@@ -251,10 +255,18 @@ export function SessionScreen({
               viewingSubagent ||
               approvalDialogVisible,
           }}
-          modelLabel={modelMissing ? "Choose model" : view.header.modelLabel}
-          onOpenModel={() => {
-            onOpenModelSettings(false);
-          }}
+          modelControl={
+            <ModelMenu
+              settings={runtime.settings}
+              fallbackLabel={view.header.modelLabel}
+              missing={modelMissing}
+              disabled={viewingSubagent || approvalDialogVisible}
+              onManage={() => {
+                onOpenModelSettings(false);
+              }}
+              onError={onError}
+            />
+          }
           activeGoal={view.activeGoal}
           onExecuteGoalCommand={(input) => runtime.executeSlashCommand(input)}
           onOpenGoalPanel={overlays.openGoalPanel}

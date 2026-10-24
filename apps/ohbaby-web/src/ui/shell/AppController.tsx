@@ -275,6 +275,7 @@ export function AppController(props: {
             runtime={runtime}
             draftPicker={draftPicker}
             onOpenModelSettings={openModelSettings}
+            onError={pushError}
           />
         ) : (
           <DraftFallback

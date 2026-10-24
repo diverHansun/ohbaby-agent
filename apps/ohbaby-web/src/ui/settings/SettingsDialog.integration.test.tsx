@@ -413,3 +413,117 @@ describe("settings dialog", () => {
     expect(dialog().textContent).toContain("Diagnostics file");
   });
 });
+
+describe("composer controls", () => {
+  it("switches the global default from the model menu", async () => {
+    const runtime = createMockRuntime("settings");
+    const select = vi.spyOn(runtime.settings, "selectModel");
+    const container = mount(runtime);
+    const trigger = (): HTMLButtonElement => {
+      const element =
+        container.querySelector<HTMLButtonElement>(".ohb-model-button");
+      if (!element) throw new Error("model button not found");
+      return element;
+    };
+    await until(
+      () => trigger().textContent === "deepseek-v4.1-flash",
+      "the label",
+    );
+    await click(trigger());
+    const menu = document.querySelector<HTMLElement>(".ohb-model-menu");
+    if (!menu) throw new Error("model menu not found");
+    const items = [...menu.querySelectorAll("[role='menuitem']")].map(
+      (item) => item.textContent,
+    );
+    // Only complete models, and Manage models… last.
+    expect(items).not.toContain("gpt-4.1");
+    expect(items.at(-1)).toBe("Manage models…");
+    await click(button(menu, "claude-sonnet-5-5 · Personal"));
+    await until(
+      () => trigger().textContent === "claude-sonnet-5-5",
+      "the new default",
+    );
+    expect(select).toHaveBeenCalledWith("m5");
+    expect(container.textContent).not.toMatch(/next turn|default model/iu);
+
+    select.mockRejectedValueOnce(new Error("offline"));
+    await click(trigger());
+    const again = document.querySelector<HTMLElement>(".ohb-model-menu");
+    if (!again) throw new Error("model menu not found");
+    await click(button(again, "gpt-5.2"));
+    await until(
+      () =>
+        document.body.textContent.includes(
+          "Couldn't switch the model. offline",
+        ),
+      "the failure notice",
+    );
+    expect(trigger().textContent).toBe("claude-sonnet-5-5");
+  });
+
+  it("puts thinking and full access in the phone More menu", async () => {
+    const runtime = createMockRuntime("settings");
+    const container = mount(runtime);
+    const more = button(container, "More controls");
+    await click(more);
+    const menu = document.querySelector<HTMLElement>(".ohb-menu");
+    if (!menu) throw new Error("More menu not found");
+    const fullAccess = button(menu, "Full access: off");
+    await click(fullAccess);
+    expect(document.body.textContent).toContain("Enable full access?");
+    await click(button(document.body, "Not now"));
+    await until(() => document.activeElement === more, "focus back on More");
+  });
+
+  it("opens Thinking options in place and returns to the first level", async () => {
+    const base = createMockRuntime("running");
+    const mock = base.client;
+    if (!mock) throw new Error("mock client missing");
+    const updates: unknown[] = [];
+    const client = new Proxy(mock, {
+      get(target, key, receiver): unknown {
+        if (key === "getCurrentModel")
+          return () =>
+            Promise.resolve({
+              provider: "p",
+              model: "m",
+              baseUrl: "https://p.test",
+              interfaceProvider: "openai-compatible",
+              reasoning: {
+                status: "identified",
+                mode: "effort",
+                supportsDisabled: true,
+                efforts: ["low", "high"],
+                default: { enabled: true, effort: "low" },
+              },
+            });
+        if (key === "updateSessionReasoning")
+          return (input: { reasoning: unknown }) => {
+            updates.push(input.reasoning);
+            return new Promise(() => undefined);
+          };
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    const runtime: OhbabyWebRuntime = { ...base, client };
+    const container = mount(runtime);
+    await until(
+      () => container.querySelector("[aria-label='Reasoning effort']") !== null,
+      "the reasoning capability",
+    );
+    await click(button(container, "More controls"));
+    const menu = (): HTMLElement => {
+      const element = document.querySelector<HTMLElement>(".ohb-menu");
+      if (!element) throw new Error("menu not found");
+      return element;
+    };
+    await click(button(menu(), "Thinking: low"));
+    expect(button(menu(), "Thinking").className).toContain("ohb-menu-back");
+    await click(button(menu(), "high"));
+    expect(updates).toEqual([{ enabled: true, effort: "high" }]);
+    // Back on the first level, with the draft untouched.
+    expect(button(menu(), "Thinking: high")).toBeDefined();
+    await key(menu(), "Escape");
+    expect(document.querySelector(".ohb-menu")).toBeNull();
+  });
+});

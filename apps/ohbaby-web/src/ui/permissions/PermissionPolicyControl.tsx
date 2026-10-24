@@ -4,7 +4,8 @@ import type { ReactElement } from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-function FullAccessConfirmDialog(props: {
+/** The existing full-access confirmation; the phone More menu reuses it (D29). */
+export function FullAccessConfirmDialog(props: {
   readonly onConfirm: () => void;
   readonly onDismiss: () => void;
 }): ReactElement {

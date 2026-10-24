@@ -115,6 +115,60 @@
   margin-left: auto;
 }
 
+.ohb-menu-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-menu [role="menuitem"] .ohb-menu-check {
+  color: var(--accent);
+}
+
+/* A small heading inside a menu, e.g. a provider in the model menu. */
+.ohb-menu-group-label {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 8px 9px 3px;
+  text-transform: uppercase;
+}
+
+/* A read-only switch drawn inside a menu item. */
+.ohb-switch {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+  flex: none;
+  height: 18px;
+  position: relative;
+  transition: background var(--duration-fast) var(--ease);
+  width: 30px;
+}
+
+.ohb-switch::after {
+  background: var(--accent-contrast);
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+  content: "";
+  height: 14px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform var(--duration-fast) var(--ease);
+  width: 14px;
+}
+
+.ohb-switch.is-on {
+  background: var(--accent);
+}
+
+.ohb-switch.is-on::after {
+  transform: translateX(12px);
+}
+
 .ohb-menu-back {
   color: var(--text-muted);
 }

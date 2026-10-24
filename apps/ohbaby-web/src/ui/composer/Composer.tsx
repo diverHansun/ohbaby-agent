@@ -92,8 +92,8 @@ export function Composer(props: {
   readonly prefill?: import("./useComposerDraft.js").ComposerPrefill | null;
   readonly onEditRevision: (revision: number) => void;
   readonly model: ComposerModel;
-  readonly modelLabel?: string;
-  readonly onOpenModel?: () => void;
+  /** The model menu in the control row (D15). */
+  readonly modelControl?: ReactNode;
   readonly activeGoal?: UiGoal | null;
   readonly onExecuteGoalCommand?: ExecuteGoalCommand;
   readonly onOpenGoalPanel?: (intent?: GoalPanelIntent) => void;
@@ -446,8 +446,12 @@ export function Composer(props: {
               client={props.client}
               session={props.activeSession}
               permissionControl={props.permissionControl}
-              modelLabel={props.modelLabel}
-              onOpenModel={props.onOpenModel}
+              permission={{
+                level: props.model.permissionLevel,
+                disabled: props.model.disabled,
+                onSet: props.onSetPermission,
+              }}
+              modelControl={props.modelControl}
               onReasoningChange={(reasoning) => {
                 selectedReasoning.current = reasoning;
               }}

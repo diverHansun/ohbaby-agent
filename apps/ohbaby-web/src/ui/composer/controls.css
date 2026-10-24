@@ -134,9 +134,30 @@
   }
 }
 
+.ohb-model-menu {
+  max-width: 320px;
+  min-width: 220px;
+}
+
+/* The More menu exists for phones only (D29). */
+.ohb-composer-more {
+  display: none;
+}
+
 @media (max-width: 639px) {
   .ohb-control-button,
   .ohb-reasoning-control select {
     min-height: 44px;
+  }
+
+  /* One breakpoint swaps permission and thinking for More; no second state. */
+  .ohb-composer-more {
+    display: inline-flex;
+  }
+
+  .ohb-composer-bar > .ohb-permission-toggle,
+  .ohb-composer-bar > .ohb-reasoning-control,
+  .ohb-composer-bar > .ohb-reasoning-status {
+    display: none;
   }
 }
