@@ -260,3 +260,36 @@ describe("session pin preferences", () => {
     expect(seen).toEqual([["external"], []]);
   });
 });
+
+describe("global session pins", () => {
+  it("merges every per-directory key of the same server, earliest pin wins, and keeps old keys", () => {
+    const { sessionPinsKey: legacy, getGlobalSessionPinsStore } = pinsModule;
+    const a = legacy("http://localhost:3000", "/a");
+    const b = legacy("http://localhost:3000", "/b");
+    const other = legacy("http://localhost:3001", "/a");
+    values.set(a, JSON.stringify({ s1: 300, s2: 100 }));
+    values.set(b, JSON.stringify({ s1: 200, s3: 50 }));
+    values.set(other, JSON.stringify({ foreign: 10 }));
+    values.set("ohbaby.web.session-pins.v1:not-json", "{}");
+    const store = getGlobalSessionPinsStore("http://localhost:3000/");
+    expect(store.getSnapshot().pins).toEqual({ s1: 200, s2: 100, s3: 50 });
+    expect(values.has(a)).toBe(true);
+    expect(values.has(b)).toBe(true);
+  });
+
+  it("migrates only once; later legacy changes do not overwrite the global set", () => {
+    const { sessionPinsKey: legacy, getGlobalSessionPinsStore } = pinsModule;
+    values.set(legacy(undefined, "/a"), JSON.stringify({ s1: 5 }));
+    getGlobalSessionPinsStore(undefined).setPinned("s1", false);
+    values.set(legacy(undefined, "/a"), JSON.stringify({ s1: 5, s9: 6 }));
+    expect(getGlobalSessionPinsStore(undefined).getSnapshot().pins).toEqual({});
+  });
+
+  it("does not persist URL credentials in the global key", () => {
+    const key = pinsModule.globalSessionPinsKey(
+      "http://user:secret@localhost:3000/api?token=secret",
+    );
+    expect(key).toBe(pinsModule.globalSessionPinsKey("http://localhost:3000"));
+    expect(key).not.toContain("secret");
+  });
+});

@@ -15,21 +15,71 @@ interface SessionPinsStore {
 
 const stores = new Map<string, SessionPinsStore>();
 
-export function sessionPinsKey(
-  serverUrl: string | undefined,
-  directory: string,
-): string {
+const LEGACY_PREFIX = "ohbaby.web.session-pins.v1:";
+
+function serverOrigin(serverUrl: string | undefined): string {
   const fallback = window.location.origin;
-  let origin = fallback;
   try {
-    origin = new URL(
+    return new URL(
       serverUrl === "" ? fallback : (serverUrl ?? fallback),
       fallback,
     ).origin;
   } catch {
     // An incomplete connection URL must not prevent the sidebar rendering.
+    return fallback;
   }
-  return `ohbaby.web.session-pins.v1:${JSON.stringify([origin, directory])}`;
+}
+
+/** The pre-redesign key: one pin set per server and project directory. */
+export function sessionPinsKey(
+  serverUrl: string | undefined,
+  directory: string,
+): string {
+  return `${LEGACY_PREFIX}${JSON.stringify([serverOrigin(serverUrl), directory])}`;
+}
+
+/** One pin set per server; session ids are unique across projects. */
+export function globalSessionPinsKey(serverUrl: string | undefined): string {
+  return `ohbaby.web.session-pins.v2:${JSON.stringify([serverOrigin(serverUrl)])}`;
+}
+
+/**
+ * Seeds the global key from every per-directory key of this server the first
+ * time it is read. The earliest pin time wins; old keys stay so an older
+ * build still sees its pins.
+ */
+function migrateLegacyPins(serverUrl: string | undefined): void {
+  try {
+    const storage = window.localStorage;
+    const key = globalSessionPinsKey(serverUrl);
+    if (storage.getItem(key) !== null) return;
+    const origin = serverOrigin(serverUrl);
+    const merged = new Map<string, number>();
+    for (let index = 0; index < storage.length; index++) {
+      const legacy = storage.key(index);
+      if (!legacy?.startsWith(LEGACY_PREFIX)) continue;
+      let scope: unknown;
+      try {
+        scope = JSON.parse(legacy.slice(LEGACY_PREFIX.length));
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(scope) || scope[0] !== origin) continue;
+      for (const [id, pinnedAt] of Object.entries(
+        parsePins(storage.getItem(legacy)),
+      )) {
+        const known = merged.get(id);
+        merged.set(
+          id,
+          known === undefined ? pinnedAt : Math.min(known, pinnedAt),
+        );
+      }
+    }
+    if (merged.size > 0)
+      storage.setItem(key, JSON.stringify(Object.fromEntries(merged)));
+  } catch {
+    // Unreadable storage: the store reports the failure on its own read.
+  }
 }
 
 function parsePins(raw: string | null): Pins {
@@ -152,6 +202,15 @@ export function getSessionPinsStore(key: string): SessionPinsStore {
     stores.set(key, store);
   }
   return store;
+}
+
+/** The cross-project pin set, migrated from per-directory keys on first use. */
+export function getGlobalSessionPinsStore(
+  serverUrl: string | undefined,
+): SessionPinsStore {
+  const key = globalSessionPinsKey(serverUrl);
+  if (!stores.has(key)) migrateLegacyPins(serverUrl);
+  return getSessionPinsStore(key);
 }
 
 export function sortPinnedSessions(
