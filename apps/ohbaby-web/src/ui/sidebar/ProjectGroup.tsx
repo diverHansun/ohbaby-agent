@@ -1,7 +1,8 @@
 import { Folder, FolderOpen, MoreHorizontal, SquarePen } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { IconButton } from "../shared/IconButton.js";
-import { anchorBelow, Menu, type MenuAnchor } from "../shared/Menu.js";
+import { anchorBelow, type MenuAnchor } from "../shared/Menu.js";
+import { ProjectMenu } from "./ProjectMenu.js";
 import { workspaceLabel } from "../workspace/workspace-labels.js";
 
 /**
@@ -76,27 +77,16 @@ export function ProjectGroup(props: {
       </div>
       {props.expanded ? props.children : null}
       {menu ? (
-        <Menu
+        <ProjectMenu
           anchor={menu.anchor}
-          label={`Actions for ${label}`}
           title={label}
+          onHide={props.onHide}
           onClose={(restoreFocus) => {
             if (restoreFocus && menu.trigger.isConnected)
               menu.trigger.focus({ preventScroll: true });
             setMenu(null);
           }}
-        >
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              setMenu(null);
-              props.onHide();
-            }}
-          >
-            <span>Hide project</span>
-          </button>
-        </Menu>
+        />
       ) : null}
     </section>
   );

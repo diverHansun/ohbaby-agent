@@ -18,7 +18,7 @@ import type {
   SessionActivity,
   SidebarSessionItem,
 } from "../../store/sidebar-groups.js";
-import type { SessionExportFormat } from "../sidebar/SessionActionsMenu.js";
+import type { SessionExportFormat } from "../sidebar/SessionMenu.js";
 import { DirectoryPickerDialog } from "../workspace/directory-picker/DirectoryPickerDialog.js";
 import { AppShell } from "./AppShell.js";
 import { MainHeader } from "./MainHeader.js";
@@ -48,6 +48,16 @@ export function AppController(props: {
   );
   const view = useMemo(() => selectViewModel(storeSnapshot), [storeSnapshot]);
   const client = runtime.client;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    setSearchFocusRequest((request) => request + 1);
+  }, []);
+  const searchSessions = useCallback<OhbabyWebRuntime["searchSessions"]>(
+    (input) => runtime.searchSessions(input),
+    [runtime],
+  );
   const [notices, setNotices] = useState<readonly NoticeItem[]>([]);
   // Where the folder picker was opened: from the draft it also selects the
   // new project; from the sidebar it only registers it (06 §1.1).
@@ -179,9 +189,14 @@ export function AppController(props: {
 
   return (
     <AppShell
+      onSearch={openSearch}
       renderSidebar={(close, dismissDrawer) => (
         <Sidebar
           serverUrl={runtime.serverUrl}
+          searchOpen={searchOpen}
+          searchFocusRequest={searchFocusRequest}
+          onSearchOpenChange={setSearchOpen}
+          searchSessions={searchSessions}
           catalog={catalog}
           activeSessionId={view.activeSession?.id ?? null}
           activity={activity}
@@ -203,6 +218,9 @@ export function AppController(props: {
             )
           }
           onExportSession={exportSession}
+          onMoveSession={(session, directory) =>
+            runAction(() => runtime.moveSession(session.id, directory))
+          }
           onHideProject={(directory) => {
             void runAction(() => runtime.hideWorkspace(directory));
           }}

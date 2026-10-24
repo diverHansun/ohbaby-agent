@@ -386,6 +386,24 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     model,
     sessions: manySessions(),
   }),
+  search: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: {
+      ...workspace,
+      scopes: [
+        ...workspace.scopes,
+        ...Array.from({ length: 7 }, (_, index) => ({
+          available: true,
+          directory: `/Users/demo/Projects/sample-${String(index + 1)}`,
+          lastOpenedAt: 0,
+          loaded: false,
+          position: index + 3,
+        })),
+      ],
+    },
+    model,
+    sessions: [...typicalSessions(), ...manySessions()],
+  }),
   running: () => ({
     snapshot: running(false),
     workspace,

@@ -291,3 +291,102 @@ describe("dev mock runtime", () => {
     expect(typeof unsubscribe).toBe("function");
   });
 });
+
+describe("improve-3 sidebar actions", () => {
+  it("opens a collapsed sidebar with Cmd/Ctrl+K and returns focus after search Escape", () => {
+    const container = mount(createMockRuntime("typical"));
+    act(() => {
+      button(container, "Collapse sidebar").click();
+    });
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(
+      container
+        .querySelector(".ohb-shell")
+        ?.classList.contains("is-sidebar-open"),
+    ).toBe(true);
+    const search = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Search chats"]',
+    );
+    if (!search) throw new Error("Missing search input");
+    expect(document.activeElement).toBe(search);
+    act(() => {
+      search.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    expect(
+      container.querySelector('input[aria-label="Search chats"]'),
+    ).toBeNull();
+    expect(document.activeElement).toBe(button(container, "Search chats"));
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(
+      container.querySelector('input[aria-label="Search chats"]'),
+    ).not.toBeNull();
+    act(() => {
+      textarea(container).focus();
+      textarea(container).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    expect(
+      container.querySelector('input[aria-label="Search chats"]'),
+    ).not.toBeNull();
+  });
+
+  it("keeps the row and reports the backend reason when moving fails", async () => {
+    const runtime = createMockRuntime("typical");
+    const container = mount({
+      ...runtime,
+      moveSession: () =>
+        Promise.reject(new Error("Project folder is not readable.")),
+    });
+    act(() => {
+      button(container, "Actions for Refactor the session sidebar").click();
+    });
+    act(() => {
+      button(document, "Move to project…").click();
+    });
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>(
+          '[role="menuitem"][title="/Users/demo/Projects/pi-web"]',
+        )
+        ?.click();
+    });
+    await settle();
+    expect(container.textContent).toContain("Project folder is not readable.");
+    expect(
+      button(container, "Select Refactor the session sidebar").closest(
+        ".ohb-project-group",
+      )?.textContent,
+    ).toContain("ohbaby-agent");
+    expect(container.querySelector('[aria-label="Moving chat"]')).toBeNull();
+  });
+});
+
+it("refocuses an already open search with the global shortcut", () => {
+  const container = mount(createMockRuntime("typical"));
+  const shortcut = (): void => { act(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true })); }); };
+  shortcut();
+  act(() => { textarea(container).focus(); });
+  shortcut();
+  expect(document.activeElement).toBe(container.querySelector('input[aria-label="Search chats"]'));
+});

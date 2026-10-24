@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
 import { Spinner } from "../shared/Spinner.js";
 import { relativeTime } from "./relative-time.js";
-import type { SessionMenuAnchor } from "./SessionActionsMenu.js";
+import type { SessionMenuAnchor } from "./SessionMenu.js";
 
 /**
  * One sidebar session (05 SessionRow): the open button, then a trailing
@@ -18,6 +18,7 @@ export function SessionRow(props: {
   readonly disabled: boolean;
   readonly pinned: boolean;
   readonly menuOpen: boolean;
+  readonly moving: boolean;
   readonly reordering: boolean;
   readonly onSelect: () => void;
   readonly onArchive: (trigger: HTMLButtonElement) => void;
@@ -98,7 +99,7 @@ export function SessionRow(props: {
 
   const openAtButton = (): void => {
     const trigger = actionsRef.current;
-    if (!trigger || props.disabled) return;
+    if (!trigger || props.disabled || props.moving) return;
     const rect = trigger.getBoundingClientRect();
     props.onMenu(
       {
@@ -134,7 +135,7 @@ export function SessionRow(props: {
         setHovered(false);
       }}
       onContextMenu={(event) => {
-        if (props.disabled || !actionsRef.current) return;
+        if (props.disabled || props.moving || !actionsRef.current) return;
         event.preventDefault();
         props.onMenu(
           {
@@ -162,7 +163,7 @@ export function SessionRow(props: {
           type="button"
           aria-label={`Unpin ${title}`}
           title="Unpin"
-          disabled={props.disabled}
+          disabled={props.disabled || props.moving}
           onClick={() => {
             props.onUnpin(mainRef.current);
           }}
@@ -173,13 +174,14 @@ export function SessionRow(props: {
       <button
         ref={mainRef}
         className="ohb-session-main"
-        disabled={props.disabled}
+        disabled={props.disabled || props.moving}
         aria-current={props.active ? "page" : undefined}
         aria-label={`Select ${title}`}
         onClick={props.onSelect}
         type="button"
       >
         <span className="ohb-session-copy">
+          {props.moving ? <Spinner size={11} label="Moving chat" /> : null}
           <strong ref={titleRef} className="ohb-session-title">
             <span ref={textRef}>{title}</span>
           </strong>
@@ -191,7 +193,7 @@ export function SessionRow(props: {
           className="ohb-session-archive"
           aria-label={`Archive ${title}`}
           title={`Archive ${title}`}
-          disabled={props.disabled}
+          disabled={props.disabled || props.moving}
           onClick={(event) => {
             props.onArchive(event.currentTarget);
           }}
@@ -205,7 +207,7 @@ export function SessionRow(props: {
           aria-label={`Actions for ${title}`}
           aria-haspopup="menu"
           aria-expanded={props.menuOpen}
-          disabled={props.disabled}
+          disabled={props.disabled || props.moving}
           onClick={openAtButton}
           type="button"
         >

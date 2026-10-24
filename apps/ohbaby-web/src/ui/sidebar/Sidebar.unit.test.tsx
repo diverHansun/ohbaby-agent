@@ -80,6 +80,9 @@ function render(overrides: Partial<SidebarProps> = {}): void {
     root.render(
       <Sidebar
         serverUrl={serverUrl}
+        searchOpen={false}
+        onSearchOpenChange={() => undefined}
+        searchSessions={() => Promise.resolve({ results: [] })}
         catalog={catalog()}
         activeSessionId={null}
         activity={new Map<string, SessionActivity>()}
@@ -89,6 +92,7 @@ function render(overrides: Partial<SidebarProps> = {}): void {
         onSelectSession={select}
         onArchiveSession={archive}
         onExportSession={exportSession}
+        onMoveSession={() => Promise.resolve(true)}
         onHideProject={() => undefined}
         onOpenFolder={() => undefined}
         onRetry={() => undefined}
@@ -223,6 +227,8 @@ it("switches to the export list in place and goes back one level per Escape", ()
       );
     });
   };
+  press("ArrowDown");
+  expect(document.activeElement).toBe(button("Move to project…"));
   press("ArrowDown");
   expect(document.activeElement).toBe(button("Export…"));
   press("ArrowRight");
@@ -414,4 +420,88 @@ it("shows an error with Retry only while there is no data", () => {
   render({ catalog: catalog(entries, { status: "error" }) });
   expect(container.querySelector('[role="alert"]')).toBeNull();
   expect(order()).toHaveLength(3);
+});
+
+it("moves a running chat only after confirmation and shows a pending spinner", async () => {
+  let finish!: (value: boolean) => void;
+  const move = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render({
+    catalog: catalog(entries, { projects: [scope("/repo"), scope("/other")] }),
+    activity: new Map([["A", "running"]]),
+    onMoveSession: move,
+  });
+  click("Actions for Chat A");
+  click("Move to project…");
+  expect(button("repo(current)").disabled).toBe(true);
+  act(() => {
+    const destination = document.querySelector<HTMLButtonElement>('[role="menuitem"][title="/other"]');
+    if (!destination) throw new Error("Missing destination project");
+    destination.click();
+  });
+  expect(move).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "A" }),
+    "/other",
+  );
+  expect(order()).toEqual(["Chat A", "Chat B", "Chat C"]);
+  expect(container.querySelector('[aria-label="Moving chat"]')).not.toBeNull();
+  await act(async () => {
+    finish(false);
+    await Promise.resolve();
+  });
+  expect(order()).toEqual(["Chat A", "Chat B", "Chat C"]);
+  expect(container.querySelector('[aria-label="Moving chat"]')).toBeNull();
+});
+
+it("filters a long project list, unwinds Escape one level at a time and restores focus", () => {
+  render({
+    catalog: catalog(entries, {
+      projects: [
+        scope("/repo"),
+        ...Array.from({ length: 9 }, (_, i) => scope(`/project-${String(i)}`)),
+      ],
+    }),
+  });
+  click("Actions for Chat A");
+  click("Move to project…");
+  const filter = document.querySelector<HTMLInputElement>(
+    '[aria-label="Filter"]',
+  );
+  if (!filter) throw new Error("Missing project filter");
+  expect(document.activeElement).toBe(filter);
+  act(() => {
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    if (!descriptor?.set) throw new Error("Missing input value setter");
+    descriptor.set.call(filter, "project-8");
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(
+    document.querySelector<HTMLButtonElement>(
+      '[role="menuitem"][title="/project-0"]',
+    )?.hidden,
+  ).toBe(true);
+  const escape = (): void => {
+    act(() => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+  };
+  escape();
+  expect(filter.value).toBe("");
+  escape();
+  expect(document.activeElement).toBe(button("Move to project…"));
+  escape();
+  expect(document.activeElement).toBe(button("Actions for Chat A"));
+});
+
+it("offers Remove from project only to a chat with a project", () => {
+  render({ catalog: catalog([row("N", null, "2026-09-01T00:00:00Z")]) });
+  click("Actions for Chat N");
+  click("Move to project…");
+  expect(document.body.textContent).not.toContain("Remove from project");
 });

@@ -2,6 +2,7 @@ import {
   type ReactElement,
   type ReactNode,
   useCallback,
+  useEffect,
   useState,
 } from "react";
 import { isNarrowViewport } from "../shared/viewport.js";
@@ -29,6 +30,7 @@ export function AppShell(props: {
   ) => ReactNode;
   readonly main: ReactNode;
   readonly overlays?: ReactNode;
+  readonly onSearch?: () => void;
 }): ReactElement {
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
   const setOpen = useCallback((open: boolean): void => {
@@ -44,6 +46,25 @@ export function AppShell(props: {
   const dismissDrawer = useCallback(() => {
     if (isNarrowViewport()) close();
   }, [close]);
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent): void => {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.key.toLowerCase() !== "k" ||
+        event.altKey ||
+        event.repeat
+      )
+        return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      open();
+      props.onSearch?.();
+    };
+    document.addEventListener("keydown", shortcut);
+    return (): void => {
+      document.removeEventListener("keydown", shortcut);
+    };
+  }, [open, props.onSearch]);
   return (
     <div className={`ohb-shell${sidebarOpen ? " is-sidebar-open" : ""}`}>
       <div className="ohb-shell-sidebar" inert={!sidebarOpen}>

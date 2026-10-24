@@ -6,6 +6,7 @@
 @import "./shared/context-usage.css";
 @import "./shell/shell.css";
 @import "./sidebar/sidebar.css";
+@import "./search/search.css";
 @import "./session/session.css";
 @import "./conversation/messages.css";
 @import "./commands/notices.css";

@@ -133,6 +133,7 @@ export function Menu(props: {
     if (!menu || !props.filterable) return;
     let visible = 0;
     for (const item of menu.querySelectorAll<HTMLElement>(ITEM_SELECTOR)) {
+      if (item.dataset.menuFilter === "false") continue;
       item.hidden = !menuItemMatches(item.textContent, query);
       if (!item.hidden) visible += 1;
     }
@@ -189,6 +190,25 @@ export function Menu(props: {
       // Restore the anchor before the native Tab action advances focus.
       props.onClose(true);
       return;
+    }
+    if (
+      !inFilter &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      event.key.length === 1
+    ) {
+      const shortcut = Array.from(
+        event.currentTarget.querySelectorAll<HTMLButtonElement>(
+          ACTIVE_ITEM_SELECTOR,
+        ),
+      ).find((item) => item.dataset.menuShortcut === event.key.toLowerCase());
+      if (shortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        shortcut.click();
+        return;
+      }
     }
     if (inFilter && (event.key === "Home" || event.key === "End")) return;
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;

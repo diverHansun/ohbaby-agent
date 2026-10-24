@@ -9,16 +9,22 @@ import {
 import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
 import type { getSessionPinsStore } from "./session-pins.js";
 import {
-  SessionActionsMenu,
+  SessionMenu,
   type SessionExportFormat,
   type SessionMenuAnchor,
-} from "./SessionActionsMenu.js";
+} from "./SessionMenu.js";
 import { SessionRow } from "./SessionRow.js";
 import { useSessionReorder } from "./use-session-reorder.js";
 
 export interface SessionListProps {
   /** The group's visible rows, already ordered. */
   readonly sessions: readonly SidebarSessionItem[];
+  readonly projects: readonly import("../../store/sidebar-groups.js").SidebarProject[];
+  readonly moving: ReadonlySet<string>;
+  readonly onMoveSession: (
+    session: SidebarSessionItem,
+    directory: string | null,
+  ) => void;
   readonly pins: ReturnType<typeof getSessionPinsStore>;
   readonly activeSessionId: string | null;
   readonly disabled: boolean;
@@ -33,7 +39,7 @@ export interface SessionListProps {
   readonly fallbackFocus: () => HTMLElement | null;
 }
 
-interface SessionMenu {
+interface OpenSessionMenu {
   readonly sessionId: string;
   readonly anchor: SessionMenuAnchor;
   readonly trigger: HTMLButtonElement;
@@ -45,7 +51,7 @@ interface SessionMenu {
  */
 export function SessionList(props: SessionListProps): ReactElement {
   const { sessions, pins } = props;
-  const [menu, setMenu] = useState<SessionMenu | null>(null);
+  const [menu, setMenu] = useState<OpenSessionMenu | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
   const archivedFocus = useRef<{
@@ -154,6 +160,7 @@ export function SessionList(props: SessionListProps): ReactElement {
             active={session.id === props.activeSessionId}
             disabled={props.disabled}
             pinned={session.pinned}
+            moving={props.moving.has(session.id)}
             menuOpen={menuSession?.id === session.id}
             reordering={reordering}
             onSelect={() => {
@@ -173,10 +180,16 @@ export function SessionList(props: SessionListProps): ReactElement {
         ))}
       </div>
       {menu && menuSession ? (
-        <SessionActionsMenu
+        <SessionMenu
           anchor={menu.anchor}
           pinned={menuSession.pinned}
           title={menuSession.title}
+          projects={props.projects}
+          projectDirectory={menuSession.projectDirectory}
+          onMove={(directory) => {
+            closeMenu(true);
+            props.onMoveSession(menuSession, directory);
+          }}
           onClose={closeMenu}
           onPin={() => {
             setPin(menuSession, !menuSession.pinned, menu.trigger);

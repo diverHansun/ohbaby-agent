@@ -1,10 +1,15 @@
-import type { UiGlobalSession } from "ohbaby-sdk";
+import {
+  globalSessionRequestDirectory,
+  type UiGlobalSession,
+  type UiSessionSearchPage,
+} from "ohbaby-sdk";
 import {
   AlertCircle,
   ChevronRight,
   FolderPlus,
   PanelLeft,
   SquarePen,
+  Search,
 } from "lucide-react";
 import {
   type ReactElement,
@@ -12,6 +17,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -27,6 +33,7 @@ import {
   type SidebarGroupKey,
   type SidebarSessionItem,
 } from "../../store/sidebar-groups.js";
+import { SidebarSearch } from "../search/SidebarSearch.js";
 import { IconButton } from "../shared/IconButton.js";
 import { Wordmark } from "../shared/Wordmark.js";
 import {
@@ -36,7 +43,7 @@ import {
 import { GroupFooter } from "./GroupFooter.js";
 import { ProjectGroup } from "./ProjectGroup.js";
 import { getGlobalSessionPinsStore } from "./session-pins.js";
-import type { SessionExportFormat } from "./SessionActionsMenu.js";
+import type { SessionExportFormat } from "./SessionMenu.js";
 import { SessionList } from "./SessionList.js";
 
 /** Lists that answer within this time show no loading line (04 §3). */
@@ -44,6 +51,15 @@ const LOADING_DELAY_MS = 300;
 
 export interface SidebarProps {
   readonly serverUrl?: string;
+  readonly searchOpen: boolean;
+  readonly searchFocusRequest?: number;
+  readonly onSearchOpenChange: (open: boolean) => void;
+  readonly searchSessions: (input: {
+    query: string;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  }) => Promise<UiSessionSearchPage>;
   readonly catalog: GlobalCatalogSnapshot;
   readonly activeSessionId: string | null;
   /** Running and awaiting state; known only for the connected instance (06 §3.4). */
@@ -58,6 +74,10 @@ export interface SidebarProps {
     session: SidebarSessionItem,
     format: SessionExportFormat,
   ) => void;
+  readonly onMoveSession: (
+    session: SidebarSessionItem,
+    directory: string | null,
+  ) => Promise<boolean>;
   readonly onHideProject: (directory: string) => void;
   readonly onOpenFolder: () => void;
   readonly onRetry: () => void;
@@ -73,6 +93,12 @@ export interface SidebarProps {
  */
 export function Sidebar(props: SidebarProps): ReactElement {
   const newRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLButtonElement>(null);
+  const movedFocus = useRef<string | null>(null);
+  const closeSearch = (): void => {
+    props.onSearchOpenChange(false);
+    searchRef.current?.focus({ preventScroll: true });
+  };
   const pinsStore = useMemo(
     () => getGlobalSessionPinsStore(props.serverUrl),
     [props.serverUrl],
@@ -89,8 +115,23 @@ export function Sidebar(props: SidebarProps): ReactElement {
     Readonly<Partial<Record<SidebarGroupKey, number>>>
   >({});
   const [loadingKey, setLoadingKey] = useState<SidebarGroupKey | null>(null);
+  const [moving, setMoving] = useState<ReadonlySet<string>>(new Set());
   const now = useMinuteClock();
   const { catalog } = props;
+  useLayoutEffect(() => {
+    if (movedFocus.current === null) return;
+    const id = movedFocus.current;
+    movedFocus.current = null;
+    if (document.activeElement === document.body) {
+      const row = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-session-id]"),
+      ).find((element) => element.dataset.sessionId === id);
+      (
+        row?.querySelector<HTMLElement>(".ohb-session-actions") ??
+        newRef.current
+      )?.focus({ preventScroll: true });
+    }
+  }, [moving, catalog.sessions]);
   const groups = useMemo(
     () =>
       selectSidebarGroups({
@@ -152,6 +193,23 @@ export function Sidebar(props: SidebarProps): ReactElement {
       <SessionList
         sessions={group.visible}
         pins={pinsStore}
+        projects={catalog.projects}
+        moving={moving}
+        onMoveSession={(session, directory) => {
+          setMoving((current) => new Set(current).add(session.id));
+          void props
+            .onMoveSession(session, directory)
+            .then(() => {
+              movedFocus.current = session.id;
+            })
+            .finally(() => {
+              setMoving((current) => {
+                const next = new Set(current);
+                next.delete(session.id);
+                return next;
+              });
+            });
+        }}
         activeSessionId={props.activeSessionId}
         disabled={props.disabled}
         now={now}
@@ -193,86 +251,119 @@ export function Sidebar(props: SidebarProps): ReactElement {
           <SquarePen aria-hidden="true" size={15} />
           <span>New chat</span>
         </button>
+        <button
+          ref={searchRef}
+          type="button"
+          className="ohb-sidebar-nav-item"
+          aria-expanded={props.searchOpen}
+          aria-label="Search chats"
+          aria-keyshortcuts="Meta+K Control+K"
+          onClick={() => {
+            if (props.searchOpen) closeSearch();
+            else props.onSearchOpenChange(true);
+          }}
+        >
+          <Search aria-hidden="true" size={15} />
+          <span>Search</span>
+        </button>
       </nav>
       <div className="ohb-sidebar-scroll">
-        {pins.error ? (
-          <p className="ohb-session-pin-error" role="status">
-            Pins could not be saved. Changes last until refresh.
-          </p>
-        ) : null}
-        {groups.pinned ? (
-          <SidebarSection
-            title="Pinned"
-            group={groups.pinned}
-            expanded={!collapsed.has("pinned")}
-            onToggle={() => {
-              toggle("pinned");
-            }}
-          >
-            {list(groups.pinned)}
-          </SidebarSection>
-        ) : null}
-        <div className="ohb-sidebar-section-title">
-          <span>Projects</span>
-          <span className="ohb-sidebar-section-actions">
-            {catalog.projectsStatus === "error" ? (
-              <IconButton
-                label="Projects could not be loaded. Retry"
-                onClick={props.onRetry}
-              >
-                <AlertCircle aria-hidden="true" size={13} />
+        <SidebarSearch
+          open={props.searchOpen}
+          focusRequest={props.searchFocusRequest}
+          search={props.searchSessions}
+          activeSessionId={props.activeSessionId}
+          onClose={closeSearch}
+          onSelect={(session) => {
+            closeSearch();
+            props.onSelectSession({
+              ...session,
+              requestDirectory: globalSessionRequestDirectory(session),
+              pinned: session.id in pins.pins,
+              activity: props.activity.get(session.id) ?? "idle",
+            });
+          }}
+        >
+          {pins.error ? (
+            <p className="ohb-session-pin-error" role="status">
+              Pins could not be saved. Changes last until refresh.
+            </p>
+          ) : null}
+          {groups.pinned ? (
+            <SidebarSection
+              title="Pinned"
+              group={groups.pinned}
+              expanded={!collapsed.has("pinned")}
+              onToggle={() => {
+                toggle("pinned");
+              }}
+            >
+              {list(groups.pinned)}
+            </SidebarSection>
+          ) : null}
+          <div className="ohb-sidebar-section-title">
+            <span>Projects</span>
+            <span className="ohb-sidebar-section-actions">
+              {catalog.projectsStatus === "error" ? (
+                <IconButton
+                  label="Projects could not be loaded. Retry"
+                  onClick={props.onRetry}
+                >
+                  <AlertCircle aria-hidden="true" size={13} />
+                </IconButton>
+              ) : null}
+              <IconButton label="Open folder…" onClick={props.onOpenFolder}>
+                <FolderPlus aria-hidden="true" size={13} />
               </IconButton>
-            ) : null}
-            <IconButton label="Open folder…" onClick={props.onOpenFolder}>
-              <FolderPlus aria-hidden="true" size={13} />
-            </IconButton>
-          </span>
-        </div>
-        {groups.projects.map((group) => (
-          <ProjectGroup
-            key={group.key}
-            directory={group.project.directory}
-            current={group.project.directory === activeProject}
-            available={group.project.available}
-            expanded={!collapsed.has(group.key)}
-            onToggle={() => {
-              toggle(group.key);
-            }}
-            {...(group.project.available
-              ? {
-                  onNewChat: (): void => {
-                    props.onNewChat(group.project.directory);
-                  },
-                }
-              : {})}
-            onHide={() => {
-              props.onHideProject(group.project.directory);
-            }}
-          >
-            {list(group)}
-          </ProjectGroup>
-        ))}
-        {groups.noProject ? (
-          <SidebarSection
-            title="No project"
-            group={groups.noProject}
-            expanded={!collapsed.has("no-project")}
-            onToggle={() => {
-              toggle("no-project");
-            }}
-          >
-            {list(groups.noProject)}
-          </SidebarSection>
-        ) : null}
-        {showLoading ? <p className="ohb-sidebar-status">Loading…</p> : null}
-        {catalog.sessionsStatus === "error" && catalog.sessions.length === 0 ? (
-          <p className="ohb-sidebar-status" role="alert">
-            <span>Chats could not be loaded.</span>
-            <button type="button" onClick={props.onRetry}>
-              Retry
-            </button>
-          </p>
-        ) : null}
+            </span>
+          </div>
+          {groups.projects.map((group) => (
+            <ProjectGroup
+              key={group.key}
+              directory={group.project.directory}
+              current={group.project.directory === activeProject}
+              available={group.project.available}
+              expanded={!collapsed.has(group.key)}
+              onToggle={() => {
+                toggle(group.key);
+              }}
+              {...(group.project.available
+                ? {
+                    onNewChat: (): void => {
+                      props.onNewChat(group.project.directory);
+                    },
+                  }
+                : {})}
+              onHide={() => {
+                props.onHideProject(group.project.directory);
+              }}
+            >
+              {list(group)}
+            </ProjectGroup>
+          ))}
+          {groups.noProject ? (
+            <SidebarSection
+              title="No project"
+              group={groups.noProject}
+              expanded={!collapsed.has("no-project")}
+              onToggle={() => {
+                toggle("no-project");
+              }}
+            >
+              {list(groups.noProject)}
+            </SidebarSection>
+          ) : null}
+          {showLoading ? <p className="ohb-sidebar-status">Loading…</p> : null}
+          {catalog.sessionsStatus === "error" &&
+          catalog.sessions.length === 0 ? (
+            <p className="ohb-sidebar-status" role="alert">
+              <span>Chats could not be loaded.</span>
+              <button type="button" onClick={props.onRetry}>
+                Retry
+              </button>
+            </p>
+          ) : null}
+        </SidebarSearch>
       </div>
     </aside>
   );
