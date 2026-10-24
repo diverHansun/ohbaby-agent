@@ -24,7 +24,7 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 | 接口 | 谁用 | 说明 |
 |---|---|---|
 | `/v1/sessions/:id/view`、`/history`、SSE `/v1/events` | SessionScreen | 不变。目录取 `globalSessionRequestDirectory(session)`（有待生效目录时用它） |
-| `POST /v1/sessions`、`POST /v1/prompts` | 草稿首发 | 目录取草稿所选项目，没有选就用 `defaultWorkspace.directory` |
+| `POST /v1/prompts` | 草稿首发 | 草稿 client 连在草稿所选项目，没有选就连 `defaultWorkspace.directory`；不带会话 ID 发送，服务端接纳时创建会话（improve-2 调整，不再先调 `POST /v1/sessions`） |
 | `/v1/sessions/:id/archive`、`/export` | SessionMenu | 目录取该会话的执行目录；操作其他目录的会话不能切换当前 SSE 或覆盖当前选择 |
 | `GET /v1/model` | 实例模型状态、ReasoningControl | improve-4 继续保留；`BrowserDaemonClient.refreshModel` 和 `model.invalidated` 仍依赖它 |
 | `POST /v1/model`、`/v1/settings/search-api-key` | 第一批的 `/connect` 浮层 | improve-4 移除 Web 写调用，改走全局设置接口；服务端旧接口保留给 TUI |
@@ -200,8 +200,8 @@ interface McpServerRow {
 - 所选项目：和草稿文字放在一起，只保存目录。打开页面时，如果该目录已不在项目列表里，就回到 No project。
 - 点“New chat”总是从 No project 开始，并清空上一份草稿的项目选择，不沿用旧的 `selectedDirectory`（improve-1 T19）。从项目分组的 `[+]` 进入时预选该项目。
 - 第一次发送成功后，`new` 草稿清空。
-- improve-2 提前增加 `GET /v1/settings/models` 的最小全局只读能力，用于草稿发送前判断默认模型，不必先创建会话；完整设置客户端与 UI 仍在 improve-4。读取失败与 `active === null` 分开处理，不能把网络错误当成未配置。
-- 首发分两步：创建会话成功后即绑定会话 ID，再发送 prompt。发送失败时在这条已创建的会话里重试，不能再次创建会话；保留现有 `clientRequestId`、未知提交结果恢复和冻结正文规则。请求期间用户切到其他草稿/会话时，晚到的结果不得抢回选择或清空新输入。
+- 草稿连着草稿目录的实例，模型是否配置沿用实例的 `GET /v1/model`；读取失败时不当成未配置。`GET /v1/settings/models` 的客户端随 improve-4 的设置页一起做（improve-2 调整）。
+- 首发一步完成：在不绑定会话的实例里发 prompt，服务端接纳时创建会话。被明确拒绝时不留下会话，超时走现有未知结果恢复，不盲目重发；保留 `clientRequestId` 和冻结正文规则。请求期间用户切到其他草稿/会话时，晚到的结果不得抢回选择或清空新输入。
 - 改 key 时同步考虑已有草稿和排队编辑租约。能从当前目录及会话 ID 唯一定位的旧 key 可迁入；多个旧 `new` 草稿有歧义时不合并，保留旧 key。不能把旧租约误绑到新会话。
 
 ### 3.6 置顶

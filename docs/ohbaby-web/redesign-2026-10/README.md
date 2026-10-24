@@ -56,7 +56,9 @@
 
 ## 实施批次（D24）
 
-2026-10-24：**improve-1 按 D29 调整后的范围验收完成，可以开始 improve-2。** 最终核对、修复和覆盖限制见 [improve-1 验收 §5.10](improve-1/05-implementation-acceptance.md#510-独立收尾验收2026-10-24)。improve-2 至 improve-4 尚未实施。
+2026-10-24：**improve-1 按 D29 调整后的范围验收完成。** 最终核对、修复和覆盖限制见 [improve-1 验收 §5.10](improve-1/05-implementation-acceptance.md#510-独立收尾验收2026-10-24)。
+
+2026-10-24：**improve-2 实施完成，可以开始 improve-3。** 结果、与 02 不同的三处做法（草稿连实例但不绑会话、首发一步完成、暂不做设置客户端）和已知限制见 [improve-2 验收](improve-2/05-implementation-acceptance.md)。improve-3、improve-4 尚未实施。
 
 | 批次 | 内容 | 依赖 | 文档 |
 |---|---|---|---|
