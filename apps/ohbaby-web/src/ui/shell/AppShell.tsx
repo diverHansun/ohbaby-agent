@@ -4,9 +4,9 @@ import {
   useCallback,
   useState,
 } from "react";
+import { isNarrowViewport } from "../shared/viewport.js";
 import {
   initialSidebarOpen,
-  isNarrowViewport,
   rememberSidebarOpen,
 } from "./sidebar-preference.js";
 

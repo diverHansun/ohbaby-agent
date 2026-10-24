@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Menu, placeMenu, type MenuAnchor } from "./Menu.js";
+import { Menu, menuItemMatches, placeMenu, type MenuAnchor } from "./Menu.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -17,11 +17,23 @@ afterEach(() => {
     for (const root of roots.splice(0)) root.unmount();
   });
   document.body.replaceChildren();
+  vi.unstubAllGlobals();
 });
+
+function stubPhone(): void {
+  vi.stubGlobal(
+    "matchMedia",
+    (query: string): Partial<MediaQueryList> => ({
+      matches: query.includes("max-width"),
+      media: query,
+    }),
+  );
+}
 
 function renderMenu(props: {
   readonly onClose: (restoreFocus: boolean) => void;
   readonly onEscape?: () => void;
+  readonly filterable?: boolean;
 }): HTMLElement {
   const container = document.createElement("div");
   document.body.append(container);
@@ -39,6 +51,7 @@ function renderMenu(props: {
         <button role="menuitem" type="button">
           Second
         </button>
+        <div role="separator" />
         <button role="menuitem" type="button">
           Third
         </button>
@@ -50,10 +63,33 @@ function renderMenu(props: {
   return menu;
 }
 
-function press(menu: HTMLElement, key: string): void {
+function press(target: Element | null, key: string): void {
   act(() => {
-    menu.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    target?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   });
+}
+
+function typeFilter(text: string): void {
+  const input = document.querySelector<HTMLInputElement>(".ohb-menu-filter");
+  if (!input) throw new Error("filter not found");
+  const descriptor = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  );
+  act(() => {
+    if (descriptor?.set) {
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- React controlled inputs need the native setter in jsdom tests.
+      const setValue = descriptor.set;
+      Reflect.apply(setValue, input, [text]);
+    }
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+function visibleItems(): string[] {
+  return [...document.querySelectorAll<HTMLElement>("[role='menuitem']")]
+    .filter((item) => !item.hidden)
+    .map((item) => item.textContent);
 }
 
 describe("placeMenu", () => {
@@ -123,5 +159,90 @@ describe("Menu", () => {
     press(menu, "Escape");
     expect(onEscape).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("Menu filter", () => {
+  it("matches labels case-insensitively and keeps everything for an empty query", () => {
+    expect(menuItemMatches("Open folder…", "FOLD")).toBe(true);
+    expect(menuItemMatches("Archive", "pin")).toBe(false);
+    expect(menuItemMatches("Archive", "  ")).toBe(true);
+  });
+
+  it("starts in the filter, hides non-matching items and separators, and says when nothing matches", () => {
+    renderMenu({ onClose: vi.fn(), filterable: true });
+    const input = document.querySelector(".ohb-menu-filter");
+    expect(document.activeElement).toBe(input);
+
+    typeFilter("th");
+    expect(visibleItems()).toEqual(["Third"]);
+    expect(
+      document.querySelector<HTMLElement>("[role='separator']")?.hidden,
+    ).toBe(true);
+
+    typeFilter("zzz");
+    expect(visibleItems()).toEqual([]);
+    expect(document.querySelector(".ohb-menu-empty")?.textContent).toBe(
+      "No matches",
+    );
+  });
+
+  it("moves from the filter into the visible items with the arrow keys", () => {
+    renderMenu({ onClose: vi.fn(), filterable: true });
+    typeFilter("sec");
+    press(document.querySelector(".ohb-menu-filter"), "ArrowDown");
+    expect(document.activeElement?.textContent).toBe("Second");
+  });
+
+  it("clears the filter on the first Escape and closes on the second", () => {
+    const onClose = vi.fn();
+    renderMenu({ onClose, filterable: true });
+    typeFilter("th");
+    const input = document.querySelector<HTMLInputElement>(".ohb-menu-filter");
+    press(input, "Escape");
+    expect(input?.value).toBe("");
+    expect(visibleItems()).toEqual(["First", "Skipped", "Second", "Third"]);
+    expect(onClose).not.toHaveBeenCalled();
+    press(input, "Escape");
+    expect(onClose).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("Menu on a phone", () => {
+  it("opens as a bottom sheet with a title, focuses the first item and closes with Cancel", () => {
+    stubPhone();
+    const onClose = vi.fn();
+    const menu = renderMenu({ onClose });
+    const sheet = document.querySelector(".ohb-menu.is-sheet");
+
+    expect(sheet?.getAttribute("role")).toBe("dialog");
+    expect(sheet?.getAttribute("style")).toBeNull();
+    expect(document.querySelector(".ohb-menu-sheet-title")?.textContent).toBe(
+      "Actions",
+    );
+    expect(document.activeElement?.textContent).toBe("First");
+    press(menu, "ArrowDown");
+    expect(document.activeElement?.textContent).toBe("Second");
+
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>(".ohb-menu-sheet-cancel")
+        ?.click();
+    });
+    expect(onClose).toHaveBeenCalledWith(true);
+  });
+
+  it("closes when the backdrop is tapped and leaves the filter unfocused", () => {
+    stubPhone();
+    const onClose = vi.fn();
+    renderMenu({ onClose, filterable: true });
+    expect(document.activeElement?.textContent).toBe("First");
+
+    act(() => {
+      document
+        .querySelector(".ohb-menu-sheet-backdrop")
+        ?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    expect(onClose).toHaveBeenCalledWith(false);
   });
 });

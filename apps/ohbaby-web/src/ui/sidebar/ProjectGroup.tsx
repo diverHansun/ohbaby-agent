@@ -70,6 +70,7 @@ export function ProjectGroup(props: {
         <Menu
           anchor={menu.anchor}
           label={`Actions for ${label}`}
+          title={label}
           onClose={(restoreFocus) => {
             if (restoreFocus && menu.trigger.isConnected)
               menu.trigger.focus({ preventScroll: true });

@@ -33,6 +33,7 @@ export function SessionActionsMenu(props: {
       <Menu
         anchor={props.anchor}
         label="Export format"
+        title={`Export ${props.title}`}
         level="export"
         className="ohb-session-menu"
         onClose={props.onClose}
@@ -72,6 +73,7 @@ export function SessionActionsMenu(props: {
     <Menu
       anchor={props.anchor}
       label={`Actions for ${props.title}`}
+      title={props.title}
       level="main"
       className="ohb-session-menu"
       {...(returned ? { focusSelector: "[data-menu-item='export']" } : {})}
