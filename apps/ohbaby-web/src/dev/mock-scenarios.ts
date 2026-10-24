@@ -449,6 +449,13 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     model: null,
     sessions: [],
   }),
+  // A keyless legacy model and no default: completing it sets the default.
+  "settings-legacy": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: { scopes: [], selectedDirectory: DEFAULT_WORKSPACE },
+    model: null,
+    sessions: [],
+  }),
   "settings-errors": () => ({
     snapshot: { ...base, activeSessionId: null, sessions: history },
     workspace,

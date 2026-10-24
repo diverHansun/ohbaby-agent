@@ -410,6 +410,29 @@ describe("settings dialog", () => {
     expect(dialogOpen()).toBe(true);
   });
 
+  it("finishes a keyless Needs setup entry on Save and makes it the default", async () => {
+    const runtime = createMockRuntime("settings-legacy");
+    const update = vi.spyOn(runtime.settings, "updateModel");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("Needs setup"),
+      "the legacy entry",
+    );
+    await click(button(dialog(), "Edit anthropic/claude-sonnet-5"));
+    expect(dialog().textContent).toContain("Not set");
+    const save = button(dialog(), "Save");
+    expect(save.disabled).toBe(false);
+    await click(save);
+    await until(
+      () => dialog().textContent.includes("Default"),
+      "the completed default",
+    );
+    // No key typed: Save confirms no-key mode instead of sending nothing.
+    expect(update).toHaveBeenCalledWith("legacy", { apiKeyEnv: null });
+    expect(dialog().textContent).not.toContain("Needs setup");
+  });
+
   it("puts a server field error under its input and keeps the input", async () => {
     const runtime = createMockRuntime("settings-errors");
     const container = mount(runtime);

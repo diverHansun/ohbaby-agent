@@ -956,3 +956,42 @@ it("returns stable codes and value-free field errors on every global settings fa
     error: { code: "SETTINGS_ACCESS_FAILED" },
   });
 });
+
+it("finishes a keyless legacy entry when the patch confirms no key reference", async () => {
+  await json(join(home, "model.json"), {
+    provider: "zenmux",
+    defaultModel: "missing",
+    apiConfig: { baseUrl: "http://localhost:1/v1" },
+    llmParams: { maxTokens: 8192 },
+    models: [
+      {
+        id: "legacy",
+        provider: "zenmux",
+        model: "history",
+        baseUrl: "http://localhost:1/v1",
+        interfaceProvider: "anthropic",
+        contextWindowTokens: 12000,
+      },
+    ],
+  });
+  const before = (await (
+    await request("models")
+  ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+  const legacy = before.models.find((model) => model.model === "history");
+  expect(legacy?.configurationComplete).toBe(false);
+  const id = legacy?.id ?? "";
+  // An empty patch leaves it unfinished; apiKeyEnv: null is the explicit choice.
+  const empty = (await (
+    await request(`models/profiles/${id}`, "PATCH", {})
+  ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+  expect(
+    empty.models.find((model) => model.id === id)?.configurationComplete,
+  ).toBe(false);
+  const done = (await (
+    await request(`models/profiles/${id}`, "PATCH", { apiKeyEnv: null })
+  ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+  const entry = done.models.find((model) => model.id === id);
+  expect(entry?.configurationComplete).toBe(true);
+  expect(entry?.apiKeyConfigured).toBe(false);
+  expect((await request("models/active", "POST", { id })).status).toBe(200);
+});

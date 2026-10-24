@@ -197,6 +197,21 @@ function fullState(): MockSettingsState {
   };
 }
 
+/** An old history entry with a URL and protocol but no key reference, and no default. */
+function legacyState(): MockSettingsState {
+  return {
+    ...emptyState(),
+    models: [
+      entry("legacy", "zenmux", "anthropic/claude-sonnet-5", {
+        interfaceProvider: "anthropic",
+        apiKeyEnv: undefined,
+        apiKeyConfigured: false,
+        configurationComplete: false,
+      }),
+    ],
+  };
+}
+
 function emptyState(): MockSettingsState {
   return {
     models: [],
@@ -243,9 +258,11 @@ export function createMockSettingsApi(
   const state =
     scenario === "settings-empty" || scenario === "fresh"
       ? emptyState()
-      : scenario === "no-model"
-        ? { ...fullState(), activeId: null, models: [] }
-        : fullState();
+      : scenario === "settings-legacy"
+        ? legacyState()
+        : scenario === "no-model"
+          ? { ...fullState(), activeId: null, models: [] }
+          : fullState();
   const failing = scenario === "settings-errors";
   let nextId = 100;
   const models = (): UiSettingsModels => ({
@@ -304,13 +321,25 @@ export function createMockSettingsApi(
           throw validationError(["baseUrl"], "Must be an http or https URL");
         const current = find(id);
         const { apiKey, label, apiKeyEnv, ...fields } = patch;
-        const next: UiSettingsModel = complete({
+        const merged: UiSettingsModel = {
           ...current,
           ...fields,
           ...(apiKeyEnv ? { apiKeyEnv } : {}),
           apiKeyConfigured:
             apiKey === undefined ? current.apiKeyConfigured : apiKey !== "",
-        });
+        };
+        // As the server: a legacy entry finishes setup only with an explicit
+        // credential choice (a key, a variable, or apiKeyEnv: null).
+        const next: UiSettingsModel = current.configurationComplete
+          ? complete(merged)
+          : {
+              ...merged,
+              configurationComplete:
+                complete(merged).configurationComplete &&
+                (apiKeyEnv !== undefined ||
+                  apiKey !== undefined ||
+                  current.apiKeyEnv !== undefined),
+            };
         const { label: _label, ...unlabelled } = next;
         state.models = state.models.map((model) =>
           model.id === id
