@@ -20,6 +20,11 @@
   z-index: 30;
 }
 
+/* The empty-state card opens taller, like Cursor's, so it reads as the start. */
+.ohb-composer.ohb-composer-hero textarea {
+  min-height: 48px;
+}
+
 .ohb-composer-hero {
   background: none;
   max-width: var(--content-width);

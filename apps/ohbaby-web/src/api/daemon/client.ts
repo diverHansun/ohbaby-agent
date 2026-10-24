@@ -89,6 +89,10 @@ export class BrowserDaemonClient implements UiBackendClient {
     this.prompts.forgetUnknownPrompt(clientRequestId);
   }
 
+  hasUnknownPrompt(clientRequestId: string): boolean {
+    return this.prompts.isUnknown(clientRequestId);
+  }
+
   retryUnknownPrompts(): Promise<void> {
     return this.prompts.retryUnknownPrompts();
   }

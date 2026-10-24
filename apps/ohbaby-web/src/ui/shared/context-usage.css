@@ -44,12 +44,14 @@
   stroke-linecap: round;
 }
 
+/* Neutral until nearly full (D32): dark at the high mark, amber when
+   critical; red stays for errors. */
 .ohb-context-usage-control.is-high .ohb-context-ring-button {
-  color: var(--warning);
+  color: var(--text);
 }
 
 .ohb-context-usage-control.is-critical .ohb-context-ring-button {
-  color: var(--danger);
+  color: var(--warning);
 }
 
 .ohb-context-usage-control.is-unavailable .ohb-context-ring-button {

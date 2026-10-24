@@ -1,4 +1,4 @@
-import { ChevronRight, MoreHorizontal, SquarePen } from "lucide-react";
+import { Folder, FolderOpen, MoreHorizontal, SquarePen } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { IconButton } from "../shared/IconButton.js";
 import { anchorBelow, Menu, type MenuAnchor } from "../shared/Menu.js";
@@ -38,11 +38,20 @@ export function ProjectGroup(props: {
           title={props.available ? props.directory : `${label} is unavailable`}
           onClick={props.onToggle}
         >
-          <ChevronRight
-            aria-hidden="true"
-            size={12}
-            className={`ohb-project-chevron${props.expanded ? " is-open" : ""}`}
-          />
+          {/* The folder shows the fold state, like Codex and Cursor. */}
+          {props.expanded ? (
+            <FolderOpen
+              aria-hidden="true"
+              size={15}
+              className="ohb-project-folder"
+            />
+          ) : (
+            <Folder
+              aria-hidden="true"
+              size={15}
+              className="ohb-project-folder"
+            />
+          )}
           <span className="ohb-project-name">{label}</span>
           {!props.expanded && props.loadedCount > 0 ? (
             <span className="ohb-group-count">{props.loadedCount}</span>

@@ -180,7 +180,7 @@ it("collapses to its title row and expands back without losing the request", () 
     });
     const dialog = element.querySelector('[role="dialog"]');
     expect(dialog?.getAttribute("aria-modal")).toBe("false");
-    expect(element.textContent).toContain("1 / 2");
+    expect(element.textContent).toContain("1 of 2");
     act(() => {
       element
         .querySelector<HTMLButtonElement>('[aria-label="Collapse approval"]')

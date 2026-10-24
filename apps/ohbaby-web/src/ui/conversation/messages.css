@@ -46,15 +46,15 @@
 .ohb-message-body {
   color: var(--text);
   font-size: 15px;
-  line-height: 1.62;
+  line-height: 1.7;
   min-width: 0;
 }
 
 .ohb-message-user-bubble {
-  background: var(--bg-subtle);
-  border-radius: 14px;
+  background: var(--user-bg);
+  border-radius: 18px;
   max-width: 76%;
-  padding: 11px 15px;
+  padding: 10px 16px;
   width: fit-content;
 }
 
@@ -155,10 +155,17 @@
 }
 
 .ohb-streaming-text,
-.ohb-reasoning,
 .ohb-tool-panel pre {
   font-family: var(--font-mono);
   font-size: 13px;
+  line-height: 1.65;
+  margin: 0;
+}
+
+/* Thinking reads as quiet prose, not code (Claude, Codex). */
+.ohb-reasoning {
+  font-family: var(--font-ui);
+  font-size: 14px;
   line-height: 1.65;
   margin: 0;
 }
@@ -192,11 +199,12 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   color: var(--text-muted);
   display: flex;
-  gap: 10px;
-  padding: 3px 8px;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 8px;
   transition: background-color 140ms ease;
   width: 100%;
 }
@@ -205,21 +213,28 @@
   background: var(--bg-hover);
 }
 
-.ohb-tool-panel button span:first-child {
-  background: transparent;
-  border: 0;
+.ohb-tool-icon {
+  color: var(--text-dim);
   flex: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
+}
+
+.ohb-tool-spinner {
+  animation: ohb-spin 1s linear infinite;
+}
+
+/* Tool name in UI type, like Claude and Codex; the argument stays mono. */
+.ohb-tool-name {
+  color: var(--text);
+  flex: none;
+  font-size: 13px;
   font-weight: 500;
-  padding: 0;
 }
 
 .ohb-tool-summary {
-  color: var(--text-muted);
+  color: var(--text-dim);
   flex: 1;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 12.5px;
   min-width: 0;
   overflow: hidden;
   text-align: left;
@@ -244,12 +259,13 @@
 }
 
 .ohb-tool-details {
-  background: var(--bg-hover);
-  border-radius: 7px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(0, 1fr);
-  margin: 2px 8px 10px;
+  margin: 4px 0 10px 30px;
   min-width: 0;
   padding: 10px 12px;
 }
@@ -295,13 +311,8 @@
 }
 
 /* Tool names stay neutral; only a failure is coloured (D5). */
-.ohb-tool-blue button span:first-child,
-.ohb-tool-gold button span:first-child,
-.ohb-tool-green button span:first-child {
-  color: var(--text-muted);
-}
-
-.ohb-tool-red button span:first-child {
+.ohb-tool-red .ohb-tool-name,
+.ohb-tool-red .ohb-tool-icon {
   color: var(--danger-ink);
 }
 

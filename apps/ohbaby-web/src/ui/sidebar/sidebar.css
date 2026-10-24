@@ -1,8 +1,7 @@
 /* Sidebar (03 §4.4): wordmark, New chat, project groups and single-line rows. */
 .ohb-sidebar {
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
   background: var(--bg-panel);
+  border-right: 1px solid var(--border);
   color: var(--text);
   display: flex;
   flex-direction: column;
@@ -91,11 +90,11 @@
   color: var(--text-muted);
   display: flex;
   flex: 1;
-  font-size: 13px;
-  gap: 6px;
+  font-size: 13.5px;
+  gap: 8px;
   min-height: var(--row-height);
   min-width: 0;
-  padding: 0 4px 0 6px;
+  padding: 0 4px 0 8px;
   text-align: left;
 }
 
@@ -108,6 +107,11 @@
   color: var(--text-dim);
   flex: none;
   transition: transform var(--duration-fast) var(--ease);
+}
+
+.ohb-project-folder {
+  color: var(--text-dim);
+  flex: none;
 }
 
 .ohb-project-chevron.is-open {
@@ -143,7 +147,7 @@
   flex-direction: column;
   gap: 1px;
   overflow-anchor: none;
-  padding: 2px 0 6px 12px;
+  padding: 2px 0 6px 14px;
 }
 
 .ohb-sidebar-section-actions {
@@ -248,7 +252,7 @@ button.ohb-group-more:hover {
   color: var(--text-muted);
   display: flex;
   flex: 1;
-  font-size: 13px;
+  font-size: 13.5px;
   gap: 8px;
   min-height: var(--row-height);
   min-width: 0;

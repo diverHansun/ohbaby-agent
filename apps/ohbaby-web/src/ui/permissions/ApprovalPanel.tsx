@@ -86,6 +86,8 @@ export function ApprovalPanel(props: {
         <header className="ohb-approval-header">
           <div className="ohb-approval-heading">
             <span className="ohb-approval-source">
+              <span className="ohb-approval-dot" aria-hidden="true" />
+              Needs approval ·{" "}
               {request.sessionId === request.rootSessionId
                 ? "Main agent"
                 : (request.sourceLabel ?? request.sessionId)}
@@ -106,7 +108,7 @@ export function ApprovalPanel(props: {
                 <ChevronLeft aria-hidden="true" size={15} />
               </IconButton>
               <span>
-                {selectedIndex + 1} / {props.permissions.length}
+                {selectedIndex + 1} of {props.permissions.length}
               </span>
               <IconButton
                 label="Next approval"
@@ -138,61 +140,25 @@ export function ApprovalPanel(props: {
         {collapsed ? null : (
           <>
             {request.description ? (
-              <p className="ohb-approval-detail">{request.description}</p>
+              <div className="ohb-approval-body">
+                <pre className="ohb-approval-detail">{request.description}</pre>
+              </div>
             ) : null}
-            <div className="ohb-permission-actions">
-              {props.syncing ? (
-                <span role="status">Synchronizing approvals…</span>
-              ) : null}
-              {props.error ? (
-                <div role="status">
-                  {props.error}
+            {props.syncing || props.error ? (
+              <div className="ohb-approval-status" role="status">
+                {props.syncing ? "Synchronizing approvals…" : props.error}
+                {props.error ? (
                   <button onClick={props.onRetry} type="button">
                     Retry approvals
                   </button>
-                </div>
-              ) : null}
-              {request.choices
-                .filter(
-                  (choice) =>
-                    choice.id !== "cancel" && choice.intent !== "abort",
-                )
-                .map((choice) => (
-                  <button
-                    className={permissionButtonClass(choice)}
-                    disabled={props.disabled || responding}
-                    key={`${request.id}:${choice.id}`}
-                    onClick={(event) => {
-                      if (
-                        event.detail > 1 ||
-                        pending.current.has(request.id) ||
-                        props.disabled
-                      )
-                        return;
-                      pending.current.add(request.id);
-                      update((value) => value + 1);
-                      void props.onRespond(request, choice).then(
-                        (success) => {
-                          if (!success) {
-                            pending.current.delete(request.id);
-                            update((value) => value + 1);
-                          }
-                        },
-                        () => {
-                          pending.current.delete(request.id);
-                          update((value) => value + 1);
-                        },
-                      );
-                    }}
-                    type="button"
-                  >
-                    {choice.label}
-                  </button>
-                ))}
+                ) : null}
+              </div>
+            ) : null}
+            <footer className="ohb-permission-actions">
               {props.onCancel ? (
                 <button
                   type="button"
-                  className="ohb-stop-button"
+                  className="ohb-approval-stop"
                   aria-label={props.cancelLabel ?? "Stop run"}
                   title={props.cancelLabel ?? "Stop run"}
                   aria-busy={props.cancelLabel !== undefined}
@@ -203,14 +169,54 @@ export function ApprovalPanel(props: {
                     <LoaderCircle
                       aria-hidden="true"
                       className="ohb-stop-pending"
-                      size={14}
+                      size={13}
                     />
                   ) : (
-                    <Square aria-hidden="true" size={14} />
+                    <Square aria-hidden="true" size={11} fill="currentColor" />
                   )}
+                  <span>Stop</span>
                 </button>
               ) : null}
-            </div>
+              <span className="ohb-permission-choices">
+                {request.choices
+                  .filter(
+                    (choice) =>
+                      choice.id !== "cancel" && choice.intent !== "abort",
+                  )
+                  .map((choice) => (
+                    <button
+                      className={permissionButtonClass(choice)}
+                      disabled={props.disabled || responding}
+                      key={`${request.id}:${choice.id}`}
+                      onClick={(event) => {
+                        if (
+                          event.detail > 1 ||
+                          pending.current.has(request.id) ||
+                          props.disabled
+                        )
+                          return;
+                        pending.current.add(request.id);
+                        update((value) => value + 1);
+                        void props.onRespond(request, choice).then(
+                          (success) => {
+                            if (!success) {
+                              pending.current.delete(request.id);
+                              update((value) => value + 1);
+                            }
+                          },
+                          () => {
+                            pending.current.delete(request.id);
+                            update((value) => value + 1);
+                          },
+                        );
+                      }}
+                      type="button"
+                    >
+                      {choice.label}
+                    </button>
+                  ))}
+              </span>
+            </footer>
           </>
         )}
       </section>

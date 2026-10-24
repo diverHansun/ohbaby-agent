@@ -149,10 +149,16 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     options?: SubmitPromptOptions,
   ): Promise<UiPromptReceipt> {
     const generation = this.instance.selection;
+    const promptOptions = {
+      ...options,
+      clientRequestId:
+        options?.clientRequestId ?? globalThis.crypto.randomUUID(),
+    };
     for (let resends = 0; ; resends++) {
       const client = this.instance.requireClient();
+      const directory = this.instance.directory;
       try {
-        return await client.submitPromptAccepted(text, options);
+        return await client.submitPromptAccepted(text, promptOptions);
       } catch (error) {
         const target = sessionMovedTarget(error);
         const sessionId = options?.sessionId;
@@ -167,6 +173,17 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
         await this.instance.followMove(sessionId, target, generation);
         if (this.instance.selection !== generation) throw error;
         await waitForSessionReady(this.store, sessionId);
+      } finally {
+        // A replacement client may have inherited this in-flight ledger entry.
+        // Clear only an outcome the submitting client has proved, in its directory.
+        if (
+          client !== this.instance.client &&
+          directory === this.instance.directory &&
+          !client.hasUnknownPrompt(promptOptions.clientRequestId)
+        )
+          this.instance.client?.forgetUnknownPrompt(
+            promptOptions.clientRequestId,
+          );
       }
     }
   }
@@ -188,11 +205,13 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       this.draft.setProject(previous);
       throw new Error("The default workspace is not available yet");
     }
+    const opening = this.instance.openDraft(directory);
+    const generation = this.instance.selection;
     try {
-      await this.instance.openDraft(directory);
+      await opening;
     } catch (error) {
       // The instance rolled back; the picker must name where a send would go.
-      if (this.draft.getSnapshot().projectDirectory === projectDirectory)
+      if (this.instance.selection === generation)
         this.draft.setProject(this.projectOf(this.instance.directory));
       throw error;
     }
@@ -222,6 +241,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       .getSnapshot()
       .sessions.find((session) => session.id === sessionId);
     const wasOpen = this.boundSessionId() === sessionId;
+    const generation = this.instance.selection;
     // The only optimistic sidebar change (04 §2.3): the row leaves at once
     // and returns if the server refuses.
     this.catalog.removeSession(sessionId);
@@ -239,7 +259,8 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     settle();
     void this.global.refresh();
     // The server may bind another session after archiving; the draft wins.
-    if (wasOpen) await this.openDraft(null).catch(() => undefined);
+    if (wasOpen && this.instance.selection === generation)
+      await this.openDraft(null).catch(() => undefined);
   }
 
   async exportSession(

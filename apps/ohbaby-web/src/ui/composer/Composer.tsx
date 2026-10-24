@@ -48,7 +48,7 @@ export interface ComposerModel {
   readonly permissionLevel: UiPermissionLevel;
 }
 
-const TEXTAREA_FIT = { lineHeight: 22, maxLines: 7 } as const;
+const TEXTAREA_FIT = { lineHeight: 24, maxLines: 7 } as const;
 const DOUBLE_ESCAPE_MS = 650;
 
 /**

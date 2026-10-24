@@ -13,23 +13,24 @@
 
 .ohb-approval-panel {
   animation: ohb-slide-up var(--duration) var(--ease);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  background: var(--bg-glass);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-menu);
+  display: flex;
+  flex-direction: column;
   max-height: calc(100dvh - 120px);
-  overflow-y: auto;
+  overflow: hidden;
   pointer-events: auto;
-  width: min(560px, 100%);
+  width: min(var(--content-width), 100%);
 }
 
+/* Header (after pi-web's request dialog): a status line, then the title. */
 .ohb-approval-header {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   gap: 6px;
-  padding: 10px 8px 10px 16px;
+  padding: 14px 10px 10px 18px;
 }
 
 .ohb-approval-heading {
@@ -38,18 +39,34 @@
 }
 
 .ohb-approval-source {
+  align-items: center;
   color: var(--text-dim);
-  display: block;
-  font-size: 11.5px;
-  margin-bottom: 2px;
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+/* The one attention colour, matching the sidebar's awaiting dot. */
+.ohb-approval-dot {
+  background: var(--warning);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
 }
 
 .ohb-approval-heading h2 {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
-  line-height: 1.35;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.ohb-approval-panel.is-collapsed .ohb-approval-header {
+  padding-bottom: 14px;
 }
 
 .ohb-approval-panel.is-collapsed .ohb-approval-heading h2 {
@@ -67,41 +84,42 @@
   color: var(--text-dim);
   display: flex;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   gap: 2px;
+}
+
+.ohb-approval-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 18px 14px;
 }
 
 .ohb-approval-detail {
   background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border);
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text);
   font-family: var(--font-mono);
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: 1.55;
   margin: 0;
-  max-height: 180px;
+  max-height: 200px;
   overflow: auto;
   overflow-wrap: anywhere;
-  padding: 10px 16px;
+  padding: 10px 12px;
   white-space: pre-wrap;
 }
 
-.ohb-permission-actions {
+.ohb-approval-status {
   align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-  padding: 10px 12px;
-}
-
-.ohb-permission-actions > [role="status"] {
   color: var(--text-dim);
+  display: flex;
   font-size: 12px;
-  margin-right: auto;
+  gap: 8px;
+  padding: 0 18px 12px;
 }
 
-.ohb-permission-actions > [role="status"] button,
+.ohb-approval-status button,
 .ohb-permission-sync button {
   background: transparent;
   border: 0;
@@ -110,6 +128,24 @@
   font-weight: 500;
   padding: 2px 6px;
   text-decoration: underline;
+}
+
+/* Footer bar: Stop on the left, choices on the right, primary last. */
+.ohb-permission-actions {
+  align-items: center;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+}
+
+.ohb-permission-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .ohb-perm-btn {
@@ -121,36 +157,41 @@
   font-weight: 500;
   gap: 7px;
   justify-content: center;
+  letter-spacing: -0.01em;
   min-height: 32px;
-  padding: 0 12px;
-  transition: background var(--duration-fast) var(--ease);
+  padding: 0 14px;
+  transition:
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
 }
 
 .ohb-perm-allow-primary {
   background: var(--accent);
   color: var(--accent-contrast);
+  order: 2;
 }
 
 .ohb-perm-allow-primary:not(:disabled):hover {
   background: var(--accent-hover);
 }
 
-.ohb-perm-allow-secondary,
-.ohb-perm-deny {
-  background: transparent;
+.ohb-perm-allow-secondary {
+  background: var(--bg-elevated);
   border-color: var(--border-strong);
   color: var(--text);
+  order: 1;
+}
+
+.ohb-perm-deny {
+  background: transparent;
+  color: var(--text-muted);
+  order: 0;
 }
 
 .ohb-perm-allow-secondary:not(:disabled):hover,
 .ohb-perm-deny:not(:disabled):hover {
   background: var(--bg-hover);
-}
-
-/* Deny sits first on the left, away from the approving choices. */
-.ohb-perm-deny {
-  margin-right: auto;
-  order: -1;
+  color: var(--text);
 }
 
 .ohb-perm-abort {
@@ -163,10 +204,23 @@
   background: var(--danger-soft);
 }
 
-.ohb-permission-actions .ohb-stop-button {
-  border-radius: 50%;
-  height: 32px;
-  width: 32px;
+/* Stopping is a quiet text action here; the black Stop lives in the composer. */
+.ohb-approval-stop {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 13px;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.ohb-approval-stop:not(:disabled):hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .ohb-permission-sync {
@@ -201,13 +255,9 @@
     min-height: 44px;
   }
 
-  .ohb-permission-actions > [role="status"] button,
-  .ohb-permission-sync button {
+  .ohb-approval-status button,
+  .ohb-permission-sync button,
+  .ohb-approval-stop {
     min-height: 44px;
-  }
-
-  .ohb-permission-actions .ohb-stop-button {
-    height: 44px;
-    width: 44px;
   }
 }

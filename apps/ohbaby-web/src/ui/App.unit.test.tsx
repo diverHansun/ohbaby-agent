@@ -467,10 +467,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     }
     Object.defineProperty(textarea, "scrollHeight", {
       configurable: true,
-      value: 66,
+      value: 72,
     });
     await setTextareaValue(app.container, "line one\nline two\nline three");
-    expect(textarea.style.height).toBe("66px");
+    expect(textarea.style.height).toBe("72px");
     expect(textarea.style.overflowY).toBe("hidden");
 
     Object.defineProperty(textarea, "scrollHeight", {
@@ -481,7 +481,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container,
       "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten",
     );
-    expect(textarea.style.height).toBe("154px");
+    expect(textarea.style.height).toBe("168px");
     expect(textarea.style.overflowY).toBe("auto");
   });
 

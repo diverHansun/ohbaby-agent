@@ -144,8 +144,8 @@ describe("web layout styles", () => {
 
   it("supports a bounded, contained composer textarea scroll", () => {
     expectCssRule(".ohb-composer textarea", [
-      "line-height: 22px",
-      "max-height: 154px",
+      "line-height: 24px",
+      "max-height: 168px",
       "overflow-y: auto",
       "overscroll-behavior: contain",
     ]);
@@ -186,7 +186,7 @@ describe("web layout styles", () => {
     ]);
     expectCssRule(".ohb-approval-panel", [
       "pointer-events: auto",
-      "width: min(560px, 100%)",
+      "width: min(var(--content-width), 100%)",
     ]);
     expectCssRule(
       ".ohb-main-body.has-approval .ohb-root-conversation > .ohb-stream",

@@ -65,7 +65,7 @@ export function ComposerControls(props: {
               size={14}
             />
           ) : (
-            <Square size={12} fill="currentColor" />
+            <Square size={10} fill="currentColor" />
           )}
         </button>
       ) : (

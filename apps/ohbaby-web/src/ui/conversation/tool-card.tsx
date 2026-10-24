@@ -1,4 +1,15 @@
-import { ChevronRight } from "lucide-react";
+import {
+  ChevronRight,
+  FilePen,
+  FileText,
+  Globe,
+  LoaderCircle,
+  type LucideIcon,
+  Search,
+  SquareTerminal,
+  TriangleAlert,
+  Wrench,
+} from "lucide-react";
 import type {
   UiMessagePart,
   UiToolCall,
@@ -160,6 +171,10 @@ function ToolPanel(props: {
   readonly summary: string;
   readonly title: string;
 }): ReactElement {
+  const executing =
+    props.execution?.phase === "executing" &&
+    props.execution.endedAt === undefined;
+  const Icon = props.abnormal ? TriangleAlert : toolIcon(props.title);
   return (
     <div className={`ohb-tool-panel ohb-tool-${props.accent}`}>
       <button
@@ -168,13 +183,17 @@ function ToolPanel(props: {
         onClick={props.onToggle}
         type="button"
       >
+        {executing ? (
+          <LoaderCircle
+            aria-hidden="true"
+            className="ohb-tool-icon ohb-tool-spinner"
+            size={14}
+          />
+        ) : (
+          <Icon aria-hidden="true" className="ohb-tool-icon" size={14} />
+        )}
         <span
-          className={
-            props.execution?.phase === "executing" &&
-            props.execution.endedAt === undefined
-              ? "ohb-tool-executing"
-              : undefined
-          }
+          className={`ohb-tool-name${executing ? " ohb-tool-executing" : ""}`}
         >
           {props.title}
         </span>
@@ -225,6 +244,17 @@ function resultBody(result: UiToolResult): string {
     return result.output;
   }
   return `${result.output}\n\nError: ${error}`;
+}
+
+/** One neutral icon per kind of tool, so rows scan without colour. */
+function toolIcon(name: string): LucideIcon {
+  const lowered = name.toLowerCase();
+  if (/bash|shell|exec|command|terminal/u.test(lowered)) return SquareTerminal;
+  if (/edit|write|patch|apply/u.test(lowered)) return FilePen;
+  if (/grep|glob|search|find|list/u.test(lowered)) return Search;
+  if (/web|fetch|http|url/u.test(lowered)) return Globe;
+  if (/read|view|open|cat/u.test(lowered)) return FileText;
+  return Wrench;
 }
 
 function toolAccent(name: string): "blue" | "gold" | "green" {

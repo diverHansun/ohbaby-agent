@@ -111,14 +111,6 @@ export class InstanceLayer {
     return this.enqueue(async () => {
       // A later choice already superseded this one.
       if (generation !== this.selectionGeneration) return;
-      const binding = this.store.getSnapshot().permissionSync.binding;
-      if (
-        this.activeClient &&
-        this.directoryValue === directory &&
-        binding !== null &&
-        binding.rootSessionId === null
-      )
-        return;
       await this.connect(directory);
     });
   }
