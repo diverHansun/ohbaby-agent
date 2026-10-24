@@ -53,6 +53,12 @@ export class ClientSync {
   private scopeTicketValue = 0;
   private selectionTicket = 0;
   private modelTicketValue = 0;
+  private modelRead:
+    | {
+        scope: number;
+        promise: ReturnType<UiBackendClient["getCurrentModel"]>;
+      }
+    | undefined;
   private indexTicket = 0;
   private controlTicket = 0;
   private historyTicket = 0;
@@ -241,19 +247,37 @@ export class ClientSync {
     void this.refreshIndex();
   }
 
-  private async refreshModel(): Promise<void> {
+  /** The store and thinking control share the same in-flight metadata read. */
+  getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
+    const scope = this.scopeTicketValue;
+    if (this.modelRead?.scope === scope) return this.modelRead.promise;
     const ticket = this.nextModelTicket();
+    const promise = this.http
+      .getCurrentModel({
+        signal: this.lifecycleController.signal,
+      })
+      .then(({ model }) => {
+        if (
+          !this.closedValue &&
+          ticket === this.modelTicketValue &&
+          scope === this.scopeTicketValue
+        )
+          this.store.setCurrentModel(model);
+        return model;
+      })
+      .finally(() => {
+        if (this.modelRead?.promise === promise) this.modelRead = undefined;
+      });
+    this.modelRead = { scope, promise };
+    return promise;
+  }
+
+  private async refreshModel(): Promise<void> {
+    const pending = this.getCurrentModel();
+    const ticket = this.modelTicketValue;
     const scope = this.scopeTicketValue;
     try {
-      const response = await this.http.getCurrentModel({
-        signal: this.lifecycleController.signal,
-      });
-      if (
-        !this.closedValue &&
-        ticket === this.modelTicketValue &&
-        scope === this.scopeTicketValue
-      )
-        this.store.setCurrentModel(response.model);
+      await pending;
     } catch (error) {
       if (
         !this.closedValue &&
@@ -599,9 +623,10 @@ export class ClientSync {
           return;
         }
         if (event.event.type === "model.invalidated") {
+          // An earlier read may predate this change. Start a fresh one;
+          // subscribers notified below will join it.
+          this.modelRead = undefined;
           void this.refreshModel();
-          // Subscribers such as the reasoning control and the settings
-          // cache reread on their own.
           this.notifyUiEvent(event.event);
           return;
         }

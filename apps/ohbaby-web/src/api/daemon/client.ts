@@ -437,7 +437,11 @@ export class BrowserDaemonClient implements UiBackendClient {
   async setPermission(
     input: Parameters<UiBackendClient["setPermission"]>[0],
   ): ReturnType<UiBackendClient["setPermission"]> {
-    return (await this.http.setPermission(input)).permission;
+    const scope = this.sync.scopeTicket;
+    const { permission } = await this.http.setPermission(input);
+    if (!this.sync.closed && scope === this.sync.scopeTicket)
+      this.sync.store.setPermission(permission);
+    return permission;
   }
 
   async abortRun(runId: string): ReturnType<UiBackendClient["abortRun"]> {

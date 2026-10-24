@@ -87,6 +87,12 @@ export function validateModelForm(
   if (form.baseUrl.trim() === "") errors.baseUrl = "Required";
   else if (!/^https?:\/\//iu.test(form.baseUrl.trim()))
     errors.baseUrl = "Must be an http or https URL";
+  else if (
+    form.baseUrl.trim() !== saved?.baseUrl &&
+    /\[REDACTED\]|%5BREDACTED%5D/iu.test(form.baseUrl)
+  )
+    errors.baseUrl =
+      "Replace the entire URL; hidden credentials cannot be reused.";
   if (form.interfaceProvider === "") errors.interfaceProvider = "Required";
   for (const field of ["contextWindowTokens", "maxOutputTokens"] as const)
     if (form[field].trim() !== "" && !POSITIVE_INTEGER.test(form[field].trim()))
@@ -147,6 +153,7 @@ export function modelCreateRequest(form: ModelForm): UiSettingsModelCreate {
 export function modelPatchRequest(
   form: ModelForm,
   saved: ModelForm,
+  needsSetup = false,
 ): UiSettingsModelPatch {
   const patch: {
     -readonly [K in keyof UiSettingsModelPatch]: UiSettingsModelPatch[K];
@@ -163,6 +170,15 @@ export function modelPatchRequest(
   if (secretChanged(form.secret)) patch.apiKey = secretPatch(form.secret);
   if (form.apiKeyEnv.trim() !== saved.apiKeyEnv && form.apiKeyEnv.trim() !== "")
     patch.apiKeyEnv = form.apiKeyEnv.trim();
+  // Legacy entries require an explicit credential choice to finish setup.
+  // Confirm keyless only when neither a saved reference nor a new key exists.
+  if (
+    needsSetup &&
+    saved.apiKeyEnv === "" &&
+    form.apiKeyEnv.trim() === "" &&
+    !secretChanged(form.secret)
+  )
+    patch.apiKeyEnv = null;
   for (const field of ["contextWindowTokens", "maxOutputTokens"] as const)
     if (form[field].trim() !== saved[field] && form[field].trim() !== "")
       patch[field] = Number(form[field].trim());
@@ -182,7 +198,10 @@ export function modelFormSavable(
 ): boolean {
   if (Object.keys(validateModelForm(form, saved)).length > 0) return false;
   if (saved === null) return true;
-  return needsSetup || Object.keys(modelPatchRequest(form, saved)).length > 0;
+  return (
+    needsSetup ||
+    Object.keys(modelPatchRequest(form, saved, needsSetup)).length > 0
+  );
 }
 
 const FIELD_NAMES: ReadonlySet<string> = new Set<ModelField>([

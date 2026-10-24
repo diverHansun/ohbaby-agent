@@ -139,6 +139,8 @@ export interface StoreSnapshot {
   readonly historyStale: boolean;
   readonly unknownPromptRequests: readonly UnknownPromptRequest[];
   readonly permissionSync: PermissionSyncState;
+  /** Instance permission policy also exists before a draft has a session. */
+  readonly permission: UiPermissionState | null;
   readonly sessionIndex: readonly UiSessionIndexEntry[];
   readonly connectionState: ConnectionState;
   readonly currentModel: UiCurrentModelConfig | null;

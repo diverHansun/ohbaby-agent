@@ -94,6 +94,37 @@ describe("model form", () => {
     ).toBeDefined();
   });
 
+  it.each(["[REDACTED]", "%5BREDACTED%5D"])(
+    "requires a full replacement when editing a model URL containing %s",
+    (mask) => {
+      const base = modelFormFrom({
+        ...saved,
+        baseUrl: `https://acme.test/v1?token=${mask}`,
+      });
+      const changed = {
+        ...base,
+        baseUrl: `https://acme.test/v2?token=${mask}`,
+      };
+      expect(validateModelForm(changed, base).baseUrl).toEqual(
+        expect.stringContaining("Replace the entire URL"),
+      );
+      expect(modelFormSavable(changed, base, false)).toBe(false);
+      expect(validateModelForm(changed, null).baseUrl).toBeDefined();
+
+      const relabeled = { ...base, label: "Personal" };
+      expect(validateModelForm(relabeled, base)).toEqual({});
+      expect(modelFormSavable(relabeled, base, false)).toBe(true);
+      expect(modelPatchRequest(relabeled, base)).toEqual({ label: "Personal" });
+
+      const replaced = { ...base, baseUrl: "https://new.test/v1" };
+      expect(validateModelForm(replaced, base)).toEqual({});
+      expect(modelFormSavable(replaced, base, false)).toBe(true);
+      expect(validateModelForm({ ...base, baseUrl: "" }, base).baseUrl).toBe(
+        "Required",
+      );
+    },
+  );
+
   it("lets a completed Needs setup entry save without other changes", () => {
     const legacy = modelFormFrom({
       ...saved,
@@ -112,6 +143,39 @@ describe("model form", () => {
       baseUrl: "https://acme.test/v1",
       interfaceProvider: "anthropic",
     });
+  });
+
+  it("confirms a legacy entry without a credential reference as keyless", () => {
+    const base = modelFormFrom({
+      ...saved,
+      apiKeyEnv: undefined,
+      apiKeyConfigured: false,
+      configurationComplete: false,
+    });
+    expect(modelFormSavable(base, base, true)).toBe(true);
+    expect(modelPatchRequest(base, base, true)).toEqual({ apiKeyEnv: null });
+    // Completed keyless entries still send only the user's changed fields.
+    expect(modelPatchRequest(base, base, false)).toEqual({});
+    expect(modelFormSavable(base, base, false)).toBe(false);
+  });
+
+  it("preserves an existing or newly supplied credential when completing setup", () => {
+    const referenced = modelFormFrom(saved);
+    expect(modelPatchRequest(referenced, referenced, true)).toEqual({});
+    const keyless = { ...referenced, apiKeyEnv: "" };
+    expect(
+      modelPatchRequest({ ...keyless, apiKeyEnv: "NEW_KEY" }, keyless, true),
+    ).toEqual({ apiKeyEnv: "NEW_KEY" });
+    expect(
+      modelPatchRequest(
+        { ...keyless, secret: { replace: "new-key" } },
+        keyless,
+        true,
+      ),
+    ).toEqual({ apiKey: "new-key" });
+    expect(
+      modelPatchRequest({ ...keyless, secret: "clear" }, keyless, true),
+    ).toEqual({ apiKey: "" });
   });
 
   it("puts server field errors under inputs and the rest beside Save", () => {
@@ -186,6 +250,38 @@ describe("search form", () => {
       ),
     ).toEqual({ apiKey: "k", baseUrl: null, defaults: { timeout: 120 } });
   });
+
+  it.each(["[REDACTED]", "%5BREDACTED%5D"])(
+    "requires a full replacement when editing a search URL containing %s",
+    (mask) => {
+      const base = searchFormFrom({
+        ...settings,
+        baseUrl: `https://search.test/v1?token=${mask}`,
+      });
+      const changed = {
+        ...base,
+        baseUrl: `https://search.test/v2?token=${mask}`,
+      };
+      expect(validateSearchForm(changed, base).baseUrl).toEqual(
+        expect.stringContaining("Replace the entire URL"),
+      );
+
+      const timed = { ...base, timeout: "120" };
+      expect(validateSearchForm(timed, base)).toEqual({});
+      expect(searchUpdateRequest(timed, base)).toEqual({
+        defaults: { timeout: 120 },
+      });
+
+      const replaced = { ...base, baseUrl: "https://new.test/search" };
+      expect(validateSearchForm(replaced, base)).toEqual({});
+      expect(searchUpdateRequest(replaced, base)).toEqual({
+        baseUrl: "https://new.test/search",
+      });
+      const cleared = { ...base, baseUrl: "" };
+      expect(validateSearchForm(cleared, base)).toEqual({});
+      expect(searchUpdateRequest(cleared, base)).toEqual({ baseUrl: null });
+    },
+  );
 
   it("checks the server's ranges", () => {
     const base = searchFormFrom(settings);

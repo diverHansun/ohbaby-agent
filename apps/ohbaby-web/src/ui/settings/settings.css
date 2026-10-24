@@ -261,6 +261,13 @@
   flex-direction: column;
 }
 
+.ohb-settings-form-fields {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
 .ohb-field-row {
   align-items: start;
   border-bottom: 1px solid var(--border);

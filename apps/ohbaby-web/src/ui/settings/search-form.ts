@@ -49,6 +49,12 @@ export function validateSearchForm(
     errors.timeout = "Must be a whole number from 1 to 600";
   if (form.baseUrl.trim() !== "" && !/^https?:\/\//iu.test(form.baseUrl.trim()))
     errors.baseUrl = "Must be an http or https URL";
+  else if (
+    form.baseUrl.trim() !== saved.baseUrl &&
+    /\[REDACTED\]|%5BREDACTED%5D/iu.test(form.baseUrl)
+  )
+    errors.baseUrl =
+      "Replace the entire URL; hidden credentials cannot be reused.";
   if (
     form.apiKeyEnv.trim() !== "" &&
     !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(form.apiKeyEnv.trim())

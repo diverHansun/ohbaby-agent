@@ -101,7 +101,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     : coreReady && daemonSnapshot?.activeSessionId === activeSessionId
       ? (snapshotStatus ?? { kind: "idle" })
       : { kind: "idle" };
-  const permission = daemonSnapshot?.permission;
+  const permission = snapshot.permission ?? daemonSnapshot?.permission;
   const pendingPermissions = snapshot.permissionSync.requests;
   const attentionStatus: UiRunStatus = pendingPermissions.length
     ? { kind: "waiting-for-permission", requestId: pendingPermissions[0].id }

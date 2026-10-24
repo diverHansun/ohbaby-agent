@@ -106,10 +106,17 @@ export function useReasoning(
       // model capabilities and must not trigger a metadata request per token.
       if (event.type === "model.invalidated") refresh();
     });
+    const onVisible = (): void => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
     return (): void => {
       closed = true;
       generation++;
       unsubscribe();
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [client]);
   const update = (reasoning: UiReasoningConfig): void => {

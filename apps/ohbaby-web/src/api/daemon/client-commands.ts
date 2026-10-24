@@ -149,8 +149,7 @@ export class ClientCommands {
   }
 
   async getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
-    const response = await this.sync.http.getCurrentModel();
-    return response.model;
+    return this.sync.getCurrentModel();
   }
 
   /** Model and search setup are settings-dialog writes on the Web (D18). */

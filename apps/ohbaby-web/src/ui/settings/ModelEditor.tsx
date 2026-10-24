@@ -61,9 +61,12 @@ export function ModelEditor(props: {
 }): ReactElement {
   const { entry, settings } = props;
   const baseId = useId();
-  // The saved values follow the cache; the typed values never do (06 §3.7).
-  const saved = useMemo(() => (entry ? modelFormFrom(entry) : null), [entry]);
-  const [form, setForm] = useState<ModelForm>(() => saved ?? EMPTY_MODEL_FORM);
+  // Keep the edit's baseline: a reread must not turn untouched old values
+  // into changes that overwrite another window's settings.
+  const [baseline] = useState(() => (entry ? modelFormFrom(entry) : null));
+  const [form, setForm] = useState<ModelForm>(
+    () => baseline ?? EMPTY_MODEL_FORM,
+  );
   const [touched, setTouched] = useState<ReadonlySet<ModelField>>(new Set());
   const [serverErrors, setServerErrors] = useState<FieldErrors>({});
   const [moreOpen, setMoreOpen] = useState(false);
@@ -73,8 +76,9 @@ export function ModelEditor(props: {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const needsSetup = entry?.configurationComplete === false;
   const isDefault = entry !== undefined && props.models.active?.id === entry.id;
-  const localErrors = validateModelForm(form, saved);
-  const savable = !saving && modelFormSavable(form, saved, needsSetup);
+  const busy = saving || deleting;
+  const localErrors = validateModelForm(form, baseline);
+  const savable = !busy && modelFormSavable(form, baseline, needsSetup);
   const providers = useMemo(
     () => [...new Set(props.models.models.map((model) => model.provider))],
     [props.models.models],
@@ -82,20 +86,20 @@ export function ModelEditor(props: {
 
   // An emptied saved value blocks Save, so say why at once (06 §2.2).
   const cleared = (field: ModelField): boolean =>
-    saved !== null &&
+    baseline !== null &&
     isUnclearable(field) &&
-    saved[field] !== "" &&
+    baseline[field] !== "" &&
     form[field].trim() === "";
   const errorFor = (field: ModelField): string | undefined =>
     serverErrors[field] ??
     (touched.has(field) || cleared(field) ? localErrors[field] : undefined);
   const restore = (field: UnclearableField): ReactElement | undefined =>
-    cleared(field) && saved ? (
+    cleared(field) && baseline ? (
       <button
         type="button"
         className="ohb-text-button"
         onClick={() => {
-          set(field, saved[field]);
+          set(field, baseline[field]);
         }}
       >
         Restore
@@ -124,13 +128,18 @@ export function ModelEditor(props: {
     try {
       let result: UiSettingsModels;
       let id: string | undefined;
-      if (!entry || !saved) {
+      if (!entry || !baseline) {
         result = await settings.createModel(modelCreateRequest(form));
         id = createdModelId(result);
       } else {
         result = await settings.updateModel(
           entry.id,
-          modelPatchRequest(form, saved),
+          modelPatchRequest(
+            form,
+            baseline,
+            // A refresh may have supplied a key reference during this edit.
+            needsSetup && entry.apiKeyEnv === undefined,
+          ),
         );
         // A Needs setup entry that is now complete may become the default.
         id = needsSetup ? entry.id : undefined;
@@ -211,7 +220,11 @@ export function ModelEditor(props: {
   return (
     <div className="ohb-settings-editor">
       <div className="ohb-settings-editor-header">
-        <IconButton label="Back to Models" onClick={props.onBack}>
+        <IconButton
+          label="Back to Models"
+          onClick={props.onBack}
+          disabled={busy}
+        >
           <ArrowLeft aria-hidden="true" size={15} />
         </IconButton>
         <h3>
@@ -219,6 +232,7 @@ export function ModelEditor(props: {
             type="button"
             className="ohb-settings-crumb"
             onClick={props.onBack}
+            disabled={busy}
           >
             Models
           </button>
@@ -234,161 +248,167 @@ export function ModelEditor(props: {
           void save();
         }}
       >
-        <FieldRow
-          id={id("provider")}
-          label="Provider"
-          error={errorFor("provider")}
-        >
-          {input("provider", { list: `${baseId}-providers` })}
-          <datalist id={`${baseId}-providers`}>
-            {providers.map((provider) => (
-              <option key={provider} value={provider} />
-            ))}
-          </datalist>
-        </FieldRow>
-        <FieldRow id={id("model")} label="Model" error={errorFor("model")}>
-          {input("model")}
-        </FieldRow>
-        <FieldRow
-          id={id("baseUrl")}
-          label="Base URL"
-          error={errorFor("baseUrl")}
-        >
-          {input("baseUrl", { type: "url" })}
-        </FieldRow>
-        <FieldRow
-          id={id("interfaceProvider")}
-          label="Protocol"
-          error={errorFor("interfaceProvider")}
-        >
-          <select
+        <fieldset className="ohb-settings-form-fields" disabled={busy}>
+          <FieldRow
+            id={id("provider")}
+            label="Provider"
+            error={errorFor("provider")}
+          >
+            {input("provider", { list: `${baseId}-providers` })}
+            <datalist id={`${baseId}-providers`}>
+              {providers.map((provider) => (
+                <option key={provider} value={provider} />
+              ))}
+            </datalist>
+          </FieldRow>
+          <FieldRow id={id("model")} label="Model" error={errorFor("model")}>
+            {input("model")}
+          </FieldRow>
+          <FieldRow
+            id={id("baseUrl")}
+            label="Base URL"
+            error={errorFor("baseUrl")}
+          >
+            {input("baseUrl", { type: "url" })}
+          </FieldRow>
+          <FieldRow
             id={id("interfaceProvider")}
-            className="ohb-settings-select"
-            value={form.interfaceProvider}
-            onChange={(event) => {
-              set(
-                "interfaceProvider",
-                event.target.value as ModelForm["interfaceProvider"],
-              );
-            }}
-          >
-            {form.interfaceProvider === "" ? (
-              <option value="" disabled>
-                Choose a protocol
-              </option>
-            ) : null}
-            {PROTOCOLS.map((protocol) => (
-              <option key={protocol.value} value={protocol.value}>
-                {protocol.label}
-              </option>
-            ))}
-          </select>
-        </FieldRow>
-        <FieldRow id={id("apiKey")} label="API key" error={errorFor("apiKey")}>
-          <SecretField
-            id={id("apiKey")}
-            configured={entry?.apiKeyConfigured ?? false}
-            startEditing={!entry}
-            value={form.secret}
-            invalid={errorFor("apiKey") !== undefined}
-            describedBy={
-              errorFor("apiKey") ? fieldErrorId(id("apiKey")) : undefined
-            }
-            onChange={(next) => {
-              set("secret", next);
-            }}
-          />
-        </FieldRow>
-        <FieldRow id={id("label")} label="Label" error={errorFor("label")}>
-          {input("label")}
-        </FieldRow>
-        <MoreOptions
-          // It opens by itself while one of its fields has an error.
-          open={
-            moreOpen ||
-            UNCLEARABLE_FIELDS.some((field) => errorFor(field) !== undefined)
-          }
-          onToggle={() => {
-            setMoreOpen((open) => !open);
-          }}
-        >
-          <FieldRow
-            id={id("apiKeyEnv")}
-            label="Key variable"
-            error={errorFor("apiKeyEnv")}
-            errorAction={restore("apiKeyEnv")}
-          >
-            {input("apiKeyEnv")}
-          </FieldRow>
-          <FieldRow
-            id={id("contextWindowTokens")}
-            label="Context window"
-            hint="tokens"
-            error={errorFor("contextWindowTokens")}
-            errorAction={restore("contextWindowTokens")}
-          >
-            {input("contextWindowTokens", { type: "number" })}
-          </FieldRow>
-          <FieldRow
-            id={id("maxOutputTokens")}
-            label="Max output"
-            hint="tokens"
-            error={errorFor("maxOutputTokens")}
-            errorAction={restore("maxOutputTokens")}
-          >
-            {input("maxOutputTokens", { type: "number" })}
-          </FieldRow>
-          <FieldRow
-            id={id("promptCache")}
-            label="Prompt cache"
-            error={errorFor("promptCache")}
-            errorAction={restore("promptCache")}
+            label="Protocol"
+            error={errorFor("interfaceProvider")}
           >
             <select
-              id={id("promptCache")}
+              id={id("interfaceProvider")}
               className="ohb-settings-select"
-              value={form.promptCache}
+              value={form.interfaceProvider}
               onChange={(event) => {
                 set(
-                  "promptCache",
-                  event.target.value as ModelForm["promptCache"],
+                  "interfaceProvider",
+                  event.target.value as ModelForm["interfaceProvider"],
                 );
-                touch("promptCache");
               }}
             >
-              <option value="">Default</option>
-              <option value="auto">Auto</option>
-              <option value="enabled">Enabled</option>
-              <option value="disabled">Disabled</option>
+              {form.interfaceProvider === "" ? (
+                <option value="" disabled>
+                  Choose a protocol
+                </option>
+              ) : null}
+              {PROTOCOLS.map((protocol) => (
+                <option key={protocol.value} value={protocol.value}>
+                  {protocol.label}
+                </option>
+              ))}
             </select>
           </FieldRow>
-        </MoreOptions>
-        <div className="ohb-settings-form-footer">
-          {entry ? (
-            <button
-              type="button"
-              className="ohb-text-button is-danger"
-              disabled={saving || deleting}
-              onClick={() => {
-                if (isDefault) setConfirmDelete(true);
-                else void remove();
-              }}
-            >
-              Delete
-            </button>
-          ) : null}
-          <span className="ohb-settings-form-status" role="alert">
-            {serverErrors.form ?? (confirmDelete ? null : deleteError)}
-          </span>
-          <button
-            type="submit"
-            className="ohb-primary-button"
-            aria-busy={saving}
-            disabled={!savable}
+          <FieldRow
+            id={id("apiKey")}
+            label="API key"
+            error={errorFor("apiKey")}
           >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
+            <SecretField
+              id={id("apiKey")}
+              configured={entry?.apiKeyConfigured ?? false}
+              startEditing={!entry}
+              value={form.secret}
+              invalid={errorFor("apiKey") !== undefined}
+              describedBy={
+                errorFor("apiKey") ? fieldErrorId(id("apiKey")) : undefined
+              }
+              onChange={(next) => {
+                set("secret", next);
+              }}
+            />
+          </FieldRow>
+          <FieldRow id={id("label")} label="Label" error={errorFor("label")}>
+            {input("label")}
+          </FieldRow>
+          <MoreOptions
+            // It opens by itself while one of its fields has an error.
+            open={
+              moreOpen ||
+              UNCLEARABLE_FIELDS.some((field) => errorFor(field) !== undefined)
+            }
+            onToggle={() => {
+              setMoreOpen((open) => !open);
+            }}
+          >
+            <FieldRow
+              id={id("apiKeyEnv")}
+              label="Key variable"
+              error={errorFor("apiKeyEnv")}
+              errorAction={restore("apiKeyEnv")}
+            >
+              {input("apiKeyEnv")}
+            </FieldRow>
+            <FieldRow
+              id={id("contextWindowTokens")}
+              label="Context window"
+              hint="tokens"
+              error={errorFor("contextWindowTokens")}
+              errorAction={restore("contextWindowTokens")}
+            >
+              {input("contextWindowTokens", { type: "number" })}
+            </FieldRow>
+            <FieldRow
+              id={id("maxOutputTokens")}
+              label="Max output"
+              hint="tokens"
+              error={errorFor("maxOutputTokens")}
+              errorAction={restore("maxOutputTokens")}
+            >
+              {input("maxOutputTokens", { type: "number" })}
+            </FieldRow>
+            <FieldRow
+              id={id("promptCache")}
+              label="Prompt cache"
+              error={errorFor("promptCache")}
+              errorAction={restore("promptCache")}
+            >
+              <select
+                id={id("promptCache")}
+                className="ohb-settings-select"
+                value={form.promptCache}
+                onChange={(event) => {
+                  set(
+                    "promptCache",
+                    event.target.value as ModelForm["promptCache"],
+                  );
+                  touch("promptCache");
+                }}
+              >
+                <option value="">Default</option>
+                <option value="auto">Auto</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </FieldRow>
+          </MoreOptions>
+          <div className="ohb-settings-form-footer">
+            {entry ? (
+              <button
+                type="button"
+                className="ohb-text-button is-danger"
+                disabled={saving || deleting}
+                onClick={() => {
+                  if (isDefault) setConfirmDelete(true);
+                  else void remove();
+                }}
+              >
+                Delete
+              </button>
+            ) : null}
+            <span className="ohb-settings-form-status" role="alert">
+              {serverErrors.form ?? (confirmDelete ? null : deleteError)}
+            </span>
+            <button
+              type="submit"
+              className="ohb-primary-button"
+              aria-busy={saving}
+              disabled={!savable}
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </fieldset>
       </form>
       {confirmDelete && entry ? (
         <ConfirmDialog

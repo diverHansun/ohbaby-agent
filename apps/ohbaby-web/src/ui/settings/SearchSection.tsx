@@ -44,15 +44,19 @@ function SearchFormView(props: {
 }): ReactElement {
   const baseId = useId();
   const saved = searchFormFrom(props.saved);
-  // Null while untouched: rereads then show the newest saved values; typed
-  // values are never replaced by a reread (06 §3.7).
-  const [draft, setDraft] = useState<SearchForm | null>(null);
+  // Untouched forms follow rereads. Once editing starts, keep the original
+  // baseline so another window's changes never become part of our patch.
+  const [draft, setDraft] = useState<{
+    readonly form: SearchForm;
+    readonly baseline: SearchForm;
+  } | null>(null);
   const [serverErrors, setServerErrors] = useState<SearchErrors>({});
   const [moreOpen, setMoreOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const form = draft ?? saved;
-  const localErrors = validateSearchForm(form, saved);
-  const patch = searchUpdateRequest(form, saved);
+  const form = draft?.form ?? saved;
+  const baseline = draft?.baseline ?? saved;
+  const localErrors = validateSearchForm(form, baseline);
+  const patch = searchUpdateRequest(form, baseline);
   const savable =
     !saving &&
     Object.keys(localErrors).length === 0 &&
@@ -64,7 +68,10 @@ function SearchFormView(props: {
     field: F,
     value: SearchForm[F],
   ): void => {
-    setDraft({ ...form, [field]: value });
+    setDraft((current) => ({
+      form: { ...(current?.form ?? saved), [field]: value },
+      baseline: current?.baseline ?? saved,
+    }));
     setServerErrors({});
   };
 
@@ -118,112 +125,114 @@ function SearchFormView(props: {
         void save();
       }}
     >
-      <FieldRow id={id("apiKey")} label="API key" error={errorFor("apiKey")}>
-        <SecretField
-          id={id("apiKey")}
-          configured={props.saved.apiKeyConfigured}
-          value={form.secret}
-          onChange={(next) => {
-            set("secret", next);
-          }}
-        />
-      </FieldRow>
-      <MoreOptions
-        open={
-          moreOpen ||
-          (
-            [
-              "apiKeyEnv",
-              "baseUrl",
-              "searchDepth",
-              "maxResults",
-              "topic",
-              "timeout",
-            ] as const
-          ).some((field) => errorFor(field) !== undefined)
-        }
-        onToggle={() => {
-          setMoreOpen((open) => !open);
-        }}
-      >
-        <FieldRow
-          id={id("apiKeyEnv")}
-          label="Key variable"
-          error={errorFor("apiKeyEnv")}
-        >
-          {text("apiKeyEnv")}
+      <fieldset className="ohb-settings-form-fields" disabled={saving}>
+        <FieldRow id={id("apiKey")} label="API key" error={errorFor("apiKey")}>
+          <SecretField
+            id={id("apiKey")}
+            configured={props.saved.apiKeyConfigured}
+            value={form.secret}
+            onChange={(next) => {
+              set("secret", next);
+            }}
+          />
         </FieldRow>
-        <FieldRow
-          id={id("baseUrl")}
-          label="Base URL"
-          error={errorFor("baseUrl")}
-        >
-          {text("baseUrl", "url")}
-        </FieldRow>
-        <FieldRow
-          id={id("searchDepth")}
-          label="Search depth"
-          error={errorFor("searchDepth")}
-        >
-          <select
-            id={id("searchDepth")}
-            className="ohb-settings-select"
-            value={form.searchDepth}
-            onChange={(event) => {
-              set(
+        <MoreOptions
+          open={
+            moreOpen ||
+            (
+              [
+                "apiKeyEnv",
+                "baseUrl",
                 "searchDepth",
-                event.target.value as SearchForm["searchDepth"],
-              );
-            }}
+                "maxResults",
+                "topic",
+                "timeout",
+              ] as const
+            ).some((field) => errorFor(field) !== undefined)
+          }
+          onToggle={() => {
+            setMoreOpen((open) => !open);
+          }}
+        >
+          <FieldRow
+            id={id("apiKeyEnv")}
+            label="Key variable"
+            error={errorFor("apiKeyEnv")}
           >
-            <option value="basic">Basic</option>
-            <option value="advanced">Advanced</option>
-          </select>
-        </FieldRow>
-        <FieldRow
-          id={id("maxResults")}
-          label="Max results"
-          hint="1–20"
-          error={errorFor("maxResults")}
-        >
-          {text("maxResults", "number")}
-        </FieldRow>
-        <FieldRow id={id("topic")} label="Topic" error={errorFor("topic")}>
-          <select
-            id={id("topic")}
-            className="ohb-settings-select"
-            value={form.topic}
-            onChange={(event) => {
-              set("topic", event.target.value as SearchForm["topic"]);
-            }}
+            {text("apiKeyEnv")}
+          </FieldRow>
+          <FieldRow
+            id={id("baseUrl")}
+            label="Base URL"
+            error={errorFor("baseUrl")}
           >
-            <option value="general">General</option>
-            <option value="news">News</option>
-            <option value="finance">Finance</option>
-          </select>
-        </FieldRow>
-        <FieldRow
-          id={id("timeout")}
-          label="Timeout"
-          hint="seconds"
-          error={errorFor("timeout")}
-        >
-          {text("timeout", "number")}
-        </FieldRow>
-      </MoreOptions>
-      <div className="ohb-settings-form-footer">
-        <span className="ohb-settings-form-status" role="alert">
-          {serverErrors.form}
-        </span>
-        <button
-          type="submit"
-          className="ohb-primary-button"
-          aria-busy={saving}
-          disabled={!savable}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
+            {text("baseUrl", "url")}
+          </FieldRow>
+          <FieldRow
+            id={id("searchDepth")}
+            label="Search depth"
+            error={errorFor("searchDepth")}
+          >
+            <select
+              id={id("searchDepth")}
+              className="ohb-settings-select"
+              value={form.searchDepth}
+              onChange={(event) => {
+                set(
+                  "searchDepth",
+                  event.target.value as SearchForm["searchDepth"],
+                );
+              }}
+            >
+              <option value="basic">Basic</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </FieldRow>
+          <FieldRow
+            id={id("maxResults")}
+            label="Max results"
+            hint="1–20"
+            error={errorFor("maxResults")}
+          >
+            {text("maxResults", "number")}
+          </FieldRow>
+          <FieldRow id={id("topic")} label="Topic" error={errorFor("topic")}>
+            <select
+              id={id("topic")}
+              className="ohb-settings-select"
+              value={form.topic}
+              onChange={(event) => {
+                set("topic", event.target.value as SearchForm["topic"]);
+              }}
+            >
+              <option value="general">General</option>
+              <option value="news">News</option>
+              <option value="finance">Finance</option>
+            </select>
+          </FieldRow>
+          <FieldRow
+            id={id("timeout")}
+            label="Timeout"
+            hint="seconds"
+            error={errorFor("timeout")}
+          >
+            {text("timeout", "number")}
+          </FieldRow>
+        </MoreOptions>
+        <div className="ohb-settings-form-footer">
+          <span className="ohb-settings-form-status" role="alert">
+            {serverErrors.form}
+          </span>
+          <button
+            type="submit"
+            className="ohb-primary-button"
+            aria-busy={saving}
+            disabled={!savable}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </fieldset>
     </form>
   );
 }

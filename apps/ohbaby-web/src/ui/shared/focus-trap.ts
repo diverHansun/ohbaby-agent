@@ -12,7 +12,19 @@ const FOCUSABLE = [
 /** Visible, enabled elements Tab can reach inside `container`, in order. */
 export function focusableIn(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-    (element) => !element.closest("[hidden], [inert]"),
+    (element) => {
+      if (element.closest("[hidden], [inert]")) return false;
+      const visibility = getComputedStyle(element).visibility;
+      if (visibility === "hidden" || visibility === "collapse") return false;
+      // Responsive panes use CSS display:none, not the hidden attribute.
+      for (
+        let node: HTMLElement | null = element;
+        node;
+        node = node.parentElement
+      )
+        if (getComputedStyle(node).display === "none") return false;
+      return true;
+    },
   );
 }
 

@@ -192,6 +192,143 @@ describe("settings dialog", () => {
     expect(dialog().querySelector(".ohb-settings-editor")).toBeNull();
   });
 
+  it.each(["ctrlKey", "metaKey"] as const)(
+    "opens chat search with %s+K after settings closes",
+    async (modifier) => {
+      const runtime = createMockRuntime("settings");
+      const container = mount(runtime);
+      await openSettings(container);
+      await click(button(dialog(), "Close settings"));
+      await act(async () => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "k",
+            bubbles: true,
+            [modifier]: true,
+          }),
+        );
+        await Promise.resolve();
+      });
+      const search = container.querySelector(
+        'input[aria-label="Search chats"]',
+      );
+      expect(search).not.toBeNull();
+      expect(document.activeElement).toBe(search);
+    },
+  );
+
+  it("keeps a model edit's original baseline when settings refresh", async () => {
+    const runtime = createMockRuntime("settings");
+    const update = vi.spyOn(runtime.settings, "updateModel");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("gpt-5.2"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit gpt-5.2"));
+    await type(field("Label") as HTMLInputElement, "My edit");
+    await act(async () => {
+      await runtime.settings.updateModel("m3", {
+        baseUrl: "https://changed-elsewhere.test/v1",
+      });
+    });
+    update.mockClear();
+    await click(button(dialog(), "Save"));
+    expect(update).toHaveBeenCalledWith("m3", { label: "My edit" });
+    await until(
+      () => dialog().querySelector(".ohb-settings-editor") === null,
+      "the list after saving",
+    );
+    const saved = selectSettings(
+      runtime.settings.cache.getSnapshot(),
+      "models",
+    ).data?.models.find((model) => model.id === "m3");
+    expect(saved?.baseUrl).toBe("https://changed-elsewhere.test/v1");
+  });
+
+  it("locks model edits and Back while saving, while settings can still close", async () => {
+    const runtime = createMockRuntime("settings");
+    const originalUpdate = runtime.settings.updateModel.bind(runtime.settings);
+    let release: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(runtime.settings, "updateModel").mockImplementationOnce(
+      async (id, patch) => {
+        await pending;
+        return originalUpdate(id, patch);
+      },
+    );
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("gpt-5.2"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit gpt-5.2"));
+    await type(field("Label") as HTMLInputElement, "Saved label");
+    await click(button(dialog(), "Save"));
+    expect(field("Label").matches(":disabled")).toBe(true);
+    expect(button(dialog(), "Replace").matches(":disabled")).toBe(true);
+    expect(button(dialog(), "Back to Models").disabled).toBe(true);
+    await click(button(dialog(), "Close settings"));
+    expect(dialogOpen()).toBe(false);
+    await act(async () => {
+      release?.();
+      await pending;
+    });
+    await openSettings(container);
+    await until(
+      () => dialog().querySelector(".ohb-settings-editor") === null,
+      "the list after saving",
+    );
+    expect(dialog().textContent).toContain("Saved label");
+  });
+
+  it("keeps a key reference added elsewhere while completing model setup", async () => {
+    const runtime = createMockRuntime("settings");
+    const update = vi.spyOn(runtime.settings, "updateModel");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("gpt-4.1"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit gpt-4.1"));
+    await type(field("Base URL") as HTMLInputElement, "https://model.test/v1");
+    await act(async () => {
+      const protocol = field("Protocol") as HTMLSelectElement;
+      protocol.value = "openai-compatible";
+      protocol.dispatchEvent(new Event("change", { bubbles: true }));
+      await runtime.settings.updateModel("m4", {
+        apiKeyEnv: "ADDED_ELSEWHERE_KEY",
+      });
+    });
+    expect(
+      selectSettings(
+        runtime.settings.cache.getSnapshot(),
+        "models",
+      ).data?.models.find((model) => model.id === "m4")?.configurationComplete,
+    ).toBe(false);
+    update.mockClear();
+    await click(button(dialog(), "Save"));
+    expect(update).toHaveBeenCalledWith("m4", {
+      baseUrl: "https://model.test/v1",
+      interfaceProvider: "openai-compatible",
+    });
+    await until(
+      () => dialog().querySelector(".ohb-settings-editor") === null,
+      "the list after completing setup",
+    );
+    expect(
+      selectSettings(
+        runtime.settings.cache.getSnapshot(),
+        "models",
+      ).data?.models.find((model) => model.id === "m4")?.apiKeyEnv,
+    ).toBe("ADDED_ELSEWHERE_KEY");
+  });
+
   it("sends only changed fields and clears a label with null", async () => {
     const runtime = createMockRuntime("settings");
     const update = vi.spyOn(runtime.settings, "updateModel");
@@ -345,6 +482,69 @@ describe("settings dialog", () => {
     expect(button(dialog(), "Save").disabled).toBe(true);
   });
 
+  it("keeps a search edit's original baseline when settings refresh", async () => {
+    const runtime = createMockRuntime("settings");
+    const update = vi.spyOn(runtime.settings, "updateSearch");
+    const container = mount(runtime);
+    await openSettings(container);
+    await click(button(dialog(), "Web search"));
+    await until(
+      () => dialog().textContent.includes("Configured"),
+      "the search form",
+    );
+    await click(button(dialog(), "More options"));
+    await type(field("Timeout") as HTMLInputElement, "120");
+    await act(async () => {
+      await runtime.settings.updateSearch({
+        baseUrl: "https://changed-elsewhere.test/search",
+      });
+    });
+    update.mockClear();
+    await click(button(dialog(), "Save"));
+    expect(update).toHaveBeenCalledWith({ defaults: { timeout: 120 } });
+    await until(
+      () => !field("Timeout").matches(":disabled"),
+      "the saved search form",
+    );
+    expect(field("Base URL").value).toBe(
+      "https://changed-elsewhere.test/search",
+    );
+  });
+
+  it("locks search edits while saving and unlocks them after the response", async () => {
+    const runtime = createMockRuntime("settings");
+    const originalUpdate = runtime.settings.updateSearch.bind(runtime.settings);
+    let release: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(runtime.settings, "updateSearch").mockImplementationOnce(
+      async (patch) => {
+        await pending;
+        return originalUpdate(patch);
+      },
+    );
+    const container = mount(runtime);
+    await openSettings(container);
+    await click(button(dialog(), "Web search"));
+    await until(
+      () => dialog().textContent.includes("Configured"),
+      "the search form",
+    );
+    await click(button(dialog(), "More options"));
+    await type(field("Timeout") as HTMLInputElement, "120");
+    await click(button(dialog(), "Save"));
+    expect(field("Timeout").matches(":disabled")).toBe(true);
+    expect(button(dialog(), "Replace").matches(":disabled")).toBe(true);
+    await act(async () => {
+      release?.();
+      await pending;
+    });
+    await until(() => !field("Timeout").matches(":disabled"), "the saved form");
+    expect(field("Timeout").value).toBe("120");
+    expect(button(dialog(), "Save").disabled).toBe(true);
+  });
+
   it("shows MCP config with the actual status and never writes", async () => {
     const runtime = createMockRuntime("settings");
     const container = mount(runtime);
@@ -440,7 +640,8 @@ describe("composer controls", () => {
     expect(items.at(-1)).toBe("Manage models…");
     await click(button(menu, "claude-sonnet-5-5 · Personal"));
     await until(
-      () => trigger().textContent === "claude-sonnet-5-5",
+      () =>
+        trigger().textContent === "claude-sonnet-5-5" && !trigger().disabled,
       "the new default",
     );
     expect(select).toHaveBeenCalledWith("m5");

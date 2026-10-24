@@ -105,7 +105,7 @@ export function SettingsDialog(props: {
         className="ohb-settings-dialog"
         data-pane={state.pane}
         role="dialog"
-        aria-modal="true"
+        aria-modal={state.open ? "true" : undefined}
         aria-labelledby={titleId}
         // A click on plain text then focuses the dialog, not <body>, so
         // Escape and the Tab trap keep working.

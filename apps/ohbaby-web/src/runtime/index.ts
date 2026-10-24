@@ -636,11 +636,16 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     });
     if (typeof window === "undefined") return;
     const onVisible = (): void => {
-      if (document.visibilityState === "visible") this.settings.reactivate();
+      if (document.visibilityState !== "visible") return;
+      this.settings.reactivate();
+      // File edits need not emit SSE. Refresh the send guard as well as settings.
+      void this.instance.client?.getCurrentModel().catch(() => undefined);
     };
     window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
     this.cleanups.push(() => {
       window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
     });
   }
 

@@ -43,6 +43,8 @@ export function ModelMenu(props: {
   const models = selectSettings(snapshot, "models").data;
   useEffect(() => {
     void settings.load("models", { maxAge: MAX_AGE_MS });
+    // The button remains visible even when its menu is closed.
+    return settings.watch("models");
   }, [settings]);
 
   const complete =
@@ -88,7 +90,7 @@ export function ModelMenu(props: {
         aria-haspopup="menu"
         aria-expanded={anchor !== null}
         aria-busy={selecting !== null}
-        disabled={props.disabled}
+        disabled={props.disabled === true || selecting !== null}
         title="Model"
         onClick={(event) => {
           if (anchor) {
