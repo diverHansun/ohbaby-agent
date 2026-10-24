@@ -3199,13 +3199,13 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
   });
 
-  it("switches the selected workspace from its sidebar project group", async () => {
+  it("starts a new chat in a project from its sidebar group", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "/repo-b");
+    await clickButton(app.container, "New chat in repo-b");
 
     expect(fake.openDraft).toHaveBeenCalledWith("/repo-b");
   });
@@ -3411,7 +3411,11 @@ describe("OhbabyWebApp slash command interactions", () => {
             ?.textContent.includes(expected),
         ),
       );
-      expect(fake.exportSession).toHaveBeenCalledWith("session_2", "html");
+      expect(fake.exportSession).toHaveBeenCalledWith(
+        "session_2",
+        "html",
+        "/repo-a",
+      );
       expect(fake.selectSession).not.toHaveBeenCalled();
       expect(document.querySelector('[role="menu"]')).toBeNull();
     },
@@ -3442,7 +3446,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     await clickButton(document.body, "Archive");
 
     expect(confirm).not.toHaveBeenCalled();
-    expect(fake.archiveSession).toHaveBeenCalledWith("session_2");
+    expect(fake.archiveSession).toHaveBeenCalledWith("session_2", "/repo-a");
     expect(fake.selectSession).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
@@ -4755,6 +4759,26 @@ function createFakeRuntime(input: {
     ],
     selectedDirectory: "/repo-a",
   } as const;
+  // Like a daemon without global routes: the instance index is the whole list.
+  const globalCatalog = createGlobalCatalogStore();
+  globalCatalog.setProjects(workspaceSnapshot.scopes, "/default");
+  const mirrorIndex = (): void => {
+    globalCatalog.replaceSessions(
+      store.getSnapshot().sessionIndex.map((entry) => ({
+        id: entry.id,
+        title: entry.title,
+        status: "active" as const,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        messageCount: 0,
+        projectDirectory: "/repo-a",
+        workingDirectory: "/repo-a",
+      })),
+      undefined,
+    );
+  };
+  mirrorIndex();
+  store.subscribe(mirrorIndex);
   const submitPromptAccepted = vi.fn<UiBackendClient["submitPromptAccepted"]>(
     (_text, options) =>
       Promise.resolve({
@@ -4905,7 +4929,7 @@ function createFakeRuntime(input: {
       ready: Promise.resolve(),
       refreshCatalog: () => Promise.resolve(),
       loadMoreSessions: () => Promise.resolve(),
-      catalog: createGlobalCatalogStore(),
+      catalog: globalCatalog,
       draft: createDraftStore(),
       submitPrompt: (text, options) =>
         client.submitPromptAccepted(text, options),

@@ -1,16 +1,26 @@
-import { MoreHorizontal, Pin } from "lucide-react";
+import { Archive, MoreHorizontal, Pin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import type { UiSessionIndexEntry } from "ohbaby-sdk";
+import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
+import { Spinner } from "../shared/Spinner.js";
+import { relativeTime } from "./relative-time.js";
 import type { SessionMenuAnchor } from "./SessionActionsMenu.js";
 
+/**
+ * One sidebar session (05 SessionRow): the open button, then a trailing
+ * spinner (running), amber dot (awaiting approval) or relative time. On hover
+ * the time gives way to Archive and the menu.
+ */
 export function SessionRow(props: {
-  readonly session: UiSessionIndexEntry;
+  readonly session: SidebarSessionItem;
+  /** Clock for the relative time; the list passes one value to all rows. */
+  readonly now: number;
   readonly active: boolean;
   readonly disabled: boolean;
   readonly pinned: boolean;
   readonly menuOpen: boolean;
   readonly reordering: boolean;
   readonly onSelect: () => void;
+  readonly onArchive: (trigger: HTMLButtonElement) => void;
   readonly onUnpin: (focusTarget: HTMLElement | null) => void;
   readonly onMenu: (
     anchor: SessionMenuAnchor,
@@ -100,13 +110,18 @@ export function SessionRow(props: {
       trigger,
     );
   };
-  const date = new Date(props.session.updatedAt);
-  const meta = Number.isNaN(date.getTime())
-    ? "recent"
-    : new Intl.DateTimeFormat("en-US", {
-        day: "2-digit",
-        month: "short",
-      }).format(date);
+  const meta =
+    props.session.activity === "running" ? (
+      <Spinner size={11} label="Running" />
+    ) : props.session.activity === "awaiting" ? (
+      <span
+        className="ohb-session-awaiting"
+        role="status"
+        aria-label="Waiting for approval"
+      />
+    ) : (
+      <small>{relativeTime(props.session.updatedAt, props.now)}</small>
+    );
   return (
     <div
       ref={rowRef}
@@ -168,21 +183,35 @@ export function SessionRow(props: {
           <strong ref={titleRef} className="ohb-session-title">
             <span ref={textRef}>{title}</span>
           </strong>
-          <small>{meta}</small>
+          <span className="ohb-session-meta">{meta}</span>
         </span>
       </button>
-      <button
-        ref={actionsRef}
-        className="ohb-session-actions"
-        aria-label={`Actions for ${title}`}
-        aria-haspopup="menu"
-        aria-expanded={props.menuOpen}
-        disabled={props.disabled}
-        onClick={openAtButton}
-        type="button"
-      >
-        <MoreHorizontal aria-hidden="true" size={16} />
-      </button>
+      <span className="ohb-session-hover-actions">
+        <button
+          className="ohb-session-archive"
+          aria-label={`Archive ${title}`}
+          title={`Archive ${title}`}
+          disabled={props.disabled}
+          onClick={(event) => {
+            props.onArchive(event.currentTarget);
+          }}
+          type="button"
+        >
+          <Archive aria-hidden="true" size={14} />
+        </button>
+        <button
+          ref={actionsRef}
+          className="ohb-session-actions"
+          aria-label={`Actions for ${title}`}
+          aria-haspopup="menu"
+          aria-expanded={props.menuOpen}
+          disabled={props.disabled}
+          onClick={openAtButton}
+          type="button"
+        >
+          <MoreHorizontal aria-hidden="true" size={16} />
+        </button>
+      </span>
     </div>
   );
 }

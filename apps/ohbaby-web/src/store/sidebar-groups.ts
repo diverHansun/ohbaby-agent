@@ -160,3 +160,22 @@ function toItem(
     activity: input.activity.get(session.id) ?? "idle",
   };
 }
+
+/** How many loaded sessions fall into `key`; Show more pages until this is enough. */
+export function countGroupRows(
+  key: SidebarGroupKey,
+  sessions: readonly UiGlobalSession[],
+  pins: Readonly<Record<string, number>>,
+): number {
+  let count = 0;
+  for (const session of sessions) {
+    const pinned = Object.hasOwn(pins, session.id);
+    const rowKey: SidebarGroupKey = pinned
+      ? "pinned"
+      : session.projectDirectory === null
+        ? "no-project"
+        : projectGroupKey(session.projectDirectory);
+    if (rowKey === key) count += 1;
+  }
+  return count;
+}

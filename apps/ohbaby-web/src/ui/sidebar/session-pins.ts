@@ -1,5 +1,3 @@
-import type { UiSessionIndexEntry } from "ohbaby-sdk";
-
 type Pins = Readonly<Record<string, number>>;
 
 interface PinSnapshot {
@@ -211,21 +209,4 @@ export function getGlobalSessionPinsStore(
   const key = globalSessionPinsKey(serverUrl);
   if (!stores.has(key)) migrateLegacyPins(serverUrl);
   return getSessionPinsStore(key);
-}
-
-export function sortPinnedSessions(
-  sessions: readonly UiSessionIndexEntry[],
-  pins: Pins,
-): UiSessionIndexEntry[] {
-  return [...sessions].sort((left, right) => {
-    const leftPin = Object.hasOwn(pins, left.id) ? (pins[left.id] ?? 0) : 0;
-    const rightPin = Object.hasOwn(pins, right.id) ? (pins[right.id] ?? 0) : 0;
-    if (leftPin || rightPin) {
-      return rightPin - leftPin || left.id.localeCompare(right.id);
-    }
-    return (
-      Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
-      left.id.localeCompare(right.id)
-    );
-  });
 }

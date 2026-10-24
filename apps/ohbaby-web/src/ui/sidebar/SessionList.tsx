@@ -2,14 +2,12 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactElement,
 } from "react";
-import type { ViewModel } from "../session/selectors.js";
-import { getSessionPinsStore, sortPinnedSessions } from "./session-pins.js";
+import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
+import type { getSessionPinsStore } from "./session-pins.js";
 import {
   SessionActionsMenu,
   type SessionExportFormat,
@@ -19,16 +17,20 @@ import { SessionRow } from "./SessionRow.js";
 import { useSessionReorder } from "./use-session-reorder.js";
 
 export interface SessionListProps {
-  readonly scopeKey: string;
-  readonly onArchiveSession: (sessionId: string) => Promise<boolean>;
+  /** The group's visible rows, already ordered. */
+  readonly sessions: readonly SidebarSessionItem[];
+  readonly pins: ReturnType<typeof getSessionPinsStore>;
+  readonly activeSessionId: string | null;
+  readonly disabled: boolean;
+  readonly now: number;
+  readonly onArchiveSession: (session: SidebarSessionItem) => Promise<boolean>;
   readonly onExportSession: (
-    sessionId: string,
+    session: SidebarSessionItem,
     format: SessionExportFormat,
   ) => void;
-  readonly onSelectSession: (sessionId: string) => void;
+  readonly onSelectSession: (session: SidebarSessionItem) => void;
   /** Where focus goes when an archived row leaves no next row behind. */
   readonly fallbackFocus: () => HTMLElement | null;
-  readonly view: ViewModel;
 }
 
 interface SessionMenu {
@@ -38,25 +40,11 @@ interface SessionMenu {
 }
 
 /**
- * Sessions of the current project, with pins, the row menu and focus repair
- * after archiving. Keyed by the pins scope so switching projects starts clean.
+ * The rows of one sidebar group with the row menu, pins and focus repair
+ * after archiving: focus moves to the next row once the archived row leaves.
  */
 export function SessionList(props: SessionListProps): ReactElement {
-  const pinsStore = useMemo(
-    () => getSessionPinsStore(props.scopeKey),
-    [props.scopeKey],
-  );
-  const preferences = useSyncExternalStore(
-    useCallback(
-      (listener: () => void) => pinsStore.subscribe(listener),
-      [pinsStore],
-    ),
-    () => pinsStore.getSnapshot(),
-  );
-  const sessions = useMemo(
-    () => sortPinnedSessions(props.view.sessionIndex, preferences.pins),
-    [props.view.sessionIndex, preferences.pins],
-  );
+  const { sessions, pins } = props;
   const [menu, setMenu] = useState<SessionMenu | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
@@ -74,9 +62,7 @@ export function SessionList(props: SessionListProps): ReactElement {
     archivedFocus.current = null;
     if (document.activeElement === document.body) {
       (pending.next?.isConnected ? pending.next : props.fallbackFocus())?.focus(
-        {
-          preventScroll: true,
-        },
+        { preventScroll: true },
       );
     }
   }, []);
@@ -102,10 +88,7 @@ export function SessionList(props: SessionListProps): ReactElement {
       document.removeEventListener("pointerdown", cancelFocus);
     };
   }, []);
-  const { prepare, reordering } = useSessionReorder(
-    listRef,
-    JSON.stringify([sessions.map((session) => session.id), preferences.pins]),
-  );
+  const { prepare, reordering } = useSessionReorder(listRef, orderedIds);
   useEffect(() => {
     mounted.current = true;
     return (): void => {
@@ -113,8 +96,8 @@ export function SessionList(props: SessionListProps): ReactElement {
     };
   }, []);
   useEffect(() => {
-    if (props.view.composer.disabled) setMenu(null);
-  }, [props.view.composer.disabled]);
+    if (props.disabled) setMenu(null);
+  }, [props.disabled]);
   const closeMenu = useCallback(
     (restoreFocus: boolean): void => {
       if (restoreFocus && menu?.trigger.isConnected)
@@ -123,37 +106,38 @@ export function SessionList(props: SessionListProps): ReactElement {
     },
     [menu],
   );
-  const menuSession = !props.view.composer.disabled
+  const menuSession = !props.disabled
     ? sessions.find((session) => session.id === menu?.sessionId)
     : undefined;
-  const isPinned = (id: string): boolean => Object.hasOwn(preferences.pins, id);
   const setPin = (
-    id: string,
+    session: SidebarSessionItem,
     pinned: boolean,
     focus: HTMLElement | null,
   ): void => {
     prepare(focus);
     setMenu(null);
-    pinsStore.setPinned(id, pinned);
+    pins.setPinned(session.id, pinned);
   };
-  const archive = (id: string): void => {
-    const row = menu?.trigger.closest(".ohb-session-row");
+  const archive = (
+    session: SidebarSessionItem,
+    trigger: HTMLButtonElement | undefined,
+  ): void => {
+    const row = trigger?.closest(".ohb-session-row");
     const next =
       row?.nextElementSibling?.querySelector<HTMLButtonElement>(
         ".ohb-session-main",
       );
-    const trigger = menu?.trigger;
-    closeMenu(true);
+    if (menu) closeMenu(true);
     const pending = trigger
       ? { trigger, next: next ?? null, succeeded: false }
       : null;
     archivedFocus.current = pending;
-    void props.onArchiveSession(id).then((success) => {
+    void props.onArchiveSession(session).then((success) => {
       if (!success) {
         if (archivedFocus.current === pending) archivedFocus.current = null;
         return;
       }
-      pinsStore.setPinned(id, false);
+      pins.setPinned(session.id, false);
       if (pending) pending.succeeded = true;
       restoreArchivedFocus();
     });
@@ -161,27 +145,26 @@ export function SessionList(props: SessionListProps): ReactElement {
 
   return (
     <>
-      {preferences.error ? (
-        <p className="ohb-session-pin-error" role="status">
-          Pins could not be saved. Changes last until refresh.
-        </p>
-      ) : null}
       <div ref={listRef} className="ohb-sidebar-list">
         {sessions.map((session) => (
           <SessionRow
             key={session.id}
             session={session}
-            active={session.id === props.view.activeSession?.id}
-            disabled={props.view.composer.disabled}
-            pinned={isPinned(session.id)}
+            now={props.now}
+            active={session.id === props.activeSessionId}
+            disabled={props.disabled}
+            pinned={session.pinned}
             menuOpen={menuSession?.id === session.id}
             reordering={reordering}
             onSelect={() => {
-              if (session.id !== props.view.activeSession?.id)
-                props.onSelectSession(session.id);
+              if (session.id !== props.activeSessionId)
+                props.onSelectSession(session);
+            }}
+            onArchive={(trigger) => {
+              archive(session, trigger);
             }}
             onUnpin={(focus) => {
-              setPin(session.id, false, focus);
+              setPin(session, false, focus);
             }}
             onMenu={(anchor, trigger) => {
               setMenu({ sessionId: session.id, anchor, trigger });
@@ -192,18 +175,18 @@ export function SessionList(props: SessionListProps): ReactElement {
       {menu && menuSession ? (
         <SessionActionsMenu
           anchor={menu.anchor}
-          pinned={isPinned(menuSession.id)}
+          pinned={menuSession.pinned}
           title={menuSession.title}
           onClose={closeMenu}
           onPin={() => {
-            setPin(menuSession.id, !isPinned(menuSession.id), menu.trigger);
+            setPin(menuSession, !menuSession.pinned, menu.trigger);
           }}
           onArchive={() => {
-            archive(menuSession.id);
+            archive(menuSession, menu.trigger);
           }}
           onExport={(format) => {
             closeMenu(true);
-            props.onExportSession(menuSession.id, format);
+            props.onExportSession(menuSession, format);
           }}
         />
       ) : null}

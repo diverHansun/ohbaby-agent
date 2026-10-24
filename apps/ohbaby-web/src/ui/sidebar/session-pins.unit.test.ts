@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import type { UiSessionIndexEntry } from "ohbaby-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let pinsModule: typeof import("./session-pins.js");
@@ -33,10 +32,6 @@ beforeEach(async () => {
   pinsModule = await import("./session-pins.js");
 });
 
-function session(id: string, updatedAt = "2026-09-01"): UiSessionIndexEntry {
-  return { id, title: id, createdAt: "2026-08-01", updatedAt };
-}
-
 describe("session pin preferences", () => {
   it("isolates server origins and project paths without persisting URL credentials", () => {
     const { sessionPinsKey: key, getSessionPinsStore: get } = pinsModule;
@@ -58,42 +53,15 @@ describe("session pin preferences", () => {
     );
   });
 
-  it("keeps newest pins first even in one millisecond without mutating sessions", () => {
+  it("gives each new pin a later time even within one millisecond", () => {
     vi.spyOn(Date, "now").mockReturnValue(100);
     const store = pinsModule.getSessionPinsStore("order");
     store.setPinned("a", true);
     store.setPinned("b", true);
-    const input = Object.freeze([
-      session("a", "2026-09-30"),
-      session("b"),
-      session("c"),
-    ]);
     expect(store.getSnapshot().pins).toEqual({ a: 100, b: 101 });
-    expect(
-      pinsModule
-        .sortPinnedSessions(input, store.getSnapshot().pins)
-        .map((s) => s.id),
-    ).toEqual(["b", "a", "c"]);
-    expect(input.map((s) => s.id)).toEqual(["a", "b", "c"]);
     store.setPinned("a", false);
     store.setPinned("a", true);
-    expect(
-      pinsModule
-        .sortPinnedSessions(input, store.getSnapshot().pins)
-        .map((s) => s.id),
-    ).toEqual(["a", "b", "c"]);
-  });
-
-  it("sorts ordinary sessions by update time and breaks ties by ID", () => {
-    const input = [session("b"), session("c", "2026-09-30"), session("a")];
-    expect(pinsModule.sortPinnedSessions(input, {}).map((s) => s.id)).toEqual([
-      "c",
-      "a",
-      "b",
-    ]);
-    expect(
-      pinsModule.sortPinnedSessions(input, { b: 20, a: 20 }).map((s) => s.id),
-    ).toEqual(["a", "b", "c"]);
+    expect(store.getSnapshot().pins).toEqual({ b: 101, a: 102 });
   });
 
   it("restores persisted preferences in a fresh module", async () => {
@@ -103,17 +71,6 @@ describe("session pin preferences", () => {
     expect(
       Object.keys(fresh.getSessionPinsStore("refresh").getSnapshot().pins),
     ).toEqual(["saved"]);
-  });
-
-  it("sorts ordinary sessions by actual instants across timezone offsets", () => {
-    const input = [
-      session("earlier", "2026-09-30T10:00:00+08:00"),
-      session("later", "2026-09-30T04:00:00Z"),
-    ];
-    expect(pinsModule.sortPinnedSessions(input, {}).map((s) => s.id)).toEqual([
-      "later",
-      "earlier",
-    ]);
   });
 
   it.each(["[]", "null", "123", '"text"', "{bad"])(
@@ -151,14 +108,6 @@ describe("session pin preferences", () => {
     expect(Object.hasOwn(store.getSnapshot().pins, "toString")).toBe(true);
     store.setPinned("__proto__", true);
     expect(Object.hasOwn(store.getSnapshot().pins, "__proto__")).toBe(true);
-    expect(
-      pinsModule
-        .sortPinnedSessions(
-          [session("constructor"), session("z", "2026-09-30")],
-          {},
-        )
-        .map((s) => s.id),
-    ).toEqual(["z", "constructor"]);
   });
 
   it("reads newer persisted pins before a clean write", () => {

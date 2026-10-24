@@ -4,14 +4,19 @@ import { IconButton } from "../shared/IconButton.js";
 import { anchorBelow, Menu, type MenuAnchor } from "../shared/Menu.js";
 import { workspaceLabel } from "../workspace/workspace-labels.js";
 
-/** A project heading with its sessions. Only the current project lists sessions in this batch. */
+/**
+ * A project heading and its sessions. The heading folds the group; a folded
+ * group shows how many rows are loaded. Hover reveals New chat in the
+ * project and the project menu (Hide project).
+ */
 export function ProjectGroup(props: {
   readonly directory: string;
+  /** The open session belongs to this project. */
   readonly current: boolean;
   readonly available: boolean;
   readonly expanded: boolean;
+  readonly loadedCount: number;
   readonly onToggle: () => void;
-  readonly onOpen: () => void;
   readonly onNewChat?: () => void;
   readonly onHide: () => void;
   readonly children?: ReactNode;
@@ -29,19 +34,19 @@ export function ProjectGroup(props: {
         <button
           type="button"
           className="ohb-project-toggle"
-          aria-expanded={props.current ? props.expanded : false}
-          disabled={!props.available}
+          aria-expanded={props.expanded}
           title={props.available ? props.directory : `${label} is unavailable`}
-          onClick={props.current ? props.onToggle : props.onOpen}
+          onClick={props.onToggle}
         >
           <ChevronRight
             aria-hidden="true"
             size={12}
-            className={`ohb-project-chevron${
-              props.current && props.expanded ? " is-open" : ""
-            }`}
+            className={`ohb-project-chevron${props.expanded ? " is-open" : ""}`}
           />
           <span className="ohb-project-name">{label}</span>
+          {!props.expanded && props.loadedCount > 0 ? (
+            <span className="ohb-group-count">{props.loadedCount}</span>
+          ) : null}
         </button>
         <span className="ohb-project-actions">
           {props.onNewChat ? (
@@ -65,7 +70,7 @@ export function ProjectGroup(props: {
           </IconButton>
         </span>
       </div>
-      {props.current && props.expanded ? props.children : null}
+      {props.expanded ? props.children : null}
       {menu ? (
         <Menu
           anchor={menu.anchor}

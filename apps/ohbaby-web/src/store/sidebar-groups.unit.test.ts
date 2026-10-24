@@ -2,7 +2,11 @@ import type { UiGlobalSession } from "ohbaby-sdk";
 import { describe, expect, it } from "vitest";
 import type { WorkspaceScopeSummary } from "../api/daemon/wire.js";
 import { createGlobalCatalogStore } from "./global-catalog.js";
-import { projectGroupKey, selectSidebarGroups } from "./sidebar-groups.js";
+import {
+  countGroupRows,
+  projectGroupKey,
+  selectSidebarGroups,
+} from "./sidebar-groups.js";
 
 function session(
   id: string,
@@ -173,5 +177,20 @@ describe("global catalog store", () => {
       sessionsError: "offline",
     });
     expect(store.getSnapshot().sessions).toHaveLength(1);
+  });
+});
+
+describe("group row count", () => {
+  it("counts loaded rows the way the groups place them", () => {
+    const sessions = [
+      session("1", "/a"),
+      session("2", "/a"),
+      session("3", null),
+      session("4", "/a"),
+    ];
+    const pins = { "2": 1 };
+    expect(countGroupRows(projectGroupKey("/a"), sessions, pins)).toBe(2);
+    expect(countGroupRows("pinned", sessions, pins)).toBe(1);
+    expect(countGroupRows("no-project", sessions, pins)).toBe(1);
   });
 });

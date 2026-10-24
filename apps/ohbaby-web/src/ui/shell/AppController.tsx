@@ -14,6 +14,10 @@ import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
 import { type NoticeItem, NoticeStack } from "../shared/Notice.js";
 import { Sidebar } from "../sidebar/Sidebar.js";
+import type {
+  SessionActivity,
+  SidebarSessionItem,
+} from "../../store/sidebar-groups.js";
 import type { SessionExportFormat } from "../sidebar/SessionActionsMenu.js";
 import { DirectoryPickerDialog } from "../workspace/directory-picker/DirectoryPickerDialog.js";
 import { AppShell } from "./AppShell.js";
@@ -97,10 +101,16 @@ export function AppController(props: {
   }, [runtime, pushError]);
 
   const exportSession = useCallback(
-    (sessionId: string, format: SessionExportFormat): void => {
+    (session: SidebarSessionItem, format: SessionExportFormat): void => {
       void runAction(async () => {
         try {
-          downloadTextFile(await runtime.exportSession(sessionId, format));
+          downloadTextFile(
+            await runtime.exportSession(
+              session.id,
+              format,
+              session.requestDirectory,
+            ),
+          );
         } catch (error) {
           if (
             error instanceof Error &&
@@ -132,6 +142,18 @@ export function AppController(props: {
     [runWorkspaceAction, runtime],
   );
 
+  // Only the connected instance reports runs and approvals (06 §3.4).
+  const activeId = view.activeSession?.id;
+  const awaiting = view.pendingPermissions.length > 0;
+  const running = view.composer.activeRunId !== undefined;
+  const activity = useMemo(
+    (): ReadonlyMap<string, SessionActivity> =>
+      activeId && (awaiting || running)
+        ? new Map([[activeId, awaiting ? "awaiting" : "running"]])
+        : new Map(),
+    [activeId, awaiting, running],
+  );
+
   const draftPicker = (
     <ProjectPicker
       value={draft.projectDirectory}
@@ -155,30 +177,37 @@ export function AppController(props: {
       renderSidebar={(close, dismissDrawer) => (
         <Sidebar
           serverUrl={runtime.serverUrl}
-          view={view}
-          workspace={workspace}
+          catalog={catalog}
+          activeSessionId={view.activeSession?.id ?? null}
+          activity={activity}
+          disabled={view.composer.disabled}
           onCollapse={close}
-          onCreateSession={() => {
+          onNewChat={(projectDirectory) => {
             dismissDrawer();
-            void runAction(() => runtime.openDraft(null));
+            void runWorkspaceAction(() => runtime.openDraft(projectDirectory));
           }}
-          onSelectSession={(sessionId) => {
+          onSelectSession={(session) => {
             dismissDrawer();
-            void runAction(() => runtime.openSession(sessionId));
+            void runAction(() =>
+              runtime.openSession(session.id, session.requestDirectory),
+            );
           }}
-          onArchiveSession={(sessionId) =>
-            runAction(() => runtime.archiveSession(sessionId))
+          onArchiveSession={(session) =>
+            runAction(() =>
+              runtime.archiveSession(session.id, session.requestDirectory),
+            )
           }
           onExportSession={exportSession}
-          onSwitchProject={(directory) => {
-            void runWorkspaceAction(() => runtime.openDraft(directory));
-          }}
           onHideProject={(directory) => {
             void runAction(() => runtime.hideWorkspace(directory));
           }}
           onOpenFolder={() => {
             setDirectoryPickerOpen(true);
           }}
+          onRetry={() => {
+            void runtime.refreshCatalog();
+          }}
+          onLoadMore={(enough) => runtime.loadMoreSessions(enough)}
         />
       )}
       renderHeader={(sidebarOpen, openSidebar) => (

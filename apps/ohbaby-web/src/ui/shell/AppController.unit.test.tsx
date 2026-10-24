@@ -165,7 +165,9 @@ describe("AppController new-chat draft", () => {
 
     await openPicker(container);
     await act(async () => {
-      button(document.body, "pi-web").click();
+      const menu = document.querySelector('[role="menu"]');
+      if (!menu) throw new Error("picker menu not open");
+      button(menu, "pi-web").click();
       await Promise.resolve();
     });
     await settle();

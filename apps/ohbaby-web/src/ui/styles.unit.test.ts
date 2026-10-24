@@ -104,7 +104,10 @@ describe("web layout styles", () => {
       "overflow: hidden",
       "white-space: nowrap",
     ]);
-    expectCssRule(".ohb-session-actions", ["opacity: 0", "position: absolute"]);
+    expectCssRule(".ohb-session-hover-actions", [
+      "opacity: 0",
+      "position: absolute",
+    ]);
   });
 
   it("gives phones bottom-sheet menus and 44px touch targets", () => {

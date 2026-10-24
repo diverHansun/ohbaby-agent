@@ -146,6 +146,76 @@
   padding: 2px 0 6px 12px;
 }
 
+.ohb-sidebar-section-actions {
+  display: inline-flex;
+}
+
+.ohb-sidebar-section-toggle {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  width: 100%;
+}
+
+.ohb-sidebar-section-toggle > span:first-child {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.ohb-sidebar-section-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.ohb-group-count {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 400;
+  margin-left: auto;
+  padding-right: 6px;
+}
+
+.ohb-group-footer {
+  display: flex;
+  gap: 4px;
+  padding: 0 0 6px 12px;
+}
+
+.ohb-group-more {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text-dim);
+  display: inline-flex;
+  font-size: 12px;
+  min-height: 24px;
+  padding: 0 10px;
+}
+
+button.ohb-group-more:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-sidebar-status {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  margin: 8px 10px;
+}
+
+.ohb-sidebar-status button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 0;
+  text-decoration: underline;
+}
+
 .ohb-session-pin-error {
   color: var(--danger-ink);
   font-size: 12px;
@@ -222,22 +292,54 @@
   vertical-align: bottom;
 }
 
-.ohb-session-copy > small {
-  color: var(--text-dim);
+.ohb-session-meta {
+  align-items: center;
+  display: inline-flex;
   flex: none;
+  justify-content: flex-end;
+  min-width: 18px;
+}
+
+.ohb-session-meta > small {
+  color: var(--text-dim);
   font-size: 11.5px;
 }
 
-.ohb-session-row.ohb-session-active .ohb-session-copy > small {
+.ohb-session-row.ohb-session-active .ohb-session-meta > small {
   color: var(--text-muted);
 }
 
-.ohb-session-row:hover .ohb-session-copy > small,
-.ohb-session-row.is-menu-open .ohb-session-copy > small {
+/* Waiting for approval: an amber dot, labelled for assistive technology. */
+.ohb-session-awaiting {
+  background: var(--warning);
+  border-radius: 50%;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
+/* Time gives way to Archive and the menu on hover; activity marks stay. */
+.ohb-session-row:hover .ohb-session-meta > small,
+.ohb-session-row.is-menu-open .ohb-session-meta > small,
+.ohb-session-row:focus-within .ohb-session-meta > small {
   visibility: hidden;
 }
 
+.ohb-session-hover-actions {
+  display: flex;
+  opacity: 0;
+  position: absolute;
+  right: 4px;
+}
+
+.ohb-session-row:hover .ohb-session-hover-actions,
+.ohb-session-row.is-menu-open .ohb-session-hover-actions,
+.ohb-session-hover-actions:focus-within {
+  opacity: 1;
+}
+
 .ohb-session-pin,
+.ohb-session-archive,
 .ohb-session-actions {
   align-items: center;
   background: transparent;
@@ -252,19 +354,8 @@
   width: 24px;
 }
 
-.ohb-session-actions {
-  opacity: 0;
-  position: absolute;
-  right: 4px;
-}
-
-.ohb-session-row:hover .ohb-session-actions,
-.ohb-session-row.is-menu-open .ohb-session-actions,
-.ohb-session-actions:focus-visible {
-  opacity: 1;
-}
-
 .ohb-session-pin:hover,
+.ohb-session-archive:hover,
 .ohb-session-actions:hover {
   background: var(--bg-hover);
   color: var(--text);
@@ -301,17 +392,18 @@
 
   .ohb-project-actions .ohb-icon-button,
   .ohb-session-pin,
+  .ohb-session-archive,
   .ohb-session-actions {
     height: 44px;
     width: 44px;
   }
 
-  .ohb-session-actions {
+  .ohb-session-hover-actions {
     opacity: 1;
     position: static;
   }
 
-  .ohb-session-copy > small {
+  .ohb-session-meta > small {
     display: none;
   }
 }
@@ -319,11 +411,11 @@
 /* Touch screens wider than a phone have no hover either: keep row actions reachable. */
 @media (hover: none) {
   .ohb-project-actions,
-  .ohb-session-actions {
+  .ohb-session-hover-actions {
     opacity: 1;
   }
 
-  .ohb-session-actions {
+  .ohb-session-hover-actions {
     position: static;
   }
 }
