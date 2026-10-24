@@ -85,7 +85,7 @@ export function AppController(props: {
   );
 
   useEffect(() => {
-    void runtime.refreshWorkspaces().catch(pushError);
+    void runtime.refreshCatalog().catch(pushError);
   }, [runtime, pushError]);
 
   const exportSession = useCallback(
@@ -113,7 +113,11 @@ export function AppController(props: {
 
   const selectDirectory = useCallback(
     async (directory: string): Promise<void> => {
-      if (await runWorkspaceAction(() => runtime.openWorkspace(directory))) {
+      if (
+        await runWorkspaceAction(async () => {
+          await runtime.openDraft(await runtime.openFolder(directory));
+        })
+      ) {
         setDirectoryPickerOpen(false);
       }
     },
@@ -130,18 +134,18 @@ export function AppController(props: {
           onCollapse={close}
           onCreateSession={() => {
             dismissDrawer();
-            void runAction(() => runtime.createSession());
+            void runAction(() => runtime.openDraft(null));
           }}
           onSelectSession={(sessionId) => {
             dismissDrawer();
-            void runAction(() => runtime.selectSession(sessionId));
+            void runAction(() => runtime.openSession(sessionId));
           }}
           onArchiveSession={(sessionId) =>
             runAction(() => runtime.archiveSession(sessionId))
           }
           onExportSession={exportSession}
           onSwitchProject={(directory) => {
-            void runWorkspaceAction(() => runtime.switchWorkspace(directory));
+            void runWorkspaceAction(() => runtime.openDraft(directory));
           }}
           onHideProject={(directory) => {
             void runAction(() => runtime.hideWorkspace(directory));

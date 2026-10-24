@@ -33,15 +33,33 @@ describe("web navigation state", () => {
     history.replaceState(null, "", "/");
   });
 
-  it("round-trips the selected project and per-project sessions", () => {
+  it("round-trips the last open session and its directory", () => {
     writeWebNavigationState({
-      selectedDirectory: "/repo/a",
-      sessionByDirectory: { "/repo/a": "session-a" },
+      lastSession: { sessionId: "session-a", directory: "/repo/a" },
     });
     expect(readWebNavigationState()).toEqual({
-      selectedDirectory: "/repo/a",
-      sessionByDirectory: { "/repo/a": "session-a" },
+      lastSession: { sessionId: "session-a", directory: "/repo/a" },
     });
+    writeWebNavigationState({ lastSession: null });
+    expect(readWebNavigationState()).toEqual({ lastSession: null });
+  });
+
+  it("reads the v1 selected project and its session once", () => {
+    values.set(
+      "ohbaby.web.navigation.v1",
+      JSON.stringify({
+        selectedDirectory: "/repo/a",
+        sessionByDirectory: { "/repo/a": "session-a", "/repo/b": "session-b" },
+      }),
+    );
+    expect(readWebNavigationState()).toEqual({
+      lastSession: { sessionId: "session-a", directory: "/repo/a" },
+    });
+    values.set(
+      "ohbaby.web.navigation.v1",
+      JSON.stringify({ selectedDirectory: "/repo/c", sessionByDirectory: {} }),
+    );
+    expect(readWebNavigationState()).toEqual({ lastSession: null });
   });
 
   it("replaces the canonical project and session hash", () => {
@@ -55,15 +73,9 @@ describe("web navigation state", () => {
       value: {},
     });
 
-    expect(readWebNavigationState()).toEqual({
-      selectedDirectory: null,
-      sessionByDirectory: {},
-    });
+    expect(readWebNavigationState()).toEqual({ lastSession: null });
     expect(() => {
-      writeWebNavigationState({
-        selectedDirectory: "/repo/a",
-        sessionByDirectory: {},
-      });
+      writeWebNavigationState({ lastSession: null });
     }).not.toThrow();
   });
 });

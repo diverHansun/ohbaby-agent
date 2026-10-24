@@ -1,4 +1,7 @@
-import { createOhbabyWebRuntime, type OhbabyWebRuntime } from "./runtime/index.js";
+import {
+  createOhbabyWebRuntime,
+  type OhbabyWebRuntime,
+} from "./runtime/index.js";
 import type { OhbabyBootstrapConfig } from "./api/daemon/wire.js";
 import { mountBootstrapError, mountOhbabyWebApp } from "./ui/App.js";
 import "./ui/styles.css";

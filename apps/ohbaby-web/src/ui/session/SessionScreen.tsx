@@ -99,7 +99,6 @@ export function SessionScreen({
   const { promptProjection, isPromptAdmitting, submitText } =
     usePromptSubmission({
       runtime,
-      client,
       view,
       selectedDirectory: workspace.selectedDirectory,
       draftScopeKey,

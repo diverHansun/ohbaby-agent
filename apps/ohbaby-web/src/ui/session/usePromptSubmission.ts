@@ -1,4 +1,4 @@
-import type { UiBackendClient, UiReasoningConfig } from "ohbaby-sdk";
+import type { UiReasoningConfig } from "ohbaby-sdk";
 import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
@@ -19,7 +19,6 @@ import type { CommandInputError } from "./useCommandOverlays.js";
  */
 export function usePromptSubmission(input: {
   readonly runtime: OhbabyWebRuntime;
-  readonly client: UiBackendClient;
   readonly view: ViewModel;
   readonly selectedDirectory: string | null;
   readonly draftScopeKey: string;
@@ -44,7 +43,6 @@ export function usePromptSubmission(input: {
 } {
   const {
     runtime,
-    client,
     view,
     selectedDirectory,
     draftScopeKey,
@@ -173,7 +171,7 @@ export function usePromptSubmission(input: {
             text,
           },
         ]);
-        const receipt = await client.submitPromptAccepted(text, {
+        const receipt = await runtime.submitPrompt(text, {
           ...(reasoning === undefined ? {} : { reasoning }),
           clientRequestId: requestId,
           ...(submittedSessionId === undefined
@@ -223,7 +221,6 @@ export function usePromptSubmission(input: {
     },
     [
       clearActionError,
-      client,
       localPromptAttempts,
       runtime,
       selectedDirectory,

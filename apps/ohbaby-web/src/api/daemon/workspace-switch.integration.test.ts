@@ -250,7 +250,7 @@ describe("ohbaby web workspace switching", () => {
     );
     runtime.retrySession();
     await waitFor(() => oldResyncStarted);
-    await runtime.switchWorkspace("/repo-b");
+    await runtime.openDraft("/repo-b");
     resolveOldResync?.(
       Response.json({
         ok: true,
@@ -398,7 +398,7 @@ describe("ohbaby web workspace switching", () => {
     );
 
     await runtime.ready;
-    await runtime.refreshWorkspaces();
+    await runtime.refreshCatalog();
     expect(runtime.getWorkspaceSnapshot()).toEqual({
       scopes: [
         {
@@ -419,7 +419,7 @@ describe("ohbaby web workspace switching", () => {
       selectedDirectory: "/repo-a",
     });
 
-    await runtime.switchWorkspace("/repo-b");
+    await runtime.openDraft("/repo-b");
 
     expect(abortedDirectories).toEqual(["/repo-a"]);
     expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-b");
@@ -555,9 +555,9 @@ describe("ohbaby web workspace switching", () => {
       { fetch: fetchImpl },
     );
     await runtime.ready;
-    await runtime.refreshWorkspaces();
+    await runtime.refreshCatalog();
 
-    await expect(runtime.switchWorkspace("/repo-b")).rejects.toThrow(
+    await expect(runtime.openDraft("/repo-b")).rejects.toThrow(
       "workspace disappeared",
     );
 
@@ -724,7 +724,7 @@ describe("ohbaby web workspace switching", () => {
       ).toBe(true);
 
       const beforeSelection = requests.length;
-      await runtime.openWorkspace(unicodeDirectory);
+      await runtime.openDraft(await runtime.openFolder(unicodeDirectory));
 
       const openRequest = requests.slice(beforeSelection)[0];
       expect(new URL(openRequest.url).pathname).toBe("/v1/scopes/open");

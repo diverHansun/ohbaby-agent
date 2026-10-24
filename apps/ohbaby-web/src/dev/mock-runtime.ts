@@ -1,5 +1,7 @@
 import type { UiBackendClient, UiSnapshot } from "ohbaby-sdk";
 import type { OhbabyWebRuntime } from "../runtime/index.js";
+import { createDraftStore } from "../store/draft.js";
+import { createGlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore } from "../store/store.js";
 import { mockScenarios } from "./mock-scenarios.js";
 
@@ -13,6 +15,22 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   installSnapshot(store, scenario.snapshot);
   store.setCurrentModel(scenario.model);
   store.setConnectionState("live");
+  const catalog = createGlobalCatalogStore();
+  const directory = scenario.workspace.selectedDirectory;
+  catalog.setProjects(scenario.workspace.scopes, "/home/you/.ohbaby/workspace");
+  catalog.replaceSessions(
+    scenario.snapshot.sessions.map((session) => ({
+      id: session.id,
+      title: session.title,
+      status: "active" as const,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messageCount: session.messages.length,
+      projectDirectory: directory,
+      workingDirectory: directory ?? "/home/you/.ohbaby/workspace",
+    })),
+    undefined,
+  );
 
   const resolved = (): Promise<void> => Promise.resolve();
   const client = new Proxy<Record<string, unknown>>(
@@ -39,6 +57,8 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     client,
     ready: Promise.resolve(),
     store,
+    catalog,
+    draft: createDraftStore(),
     retryPermissions: () => undefined,
     retrySession: () => undefined,
     loadEarlierHistory: resolved,
@@ -58,11 +78,15 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     listDirectoryPicker: (directory) =>
       Promise.resolve({ ok: true, directory, parent: null, children: [] }),
     listWebCommands: () => Promise.resolve({ commands: [], version: "mock" }),
-    openWorkspace: resolved,
-    refreshWorkspaces: resolved,
+    openDraft: resolved,
+    openFolder: (folder) => Promise.resolve(folder),
+    openSession: resolved,
+    refreshCatalog: resolved,
+    loadMoreSessions: resolved,
     selectSession: resolved,
+    submitPrompt: () =>
+      Promise.reject(new Error("mock runtime: prompts are not sent")),
     subscribeWorkspaces: () => () => undefined,
-    switchWorkspace: resolved,
   };
 }
 

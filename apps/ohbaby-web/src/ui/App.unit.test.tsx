@@ -16,6 +16,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OhbabyWebRuntime } from "../runtime/index.js";
 import type { OhbabyWebStore } from "../store/store.js";
+import { createDraftStore } from "../store/draft.js";
+import { createGlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore } from "../store/store.js";
 import { OhbabyWebApp } from "./App.js";
 
@@ -70,9 +72,8 @@ interface FakeRuntime {
   readonly listDirectoryPicker: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["listDirectoryPicker"]>
   >;
-  readonly openWorkspace: ReturnType<
-    typeof vi.fn<OhbabyWebRuntime["openWorkspace"]>
-  >;
+  readonly openFolder: ReturnType<typeof vi.fn<OhbabyWebRuntime["openFolder"]>>;
+  readonly openDraft: ReturnType<typeof vi.fn<OhbabyWebRuntime["openDraft"]>>;
   readonly runtime: OhbabyWebRuntime;
   readonly selectSession: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["selectSession"]>
@@ -87,9 +88,6 @@ interface FakeRuntime {
     typeof vi.fn<UiBackendClient["submitPromptAccepted"]>
   >;
   readonly store: OhbabyWebStore;
-  readonly switchWorkspace: ReturnType<
-    typeof vi.fn<OhbabyWebRuntime["switchWorkspace"]>
-  >;
 }
 
 const mountedApps: MountedApp[] = [];
@@ -3159,7 +3157,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     await clickButton(app.container, "New chat");
     await clickButton(app.container, "Select Session 2");
 
-    expect(fake.createSession).toHaveBeenCalledTimes(1);
+    expect(fake.openDraft).toHaveBeenCalledTimes(1);
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
   });
 
@@ -3171,7 +3169,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     await clickButton(app.container, "/repo-b");
 
-    expect(fake.switchWorkspace).toHaveBeenCalledWith("/repo-b");
+    expect(fake.openDraft).toHaveBeenCalledWith("/repo-b");
   });
 
   it("hides a project through its group menu", async () => {
@@ -3201,7 +3199,7 @@ describe("OhbabyWebApp slash command interactions", () => {
           ?.textContent.includes("C:\\") === true,
     );
     expect(fake.getDirectoryPickerRoots).toHaveBeenCalledTimes(1);
-    expect(fake.openWorkspace).not.toHaveBeenCalled();
+    expect(fake.openFolder).not.toHaveBeenCalled();
     const root = [...app.container.querySelectorAll("button")].find((button) =>
       button.textContent.includes("C:\\"),
     );
@@ -3230,14 +3228,14 @@ describe("OhbabyWebApp slash command interactions", () => {
       await Promise.resolve();
     });
 
-    expect(fake.openWorkspace).toHaveBeenCalledWith("C:\\");
+    expect(fake.openFolder).toHaveBeenCalledWith("C:\\");
   });
 
   it("keeps the directory picker open when opening a directory fails", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    fake.openWorkspace.mockRejectedValueOnce(new Error("Scope unavailable"));
+    fake.openFolder.mockRejectedValueOnce(new Error("Scope unavailable"));
     const app = mountApp(fake.runtime);
 
     await clickButton(app.container, "Open folder…");
@@ -4674,14 +4672,14 @@ function createFakeRuntime(input: {
       searchJsonPath: "search.json",
     }),
   );
-  const switchWorkspace = vi.fn<OhbabyWebRuntime["switchWorkspace"]>(() =>
+  const openDraft = vi.fn<OhbabyWebRuntime["openDraft"]>(() =>
     Promise.resolve(),
   );
   const hideWorkspace = vi.fn<OhbabyWebRuntime["hideWorkspace"]>(() =>
     Promise.resolve(),
   );
-  const openWorkspace = vi.fn<OhbabyWebRuntime["openWorkspace"]>(() =>
-    Promise.resolve(),
+  const openFolder = vi.fn<OhbabyWebRuntime["openFolder"]>((directory) =>
+    Promise.resolve(directory),
   );
   const getDirectoryPickerRoots = vi.fn<
     OhbabyWebRuntime["getDirectoryPickerRoots"]
@@ -4842,7 +4840,8 @@ function createFakeRuntime(input: {
     hideWorkspace,
     listCommands,
     listDirectoryPicker,
-    openWorkspace,
+    openDraft,
+    openFolder,
     runtime: {
       retryPermissions: vi.fn(),
       retrySession: vi.fn(),
@@ -4860,21 +4859,27 @@ function createFakeRuntime(input: {
       hideWorkspace,
       listDirectoryPicker,
       listWebCommands: listCommands,
-      openWorkspace,
+      openDraft,
+      openFolder,
+      // Sidebar opens go through selectSession so tests observe one entry point.
+      openSession: (sessionId) => selectSession(sessionId),
       getWorkspaceSnapshot: () => workspaceSnapshot,
       ready: Promise.resolve(),
-      refreshWorkspaces: () => Promise.resolve(),
+      refreshCatalog: () => Promise.resolve(),
+      loadMoreSessions: () => Promise.resolve(),
+      catalog: createGlobalCatalogStore(),
+      draft: createDraftStore(),
+      submitPrompt: (text, options) =>
+        client.submitPromptAccepted(text, options),
       selectSession,
       store,
       subscribeWorkspaces: () => () => undefined,
-      switchWorkspace,
     },
     selectSession,
     setPermission,
     setSearchApiKey,
     store,
     submitPromptAccepted,
-    switchWorkspace,
   };
 }
 

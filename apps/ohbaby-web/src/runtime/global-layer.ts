@@ -1,3 +1,5 @@
+import type { UiGlobalSession } from "ohbaby-sdk";
+import { GlobalSessionsClient } from "../api/daemon/global-sessions.js";
 import {
   createDaemonHttpClient,
   type DaemonHttpClient,
@@ -6,54 +8,116 @@ import type {
   DirectoryPickerListResponse,
   DirectoryPickerRootsResponse,
   OhbabyBootstrapConfig,
-  WorkspaceSnapshot,
 } from "../api/daemon/wire.js";
+import {
+  createGlobalCatalogStore,
+  type GlobalCatalogStore,
+} from "../store/global-catalog.js";
+
+/** One page of the global list; the server caps pages at 500. */
+const PAGE_SIZE = 100;
 
 /**
- * Directory-independent state: the project (scope) list and the folder
- * picker. Requests carry no directory header.
+ * Directory-independent state: projects, the global session list and the
+ * folder picker. Requests carry no directory header. Reads go through one
+ * serial queue, so a refresh and Show more never interleave pages.
  */
 export class GlobalLayer {
-  readonly http: DaemonHttpClient;
-  private readonly listeners = new Set<() => void>();
-  private snapshot: WorkspaceSnapshot = { scopes: [], selectedDirectory: null };
+  readonly catalog: GlobalCatalogStore = createGlobalCatalogStore();
+  private readonly http: DaemonHttpClient;
+  private readonly sessions: GlobalSessionsClient;
+  private queue: Promise<void> = Promise.resolve();
+  private refreshQueued: Promise<void> | null = null;
   /** False when the daemon serves a single workspace without scope routes. */
   controlPlaneAvailable = true;
 
   constructor(
-    config: OhbabyBootstrapConfig,
-    fetchImpl: typeof fetch | undefined,
+    private readonly config: OhbabyBootstrapConfig,
+    private readonly fetchImpl: typeof fetch | undefined,
   ) {
     this.http = createDaemonHttpClient(
       { ...config, directory: undefined },
       fetchImpl,
     );
+    this.sessions = new GlobalSessionsClient(this.http);
   }
 
-  getSnapshot(): WorkspaceSnapshot {
-    return this.snapshot;
-  }
-
-  subscribe(listener: () => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  publish(snapshot: WorkspaceSnapshot): void {
-    this.snapshot = snapshot;
-    for (const listener of this.listeners) {
-      listener();
+  /** Reads the project list; throws so startup can detect a missing control plane. */
+  async refreshProjects(): Promise<void> {
+    try {
+      const response = await this.http.listWorkspaceScopes();
+      this.catalog.setProjects(
+        response.scopes,
+        response.defaultWorkspace?.directory ?? null,
+      );
+    } catch (error) {
+      this.catalog.failProjects();
+      throw error;
     }
   }
 
-  async refreshScopes(): Promise<void> {
-    const response = await this.http.listWorkspaceScopes();
-    this.publish({
-      scopes: response.scopes,
-      selectedDirectory: this.snapshot.selectedDirectory,
+  /**
+   * Re-reads projects and at least the loaded range of sessions from the first
+   * page, then replaces the range so rows archived, hidden or moved elsewhere
+   * disappear. Triggers during a refresh coalesce into one more refresh.
+   */
+  refresh(): Promise<void> {
+    if (!this.controlPlaneAvailable) return Promise.resolve();
+    if (this.refreshQueued) return this.refreshQueued;
+    const pending = this.enqueue(async () => {
+      this.refreshQueued = null;
+      await Promise.allSettled([this.refreshProjects(), this.reloadSessions()]);
     });
+    this.refreshQueued = pending;
+    return pending;
+  }
+
+  /** Startup: projects were just read, so only the session list is loaded. */
+  refreshSessions(): Promise<void> {
+    if (!this.controlPlaneAvailable) return Promise.resolve();
+    return this.enqueue(() => this.reloadSessions());
+  }
+
+  /**
+   * Loads further pages until `enough` holds for the loaded range or no page
+   * is left. Show more uses it to fill one group across several pages.
+   */
+  loadMore(
+    enough: (sessions: readonly UiGlobalSession[]) => boolean,
+  ): Promise<void> {
+    return this.enqueue(async () => {
+      let cursor = this.catalog.getSnapshot().nextCursor;
+      if (cursor === undefined || enough(this.catalog.getSnapshot().sessions))
+        return;
+      this.catalog.setLoadingMore(true);
+      try {
+        while (cursor !== undefined) {
+          const page = await this.sessions.listSessions({
+            cursor,
+            limit: PAGE_SIZE,
+          });
+          this.catalog.appendSessions(page.sessions, page.nextCursor);
+          cursor = page.nextCursor;
+          if (enough(this.catalog.getSnapshot().sessions)) break;
+        }
+      } catch {
+        // The loaded range stays; the next Show more starts from the same cursor.
+      } finally {
+        this.catalog.setLoadingMore(false);
+      }
+    });
+  }
+
+  /** Replaces one row with the server's latest version, e.g. after a move. */
+  upsertSession(session: UiGlobalSession): void {
+    this.catalog.upsertSession(session);
+  }
+
+  moveSession(
+    sessionId: string,
+    projectDirectory: string | null,
+  ): Promise<UiGlobalSession> {
+    return this.sessions.moveSession(sessionId, projectDirectory);
   }
 
   /** Registers a folder as a project and returns its canonical directory. */
@@ -61,8 +125,8 @@ export class GlobalLayer {
     return (await this.http.openWorkspace(directory)).scope.directory;
   }
 
-  hideScope(directory: string): Promise<unknown> {
-    return this.http.hideWorkspace(directory);
+  async hideScope(directory: string): Promise<void> {
+    await this.http.hideWorkspace(directory);
   }
 
   getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse> {
@@ -71,5 +135,53 @@ export class GlobalLayer {
 
   listDirectoryPicker(directory: string): Promise<DirectoryPickerListResponse> {
     return this.http.listDirectoryPicker(directory);
+  }
+
+  /**
+   * A short-lived client registered in another directory, for archive and
+   * export of sessions outside the connected instance. It opens no SSE, so
+   * the current conversation keeps its stream and approvals.
+   */
+  async scopedHttp(directory: string): Promise<DaemonHttpClient> {
+    const http = createDaemonHttpClient(
+      {
+        ...this.config,
+        clientId: globalThis.crypto.randomUUID(),
+        directory,
+      },
+      this.fetchImpl,
+    );
+    await http.registerClient({
+      startupIntent: { startupSessionMode: { type: "fresh" } },
+    });
+    return http;
+  }
+
+  private async reloadSessions(): Promise<void> {
+    const before = this.catalog.getSnapshot();
+    const target = Math.max(before.sessions.length, PAGE_SIZE);
+    const loaded: UiGlobalSession[] = [];
+    let cursor: string | undefined;
+    try {
+      do {
+        const page = await this.sessions.listSessions({
+          ...(cursor === undefined ? {} : { cursor }),
+          limit: PAGE_SIZE,
+        });
+        loaded.push(...page.sessions);
+        cursor = page.nextCursor;
+      } while (cursor !== undefined && loaded.length < target);
+      this.catalog.replaceSessions(loaded, cursor);
+    } catch (error) {
+      this.catalog.failSessions(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private enqueue(task: () => Promise<void>): Promise<void> {
+    const pending = this.queue.then(task);
+    this.queue = pending.catch(() => undefined);
+    return pending;
   }
 }

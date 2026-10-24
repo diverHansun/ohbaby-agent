@@ -231,7 +231,8 @@
   flex: none;
   height: 14px;
   opacity: 0;
-  transition: opacity 140ms ease,
+  transition:
+    opacity 140ms ease,
     transform 140ms ease;
   width: 14px;
 }
@@ -357,7 +358,8 @@
   height: 16px;
   flex: none;
   opacity: 0;
-  transition: opacity 140ms ease,
+  transition:
+    opacity 140ms ease,
     transform 140ms ease;
 }
 

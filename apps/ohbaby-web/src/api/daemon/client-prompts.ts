@@ -14,6 +14,8 @@ const KNOWN_REJECTION_CODES = [
   "PROMPT_SCHEDULER_CLOSED",
   "IDEMPOTENCY_CONFLICT",
   "PROMPT_SUBMISSION_REJECTED",
+  // The session's next turn belongs to another directory; the runtime resends there.
+  "SESSION_MOVED",
 ];
 
 /**

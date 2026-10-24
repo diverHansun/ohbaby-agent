@@ -267,8 +267,11 @@ describe("independent web approval recovery", () => {
     const test = fixture({ selectedChild: true });
     try {
       await test.runtime.ready;
+      // The error arrives after the approval retry backoff (about 0.9s).
       await expect
-        .poll(() => test.runtime.store.getSnapshot().permissionSync.status)
+        .poll(() => test.runtime.store.getSnapshot().permissionSync.status, {
+          timeout: 3_000,
+        })
         .toBe("error");
       expect(test.runtime.store.getSnapshot().permissionSync.error).toContain(
         "Return to a main session to approve requests.",

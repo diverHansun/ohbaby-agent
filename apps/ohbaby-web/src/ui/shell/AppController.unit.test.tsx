@@ -141,10 +141,10 @@ describe("AppController without an open folder", () => {
   it("keeps the folderless draft when connecting to the chosen folder fails", async () => {
     const { runtime, mockClient, setState } = switchableRuntime();
     let failConnect: (error: Error) => void = () => undefined;
-    runtime.openWorkspace = (directory): Promise<void> =>
+    runtime.openDraft = (directory): Promise<void> =>
       new Promise<void>((_resolve, reject) => {
         // The real runtime creates the client before it connects.
-        setState(mockClient, folder(directory));
+        setState(mockClient, folder(directory ?? "/"));
         failConnect = (error): void => {
           setState(null, noFolder);
           reject(error);
@@ -170,8 +170,8 @@ describe("AppController without an open folder", () => {
 
   it("hands the draft over once the folder opened successfully", async () => {
     const { runtime, mockClient, setState } = switchableRuntime();
-    runtime.openWorkspace = (directory): Promise<void> => {
-      setState(mockClient, folder(directory));
+    runtime.openDraft = (directory): Promise<void> => {
+      setState(mockClient, folder(directory ?? "/"));
       return Promise.resolve();
     };
     const container = mount(runtime);
@@ -210,8 +210,7 @@ describe("AppController without an open folder", () => {
             resolve();
           };
         });
-      runtime.openWorkspace = open;
-      runtime.switchWorkspace = open;
+      runtime.openDraft = (directory): Promise<void> => open(directory ?? "/");
       if (entry === "project") {
         setState(null, {
           ...folder("/workspace"),
