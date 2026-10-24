@@ -6,8 +6,11 @@ import type { SettingsLayer } from "../../runtime/settings-layer.js";
 import { focusableIn, trapTab } from "../shared/focus-trap.js";
 import { IconButton } from "../shared/IconButton.js";
 import { isPhoneViewport } from "../shared/viewport.js";
+import { AboutSection } from "./AboutSection.js";
+import { McpSection } from "./mcp/McpSection.js";
 import { ModelsSection } from "./ModelsSection.js";
 import { SearchSection } from "./SearchSection.js";
+import { SkillsSection } from "./SkillsSection.js";
 import { SETTINGS_SECTIONS, type SettingsSection } from "./sections.js";
 import { SettingsNav } from "./SettingsNav.js";
 import type { SettingsDialogState } from "./useSettingsDialog.js";
@@ -57,6 +60,23 @@ export function SettingsDialog(props: {
     };
   }, [state.open]);
 
+  // A focused control that unmounts (Save leaving the editor, a removed row)
+  // drops focus to <body>, where Escape and the Tab trap stop working.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!state.open || !dialog) return;
+    const recover = (): void => {
+      setTimeout(() => {
+        if (document.activeElement === document.body)
+          dialog.focus({ preventScroll: true });
+      }, 0);
+    };
+    dialog.addEventListener("focusout", recover);
+    return (): void => {
+      dialog.removeEventListener("focusout", recover);
+    };
+  }, [state.open]);
+
   // Focus goes back after the commit: the dialog only hides, and React
   // restores the focus it saw before a commit once mutations are done.
   const wasOpen = useRef(false);
@@ -87,6 +107,9 @@ export function SettingsDialog(props: {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        // A click on plain text then focuses the dialog, not <body>, so
+        // Escape and the Tab trap keep working.
+        tabIndex={-1}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
@@ -122,15 +145,36 @@ export function SettingsDialog(props: {
             onSelect={props.onSelectSection}
           />
           <div className="ohb-settings-content" key={state.resetKey}>
-            {state.section === "models" ? (
-              <ModelsSection settings={props.settings} visible={state.open} />
-            ) : (
-              <SearchSection settings={props.settings} visible={state.open} />
-            )}
+            <Section
+              section={state.section}
+              settings={props.settings}
+              visible={state.open}
+            />
           </div>
         </div>
       </section>
     </div>,
     document.body,
   );
+}
+
+/** Only the current section is mounted, so switching drops a half-done edit. */
+function Section(props: {
+  readonly section: SettingsSection;
+  readonly settings: SettingsLayer;
+  readonly visible: boolean;
+}): ReactElement {
+  const { settings, visible } = props;
+  switch (props.section) {
+    case "models":
+      return <ModelsSection settings={settings} visible={visible} />;
+    case "mcp":
+      return <McpSection settings={settings} visible={visible} />;
+    case "skills":
+      return <SkillsSection settings={settings} visible={visible} />;
+    case "search":
+      return <SearchSection settings={settings} visible={visible} />;
+    case "about":
+      return <AboutSection settings={settings} visible={visible} />;
+  }
 }

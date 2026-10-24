@@ -54,6 +54,18 @@ function dialogOpen(): boolean {
   return layer !== null && !layer.hidden;
 }
 
+/** A disclosure or editable row by its visible name. */
+function row(name: string): HTMLButtonElement {
+  const found = [
+    ...dialog().querySelectorAll<HTMLButtonElement>(".ohb-settings-row-main"),
+  ].find(
+    (candidate) =>
+      candidate.querySelector(".ohb-settings-row-title")?.textContent === name,
+  );
+  if (!found) throw new Error(`row not found: ${name}`);
+  return found;
+}
+
 function button(scope: ParentNode, name: string): HTMLButtonElement {
   const found = [...scope.querySelectorAll("button")].find(
     (candidate) =>
@@ -131,7 +143,7 @@ describe("settings dialog", () => {
     const nav = [
       ...dialog().querySelectorAll<HTMLButtonElement>(".ohb-settings-nav-item"),
     ].map((item) => item.textContent.trim());
-    expect(nav).toEqual(["Models", "Web search"]);
+    expect(nav).toEqual(["Models", "MCP", "Skills", "Web search", "About"]);
     expect(
       dialog().querySelector("[aria-current='page']")?.textContent,
     ).toContain("Models");
@@ -205,6 +217,12 @@ describe("settings dialog", () => {
       label: null,
       apiKey: "sk-test-secret",
     });
+    // Focus lands on the edited row, so Escape still closes the dialog.
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Edit deepseek-v4.1-flash",
+    );
+    await key(dialog(), "Escape");
+    expect(dialogOpen()).toBe(false);
     expect(document.body.textContent).not.toContain("sk-test-secret");
   });
 
@@ -325,5 +343,73 @@ describe("settings dialog", () => {
     expect(update).toHaveBeenCalledWith({ apiKey: "tvly-secret" });
     expect(document.body.textContent).not.toContain("tvly-secret");
     expect(button(dialog(), "Save").disabled).toBe(true);
+  });
+
+  it("shows MCP config with the actual status and never writes", async () => {
+    const runtime = createMockRuntime("settings");
+    const container = mount(runtime);
+    const reads = vi.spyOn(runtime.settings, "load");
+    await openSettings(container);
+    await click(button(dialog(), "MCP"));
+    await until(
+      () => dialog().textContent.includes("3 tools"),
+      "the MCP status",
+    );
+    const rows = [...dialog().querySelectorAll(".ohb-settings-row")].map(
+      (row) => row.textContent,
+    );
+    expect(rows).toEqual([
+      "github3 tools",
+      "filesystemFailed",
+      "docs-searchOff",
+    ]);
+    await click(row("filesystem"));
+    expect(dialog().textContent).toContain("spawn mcp-filesystem ENOENT");
+    await click(row("docs-search"));
+    // Header and env values never reach the page, only their names.
+    expect(dialog().textContent).toContain("Authorization");
+    // No inputs, switches or write buttons in the section.
+    expect(
+      dialog().querySelectorAll(".ohb-settings-content input"),
+    ).toHaveLength(0);
+    expect(dialog().textContent).not.toMatch(
+      /Save|Delete|Reconnect|Add server/u,
+    );
+    reads.mockClear();
+    await click(button(dialog(), "Refresh"));
+    expect(reads.mock.calls.map(([kind]) => kind).sort()).toEqual([
+      "mcpServers",
+      "mcpStatus",
+    ]);
+  });
+
+  it("keeps the MCP config when the status read fails", async () => {
+    const runtime = createMockRuntime("settings-errors");
+    const container = mount(runtime);
+    await openSettings(container);
+    await click(button(dialog(), "MCP"));
+    await until(
+      () =>
+        dialog().textContent.includes("Couldn't read the connection status."),
+      "the status failure",
+    );
+    expect(dialog().textContent).toContain("github—");
+    expect(button(dialog(), "Retry")).toBeDefined();
+  });
+
+  it("lists only global skills and leaves out absent About items", async () => {
+    const runtime = createMockRuntime("settings");
+    const container = mount(runtime);
+    await openSettings(container);
+    await click(button(dialog(), "Skills"));
+    await until(() => dialog().textContent.includes("humanizer"), "skills");
+    expect(dialog().textContent).not.toContain("project-only");
+    await click(row("humanizer"));
+    expect(dialog().textContent).toContain(
+      "/Users/demo/.ohbaby/skills/humanizer/SKILL.md",
+    );
+    await click(button(dialog(), "About"));
+    await until(() => dialog().textContent.includes("0.1.16"), "About");
+    expect(dialog().textContent).toContain("Diagnostics file");
   });
 });

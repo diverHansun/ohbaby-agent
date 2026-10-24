@@ -1,7 +1,7 @@
 import { MoreHorizontal } from "lucide-react";
 import type { UiSettingsModel, UiSettingsModels } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isDaemonRequestError } from "../../api/daemon/http.js";
 import type { SettingsLayer } from "../../runtime/settings-layer.js";
 import { ConfirmDialog } from "../shared/ConfirmDialog.js";
@@ -54,6 +54,25 @@ export function ModelsSection(props: {
   const resource = useSettingsResource(settings, "models", props.visible);
   const models = resource.data;
   const [view, setView] = useState<View>({ kind: "list" });
+  // Back from the editor, focus lands on the row that was edited.
+  const sectionRef = useRef<HTMLElement>(null);
+  const returnTo = useRef<string | null>(null);
+  const toList = (): void => {
+    returnTo.current = view.kind === "edit" ? view.id : "new";
+    setView({ kind: "list" });
+  };
+  useLayoutEffect(() => {
+    if (view.kind !== "list" || returnTo.current === null) return;
+    const id = returnTo.current;
+    returnTo.current = null;
+    const section = sectionRef.current;
+    const target =
+      [...(section?.querySelectorAll<HTMLElement>("[data-model-id]") ?? [])]
+        .find((row) => row.dataset.modelId === id)
+        ?.querySelector<HTMLElement>(".ohb-settings-row-main") ??
+      section?.querySelector<HTMLElement>(".ohb-primary-button");
+    target?.focus({ preventScroll: true });
+  }, [view]);
   const [rows, setRows] = useState<Readonly<Partial<Record<string, RowState>>>>(
     {},
   );
@@ -144,18 +163,16 @@ export function ModelsSection(props: {
         settings={settings}
         {...(editing ? { entry: editing } : {})}
         models={models}
-        onBack={() => {
-          setView({ kind: "list" });
-        }}
+        onBack={toList}
         onSaved={(outcome) => {
           if (outcome.defaultError)
             setRow(outcome.defaultError.id, {
               error: `Saved, but couldn't set as default. ${outcome.defaultError.message}`,
             });
-          setView({ kind: "list" });
+          toList();
         }}
         onMissing={() => {
-          setView({ kind: "list" });
+          toList();
           void resource.reload();
         }}
       />
@@ -164,7 +181,11 @@ export function ModelsSection(props: {
   const activeId = models?.active?.id ?? null;
   const groups = models ? groupModels(models.models) : [];
   return (
-    <section className="ohb-settings-section" aria-label="Models">
+    <section
+      ref={sectionRef}
+      className="ohb-settings-section"
+      aria-label="Models"
+    >
       <SectionHeader
         title="Models"
         action={
@@ -206,7 +227,11 @@ export function ModelsSection(props: {
             const row = rows[model.id];
             const isDefault = model.id === activeId;
             return (
-              <div key={model.id} className="ohb-settings-row-wrap">
+              <div
+                key={model.id}
+                className="ohb-settings-row-wrap"
+                data-model-id={model.id}
+              >
                 <SettingsRow
                   muted={!model.configurationComplete}
                   ariaLabel={`Edit ${model.model}${model.label ? ` ${model.label}` : ""}`}

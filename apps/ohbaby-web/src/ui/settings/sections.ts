@@ -1,12 +1,15 @@
-export type SettingsSection = "models" | "search";
+export type SettingsSection = "models" | "mcp" | "skills" | "search" | "about";
 
-/** Navigation order (D12); 4b adds MCP, Skills and About. */
+/** The five sections in navigation order (D12). */
 export const SETTINGS_SECTIONS: readonly {
   readonly id: SettingsSection;
   readonly label: string;
 }[] = [
   { id: "models", label: "Models" },
+  { id: "mcp", label: "MCP" },
+  { id: "skills", label: "Skills" },
   { id: "search", label: "Web search" },
+  { id: "about", label: "About" },
 ];
 
 const STORAGE_KEY = "ohbaby.settings.section";

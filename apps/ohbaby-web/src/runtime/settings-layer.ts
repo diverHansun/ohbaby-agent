@@ -19,6 +19,9 @@ import {
 
 type SettingsDomain = UiSettingsChangedEvent["domains"][number];
 
+/** Change events arriving this close together cause one reread. */
+const INVALIDATE_GATHER_MS = 50;
+
 /** Which cached kinds a `settings.changed` domain makes stale. */
 const DOMAIN_KINDS: Readonly<Record<SettingsDomain, readonly SettingsKind[]>> =
   {
@@ -62,6 +65,8 @@ export class SettingsLayer {
   private readonly tickets = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<void>>();
   private readonly watched = new Map<SettingsKind, number>();
+  private readonly stale = new Set<SettingsKind>();
+  private flush: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly api: SettingsApi,
@@ -129,14 +134,25 @@ export class SettingsLayer {
     };
   }
 
-  /** `settings.changed` (or `model.invalidated`): reread visible kinds now. */
+  /**
+   * `settings.changed` (or `model.invalidated`): reread visible kinds. One
+   * write sends both events, so rereads are gathered for a moment and run once.
+   */
   invalidate(domains: readonly SettingsDomain[]): void {
-    const kinds = new Set(domains.flatMap((domain) => DOMAIN_KINDS[domain]));
-    for (const kind of kinds) {
-      // Unwatched entries reread when next shown (and ModelMenu checks age).
-      this.expire(kind);
-      if (this.watched.has(kind)) void this.load(kind, { force: true });
-    }
+    for (const domain of domains)
+      for (const kind of DOMAIN_KINDS[domain]) {
+        // Unwatched entries reread when next shown (and ModelMenu checks age).
+        this.expire(kind);
+        this.stale.add(kind);
+      }
+    if (this.flush !== null) return;
+    this.flush = setTimeout(() => {
+      this.flush = null;
+      const kinds = [...this.stale];
+      this.stale.clear();
+      for (const kind of kinds)
+        if (this.watched.has(kind)) void this.load(kind, { force: true });
+    }, INVALIDATE_GATHER_MS);
   }
 
   /** The window regained focus: files may have changed without an event. */

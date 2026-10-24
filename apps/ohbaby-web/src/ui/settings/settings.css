@@ -37,6 +37,10 @@
   width: min(960px, 100%);
 }
 
+.ohb-settings-dialog:focus {
+  outline: none;
+}
+
 .ohb-settings-header {
   align-items: center;
   border-bottom: 1px solid var(--border);
@@ -525,5 +529,130 @@
   .ohb-primary-button,
   .ohb-settings-form-footer .ohb-text-button {
     height: 44px;
+  }
+}
+
+/* Disclosure rows (MCP, Skills) and their read-only detail. */
+.ohb-settings-disclosure {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.ohb-settings-disclosure-chevron {
+  color: var(--text-dim);
+  flex: none;
+  transition: transform var(--duration-fast) var(--ease);
+}
+
+.ohb-settings-disclosure-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.ohb-mcp-failed {
+  color: var(--danger-ink);
+}
+
+.ohb-mcp-details,
+.ohb-skill-details {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0 14px 19px;
+}
+
+.ohb-mcp-config {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.ohb-mcp-config-row {
+  display: grid;
+  font-size: 13px;
+  gap: 12px;
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.ohb-mcp-config-row dt {
+  color: var(--text-dim);
+}
+
+.ohb-mcp-config-row dd {
+  color: var(--text);
+  margin: 0;
+  min-width: 0;
+}
+
+.ohb-mcp-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ohb-mcp-code,
+.ohb-about-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ohb-mcp-error {
+  color: var(--danger-ink);
+  overflow-wrap: anywhere;
+}
+
+.ohb-mcp-tools {
+  margin-top: 12px;
+}
+
+.ohb-mcp-tools h4 {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+}
+
+.ohb-mcp-tools ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ohb-mcp-tools li {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  gap: 1px;
+}
+
+.ohb-mcp-tools li span,
+.ohb-skill-details p {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0 0 4px;
+}
+
+.ohb-about-value {
+  color: var(--text-muted);
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .ohb-mcp-config-row {
+    gap: 2px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ohb-about-value {
+    max-width: 160px;
   }
 }
