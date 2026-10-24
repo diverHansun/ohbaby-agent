@@ -133,3 +133,10 @@
     max-width: 120px;
   }
 }
+
+@media (max-width: 639px) {
+  .ohb-control-button,
+  .ohb-reasoning-control select {
+    min-height: 44px;
+  }
+}

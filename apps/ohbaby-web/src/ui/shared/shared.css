@@ -125,6 +125,110 @@
   margin: 4px 6px;
 }
 
+/* Items and separators hidden by the filter (display: flex would win over the attribute). */
+.ohb-menu [hidden] {
+  display: none;
+}
+
+.ohb-menu-filter {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-size: 13px;
+  margin: 0 0 4px;
+  min-height: 30px;
+  padding: 0 9px;
+  width: 100%;
+}
+
+.ohb-menu-filter:focus-visible {
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.ohb-menu-empty {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  margin: 0;
+  padding: 6px 9px;
+}
+
+/* Phone (< 640px): the menu is a bottom sheet over a backdrop (03 §5). */
+.ohb-menu-sheet-layer {
+  inset: 0;
+  position: fixed;
+  z-index: 150;
+}
+
+.ohb-menu-sheet-backdrop {
+  animation: ohb-fade var(--duration-fast) var(--ease);
+  background: var(--bg-scrim);
+  inset: 0;
+  position: absolute;
+}
+
+.ohb-menu.is-sheet {
+  animation: ohb-slide-up var(--duration-fast) var(--ease);
+  background: var(--bg-elevated);
+  border: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  bottom: 0;
+  gap: 0;
+  left: 0;
+  max-height: 80dvh;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0 max(8px, env(safe-area-inset-bottom));
+  position: absolute;
+  right: 0;
+}
+
+.ohb-menu-sheet-title {
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  padding: 10px 16px 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-menu-sheet-body {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.ohb-menu.is-sheet [role="menuitem"] {
+  border-radius: 0;
+  font-size: 15px;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 16px;
+}
+
+.ohb-menu.is-sheet .ohb-menu-separator {
+  margin: 4px 0;
+}
+
+.ohb-menu.is-sheet .ohb-menu-filter {
+  font-size: 16px;
+  margin: 4px 16px 8px;
+  min-height: 44px;
+  width: calc(100% - 32px);
+}
+
+.ohb-menu-sheet-cancel {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 15px;
+  min-height: 48px;
+  width: 100%;
+}
+
 /* Notices: top-right, failures and background events only (D16). */
 .ohb-notice-stack {
   display: flex;
@@ -190,6 +294,15 @@
 .ohb-notice-close:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* Keep phone overrides after the base button rules so the hit areas survive. */
+@media (max-width: 639px) {
+  .ohb-icon-button,
+  .ohb-notice-close {
+    height: 44px;
+    width: 44px;
+  }
 }
 
 /* Inline error: where it happened, reason plus a way out. */

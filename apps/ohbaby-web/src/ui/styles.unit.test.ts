@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const entry = new URL("./styles.css", import.meta.url);
@@ -44,7 +46,20 @@ describe("web stylesheet structure", () => {
     }
   });
 
-  it("uses the brand colors only for the wordmark", () => {
+  it("keeps literal colors out of components and scripts", () => {
+    const literal = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(/iu;
+    const sourceRoot = fileURLToPath(new URL("..", import.meta.url));
+    const sources = readdirSync(sourceRoot, { recursive: true })
+      .map(String)
+      .filter((path) => /\.tsx?$/u.test(path) && !/\.test\.tsx?$/u.test(path));
+    expect(sources.length).toBeGreaterThan(0);
+    for (const path of sources) {
+      const text = readFileSync(join(sourceRoot, path), "utf8");
+      expect(literal.exec(text)?.[0], path).toBeUndefined();
+    }
+  });
+
+  it("uses the brand colors only for the wordmark and the Lychee mark", () => {
     const users = files
       .filter((file) => fileName(file) !== "styles/tokens.css")
       .filter((file) => readFileSync(file, "utf8").includes("--brand-"))
@@ -54,7 +69,7 @@ describe("web stylesheet structure", () => {
 
   it("falls back to solid surfaces without backdrop-filter", () => {
     expect(css).toMatch(
-      /@supports not \(\(backdrop-filter: blur\(1px\)\) or \(-webkit-backdrop-filter: blur\(1px\)\)\)\s*\{\s*:root\s*\{[^}]*--bg-glass: var\(--bg-glass-solid\)/u,
+      /@supports not \(\s*\(backdrop-filter: blur\(1px\)\) or \(-webkit-backdrop-filter: blur\(1px\)\)\s*\)\s*\{\s*:root\s*\{[^}]*--bg-glass: var\(--bg-glass-solid\)/u,
     );
   });
 
@@ -90,6 +105,24 @@ describe("web layout styles", () => {
       "white-space: nowrap",
     ]);
     expectCssRule(".ohb-session-actions", ["opacity: 0", "position: absolute"]);
+  });
+
+  it("gives phones bottom-sheet menus and 44px touch targets", () => {
+    const phone = [
+      ...css.matchAll(/@media \(max-width: 639px\)\s*\{([\s\S]*?)\n\}/gu),
+    ]
+      .map((match) => match[1])
+      .join("\n");
+    expect(phone).toMatch(
+      /\.ohb-icon-button,\s*\.ohb-notice-close\s*\{[^}]*height: 44px;[^}]*width: 44px/u,
+    );
+    expect(phone).toMatch(/\.ohb-sidebar\s*\{[^}]*--row-height: 44px/u);
+    expect(phone).toMatch(/\.ohb-perm-btn\s*\{[^}]*min-height: 44px/u);
+    expectCssRule('.ohb-menu.is-sheet [role="menuitem"]', [
+      "font-size: 15px",
+      "min-height: 48px",
+    ]);
+    expectCssRule(".ohb-menu [hidden]", ["display: none"]);
   });
 
   it("keeps composer send and stop circular inside the card", () => {

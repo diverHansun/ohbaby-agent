@@ -156,3 +156,11 @@
     width: 100%;
   }
 }
+
+@media (max-width: 639px) {
+  .ohb-permission-toggle {
+    flex-basis: 44px;
+    height: 44px;
+    width: 44px;
+  }
+}

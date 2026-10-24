@@ -14,19 +14,20 @@ interface CompositionRow {
   readonly label: string;
 }
 
+// Chart colours come from tokens.css (`--chart-1`…`--chart-7`).
 const COMPOSITION_ROWS: readonly CompositionRow[] = [
-  { color: "#526d9d", key: "system-prompt", label: "System prompt" },
-  { color: "#6b8ec8", key: "builtin-tools", label: "Built-in tools" },
-  { color: "#7c73bd", key: "mcp", label: "MCP tools" },
-  { color: "#a06cab", key: "skills", label: "Skills" },
-  { color: "#cf7c92", key: "conversation", label: "Conversation" },
+  { color: "var(--chart-1)", key: "system-prompt", label: "System prompt" },
+  { color: "var(--chart-2)", key: "builtin-tools", label: "Built-in tools" },
+  { color: "var(--chart-3)", key: "mcp", label: "MCP tools" },
+  { color: "var(--chart-4)", key: "skills", label: "Skills" },
+  { color: "var(--chart-5)", key: "conversation", label: "Conversation" },
   {
-    color: "#d89b6b",
+    color: "var(--chart-6)",
     key: "summarized-conversation",
     label: "Summarized conversation",
   },
   {
-    color: "#6fa399",
+    color: "var(--chart-7)",
     key: "subagent-exchanges",
     label: "Subagent exchanges",
   },

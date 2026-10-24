@@ -277,3 +277,53 @@
     background: var(--bg-panel-solid);
   }
 }
+
+/* Phones (03 §3.3, §5): 44px rows and touch targets; row actions stay visible
+   because there is no hover. */
+@media (max-width: 639px) {
+  .ohb-sidebar {
+    --row-height: 44px;
+  }
+
+  .ohb-sidebar-nav-item {
+    font-size: 15px;
+    min-height: 44px;
+  }
+
+  .ohb-project-toggle,
+  .ohb-session-main {
+    font-size: 15px;
+  }
+
+  .ohb-project-actions {
+    opacity: 1;
+  }
+
+  .ohb-project-actions .ohb-icon-button,
+  .ohb-session-pin,
+  .ohb-session-actions {
+    height: 44px;
+    width: 44px;
+  }
+
+  .ohb-session-actions {
+    opacity: 1;
+    position: static;
+  }
+
+  .ohb-session-copy > small {
+    display: none;
+  }
+}
+
+/* Touch screens wider than a phone have no hover either: keep row actions reachable. */
+@media (hover: none) {
+  .ohb-project-actions,
+  .ohb-session-actions {
+    opacity: 1;
+  }
+
+  .ohb-session-actions {
+    position: static;
+  }
+}

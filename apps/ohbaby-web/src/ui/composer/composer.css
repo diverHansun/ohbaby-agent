@@ -259,8 +259,6 @@
   color: var(--text-dim);
 }
 
-
-
 .ohb-slash-palette {
   animation: ohb-pop var(--duration-fast) var(--ease);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -308,7 +306,10 @@
   cursor: pointer;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(128px, 144px) minmax(136px, 1fr) minmax(148px, 1fr);
+  grid-template-columns: minmax(128px, 144px) minmax(136px, 1fr) minmax(
+      148px,
+      1fr
+    );
   min-height: 31px;
   padding: 9px 11px;
   width: 100%;
@@ -707,5 +708,24 @@ details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
 @media (max-width: 420px) {
   .ohb-composer-input {
     gap: 6px;
+  }
+}
+
+/* Phones (03 §3.3): send and stop keep their size but get a 44px hit area. */
+@media (max-width: 639px) {
+  .ohb-composer-bar .ohb-send-button,
+  .ohb-composer-bar .ohb-stop-button {
+    flex-basis: 36px;
+    height: 36px;
+    min-height: 36px;
+    position: relative;
+    width: 36px;
+  }
+
+  .ohb-composer-bar .ohb-send-button::after,
+  .ohb-composer-bar .ohb-stop-button::after {
+    content: "";
+    inset: -4px;
+    position: absolute;
   }
 }

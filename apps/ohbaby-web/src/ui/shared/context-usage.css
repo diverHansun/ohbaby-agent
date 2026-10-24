@@ -237,3 +237,10 @@
     width: min(340px, calc(100vw - 88px));
   }
 }
+
+@media (max-width: 639px) {
+  .ohb-context-ring-button {
+    height: 44px;
+    width: 44px;
+  }
+}

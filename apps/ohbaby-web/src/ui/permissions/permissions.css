@@ -195,4 +195,19 @@
     left: 10px;
     right: 10px;
   }
+
+  .ohb-perm-btn {
+    font-size: 15px;
+    min-height: 44px;
+  }
+
+  .ohb-permission-actions > [role="status"] button,
+  .ohb-permission-sync button {
+    min-height: 44px;
+  }
+
+  .ohb-permission-actions .ohb-stop-button {
+    height: 44px;
+    width: 44px;
+  }
 }
