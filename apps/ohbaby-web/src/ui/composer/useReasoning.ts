@@ -175,7 +175,7 @@ export function useReasoning(
           : (effective?.effort ?? view.default?.effort ?? ""),
     options,
     ...(error === undefined ? {} : { error }),
-    select: (value) => {
+    select: (value): void => {
       update(
         value === "off"
           ? { enabled: false }
