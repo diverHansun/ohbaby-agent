@@ -109,6 +109,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     refreshCatalog: resolved,
     loadMoreSessions,
     selectSession: resolved,
+    getSelectionGeneration: () => 0,
     submitPrompt: () =>
       Promise.reject(new Error("mock runtime: prompts are not sent")),
     subscribeWorkspaces: () => () => undefined,

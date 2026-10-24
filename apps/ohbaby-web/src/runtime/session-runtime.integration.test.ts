@@ -1,322 +1,34 @@
-import type { UiGlobalSession, UiSnapshot } from "ohbaby-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  recoveryBinding,
-  sessionViewFromSnapshot,
-} from "../api/daemon/session-recovery.test-utils.js";
+  readWebNavigationState,
+  writeWebNavigationState,
+} from "../api/daemon/navigation-state.js";
 import type { WebStartupIntent } from "../api/daemon/wire.js";
 import { createOhbabyWebRuntime, type OhbabyWebRuntime } from "./index.js";
 
-const DEFAULT = "/default";
-const encoder = new TextEncoder();
-
-interface WorldSession {
-  id: string;
-  title: string;
-  updatedAt: string;
-  projectDirectory: string | null;
-  workingDirectory: string;
-  pendingWorkingDirectory?: string;
-  archived?: boolean;
-}
-
-interface LoggedRequest {
-  readonly method: string;
-  readonly path: string;
-  readonly directory: string | undefined;
-  readonly clientId: string | undefined;
-  readonly body: unknown;
-}
-
-/**
- * A daemon with global routes and one instance per directory. A session is
- * owned by its request directory; prompts and selections elsewhere are
- * refused the way the server refuses them.
- */
-function fakeDaemon(initial: readonly WorldSession[] = []): {
-  readonly fetch: typeof fetch;
-  readonly sessions: Map<string, WorldSession>;
-  readonly requests: LoggedRequest[];
-  readonly abortedStreams: string[];
-  /** Overrides the directory a prompt for this session must move to. */
-  movedTo: ((sessionId: string, directory: string) => string | null) | null;
-  /** Paths answered with HTTP 500. */
-  readonly failing: Set<string>;
-} {
-  const sessions = new Map(initial.map((session) => [session.id, session]));
-  const requests: LoggedRequest[] = [];
-  const abortedStreams: string[] = [];
-  const clients = new Map<
-    string,
-    { directory: string; selected: string | null; generation: number }
-  >();
-  let created = 0;
-  const owner = (session: WorldSession): string =>
-    session.pendingWorkingDirectory ?? session.workingDirectory;
-  const global = (session: WorldSession): UiGlobalSession => ({
-    id: session.id,
-    title: session.title,
-    status: "active",
-    createdAt: session.updatedAt,
-    updatedAt: session.updatedAt,
-    messageCount: 1,
-    projectDirectory: session.projectDirectory,
-    workingDirectory: session.workingDirectory,
-    ...(session.pendingWorkingDirectory === undefined
-      ? {}
-      : { pendingWorkingDirectory: session.pendingWorkingDirectory }),
-  });
-  const snapshot = (sessionId: string | null): UiSnapshot => ({
-    activeSessionId: sessionId,
-    sessions: sessionId
-      ? [
-          {
-            id: sessionId,
-            title: sessions.get(sessionId)?.title ?? sessionId,
-            createdAt: "2026-10-01",
-            updatedAt: "2026-10-01",
-            messages: [],
-          },
-        ]
-      : [],
-    permission: { level: "default", mode: "auto", sessionRules: [] },
-    permissions: [],
-    runs: [],
-    status: { kind: "idle" },
-  });
-  const daemon = {
-    sessions,
-    requests,
-    abortedStreams,
-    movedTo: null as
-      | ((sessionId: string, directory: string) => string | null)
-      | null,
-    failing: new Set<string>(),
-    fetch: (async (input, init = {}) => {
-      // Answer asynchronously, like the network.
-      await Promise.resolve();
-      const request = new Request(input, init);
-      const url = new URL(request.url);
-      const path = url.pathname;
-      const rawDirectory = request.headers.get("x-ohbaby-directory");
-      const directory =
-        rawDirectory === null ? undefined : decodeURIComponent(rawDirectory);
-      const clientId = request.headers.get("x-ohbaby-client-id") ?? undefined;
-      const body: unknown =
-        typeof init.body === "string" ? JSON.parse(init.body) : undefined;
-      requests.push({
-        method: request.method,
-        path,
-        directory,
-        clientId,
-        body,
-      });
-      if (daemon.failing.has(path))
-        return Response.json(
-          { ok: false, error: { message: "unavailable" } },
-          { status: 500 },
-        );
-      const client = clientId ? clients.get(clientId) : undefined;
-      const binding = (): ReturnType<typeof recoveryBinding> =>
-        recoveryBinding(client?.selected ?? null, client?.generation ?? 1);
-
-      if (path === "/v1/scopes")
-        return Response.json({
-          ok: true,
-          defaultWorkspace: { directory: DEFAULT },
-          scopes: ["/a", "/b"].map((value, position) => ({
-            available: true,
-            directory: value,
-            lastOpenedAt: 0,
-            loaded: false,
-            position,
-          })),
-        });
-      if (path === "/v1/sessions" && request.method === "GET") {
-        const active = [...sessions.values()]
-          .filter((session) => !session.archived)
-          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-        const offset = Number(url.searchParams.get("cursor") ?? "0");
-        const limit = Number(url.searchParams.get("limit") ?? "100");
-        const page = active.slice(offset, offset + limit);
-        return Response.json({
-          ok: true,
-          sessions: page.map(global),
-          ...(offset + limit < active.length
-            ? { nextCursor: String(offset + limit) }
-            : {}),
-        });
-      }
-      if (path === "/v1/clients" && clientId && directory) {
-        clients.set(clientId, { directory, selected: null, generation: 1 });
-        return Response.json({ ok: true, clientId, ...binding() });
-      }
-      if (path === "/v1/events" && client) {
-        return new Response(
-          new ReadableStream<Uint8Array>({
-            start(controller): void {
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({ type: "hello", clientId, ...binding() })}\n\n`,
-                ),
-              );
-              request.signal.addEventListener(
-                "abort",
-                () => {
-                  abortedStreams.push(client.directory);
-                  controller.close();
-                },
-                { once: true },
-              );
-            },
-          }),
-          { headers: { "content-type": "text/event-stream" } },
-        );
-      }
-      const select = /^\/v1\/sessions\/([^/]+)\/select$/.exec(path);
-      if (select?.[1] && client) {
-        const session = sessions.get(select[1]);
-        if (!session || owner(session) !== client.directory)
-          return Response.json(
-            {
-              ok: false,
-              error: { message: "scope", code: "PERMISSION_SCOPE_CHANGED" },
-            },
-            { status: 409 },
-          );
-        client.selected = session.id;
-        client.generation += 1;
-        return Response.json({ ok: true, ...binding() });
-      }
-      if (path.endsWith("/view") && client)
-        return Response.json({
-          ok: true,
-          seqNum: 0,
-          view: sessionViewFromSnapshot(
-            snapshot(client.selected),
-            0,
-            client.generation,
-          ),
-        });
-      if (path.endsWith("/control") && client?.selected)
-        return Response.json({
-          ok: true,
-          control: {
-            sessionId: client.selected,
-            rootSessionId: client.selected,
-            runtimeEpoch: "epoch",
-            bindingGeneration: client.generation,
-            runId: null,
-            driver: "user",
-          },
-        });
-      if (path === "/v1/model") return Response.json({ ok: true, model: null });
-      if (path === "/v1/sessions/index" && client)
-        return Response.json({
-          ok: true,
-          sessions: [...sessions.values()]
-            .filter((session) => owner(session) === client.directory)
-            .map((session) => ({
-              id: session.id,
-              title: session.title,
-              createdAt: session.updatedAt,
-              updatedAt: session.updatedAt,
-            })),
-        });
-      if (path === "/v1/permissions")
-        return Response.json({
-          ok: true,
-          snapshot: { ...binding(), permissionRevision: 0, requests: [] },
-        });
-      if (path === "/v1/prompts" && client) {
-        const prompt = body as {
-          clientRequestId: string;
-          sessionId?: string;
-          text: string;
-        };
-        let sessionId = prompt.sessionId;
-        if (sessionId !== undefined) {
-          const session = sessions.get(sessionId);
-          const target =
-            daemon.movedTo?.(sessionId, client.directory) ??
-            (session && owner(session) !== client.directory
-              ? owner(session)
-              : null);
-          if (target)
-            return Response.json(
-              {
-                ok: false,
-                error: {
-                  message: "Session moved",
-                  code: "SESSION_MOVED",
-                  targetDirectory: target,
-                },
-              },
-              { status: 409 },
-            );
-        } else {
-          created += 1;
-          sessionId = `created-${String(created)}`;
-          sessions.set(sessionId, {
-            id: sessionId,
-            title: prompt.text,
-            updatedAt: `2026-10-24T00:00:0${String(created)}.000Z`,
-            projectDirectory:
-              client.directory === DEFAULT ? null : client.directory,
-            workingDirectory: client.directory,
-          });
-          client.selected = sessionId;
-          client.generation += 1;
-        }
-        return Response.json({
-          ok: true,
-          ...binding(),
-          promptId: `prompt-${prompt.clientRequestId}`,
-          clientRequestId: prompt.clientRequestId,
-          userMessageId: "message",
-          sessionId,
-          status: "accepted",
-          createdAt: "2026-10-24T00:00:00.000Z",
-        });
-      }
-      const archive = /^\/v1\/sessions\/([^/]+)\/archive$/.exec(path);
-      if (archive?.[1] && request.method === "PATCH") {
-        if (!client)
-          return Response.json(
-            { ok: false, error: { message: "client is not registered" } },
-            { status: 409 },
-          );
-        const session = sessions.get(archive[1]);
-        if (session) session.archived = true;
-        return Response.json({ ok: true });
-      }
-      const exported = /^\/v1\/sessions\/([^/]+)\/export$/.exec(path);
-      if (exported?.[1] && client)
-        return Response.json({
-          ok: true,
-          export: {
-            filename: `${exported[1]}.jsonl`,
-            mimeType: "application/x-ndjson",
-            content: "{}\n",
-            messageCount: 0,
-          },
-        });
-      throw new Error(`Unexpected request ${request.method} ${path}`);
-    }) as typeof fetch,
-  };
-  return daemon;
-}
-
-function session(
-  id: string,
-  projectDirectory: string | null,
-  workingDirectory: string,
-  updatedAt = "2026-10-01T00:00:00.000Z",
-): WorldSession {
-  return { id, title: id, updatedAt, projectDirectory, workingDirectory };
-}
+import { DEFAULT, fakeDaemon, session } from "./fake-daemon.test-support.js";
 
 const runtimes: OhbabyWebRuntime[] = [];
+
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    clear: (): void => {
+      values.clear();
+    },
+    getItem: (key): string | null => values.get(key) ?? null,
+    key: (index): string | null => [...values.keys()][index] ?? null,
+    get length(): number {
+      return values.size;
+    },
+    removeItem: (key): void => {
+      values.delete(key);
+    },
+    setItem: (key, value): void => {
+      values.set(key, value);
+    },
+  };
+}
 
 function start(
   daemon: ReturnType<typeof fakeDaemon>,
@@ -581,5 +293,135 @@ describe("session-centric runtime", () => {
     );
     expect(registration?.directory).toBe("/b");
     expect(registration?.body).not.toHaveProperty("startupIntent");
+  });
+
+  it("falls back to a draft when the remembered directory is unavailable", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    writeWebNavigationState({
+      lastSession: { sessionId: "gone", directory: "/deleted" },
+    });
+    const daemon = fakeDaemon();
+    daemon.unavailable.add("/deleted");
+    const runtime = start(daemon);
+
+    await runtime.ready;
+    await waitForSession(runtime, null);
+
+    expect(instanceDirectory(runtime)).toBe(DEFAULT);
+    expect(readWebNavigationState().lastSession).toBeNull();
+  });
+
+  it("opens a draft when the remembered session no longer exists, so the picker matches", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    writeWebNavigationState({
+      lastSession: { sessionId: "archived", directory: "/a" },
+    });
+    const daemon = fakeDaemon();
+    const runtime = start(daemon);
+    await runtime.ready;
+    await waitForSession(runtime, null);
+
+    expect(instanceDirectory(runtime)).toBe(DEFAULT);
+    expect(runtime.draft.getSnapshot().projectDirectory).toBeNull();
+  });
+
+  it("keeps a running turn bound when its session has moved, and says when the next turn applies", async () => {
+    const daemon = fakeDaemon([session("s1", "/a", "/a")]);
+    const runtime = start(daemon);
+    await runtime.ready;
+    daemon.running.add("s1");
+    await runtime.openSession("s1");
+    await waitForSession(runtime, "s1");
+    await vi.waitFor(() => {
+      expect(runtime.store.getSnapshot().sessionControl?.runId).toBe("run-1");
+    });
+    const live = runtime.client;
+    const moved = daemon.sessions.get("s1");
+    if (moved) moved.pendingWorkingDirectory = "/b";
+
+    await expect(
+      runtime.submitPrompt("queued", { sessionId: "s1", clientRequestId: "q" }),
+    ).rejects.toThrow("after the current turn");
+
+    expect(runtime.client).toBe(live);
+    expect(instanceDirectory(runtime)).toBe("/a");
+    expect(daemon.abortedStreams).not.toContain("/a");
+  });
+
+  it("does not follow a move after the user opened something else", async () => {
+    const daemon = fakeDaemon([
+      session("s1", "/a", "/a"),
+      session("s2", "/c", "/c"),
+    ]);
+    const runtime = start(daemon);
+    await runtime.ready;
+    await runtime.openSession("s1");
+    await waitForSession(runtime, "s1");
+    const moved = daemon.sessions.get("s1");
+    if (moved) moved.pendingWorkingDirectory = "/b";
+    let opened: Promise<void> | undefined;
+    daemon.movedTo = (): string => {
+      opened ??= runtime.openSession("s2");
+      return "/b";
+    };
+
+    await expect(
+      runtime.submitPrompt("x", { sessionId: "s1", clientRequestId: "m" }),
+    ).rejects.toMatchObject({ code: "SESSION_MOVED" });
+    await opened;
+    await waitForSession(runtime, "s2");
+    expect(instanceDirectory(runtime)).toBe("/c");
+  });
+
+  it("restores the picker to the connected project when opening a draft fails", async () => {
+    const daemon = fakeDaemon();
+    const runtime = start(daemon);
+    await runtime.ready;
+    await waitForSession(runtime, null);
+    daemon.unavailable.add("/b");
+
+    await expect(runtime.openDraft("/b")).rejects.toThrow("unavailable");
+
+    expect(instanceDirectory(runtime)).toBe(DEFAULT);
+    expect(runtime.draft.getSnapshot().projectDirectory).toBeNull();
+  });
+
+  it("does not re-read the whole list when switching instances", async () => {
+    const daemon = fakeDaemon([session("s1", "/a", "/a")]);
+    const runtime = start(daemon);
+    await runtime.ready;
+    await waitForSession(runtime, null);
+    const lists = (): number =>
+      daemon.requests.filter((request) => request.path === "/v1/sessions")
+        .length;
+    const before = lists();
+
+    await runtime.openDraft("/a");
+    await waitForSession(runtime, null);
+    await runtime.openSession("s1");
+    await waitForSession(runtime, "s1");
+
+    expect(lists()).toBe(before);
+  });
+
+  it("does not let a refresh read before an archive bring the row back", async () => {
+    const daemon = fakeDaemon([
+      session("keep", null, DEFAULT, "2026-10-02T00:00:00.000Z"),
+      session("drop", "/b", "/b"),
+    ]);
+    const runtime = start(daemon);
+    await runtime.ready;
+    let release: () => void = () => undefined;
+    daemon.holdNextList = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const refreshing = runtime.refreshCatalog();
+    await runtime.archiveSession("drop");
+    release();
+    await refreshing;
+
+    expect(
+      runtime.catalog.getSnapshot().sessions.map((value) => value.id),
+    ).toEqual(["keep"]);
   });
 });

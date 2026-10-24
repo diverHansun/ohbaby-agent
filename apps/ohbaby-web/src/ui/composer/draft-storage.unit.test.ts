@@ -20,7 +20,7 @@ describe("legacy composer key migration", () => {
 
   it("moves the only new-chat draft, including a Windows directory", () => {
     sessionStorage.setItem("ohbaby:composer:C:\\repo:new", '{"text":"draft"}');
-    migrateLegacyComposerKeys();
+    expect(migrateLegacyComposerKeys()).toBe("C:\\repo");
     expect(sessionStorage.getItem("ohbaby:composer:new")).toBe(
       '{"text":"draft"}',
     );

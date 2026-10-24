@@ -67,12 +67,14 @@ const MIGRATED_KEY = "ohbaby:composer-keys:v2";
  * exactly one directory holds it; the new-chat draft moves only when exactly
  * one directory had one. Edit leases move only for sessions, never into
  * `new`. Old keys stay, an existing new key is never overwritten, and the
- * move runs once per tab.
+ * move runs once per tab. Returns the directory a moved new-chat draft was
+ * written in, so the draft can reopen in that project.
  */
-export function migrateLegacyComposerKeys(): void {
+export function migrateLegacyComposerKeys(): string | null {
+  let draftDirectory: string | null = null;
   try {
     const storage = globalThis.sessionStorage;
-    if (storage.getItem(MIGRATED_KEY) !== null) return;
+    if (storage.getItem(MIGRATED_KEY) !== null) return null;
     storage.setItem(MIGRATED_KEY, "1");
     const keys: string[] = [];
     for (let index = 0; index < storage.length; index++) {
@@ -96,11 +98,19 @@ export function migrateLegacyComposerKeys(): void {
         if (prefix === LEASE_PREFIX && target === "new") continue;
         const destination = `${prefix}${target}`;
         if (storage.getItem(destination) !== null) continue;
-        const value = storage.getItem(sources[0] ?? "");
-        if (value !== null) storage.setItem(destination, value);
+        const source = sources[0] ?? "";
+        const value = storage.getItem(source);
+        if (value === null) continue;
+        storage.setItem(destination, value);
+        if (prefix === DRAFT_PREFIX && target === "new")
+          draftDirectory = source.slice(
+            DRAFT_PREFIX.length,
+            source.lastIndexOf(":"),
+          );
       }
     }
   } catch {
     // Unreadable storage: old drafts simply stay where they were.
   }
+  return draftDirectory;
 }

@@ -49,7 +49,11 @@ export function AppController(props: {
   const view = useMemo(() => selectViewModel(storeSnapshot), [storeSnapshot]);
   const client = runtime.client;
   const [notices, setNotices] = useState<readonly NoticeItem[]>([]);
-  const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
+  // Where the folder picker was opened: from the draft it also selects the
+  // new project; from the sidebar it only registers it (06 §1.1).
+  const [directoryPickerOpen, setDirectoryPickerOpen] = useState<
+    "draft" | "sidebar" | null
+  >(null);
   const [workspaceActionCount, setWorkspaceActionCount] = useState(0);
   const catalog = useSyncExternalStore(
     (listener) => runtime.catalog.subscribe(listener),
@@ -133,13 +137,14 @@ export function AppController(props: {
     async (directory: string): Promise<void> => {
       if (
         await runWorkspaceAction(async () => {
-          await runtime.openDraft(await runtime.openFolder(directory));
+          const opened = await runtime.openFolder(directory);
+          if (directoryPickerOpen === "draft") await runtime.openDraft(opened);
         })
       ) {
-        setDirectoryPickerOpen(false);
+        setDirectoryPickerOpen(null);
       }
     },
-    [runWorkspaceAction, runtime],
+    [directoryPickerOpen, runWorkspaceAction, runtime],
   );
 
   // Only the connected instance reports runs and approvals (06 §3.4).
@@ -164,7 +169,7 @@ export function AppController(props: {
         void runWorkspaceAction(() => runtime.openDraft(directory));
       }}
       onOpenFolder={() => {
-        setDirectoryPickerOpen(true);
+        setDirectoryPickerOpen("draft");
       }}
       onRetry={() => {
         void runtime.refreshCatalog();
@@ -202,7 +207,7 @@ export function AppController(props: {
             void runAction(() => runtime.hideWorkspace(directory));
           }}
           onOpenFolder={() => {
-            setDirectoryPickerOpen(true);
+            setDirectoryPickerOpen("sidebar");
           }}
           onRetry={() => {
             void runtime.refreshCatalog();
@@ -260,11 +265,11 @@ export function AppController(props: {
               );
             }}
           />
-          {directoryPickerOpen ? (
+          {directoryPickerOpen !== null ? (
             <DirectoryPickerDialog
               directoryPicker={runtime}
               onClose={() => {
-                setDirectoryPickerOpen(false);
+                setDirectoryPickerOpen(null);
               }}
               onSelect={selectDirectory}
             />

@@ -189,7 +189,9 @@ describe("AppController new-chat draft", () => {
 
     await openPicker(container);
     act(() => {
-      button(document.body, "Open folder…").click();
+      const menu = document.querySelector('[role="menu"]');
+      if (!menu) throw new Error("picker menu not open");
+      button(menu, "Open folder…").click();
     });
     await settle();
     act(() => {
@@ -205,6 +207,35 @@ describe("AppController new-chat draft", () => {
     expect(openFolder).toHaveBeenCalledWith("/");
     expect(openDraft).toHaveBeenCalledWith("/");
     expect(textarea(container).value).toBe("Question for the new folder");
+  });
+
+  it("only registers a folder opened from the sidebar; the current place stays", async () => {
+    const { runtime, mockClient, setState } = switchableRuntime();
+    setState(mockClient, folder("/workspace"));
+    const openFolder = vi.fn((directory: string) => Promise.resolve(directory));
+    const openDraft = vi.fn((): Promise<void> => Promise.resolve());
+    runtime.openFolder = openFolder;
+    runtime.openDraft = openDraft;
+    const container = mount(runtime);
+
+    act(() => {
+      const sidebar = container.querySelector(".ohb-sidebar");
+      if (!sidebar) throw new Error("sidebar missing");
+      button(sidebar, "Open folder…").click();
+    });
+    await settle();
+    act(() => {
+      button(container, "/").click();
+    });
+    await settle();
+    await act(async () => {
+      button(container, "Choose this folder").click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(openFolder).toHaveBeenCalledWith("/");
+    expect(openDraft).not.toHaveBeenCalled();
   });
 
   it("shows no project picker once a session is open", () => {

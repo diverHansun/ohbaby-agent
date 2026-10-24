@@ -19,7 +19,17 @@ export function mountOhbabyWebApp(runtime: OhbabyWebRuntime): void {
   }
   mountedRoot?.unmount();
   // Before the first render, so the composer reads drafts at their new keys.
-  migrateLegacyComposerKeys();
+  const legacyDraftProject = migrateLegacyComposerKeys();
+  if (
+    legacyDraftProject !== null &&
+    (runtime.store.getSnapshot().permissionSync.binding?.rootSessionId ??
+      null) === null &&
+    runtime.draft.getSnapshot().projectDirectory === null &&
+    runtime.catalog
+      .getSnapshot()
+      .projects.some((project) => project.directory === legacyDraftProject)
+  )
+    void runtime.openDraft(legacyDraftProject).catch(() => undefined);
   mountedRoot = createRoot(rootElement);
   mountedRoot.render(<OhbabyWebApp runtime={runtime} />);
 }

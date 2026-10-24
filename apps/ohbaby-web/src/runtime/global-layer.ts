@@ -16,6 +16,8 @@ import {
 
 /** One page of the global list; the server caps pages at 500. */
 const PAGE_SIZE = 100;
+/** Show more stops after this many pages; the next click continues. */
+const MAX_PAGES_PER_LOAD = 10;
 
 /**
  * Directory-independent state: projects, the global session list and the
@@ -28,6 +30,11 @@ export class GlobalLayer {
   private readonly sessions: GlobalSessionsClient;
   private queue: Promise<void> = Promise.resolve();
   private refreshQueued: Promise<void> | null = null;
+  /** Counts local row changes, so a refresh read before one does not undo it. */
+  private writes = 0;
+  /** Optimistic changes the server has not confirmed yet. */
+  private writesInFlight = 0;
+  private readonly scoped = new Map<string, Promise<DaemonHttpClient>>();
   /** False when the daemon serves a single workspace without scope routes. */
   controlPlaneAvailable = true;
 
@@ -91,7 +98,11 @@ export class GlobalLayer {
         return;
       this.catalog.setLoadingMore(true);
       try {
-        while (cursor !== undefined) {
+        for (
+          let pages = 0;
+          cursor !== undefined && pages < MAX_PAGES_PER_LOAD;
+          pages++
+        ) {
           const page = await this.sessions.listSessions({
             cursor,
             limit: PAGE_SIZE,
@@ -108,16 +119,23 @@ export class GlobalLayer {
     });
   }
 
-  /** Replaces one row with the server's latest version, e.g. after a move. */
-  upsertSession(session: UiGlobalSession): void {
-    this.catalog.upsertSession(session);
+  /** Call after changing rows locally; an in-flight refresh then reads again. */
+  noteWrite(): void {
+    this.writes += 1;
   }
 
-  moveSession(
-    sessionId: string,
-    projectDirectory: string | null,
-  ): Promise<UiGlobalSession> {
-    return this.sessions.moveSession(sessionId, projectDirectory);
+  /**
+   * Marks an optimistic change awaiting the server. Refreshes that finish
+   * meanwhile keep the local rows; call the returned function when the
+   * server answered, then refresh.
+   */
+  beginWrite(): () => void {
+    this.writesInFlight += 1;
+    this.writes += 1;
+    return () => {
+      this.writesInFlight -= 1;
+      this.writes += 1;
+    };
   }
 
   /** Registers a folder as a project and returns its canonical directory. */
@@ -138,27 +156,38 @@ export class GlobalLayer {
   }
 
   /**
-   * A short-lived client registered in another directory, for archive and
-   * export of sessions outside the connected instance. It opens no SSE, so
-   * the current conversation keeps its stream and approvals.
+   * A client registered once per other directory, for archive and export of
+   * sessions outside the connected instance. It opens no SSE, so the current
+   * conversation keeps its stream and approvals.
    */
-  async scopedHttp(directory: string): Promise<DaemonHttpClient> {
-    const http = createDaemonHttpClient(
-      {
-        ...this.config,
-        clientId: globalThis.crypto.randomUUID(),
-        directory,
-      },
-      this.fetchImpl,
-    );
-    await http.registerClient({
-      startupIntent: { startupSessionMode: { type: "fresh" } },
-    });
-    return http;
+  scopedHttp(directory: string): Promise<DaemonHttpClient> {
+    let pending = this.scoped.get(directory);
+    if (!pending) {
+      const http = createDaemonHttpClient(
+        {
+          ...this.config,
+          clientId: globalThis.crypto.randomUUID(),
+          directory,
+        },
+        this.fetchImpl,
+      );
+      pending = http
+        .registerClient({
+          startupIntent: { startupSessionMode: { type: "fresh" } },
+        })
+        .then(() => http);
+      // One registration per directory; a failed one is retried next time.
+      pending.catch(() => {
+        this.scoped.delete(directory);
+      });
+      this.scoped.set(directory, pending);
+    }
+    return pending;
   }
 
   private async reloadSessions(): Promise<void> {
     const before = this.catalog.getSnapshot();
+    const writes = this.writes;
     const target = Math.max(before.sessions.length, PAGE_SIZE);
     const loaded: UiGlobalSession[] = [];
     let cursor: string | undefined;
@@ -171,6 +200,13 @@ export class GlobalLayer {
         loaded.push(...page.sessions);
         cursor = page.nextCursor;
       } while (cursor !== undefined && loaded.length < target);
+      // The read may predate a local change: keep the rows. An unconfirmed
+      // change refreshes when it settles; a settled one reads again now.
+      if (this.writesInFlight > 0) return;
+      if (writes !== this.writes) {
+        void this.refresh();
+        return;
+      }
       this.catalog.replaceSessions(loaded, cursor);
     } catch (error) {
       this.catalog.failSessions(

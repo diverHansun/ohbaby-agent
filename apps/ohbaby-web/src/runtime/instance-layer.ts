@@ -29,6 +29,8 @@ export class InstanceLayer {
   private selectionGeneration = 0;
   private navigationState: WebNavigationState;
   private queue: Promise<void> = Promise.resolve();
+  /** The client whose connect finished; selecting in place needs it. */
+  private connectedClient: BrowserDaemonClient | undefined;
   private readonly listeners = new Set<() => void>();
 
   constructor(
@@ -57,6 +59,11 @@ export class InstanceLayer {
     return this.directoryValue;
   }
 
+  /** A remembered session is still waiting for its index to arrive. */
+  get restorePending(): boolean {
+    return this.pendingRestore !== null;
+  }
+
   get lastSession(): WebNavigationState["lastSession"] {
     return this.navigationState.lastSession;
   }
@@ -73,6 +80,11 @@ export class InstanceLayer {
       throw new Error("No workspace is selected");
     }
     return this.activeClient;
+  }
+
+  /** Bumped by every user choice of draft or session; late results compare it. */
+  get selection(): number {
+    return this.selectionGeneration;
   }
 
   /** An explicit user selection wins over any pending restore. */
@@ -118,7 +130,11 @@ export class InstanceLayer {
   openSession(sessionId: string, directory: string): Promise<void> {
     this.beginUserSelection();
     const generation = this.selectionGeneration;
-    if (this.activeClient && this.directoryValue === directory)
+    if (
+      this.activeClient &&
+      this.activeClient === this.connectedClient &&
+      this.directoryValue === directory
+    )
       return this.activeClient.selectSessionForRuntime(sessionId);
     return this.enqueue(async () => {
       if (generation !== this.selectionGeneration) return;
@@ -132,24 +148,47 @@ export class InstanceLayer {
   }
 
   /**
+   * Follows a session the server reports as moved. Not a user choice: it is
+   * dropped when the user picked something else since `generation`.
+   */
+  followMove(
+    sessionId: string,
+    directory: string,
+    generation: number,
+  ): Promise<void> {
+    return this.enqueue(async () => {
+      if (generation !== this.selectionGeneration) return;
+      const client = await this.connect(directory);
+      if (this.disposed || generation !== this.selectionGeneration) return;
+      await client.selectSessionForRuntime(sessionId);
+    });
+  }
+
+  /**
    * Startup: connect and reopen a remembered session if it still exists.
    * The server's own startup selection (a `resumeSessionId` hint) wins.
    */
-  restore(directory: string, sessionId: string | undefined): Promise<void> {
+  /** Resolves to false when the remembered session is known to be gone. */
+  restore(directory: string, sessionId: string | undefined): Promise<boolean> {
     const generation = this.selectionGeneration;
+    let found = true;
     return this.enqueue(async () => {
       this.restoring = true;
       try {
         const client = await this.connect(directory);
         if (this.disposed) return;
-        await this.restoreRememberedSession(client, sessionId, generation);
+        found = await this.restoreRememberedSession(
+          client,
+          sessionId,
+          generation,
+        );
       } finally {
         this.restoring = false;
         // Index recovery can finish while the connection was still settling.
         await this.retryPendingRestore();
         this.persistActiveSession();
       }
-    });
+    }).then(() => found);
   }
 
   // A method, not the field, so narrowing does not survive an await.
@@ -179,6 +218,7 @@ export class InstanceLayer {
         return client;
       }
       this.connectedOnce = true;
+      if (this.activeClient === client) this.connectedClient = client;
       return client;
     } catch (error) {
       await client.close();
@@ -206,9 +246,9 @@ export class InstanceLayer {
     client: BrowserDaemonClient,
     sessionId: string | undefined,
     generation: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!sessionId || (await client.getSelectedSessionId()) === sessionId) {
-      return;
+      return true;
     }
     // Navigation needs only lightweight metadata, never the history/model
     // refresh that runs independently from the live permission subscription.
@@ -225,14 +265,18 @@ export class InstanceLayer {
       this.disposed ||
       this.activeClient !== client ||
       this.selectionGeneration !== generation ||
+      this.pendingRestore !== null
+    )
+      return true;
+    if (
       !sessions.some(
         (session) =>
           session.id === sessionId && !session.parentId && !session.isSubagent,
       )
-    ) {
-      return;
-    }
+    )
+      return false;
     await client.selectSessionForRuntime(sessionId);
+    return true;
   }
 
   private async retryPendingRestore(): Promise<void> {
@@ -292,7 +336,7 @@ export class InstanceLayer {
     replaceNavigationHash({ directory, sessionId });
   }
 
-  private forgetLastSession(): void {
+  forgetLastSession(): void {
     this.navigationState = { lastSession: null };
     writeWebNavigationState(this.navigationState);
     replaceNavigationHash({ directory: null });

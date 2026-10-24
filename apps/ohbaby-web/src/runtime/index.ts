@@ -63,6 +63,8 @@ export interface OhbabyWebRuntime {
   openSession(sessionId: string, directory?: string): Promise<void>;
   /** Selects a session in the connected instance, e.g. after a first prompt. */
   selectSession(sessionId: string): Promise<void>;
+  /** Changes whenever the user opens a draft or a session; late results compare it. */
+  getSelectionGeneration(): number;
   dispose(): Promise<void>;
   executeSlashCommand(input: {
     readonly allowOverlay?: boolean;
@@ -146,6 +148,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     text: string,
     options?: SubmitPromptOptions,
   ): Promise<UiPromptReceipt> {
+    const generation = this.instance.selection;
     for (let resends = 0; ; resends++) {
       const client = this.instance.requireClient();
       try {
@@ -155,10 +158,21 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
         const sessionId = options?.sessionId;
         // Only an explicit rejection is resent: the server never admitted it.
         if (!target || !sessionId || resends >= MAX_MOVED_RESENDS) throw error;
-        await this.instance.openSession(sessionId, target);
+        // The running turn keeps its stream, approvals and Stop (02 §3.2).
+        if (this.turnInProgress(sessionId))
+          throw new Error(
+            `This chat moves to ${workspaceName(target)} after the current turn. Send again when it finishes.`,
+            { cause: error },
+          );
+        await this.instance.followMove(sessionId, target, generation);
+        if (this.instance.selection !== generation) throw error;
         await waitForSessionReady(this.store, sessionId);
       }
     }
+  }
+
+  getSelectionGeneration(): number {
+    return this.instance.selection;
   }
 
   async createSession(): Promise<void> {
@@ -167,11 +181,21 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   async openDraft(projectDirectory: string | null = null): Promise<void> {
+    const previous = this.draft.getSnapshot().projectDirectory;
     this.draft.setProject(projectDirectory);
     const directory = this.draftDirectory();
-    if (directory === null)
+    if (directory === null) {
+      this.draft.setProject(previous);
       throw new Error("The default workspace is not available yet");
-    await this.instance.openDraft(directory);
+    }
+    try {
+      await this.instance.openDraft(directory);
+    } catch (error) {
+      // The instance rolled back; the picker must name where a send would go.
+      if (this.draft.getSnapshot().projectDirectory === projectDirectory)
+        this.draft.setProject(this.projectOf(this.instance.directory));
+      throw error;
+    }
   }
 
   async openSession(sessionId: string, directory?: string): Promise<void> {
@@ -201,6 +225,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     // The only optimistic sidebar change (04 §2.3): the row leaves at once
     // and returns if the server refuses.
     this.catalog.removeSession(sessionId);
+    const settle = this.global.beginWrite();
     try {
       if (target === this.instance.directory && this.instance.client)
         await this.instance.client.archiveSession({ sessionId });
@@ -208,11 +233,13 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
         await (await this.global.scopedHttp(target)).archiveSession(sessionId);
     } catch (error) {
       if (row) this.catalog.upsertSession(row);
+      settle();
       throw error;
     }
+    settle();
     void this.global.refresh();
-    if (wasOpen && this.boundSessionId() === sessionId)
-      await this.openDraft(null).catch(() => undefined);
+    // The server may bind another session after archiving; the draft wins.
+    if (wasOpen) await this.openDraft(null).catch(() => undefined);
   }
 
   async exportSession(
@@ -352,9 +379,6 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     const trimmed = this.config.directory?.trim();
     const hinted = trimmed === "" ? undefined : trimmed;
     const intent = this.config.startupIntent;
-    const fresh =
-      intent?.resumeSessionId !== undefined ||
-      intent?.startupSessionMode?.type === "fresh";
     try {
       await this.global.refreshProjects();
     } catch (error) {
@@ -373,7 +397,31 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
         ],
         hinted,
       );
-      await this.startIn(hinted, intent?.resumeSessionId, fresh);
+    }
+    // Past this point the app always mounts: a directory that cannot be
+    // reached falls back to a draft, or to no instance with the reason shown.
+    try {
+      await this.startup(hinted, intent);
+    } catch (error) {
+      await this.recoverStartup(error);
+    }
+  }
+
+  private async startup(
+    hinted: string | undefined,
+    intent: OhbabyBootstrapConfig["startupIntent"],
+  ): Promise<void> {
+    const fresh = intent?.startupSessionMode?.type === "fresh";
+    const resumeId = intent?.resumeSessionId;
+    if (!this.global.controlPlaneAvailable && hinted) {
+      await this.restoreOrDraft(
+        hinted,
+        resumeId ??
+          (!fresh && this.instance.lastSession?.directory === hinted
+            ? this.instance.lastSession.sessionId
+            : undefined),
+        fresh || resumeId !== undefined,
+      );
       return;
     }
     await this.global.refreshSessions();
@@ -381,14 +429,15 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     const draftProject = this.draft.getSnapshot().projectDirectory;
     if (
       draftProject !== null &&
-      !projects.some((project) => project.directory === draftProject)
+      !projects.some(
+        (project) => project.directory === draftProject && project.available,
+      )
     )
       this.draft.setProject(null);
-    if (intent?.resumeSessionId !== undefined) {
-      const sessionId = intent.resumeSessionId;
+    if (resumeId !== undefined) {
       const directory =
-        this.requestDirectory(sessionId) ?? hinted ?? defaultWorkspace;
-      if (directory) await this.instance.restore(directory, sessionId);
+        this.requestDirectory(resumeId) ?? hinted ?? defaultWorkspace;
+      if (directory) await this.restoreOrDraft(directory, resumeId, true);
       return;
     }
     if (hinted) {
@@ -403,34 +452,96 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
         await this.global.refresh();
       }
       this.draft.setProject(directory === defaultWorkspace ? null : directory);
-      await this.startIn(directory, undefined, fresh);
+      const last = this.instance.lastSession;
+      await this.restoreOrDraft(
+        directory,
+        !fresh && last?.directory === directory ? last.sessionId : undefined,
+        fresh,
+      );
       return;
     }
     const last = this.instance.lastSession;
     if (last && !fresh) {
-      await this.instance.restore(
-        this.requestDirectory(last.sessionId) ?? last.directory,
-        last.sessionId,
-      );
-      return;
+      const directory = this.requestDirectory(last.sessionId) ?? last.directory;
+      if (!this.unavailable(directory)) {
+        await this.restoreOrDraft(directory, last.sessionId, false);
+        return;
+      }
+      this.instance.forgetLastSession();
     }
     const directory = this.draftDirectory();
     if (directory) await this.instance.openDraft(directory);
   }
 
-  /** Startup in one directory: its remembered session unless told to start fresh. */
-  private async startIn(
+  /**
+   * Connects at `directory` and reopens `sessionId`. When the session is
+   * gone, a draft takes over so the picker and the connection agree. With
+   * `keepEmpty`, an explicit fresh start stays connected there unbound.
+   */
+  private async restoreOrDraft(
     directory: string,
     sessionId: string | undefined,
-    fresh: boolean,
+    keepEmpty: boolean,
   ): Promise<void> {
-    const last = this.instance.lastSession;
-    const remembered =
-      sessionId ??
-      (!fresh && last?.directory === directory ? last.sessionId : undefined);
-    if (remembered !== undefined || fresh)
-      await this.instance.restore(directory, remembered);
-    else await this.instance.openDraft(directory);
+    if (sessionId === undefined && !keepEmpty) {
+      await this.instance.openDraft(directory);
+      return;
+    }
+    const found = await this.instance.restore(directory, sessionId);
+    if (found || this.instance.restorePending) return;
+    this.instance.forgetLastSession();
+    const draft = this.draftDirectory();
+    if (draft !== null && draft !== this.instance.directory)
+      await this.instance.openDraft(draft);
+    else this.draft.setProject(this.projectOf(this.instance.directory));
+  }
+
+  /** The remembered place failed: forget it and fall back to a draft. */
+  private async recoverStartup(error: unknown): Promise<void> {
+    this.instance.forgetLastSession();
+    const message = error instanceof Error ? error.message : String(error);
+    const failed = this.instance.directory;
+    if (this.projectOf(failed) === this.draft.getSnapshot().projectDirectory)
+      this.draft.setProject(null);
+    const directory = this.draftDirectory();
+    if (directory !== null && directory !== failed && !this.instance.client) {
+      try {
+        await this.instance.openDraft(directory);
+        return;
+      } catch {
+        // Fall through: no instance, the draft shows why.
+      }
+    }
+    this.store.setError(message);
+  }
+
+  /** A run or an approval is open for this session in the connected instance. */
+  private turnInProgress(sessionId: string): boolean {
+    const { sessionControl, permissionSync } = this.store.getSnapshot();
+    return (
+      (sessionControl?.sessionId === sessionId &&
+        sessionControl.runId !== null) ||
+      (permissionSync.binding?.rootSessionId === sessionId &&
+        permissionSync.requests.length > 0)
+    );
+  }
+
+  /** The project a directory belongs to in the draft picker; null for none. */
+  private projectOf(directory: string | null): string | null {
+    if (directory === null) return null;
+    return this.catalog
+      .getSnapshot()
+      .projects.some((project) => project.directory === directory)
+      ? directory
+      : null;
+  }
+
+  private unavailable(directory: string): boolean {
+    return this.catalog
+      .getSnapshot()
+      .projects.some(
+        (project) => project.directory === directory && !project.available,
+      );
   }
 
   /** Directory a new-chat draft runs in: its project, else the default workspace. */
@@ -486,6 +597,12 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
         }
       }),
     );
+    // A new instance's first "live" is not a reconnect.
+    this.cleanups.push(
+      this.instance.subscribe(() => {
+        wasLive = false;
+      }),
+    );
     if (typeof window === "undefined") return;
     const onVisible = (): void => {
       if (document.visibilityState === "visible") void this.global.refresh();
@@ -533,12 +650,14 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       if (
         row &&
         (row.title !== entry.title || row.updatedAt !== entry.updatedAt)
-      )
+      ) {
         this.catalog.upsertSession({
           ...row,
           title: entry.title,
           updatedAt: entry.updatedAt,
         });
+        this.global.noteWrite();
+      }
     }
     const bound = this.boundSessionId();
     if (
@@ -550,6 +669,10 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       void this.global.refresh();
     }
   }
+}
+
+function workspaceName(directory: string): string {
+  return directory.split(/[\\/]/u).filter(Boolean).at(-1) ?? directory;
 }
 
 export function createOhbabyWebRuntime(

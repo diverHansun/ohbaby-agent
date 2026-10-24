@@ -1007,7 +1007,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.selectSession).toHaveBeenCalledWith("session_new");
   });
 
-  it("does not open a late first-prompt session after the user moved to another draft", async () => {
+  it("does not open a late first-prompt session after the user opened another draft", async () => {
     const pendingReceipt =
       deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
     const fake = createFakeRuntime({
@@ -1026,10 +1026,9 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     await setTextareaValue(app.container, "slow first prompt");
     await pressTextareaKey(app.container, "Enter");
-    // New chat elsewhere connects a fresh client before the receipt arrives.
-    Object.defineProperty(fake.runtime, "client", {
-      configurable: true,
-      value: { ...fake.client },
+    // New chat in the same directory keeps the client; only the choice changes.
+    await act(async () => {
+      await fake.runtime.openDraft(null);
     });
     await act(async () => {
       pendingReceipt.resolve({
@@ -4714,9 +4713,12 @@ function createFakeRuntime(input: {
       searchJsonPath: "search.json",
     }),
   );
-  const openDraft = vi.fn<OhbabyWebRuntime["openDraft"]>(() =>
-    Promise.resolve(),
-  );
+  // Opening a draft or a session is a new user choice, as in the runtime.
+  let selection = 0;
+  const openDraft = vi.fn<OhbabyWebRuntime["openDraft"]>(() => {
+    selection += 1;
+    return Promise.resolve();
+  });
   const hideWorkspace = vi.fn<OhbabyWebRuntime["hideWorkspace"]>(() =>
     Promise.resolve(),
   );
@@ -4924,7 +4926,11 @@ function createFakeRuntime(input: {
       openDraft,
       openFolder,
       // Sidebar opens go through selectSession so tests observe one entry point.
-      openSession: (sessionId) => selectSession(sessionId),
+      openSession: (sessionId): Promise<void> => {
+        selection += 1;
+        return selectSession(sessionId);
+      },
+      getSelectionGeneration: () => selection,
       getWorkspaceSnapshot: () => workspaceSnapshot,
       ready: Promise.resolve(),
       refreshCatalog: () => Promise.resolve(),

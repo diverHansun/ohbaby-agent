@@ -147,6 +147,7 @@ export function usePromptSubmission(input: {
       const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
       const submittedSessionId = view.composer.activeSessionId;
       const submittingClient = runtime.client;
+      const submittingSelection = runtime.getSelectionGeneration();
       const placement =
         submittedSessionId !== undefined &&
         (hasActiveTurnForSession(view.snapshot, submittedSessionId) ||
@@ -201,6 +202,7 @@ export function usePromptSubmission(input: {
         if (
           submittedSessionId === undefined &&
           runtime.client === submittingClient &&
+          runtime.getSelectionGeneration() === submittingSelection &&
           runtime.store.getSnapshot().sessionSync.scope === null &&
           runtime.getWorkspaceSnapshot().selectedDirectory === selectedDirectory
         ) {
