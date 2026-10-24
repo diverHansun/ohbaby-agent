@@ -66,7 +66,26 @@ interface ErrorResponseBody {
   readonly error?: {
     readonly message?: string;
     readonly code?: string;
+    readonly targetDirectory?: string;
   };
+}
+
+/** Fields the transport keeps from a daemon error body. */
+export interface DaemonRequestError extends Error {
+  readonly code?: string;
+  readonly status: number;
+  /** Present on `SESSION_MOVED`: the directory the next request must use. */
+  readonly targetDirectory?: string;
+}
+
+export function isDaemonRequestError(
+  error: unknown,
+): error is DaemonRequestError {
+  return (
+    error instanceof Error &&
+    "status" in error &&
+    typeof (error as { status: unknown }).status === "number"
+  );
 }
 
 function requestUrl(baseUrl: string, path: string): string {
@@ -552,12 +571,13 @@ export class DaemonHttpClient {
     });
   }
 
-  private async request<T>(
+  /** Shared transport: auth, JSON, cancellation and error parsing. */
+  async request<T>(
     path: string,
     options: {
       readonly body?: unknown;
       readonly includeDirectory?: boolean;
-      readonly method?: "DELETE" | "GET" | "PATCH" | "POST";
+      readonly method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
       readonly signal?: AbortSignal;
     } = {},
   ): Promise<T> {
@@ -592,9 +612,13 @@ export class DaemonHttpClient {
         isErrorBody(value) && typeof value.error?.message === "string"
           ? value.error.message
           : `Daemon request failed with HTTP ${String(response.status)}`;
+      const body = isErrorBody(value) ? value.error : undefined;
       throw Object.assign(new Error(message), {
-        code: isErrorBody(value) ? value.error?.code : undefined,
+        code: body?.code,
         status: response.status,
+        ...(typeof body?.targetDirectory === "string"
+          ? { targetDirectory: body.targetDirectory }
+          : {}),
       });
     }
     return value as T;
