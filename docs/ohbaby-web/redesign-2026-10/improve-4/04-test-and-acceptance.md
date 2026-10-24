@@ -20,6 +20,7 @@
 | D12 | `pnpm typecheck`、`pnpm lint`、`pnpm build` 通过 | 命令 |
 | D13 | 共用 HTTP 支持 PUT 并保留 fields；校验路径映射到表单；其他窗口先新增模型后，本次 D20 仍选择本次 POST 响应中的新条目 | contract + integration |
 | D14 | MCP 无编辑路由、表单、增删、启停或重连入口；Refresh / Retry 只发配置与状态 GET，没有 PUT / DELETE / reconnect POST；agent 改文件后，即使无 SSE 通知也能主动读取，实际连接未更新时不显示假成功 | integration + 浏览器 |
+| D15 | 手机（< 640px）输入框次要项收进“更多”（README D29，从 improve-1 移入）；模型、思考与权限入口可达，发送/停止主位保留，无横向溢出；触控区 ≥ 44px，Esc / 取消后焦点返回，开关菜单和调整选项不丢草稿 | integration + 390px 浏览器走查 |
 
 ## 视觉走查
 

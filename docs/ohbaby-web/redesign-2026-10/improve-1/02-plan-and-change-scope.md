@@ -27,7 +27,7 @@
 
 5. **外壳与侧栏**：
    - `AppShell`：两栏、收起、窄屏抽屉；断开提示由 `AppController` 提供。
-   - `MainHeader`：由 `SessionStatus` 的顶栏部分改写，玻璃顶栏，标题、工作目录、上下文用量（70%、90% 变色）。字标移到侧栏顶部，`SessionStatus` 不再保留。
+   - `MainHeader`：由 `SessionStatus` 的顶栏部分改写，普通顶栏（D27），标题、工作目录、上下文用量（70%、90% 变色）。字标移到侧栏顶部，`SessionStatus` 不再保留。
    - 临时侧栏：把 `ProjectRail` 的项目切换并入侧栏，做成 Projects 分组：当前目录展开显示会话，其他项目折叠，点击切换目录（沿用现有逻辑）。按目标结构写 `ProjectGroup`、`SessionRow`，improve-2 只换数据来源。删除 `ProjectRail`。
    - `SessionActionsMenu` 换肤并改用通用 `Menu`，功能不变（improve-3 再改写）。
 
@@ -38,6 +38,8 @@
    - 空态（D23）：字标 + 选择条位置 + 输入框卡片居中。**没有打开任何目录时**，选择条位置显示 `Open folder…`，点发送也打开目录选择（本批没有默认工作区的草稿首发，improve-2 再改成直接发送）。目录选择前后的输入放在稳定的草稿容器中保留；没有 client 时隐藏依赖实例的模型、思考与权限控件，不能访问空 client 或伪装成离线。
 
 7. **少提示**（D16）：没配模型时不显示提示，点发送才打开 `/connect` 浮层；不显示后端说明性通知，在 Web 的通知入口（`store/store.ts` 接收 notice 的位置）按 key 过滤掉 `runtime:model-switch`。
+
+范围调整（2026-10-24，D29）：手机输入框次要选项收进“更多”交给 improve-4，与模型菜单一起实现；本批保留当前控制行。手机菜单的底部面板与触控尺寸仍属于本批。
 
 不做：全局会话列表、草稿首发、项目归属菜单、搜索、设置页（improve-2 至 4）；不改 `api/daemon` 和 `runtime.ts`。
 

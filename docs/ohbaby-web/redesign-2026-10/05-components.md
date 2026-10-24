@@ -57,13 +57,16 @@
 - **Anatomy**：可选的过滤框 / 条目（图标、文字、右侧快捷键或勾选）/ 分隔线 / 小标题。
 - **States**：见 04 §1。
 - **Visual semantics**：底色 `--bg`，描边 `--border`，菜单阴影；高亮 `--bg-hover`；危险项 `--danger`；勾选用 `--accent`。
-- **API**：
-  - `anchor: { element } | { x, y }`，`placement: "below" | "above"`（放不下时自动翻转）
-  - `items: MenuItem[]`，条目类型为 `item`、`separator`、`header`
-  - `item` 字段：`label`、`icon?`、`shortcut?`、`checked?`、`disabled?`、`danger?`、`onSelect()`
-  - `filterable?: boolean`（条目超过 8 个时由调用方打开）
-  - `onClose()`、`returnFocusTo`（右键坐标锚点也必须提供可聚焦的原会话行）
-- **Accessibility**：`role="menu"` / `menuitem`；↑↓、Home、End、Enter、Esc；关闭后焦点回到触发元素。二级列表由调用方处理 Esc 返回，不能先触发整个菜单关闭。
+- **API**（improve-1 实现）：
+  - `anchor: MenuAnchor`（`x`、`y`、`aboveY`、`alignRight`；`anchorBelow(element)` 从按钮生成），放不下时自动向上或向左翻转
+  - 条目是普通子元素：带 `role="menuitem"` 的按钮、`role="separator"` 分隔线。没有采用 `items: MenuItem[]` 数据形式：现有调用方只有两三个固定条目，直接写子元素更简单；需要数据驱动时再在调用方组装
+  - `label`（无障碍名称）、`title?`（手机底部面板的标题，默认用 `label`）
+  - `level?`：调用方原地切换二级列表时换一个值，焦点回到第一项；`onEscape?` 让 Esc 先返回上一级
+  - `focusSelector?`：打开或换层时要聚焦的条目
+  - `filterable?: boolean`（条目超过 8 个时由调用方打开）：顶部出现过滤框，按条目文字不区分大小写过滤，过滤时隐藏分隔线，没有结果时显示 `No matches`
+  - `onClose(restoreFocus)`：Esc、Tab、Cancel 传 `true`，由调用方把焦点还给触发按钮；点外部传 `false`
+- **手机（< 640px）**：自动变成底部弹出面板，带遮罩、标题行和 Cancel；条目行高 48、字号 15。过滤框不自动获得焦点，避免键盘盖住面板。
+- **Accessibility**：`role="menu"` / `menuitem`（手机面板外层是 `role="dialog"`，里面是 `menu`）；↑↓、Home、End、Enter、Esc；有过滤文字时第一次 Esc 先清空；关闭后焦点回到触发元素。二级列表由调用方处理 Esc 返回，不能先触发整个菜单关闭。
 
 ### SessionRow
 
@@ -106,7 +109,7 @@
 - **Purpose**：输入卡片内底部的一行控制按钮（D22）。
 - **Anatomy**：顺序以 D22 和 03 §4.3 为准：左边权限模式；右边模型、思考强度、圆形发送。附件入口的范围见 README 的实施约定。
 - **API**：接收现有 `ReasoningControl`、`PermissionPolicyControl` 需要的数据与回调，加上 `running`、`onStop()`；模型按钮第一批沿用现有 `modelLabel`、`onOpenModel()`，第二批换成 `ModelMenu`。
-- **约束**：选择控件为无边框文字按钮；发送为深色圆形按钮，Stop 带描边。沿用现有提交规则：运行中且草稿为空时主位是 Stop，有草稿时仍能发送插话或排队；不增加第二套 Send/Stop 状态机。窄屏时次要项收进“更多”菜单。
+- **约束**：选择控件为无边框文字按钮；发送为深色圆形按钮，Stop 带描边。沿用现有提交规则：运行中且草稿为空时主位是 Stop，有草稿时仍能发送插话或排队；不增加第二套 Send/Stop 状态机。手机（< 640px）次要项收进“更多”菜单；按 D29 放在 improve-4，与模型菜单一起实现。
 
 ### ApprovalPanel
 

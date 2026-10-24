@@ -22,7 +22,7 @@
 3. **Models**：`ModelsSection`（按 provider 分组、行菜单、provider 组菜单、删除确认 D17）、`ModelEditor`（常用字段加 More options，只提交改过的字段，`SecretField`）、D20 自动设为默认、从草稿跳来时回草稿。
 4. **MCP**：`McpSection`（全局配置列表合并实例状态）、`McpDetails`（原地展开只读配置、失败原因和工具列表）。只接两个 GET；Refresh 重新读取，不触发重连。没有表单、启停开关、添加或删除入口，配置修改继续交给 ohbaby（D25）。
 5. **Skills、Web search、About**：各一个小组件。
-6. **输入框模型菜单**：`ui/composer/ModelMenu.tsx`，读全局模型列表，选中调用 `POST /v1/settings/models/active`；`ReasoningControl` 在模型变化后刷新。
+6. **输入框模型菜单与手机控制行**（D29）：`ui/composer/ModelMenu.tsx`，读全局模型列表，选中调用 `POST /v1/settings/models/active`；`ReasoningControl` 在模型变化后刷新。同步完成从 improve-1 移入的手机“更多”：< 640px 时收纳次要选项，仍能访问模型、思考与权限控制，发送/停止保留主位；复用共享 `Menu`，不新增一套控制状态，保持草稿与焦点。
 7. **删除旧入口**（D18）：删除 `ConnectOverlay` 及 `StructuredCommandOverlay` 中的挂载；SDK `web-passthrough.ts` 不再向 Web 暴露 `connectModel`、`connectSearch` 两个 action（TUI 的命令路径保持不变）；`UiBackendClient.connectModel` 保留给 TUI。没配模型时点发送改为打开设置 › Models。
 8. **刷新**：写接口返回值替换缓存；`settings.changed`、进入分区、窗口重新激活时重新读取（06 §3.7）。
 
