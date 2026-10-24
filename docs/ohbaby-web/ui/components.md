@@ -2,30 +2,32 @@
 
 > `src/ui/` 各组件的呈现规格。对齐 [`../architecture.md`](../architecture.md) §3 的组件清单；状态可视化见 [`states.md`](./states.md)。[`design/session-screen.dc.html`](./design/session-screen.dc.html) 是历史视觉参考，header、composer 与 sidebar 以本规格和 improve-2 决策为准。
 
+> 2026-10 改版已完成 improve-1 至 improve-3。当前外壳、视觉与交互以 [redesign-2026-10](../redesign-2026-10/README.md) 为准，下文早期的项目轨、顶栏和颜色描述保留为历史背景。
+
 ---
 
-当前实现入口为 `App.tsx → session/SessionScreen.tsx`。App 负责挂载及空工作区切换；SessionScreen 负责 store 订阅、提交投影、Stop/恢复和跨功能组合。组件职责与产品呈现规格分开：下面的外观/交互不因文件迁移改变。
+当前入口为 `App.tsx → shell/AppController.tsx`。AppController 负责业务接线，AppShell 负责两栏外壳和侧栏开合；SessionScreen 负责 store 订阅、提交投影、Stop/恢复和跨功能组合。
 
 | 功能 | 当前实现落点 | 状态边界 |
 | --- | --- | --- |
-| 项目轨 / 目录选择 | `workspace/ProjectRail.tsx`、`workspace/directory-picker/DirectoryPickerDialog.tsx` | workspace 数据与导航由 runtime 提供 |
-| 会话侧栏 / 状态 | `session/SessionSidebar.tsx`、`session/SessionStatus.tsx` | 接收会话/状态数据及动作 |
+| 项目目录选择 | `composer/ProjectPicker.tsx`、`workspace/directory-picker/DirectoryPickerDialog.tsx` | workspace 数据与导航由 runtime 提供 |
+| 全局会话侧栏 / 菜单 | `sidebar/Sidebar.tsx`、`SessionMenu.tsx`、`ProjectMenu.tsx` | 接收全局目录、运行状态及动作，菜单复用 `shared/Menu` |
+| 侧栏全局搜索 | `search/SidebarSearch.tsx`、`useSessionSearch.ts` | hook 独占查询并发与分页；AppController 仅持有打开状态、聚焦请求 |
 | 消息 / 工具 / 计时 / TodoDock | `conversation/ConversationStream.tsx`、`MessageRow.tsx`、`tool-card.tsx`、`ExecutionProgress.tsx`、`TodoDock.tsx` | 消息事实只读；根消息局部状态留在 conversation，子会话阅读缓存由根会话持有 |
 | 输入 / 队列编辑 / reasoning | `composer/Composer.tsx`、`draft-storage.ts`、`ReasoningControl.tsx` | 唯一草稿、租约生命周期和键盘链 |
 | slash / 结果 / 表单 | `commands/slashCommands.ts`、`SlashPalette.tsx`、`CommandResultModal.tsx`、`StructuredCommandOverlay.tsx` | 规则/展示/表单不复制 Composer draft；结果状态使用 commands 自己的窄类型 |
 | 审批 / 策略确认 | `permissions/PermissionModal.tsx`、`PermissionPolicyControl.tsx` | 独立审批同步与局部确认/焦点 |
 | 跨功能基础展示 | `shared/MarkdownBlock.tsx`、`ContextUsage.tsx` | 只读展示，不持有业务状态 |
 
-Composer 通过 `topContent` 接收 SessionScreen 装配的 TodoDock，通过 `permissionControl` 接收权限策略控件。TodoDock 仍位于 Composer section 顶部、消息滚动容器之外，保留原身份 key、展开状态与 DOM 顺序。组件接收具体 model/数据/能力，不接整个 runtime 或 ViewModel。样式由 `ui/styles.css` 按原顺序导入 14 个连续块，功能规则随所属目录放置。
+Composer 通过 `topContent` 接收 SessionScreen 装配的 TodoDock，通过 `permissionControl` 接收权限策略控件。TodoDock 仍位于 Composer section 顶部、消息滚动容器之外，保留原身份 key、展开状态与 DOM 顺序。组件接收具体 model/数据/能力，不接整个 runtime 或 ViewModel。样式由 `ui/styles.css` 按固定顺序导入，功能规则随所属目录放置。
 
 结构规格见 [Web improve-3](../improve-3/02-change-spec.md)，阶段行为与验收归[中央 improve-2.1](../../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)。
 
-## 0. ProjectRail / SessionSidebar（项目轨与会话侧栏）
+## 0. Sidebar / SessionMenu / SidebarSearch
 
-会话行采用 [会话侧栏设计](../../problem-lists/2026-09-30-web-session-sidebar/improve-1/frontend/03-ui-layout-and-style.md)：Sessions、无圆点/底部计数、标题左侧实心 pin、hover 的 … 与右键共用 Pin/Unpin/Archive 菜单；浏览器置顶按当前项目隔离。行为见该议题前端 04。
+侧栏按 Pinned、Projects、No project 分组，置顶按服务端地址保存。会话行尾的 … 与右键打开同一个菜单，一级为 Pin / Unpin、Move to project…、Export…、Archive。项目与格式在原位置切换二级列表；项目多于 8 个时显示过滤框。移动中行内显示 spinner，成功后更新归属，失败保留原行并显示错误通知。
 
-- 会话侧栏以宽度动画展开和收起，内容在动画中不重排。
-- `New session` 使用 `SquarePen` 方笔图标和英文文案；默认透明、无描边，hover/focus 时整块显示浅灰底。按钮左右完整留白，不得贴住或裁到侧栏右边缘。
+Search 在侧栏内展开，非空查询结果替换会话树。250ms 防抖、取消旧请求；标题命中在前，正文片段为纯文本并限制两行。Cmd/Ctrl+K 打开或重新聚焦搜索；Escape 关闭当前层，输入法合成期间不拦截选字键。手机菜单复用贴底面板，菜单项高 48px。细节及验证见 [improve-3 验收](../redesign-2026-10/improve-3/05-implementation-acceptance.md)。
 
 ---
 
