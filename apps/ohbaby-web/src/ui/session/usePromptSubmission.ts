@@ -146,6 +146,7 @@ export function usePromptSubmission(input: {
       }
       const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
       const submittedSessionId = view.composer.activeSessionId;
+      const submittingClient = runtime.client;
       const placement =
         submittedSessionId !== undefined &&
         (hasActiveTurnForSession(view.snapshot, submittedSessionId) ||
@@ -195,8 +196,11 @@ export function usePromptSubmission(input: {
               : attempt,
           ),
         );
+        // A first prompt opens its new session, unless the user moved to
+        // another draft or session meanwhile: that choice wins (B15).
         if (
           submittedSessionId === undefined &&
+          runtime.client === submittingClient &&
           runtime.store.getSnapshot().sessionSync.scope === null &&
           runtime.getWorkspaceSnapshot().selectedDirectory === selectedDirectory
         ) {

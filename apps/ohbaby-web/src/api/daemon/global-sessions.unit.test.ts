@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GlobalSessionsClient } from "./global-sessions.js";
 import { DaemonHttpClient, isDaemonRequestError } from "./http.js";
-import { SettingsClient } from "./settings-client.js";
 
 const session = {
   id: "s1",
@@ -84,22 +83,6 @@ describe("global session transport", () => {
     );
     expect(fake.requests[0]?.init?.method).toBe("POST");
     expect(fake.requests[0]?.init?.body).toBe('{"projectDirectory":null}');
-  });
-
-  it("reads the global model settings", async () => {
-    const fake = recorder(() =>
-      Response.json({
-        ok: true,
-        active: null,
-        params: { maxTokens: 1000 },
-        models: [],
-      }),
-    );
-    const models = await new SettingsClient(http(fake.fetch)).getModels();
-    expect(models.active).toBeNull();
-    expect(fake.requests[0]?.url).toBe(
-      "http://localhost:4096/v1/settings/models",
-    );
   });
 });
 

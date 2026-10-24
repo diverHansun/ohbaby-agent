@@ -7,7 +7,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
-import { FolderlessDraft } from "../session/FolderlessDraft.js";
+import { ProjectPicker } from "../composer/ProjectPicker.js";
+import { DraftFallback } from "../session/DraftFallback.js";
 import { selectViewModel } from "../session/selectors.js";
 import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
@@ -46,9 +47,16 @@ export function AppController(props: {
   const [notices, setNotices] = useState<readonly NoticeItem[]>([]);
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
   const [workspaceActionCount, setWorkspaceActionCount] = useState(0);
-  // Keep the folderless composer mounted until connecting and restoring the
-  // selected session finish. A client can exist before its draft scope is ready.
-  const [pendingDraft, setPendingDraft] = useState("");
+  const catalog = useSyncExternalStore(
+    (listener) => runtime.catalog.subscribe(listener),
+    () => runtime.catalog.getSnapshot(),
+    () => runtime.catalog.getSnapshot(),
+  );
+  const draft = useSyncExternalStore(
+    (listener) => runtime.draft.subscribe(listener),
+    () => runtime.draft.getSnapshot(),
+    () => runtime.draft.getSnapshot(),
+  );
 
   const pushError = useCallback((error: unknown): void => {
     setNotices((current) => [
@@ -124,6 +132,24 @@ export function AppController(props: {
     [runWorkspaceAction, runtime],
   );
 
+  const draftPicker = (
+    <ProjectPicker
+      value={draft.projectDirectory}
+      projects={catalog.projects}
+      disabled={workspaceActionCount > 0}
+      loadFailed={catalog.projectsStatus === "error"}
+      onChange={(directory) => {
+        void runWorkspaceAction(() => runtime.openDraft(directory));
+      }}
+      onOpenFolder={() => {
+        setDirectoryPickerOpen(true);
+      }}
+      onRetry={() => {
+        void runtime.refreshCatalog();
+      }}
+    />
+  );
+
   return (
     <AppShell
       renderSidebar={(close, dismissDrawer) => (
@@ -178,22 +204,20 @@ export function AppController(props: {
         />
       )}
       main={
-        client && (pendingDraft.length === 0 || workspaceActionCount === 0) ? (
+        client ? (
           <SessionScreen
             client={client}
             runtime={runtime}
-            initialDraft={pendingDraft}
-            onInitialDraftConsumed={() => {
-              setPendingDraft("");
-            }}
+            draftPicker={draftPicker}
           />
         ) : (
-          <FolderlessDraft
-            text={pendingDraft}
-            onChange={setPendingDraft}
-            onOpenFolder={() => {
-              setDirectoryPickerOpen(true);
-            }}
+          <DraftFallback
+            picker={draftPicker}
+            reason={
+              workspaceActionCount > 0
+                ? "Connecting…"
+                : "The default workspace is not available. Choose a project to start."
+            }
           />
         )
       }

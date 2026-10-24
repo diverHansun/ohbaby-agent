@@ -30,7 +30,8 @@ export function useSessionLoad(runtime: OhbabyWebRuntime): {
     storeSnapshot,
     view,
     workspace,
-    draftScopeKey: `${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`,
+    // Directory-free: changing the draft's project keeps its text (06 §3.5).
+    draftScopeKey: view.composer.activeSessionId ?? "new",
     sessionSyncBanner,
     promptRecoveryReminders: storeSnapshot.unknownPromptRequests.filter(
       (request) => request.status === "epoch-changed" || !request.submitting,

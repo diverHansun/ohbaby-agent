@@ -55,3 +55,52 @@ export function removeSessionValue(key: string): void {
     // Ignore storage denial.
   }
 }
+
+const DRAFT_PREFIX = "ohbaby:composer:";
+const LEASE_PREFIX = "ohbaby:composer-lease:";
+/** Set once per tab so a sent draft is not resurrected from its old key. */
+const MIGRATED_KEY = "ohbaby:composer-keys:v2";
+
+/**
+ * Moves drafts saved under the pre-redesign `<directory>:<session|new>` scope
+ * to the directory-free `<session|new>` scope. A session's draft moves when
+ * exactly one directory holds it; the new-chat draft moves only when exactly
+ * one directory had one. Edit leases move only for sessions, never into
+ * `new`. Old keys stay, an existing new key is never overwritten, and the
+ * move runs once per tab.
+ */
+export function migrateLegacyComposerKeys(): void {
+  try {
+    const storage = globalThis.sessionStorage;
+    if (storage.getItem(MIGRATED_KEY) !== null) return;
+    storage.setItem(MIGRATED_KEY, "1");
+    const keys: string[] = [];
+    for (let index = 0; index < storage.length; index++) {
+      const key = storage.key(index);
+      if (key) keys.push(key);
+    }
+    for (const prefix of [DRAFT_PREFIX, LEASE_PREFIX]) {
+      const byScope = new Map<string, string[]>();
+      for (const key of keys) {
+        if (!key.startsWith(prefix)) continue;
+        const scope = key.slice(prefix.length);
+        // The directory may itself contain ":" (Windows), so split at the last one.
+        const split = scope.lastIndexOf(":");
+        if (split <= 0) continue;
+        const target = scope.slice(split + 1);
+        if (target.length === 0) continue;
+        byScope.set(target, [...(byScope.get(target) ?? []), key]);
+      }
+      for (const [target, sources] of byScope) {
+        if (sources.length !== 1) continue;
+        if (prefix === LEASE_PREFIX && target === "new") continue;
+        const destination = `${prefix}${target}`;
+        if (storage.getItem(destination) !== null) continue;
+        const value = storage.getItem(sources[0] ?? "");
+        if (value !== null) storage.setItem(destination, value);
+      }
+    }
+  } catch {
+    // Unreadable storage: old drafts simply stay where they were.
+  }
+}

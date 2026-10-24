@@ -1,6 +1,6 @@
 import { getUnconsumedSteers, type UiBackendClient } from "ohbaby-sdk";
-import type { ReactElement } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { CommandNoticeList } from "../commands/CommandResultModal.js";
 import { StructuredCommandOverlay } from "../commands/StructuredCommandOverlay.js";
@@ -29,14 +29,12 @@ import { useStopRequest } from "./use-stop-request.js";
 export function SessionScreen({
   client,
   runtime,
-  initialDraft,
-  onInitialDraftConsumed,
+  draftPicker,
 }: {
   readonly runtime: OhbabyWebRuntime;
   readonly client: UiBackendClient;
-  /** Text typed before a folder was open; it is placed into the composer once. */
-  readonly initialDraft?: string;
-  readonly onInitialDraftConsumed?: () => void;
+  /** Project picker for a new-chat draft; hidden once a session is bound. */
+  readonly draftPicker?: ReactNode;
 }): ReactElement {
   const {
     storeSnapshot,
@@ -136,17 +134,6 @@ export function SessionScreen({
   const { viewingSubagent, approvalDialogVisible, childExpanded } =
     interactions;
 
-  // The shell waits for workspace restoration before mounting this handoff.
-  // Prefill once, after the composer has restored that final draft scope.
-  const initialDraftRef = useRef(initialDraft);
-  useEffect(() => {
-    const text = initialDraftRef.current;
-    if (!text) return;
-    initialDraftRef.current = undefined;
-    prefillComposer(text);
-    onInitialDraftConsumed?.();
-  }, [prefillComposer, onInitialDraftConsumed]);
-
   const showMain =
     !view.isEmpty ||
     view.commandNotices.length > 0 ||
@@ -223,7 +210,13 @@ export function SessionScreen({
           onInsertSkill={prefillComposer}
         />
       ) : (
-        <DraftHero directory={workspace.selectedDirectory} />
+        <DraftHero
+          picker={
+            view.composer.activeSessionId === undefined
+              ? draftPicker
+              : undefined
+          }
+        />
       )}
       <div
         className="ohb-root-composer"

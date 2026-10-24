@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import type { OhbabyWebRuntime } from "../runtime/index.js";
+import { migrateLegacyComposerKeys } from "./composer/draft-storage.js";
 import { AppController } from "./shell/AppController.js";
 import { Wordmark } from "./shared/Wordmark.js";
 
@@ -17,6 +18,8 @@ export function mountOhbabyWebApp(runtime: OhbabyWebRuntime): void {
     throw new Error("Missing #root element");
   }
   mountedRoot?.unmount();
+  // Before the first render, so the composer reads drafts at their new keys.
+  migrateLegacyComposerKeys();
   mountedRoot = createRoot(rootElement);
   mountedRoot.render(<OhbabyWebApp runtime={runtime} />);
 }

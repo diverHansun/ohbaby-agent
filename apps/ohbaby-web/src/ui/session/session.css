@@ -62,9 +62,34 @@
   white-space: nowrap;
 }
 
-button.ohb-project-slot:hover {
+button.ohb-project-slot:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* Project names are paths; a monospace face keeps them recognizable (03 §4.2). */
+.ohb-project-picker > span {
+  font-family: var(--font-mono);
+}
+
+.ohb-project-picker:disabled {
+  opacity: 0.6;
+}
+
+.ohb-project-picker-menu [aria-current="true"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ohb-project-picker-error {
+  color: var(--danger-ink);
+}
+
+.ohb-draft-fallback-reason {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  margin: 0 0 8px;
+  text-align: center;
 }
 
 /* A slow first read occupies conversation whitespace without moving the composer. */

@@ -942,7 +942,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
   it("restores a session draft without waiting for snapshot events", () => {
     globalThis.sessionStorage.setItem(
-      "ohbaby:composer:/repo-a:session_1",
+      "ohbaby:composer:session_1",
       JSON.stringify({
         clientRequestId: "request_pending",
         pendingText: "restored draft",
@@ -1005,6 +1005,46 @@ describe("OhbabyWebApp slash command interactions", () => {
     await waitFor(() => fake.selectSession.mock.calls.length === 1);
 
     expect(fake.selectSession).toHaveBeenCalledWith("session_new");
+  });
+
+  it("does not open a late first-prompt session after the user moved to another draft", async () => {
+    const pendingReceipt =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    let requestId = "";
+    fake.submitPromptAccepted.mockImplementation((_text, options) => {
+      requestId = options?.clientRequestId ?? "";
+      return pendingReceipt.promise;
+    });
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "slow first prompt");
+    await pressTextareaKey(app.container, "Enter");
+    // New chat elsewhere connects a fresh client before the receipt arrives.
+    Object.defineProperty(fake.runtime, "client", {
+      configurable: true,
+      value: { ...fake.client },
+    });
+    await act(async () => {
+      pendingReceipt.resolve({
+        clientRequestId: requestId,
+        createdAt: timestamp,
+        promptId: "prompt_late",
+        sessionId: "session_late",
+        status: "queued",
+        userMessageId: "message_late",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    expect(fake.selectSession).not.toHaveBeenCalled();
   });
 
   it("commits the first prompt and startup feedback before admission resolves", async () => {
@@ -2082,7 +2122,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       userMessageId: "message_queued",
     };
     globalThis.sessionStorage.setItem(
-      "ohbaby:composer:/repo-a:session_1",
+      "ohbaby:composer:session_1",
       JSON.stringify({
         clientRequestId: "request_pending",
         pendingText: "pending draft",
@@ -2282,11 +2322,11 @@ describe("OhbabyWebApp slash command interactions", () => {
 
   it("preserves expired editing separately from the original draft and blocks implicit submission", async () => {
     globalThis.sessionStorage.setItem(
-      "ohbaby:composer:/repo-a:session_1",
+      "ohbaby:composer:session_1",
       JSON.stringify({ text: "older draft" }),
     );
     globalThis.sessionStorage.setItem(
-      "ohbaby:composer-lease:/repo-a:session_1",
+      "ohbaby:composer-lease:session_1",
       JSON.stringify({
         editLeaseId: "expired_lease",
         editText: "preserve edited buffer",
@@ -2308,12 +2348,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     expect(textareaValue(app.container)).toBe("preserve edited buffer");
     expect(
-      globalThis.sessionStorage.getItem("ohbaby:composer:/repo-a:session_1"),
+      globalThis.sessionStorage.getItem("ohbaby:composer:session_1"),
     ).toContain("older draft");
     expect(
-      globalThis.sessionStorage.getItem(
-        "ohbaby:composer-lease:/repo-a:session_1",
-      ),
+      globalThis.sessionStorage.getItem("ohbaby:composer-lease:session_1"),
     ).toContain("preserve edited buffer");
     await pressTextareaKey(app.container, "Enter");
     expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
@@ -6362,8 +6400,7 @@ describe("feature boundary late-result isolation", () => {
     expect(textareaValue(app.container)).toBe("");
     expect(
       JSON.parse(
-        sessionStorage.getItem("ohbaby:composer:/repo-a:session_1") ??
-          '{"text":""}',
+        sessionStorage.getItem("ohbaby:composer:session_1") ?? '{"text":""}',
       ),
     ).toMatchObject({ text: "" });
   });
@@ -6440,7 +6477,7 @@ describe("feature boundary late-result isolation", () => {
   it("does not let old lease recovery failure clear the new scope's queued editor", async () => {
     for (const id of ["session_1", "session_2"]) {
       sessionStorage.setItem(
-        `ohbaby:composer-lease:/repo-a:${id}`,
+        `ohbaby:composer-lease:${id}`,
         JSON.stringify({
           editLeaseId: `lease_${id}`,
           editText: `editing ${id}`,
@@ -6506,7 +6543,7 @@ function storeEditLease(
   text: string,
 ): void {
   sessionStorage.setItem(
-    `ohbaby:composer-lease:/repo-a:${sessionId}`,
+    `ohbaby:composer-lease:${sessionId}`,
     JSON.stringify({
       editLeaseId,
       editText: text,
@@ -6544,12 +6581,12 @@ describe("queued edit identity isolation", () => {
       old.reject(new Error("old A failure"));
       await old.promise.catch(() => undefined);
     });
-    expect(
-      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
-    ).toContain("lease_new_A");
-    expect(
-      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
-    ).toContain("new A edit");
+    expect(sessionStorage.getItem("ohbaby:composer-lease:session_1")).toContain(
+      "lease_new_A",
+    );
+    expect(sessionStorage.getItem("ohbaby:composer-lease:session_1")).toContain(
+      "new A edit",
+    );
   });
   it.each(["edit", "release"])(
     "recovery success preserves a later %s of the same lease",
@@ -6574,9 +6611,7 @@ describe("queued edit identity isolation", () => {
         });
         await pending.promise;
       });
-      const stored = sessionStorage.getItem(
-        "ohbaby:composer-lease:/repo-a:session_1",
-      );
+      const stored = sessionStorage.getItem("ohbaby:composer-lease:session_1");
       if (action === "edit") expect(stored).toContain("new edit");
       else expect(stored).toBeNull();
     },
@@ -6631,9 +6666,9 @@ describe("queued edit identity isolation", () => {
     });
     expect(textareaValue(app.container)).toBe("queued two");
     expect(app.container.querySelector(".ohb-queued-edit-hint")).not.toBeNull();
-    expect(
-      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
-    ).toContain("lease_q2");
+    expect(sessionStorage.getItem("ohbaby:composer-lease:session_1")).toContain(
+      "lease_q2",
+    );
   });
 });
 

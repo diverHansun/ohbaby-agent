@@ -122,140 +122,94 @@ async function settle(): Promise<void> {
   });
 }
 
-async function chooseFolder(container: HTMLElement): Promise<void> {
+async function openPicker(container: HTMLElement): Promise<void> {
+  const trigger = container.querySelector<HTMLButtonElement>(
+    ".ohb-project-picker",
+  );
+  if (!trigger) throw new Error("project picker not found");
   act(() => {
-    button(container, "Open folder…").click();
+    trigger.click();
   });
   await settle();
-  act(() => {
-    button(container, "/").click();
-  });
-  await settle();
-  await act(async () => {
-    button(container, "Choose this folder").click();
-    await Promise.resolve();
-  });
 }
 
-describe("AppController without an open folder", () => {
-  it("keeps the folderless draft when connecting to the chosen folder fails", async () => {
+describe("AppController new-chat draft", () => {
+  it("keeps text typed while no instance is reachable and hands it to the composer", async () => {
     const { runtime, mockClient, setState } = switchableRuntime();
-    let failConnect: (error: Error) => void = () => undefined;
-    runtime.openDraft = (directory): Promise<void> =>
-      new Promise<void>((_resolve, reject) => {
-        // The real runtime creates the client before it connects.
-        setState(mockClient, folder(directory ?? "/"));
-        failConnect = (error): void => {
-          setState(null, noFolder);
-          reject(error);
-        };
-      });
     const container = mount(runtime);
+    expect(
+      container.querySelector(".ohb-draft-fallback-reason"),
+    ).not.toBeNull();
 
     typeText(container, "Keep this draft");
-    await chooseFolder(container);
-    expect(textarea(container).value).toBe("Keep this draft");
+    act(() => {
+      setState(mockClient, folder("/workspace"));
+    });
+    await settle();
 
+    expect(container.querySelector(".ohb-draft-fallback-reason")).toBeNull();
+    expect(textarea(container).value).toBe("Keep this draft");
+  });
+
+  it("changes the draft's project without touching its text", async () => {
+    const { runtime, mockClient, setState } = switchableRuntime();
+    setState(mockClient, folder("/Users/demo/Projects/ohbaby-agent"));
+    const openDraft = vi.fn((directory?: string | null): Promise<void> => {
+      runtime.draft.setProject(directory ?? null);
+      return Promise.resolve();
+    });
+    runtime.openDraft = openDraft;
+    const container = mount(runtime);
+    typeText(container, "Same words");
+    expect(button(container, "Project: No project")).toBeTruthy();
+
+    await openPicker(container);
     await act(async () => {
-      failConnect(new Error("connect failed"));
+      button(document.body, "pi-web").click();
       await Promise.resolve();
     });
     await settle();
 
-    expect(container.querySelector(".ohb-composer-hero textarea")).toBe(
-      textarea(container),
-    );
-    expect(textarea(container).value).toBe("Keep this draft");
+    expect(openDraft).toHaveBeenCalledWith("/Users/demo/Projects/pi-web");
+    expect(button(container, "Project: pi-web")).toBeTruthy();
+    expect(textarea(container).value).toBe("Same words");
   });
 
-  it("hands the draft over once the folder opened successfully", async () => {
+  it("selects a folder opened from the picker and keeps the text", async () => {
     const { runtime, mockClient, setState } = switchableRuntime();
-    runtime.openDraft = (directory): Promise<void> => {
-      setState(mockClient, folder(directory ?? "/"));
-      return Promise.resolve();
-    };
+    setState(mockClient, folder("/workspace"));
+    const openFolder = vi.fn((directory: string) => Promise.resolve(directory));
+    const openDraft = vi.fn((): Promise<void> => Promise.resolve());
+    runtime.openFolder = openFolder;
+    runtime.openDraft = openDraft;
     const container = mount(runtime);
+    typeText(container, "Question for the new folder");
 
-    typeText(container, "First question");
-    await chooseFolder(container);
-    await settle();
-    expect(textarea(container).value).toBe("First question");
-
-    // Back to no folder later: the handed-over draft does not come back.
+    await openPicker(container);
     act(() => {
-      setState(null, noFolder);
+      button(document.body, "Open folder…").click();
     });
-    expect(textarea(container).value).toBe("");
+    await settle();
+    act(() => {
+      button(container, "/").click();
+    });
+    await settle();
+    await act(async () => {
+      button(container, "Choose this folder").click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(openFolder).toHaveBeenCalledWith("/");
+    expect(openDraft).toHaveBeenCalledWith("/");
+    expect(textarea(container).value).toBe("Question for the new folder");
   });
 
-  it.each(["picker", "project"] as const)(
-    "keeps the draft when opening via %s restores a remembered session",
-    async (entry) => {
-      const { runtime, mockClient, setState } = switchableRuntime();
-      const snapshot = runtime.store.getSnapshot().view.snapshot;
-      if (!snapshot) throw new Error("mock snapshot missing");
-      const session = snapshot.sessions[0];
-      let finishOpen: () => void = () => undefined;
-      const open = (directory: string): Promise<void> =>
-        new Promise<void>((resolve) => {
-          // Match runtime ordering: publish a client before connecting and
-          // restoring its remembered session into a different draft scope.
-          runtime.store.reset();
-          setState(mockClient, folder(directory));
-          finishOpen = (): void => {
-            runtime.store.replaceSnapshot(
-              { ...snapshot, activeSessionId: session.id },
-              2,
-            );
-            resolve();
-          };
-        });
-      runtime.openDraft = (directory): Promise<void> => open(directory ?? "/");
-      if (entry === "project") {
-        setState(null, {
-          ...folder("/workspace"),
-          selectedDirectory: null,
-        });
-      }
-      const container = mount(runtime);
-      typeText(container, "Keep my question after restoring the session");
-      if (entry === "picker") {
-        await chooseFolder(container);
-      } else {
-        act(() => {
-          button(container, "workspace").click();
-        });
-        await settle();
-      }
-
-      await act(async () => {
-        finishOpen();
-        await Promise.resolve();
-      });
-      await settle();
-      expect(textarea(container).value).toBe(
-        "Keep my question after restoring the session",
-      );
-
-      // Later renders must not overwrite edits or resurrect the handed-off text.
-      typeText(container, "My revised question");
-      act(() => {
-        runtime.store.setConnectionState("live");
-      });
-      expect(textarea(container).value).toBe("My revised question");
-      act(() => {
-        runtime.store.replaceSnapshot(
-          { ...snapshot, activeSessionId: null },
-          3,
-        );
-      });
-      expect(textarea(container).value).toBe("");
-      act(() => {
-        setState(null, noFolder);
-      });
-      expect(textarea(container).value).toBe("");
-    },
-  );
+  it("shows no project picker once a session is open", () => {
+    const runtime = createMockRuntime("running");
+    const container = mount(runtime);
+    expect(container.querySelector(".ohb-project-picker")).toBeNull();
+  });
 
   it("does not show a connection state when there is no instance to connect to", () => {
     const { runtime } = switchableRuntime();
