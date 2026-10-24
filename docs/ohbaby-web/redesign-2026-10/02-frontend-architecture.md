@@ -7,7 +7,7 @@
 | 方面 | 选择 | 说明 |
 |---|---|---|
 | 框架与构建 | React 19 + Vite（不变） | |
-| 路由 | 不引入路由库（不变） | 视图状态写进 URL hash，见 §4 |
+| 路由 | 不引入路由库（不变） | 会话 ID 和执行目录写进 URL hash，见 §4；设置弹窗不进 hash |
 | 状态 | 自写 store + `useSyncExternalStore`（不变） | 不引入 Zustand、TanStack Query |
 | 样式 | 手写 CSS，类名沿用 `ohb-` 前缀 | 新增一份 token 文件，见 03 §3 |
 | 图标 | lucide-react（已安装） | 统一用这一套，不混用其他图标库或手写 SVG（字标除外） |
@@ -44,7 +44,7 @@ src/
     shell/            新增：AppController（runtime 接线、视图切换、目录选择）、AppShell（布局、收起、窄屏抽屉）
     sidebar/          新增：由 session/SessionSidebar 等迁入并改写；项目分组、会话行、会话菜单
     search/           新增：侧栏内的搜索框与结果列表（由 sidebar 挂载）
-    settings/         新增（第二批）：设置页与各分区
+    settings/         新增（第二批）：设置弹窗与各分区
     session/          SessionScreen 继续组合对话视图；草稿态并入这里
     conversation/     不变（只改样式）
     composer/         Composer 拆出 ComposerControls、ComposerInput 和项目选择器（见 05）
@@ -102,7 +102,7 @@ shared 不反向依赖任何功能目录
 
 | 类型 | 内容 | 放在哪里 |
 |---|---|---|
-| URL（hash） | 当前会话 ID 和执行目录；设置页分区 | 沿用 `replaceNavigationHash`，在现有格式上扩展 |
+| URL（hash） | 当前会话 ID 和执行目录 | 沿用 `replaceNavigationHash`；设置是弹窗，不进 hash（D2） |
 | 服务端状态：全局 | 项目列表、会话列表（分页）、搜索结果 | store 新增的全局切片；REST 拉取，触发刷新的时机见 06 |
 | 服务端状态：实例 | 当前会话的消息、运行状态、审批、模型、上下文用量 | 不变：SSE → eventReducer → store |
 | 浏览器本地 | 草稿文字和草稿所选项目；侧栏收起、项目分组折叠；置顶；设置上次停留的分区 | 草稿沿用 `draft-storage` 的 sessionStorage（按标签页隔离，刷新保留），但 key 改为不含目录（06 §3.5）；其余用 localStorage。置顶改为全局 key（06 §3.6）。读写都包 try/catch，读不到就用默认值 |
@@ -115,7 +115,7 @@ shared 不反向依赖任何功能目录
 ```text
 AppController（订阅 runtime、组合功能区）
 └── AppShell（通过区域插槽接收内容，布局不含业务）
-    └── 功能区：Sidebar / SidebarSearch / SessionScreen / SettingsPage
+    └── 功能区：Sidebar / SidebarSearch / SessionScreen / SettingsDialog
     └── 组合组件：SessionRow、ProjectGroup、ComposerControls、ProjectPicker …
         └── 基础组件：IconButton、Menu（照 pi-web 自写）、Spinner、Kbd …
 ```
@@ -136,7 +136,7 @@ AppController（订阅 runtime、组合功能区）
 | 改项目归属失败 | Sidebar | 侧栏不变，在对话区右上角显示通知（03 §4.8） |
 | 会话已移动 | runtime | 自动换目录重发，不显示 |
 | daemon 断开 | AppShell | 主区顶部一条提示，恢复后消失；常态不显示连接状态 |
-| 设置分区读取失败（第二批） | SettingsPage | 只有该分区显示错误和“重试” |
+| 设置分区读取失败（第二批） | SettingsDialog | 只有该分区显示错误和“重试” |
 | 设置字段校验失败（第二批） | 编辑子页、单页表单 | 出错字段下写原因，保留输入（06 §4） |
 
 判断规则：和当前位置有关的错误在原地提示；操作成功不提示（README 的 D16）；不在原地的失败和需要用户处理的后台事件用对话区右上角的通知。

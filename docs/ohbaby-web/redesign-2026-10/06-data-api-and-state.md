@@ -17,7 +17,7 @@
 
 SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工作区议题 improve-1 的 05 记录）。本次在 Web 的 `api/daemon/global-sessions.ts` 实现调用、复用 SDK 类型，与 improve-2 的改动面一致；不为这次改版另造一套 SDK HTTP 客户端。
 
-共用 HTTP 传输只负责鉴权、序列化、取消和错误解析，支持设置需要的 PUT。`http.ts` 目前抛错只保留 `code` / `status`，improve-2 要增加 `targetDirectory`，improve-4 要增加结构化 `fields`；不让各功能客户端复制一份传输实现或解析错误 message 猜字段。
+共用 HTTP 传输只负责鉴权、序列化、取消和错误解析，已支持设置需要的 PUT、PATCH、DELETE。`http.ts` 目前抛错只保留 `code` / `status`，improve-2 要增加 `targetDirectory`，improve-4 要增加结构化 `fields`；不让各功能客户端复制一份传输实现或解析错误 message 猜字段。
 
 ### 1.2 实例层（带目录头，沿用现有）
 
@@ -57,7 +57,7 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 
 MCP 只读（D25）：Web 不调用 MCP 配置 PUT / DELETE 或 `POST /v1/settings/mcp/reconnect`。这些现有服务端接口保留，不为本次改版下线；前端不实现配置补丁、清空字段或重连流程。
 
-**后端前置（D19）**：目前校验失败只返回 `Invalid settings`，没有错误码和出错字段。第二批需要让 Models / Web search 写接口的校验失败返回 `{ code: "VALIDATION_FAILED", fields: [{ path, message }] }`（不含字段值），并给本期 Web 使用的设置读写接口统一错误码。MCP 写入、名称校验和重连接口的改进不再是前置条件。这是对 improve-2 接口的小补充，需要在后端文档里登记。
+**后端前置（D19）**：目前校验失败只返回 `Invalid settings`，没有错误码和出错字段。第二批需要让 Models / Web search 写接口的校验失败返回 `{ code: "VALIDATION_FAILED", fields: [{ path, message }] }`（不含字段值），并让全局设置路由的错误都带 code；不统一整个 daemon 的错误格式。实例层设置路由、MCP 写入、名称校验和重连接口的改进不是前置条件，细节见 improve-4 02 Stage A。这是对 improve-2 接口的小补充，需要在后端文档里登记。
 
 ## 2. ViewModel
 
@@ -216,9 +216,9 @@ interface McpServerRow {
 - **写入**：模型和搜索设置等服务端返回后再更新，不做乐观更新；写接口返回的结果直接替换缓存。MCP 没有写入流程。
 - **别处的改动**：当前实例的 SSE 收到 `settings.changed` 时，按 `domains` 让对应缓存失效；当前在看的分区立即重新读取。编辑子页有未保存的输入时只刷新只读区，不覆盖输入。`model.invalidated` 同样让模型缓存失效。
 - **实例层用哪个目录**：打开设置前所在会话的请求目录（有待生效目录时用它）；在草稿里用所选项目，没选用 `defaultWorkspace.directory`。目录只用于请求，页面上不显示。
-- **设置分区记忆**：上次停留的分区存在 localStorage；编辑子页不记忆，重新打开时回到列表。
-- **从草稿跳来再回去**：草稿点发送发现没有模型时，跳到设置 › Models，并在内存里记一个“返回草稿”标记（不写进 hash）。D20 自动设为默认成功后，如果标记还在，就回到草稿；切到其他分区、点 Back to app 或刷新页面都会清掉标记。
-- **草稿态收不到 `settings.changed`**：草稿态没有连接实例，也没有 SSE。所以除了事件，每次进入分区、窗口重新激活时也重新读取当前分区。
+- **设置分区记忆**：上次停留的分区存在 localStorage，刷新页面后第一次打开用它。同一次页面内，关闭弹窗只是隐藏，再打开时分区、编辑子页和未保存输入原样恢复（D2、04 §2.6）；编辑子页不写进 localStorage。
+- **从草稿跳来再回去**：草稿点发送发现没有模型时，打开设置弹窗并直接进入 Models（覆盖弹窗之前停留的位置，手机上也直接进 Models），同时在内存里记一个“来自草稿发送”标记。标记还在时，只要默认模型从无变有（D20 自动设为默认，或手动 Set as default），就关闭弹窗，下面就是原来的草稿，文字还在。用户自己关闭弹窗时清除标记。“没有模型”的判断沿用现有的 `GET /v1/model`（`SessionScreen` 的 `modelMissing`），读取失败不算没有模型。
+- **不能只靠 `settings.changed`**：草稿态连着草稿目录的实例，能收到该实例的事件；但 agent 直接改配置文件、或改动发生在别的进程时，不一定有事件。所以除了事件，每次进入分区、窗口重新激活时也重新读取当前分区。
 - **事件接线**：检查并补齐 BrowserDaemonClient 到 runtime 的 `settings.changed` 转发；模型失效仍要更新实例模型状态。缓存按 domain 分开，MCP 状态和 Skills 再按设置目录分 key；迟到的读取不能覆盖写接口的新结果或另一个目录的数据。
 - **MCP 文件变更**：ohbaby 直接改配置文件后，前端不能只等待 `settings.changed`；进入分区、窗口重新激活、Refresh 都重读配置和状态。Refresh / Retry 只调用两个 GET，不触发重连。配置与实际状态分别缓存，配置读取成功不代表运行时已应用；配置删除后清除对应展开详情。
 
@@ -255,7 +255,7 @@ interface McpServerRow {
 | `no-model` | 模型未配置 | 04 §2.1 | 按需 |
 | `settings` | 3 个 provider、6 个模型（其中一个 Needs setup、一个是默认）；3 台 MCP 服务器（已连接、失败、停用）；若干全局 Skills；搜索已配置 key | UC-SETTINGS-02 至 05 | 第二批先做 |
 | `settings-empty` | 没有模型、没有 MCP 服务器、搜索未配置 | 04 §2.6 空态 | 第二批先做 |
-| `settings-errors` | 模型/搜索保存返回 `VALIDATION_FAILED`、MCP 配置或状态读取失败 | 04 §2.6、§4 | 第二批按需 |
+| `settings-errors` | 模型/搜索保存返回 `VALIDATION_FAILED`（4a 先做）；MCP 配置或状态读取失败（4b 补上） | 04 §2.6、§4 | 第二批先做 |
 | `many` | 600 条会话，跨 4 个项目，多页 | 分页、Show more | 按需 |
 | `missing-dir` | 当前会话的执行目录不存在 | 04 §2.2 | 按需 |
 | `search` | 标题命中、正文命中、无结果三种关键词 | UC-SEARCH-01 | 按需 |

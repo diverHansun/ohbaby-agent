@@ -34,8 +34,8 @@
 | `ProjectPicker` | 组合 | 草稿里的项目选择条和下拉 | `ui/composer/` | 新增 |
 | `ComposerControls` | 组合 | 输入卡片内底部的控制行 | `ui/composer/` | 从 `Composer` 拆出 |
 | `ApprovalPanel` | 组合 | 消息区内的审批浮层 | `ui/permissions/` | 改写自 `PermissionModal` |
-| `SettingsPage` | 功能区 | 设置导航 + 分区内容 + 子页路由（第二批） | `ui/settings/` | 新增 |
-| `SettingsNav` | 组合 | 设置导航（替换侧栏内容），含 Back to app | `ui/settings/` | 新增 |
+| `SettingsDialog` | 功能区 | 设置弹窗：分区导航 + 分区内容 + 编辑子页切换，不进 URL（第二批，D2） | `ui/settings/` | 新增 |
+| `SettingsNav` | 组合 | 设置弹窗左侧的分区导航 | `ui/settings/` | 新增 |
 | `SettingsRow` | 基础 | “标签 \| 值或控件”一行，细线分隔；可点击时整行是按钮 | `ui/shared/` | 新增 |
 | `ConfirmDialog` | 基础 | 确认框（标题、说明、确认和取消） | `ui/shared/` | 新增 |
 | `SecretField` | 组合 | API key 字段：Configured / Not set、Replace、Clear、Add key | `ui/settings/` | 新增 |
@@ -43,6 +43,7 @@
 | `McpSection` / `McpDetails` | 功能区 / 组合 | MCP 配置与状态列表、原地展开的只读详情 | `ui/settings/mcp/` | 新增 |
 | `SearchSection`、`SkillsSection`、`AboutSection` | 功能区 | 单页表单与只读列表 | `ui/settings/` | 新增 |
 | `ModelMenu` | 组合 | 输入框控制行的模型菜单（第二批） | `ui/composer/` | 新增 |
+| `ComposerMoreMenu` | 组合 | 手机（< 640px）控制行的“更多”：Thinking 二级列表和 Full access 开关，复用 `Menu`（improve-4 4b，D29） | `ui/composer/` | 新增 |
 | `ConnectOverlay` | — | — | `ui/commands/` | 第二批删除（D18） |
 | `ProjectRail` | — | — | `ui/workspace/` | 删除 |
 | `TypewriterPlaceholder` | — | — | `ui/composer/` | 删除，占位改为固定文字 |
@@ -109,7 +110,7 @@
 - **Purpose**：输入卡片内底部的一行控制按钮（D22）。
 - **Anatomy**：顺序以 D22 和 03 §4.3 为准：左边权限模式；右边模型、思考强度、圆形发送。附件入口的范围见 README 的实施约定。
 - **API**：接收现有 `ReasoningControl`、`PermissionPolicyControl` 需要的数据与回调，加上 `running`、`onStop()`；模型按钮第一批沿用现有 `modelLabel`、`onOpenModel()`，第二批换成 `ModelMenu`。
-- **约束**：选择控件为无边框文字按钮；发送为深色圆形按钮，Stop 带描边。沿用现有提交规则：运行中且草稿为空时主位是 Stop，有草稿时仍能发送插话或排队；不增加第二套 Send/Stop 状态机。手机（< 640px）次要项收进“更多”菜单；按 D29 放在 improve-4，与模型菜单一起实现。
+- **约束**：选择控件为无边框文字按钮；发送和 Stop 都是深色圆形按钮（D32）。沿用现有提交规则：运行中且草稿为空时主位是 Stop，有草稿时仍能发送插话或排队；不增加第二套 Send/Stop 状态机。手机（< 640px）次要项收进“更多”菜单；按 D29 放在 improve-4，与模型菜单一起实现。
 
 ### ApprovalPanel
 
@@ -153,5 +154,5 @@
 - **草稿首发**：`DraftHero` + `ProjectPicker` + `Composer`，由 `SessionScreen` 组合。
 - **侧栏搜索切换**：`Sidebar` 根据搜索框是否有内容，在会话树和 `SidebarSearch` 之间切换。
 - **撤销提示**：不做。服务端没有取消归档的接口；归档后行直接消失，不另外提示（D16）。
-- **列表加编辑子页**：`ModelsSection` + `ModelEditor` 由 `SettingsPage` 按 hash 切换；编辑子页返回所属列表，Back to app 返回进入设置前的对话，history 规则见 01 §1.2。
+- **列表加编辑子页**：`ModelsSection` + `ModelEditor` 由设置弹窗按内存里的状态切换，不进 URL；编辑子页返回所属列表，× 或 Esc 关闭整个弹窗。
 - **只读列表与详情**：`McpSection` + `McpDetails`，详情原地展开，展开状态留在组件内，不新增编辑路由。

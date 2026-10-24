@@ -12,7 +12,7 @@
 | 输入框卡片 | idle / focused / has-text / submitting / running / steerable / disabled | focused：描边加深；running 且可插话：描边变浅琥珀；disabled（daemon 断开、会话已归档、执行目录不可用）：输入可用，发送按钮不可用。模型未配置不算 disabled（§2.1） | 高度随内容增长，到上限后在框内滚动；IME 输入中按 Enter 不发送（沿用现有逻辑） |
 | 发送按钮 | empty / ready / submitting / hidden | 圆形；empty：`--bg-hover` 底、`--text-dim`；ready：`--accent` 底；submitting：转圈，宽度不变，不响应点击 | 运行中且草稿为空时，Stop 占主位（沿用现有规则） |
 | 卡片底部控制按钮（模型、思考强度、权限模式） | default / hover / open / disabled | hover 和 open：`--bg-hover`；open 时弹出菜单向上展开 | 按钮宽度随文字变化，最大宽度截断 |
-| Stop | default / hover / stopping | `--danger-ink` 文字 + `--danger` 8% 底 + 描边；stopping：转圈 | 点击后在请求返回前不可重复点击 |
+| Stop | default / hover / stopping | 和发送一样的黑色圆钮（D32）；stopping：转圈 | 点击后在请求返回前不可重复点击 |
 | 菜单 | open / item-hover / item-disabled / filtering | item-hover 和键盘高亮同一个样式 | Esc：有过滤文字时先清空，再按一次关闭；关闭后焦点回到触发按钮 |
 | 项目选择条（草稿） | default / hover / open | 无边框，hover 才有底色 | 换项目不清空输入框文字 |
 | 审批浮层 | expanded / collapsed / responding / multiple / syncing / sync-error | collapsed：消息区顶部一条；responding：所有选项按钮转圈且不可点；multiple：标题栏显示 `1 / N` 和上一条、下一条；syncing、sync-error：沿用现有提示和 Retry | 浮层出现时焦点移到第一个选项按钮；按钮由后端返回的选项决定，不写死数量；Esc 不作用于审批（避免和输入框的“两次 Esc 停止”冲突），折叠用标题栏的 `[-]` |
@@ -100,11 +100,11 @@
 
 | 状态 | 页面表现 |
 |---|---|
-| 打开 | 侧栏换成设置导航，主区显示上次的分区（第一次是 Models） |
-| 离开 | Back to app 和浏览器后退一次回到进入设置前的对话；编辑页内的返回只回所属列表。直接打开设置链接时 Back to app 回草稿；history 细则见 01 §1.2 |
+| 打开 | 点齿轮打开设置弹窗，显示上次的分区（第一次是 Models）；焦点移入弹窗 |
+| 离开 | × 或 Esc 关闭弹窗，焦点回到齿轮；点遮罩不关闭；编辑页内的返回只回所属列表。弹窗不进 URL，浏览器后退不负责关闭它 |
 | 分区加载中 | 超过 300ms 显示一行 `Loading…` |
 | 分区加载失败 | 只有该分区显示原因 + `Retry`，其他分区正常 |
-| 有未保存修改时离开 | 不拦截；未保存的输入丢弃 |
+| 有未保存修改时离开 | 不拦截、不弹确认框。关闭弹窗时保留弹窗状态（所在分区、编辑子页和输入），本次页面内再次打开时原样恢复；切到其他分区或刷新页面后丢弃 |
 | 保存中 / 成功 / 失败 | Save 转圈 / 回到列表（编辑子页）或 Save 回到不可点（单页表单），不显示 `Saved` / 出错字段下写原因，保留输入；没有字段信息的错误写在 Save 旁 |
 | 别处改了设置 | 收到 `settings.changed` 时重新读取当前分区（只在已连接实例时能收到）；另外每次进入分区、窗口重新激活时也重新读取；编辑子页里有未保存的输入时不覆盖输入 |
 
