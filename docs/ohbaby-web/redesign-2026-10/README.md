@@ -65,9 +65,9 @@
 
 2026-10-24：**improve-3 实施与验收完成。** 会话菜单、项目隐藏和全局搜索已接通；Web 705 个用例、类型检查、lint、构建及桌面/手机电脑操作检查通过。运行中移动、下一轮目录切换和审批保持已用真实 daemon 验证，详情见 [improve-3 验收](improve-3/05-implementation-acceptance.md)。
 
-2026-10-24：**improve-4 实施完成，等待用户审查。** 按 4a、4b 先后完成：全局设置路由的错误码与字段错误、设置弹窗的五个分区、输入框模型菜单、手机“更多”，Web 端的 `/connect` 浮层已删除。Web 59 个文件、719 个用例通过，并用真实 daemon 走查。差异、遗留和提交批次见 [improve-4 验收](improve-4/05-implementation-acceptance.md)。四批全部结束后再写根目录 09 整体验收。
+2026-10-24：**improve-4 实施完成，后续审查结果见下方 2026-10-25 记录。** 按 4a、4b 先后完成：全局设置路由的错误码与字段错误、设置弹窗的五个分区、输入框模型菜单、手机“更多”，Web 端的 `/connect` 浮层已删除。Web 59 个文件、719 个用例通过，并用真实 daemon 走查。差异、遗留和提交批次见 [improve-4 验收](improve-4/05-implementation-acceptance.md)。
 
-2026-10-25：合并前发现的 MCP 参数脱敏、设置写响应顺序和新草稿旧气泡三项问题已修复，并补齐回归与真实页面验证。当前代码无剩余合并阻塞，仍保留在 `codex/redesign`，未合并到 `main`；最新测试与边界见 [合并前回归修复](improve-4/05-implementation-acceptance.md#合并前回归修复2026-10-25)。
+2026-10-25：合并前发现的 MCP 参数脱敏、设置写响应顺序和新草稿旧气泡三项问题已修复，并补齐回归与真实页面验证；该轮按要求暂不合并，结果见 [合并前回归修复](improve-4/05-implementation-acceptance.md#合并前回归修复2026-10-25)。随后用户完成 improve-5、improve-6，并授权测试后合并。本轮又修复嵌套滚动、MCP 失败文字颜色和新草稿刷新导航，Web 766 项通过，实际浏览器操作复验通过；完整范围、测试与限制见 [09 整体验收](09-implementation-acceptance.md)。
 
 | 批次 | 内容 | 依赖 | 文档 |
 |---|---|---|---|
@@ -76,10 +76,11 @@
 | improve-3 | 会话菜单（移入、换项目、移出、归档、导出）与侧栏全局搜索 | improve-2 | [improve-3](improve-3/02-plan-and-change-scope.md) |
 | improve-4 | 后端前置 D19、设置 API 客户端、5 个设置分区、输入框模型菜单、手机“更多”控制项（D29）、删除 `/connect` 浮层 | improve-1、improve-2（设置目录与“回到草稿”依赖新运行时）；D19 | [improve-4](improve-4/02-plan-and-change-scope.md) |
 | improve-5 | 输入框提示文字、空状态问候与进场动画、输入卡片焦点样式、发送按钮过渡（小批次，单篇文档） | improve-4 | [improve-5](improve-5/02-plan-and-change-scope.md) |
+| improve-6 | 通知与连接提示、可读错误、命令弹窗与结果列表、去掉重复状态圆点 | improve-5 | [improve-6](improve-6/02-plan-and-change-scope.md) |
 
 00–08 里写的“第一批”对应 improve-1 至 improve-3，“第二批”对应 improve-4。每批目录下有 01 现状、02 方案与改动面、04 验收，简写。行为、视觉和组件以本目录 00–08 为准，各批文档只写“这一批改哪些、怎么验”。实施后各批另写 05 验收。
 
-这里按用户要求用 `improve-N` 表示实施批次，保留现有四批结构。各批 01 中的代码事实以 `f5f36b9e` 为快照，“假设上一批已完成”属于前置目标；开工前要按实际代码复核，不把目标写成已完成事实。各批的 `05-implementation-acceptance.md` 记录本批结果，四批结束后再写根目录 `09-implementation-acceptance.md`，做整体行为和视觉验收。
+这里按用户要求用 `improve-N` 表示实施批次，原四批之后追加 improve-5、improve-6。各批 01 中的代码事实以 `f5f36b9e` 为快照，“假设上一批已完成”属于前置目标；开工前要按实际代码复核，不把目标写成已完成事实。各批的 `05-implementation-acceptance.md` 记录本批结果，根目录 [09-implementation-acceptance.md](09-implementation-acceptance.md) 汇总最后一轮行为和视觉验收。
 
 ## 实施约定（2026-10-23 审阅补充）
 

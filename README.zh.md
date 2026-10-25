@@ -77,7 +77,7 @@ base URL、模型名后保存即可。API key 相关字段对 LM Studio 等本�
 | Base URL | SDK 的 base URL（不要带 `/chat/completions` 后缀） |
 | API key env | 可选，存放 Key 的环境变量名（如 `OPENAI_API_KEY`） |
 | API key value | 可选，Key 本身；本地无鉴权 endpoint 可留空 |
-| Model name | 如 `gpt-5.5`、`claude-sonnet-4-5`、`glm-5.1`，或你的 provider 提供的模型 ID |
+| Model name | 如 `gpt-6-astra`、`claude-sonnet-5-5`、`glm-5.3`，或你的 provider 提供的模型 ID |
 | Context window / Max output tokens | 可选 |
 
 **3. 开始编码。** 就这样 —— 描述你想做的事，ohbaby-agent 就会动手。
