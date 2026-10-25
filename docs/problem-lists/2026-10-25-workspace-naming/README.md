@@ -8,7 +8,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-10-25 | 首轮 | 数据库列、核心会话类型、服务端与 SDK 契约、Web 命名与 Recents、权威文档同步 | 规划完成，等待实施 |
+| [improve-1](improve-1/00-discussion.md) | 2026-10-25 | 首轮 | 数据库列、核心会话类型、服务端与 SDK 契约、Web 命名与 Recents、权威文档同步 | 已实施并验收，见 [05](improve-1/05-implementation-acceptance.md) |
 
 归档会话管理（Settings 里的 Archived 页面、恢复、永久删除）是另一个议题，放在 `../2026-10-25-archived-sessions/`，在本议题实施完成后再规划。它依赖本议题定下的新名字。
 
@@ -21,7 +21,7 @@
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 分阶段实施、迁移、关键改动清单 |
 | [03 参考项目](improve-1/03-reference-projects.md) | opencode、Codex、deepseek-harness、kimi-code、ZCode、pi 的做法 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 验收场景和发布门 |
-| 05 实施验收 | 实施完成后由验收会话写入 `improve-1/05-implementation-acceptance.md` |
+| [05 实施验收](improve-1/05-implementation-acceptance.md) | 后端与前端的实际改动、差异、测试与走查 |
 
 ## 实施契约
 

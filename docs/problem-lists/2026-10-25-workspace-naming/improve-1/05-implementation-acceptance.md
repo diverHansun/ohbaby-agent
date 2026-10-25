@@ -4,7 +4,7 @@
 
 实现分两批提交：`2feae1fb`（数据库与核心领域）、`6453aebb`（SDK、服务端与 CLI 契约）。
 
-本记录覆盖本轮的后端实施。按本次会话的最新分工，agent 完成 Stage 1、2 的数据库、核心领域、SDK、服务端和 CLI；用户在同一分支继续实施前端。因此本轮整体状态为**部分完成，尚不具备整包发布条件**。
+本记录先写于后端实施完成时（5.1–5.5），随后补充前端实施与整轮验收（5.6）。**整轮结论：Stage 1–4 已全部完成并通过验收，全仓库类型检查、lint、Web 测试与构建恢复通过，可以随下一版发布。** 发布前仍需按 `docs/releases/unreleased.md` 提醒用户退出所有 ohbaby 进程、升级后刷新网页。
 
 ## 5.1 已完成范围
 
@@ -84,3 +84,48 @@ pnpm exec vitest run --no-file-parallelism $(rg --files packages | rg '\.integra
 - SDK：`packages/ohbaby-sdk/src/contract/{global-sessions,snapshot,permission,settings,request-directory-header}.ts`。
 - 服务端：`packages/ohbaby-server/src/coordination/session-workspace-move.ts`、`protocols/global-sessions.ts`、`runtime/daemon/{main,server}.ts`、settings 路由和 OpenAPI。
 - CLI：`packages/ohbaby-cli/src/tui/app.tsx`、`components/prompt/{index.tsx,footer.ts}`。
+
+## 5.6 前端实施与整轮验收（2026-10-25）
+
+### 后端复核
+
+前端动手前，对 5.1–5.5 做了独立复核，没有发现需要返工的问题：
+
+- 迁移 `026` 的三条 `RENAME COLUMN`、`requiresOfflineBackup` 和 `knownDaemonWriterPids`（读取 `daemon.pid` 的 JSON `pid`、排除当前进程）与 02 一致。
+- 旧列名只剩已发布迁移和“迁移前准备旧数据”的测试，契约层 `rg` 的剩余命中都是“断言旧字段不存在”的测试或 b 类同名选项。
+- 独立重跑迁移、会话领域、移动、全局路由、契约输出和事件目录相关测试：23 个文件、208 个测试通过；全仓库类型检查的报错全部位于当时尚未迁移的 Web。
+
+### 实际改动
+
+| 提交 | 内容 |
+|---|---|
+| `c3df6d03` | Web 接口层迁到新契约：`workspaceDirectory`、`/workspace` 移动路由、`defaultDirectory`、`workingDirectory`、`requestDirectoryHeaders`；fixture、mock 和原始 SQL 回归测试同步。改完后全仓库类型检查恢复通过 |
+| `52540c9c` | 侧栏与草稿的 project 命名统一改为 workspace（store、runtime、组件、CSS 类、文案）；无工作区会话进入底部不能折叠的 Recents；空工作区显示 `No chats`；折叠状态升到 `ohbaby.web.sidebar.collapsed.v2` 并删除 v1；草稿 key 改为 `ohbaby:draft-workspace:new` |
+| `12b6bbfc` | 本议题和归档会话议题的规划文档入库 |
+| `f394b50c` | 同步 `docs/ohbaby-web/redesign-2026-10/00–08`、`README.md` 和 `ui/components.md` |
+
+### 与 02 的差异
+
+- 02 Stage 2 原定由后端一并修改 Web 接口层；按实际分工，这部分放在前端第一批提交（`c3df6d03`）里完成，结果与 02 的契约表一致。
+- 用户在实施中要求界面参照 Codex、Cursor、Claude Code、pi-web。据此在 02 之外补了两处小调整：Recents 的会话行不缩进，和工作区标题左对齐（照 Codex）；空工作区显示灰色的 `No chats`（照 Codex）。没有新增组件或状态。
+- 设计文档里的用例编号 `UC-PROJECT-*` 保留不改，避免历史验收文档的引用失效。
+- `InProcessUiBackendOptions.projectDirectory`、Skills 的 `project-native` 来源、`/status` 的 `projectRoot` 属于其他含义，保留原名。
+
+### 测试与走查
+
+| 检查 | 结果 |
+|---|---|
+| 全仓库 `pnpm typecheck` | 通过 |
+| 全仓库 lint（提交钩子） | 0 错误，122 个存量警告 |
+| Web 测试 | 66 个文件、769 个测试通过（新增 `collapsed-groups.unit.test.ts`，`Sidebar.unit` 补 Recents 与 `No chats` 断言） |
+| `pnpm --filter ohbaby-web build`、`pnpm build` | 通过 |
+| mock 浏览器走查（`typical`、`many`、手机宽度） | Workspaces 与 Recents 顺序正确，Recents 不能折叠、按时间倒序；Recents 会话移入工作区后离开 Recents；菜单文案为 `Move to workspace…`；草稿选择器为 `No workspace`；控制台无错误 |
+| 真实 daemon 走查 | 用户数据库的副本（迁移 `025`，64 个活跃根会话）放在临时 `OHBABY_HOME` / `XDG_DATA_HOME` 下启动新 daemon：自动生成 `.before-retained-*.backup`，升级到 `026`，会话数与无工作区会话数不变；侧栏正常显示；对一条 Recents 会话执行“移入 code-cli → Remove from workspace”，两次 `POST /v1/sessions/:id/workspace` 均为 200；About 显示 `Default directory`。用户原数据库未改动 |
+
+按 04 核对：T1–T9 见 5.3；T10–T13 由上表的单元测试和走查覆盖；T14 的 `rg` 在 `redesign-2026-10/0*.md`、`ui/components.md`、`docs/services/session/dfd-interface.md` 中没有本概念的命中（只剩示例路径 `~/Projects/` 和术语表里“不要使用”一栏的 `No project`）。发布门第 7 项（真实数据库升级）已在副本上完成。
+
+### 遗留与注意
+
+- 临时环境里，用户真实的 `~/.ohbaby/workspace/default` 被当作普通工作区显示，是因为临时环境的默认目录换了位置；真实环境中它会被识别为默认目录并过滤。
+- `many` 场景下 Pinned 区在置顶会话尚未加载时只显示 `Show more`，属于改动前已有的行为，本轮未改。
+- 归档会话管理按计划在 `../../2026-10-25-archived-sessions/` 另行实施。
