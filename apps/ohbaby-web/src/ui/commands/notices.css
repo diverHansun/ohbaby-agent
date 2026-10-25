@@ -1,49 +1,66 @@
+/* Command results shown in place (mostly errors): the same calm card as the
+   banners. The command name leads, the output sits below; an error's text
+   takes the error colour, a running command shows a spinner. */
 .ohb-command-notices {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .ohb-command-notice {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 11px 13px;
-  position: relative;
+  border-radius: 14px;
+  box-shadow: var(--shadow-notice);
+  color: var(--text-muted);
   min-width: 0;
   overflow-wrap: anywhere;
+  padding: 9px 8px 10px 14px;
 }
 
 .ohb-composer .ohb-command-notices {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   max-height: 30vh;
   overflow-y: auto;
 }
 
-.ohb-command-notice:has(.ohb-command-notice-close) .ohb-command-label {
-  padding-right: 28px;
+.ohb-command-label {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-height: 22px;
+}
+
+.ohb-command-label > span:not(.ohb-spinner) {
+  color: var(--text);
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
 }
 
 .ohb-command-notice-close {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   color: var(--text-dim);
   cursor: pointer;
   display: inline-flex;
-  height: 24px;
+  flex: none;
+  height: 22px;
   justify-content: center;
   padding: 0;
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  width: 24px;
+  transition:
+    background-color var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+  width: 22px;
 }
 
 .ohb-command-notice-close:hover {
-  background: var(--danger-soft);
-  color: var(--danger-ink);
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .ohb-command-notice-close:focus-visible {
@@ -51,61 +68,31 @@
   outline-offset: 2px;
 }
 
-.ohb-command-label {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.ohb-command-label span:first-child {
-  border-radius: 5px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  padding: 2px 7px;
-  text-transform: uppercase;
-}
-
-.ohb-command-label span:nth-child(2) {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-
-.ohb-command-running .ohb-command-label span:first-child {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-strong);
-  color: var(--text-muted);
-}
-
-.ohb-command-success .ohb-command-label span:first-child {
-  background: var(--success-soft);
-  border: 1px solid var(--border);
-  color: var(--success-ink);
-}
-
-.ohb-command-error .ohb-command-label span:first-child {
-  background: var(--danger-soft);
-  border: 1px solid var(--danger-border);
-  color: var(--danger-ink);
+.ohb-command-notice > :not(.ohb-command-label) {
+  margin: 4px 6px 0 0;
 }
 
 .ohb-command-notice pre {
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.65;
-  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 21px;
   overflow-x: auto;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
+.ohb-command-notice.ohb-command-error pre {
+  color: var(--danger-ink);
+}
+
+/* Command result dialogs (/status, /mcps, /skills, /help) match the Settings
+   dialog: a scrim, a plain card, the title alone in the header and flat rows
+   with hairlines, no cards inside the card. */
 .ohb-command-modal-layer {
   align-items: center;
-  animation: ohb-fade 140ms ease;
-  background: var(--bg-selected);
+  animation: ohb-fade var(--duration) var(--ease);
+  background: var(--bg-scrim);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -115,10 +102,10 @@
 }
 
 .ohb-command-modal {
-  animation: ohb-pop 160ms ease;
+  animation: ohb-pop var(--duration) var(--ease);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
@@ -138,48 +125,53 @@
   border-bottom: 1px solid var(--border);
   display: flex;
   flex: none;
-  gap: 11px;
-  padding: 16px 18px;
-}
-
-.ohb-command-modal-header > span {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  padding: 3px 8px;
+  gap: 8px;
+  height: 52px;
+  padding: 0 12px 0 20px;
 }
 
 .ohb-command-modal-header h2 {
   color: var(--text);
+  flex: 1;
   font-size: 15px;
-  line-height: 1;
+  font-weight: 600;
   margin: 0;
 }
 
 .ohb-command-modal-header button {
   align-items: center;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
   color: var(--text-dim);
   display: inline-flex;
-  height: 30px;
+  height: 28px;
   justify-content: center;
-  margin-left: auto;
-  width: 30px;
+  transition:
+    background-color var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+  width: 28px;
+}
+
+.ohb-command-modal-header button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .ohb-command-modal-body {
   overflow-y: auto;
-  padding: 16px 18px 18px;
+  padding: 6px 20px 14px;
 }
 
 @media (max-width: 480px) {
   .ohb-command-modal-layer {
     padding: 18px;
+  }
+}
+
+@media (max-width: 639px) {
+  .ohb-command-notice-close {
+    height: 44px;
+    width: 44px;
   }
 }

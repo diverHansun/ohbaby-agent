@@ -56,30 +56,30 @@ export function StructuredCommandOverlay(props: {
 
   return (
     <div
-      className="ohb-structured-overlay"
+      className="ohb-command-modal-layer ohb-structured-overlay"
       onClick={props.onClose}
       role="presentation"
     >
       <section
         aria-label={structuredOverlayTitle(props.overlay.kind)}
         aria-modal="true"
-        className="ohb-structured-dialog"
+        className="ohb-command-modal ohb-structured-dialog"
         onClick={(event) => {
           event.stopPropagation();
         }}
         ref={dialogRef}
         role="dialog"
       >
-        <header className="ohb-structured-header">
-          <span>{props.overlay.commandLabel}</span>
+        <header className="ohb-command-modal-header">
           <h2>{structuredOverlayTitle(props.overlay.kind)}</h2>
           <button
+            aria-label="Close"
             onClick={props.onClose}
             ref={closeButtonRef}
-            title="Close overlay"
+            title="Close"
             type="button"
           >
-            <X size={16} />
+            <X aria-hidden="true" size={16} />
           </button>
         </header>
         {props.overlay.kind === "goal" ? (

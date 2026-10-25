@@ -355,7 +355,6 @@ export function GoalOverlayBody(props: {
         {activeGoal ? (
           <>
             <p className={`ohb-goal-status ohb-goal-${activeGoal.status}`}>
-              <span aria-hidden="true" />
               {GOAL_STATUS_LABEL[activeGoal.status]}
             </p>
             <OverlayResult

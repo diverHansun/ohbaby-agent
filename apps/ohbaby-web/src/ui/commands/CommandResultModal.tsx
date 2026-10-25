@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CommandNotice } from "../../api/daemon/wire.js";
 import { ContextUsageDetails } from "../shared/ContextUsage.js";
 import { MarkdownBlock } from "../shared/MarkdownBlock.js";
+import { Spinner } from "../shared/Spinner.js";
 import {
   commandData,
   commandDataArray,
@@ -32,27 +33,24 @@ export function CommandNoticeList(props: {
     <div className="ohb-command-notices">
       {notices.map((notice) => (
         <article
+          aria-label={`${notice.kind}: ${commandName(notice)}`}
           className={`ohb-command-notice ohb-command-${notice.kind}`}
           key={notice.id}
         >
-          {props.onClose ? (
-            <button
-              type="button"
-              title="Dismiss command result"
-              aria-label="Dismiss command result"
-              className="ohb-command-notice-close"
-              onClick={() => props.onClose?.(notice.id)}
-            >
-              <X size={14} />
-            </button>
-          ) : null}
           <div className="ohb-command-label">
-            <span>{notice.kind}</span>
-            <span>
-              {notice.path.length > 0
-                ? `/${notice.path.join(" ")}`
-                : notice.commandId}
-            </span>
+            {notice.kind === "running" ? <Spinner size={12} /> : null}
+            <span>{commandName(notice)}</span>
+            {props.onClose ? (
+              <button
+                type="button"
+                title="Dismiss command result"
+                aria-label="Dismiss command result"
+                className="ohb-command-notice-close"
+                onClick={() => props.onClose?.(notice.id)}
+              >
+                <X aria-hidden="true" size={13} />
+              </button>
+            ) : null}
           </div>
           {notice.kind === "error" ? (
             <>
@@ -74,6 +72,12 @@ export function CommandNoticeList(props: {
       ))}
     </div>
   );
+}
+
+function commandName(notice: CommandNotice): string {
+  return notice.path.length > 0
+    ? `/${notice.path.join(" ")}`
+    : notice.commandId;
 }
 
 export function CommandResultModal(props: {
@@ -118,15 +122,15 @@ export function CommandResultModal(props: {
         role="dialog"
       >
         <header className="ohb-command-modal-header">
-          <span>{model.commandLabel}</span>
           <h2>{model.title}</h2>
           <button
+            aria-label="Close"
             onClick={props.onClose}
             ref={closeButtonRef}
             title="Close"
             type="button"
           >
-            <X size={16} />
+            <X aria-hidden="true" size={16} />
           </button>
         </header>
         {props.notice.kind !== "success" ? (
@@ -276,7 +280,6 @@ function McpCommandResult(props: {
               className={`ohb-list-row ohb-list-${stringField(server, "status") ?? "unknown"}`}
               key={`${stringField(server, "name") ?? "server"}-${String(index)}`}
             >
-              <span />
               <strong>{stringField(server, "name") ?? "server"}</strong>
               <small>{stringField(server, "status") ?? "unknown"}</small>
               <em>{mcpServerMeta(server)}</em>
