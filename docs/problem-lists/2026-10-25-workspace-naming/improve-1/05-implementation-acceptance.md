@@ -154,4 +154,11 @@ pnpm exec vitest run --no-file-parallelism $(rg --files packages | rg '\.integra
 
 原生 Chrome 尝试受到用户手动切换页面干扰，因此实际浏览器走查使用 Codex 内置浏览器；没有使用 headless 浏览器替代 UI 交互。所有本轮服务数据来自临时 fixture，不读取或修改用户日常数据库。真实用户数据库副本升级的证据沿用 5.6，本轮没有重复迁移该副本。E2E 模型为本地可控响应，不能视为外部模型服务的可用性验收。
 
-按用户最终指示，仅合并到本地 `main` 并删除已合并的本地 `codex/workspace`，不推送远程。
+最初按用户要求仅计划本地合并。用户随后要求修复 Windows CI，并明确授权推送 `main`、不推送临时分支；最终按此授权执行。
+
+
+## 5.8 Windows CI 换行回归（2026-10-25）
+
+用户指出 main 的 [CI #40175656009](https://github.com/diverHansun/ohbaby-agent/actions/runs/40175656009) 失败。日志显示 Ubuntu、macOS 和最低 Node 版本检查通过，Windows 的 Unit tests 步骤只有 `styles.unit.test.ts` 的两项多行选择器断言失败，后续步骤被跳过。
+
+根因是测试 helper 用 JavaScript 的 LF 字符串精确匹配从磁盘读取的 CSS，未处理 Windows checkout 的 CRLF；CSS 声明本身没有变化。新增 LF/CRLF 参数化回归，用真实加载的 CSS 内容转换行尾，先在本机稳定复现 CRLF 失败，再在匹配前规范化源码行尾。修复后该文件 19 项全部通过，原有布局断言保留，未跳过 Windows 测试或修改 CI 门槛。

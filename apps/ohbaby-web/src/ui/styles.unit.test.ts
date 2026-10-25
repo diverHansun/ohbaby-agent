@@ -203,14 +203,37 @@ describe("web layout styles", () => {
   });
 });
 
+it.each([
+  ["LF", "\n"],
+  ["CRLF", "\r\n"],
+])(
+  "matches multiline CSS selectors with %s checkout line endings",
+  (_name, newline) => {
+    const source = css.replace(/\r?\n/g, newline);
+    expectCssRule(
+      ".ohb-send-button,\n.ohb-stop-button",
+      ["border-radius: 50%"],
+      source,
+    );
+    expectCssRule(
+      '.ohb-tool-panel button:hover .ohb-tool-chevron,\n.ohb-tool-panel button:focus-visible .ohb-tool-chevron,\n.ohb-tool-panel button[aria-expanded="true"] .ohb-tool-chevron',
+      ["opacity: 1"],
+      source,
+    );
+  },
+);
+
 function expectCssRule(
   selector: string,
   declarations: readonly string[],
+  source = css,
 ): void {
   const rulePattern = new RegExp(
     `(?:^|\\}|\\*/)\\s*${escapeRegExp(selector)}\\s*\\{(?<body>[^}]*)\\}`,
   );
-  const ruleBody = rulePattern.exec(css)?.groups?.body;
+  // Git may check CSS out with CRLF on Windows; selectors use JS LF strings.
+  const ruleBody = rulePattern.exec(source.replace(/\r\n?/g, "\n"))?.groups
+    ?.body;
 
   expect(ruleBody, `missing CSS rule for ${selector}`).toBeDefined();
   const normalizedRuleBody = normalizeCss(ruleBody ?? "");
