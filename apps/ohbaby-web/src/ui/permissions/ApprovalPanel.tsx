@@ -86,7 +86,6 @@ export function ApprovalPanel(props: {
         <header className="ohb-approval-header">
           <div className="ohb-approval-heading">
             <span className="ohb-approval-source">
-              <span className="ohb-approval-dot" aria-hidden="true" />
               Needs approval ·{" "}
               {request.sessionId === request.rootSessionId
                 ? "Main agent"

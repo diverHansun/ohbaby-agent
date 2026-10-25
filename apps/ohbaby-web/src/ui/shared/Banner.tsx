@@ -11,9 +11,9 @@ export interface BannerAction {
 }
 
 /**
- * An inline notice where it happened: a type dot, the message and optional
- * actions on a plain card (pi-web's notice). Only errors are announced as
- * alerts; `onDismiss` is left out for states that clear themselves.
+ * An inline notice where it happened: the message and optional actions on a
+ * plain card (pi-web's notice). Errors read in the error colour and are
+ * announced as alerts; `onDismiss` is left out for states that clear themselves.
  */
 export function Banner(props: {
   readonly tone: BannerTone;
@@ -27,7 +27,6 @@ export function Banner(props: {
       className={`ohb-banner ohb-banner-${props.tone}`}
       role={props.tone === "error" ? "alert" : "status"}
     >
-      <span className="ohb-banner-dot" aria-hidden="true" />
       <span className="ohb-banner-message">{props.message}</span>
       {props.actions?.map((action, index) => (
         <button

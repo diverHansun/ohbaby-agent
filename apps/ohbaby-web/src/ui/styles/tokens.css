@@ -51,12 +51,6 @@
   --success-ink: #166534;
   --success-soft: rgba(16, 185, 129, 0.09);
 
-  /* Notice dots (pi-web cards): red only for errors, Linear's lavender-blue
-     for "worth a look", neutral grey for information. */
-  --notice-error: var(--danger);
-  --notice-attention: #5e6ad2;
-  --notice-info: #a1a1aa;
-
   /* Brand: the wordmark (D5) and the Lychee mark (D26) only */
   --brand-oh: #c9a23f;
   --brand-ba: #c97e92;

@@ -47,15 +47,6 @@
   margin-bottom: 4px;
 }
 
-/* The one attention colour, matching the sidebar's awaiting dot. */
-.ohb-approval-dot {
-  background: var(--warning);
-  border-radius: 50%;
-  flex: none;
-  height: 6px;
-  width: 6px;
-}
-
 .ohb-approval-heading h2 {
   font-size: 15px;
   font-weight: 600;

@@ -41,19 +41,15 @@
   font-size: 12px;
   color: var(--text-dim);
 }
-.ohb-delegation-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--accent);
-  border-radius: 50%;
+/* A neutral type icon like other tool rows; a spinner while it runs. Failure
+   is said in the meta text, not with a coloured dot. */
+.ohb-delegation-icon {
+  color: var(--text-dim);
   flex-shrink: 0;
 }
-.ohb-delegation-dot.is-running {
-  background: var(--accent);
-}
-.ohb-delegation-dot.is-failed,
-.ohb-delegation-dot.is-timed_out {
-  background: var(--danger);
+.ohb-delegation-copy.is-failed .ohb-delegation-meta,
+.ohb-delegation-copy.is-timed_out .ohb-delegation-meta {
+  color: var(--danger-ink);
 }
 .ohb-subagent-view {
   box-sizing: border-box;

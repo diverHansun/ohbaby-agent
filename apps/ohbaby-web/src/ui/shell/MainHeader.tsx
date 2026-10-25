@@ -6,6 +6,7 @@ import {
 } from "../session/selectors.js";
 import { ContextUsageControl } from "../shared/ContextUsage.js";
 import { IconButton } from "../shared/IconButton.js";
+import { Spinner } from "../shared/Spinner.js";
 import { compactHomePath } from "../workspace/workspace-labels.js";
 
 const CONNECTION_LABELS: Partial<
@@ -63,7 +64,9 @@ export function MainHeader(props: {
             className={`ohb-connection-state ohb-connection-${props.header.connectionKind}`}
             role="status"
           >
-            <span className="ohb-connection-dot" aria-hidden="true" />
+            {props.header.connectionKind === "disconnected" ? null : (
+              <Spinner size={11} />
+            )}
             {CONNECTION_LABELS[props.header.connectionKind]}
           </span>
         ) : null}

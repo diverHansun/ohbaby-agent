@@ -296,8 +296,8 @@
   z-index: 200;
 }
 
-/* Notice card (pi-web): plain surface, hairline edge, soft shadow; only the
-   dot carries the type, so nothing shouts. */
+/* Notice card (pi-web): plain surface, hairline edge, soft shadow; nothing
+   shouts. */
 .ohb-banner {
   align-items: flex-start;
   animation: ohb-pop var(--duration) var(--ease);
@@ -316,21 +316,14 @@
   width: 100%;
 }
 
-.ohb-banner-dot {
-  background: var(--notice-info);
-  border-radius: 50%;
-  flex: none;
-  height: 7px;
-  margin-top: 7px;
-  width: 7px;
+/* No status dot: the wording carries the kind. Errors take the error colour;
+   something worth a look reads a step darker than plain information. */
+.ohb-banner-error .ohb-banner-message {
+  color: var(--danger-ink);
 }
 
-.ohb-banner-error .ohb-banner-dot {
-  background: var(--notice-error);
-}
-
-.ohb-banner-attention .ohb-banner-dot {
-  background: var(--notice-attention);
+.ohb-banner-attention .ohb-banner-message {
+  color: var(--text);
 }
 
 .ohb-banner-message {

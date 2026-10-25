@@ -85,8 +85,8 @@
   gap: 10px;
 }
 
-/* The one place connection trouble shows: a quiet pill whose dot breathes
-   while it retries and turns red once offline. */
+/* The one place connection trouble shows: a quiet pill with a spinner while
+   it retries, and the error colour once offline. */
 .ohb-connection-state {
   align-items: center;
   background: var(--bg-subtle);
@@ -97,21 +97,12 @@
   font-size: 12px;
   gap: 6px;
   line-height: 18px;
-  padding: 2px 10px 2px 8px;
+  padding: 2px 10px;
   white-space: nowrap;
 }
 
-.ohb-connection-dot {
-  animation: ohb-breathe 1.6s ease-in-out infinite;
-  background: var(--notice-info);
-  border-radius: 50%;
-  height: 6px;
-  width: 6px;
-}
-
-.ohb-connection-disconnected .ohb-connection-dot {
-  animation: none;
-  background: var(--notice-error);
+.ohb-connection-disconnected {
+  color: var(--danger-ink);
 }
 
 /* Main body: fills the area under the header; in a chat the composer floats at its bottom. */
