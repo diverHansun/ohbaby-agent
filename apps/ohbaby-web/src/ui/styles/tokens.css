@@ -21,6 +21,8 @@
   /* Lines */
   --border: rgba(0, 0, 0, 0.08);
   --border-strong: rgba(0, 0, 0, 0.13);
+  --border-focus: rgba(0, 0, 0, 0.22);
+  --ring-soft: 0 0 0 3px rgba(0, 0, 0, 0.04);
 
   /* Text */
   --text: #18181b;

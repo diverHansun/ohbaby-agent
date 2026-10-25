@@ -75,6 +75,7 @@
 | improve-2 | 全局会话客户端、按会话目录连接的运行时、草稿首发与项目选择、全局侧栏（分组、分页、置顶迁移）、`SESSION_MOVED`；拆 `client.ts`、`runtime.ts` | improve-1 | [improve-2](improve-2/02-plan-and-change-scope.md) |
 | improve-3 | 会话菜单（移入、换项目、移出、归档、导出）与侧栏全局搜索 | improve-2 | [improve-3](improve-3/02-plan-and-change-scope.md) |
 | improve-4 | 后端前置 D19、设置 API 客户端、5 个设置分区、输入框模型菜单、手机“更多”控制项（D29）、删除 `/connect` 浮层 | improve-1、improve-2（设置目录与“回到草稿”依赖新运行时）；D19 | [improve-4](improve-4/02-plan-and-change-scope.md) |
+| improve-5 | 输入框提示文字、空状态问候与进场动画、输入卡片焦点样式、发送按钮过渡（小批次，单篇文档） | improve-4 | [improve-5](improve-5/02-plan-and-change-scope.md) |
 
 00–08 里写的“第一批”对应 improve-1 至 improve-3，“第二批”对应 improve-4。每批目录下有 01 现状、02 方案与改动面、04 验收，简写。行为、视觉和组件以本目录 00–08 为准，各批文档只写“这一批改哪些、怎么验”。实施后各批另写 05 验收。
 

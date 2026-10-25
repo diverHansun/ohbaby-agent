@@ -43,6 +43,33 @@
   margin-bottom: 22px;
 }
 
+.ohb-draft-greeting {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+  margin: -6px 0 0;
+}
+
+/* Mark, greeting, picker and card rise in one after another, once. `backwards`
+   drops the transform when done so menus inside the card position normally. */
+.ohb-draft-hero > *,
+.ohb-main-body-empty .ohb-composer-hero .ohb-composer-input {
+  animation: ohb-slide-up 0.32s var(--ease) backwards;
+}
+
+.ohb-draft-hero > :nth-child(2) {
+  animation-delay: 40ms;
+}
+
+.ohb-draft-hero > :nth-child(3) {
+  animation-delay: 80ms;
+}
+
+.ohb-main-body-empty .ohb-composer-hero .ohb-composer-input {
+  animation-delay: 110ms;
+}
+
 .ohb-main-body.is-loading .ohb-draft-hero {
   visibility: hidden;
 }

@@ -497,5 +497,7 @@ function composerPlaceholder(
     return "Draft while reconnecting…";
   }
   if (isRunning) return "Steer now or queue a follow-up...";
-  return inSession ? "Reply..." : "Ask anything...";
+  return inSession
+    ? "Follow up, or type / for commands"
+    : "Describe a task, or type / for commands";
 }

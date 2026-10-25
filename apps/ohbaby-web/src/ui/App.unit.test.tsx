@@ -426,7 +426,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     if (!(textarea instanceof HTMLTextAreaElement)) {
       throw new Error("textarea not found");
     }
-    expect(textarea.placeholder).toMatch(/^(Ask anything|Reply)\.\.\.$/u);
+    expect(textarea.placeholder).toMatch(
+      /^(Describe a task|Follow up), or type \/ for commands$/u,
+    );
     expect(app.container.querySelector(".ohb-composer-typewriter")).toBeNull();
   });
 

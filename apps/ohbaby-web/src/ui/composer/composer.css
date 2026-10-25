@@ -212,13 +212,16 @@
   max-width: var(--content-width);
   padding: 16px 12px 10px 18px;
   position: relative;
-  transition: border-color var(--duration-fast) var(--ease);
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
   width: 100%;
   z-index: 2;
 }
 
 .ohb-composer-input:focus-within {
-  border-color: var(--border-strong);
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-card), var(--ring-soft);
 }
 
 .ohb-composer-input.is-plan {
@@ -436,6 +439,18 @@
   background: var(--accent);
   border: 0;
   color: var(--accent-contrast);
+}
+
+/* Enabling fades in rather than snapping; a press shrinks it slightly. */
+.ohb-send-button {
+  transition:
+    background-color var(--duration) var(--ease),
+    color var(--duration) var(--ease),
+    transform var(--duration-fast) var(--ease);
+}
+
+.ohb-send-button:not(:disabled):active {
+  transform: scale(0.92);
 }
 
 .ohb-send-button:not(:disabled):hover,

@@ -391,7 +391,7 @@ Web search 是一页表单（API key、> More options：Key variable、Base URL�
 - 按钮用动词：`Save`、`Open folder`、`Retry`。
 - 空态一句话，写为什么空、可以做什么。比如搜索无结果：`No chats match "foo".`
 - 不加感叹号，不用 emoji，去掉 “Ask Lychee anything…” 这类轮播占位。
-- 输入框占位：草稿 `Ask anything...`，会话 `Reply...`，运行中 `Steer now or queue a follow-up...`（照 pi-web 的三态写法）。
+- 输入框占位：草稿 `Describe a task, or type / for commands`，会话 `Follow up, or type / for commands`，运行中 `Steer now or queue a follow-up...`（照 pi-web 的三态写法；2026-10-25 improve-5 E1 改为只说明功能）。
 
 ## 7. 视觉验收口径
 

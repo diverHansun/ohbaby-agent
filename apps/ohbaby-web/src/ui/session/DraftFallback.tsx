@@ -35,7 +35,7 @@ export function DraftFallback(props: {
           <div className="ohb-composer-text">
             <textarea
               aria-label="Message"
-              placeholder="Ask anything..."
+              placeholder="Describe a task"
               rows={2}
               value={text}
               onChange={(event) => {
