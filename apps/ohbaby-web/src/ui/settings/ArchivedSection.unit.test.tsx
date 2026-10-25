@@ -2,7 +2,7 @@
 import type { UiGlobalSession, UiGlobalSessionPage } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
   ArchivedSection,
   type ArchivedSessionsApi,
@@ -45,7 +45,9 @@ function rejectWith(code: string, status: number): Error {
   return Object.assign(new Error(code), { code, status });
 }
 
-function pager(pages: readonly UiGlobalSessionPage[]) {
+function pager(
+  pages: readonly UiGlobalSessionPage[],
+): Mock<(cursor?: string) => Promise<UiGlobalSessionPage>> {
   return vi.fn((cursor?: string) =>
     Promise.resolve(pages[Number(cursor ?? 0)] ?? { sessions: [] }),
   );

@@ -1,5 +1,6 @@
 import type {
   UiBackendClient,
+  UiGlobalSessionPage,
   UiSnapshot,
   UiSessionSearchPage,
   UiSessionSearchResult,
@@ -207,7 +208,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
       catalog.removeSession(id);
       return Promise.resolve();
     },
-    listArchivedSessions: async (cursor) => {
+    listArchivedSessions: async (cursor): Promise<UiGlobalSessionPage> => {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       if (name === "archived-error" && archivedReads++ === 0)
         throw new Error("Can't reach ohbaby. Check that it's still running.");
