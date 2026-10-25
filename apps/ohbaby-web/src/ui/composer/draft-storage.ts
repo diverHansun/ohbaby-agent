@@ -68,7 +68,7 @@ const MIGRATED_KEY = "ohbaby:composer-keys:v2";
  * one directory had one. Edit leases move only for sessions, never into
  * `new`. Old keys stay, an existing new key is never overwritten, and the
  * move runs once per tab. Returns the directory a moved new-chat draft was
- * written in, so the draft can reopen in that project.
+ * written in, so the draft can reopen in that workspace.
  */
 export function migrateLegacyComposerKeys(): string | null {
   let draftDirectory: string | null = null;

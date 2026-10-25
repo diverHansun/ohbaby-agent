@@ -179,7 +179,8 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
         const active = [...sessions.values()]
           .filter(
             (session) =>
-              !session.archived && !hidden.has(session.workspaceDirectory ?? ""),
+              !session.archived &&
+              !hidden.has(session.workspaceDirectory ?? ""),
           )
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         const offset = Number(url.searchParams.get("cursor") ?? "0");
@@ -219,11 +220,11 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
       if (move?.[1]) {
         const value = sessions.get(decodeURIComponent(move[1]));
         if (!value) throw new Error("Missing session");
-        const project = (body as { workspaceDirectory: string | null })
+        const workspace = (body as { workspaceDirectory: string | null })
           .workspaceDirectory;
-        value.workspaceDirectory = project;
-        if (project === null) delete value.pendingWorkingDirectory;
-        else value.pendingWorkingDirectory = project;
+        value.workspaceDirectory = workspace;
+        if (workspace === null) delete value.pendingWorkingDirectory;
+        else value.pendingWorkingDirectory = workspace;
         return Response.json({ ok: true, session: global(value) });
       }
       if (directory && daemon.unavailable.has(directory))

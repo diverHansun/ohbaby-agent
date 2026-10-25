@@ -38,7 +38,7 @@ export function SessionScreen({
 }: {
   readonly runtime: OhbabyWebRuntime;
   readonly client: UiBackendClient;
-  /** Project picker for a new-chat draft; hidden once a session is bound. */
+  /** Workspace picker for a new-chat draft; hidden once a session is bound. */
   readonly draftPicker?: ReactNode;
   /** Opens Settings › Models; `fromDraft` when a draft send found no model. */
   readonly onOpenModelSettings: (fromDraft: boolean) => void;

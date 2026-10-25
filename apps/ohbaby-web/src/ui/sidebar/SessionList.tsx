@@ -19,7 +19,7 @@ import { useSessionReorder } from "./use-session-reorder.js";
 export interface SessionListProps {
   /** The group's visible rows, already ordered. */
   readonly sessions: readonly SidebarSessionItem[];
-  readonly projects: readonly import("../../store/sidebar-groups.js").SidebarProject[];
+  readonly workspaces: readonly import("../../store/sidebar-groups.js").SidebarWorkspace[];
   readonly moving: ReadonlySet<string>;
   readonly onMoveSession: (
     session: SidebarSessionItem,
@@ -184,7 +184,7 @@ export function SessionList(props: SessionListProps): ReactElement {
           anchor={menu.anchor}
           pinned={menuSession.pinned}
           title={menuSession.title}
-          projects={props.projects}
+          workspaces={props.workspaces}
           workspaceDirectory={menuSession.workspaceDirectory}
           onMove={(directory) => {
             closeMenu(true);

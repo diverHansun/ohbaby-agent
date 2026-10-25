@@ -95,7 +95,7 @@ function directoryPicker(): DirectoryPickerApi & {
       Promise.resolve(
         directory === "C:\\"
           ? {
-              children: [{ directory: "C:\\Projects", name: "Projects" }],
+              children: [{ directory: "C:\\Workspaces", name: "Workspaces" }],
               directory,
               ok: true,
               parent: null,
@@ -160,23 +160,23 @@ describe("DirectoryPickerDialog", () => {
       throw new Error("root button not found");
     }
     await click(root);
-    await waitFor(() => container.textContent.includes("Projects"));
+    await waitFor(() => container.textContent.includes("Workspaces"));
 
     const child = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent.includes("Projects"),
+      button.textContent.includes("Workspaces"),
     );
     if (!child) {
       throw new Error("child button not found");
     }
     await click(child);
-    await waitFor(() => breadcrumbLabels(container).includes("Projects"));
+    await waitFor(() => breadcrumbLabels(container).includes("Workspaces"));
     expect(breadcrumbLabels(container)).toEqual([
       "Locations",
       "C:\\",
-      "Projects",
+      "Workspaces",
     ]);
     expect(picker.listDirectoryPicker).toHaveBeenCalledWith("C:\\");
-    expect(picker.listDirectoryPicker).toHaveBeenCalledWith("C:\\Projects");
+    expect(picker.listDirectoryPicker).toHaveBeenCalledWith("C:\\Workspaces");
   });
 
   it("returns to the parent supplied by the server", async () => {
@@ -191,15 +191,15 @@ describe("DirectoryPickerDialog", () => {
       throw new Error("root button not found");
     }
     await click(root);
-    await waitFor(() => container.textContent.includes("Projects"));
+    await waitFor(() => container.textContent.includes("Workspaces"));
     const child = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent.includes("Projects"),
+      button.textContent.includes("Workspaces"),
     );
     if (!child) {
       throw new Error("child button not found");
     }
     await click(child);
-    await waitFor(() => breadcrumbLabels(container).includes("Projects"));
+    await waitFor(() => breadcrumbLabels(container).includes("Workspaces"));
 
     const back = [...container.querySelectorAll("button")].find(
       (button) => button.textContent.trim() === "Back",
@@ -247,7 +247,7 @@ describe("DirectoryPickerDialog", () => {
       throw new Error("root button not found");
     }
     await click(root);
-    await waitFor(() => container.textContent.includes("Projects"));
+    await waitFor(() => container.textContent.includes("Workspaces"));
 
     const locations = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Locations",
@@ -258,7 +258,7 @@ describe("DirectoryPickerDialog", () => {
     await click(locations);
     await waitFor(() => picker.getDirectoryPickerRoots.mock.calls.length === 2);
 
-    expect(container.textContent).not.toContain("Projects");
+    expect(container.textContent).not.toContain("Workspaces");
     expect(container.textContent).not.toContain("Choose this folder");
   });
 

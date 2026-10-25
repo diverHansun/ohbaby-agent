@@ -1,6 +1,6 @@
 import { Check, ChevronDown, Folder, FolderPlus } from "lucide-react";
 import { type ReactElement, useRef, useState } from "react";
-import type { SidebarProject } from "../../store/sidebar-groups.js";
+import type { SidebarWorkspace } from "../../store/sidebar-groups.js";
 import { Menu, type MenuAnchor } from "../shared/Menu.js";
 import { workspaceLabel } from "../workspace/workspace-labels.js";
 
@@ -8,14 +8,14 @@ import { workspaceLabel } from "../workspace/workspace-labels.js";
 const FILTER_THRESHOLD = 8;
 
 /**
- * The draft's project choice above the composer card (05 ProjectPicker):
- * No project, the known projects, then Open folder…. Changing it never
- * touches the composer text. When the project list could not be read, the
+ * The draft's workspace choice above the composer card (05 WorkspacePicker):
+ * No workspace, the known workspaces, then Open folder…. Changing it never
+ * touches the composer text. When the workspace list could not be read, the
  * menu says so and offers Retry.
  */
-export function ProjectPicker(props: {
+export function WorkspacePicker(props: {
   readonly value: string | null;
-  readonly projects: readonly SidebarProject[];
+  readonly workspaces: readonly SidebarWorkspace[];
   readonly disabled?: boolean;
   readonly loadFailed?: boolean;
   readonly onChange: (directory: string | null) => void;
@@ -25,8 +25,8 @@ export function ProjectPicker(props: {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const label =
-    props.value === null ? "No project" : workspaceLabel(props.value);
-  const available = props.projects.filter((project) => project.available);
+    props.value === null ? "No workspace" : workspaceLabel(props.value);
+  const available = props.workspaces.filter((workspace) => workspace.available);
   const close = (restoreFocus: boolean): void => {
     setAnchor(null);
     if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
@@ -41,7 +41,7 @@ export function ProjectPicker(props: {
     title?: string,
   ): ReactElement => (
     <button
-      key={directory ?? "no-project"}
+      key={directory ?? "recents"}
       role="menuitem"
       type="button"
       title={title}
@@ -61,10 +61,10 @@ export function ProjectPicker(props: {
       <button
         ref={triggerRef}
         type="button"
-        className="ohb-project-slot ohb-project-picker"
+        className="ohb-workspace-slot ohb-workspace-picker"
         aria-haspopup="menu"
         aria-expanded={anchor !== null}
-        aria-label={`Project: ${label}`}
+        aria-label={`Workspace: ${label}`}
         title={props.value ?? undefined}
         disabled={props.disabled}
         onClick={(event) => {
@@ -84,31 +84,31 @@ export function ProjectPicker(props: {
       {anchor ? (
         <Menu
           anchor={anchor}
-          label="Choose a project"
-          title="Project"
-          className="ohb-project-picker-menu"
+          label="Choose a workspace"
+          title="Workspace"
+          className="ohb-workspace-picker-menu"
           filterable={available.length > FILTER_THRESHOLD}
           onClose={close}
         >
-          {item(null, "No project")}
-          {available.map((project) =>
+          {item(null, "No workspace")}
+          {available.map((workspace) =>
             item(
-              project.directory,
-              workspaceLabel(project.directory),
-              project.directory,
+              workspace.directory,
+              workspaceLabel(workspace.directory),
+              workspace.directory,
             ),
           )}
           {props.loadFailed ? (
             <button
               role="menuitem"
               type="button"
-              className="ohb-project-picker-error"
+              className="ohb-workspace-picker-error"
               onClick={() => {
                 close(true);
                 props.onRetry?.();
               }}
             >
-              <span>Projects could not be loaded. Retry</span>
+              <span>Workspaces could not be loaded. Retry</span>
             </button>
           ) : null}
           <div className="ohb-menu-separator" role="separator" />

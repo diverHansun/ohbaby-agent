@@ -7,7 +7,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
-import { ProjectPicker } from "../composer/ProjectPicker.js";
+import { WorkspacePicker } from "../composer/WorkspacePicker.js";
 import { DraftFallback } from "../session/DraftFallback.js";
 import { selectViewModel } from "../session/selectors.js";
 import { SessionScreen } from "../session/SessionScreen.js";
@@ -70,7 +70,7 @@ export function AppController(props: {
     [openSettings],
   );
   // Where the folder picker was opened: from the draft it also selects the
-  // new project; from the sidebar it only registers it (06 §1.1).
+  // new workspace; from the sidebar it only registers it (06 §1.1).
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState<
     "draft" | "sidebar" | null
   >(null);
@@ -180,11 +180,11 @@ export function AppController(props: {
   );
 
   const draftPicker = (
-    <ProjectPicker
+    <WorkspacePicker
       value={draft.workspaceDirectory}
-      projects={catalog.projects}
+      workspaces={catalog.workspaces}
       disabled={workspaceActionCount > 0}
-      loadFailed={catalog.projectsStatus === "error"}
+      loadFailed={catalog.workspacesStatus === "error"}
       onChange={(directory) => {
         void runWorkspaceAction(() => runtime.openDraft(directory));
       }}
@@ -214,7 +214,9 @@ export function AppController(props: {
           onCollapse={close}
           onNewChat={(workspaceDirectory) => {
             dismissDrawer();
-            void runWorkspaceAction(() => runtime.openDraft(workspaceDirectory));
+            void runWorkspaceAction(() =>
+              runtime.openDraft(workspaceDirectory),
+            );
           }}
           onSelectSession={(session) => {
             dismissDrawer();
@@ -231,7 +233,7 @@ export function AppController(props: {
           onMoveSession={(session, directory) =>
             runAction(() => runtime.moveSession(session.id, directory))
           }
-          onHideProject={(directory) => {
+          onHideWorkspace={(directory) => {
             void runAction(() => runtime.hideWorkspace(directory));
           }}
           onOpenFolder={() => {
@@ -283,7 +285,7 @@ export function AppController(props: {
             reason={
               workspaceActionCount > 0
                 ? "Connecting…"
-                : "The default workspace is not available. Choose a project to start."
+                : "The default directory is not available. Choose a workspace to start."
             }
           />
         )

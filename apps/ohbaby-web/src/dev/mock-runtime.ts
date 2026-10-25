@@ -97,7 +97,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   let workspace = scenario.workspace;
   const hidden = new Set<string>();
   const catalog = createGlobalCatalogStore();
-  catalog.setProjects(scenario.workspace.scopes, DEFAULT_WORKSPACE);
+  catalog.setWorkspaces(scenario.workspace.scopes, DEFAULT_WORKSPACE);
   const page = (offset: number): void => {
     const visible = sessions.filter(
       (row) =>
@@ -259,7 +259,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
           (scope) => scope.directory !== directory,
         ),
       };
-      catalog.removeProject(directory);
+      catalog.removeWorkspace(directory);
       return Promise.resolve();
     },
     listDirectoryPicker: (directory) =>

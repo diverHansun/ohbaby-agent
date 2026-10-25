@@ -256,10 +256,10 @@ function running(withApproval: boolean): UiSnapshot {
   };
 }
 
-const agentProject = "/Users/demo/Projects/ohbaby-agent";
-const piProject = "/Users/demo/Projects/pi-web";
-const notesProject = "/Users/demo/notes";
-const archiveProject = "/Users/demo/Projects/archive-tool";
+const agentWorkspace = "/Users/demo/Projects/ohbaby-agent";
+const piWorkspace = "/Users/demo/Projects/pi-web";
+const notesWorkspace = "/Users/demo/notes";
+const archiveWorkspace = "/Users/demo/Projects/archive-tool";
 
 function globalRow(
   id: string,
@@ -289,10 +289,10 @@ function byRecency(
   );
 }
 
-/** 3 projects (one with 30 chats), 5 chats without a project, 2 pinned (06 §5). */
+/** 3 workspaces (one with 30 chats), 5 chats without a workspace, 2 pinned (06 §5). */
 function typicalSessions(): readonly UiGlobalSession[] {
   const rows: UiGlobalSession[] = history.map((entry, index) =>
-    globalRow(entry.id, entry.title, (index + 1) * 600, agentProject),
+    globalRow(entry.id, entry.title, (index + 1) * 600, agentWorkspace),
   );
   for (let index = rows.length; index < 30; index++)
     rows.push(
@@ -300,13 +300,13 @@ function typicalSessions(): readonly UiGlobalSession[] {
         `agent_${String(index)}`,
         `Earlier agent task ${String(index + 1)}`,
         (index + 1) * 900,
-        agentProject,
+        agentWorkspace,
       ),
     );
   ["Port the session tree", "Search snippet styling", "Pinned layout"].forEach(
     (title, index) => {
       rows.push(
-        globalRow(`pi_${String(index)}`, title, 45 + index * 400, piProject),
+        globalRow(`pi_${String(index)}`, title, 45 + index * 400, piWorkspace),
       );
     },
   );
@@ -316,7 +316,7 @@ function typicalSessions(): readonly UiGlobalSession[] {
         `notes_${String(index)}`,
         title,
         3000 + index * 2000,
-        notesProject,
+        notesWorkspace,
       ),
     );
   });
@@ -334,19 +334,19 @@ function typicalSessions(): readonly UiGlobalSession[] {
   return byRecency(rows);
 }
 
-/** 600 chats across 4 projects, so Show more has to page (06 §5 many). */
+/** 600 chats across 4 workspaces, so Show more has to page (06 §5 many). */
 function manySessions(): readonly UiGlobalSession[] {
-  const projects = [agentProject, piProject, notesProject];
+  const workspaces = [agentWorkspace, piWorkspace, notesWorkspace];
   return byRecency(
     Array.from({ length: 600 }, (_, index) =>
       globalRow(
         `many_${String(index)}`,
         `Chat ${String(index + 1)}`,
         index * 37,
-        // The fourth project's chats are old and rare, so it fills late.
+        // The fourth workspace's chats are old and rare, so it fills late.
         index % 20 === 0
-          ? archiveProject
-          : (projects[index % 3] ?? agentProject),
+          ? archiveWorkspace
+          : (workspaces[index % 3] ?? agentWorkspace),
       ),
     ),
   );
@@ -409,7 +409,7 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     workspace,
     model,
     sessions: byRecency([
-      globalRow("session_1", runningSession.title, 1, agentProject),
+      globalRow("session_1", runningSession.title, 1, agentWorkspace),
       ...typicalSessions(),
     ]),
   }),
@@ -418,7 +418,7 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     workspace,
     model,
     sessions: byRecency([
-      globalRow("session_1", runningSession.title, 1, agentProject),
+      globalRow("session_1", runningSession.title, 1, agentWorkspace),
       ...typicalSessions(),
     ]),
   }),
@@ -428,9 +428,9 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     workspace,
     model,
     sessions: byRecency([
-      globalRow("session_1", runningSession.title, 1, piProject, {
-        workingDirectory: agentProject,
-        pendingWorkingDirectory: piProject,
+      globalRow("session_1", runningSession.title, 1, piWorkspace, {
+        workingDirectory: agentWorkspace,
+        pendingWorkingDirectory: piWorkspace,
       }),
       ...typicalSessions(),
     ]),

@@ -6,7 +6,7 @@ import type {
 import type { DaemonHttpClient } from "./http.js";
 
 /**
- * The cross-project session catalog. Every call goes out without a
+ * The cross-workspace session catalog. Every call goes out without a
  * directory header; the `http` client passed in must be the global one.
  */
 export class GlobalSessionsClient {

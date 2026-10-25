@@ -20,7 +20,7 @@ const PAGE_SIZE = 100;
 const MAX_PAGES_PER_LOAD = 10;
 
 /**
- * Directory-independent state: projects, the global session list and the
+ * Directory-independent state: workspaces, the global session list and the
  * folder picker. Requests carry no directory header. Reads go through one
  * serial queue, so a refresh and Show more never interleave pages.
  */
@@ -49,24 +49,24 @@ export class GlobalLayer {
     this.sessions = new GlobalSessionsClient(this.http);
   }
 
-  /** Reads the project list; throws so startup can detect a missing control plane. */
-  async refreshProjects(): Promise<void> {
+  /** Reads the workspace list; throws so startup can detect a missing control plane. */
+  async refreshWorkspaces(): Promise<void> {
     const writes = this.writes;
     try {
       const response = await this.http.listWorkspaceScopes();
       if (writes !== this.writes) return;
-      this.catalog.setProjects(
+      this.catalog.setWorkspaces(
         response.scopes,
         response.defaultDirectory?.directory ?? null,
       );
     } catch (error) {
-      this.catalog.failProjects();
+      this.catalog.failWorkspaces();
       throw error;
     }
   }
 
   /**
-   * Re-reads projects and at least the loaded range of sessions from the first
+   * Re-reads workspaces and at least the loaded range of sessions from the first
    * page, then replaces the range so rows archived, hidden or moved elsewhere
    * disappear. Triggers during a refresh coalesce into one more refresh.
    */
@@ -75,13 +75,16 @@ export class GlobalLayer {
     if (this.refreshQueued) return this.refreshQueued;
     const pending = this.enqueue(async () => {
       this.refreshQueued = null;
-      await Promise.allSettled([this.refreshProjects(), this.reloadSessions()]);
+      await Promise.allSettled([
+        this.refreshWorkspaces(),
+        this.reloadSessions(),
+      ]);
     });
     this.refreshQueued = pending;
     return pending;
   }
 
-  /** Startup: projects were just read, so only the session list is loaded. */
+  /** Startup: workspaces were just read, so only the session list is loaded. */
   refreshSessions(): Promise<void> {
     if (!this.controlPlaneAvailable) return Promise.resolve();
     return this.enqueue(() => this.reloadSessions());
@@ -147,7 +150,7 @@ export class GlobalLayer {
     };
   }
 
-  /** Registers a folder as a project and returns its canonical directory. */
+  /** Registers a folder as a workspace and returns its canonical directory. */
   async openScope(directory: string): Promise<string> {
     return (await this.http.openWorkspace(directory)).scope.directory;
   }
@@ -155,7 +158,7 @@ export class GlobalLayer {
   async hideScope(directory: string): Promise<void> {
     await this.http.hideWorkspace(directory);
     this.noteWrite();
-    this.catalog.removeProject(directory);
+    this.catalog.removeWorkspace(directory);
   }
 
   async moveSession(

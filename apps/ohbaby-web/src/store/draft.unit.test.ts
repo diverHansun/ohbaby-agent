@@ -6,24 +6,24 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 
-describe("draft project", () => {
-  it("starts at No project and survives a reload of the store", () => {
+describe("draft workspace", () => {
+  it("starts at No workspace and survives a reload of the store", () => {
     expect(createDraftStore().getSnapshot().workspaceDirectory).toBeNull();
     const store = createDraftStore();
     let notified = 0;
     store.subscribe(() => {
       notified += 1;
     });
-    store.setProject("/a");
-    store.setProject("/a");
+    store.setWorkspace("/a");
+    store.setWorkspace("/a");
     expect(notified).toBe(1);
     expect(createDraftStore().getSnapshot().workspaceDirectory).toBe("/a");
-    store.setProject(null);
+    store.setWorkspace(null);
     expect(createDraftStore().getSnapshot().workspaceDirectory).toBeNull();
   });
 
   it("ignores unreadable stored values", () => {
-    sessionStorage.setItem("ohbaby:draft-project:new", "{broken");
+    sessionStorage.setItem("ohbaby:draft-workspace:new", "{broken");
     expect(createDraftStore().getSnapshot().workspaceDirectory).toBeNull();
   });
 });

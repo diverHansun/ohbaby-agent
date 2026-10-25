@@ -95,7 +95,7 @@ describe("session-centric runtime", () => {
     },
   );
 
-  it("starts a draft in the default workspace without creating a session; the first prompt creates it there", async () => {
+  it("starts a draft in the default directory without creating a session; the first prompt creates it there", async () => {
     const daemon = fakeDaemon();
     const runtime = start(daemon);
     await runtime.ready;
@@ -123,7 +123,7 @@ describe("session-centric runtime", () => {
     });
   });
 
-  it("creates the first session in the draft's project", async () => {
+  it("creates the first session in the draft's workspace", async () => {
     const daemon = fakeDaemon();
     const runtime = start(daemon);
     await runtime.ready;
@@ -133,10 +133,12 @@ describe("session-centric runtime", () => {
     expect(instanceDirectory(runtime)).toBe("/a");
     expect(runtime.draft.getSnapshot().workspaceDirectory).toBe("/a");
     const receipt = await runtime.submitPrompt("in a");
-    expect(daemon.sessions.get(receipt.sessionId)?.workspaceDirectory).toBe("/a");
+    expect(daemon.sessions.get(receipt.sessionId)?.workspaceDirectory).toBe(
+      "/a",
+    );
   });
 
-  it("opens a session removed from its project at its working directory, not the default workspace", async () => {
+  it("opens a session removed from its workspace at its working directory, not the default directory", async () => {
     const daemon = fakeDaemon([session("out", null, "/a")]);
     const runtime = start(daemon);
     await runtime.ready;
@@ -400,7 +402,7 @@ describe("session-centric runtime", () => {
     expect(instanceDirectory(runtime)).toBe("/c");
   });
 
-  it("restores the picker to the connected project when opening a draft fails", async () => {
+  it("restores the picker to the connected workspace when opening a draft fails", async () => {
     const daemon = fakeDaemon();
     const runtime = start(daemon);
     await runtime.ready;

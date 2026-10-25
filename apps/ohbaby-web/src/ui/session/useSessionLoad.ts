@@ -30,7 +30,7 @@ export function useSessionLoad(runtime: OhbabyWebRuntime): {
     storeSnapshot,
     view,
     workspace,
-    // Directory-free: changing the draft's project keeps its text (06 §3.5).
+    // Directory-free: changing the draft's workspace keeps its text (06 §3.5).
     draftScopeKey: view.composer.activeSessionId ?? "new",
     sessionSyncBanner,
     promptRecoveryReminders: storeSnapshot.unknownPromptRequests.filter(

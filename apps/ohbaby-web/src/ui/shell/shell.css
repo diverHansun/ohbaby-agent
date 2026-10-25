@@ -37,7 +37,7 @@
   border-left: 1px solid var(--border);
 }
 
-/* Main header: a quiet row with the project name; no border, no status dots. */
+/* Main header: a quiet row with the workspace name; no border, no status dots. */
 .ohb-main-header {
   align-items: center;
   display: flex;

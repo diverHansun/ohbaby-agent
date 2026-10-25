@@ -61,12 +61,12 @@ function catalog(
   sessions: readonly UiGlobalSession[] = entries,
   options: {
     readonly nextCursor?: string;
-    readonly projects?: readonly WorkspaceScopeSummary[];
+    readonly workspaces?: readonly WorkspaceScopeSummary[];
     readonly status?: "loading" | "ready" | "error";
   } = {},
 ): GlobalCatalogSnapshot {
   const store = createGlobalCatalogStore();
-  store.setProjects(options.projects ?? [scope("/repo")], "/default");
+  store.setWorkspaces(options.workspaces ?? [scope("/repo")], "/default");
   store.replaceSessions(sessions, options.nextCursor);
   if (options.status === "error") store.failSessions("offline");
   const snapshot = store.getSnapshot();
@@ -93,7 +93,7 @@ function render(overrides: Partial<SidebarProps> = {}): void {
         onArchiveSession={archive}
         onExportSession={exportSession}
         onMoveSession={() => Promise.resolve(true)}
-        onHideProject={() => undefined}
+        onHideWorkspace={() => undefined}
         onOpenFolder={() => undefined}
         onRetry={() => undefined}
         onOpenSettings={() => undefined}
@@ -183,11 +183,11 @@ it("moves pinned chats into Pinned, latest pin first, through the menu and the c
   expect(select).not.toHaveBeenCalled();
 });
 
-it("keeps pins across projects and remounts with one global set", () => {
+it("keeps pins across workspaces and remounts with one global set", () => {
   pin("B");
   render({
     catalog: catalog([...entries, row("D", "/other", "2026-09-04T00:00:00Z")], {
-      projects: [scope("/repo"), scope("/other")],
+      workspaces: [scope("/repo"), scope("/other")],
     }),
   });
   pin("D");
@@ -197,7 +197,7 @@ it("keeps pins across projects and remounts with one global set", () => {
   root = createRoot(container);
   render({
     catalog: catalog([...entries, row("D", "/other", "2026-09-04T00:00:00Z")], {
-      projects: [scope("/repo"), scope("/other")],
+      workspaces: [scope("/repo"), scope("/other")],
     }),
   });
   expect(order().slice(0, 2)).toEqual(["Chat D", "Chat B"]);
@@ -229,7 +229,7 @@ it("switches to the export list in place and goes back one level per Escape", ()
     });
   };
   press("ArrowDown");
-  expect(document.activeElement).toBe(button("Move to project…"));
+  expect(document.activeElement).toBe(button("Move to workspace…"));
   press("ArrowDown");
   expect(document.activeElement).toBe(button("Export…"));
   press("ArrowRight");
@@ -311,22 +311,33 @@ it("closes stale menus when the target disappears or the list order changes", ()
   expect(document.querySelector('[role="menu"]')).toBeNull();
 });
 
-it("groups by project with No project last and starts new chats with or without a project", () => {
+it("groups by workspace with Recents last and starts new chats with or without a workspace", () => {
   render({
     catalog: catalog(
       [
         row("P", "/repo", "2026-09-05T00:00:00Z"),
         row("N", null, "2026-09-06T00:00:00Z"),
       ],
-      { projects: [scope("/repo"), scope("/empty")] },
+      { workspaces: [scope("/repo"), scope("/empty")] },
     ),
   });
   const headings = Array.from(
     container.querySelectorAll(
-      ".ohb-project-name, .ohb-sidebar-section-toggle > span:first-child",
+      ".ohb-workspace-name, .ohb-sidebar-section-toggle > span:first-child",
     ),
   ).map((element) => element.textContent);
-  expect(headings).toEqual(["repo", "empty", "No project"]);
+  expect(headings).toEqual(["repo", "empty"]);
+  expect(
+    Array.from(container.querySelectorAll(".ohb-sidebar-empty")).map(
+      (element) => element.textContent,
+    ),
+  ).toEqual(["No chats"]);
+  const recents = container.querySelector('section[aria-label="Recents"]');
+  expect(
+    recents?.querySelector(".ohb-sidebar-section-title")?.textContent,
+  ).toBe("Recents");
+  expect(recents?.querySelector(".ohb-sidebar-section-toggle")).toBeNull();
+  expect(recents?.textContent).toContain("Chat N");
   click("New chat");
   click("New chat in repo");
   expect(newChat.mock.calls).toEqual([[null], ["/repo"]]);
@@ -380,7 +391,7 @@ it("remembers folded groups and shows no counts", () => {
   click("repo");
   expect(order()).toEqual([]);
   expect(container.querySelector(".ohb-group-count")).toBeNull();
-  expect(container.querySelector(".ohb-project-toggle")?.textContent).toBe(
+  expect(container.querySelector(".ohb-workspace-toggle")?.textContent).toBe(
     "repo",
   );
   act(() => {
@@ -432,18 +443,20 @@ it("moves a running chat only after confirmation and shows a pending spinner", a
       }),
   );
   render({
-    catalog: catalog(entries, { projects: [scope("/repo"), scope("/other")] }),
+    catalog: catalog(entries, {
+      workspaces: [scope("/repo"), scope("/other")],
+    }),
     activity: new Map([["A", "running"]]),
     onMoveSession: move,
   });
   click("Actions for Chat A");
-  click("Move to project…");
+  click("Move to workspace…");
   expect(button("repo(current)").disabled).toBe(true);
   act(() => {
     const destination = document.querySelector<HTMLButtonElement>(
       '[role="menuitem"][title="/other"]',
     );
-    if (!destination) throw new Error("Missing destination project");
+    if (!destination) throw new Error("Missing destination workspace");
     destination.click();
   });
   expect(move).toHaveBeenCalledWith(
@@ -460,21 +473,23 @@ it("moves a running chat only after confirmation and shows a pending spinner", a
   expect(container.querySelector('[aria-label="Moving chat"]')).toBeNull();
 });
 
-it("filters a long project list, unwinds Escape one level at a time and restores focus", () => {
+it("filters a long workspace list, unwinds Escape one level at a time and restores focus", () => {
   render({
     catalog: catalog(entries, {
-      projects: [
+      workspaces: [
         scope("/repo"),
-        ...Array.from({ length: 9 }, (_, i) => scope(`/project-${String(i)}`)),
+        ...Array.from({ length: 9 }, (_, i) =>
+          scope(`/workspace-${String(i)}`),
+        ),
       ],
     }),
   });
   click("Actions for Chat A");
-  click("Move to project…");
+  click("Move to workspace…");
   const filter = document.querySelector<HTMLInputElement>(
     '[aria-label="Filter"]',
   );
-  if (!filter) throw new Error("Missing project filter");
+  if (!filter) throw new Error("Missing workspace filter");
   expect(document.activeElement).toBe(filter);
   act(() => {
     const descriptor = Object.getOwnPropertyDescriptor(
@@ -482,12 +497,12 @@ it("filters a long project list, unwinds Escape one level at a time and restores
       "value",
     );
     if (!descriptor?.set) throw new Error("Missing input value setter");
-    descriptor.set.call(filter, "project-8");
+    descriptor.set.call(filter, "workspace-8");
     filter.dispatchEvent(new Event("input", { bubbles: true }));
   });
   expect(
     document.querySelector<HTMLButtonElement>(
-      '[role="menuitem"][title="/project-0"]',
+      '[role="menuitem"][title="/workspace-0"]',
     )?.hidden,
   ).toBe(true);
   const escape = (): void => {
@@ -500,14 +515,14 @@ it("filters a long project list, unwinds Escape one level at a time and restores
   escape();
   expect(filter.value).toBe("");
   escape();
-  expect(document.activeElement).toBe(button("Move to project…"));
+  expect(document.activeElement).toBe(button("Move to workspace…"));
   escape();
   expect(document.activeElement).toBe(button("Actions for Chat A"));
 });
 
-it("offers Remove from project only to a chat with a project", () => {
+it("offers Remove from workspace only to a chat with a workspace", () => {
   render({ catalog: catalog([row("N", null, "2026-09-01T00:00:00Z")]) });
   click("Actions for Chat N");
-  click("Move to project…");
-  expect(document.body.textContent).not.toContain("Remove from project");
+  click("Move to workspace…");
+  expect(document.body.textContent).not.toContain("Remove from workspace");
 });

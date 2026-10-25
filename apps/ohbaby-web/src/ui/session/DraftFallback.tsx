@@ -12,8 +12,8 @@ const DRAFT_KEY = composerDraftKey("new");
 
 /**
  * The new-chat draft while no instance can be reached, for example when the
- * default workspace is unknown. The text lives in the same `new` draft the
- * composer reads, so it carries over once a project connects; sending waits
+ * default directory is unknown. The text lives in the same `new` draft the
+ * composer reads, so it carries over once a workspace connects; sending waits
  * until then (04 §2.1).
  */
 export function DraftFallback(props: {

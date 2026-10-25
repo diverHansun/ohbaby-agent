@@ -34,7 +34,7 @@
   z-index: 10;
 }
 
-/* Empty state (D23): wordmark, project slot, then the composer card. */
+/* Empty state (D23): wordmark, workspace slot, then the composer card. */
 .ohb-draft-hero {
   align-items: center;
   display: flex;
@@ -74,7 +74,7 @@
   visibility: hidden;
 }
 
-.ohb-project-slot {
+.ohb-workspace-slot {
   align-items: center;
   background: transparent;
   border: 0;
@@ -88,32 +88,32 @@
   padding: 0 12px;
 }
 
-.ohb-project-slot > span {
+.ohb-workspace-slot > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-button.ohb-project-slot:hover:not(:disabled) {
+button.ohb-workspace-slot:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
 }
 
-/* Project names are paths; a monospace face keeps them recognizable (03 §4.2). */
-.ohb-project-picker > span {
+/* Workspace names are paths; a monospace face keeps them recognizable (03 §4.2). */
+.ohb-workspace-picker > span {
   font-family: var(--font-mono);
 }
 
-.ohb-project-picker:disabled {
+.ohb-workspace-picker:disabled {
   opacity: 0.6;
 }
 
-.ohb-project-picker-menu [aria-current="true"] {
+.ohb-workspace-picker-menu [aria-current="true"] {
   color: var(--text);
   font-weight: 600;
 }
 
-.ohb-project-picker-error {
+.ohb-workspace-picker-error {
   color: var(--danger-ink);
 }
 

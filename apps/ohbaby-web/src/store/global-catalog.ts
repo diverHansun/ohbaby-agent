@@ -4,14 +4,14 @@ import type { WorkspaceScopeSummary } from "../api/daemon/wire.js";
 export type CatalogStatus = "loading" | "ready" | "error";
 
 /**
- * Directory-independent server state: projects and the loaded range of the
+ * Directory-independent server state: workspaces and the loaded range of the
  * global session list. It survives instance switches, unlike the main store.
  */
 export interface GlobalCatalogSnapshot {
-  readonly projects: readonly WorkspaceScopeSummary[];
-  /** Working directory for sessions without a project; null until known. */
-  readonly defaultWorkspace: string | null;
-  readonly projectsStatus: CatalogStatus;
+  readonly workspaces: readonly WorkspaceScopeSummary[];
+  /** Working directory for sessions without a workspace; null until known. */
+  readonly defaultDirectory: string | null;
+  readonly workspacesStatus: CatalogStatus;
   /** Loaded range, newest first, unique by id. */
   readonly sessions: readonly UiGlobalSession[];
   /** Set while more pages exist beyond the loaded range. */
@@ -24,13 +24,13 @@ export interface GlobalCatalogSnapshot {
 export interface GlobalCatalogStore {
   getSnapshot(): GlobalCatalogSnapshot;
   subscribe(listener: () => void): () => void;
-  setProjects(
-    projects: readonly WorkspaceScopeSummary[],
-    defaultWorkspace: string | null,
+  setWorkspaces(
+    workspaces: readonly WorkspaceScopeSummary[],
+    defaultDirectory: string | null,
   ): void;
-  failProjects(): void;
-  /** Removes a confirmed hidden project and its cached group rows together. */
-  removeProject(directory: string): void;
+  failWorkspaces(): void;
+  /** Removes a confirmed hidden workspace and its cached group rows together. */
+  removeWorkspace(directory: string): void;
   /** Replaces the whole loaded range with a fresh, complete read. */
   replaceSessions(
     sessions: readonly UiGlobalSession[],
@@ -49,9 +49,9 @@ export interface GlobalCatalogStore {
 }
 
 const INITIAL: GlobalCatalogSnapshot = {
-  projects: [],
-  defaultWorkspace: null,
-  projectsStatus: "loading",
+  workspaces: [],
+  defaultDirectory: null,
+  workspacesStatus: "loading",
   sessions: [],
   nextCursor: undefined,
   sessionsStatus: "loading",
@@ -74,21 +74,21 @@ export function createGlobalCatalogStore(): GlobalCatalogStore {
         listeners.delete(listener);
       };
     },
-    setProjects: (projects, defaultWorkspace): void => {
-      publish({ projects, defaultWorkspace, projectsStatus: "ready" });
+    setWorkspaces: (workspaces, defaultDirectory): void => {
+      publish({ workspaces, defaultDirectory, workspacesStatus: "ready" });
     },
-    removeProject: (directory): void => {
+    removeWorkspace: (directory): void => {
       publish({
-        projects: snapshot.projects.filter(
-          (project) => project.directory !== directory,
+        workspaces: snapshot.workspaces.filter(
+          (workspace) => workspace.directory !== directory,
         ),
         sessions: snapshot.sessions.filter(
           (session) => session.workspaceDirectory !== directory,
         ),
       });
     },
-    failProjects: (): void => {
-      publish({ projectsStatus: "error" });
+    failWorkspaces: (): void => {
+      publish({ workspacesStatus: "error" });
     },
     replaceSessions: (sessions, nextCursor): void => {
       publish({

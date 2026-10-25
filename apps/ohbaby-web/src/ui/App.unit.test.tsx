@@ -1255,7 +1255,9 @@ describe("OhbabyWebApp slash command interactions", () => {
         "old draft admission failed",
       );
       expect(app.container.querySelector(".ohb-draft-hero")).not.toBeNull();
-      expect(app.container.querySelector(".ohb-project-picker")).not.toBeNull();
+      expect(
+        app.container.querySelector(".ohb-workspace-picker"),
+      ).not.toBeNull();
       expect(textareaValue(app.container)).toBe(
         "new draft still being written",
       );
@@ -1310,7 +1312,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.textContent).not.toContain("old client first prompt");
     expect(app.container.querySelector(".ohb-draft-hero")).not.toBeNull();
-    expect(app.container.querySelector(".ohb-project-picker")).not.toBeNull();
+    expect(app.container.querySelector(".ohb-workspace-picker")).not.toBeNull();
     expect(textareaValue(app.container)).toBe(
       "draft survives the client change",
     );
@@ -3714,14 +3716,14 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.openDraft).toHaveBeenCalledWith("/repo-b");
   });
 
-  it("hides a project through its group menu", async () => {
+  it("hides a workspace through its group menu", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Project actions for repo-b");
-    await clickButton(document.body, "Hide project");
+    await clickButton(app.container, "Workspace actions for repo-b");
+    await clickButton(document.body, "Hide workspace");
 
     expect(fake.hideWorkspace).toHaveBeenCalledWith("/repo-b");
   });
@@ -4921,7 +4923,7 @@ function createFakeRuntime(input: {
   } as const;
   // Like a daemon without global routes: the instance index is the whole list.
   const globalCatalog = createGlobalCatalogStore();
-  globalCatalog.setProjects(workspaceSnapshot.scopes, "/default");
+  globalCatalog.setWorkspaces(workspaceSnapshot.scopes, "/default");
   const mirrorIndex = (): void => {
     globalCatalog.replaceSessions(
       store.getSnapshot().sessionIndex.map((entry) => ({

@@ -9,7 +9,7 @@ import {
   Pin,
 } from "lucide-react";
 import { type ReactElement, useState } from "react";
-import type { SidebarProject } from "../../store/sidebar-groups.js";
+import type { SidebarWorkspace } from "../../store/sidebar-groups.js";
 import { workspaceLabel } from "../workspace/workspace-labels.js";
 import { Menu, type MenuAnchor } from "../shared/Menu.js";
 
@@ -22,29 +22,29 @@ export function SessionMenu(props: {
   readonly pinned: boolean;
   readonly title: string;
   readonly workspaceDirectory: string | null;
-  readonly projects: readonly SidebarProject[];
+  readonly workspaces: readonly SidebarWorkspace[];
   readonly onMove: (directory: string | null) => void;
   readonly onClose: (restoreFocus: boolean) => void;
   readonly onPin: () => void;
   readonly onArchive: () => void;
   readonly onExport: (format: SessionExportFormat) => void;
 }): ReactElement {
-  const [level, setLevel] = useState<"main" | "export" | "project">("main");
+  const [level, setLevel] = useState<"main" | "export" | "workspace">("main");
   // Returning from the format list puts focus back on Export… (one level per Escape).
-  const [returned, setReturned] = useState<"export" | "project" | null>(null);
+  const [returned, setReturned] = useState<"export" | "workspace" | null>(null);
   const back = (): void => {
-    setReturned(level === "project" ? "project" : "export");
+    setReturned(level === "workspace" ? "workspace" : "export");
     setLevel("main");
   };
-  if (level === "project") {
+  if (level === "workspace") {
     return (
       <Menu
         anchor={props.anchor}
-        label="Move to project"
-        title="Move to project"
-        level="project"
+        label="Move to workspace"
+        title="Move to workspace"
+        level="workspace"
         className="ohb-session-menu"
-        filterable={props.projects.length > 8}
+        filterable={props.workspaces.length > 8}
         onClose={props.onClose}
         onEscape={back}
       >
@@ -56,26 +56,29 @@ export function SessionMenu(props: {
           onClick={back}
         >
           <ChevronLeft aria-hidden="true" size={13} />
-          <span>Move to project</span>
+          <span>Move to workspace</span>
         </button>
-        {props.projects.map((project) => (
+        {props.workspaces.map((workspace) => (
           <button
-            key={project.directory}
+            key={workspace.directory}
             role="menuitem"
             type="button"
-            title={project.directory}
+            title={workspace.directory}
             disabled={
-              !project.available || project.directory === props.workspaceDirectory
+              !workspace.available ||
+              workspace.directory === props.workspaceDirectory
             }
-            onClick={() => { props.onMove(project.directory); }}
+            onClick={() => {
+              props.onMove(workspace.directory);
+            }}
           >
-            {project.directory === props.workspaceDirectory ? (
+            {workspace.directory === props.workspaceDirectory ? (
               <Check aria-hidden="true" size={13} />
             ) : null}
-            <span>{workspaceLabel(project.directory)}</span>
-            {project.directory === props.workspaceDirectory ? (
+            <span>{workspaceLabel(workspace.directory)}</span>
+            {workspace.directory === props.workspaceDirectory ? (
               <small>(current)</small>
-            ) : !project.available ? (
+            ) : !workspace.available ? (
               <small>Unavailable</small>
             ) : null}
           </button>
@@ -87,10 +90,12 @@ export function SessionMenu(props: {
               role="menuitem"
               type="button"
               data-menu-filter="false"
-              onClick={() => { props.onMove(null); }}
+              onClick={() => {
+                props.onMove(null);
+              }}
             >
               <FolderMinus aria-hidden="true" size={13} />
-              <span>Remove from project</span>
+              <span>Remove from workspace</span>
             </button>
           </>
         ) : null}
@@ -165,18 +170,20 @@ export function SessionMenu(props: {
         role="menuitem"
         type="button"
         aria-haspopup="menu"
-        data-menu-item="project"
+        data-menu-item="workspace"
         data-menu-shortcut="m"
-        onClick={() => { setLevel("project"); }}
+        onClick={() => {
+          setLevel("workspace");
+        }}
         onKeyDown={(event) => {
           if (event.key === "ArrowRight") {
             event.preventDefault();
-            setLevel("project");
+            setLevel("workspace");
           }
         }}
       >
         <FolderInput aria-hidden="true" size={13} />
-        <span>Move to project…</span>
+        <span>Move to workspace…</span>
         <ChevronRight aria-hidden="true" className="ohb-menu-arrow" size={13} />
       </button>
       <button

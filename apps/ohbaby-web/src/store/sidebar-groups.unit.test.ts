@@ -4,7 +4,7 @@ import type { WorkspaceScopeSummary } from "../api/daemon/wire.js";
 import { createGlobalCatalogStore } from "./global-catalog.js";
 import {
   countGroupRows,
-  projectGroupKey,
+  workspaceGroupKey,
   selectSidebarGroups,
 } from "./sidebar-groups.js";
 
@@ -33,9 +33,9 @@ function scope(directory: string, available = true): WorkspaceScopeSummary {
 const none = new Map<string, never>();
 
 describe("sidebar groups", () => {
-  it("groups by workspaceDirectory only, keeps server project order and adds unknown projects", () => {
+  it("groups by workspaceDirectory only, keeps server workspace order and adds unknown workspaces", () => {
     const groups = selectSidebarGroups({
-      projects: [scope("/b"), scope("/a", false)],
+      workspaces: [scope("/b"), scope("/a", false)],
       sessions: [
         session("1", "/a"),
         session("2", null, { workingDirectory: "/b" }),
@@ -47,19 +47,21 @@ describe("sidebar groups", () => {
       extra: {},
       hasMore: false,
     });
-    expect(groups.projects.map((group) => group.project)).toEqual([
+    expect(groups.workspaces.map((group) => group.workspace)).toEqual([
       { directory: "/b", available: true },
       { directory: "/a", available: false },
       { directory: "/new", available: true },
     ]);
-    expect(groups.projects[0]?.sessions.map((item) => item.id)).toEqual(["4"]);
-    expect(groups.noProject?.sessions.map((item) => item.id)).toEqual(["2"]);
+    expect(groups.workspaces[0]?.sessions.map((item) => item.id)).toEqual([
+      "4",
+    ]);
+    expect(groups.recents?.sessions.map((item) => item.id)).toEqual(["2"]);
     expect(groups.pinned).toBeNull();
   });
 
   it("shows pinned rows only in Pinned, newest pin first", () => {
     const groups = selectSidebarGroups({
-      projects: [scope("/a")],
+      workspaces: [scope("/a")],
       sessions: [session("1", "/a"), session("2", "/a"), session("3", null)],
       pins: { "1": 10, "3": 20 },
       activity: none,
@@ -67,8 +69,10 @@ describe("sidebar groups", () => {
       hasMore: false,
     });
     expect(groups.pinned?.sessions.map((item) => item.id)).toEqual(["3", "1"]);
-    expect(groups.projects[0]?.sessions.map((item) => item.id)).toEqual(["2"]);
-    expect(groups.noProject).toBeNull();
+    expect(groups.workspaces[0]?.sessions.map((item) => item.id)).toEqual([
+      "2",
+    ]);
+    expect(groups.recents).toBeNull();
   });
 
   it("pages 6 per group and 8 for Pinned, counts only loaded rows, and keeps an entry while pages remain", () => {
@@ -85,15 +89,15 @@ describe("sidebar groups", () => {
       session(`x${String(index)}`, null),
     );
     const groups = selectSidebarGroups({
-      projects: [scope("/a"), scope("/empty")],
+      workspaces: [scope("/a"), scope("/empty")],
       sessions: [...sessions, ...pinned],
       pins,
       activity: none,
-      extra: { [projectGroupKey("/a")]: 20 },
+      extra: { [workspaceGroupKey("/a")]: 20 },
       hasMore: true,
     });
-    const a = groups.projects[0];
-    const empty = groups.projects[1];
+    const a = groups.workspaces[0];
+    const empty = groups.workspaces[1];
     expect(a.visible).toHaveLength(26);
     expect(a.hiddenLoaded).toBe(4);
     expect(a.canShowLess).toBe(true);
@@ -101,13 +105,13 @@ describe("sidebar groups", () => {
     expect(empty.canShowMore).toBe(true);
     expect(groups.pinned?.visible).toHaveLength(8);
     expect(groups.pinned?.hiddenLoaded).toBe(2);
-    expect(groups.noProject?.sessions).toHaveLength(0);
-    expect(groups.noProject?.canShowMore).toBe(true);
+    expect(groups.recents?.sessions).toHaveLength(0);
+    expect(groups.recents?.canShowMore).toBe(true);
   });
 
   it("keeps Pinned visible before its rows are loaded, and hides it once pages are exhausted", () => {
     const input = {
-      projects: [],
+      workspaces: [],
       sessions: [session("1", null)],
       pins: { archived: 1 },
       activity: none,
@@ -121,7 +125,7 @@ describe("sidebar groups", () => {
 
   it("uses the pending directory for requests and reports activity", () => {
     const groups = selectSidebarGroups({
-      projects: [],
+      workspaces: [],
       sessions: [
         session("1", null, {
           workingDirectory: "/old",
@@ -133,7 +137,7 @@ describe("sidebar groups", () => {
       extra: {},
       hasMore: false,
     });
-    expect(groups.noProject?.sessions[0]).toMatchObject({
+    expect(groups.recents?.sessions[0]).toMatchObject({
       workingDirectory: "/old",
       requestDirectory: "/next",
       activity: "awaiting",
@@ -189,8 +193,8 @@ describe("group row count", () => {
       session("4", "/a"),
     ];
     const pins = { "2": 1 };
-    expect(countGroupRows(projectGroupKey("/a"), sessions, pins)).toBe(2);
+    expect(countGroupRows(workspaceGroupKey("/a"), sessions, pins)).toBe(2);
     expect(countGroupRows("pinned", sessions, pins)).toBe(1);
-    expect(countGroupRows("no-project", sessions, pins)).toBe(1);
+    expect(countGroupRows("recents", sessions, pins)).toBe(1);
   });
 });

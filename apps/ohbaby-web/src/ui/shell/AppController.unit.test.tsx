@@ -124,9 +124,9 @@ async function settle(): Promise<void> {
 
 async function openPicker(container: HTMLElement): Promise<void> {
   const trigger = container.querySelector<HTMLButtonElement>(
-    ".ohb-project-picker",
+    ".ohb-workspace-picker",
   );
-  if (!trigger) throw new Error("project picker not found");
+  if (!trigger) throw new Error("workspace picker not found");
   act(() => {
     trigger.click();
   });
@@ -151,17 +151,17 @@ describe("AppController new-chat draft", () => {
     expect(textarea(container).value).toBe("Keep this draft");
   });
 
-  it("changes the draft's project without touching its text", async () => {
+  it("changes the draft's workspace without touching its text", async () => {
     const { runtime, mockClient, setState } = switchableRuntime();
     setState(mockClient, folder("/Users/demo/Projects/ohbaby-agent"));
     const openDraft = vi.fn((directory?: string | null): Promise<void> => {
-      runtime.draft.setProject(directory ?? null);
+      runtime.draft.setWorkspace(directory ?? null);
       return Promise.resolve();
     });
     runtime.openDraft = openDraft;
     const container = mount(runtime);
     typeText(container, "Same words");
-    expect(button(container, "Project: No project")).toBeTruthy();
+    expect(button(container, "Workspace: No workspace")).toBeTruthy();
 
     await openPicker(container);
     await act(async () => {
@@ -173,7 +173,7 @@ describe("AppController new-chat draft", () => {
     await settle();
 
     expect(openDraft).toHaveBeenCalledWith("/Users/demo/Projects/pi-web");
-    expect(button(container, "Project: pi-web")).toBeTruthy();
+    expect(button(container, "Workspace: pi-web")).toBeTruthy();
     expect(textarea(container).value).toBe("Same words");
   });
 
@@ -238,11 +238,11 @@ describe("AppController new-chat draft", () => {
     expect(openDraft).not.toHaveBeenCalled();
   });
 
-  it("shows no project picker once a session is open", async () => {
+  it("shows no workspace picker once a session is open", async () => {
     const runtime = createMockRuntime("running");
     const container = mount(runtime);
     await settle();
-    expect(container.querySelector(".ohb-project-picker")).toBeNull();
+    expect(container.querySelector(".ohb-workspace-picker")).toBeNull();
   });
 
   it("does not show a connection state when there is no instance to connect to", () => {
@@ -356,13 +356,13 @@ describe("improve-3 sidebar actions", () => {
     const container = mount({
       ...runtime,
       moveSession: () =>
-        Promise.reject(new Error("Project folder is not readable.")),
+        Promise.reject(new Error("Workspace folder is not readable.")),
     });
     act(() => {
       button(container, "Actions for Refactor the session sidebar").click();
     });
     act(() => {
-      button(document, "Move to project…").click();
+      button(document, "Move to workspace…").click();
     });
     act(() => {
       document
@@ -372,10 +372,12 @@ describe("improve-3 sidebar actions", () => {
         ?.click();
     });
     await settle();
-    expect(container.textContent).toContain("Project folder is not readable.");
+    expect(container.textContent).toContain(
+      "Workspace folder is not readable.",
+    );
     expect(
       button(container, "Select Refactor the session sidebar").closest(
-        ".ohb-project-group",
+        ".ohb-workspace-group",
       )?.textContent,
     ).toContain("ohbaby-agent");
     expect(container.querySelector('[aria-label="Moving chat"]')).toBeNull();
@@ -384,9 +386,24 @@ describe("improve-3 sidebar actions", () => {
 
 it("refocuses an already open search with the global shortcut", () => {
   const container = mount(createMockRuntime("typical"));
-  const shortcut = (): void => { act(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true })); }); };
+  const shortcut = (): void => {
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+  };
   shortcut();
-  act(() => { textarea(container).focus(); });
+  act(() => {
+    textarea(container).focus();
+  });
   shortcut();
-  expect(document.activeElement).toBe(container.querySelector('input[aria-label="Search chats"]'));
+  expect(document.activeElement).toBe(
+    container.querySelector('input[aria-label="Search chats"]'),
+  );
 });

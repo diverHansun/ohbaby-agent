@@ -170,7 +170,7 @@ export function DirectoryPickerDialog(props: {
       role="presentation"
     >
       <section
-        aria-label="Open project"
+        aria-label="Open workspace"
         aria-modal="true"
         className="ohb-directory-picker-dialog"
         onClick={(event) => {
@@ -182,7 +182,7 @@ export function DirectoryPickerDialog(props: {
           <span>
             <FolderOpen size={16} />
           </span>
-          <h2>Open project</h2>
+          <h2>Open workspace</h2>
           <button
             aria-label="Close directory picker"
             disabled={selecting}

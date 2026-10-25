@@ -4,7 +4,7 @@ import {
 } from "ohbaby-sdk";
 import type { WorkspaceScopeSummary } from "../api/daemon/wire.js";
 
-/** Rows first shown per project or No project group. */
+/** Rows first shown per workspace group or Recents. */
 export const GROUP_PAGE = 6;
 /** Rows first shown in Pinned. */
 export const PINNED_PAGE = 8;
@@ -13,9 +13,9 @@ export const SHOW_MORE_STEP = 20;
 
 export type SessionActivity = "idle" | "running" | "awaiting";
 
-export interface SidebarProject {
+export interface SidebarWorkspace {
   readonly directory: string;
-  /** False when the server lists the project but its folder is missing. */
+  /** False when the server lists the workspace but its folder is missing. */
   readonly available: boolean;
 }
 
@@ -32,7 +32,7 @@ export interface SidebarSessionItem {
   readonly activity: SessionActivity;
 }
 
-export type SidebarGroupKey = "pinned" | "no-project" | `project:${string}`;
+export type SidebarGroupKey = "pinned" | "recents" | `workspace:${string}`;
 
 export interface SidebarGroup {
   readonly key: SidebarGroupKey;
@@ -46,18 +46,18 @@ export interface SidebarGroup {
   readonly canShowLess: boolean;
 }
 
-export interface SidebarProjectGroup extends SidebarGroup {
-  readonly project: SidebarProject;
+export interface SidebarWorkspaceGroup extends SidebarGroup {
+  readonly workspace: SidebarWorkspace;
 }
 
 export interface SidebarGroups {
   readonly pinned: SidebarGroup | null;
-  readonly projects: readonly SidebarProjectGroup[];
-  readonly noProject: SidebarGroup | null;
+  readonly workspaces: readonly SidebarWorkspaceGroup[];
+  readonly recents: SidebarGroup | null;
 }
 
-export function projectGroupKey(directory: string): SidebarGroupKey {
-  return `project:${directory}`;
+export function workspaceGroupKey(directory: string): SidebarGroupKey {
+  return `workspace:${directory}`;
 }
 
 export function baseCount(key: SidebarGroupKey): number {
@@ -65,13 +65,13 @@ export function baseCount(key: SidebarGroupKey): number {
 }
 
 /**
- * Groups the loaded global list for the sidebar: Pinned, then projects in
- * server order, then No project. Grouping follows `workspaceDirectory` only;
- * a project the scope list does not know gets a temporary group so no row
+ * Groups the loaded global list for the sidebar: Pinned, then workspaces in
+ * server order, then Recents. Grouping follows `workspaceDirectory` only;
+ * a workspace the scope list does not know gets a temporary group so no row
  * is lost. Pinned rows appear only in Pinned.
  */
 export function selectSidebarGroups(input: {
-  readonly projects: readonly WorkspaceScopeSummary[];
+  readonly workspaces: readonly WorkspaceScopeSummary[];
   readonly sessions: readonly UiGlobalSession[];
   readonly pins: Readonly<Record<string, number>>;
   readonly activity: ReadonlyMap<string, SessionActivity>;
@@ -80,16 +80,16 @@ export function selectSidebarGroups(input: {
   readonly hasMore: boolean;
 }): SidebarGroups {
   const pinned: SidebarSessionItem[] = [];
-  const byProject = new Map<string, SidebarSessionItem[]>();
-  const noProject: SidebarSessionItem[] = [];
+  const byWorkspace = new Map<string, SidebarSessionItem[]>();
+  const recents: SidebarSessionItem[] = [];
   for (const session of input.sessions) {
     const item = toItem(session, input);
     if (item.pinned) pinned.push(item);
-    else if (item.workspaceDirectory === null) noProject.push(item);
+    else if (item.workspaceDirectory === null) recents.push(item);
     else {
-      const rows = byProject.get(item.workspaceDirectory) ?? [];
+      const rows = byWorkspace.get(item.workspaceDirectory) ?? [];
       rows.push(item);
-      byProject.set(item.workspaceDirectory, rows);
+      byWorkspace.set(item.workspaceDirectory, rows);
     }
   }
   pinned.sort(
@@ -113,19 +113,21 @@ export function selectSidebarGroups(input: {
       canShowLess: extra > 0,
     };
   };
-  const known = new Set(input.projects.map((project) => project.directory));
-  const projects: SidebarProjectGroup[] = input.projects.map((scope) => ({
+  const known = new Set(
+    input.workspaces.map((workspace) => workspace.directory),
+  );
+  const workspaces: SidebarWorkspaceGroup[] = input.workspaces.map((scope) => ({
     ...group(
-      projectGroupKey(scope.directory),
-      byProject.get(scope.directory) ?? [],
+      workspaceGroupKey(scope.directory),
+      byWorkspace.get(scope.directory) ?? [],
     ),
-    project: { directory: scope.directory, available: scope.available },
+    workspace: { directory: scope.directory, available: scope.available },
   }));
-  for (const [directory, rows] of byProject) {
+  for (const [directory, rows] of byWorkspace) {
     if (known.has(directory)) continue;
-    projects.push({
-      ...group(projectGroupKey(directory), rows),
-      project: { directory, available: true },
+    workspaces.push({
+      ...group(workspaceGroupKey(directory), rows),
+      workspace: { directory, available: true },
     });
   }
   const anyPins = Object.keys(input.pins).length > 0;
@@ -134,11 +136,9 @@ export function selectSidebarGroups(input: {
       pinned.length > 0 || (anyPins && input.hasMore)
         ? group("pinned", pinned)
         : null,
-    projects,
-    noProject:
-      noProject.length > 0 || input.hasMore
-        ? group("no-project", noProject)
-        : null,
+    workspaces,
+    recents:
+      recents.length > 0 || input.hasMore ? group("recents", recents) : null,
   };
 }
 
@@ -173,8 +173,8 @@ export function countGroupRows(
     const rowKey: SidebarGroupKey = pinned
       ? "pinned"
       : session.workspaceDirectory === null
-        ? "no-project"
-        : projectGroupKey(session.workspaceDirectory);
+        ? "recents"
+        : workspaceGroupKey(session.workspaceDirectory);
     if (rowKey === key) count += 1;
   }
   return count;

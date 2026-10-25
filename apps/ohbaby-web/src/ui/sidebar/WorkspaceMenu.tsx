@@ -2,8 +2,8 @@ import type { ReactElement } from "react";
 import { EyeOff } from "lucide-react";
 import { Menu, type MenuAnchor } from "../shared/Menu.js";
 
-/** Project visibility affects the sidebar; the open conversation stays usable. */
-export function ProjectMenu(props: {
+/** Workspace visibility affects the sidebar; the open conversation stays usable. */
+export function WorkspaceMenu(props: {
   readonly anchor: MenuAnchor;
   readonly title: string;
   readonly onClose: (restoreFocus: boolean) => void;
@@ -25,7 +25,7 @@ export function ProjectMenu(props: {
         }}
       >
         <EyeOff aria-hidden="true" size={13} />
-        <span>Hide project</span>
+        <span>Hide workspace</span>
       </button>
     </Menu>
   );

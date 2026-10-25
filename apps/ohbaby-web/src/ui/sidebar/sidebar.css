@@ -1,4 +1,4 @@
-/* Sidebar (03 §4.4): wordmark, New chat, project groups and single-line rows. */
+/* Sidebar (03 §4.4): wordmark, New chat, workspace groups and single-line rows. */
 .ohb-sidebar {
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
@@ -74,11 +74,11 @@
   padding: 10px 2px 4px 10px;
 }
 
-.ohb-project-group + .ohb-project-group {
+.ohb-workspace-group + .ohb-workspace-group {
   margin-top: 2px;
 }
 
-.ohb-project-heading {
+.ohb-workspace-heading {
   align-items: center;
   border-radius: var(--radius-md);
   display: flex;
@@ -86,11 +86,11 @@
   position: relative;
 }
 
-.ohb-project-heading:hover {
+.ohb-workspace-heading:hover {
   background: var(--bg-hover);
 }
 
-.ohb-project-toggle {
+.ohb-workspace-toggle {
   align-items: center;
   background: transparent;
   border: 0;
@@ -105,33 +105,33 @@
   text-align: left;
 }
 
-.ohb-project-group.is-current .ohb-project-toggle {
+.ohb-workspace-group.is-current .ohb-workspace-toggle {
   color: var(--text);
   font-weight: 500;
 }
 
-.ohb-project-chevron {
+.ohb-workspace-chevron {
   color: var(--text-dim);
   flex: none;
   transition: transform var(--duration-fast) var(--ease);
 }
 
-.ohb-project-folder {
+.ohb-workspace-folder {
   color: var(--text-dim);
   flex: none;
 }
 
-.ohb-project-chevron.is-open {
+.ohb-workspace-chevron.is-open {
   transform: rotate(90deg);
 }
 
-.ohb-project-name {
+.ohb-workspace-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ohb-project-actions {
+.ohb-workspace-actions {
   display: flex;
   gap: 0;
   opacity: 0;
@@ -139,12 +139,12 @@
   transition: opacity var(--duration-fast) var(--ease);
 }
 
-.ohb-project-heading:hover .ohb-project-actions,
-.ohb-project-actions:focus-within {
+.ohb-workspace-heading:hover .ohb-workspace-actions,
+.ohb-workspace-actions:focus-within {
   opacity: 1;
 }
 
-.ohb-project-actions .ohb-icon-button {
+.ohb-workspace-actions .ohb-icon-button {
   height: 24px;
   width: 24px;
 }
@@ -384,16 +384,16 @@ button.ohb-group-more:hover {
     min-height: 44px;
   }
 
-  .ohb-project-toggle,
+  .ohb-workspace-toggle,
   .ohb-session-main {
     font-size: 15px;
   }
 
-  .ohb-project-actions {
+  .ohb-workspace-actions {
     opacity: 1;
   }
 
-  .ohb-project-actions .ohb-icon-button,
+  .ohb-workspace-actions .ohb-icon-button,
   .ohb-session-pin,
   .ohb-session-archive,
   .ohb-session-actions {
@@ -413,7 +413,7 @@ button.ohb-group-more:hover {
 
 /* Touch screens wider than a phone have no hover either: keep row actions reachable. */
 @media (hover: none) {
-  .ohb-project-actions,
+  .ohb-workspace-actions,
   .ohb-session-hover-actions {
     opacity: 1;
   }
@@ -421,4 +421,20 @@ button.ohb-group-more:hover {
   .ohb-session-hover-actions {
     position: static;
   }
+}
+
+/* Recents rows belong to no group, so they sit flush with workspace headings (Codex). */
+.ohb-sidebar-recents .ohb-sidebar-list {
+  padding-left: 0;
+}
+
+.ohb-sidebar-recents .ohb-group-footer {
+  padding-left: 0;
+}
+
+.ohb-sidebar-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0;
+  padding: 4px 0 8px 24px;
 }

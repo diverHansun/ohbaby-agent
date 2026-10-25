@@ -57,7 +57,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("keeps the newer draft project when an earlier selection of the same project fails", async () => {
+it("keeps the newer draft workspace when an earlier selection of the same workspace fails", async () => {
   const daemon = fakeDaemon();
   const entered = gate();
   const hold = gate();
@@ -89,7 +89,7 @@ it("keeps the newer draft project when an earlier selection of the same project 
   await second;
   await selected(runtime, null);
 
-  const receipt = await runtime.submitPrompt("send to the chosen project");
+  const receipt = await runtime.submitPrompt("send to the chosen workspace");
   expect(runtime.draft.getSnapshot().workspaceDirectory).toBe("/b");
   expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/b");
   expect(daemon.sessions.get(receipt.sessionId)?.workingDirectory).toBe("/b");

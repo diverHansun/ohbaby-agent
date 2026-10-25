@@ -2,16 +2,16 @@ import { Folder, FolderOpen, MoreHorizontal, SquarePen } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { IconButton } from "../shared/IconButton.js";
 import { anchorBelow, type MenuAnchor } from "../shared/Menu.js";
-import { ProjectMenu } from "./ProjectMenu.js";
+import { WorkspaceMenu } from "./WorkspaceMenu.js";
 import { workspaceLabel } from "../workspace/workspace-labels.js";
 
 /**
- * A project heading and its sessions. The heading folds the group; hover
- * reveals New chat in the project and the project menu (Hide project).
+ * A workspace heading and its sessions. The heading folds the group; hover
+ * reveals New chat in the workspace and the workspace menu (Hide workspace).
  */
-export function ProjectGroup(props: {
+export function WorkspaceGroup(props: {
   readonly directory: string;
-  /** The open session belongs to this project. */
+  /** The open session belongs to this workspace. */
   readonly current: boolean;
   readonly available: boolean;
   readonly expanded: boolean;
@@ -27,12 +27,12 @@ export function ProjectGroup(props: {
   } | null>(null);
   return (
     <section
-      className={`ohb-project-group${props.current ? " is-current" : ""}`}
+      className={`ohb-workspace-group${props.current ? " is-current" : ""}`}
     >
-      <div className="ohb-project-heading">
+      <div className="ohb-workspace-heading">
         <button
           type="button"
-          className="ohb-project-toggle"
+          className="ohb-workspace-toggle"
           aria-expanded={props.expanded}
           title={props.available ? props.directory : `${label} is unavailable`}
           onClick={props.onToggle}
@@ -42,18 +42,18 @@ export function ProjectGroup(props: {
             <FolderOpen
               aria-hidden="true"
               size={15}
-              className="ohb-project-folder"
+              className="ohb-workspace-folder"
             />
           ) : (
             <Folder
               aria-hidden="true"
               size={15}
-              className="ohb-project-folder"
+              className="ohb-workspace-folder"
             />
           )}
-          <span className="ohb-project-name">{label}</span>
+          <span className="ohb-workspace-name">{label}</span>
         </button>
-        <span className="ohb-project-actions">
+        <span className="ohb-workspace-actions">
           {props.onNewChat ? (
             <IconButton
               label={`New chat in ${label}`}
@@ -63,7 +63,7 @@ export function ProjectGroup(props: {
             </IconButton>
           ) : null}
           <IconButton
-            label={`Project actions for ${label}`}
+            label={`Workspace actions for ${label}`}
             onClick={(event) => {
               setMenu({
                 anchor: anchorBelow(event.currentTarget),
@@ -77,7 +77,7 @@ export function ProjectGroup(props: {
       </div>
       {props.expanded ? props.children : null}
       {menu ? (
-        <ProjectMenu
+        <WorkspaceMenu
           anchor={menu.anchor}
           title={label}
           onHide={props.onHide}

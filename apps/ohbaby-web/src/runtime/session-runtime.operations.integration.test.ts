@@ -94,7 +94,7 @@ it("hides cached rows after confirmation even when refresh fails, preserving the
   expect(
     runtime.catalog
       .getSnapshot()
-      .projects.some((project) => project.directory === "/a"),
+      .workspaces.some((workspace) => workspace.directory === "/a"),
   ).toBe(false);
   expect(runtime.catalog.getSnapshot().sessions).toHaveLength(0);
   expect(runtime.client).toBe(client);

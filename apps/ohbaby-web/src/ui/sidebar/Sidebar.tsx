@@ -39,11 +39,11 @@ import { IconButton } from "../shared/IconButton.js";
 import { useDelayed } from "../shared/use-delayed.js";
 import { Wordmark } from "../shared/Wordmark.js";
 import {
-  readCollapsedProjects,
-  writeCollapsedProjects,
-} from "./collapsed-projects.js";
+  readCollapsedGroups,
+  writeCollapsedGroups,
+} from "./collapsed-groups.js";
 import { GroupFooter } from "./GroupFooter.js";
-import { ProjectGroup } from "./ProjectGroup.js";
+import { WorkspaceGroup } from "./WorkspaceGroup.js";
 import { getGlobalSessionPinsStore } from "./session-pins.js";
 import type { SessionExportFormat } from "./SessionMenu.js";
 import { SessionList } from "./SessionList.js";
@@ -68,7 +68,7 @@ export interface SidebarProps {
   readonly activity: ReadonlyMap<string, SessionActivity>;
   readonly disabled: boolean;
   readonly onCollapse: () => void;
-  /** `null` starts a draft in No project. */
+  /** `null` starts a draft in No workspace. */
   readonly onNewChat: (workspaceDirectory: string | null) => void;
   readonly onSelectSession: (session: SidebarSessionItem) => void;
   readonly onArchiveSession: (session: SidebarSessionItem) => Promise<boolean>;
@@ -80,7 +80,7 @@ export interface SidebarProps {
     session: SidebarSessionItem,
     directory: string | null,
   ) => Promise<boolean>;
-  readonly onHideProject: (directory: string) => void;
+  readonly onHideWorkspace: (directory: string) => void;
   readonly onOpenFolder: () => void;
   readonly onRetry: () => void;
   readonly onOpenSettings: (trigger: HTMLElement) => void;
@@ -90,8 +90,8 @@ export interface SidebarProps {
 }
 
 /**
- * Wordmark, New chat and every chat across projects (03 §4.4): Pinned, then
- * projects, then No project; Settings sits at the bottom. Each group shows 6 rows (Pinned 8) and Show more
+ * Wordmark, New chat and every chat across workspaces (03 §4.4): Pinned, then
+ * workspaces, then Recents; Settings sits at the bottom. Each group shows 6 rows (Pinned 8) and Show more
  * adds 20, paging the global list when the loaded rows are not enough.
  */
 export function Sidebar(props: SidebarProps): ReactElement {
@@ -113,7 +113,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
     ),
     () => pinsStore.getSnapshot(),
   );
-  const [collapsed, setCollapsed] = useState(readCollapsedProjects);
+  const [collapsed, setCollapsed] = useState(readCollapsedGroups);
   const [extra, setExtra] = useState<
     Readonly<Partial<Record<SidebarGroupKey, number>>>
   >({});
@@ -138,7 +138,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
   const groups = useMemo(
     () =>
       selectSidebarGroups({
-        projects: catalog.projects,
+        workspaces: catalog.workspaces,
         sessions: catalog.sessions,
         pins: pins.pins,
         activity: props.activity,
@@ -146,7 +146,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
         hasMore: catalog.nextCursor !== undefined,
       }),
     [
-      catalog.projects,
+      catalog.workspaces,
       catalog.sessions,
       catalog.nextCursor,
       pins.pins,
@@ -158,7 +158,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
     catalog.sessions.length === 0 && catalog.sessionsStatus === "loading",
     LOADING_DELAY_MS,
   );
-  const activeProject =
+  const activeWorkspace =
     catalog.sessions.find((session) => session.id === props.activeSessionId)
       ?.workspaceDirectory ?? null;
 
@@ -167,7 +167,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      writeCollapsedProjects(next);
+      writeCollapsedGroups(next);
       return next;
     });
   }, []);
@@ -193,10 +193,14 @@ export function Sidebar(props: SidebarProps): ReactElement {
   };
   const list = (group: SidebarGroup): ReactNode => (
     <>
+      {group.sessions.length === 0 && !group.canShowMore ? (
+        // Like Codex: an empty workspace still says so instead of collapsing to a bare heading.
+        <p className="ohb-sidebar-empty">No chats</p>
+      ) : null}
       <SessionList
         sessions={group.visible}
         pins={pinsStore}
-        projects={catalog.projects}
+        workspaces={catalog.workspaces}
         moving={moving}
         onMoveSession={(session, directory) => {
           setMoving((current) => new Set(current).add(session.id));
@@ -305,11 +309,11 @@ export function Sidebar(props: SidebarProps): ReactElement {
             </SidebarSection>
           ) : null}
           <div className="ohb-sidebar-section-title">
-            <span>Projects</span>
+            <span>Workspaces</span>
             <span className="ohb-sidebar-section-actions">
-              {catalog.projectsStatus === "error" ? (
+              {catalog.workspacesStatus === "error" ? (
                 <IconButton
-                  label="Projects could not be loaded. Retry"
+                  label="Workspaces could not be loaded. Retry"
                   onClick={props.onRetry}
                 >
                   <AlertCircle aria-hidden="true" size={13} />
@@ -320,41 +324,40 @@ export function Sidebar(props: SidebarProps): ReactElement {
               </IconButton>
             </span>
           </div>
-          {groups.projects.map((group) => (
-            <ProjectGroup
+          {groups.workspaces.map((group) => (
+            <WorkspaceGroup
               key={group.key}
-              directory={group.project.directory}
-              current={group.project.directory === activeProject}
-              available={group.project.available}
+              directory={group.workspace.directory}
+              current={group.workspace.directory === activeWorkspace}
+              available={group.workspace.available}
               expanded={!collapsed.has(group.key)}
               onToggle={() => {
                 toggle(group.key);
               }}
-              {...(group.project.available
+              {...(group.workspace.available
                 ? {
                     onNewChat: (): void => {
-                      props.onNewChat(group.project.directory);
+                      props.onNewChat(group.workspace.directory);
                     },
                   }
                 : {})}
               onHide={() => {
-                props.onHideProject(group.project.directory);
+                props.onHideWorkspace(group.workspace.directory);
               }}
             >
               {list(group)}
-            </ProjectGroup>
+            </WorkspaceGroup>
           ))}
-          {groups.noProject ? (
-            <SidebarSection
-              title="No project"
-              group={groups.noProject}
-              expanded={!collapsed.has("no-project")}
-              onToggle={() => {
-                toggle("no-project");
-              }}
+          {groups.recents ? (
+            <section
+              className="ohb-sidebar-section ohb-sidebar-recents"
+              aria-label="Recents"
             >
-              {list(groups.noProject)}
-            </SidebarSection>
+              <div className="ohb-sidebar-section-title">
+                <span>Recents</span>
+              </div>
+              {list(groups.recents)}
+            </section>
           ) : null}
           {showLoading ? <p className="ohb-sidebar-status">Loading…</p> : null}
           {catalog.sessionsStatus === "error" &&
@@ -385,7 +388,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
   );
 }
 
-/** A foldable section heading (Pinned, No project). */
+/** A foldable section heading (Pinned). */
 function SidebarSection(props: {
   readonly title: string;
   readonly group: SidebarGroup;
@@ -405,7 +408,7 @@ function SidebarSection(props: {
           <ChevronRight
             aria-hidden="true"
             size={11}
-            className={`ohb-project-chevron${props.expanded ? " is-open" : ""}`}
+            className={`ohb-workspace-chevron${props.expanded ? " is-open" : ""}`}
           />
           {props.title}
         </span>

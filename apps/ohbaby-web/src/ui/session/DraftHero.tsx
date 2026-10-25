@@ -3,7 +3,7 @@ import { LycheeMark } from "../shared/LycheeMark.js";
 
 /**
  * Empty-state heading above the composer card: the Lychee mark, a greeting
- * for the time of day and, for a new-chat draft, the project picker. An empty
+ * for the time of day and, for a new-chat draft, the workspace picker. An empty
  * existing session shows no picker (04 §2.2).
  */
 export function DraftHero(props: {

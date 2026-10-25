@@ -37,7 +37,7 @@ export interface OhbabyWebRuntime {
   readonly ready: Promise<void>;
   /** Instance state of the open session or draft; reset on every switch. */
   readonly store: OhbabyWebStore;
-  /** Projects and the global session list; survives switches. */
+  /** Workspaces and the global session list; survives switches. */
   readonly catalog: GlobalCatalogStore;
   readonly draft: DraftStore;
   /** Settings cache, reads and writes; survives switches like the catalog. */
@@ -72,7 +72,7 @@ export interface OhbabyWebRuntime {
   ): Promise<UiSessionExport>;
   /** Creates or reuses an empty session in the connected instance. */
   createSession(): Promise<void>;
-  /** A new-chat draft; `null` is No project and runs in the default workspace. */
+  /** A new-chat draft; `null` is No workspace and runs in the default directory. */
   openDraft(workspaceDirectory?: string | null): Promise<void>;
   /** Opens a session at `directory`, or at its request directory when known. */
   openSession(sessionId: string, directory?: string): Promise<void>;
@@ -87,13 +87,13 @@ export interface OhbabyWebRuntime {
     readonly sessionId?: string;
     readonly text: string;
   }): Promise<UiCommandCompletion>;
-  /** Projects plus the connected instance directory. */
+  /** Workspaces plus the connected instance directory. */
   getWorkspaceSnapshot(): WorkspaceSnapshot;
   subscribeWorkspaces(listener: () => void): () => void;
   getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse>;
   listDirectoryPicker(directory: string): Promise<DirectoryPickerListResponse>;
   listWebCommands(): Promise<UiWebCommandCatalog>;
-  /** Registers a folder as a project and returns its directory; it does not switch. */
+  /** Registers a folder as a workspace and returns its directory; it does not switch. */
   openFolder(directory: string): Promise<string>;
   hideWorkspace(directory: string): Promise<void>;
   refreshCatalog(): Promise<void>;
@@ -106,7 +106,7 @@ function createClientInvocationId(): string {
   return globalThis.crypto.randomUUID();
 }
 
-/** Façade over the global layer (projects, sessions) and the instance layer (connection). */
+/** Façade over the global layer (workspaces, sessions) and the instance layer (connection). */
 class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   readonly store = createOhbabyWebStore();
   readonly draft = createDraftStore();
@@ -220,11 +220,11 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   async openDraft(workspaceDirectory: string | null = null): Promise<void> {
     const previous = this.draft.getSnapshot().workspaceDirectory;
-    this.draft.setProject(workspaceDirectory);
+    this.draft.setWorkspace(workspaceDirectory);
     const directory = this.draftDirectory();
     if (directory === null) {
-      this.draft.setProject(previous);
-      throw new Error("The default workspace is not available yet");
+      this.draft.setWorkspace(previous);
+      throw new Error("The default directory is not available yet");
     }
     const opening = this.instance.openDraft(directory);
     const generation = this.instance.selection;
@@ -233,7 +233,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     } catch (error) {
       // The instance rolled back; the picker must name where a send would go.
       if (this.instance.selection === generation)
-        this.draft.setProject(this.projectOf(this.instance.directory));
+        this.draft.setWorkspace(this.workspaceOf(this.instance.directory));
       throw error;
     }
   }
@@ -376,7 +376,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   getWorkspaceSnapshot(): WorkspaceSnapshot {
-    const scopes = this.catalog.getSnapshot().projects;
+    const scopes = this.catalog.getSnapshot().workspaces;
     const selectedDirectory = this.instance.directory;
     if (
       scopes !== this.workspaceSnapshot.scopes ||
@@ -423,14 +423,14 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     return this.instance.requireClient().listWebCommandsForRuntime();
   }
 
-  /** The open session stays open; a draft aimed at the project falls back to No project. */
+  /** The open session stays open; a draft aimed at the workspace falls back to No workspace. */
   async hideWorkspace(directory: string): Promise<void> {
     await this.global.hideScope(directory);
     await this.global.refresh();
     if (this.draft.getSnapshot().workspaceDirectory !== directory) return;
     if (this.boundSessionId() === null && this.instance.directory === directory)
       await this.openDraft(null);
-    else this.draft.setProject(null);
+    else this.draft.setWorkspace(null);
   }
 
   private async initialize(): Promise<void> {
@@ -438,12 +438,12 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     const hinted = trimmed === "" ? undefined : trimmed;
     const intent = this.config.startupIntent;
     try {
-      await this.global.refreshProjects();
+      await this.global.refreshWorkspaces();
     } catch (error) {
       if (!hinted) throw error;
-      // A single-workspace daemon: no project or global session routes.
+      // A single-workspace daemon: no workspace or global session routes.
       this.global.controlPlaneAvailable = false;
-      this.catalog.setProjects(
+      this.catalog.setWorkspaces(
         [
           {
             available: true,
@@ -483,33 +483,37 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       return;
     }
     await this.global.refreshSessions();
-    const { defaultWorkspace, projects } = this.catalog.getSnapshot();
-    const draftProject = this.draft.getSnapshot().workspaceDirectory;
+    const { defaultDirectory, workspaces } = this.catalog.getSnapshot();
+    const draftWorkspace = this.draft.getSnapshot().workspaceDirectory;
     if (
-      draftProject !== null &&
-      !projects.some(
-        (project) => project.directory === draftProject && project.available,
+      draftWorkspace !== null &&
+      !workspaces.some(
+        (workspace) =>
+          workspace.directory === draftWorkspace && workspace.available,
       )
     )
-      this.draft.setProject(null);
+      this.draft.setWorkspace(null);
     if (resumeId !== undefined) {
       const directory =
-        this.requestDirectory(resumeId) ?? hinted ?? defaultWorkspace;
+        this.requestDirectory(resumeId) ?? hinted ?? defaultDirectory;
       if (directory) await this.restoreOrDraft(directory, resumeId, true);
       return;
     }
     if (hinted) {
       let directory = hinted;
       if (
-        directory !== defaultWorkspace &&
-        !projects.some(
-          (project) => project.directory === directory && project.available,
+        directory !== defaultDirectory &&
+        !workspaces.some(
+          (workspace) =>
+            workspace.directory === directory && workspace.available,
         )
       ) {
         directory = await this.global.openScope(directory);
         await this.global.refresh();
       }
-      this.draft.setProject(directory === defaultWorkspace ? null : directory);
+      this.draft.setWorkspace(
+        directory === defaultDirectory ? null : directory,
+      );
       const last = this.instance.lastSession;
       await this.restoreOrDraft(
         directory,
@@ -551,7 +555,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     const draft = this.draftDirectory();
     if (draft !== null && draft !== this.instance.directory)
       await this.instance.openDraft(draft);
-    else this.draft.setProject(this.projectOf(this.instance.directory));
+    else this.draft.setWorkspace(this.workspaceOf(this.instance.directory));
   }
 
   /** The remembered place failed: forget it and fall back to a draft. */
@@ -559,8 +563,10 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     this.instance.forgetLastSession();
     const message = error instanceof Error ? error.message : String(error);
     const failed = this.instance.directory;
-    if (this.projectOf(failed) === this.draft.getSnapshot().workspaceDirectory)
-      this.draft.setProject(null);
+    if (
+      this.workspaceOf(failed) === this.draft.getSnapshot().workspaceDirectory
+    )
+      this.draft.setWorkspace(null);
     const directory = this.draftDirectory();
     if (directory !== null && directory !== failed && !this.instance.client) {
       try {
@@ -584,12 +590,12 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     );
   }
 
-  /** The project a directory belongs to in the draft picker; null for none. */
-  private projectOf(directory: string | null): string | null {
+  /** The workspace a directory belongs to in the draft picker; null for none. */
+  private workspaceOf(directory: string | null): string | null {
     if (directory === null) return null;
     return this.catalog
       .getSnapshot()
-      .projects.some((project) => project.directory === directory)
+      .workspaces.some((workspace) => workspace.directory === directory)
       ? directory
       : null;
   }
@@ -597,8 +603,9 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   private unavailable(directory: string): boolean {
     return this.catalog
       .getSnapshot()
-      .projects.some(
-        (project) => project.directory === directory && !project.available,
+      .workspaces.some(
+        (workspace) =>
+          workspace.directory === directory && !workspace.available,
       );
   }
 
@@ -649,11 +656,11 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     });
   }
 
-  /** Directory a new-chat draft runs in: its project, else the default workspace. */
+  /** Directory a new-chat draft runs in: its workspace, else the default directory. */
   private draftDirectory(): string | null {
     return (
       this.draft.getSnapshot().workspaceDirectory ??
-      this.catalog.getSnapshot().defaultWorkspace
+      this.catalog.getSnapshot().defaultDirectory
     );
   }
 

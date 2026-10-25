@@ -36,7 +36,7 @@ export function sessionPinsKey(
   return `${LEGACY_PREFIX}${JSON.stringify([serverOrigin(serverUrl), directory])}`;
 }
 
-/** One pin set per server; session ids are unique across projects. */
+/** One pin set per server; session ids are unique across workspaces. */
 export function globalSessionPinsKey(serverUrl: string | undefined): string {
   return `ohbaby.web.session-pins.v2:${JSON.stringify([serverOrigin(serverUrl)])}`;
 }
@@ -192,7 +192,7 @@ function createStore(key: string): SessionPinsStore {
   };
 }
 
-/** Keep failed writes across project unmounts for the lifetime of this page. */
+/** Keep failed writes across workspace unmounts for the lifetime of this page. */
 export function getSessionPinsStore(key: string): SessionPinsStore {
   let store = stores.get(key);
   if (!store) {
@@ -202,7 +202,7 @@ export function getSessionPinsStore(key: string): SessionPinsStore {
   return store;
 }
 
-/** The cross-project pin set, migrated from per-directory keys on first use. */
+/** The cross-workspace pin set, migrated from per-directory keys on first use. */
 export function getGlobalSessionPinsStore(
   serverUrl: string | undefined,
 ): SessionPinsStore {
