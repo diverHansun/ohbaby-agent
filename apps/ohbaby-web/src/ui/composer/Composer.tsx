@@ -1,6 +1,3 @@
-import { UnconsumedSteers } from "./UnconsumedSteers.js";
-import { SteerButton } from "./SteerButton.js";
-import { LoaderCircle, Pencil, Send, Square, Trash2 } from "lucide-react";
 import type {
   UiBackendClient,
   UiGoal,
@@ -12,51 +9,32 @@ import type {
   UiUnconsumedSteer,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
-import type {
-  ChangeEvent,
-  KeyboardEvent,
-  ReactElement,
-  ReactNode,
-} from "react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import type { KeyboardEvent, ReactElement, ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import {
   type ExecuteGoalCommand,
   GoalComposerStrip,
   type GoalPanelIntent,
 } from "../commands/GoalControl.js";
-import {
-  createSlashPaletteItems,
-  selectedSlashItem,
-  slashCompletionSuffix,
-  type SlashPaletteItem,
-} from "../commands/slashCommands.js";
-import { SlashPalette } from "../commands/SlashPalette.js";
 import { type StructuredCommandRequest } from "../commands/StructuredCommandOverlay.js";
-
+import { ComposerControls } from "./ComposerControls.js";
+import { ComposerInput } from "./ComposerInput.js";
 import { fitComposerTextarea } from "./composerTextarea.js";
 import {
   composerDraftKey,
-  composerLeaseKey,
-  type QueuedEditState,
   readSessionValue,
   removeSessionValue,
   type StoredComposerDraft,
-  type StoredQueuedEdit,
   writeSessionValue,
 } from "./draft-storage.js";
 import { isImeComposing } from "./ime.js";
-import { ReasoningControl } from "./ReasoningControl.js";
-import {
-  COMPOSER_PLACEHOLDER_PHRASES,
-  TypewriterPlaceholder,
-} from "./TypewriterPlaceholder.js";
+import { PromptQueue } from "./PromptQueue.js";
+import { UnconsumedSteers } from "./UnconsumedSteers.js";
+import { useComposerDraft } from "./useComposerDraft.js";
+import { useSlashPalette } from "./useSlashPalette.js";
+import { useSteerQueue } from "./useSteerQueue.js";
+
+export type { ComposerPrefill } from "./useComposerDraft.js";
 
 export interface ComposerModel {
   readonly activeRunId?: string;
@@ -70,13 +48,14 @@ export interface ComposerModel {
   readonly permissionLevel: UiPermissionLevel;
 }
 
-export interface ComposerPrefill {
-  readonly scopeKey: string;
-  readonly editRevision: number;
-  readonly nonce: number;
-  readonly text: string;
-}
+const TEXTAREA_FIT = { lineHeight: 24, maxLines: 7 } as const;
+const DOUBLE_ESCAPE_MS = 650;
 
+/**
+ * The composer: draft, slash palette, queued prompts, goal strip and the card
+ * with its control row. State lives in `useComposerDraft`, `useSteerQueue` and
+ * `useSlashPalette`; this component wires sending and keyboard handling.
+ */
 export function Composer(props: {
   readonly client: Pick<
     UiBackendClient,
@@ -110,9 +89,11 @@ export function Composer(props: {
     clientRequestId?: string,
     reasoning?: UiReasoningConfig,
   ) => Promise<boolean>;
-  readonly prefill?: ComposerPrefill | null;
+  readonly prefill?: import("./useComposerDraft.js").ComposerPrefill | null;
   readonly onEditRevision: (revision: number) => void;
   readonly model: ComposerModel;
+  /** The model menu in the control row (D15). */
+  readonly modelControl?: ReactNode;
   readonly activeGoal?: UiGoal | null;
   readonly onExecuteGoalCommand?: ExecuteGoalCommand;
   readonly onOpenGoalPanel?: (intent?: GoalPanelIntent) => void;
@@ -127,59 +108,44 @@ export function Composer(props: {
   useEffect(() => {
     selectedReasoning.current = undefined;
   }, [props.activeSession?.id, props.client]);
-  const [draft, setDraft] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
-  const [pendingText, setPendingText] = useState<string | null>(null);
-  const [queuedEdit, setQueuedEdit] = useState<QueuedEditState | null>(null);
-  const [leaseActivityVersion, setLeaseActivityVersion] = useState(0);
-  const [queueAcquirePending, setQueueAcquirePending] = useState(false);
-  const [queueExpanded, setQueueExpanded] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
-  const [queueError, setQueueError] = useState<string | null>(null);
-  const [resendError, setResendError] = useState<string | null>(null);
-  const [slashCatalog, setSlashCatalog] = useState<UiWebCommandCatalog | null>(
-    null,
-  );
-  const [slashDismissedDraft, setSlashDismissedDraft] = useState<string | null>(
-    null,
-  );
-  const [slashError, setSlashError] = useState<string | null>(null);
-  const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recoveryRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLDivElement | null>(null);
-  const draftRef = useRef("");
-  const queuedEditRef = useRef(queuedEdit);
-  const queuedPromptsRef = useRef(props.queuedPrompts);
-  useLayoutEffect(() => {
-    queuedPromptsRef.current = props.queuedPrompts;
-    draftRef.current = draft;
-    queuedEditRef.current = queuedEdit;
-  }, [draft, queuedEdit, props.queuedPrompts]);
-  const draftScopeGeneration = useRef(0);
-  const editRevision = useRef(0);
-  const consumedPrefillNonce = useRef(0);
-  const onEditRevisionRef = useRef(props.onEditRevision);
-  useLayoutEffect(() => {
-    onEditRevisionRef.current = props.onEditRevision;
-  }, [props.onEditRevision]);
-  const advanceEditRevision = useCallback((): void => {
-    editRevision.current += 1;
-    onEditRevisionRef.current(editRevision.current);
-  }, []);
-  useLayoutEffect(
-    () => (): void => {
-      draftScopeGeneration.current += 1;
-      queueAcquireGenerationRef.current += 1;
-    },
-    [],
-  );
   const lastEscapeAt = useRef(0);
-  const lastLeaseRenewalAt = useRef(0);
-  const leaseRenewalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const queueAcquirePendingRef = useRef(false);
-  const queueAcquireGenerationRef = useRef(0);
+  const resetSlashRef = useRef<() => void>(() => undefined);
+
+  const state = useComposerDraft({
+    client: props.client,
+    draftScopeKey: props.draftScopeKey,
+    onEditRevision: props.onEditRevision,
+    prefill: props.prefill,
+    onPrefilled: () => {
+      resetSlashRef.current();
+      textareaRef.current?.focus();
+    },
+  });
+  const {
+    draft,
+    draftRef,
+    queuedEdit,
+    isSubmitting,
+    pendingRequestId,
+    setPendingRequestId,
+    setPendingText,
+    setDraft,
+    persistDraft,
+    updateDraft,
+    draftScopeGeneration,
+    editRevision,
+  } = state;
+  const queue = useSteerQueue({
+    client: props.client,
+    draftScopeKey: props.draftScopeKey,
+    queuedPrompts: props.queuedPrompts,
+    state,
+    textareaRef,
+  });
+
   const canSend =
     props.model.canSend &&
     (!queuedEdit?.leaseLost || queuedEdit.retainedSendText !== undefined) &&
@@ -197,118 +163,21 @@ export function Composer(props: {
     !queuedEdit &&
     !isSubmitting &&
     !props.isPromptAdmitting;
-  const visibleQueuedPrompts = queueExpanded
-    ? props.queuedPrompts
-    : props.queuedPrompts.slice(0, 5);
-  const slashItems = useMemo(
-    () =>
-      canUseSlash && slashCatalog && draft.startsWith("/")
-        ? createSlashPaletteItems(slashCatalog, draft)
-        : [],
-    [canUseSlash, draft, slashCatalog],
-  );
-  const selectedCommand = selectedSlashItem(slashItems, slashIndex);
-  const completionSuffix = slashCompletionSuffix(selectedCommand, draft);
-  const slashOpen =
-    draft.startsWith("/") &&
-    slashDismissedDraft !== draft &&
-    slashItems.length > 0 &&
-    canUseSlash &&
-    !props.model.disabled;
-  const showTypewriterPlaceholder =
-    !isFocused &&
-    draft.length === 0 &&
-    !isSubmitting &&
-    !props.model.disabled &&
-    !props.model.isRunning;
-
-  useLayoutEffect(() => {
-    draftScopeGeneration.current += 1;
-    const generation = draftScopeGeneration.current;
-    advanceEditRevision();
-    setIsSubmitting(false);
-    const stored = readSessionValue(
-      composerDraftKey(props.draftScopeKey),
-    ) as StoredComposerDraft | null;
-    draftRef.current = stored?.text ?? "";
-    setDraft(draftRef.current);
-    setPendingRequestId(stored?.clientRequestId ?? null);
-    setPendingText(stored?.pendingText ?? null);
-    setQueueExpanded(false);
-    queueAcquireGenerationRef.current += 1;
-    queueAcquirePendingRef.current = false;
-    setQueueAcquirePending(false);
-    setQueueError(null);
-    setResendError(null);
-    setLeaseActivityVersion(0);
-
-    const storedLease = readSessionValue(
-      composerLeaseKey(props.draftScopeKey),
-    ) as StoredQueuedEdit | null;
-    if (!storedLease) {
-      setQueuedEdit(null);
-      return;
-    }
-    draftRef.current = storedLease.editText;
-    setDraft(storedLease.editText);
-    setQueuedEdit({ ...storedLease, leaseLost: true });
-    if (storedLease.retainedSendText !== undefined) {
-      setQueueError(
-        "Send outcome unknown. Retry the same send to recover its receipt. Esc restores your draft.",
-      );
-      return;
-    }
-    void props.client
-      .renewPromptEditLease({
-        editLeaseId: storedLease.editLeaseId,
-        promptId: storedLease.promptId,
-      })
-      .then((lease) => {
-        const current = queuedEditRef.current;
-        if (
-          generation !== draftScopeGeneration.current ||
-          current?.editLeaseId !== storedLease.editLeaseId
-        )
-          return;
-        setQueuedEdit({
-          ...current,
-          status: lease.prompt.status === "retained" ? "retained" : "queued",
-          expiresAt: lease.expiresAt,
-          leaseLost: false,
-        });
-        lastLeaseRenewalAt.current = Date.now();
-        const storedNow = readSessionValue(
-          composerLeaseKey(props.draftScopeKey),
-        ) as StoredQueuedEdit | null;
-        writeSessionValue(composerLeaseKey(props.draftScopeKey), {
-          ...current,
-          editText: draftRef.current,
-          expiresAt: lease.expiresAt,
-          lastActivityAt: storedNow?.lastActivityAt ?? Date.now(),
-        } satisfies StoredQueuedEdit);
-      })
-      .catch(() => {
-        if (
-          generation !== draftScopeGeneration.current ||
-          queuedEditRef.current?.editLeaseId !== storedLease.editLeaseId
-        )
-          return;
-        setQueuedEdit((current) =>
-          current ? { ...current, leaseLost: true } : current,
-        );
-        setQueueError(
-          "Edit lease expired. Your edited text is preserved. Esc restores your draft.",
-        );
-      });
-  }, [props.client, props.draftScopeKey, advanceEditRevision]);
+  const slash = useSlashPalette({
+    draftState: state,
+    canUseSlash,
+    disabled: props.model.disabled,
+    commandCatalogVersion: props.commandCatalogVersion,
+    onListCommands: props.onListCommands,
+    onStructuredCommand: props.onStructuredCommand,
+    onSubmit: (text) => props.onSubmit(text),
+  });
+  resetSlashRef.current = slash.reset;
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
-    if (!textarea) {
-      return;
-    }
-    fitComposerTextarea(textarea, { lineHeight: 22, maxLines: 7 });
-  }, [draft, props.model.disabled, slashOpen]);
+    if (textarea) fitComposerTextarea(textarea, TEXTAREA_FIT);
+  }, [draft, props.model.disabled, slash.slashOpen]);
 
   useLayoutEffect(() => {
     const recovery = recoveryRef.current;
@@ -339,7 +208,7 @@ export function Composer(props: {
       return;
     }
     const observer = new ResizeObserver(() => {
-      fitComposerTextarea(textarea, { lineHeight: 22, maxLines: 7 });
+      fitComposerTextarea(textarea, TEXTAREA_FIT);
     });
     observer.observe(composerInput);
     return (): void => {
@@ -347,458 +216,13 @@ export function Composer(props: {
     };
   }, []);
 
-  useEffect(() => {
-    return (): void => {
-      if (leaseRenewalTimer.current !== null) {
-        globalThis.clearTimeout(leaseRenewalTimer.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!draft.startsWith("/") || !canUseSlash || props.model.disabled) {
-      return;
-    }
-    let cancelled = false;
-    setSlashCatalog(null);
-    setSlashError(null);
-    props
-      .onListCommands()
-      .then((catalog) => {
-        if (!cancelled) {
-          setSlashCatalog(catalog);
-          setSlashError(null);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setSlashCatalog(null);
-          setSlashError(error instanceof Error ? error.message : String(error));
-        }
-      });
-    return (): void => {
-      cancelled = true;
-    };
-  }, [
-    canUseSlash,
-    draft,
-    props.onListCommands,
-    props.commandCatalogVersion,
-    props.model.disabled,
-  ]);
-
-  const persistDraft = useCallback(
-    (text: string, requestId?: string, requestText?: string): void => {
-      writeSessionValue(composerDraftKey(props.draftScopeKey), {
-        ...(requestId === undefined ? {} : { clientRequestId: requestId }),
-        ...(requestText === undefined ? {} : { pendingText: requestText }),
-        text,
-      } satisfies StoredComposerDraft);
-    },
-    [props.draftScopeKey],
-  );
-
-  const updateDraft = useCallback(
-    (nextDraft: string): void => {
-      if (queuedEdit?.retainedSendText !== undefined) return;
-      advanceEditRevision();
-      draftRef.current = nextDraft;
-      setDraft(nextDraft);
-      const keepPending =
-        pendingRequestId !== null && pendingText === nextDraft.trim();
-      if (!keepPending) {
-        setPendingRequestId(null);
-        setPendingText(null);
-      }
-      if (!queuedEdit)
-        persistDraft(
-          nextDraft,
-          keepPending ? pendingRequestId : undefined,
-          keepPending ? pendingText : undefined,
-        );
-      if (queuedEdit) {
-        setLeaseActivityVersion((version) => version + 1);
-        writeSessionValue(composerLeaseKey(props.draftScopeKey), {
-          ...queuedEdit,
-          editText: nextDraft,
-          lastActivityAt: Date.now(),
-        } satisfies StoredQueuedEdit);
-      }
-    },
-    [
-      advanceEditRevision,
-      pendingRequestId,
-      pendingText,
-      persistDraft,
-      props.draftScopeKey,
-      queuedEdit,
-    ],
-  );
-
-  useEffect(() => {
-    const prefill = props.prefill;
-    if (!prefill || prefill.nonce <= consumedPrefillNonce.current) return;
-    consumedPrefillNonce.current = prefill.nonce;
-    if (
-      prefill.scopeKey !== props.draftScopeKey ||
-      prefill.editRevision !== editRevision.current
-    )
-      return;
-    updateDraft(prefill.text);
-    setSlashDismissedDraft(null);
-    setSlashError(null);
-    setSlashIndex(0);
-    textareaRef.current?.focus();
-  }, [props.draftScopeKey, props.prefill, updateDraft]);
-
-  useEffect(() => {
-    if (
-      !queuedEdit ||
-      queuedEdit.retainedSendText !== undefined ||
-      leaseActivityVersion === 0
-    )
-      return;
-    const generation = draftScopeGeneration.current;
-    let cancelled = false;
-    if (leaseRenewalTimer.current !== null) {
-      globalThis.clearTimeout(leaseRenewalTimer.current);
-    }
-    const delay = Math.max(
-      0,
-      20_000 - (Date.now() - lastLeaseRenewalAt.current),
-    );
-    leaseRenewalTimer.current = globalThis.setTimeout(() => {
-      leaseRenewalTimer.current = null;
-      void props.client
-        .renewPromptEditLease({
-          editLeaseId: queuedEdit.editLeaseId,
-          promptId: queuedEdit.promptId,
-        })
-        .then((lease) => {
-          if (
-            cancelled ||
-            generation !== draftScopeGeneration.current ||
-            queuedEditRef.current?.retainedSendText !== undefined
-          )
-            return;
-          lastLeaseRenewalAt.current = Date.now();
-          setQueuedEdit((current) =>
-            current?.editLeaseId === queuedEdit.editLeaseId
-              ? { ...current, expiresAt: lease.expiresAt, leaseLost: false }
-              : current,
-          );
-          writeSessionValue(composerLeaseKey(props.draftScopeKey), {
-            ...queuedEdit,
-            editText: draft,
-            expiresAt: lease.expiresAt,
-            lastActivityAt: Date.now(),
-          } satisfies StoredQueuedEdit);
-        })
-        .catch(() => {
-          if (
-            cancelled ||
-            generation !== draftScopeGeneration.current ||
-            queuedEditRef.current?.retainedSendText !== undefined
-          )
-            return;
-          setQueuedEdit((current) =>
-            current?.editLeaseId === queuedEdit.editLeaseId
-              ? { ...current, leaseLost: true }
-              : current,
-          );
-          setQueueError(
-            "Edit lease expired. Your edited text is preserved. Esc restores your draft.",
-          );
-        });
-    }, delay);
-    return (): void => {
-      cancelled = true;
-      if (leaseRenewalTimer.current !== null) {
-        globalThis.clearTimeout(leaseRenewalTimer.current);
-        leaseRenewalTimer.current = null;
-      }
-    };
-  }, [
-    draft,
-    leaseActivityVersion,
-    persistDraft,
-    props.client,
-    props.draftScopeKey,
-    queuedEdit,
-  ]);
-
-  useEffect(() => {
-    if (
-      !queuedEdit ||
-      queuedEdit.retainedSendText !== undefined ||
-      queuedEdit.leaseLost ||
-      isSubmitting
-    )
-      return;
-    const prompt = props.queuedPrompts.find(
-      (item) => item.promptId === queuedEdit.promptId,
-    );
-    const invalidate = (): void => {
-      setQueuedEdit((current) =>
-        current?.editLeaseId === queuedEdit.editLeaseId
-          ? { ...current, leaseLost: true }
-          : current,
-      );
-      setQueueError(
-        "This edit is no longer available. Your text is preserved. Esc restores your draft.",
-      );
-    };
-    if (!prompt || (queuedEdit.status && prompt.status !== queuedEdit.status)) {
-      invalidate();
-      return;
-    }
-    const delay = Date.parse(queuedEdit.expiresAt) - Date.now();
-    if (delay <= 0) {
-      invalidate();
-      return;
-    }
-    const timer = globalThis.setTimeout(
-      () => {
-        if (Date.now() >= Date.parse(queuedEdit.expiresAt)) invalidate();
-      },
-      Math.min(delay, 2_147_483_647),
-    );
-    return (): void => {
-      globalThis.clearTimeout(timer);
-    };
-  }, [queuedEdit, props.queuedPrompts, isSubmitting]);
-
-  const beginQueuedEdit = useCallback(
-    (prompt: UiPromptSubmission): void => {
-      if (queuedEdit || queueAcquirePendingRef.current) {
-        setQueueError("Finish or cancel the current queued edit first.");
-        return;
-      }
-      setQueueError(null);
-      const acquireGeneration = queueAcquireGenerationRef.current + 1;
-      queueAcquireGenerationRef.current = acquireGeneration;
-      queueAcquirePendingRef.current = true;
-      setQueueAcquirePending(true);
-      void props.client
-        .acquirePromptEditLease({ promptId: prompt.promptId })
-        .then((lease) => {
-          if (
-            queueAcquireGenerationRef.current !== acquireGeneration ||
-            !queuedPromptsRef.current.some(
-              (item) =>
-                item.promptId === prompt.promptId &&
-                item.status === lease.prompt.status,
-            )
-          ) {
-            void props.client
-              .releasePromptEditLease({
-                editLeaseId: lease.editLeaseId,
-                promptId: prompt.promptId,
-              })
-              .catch(() => undefined);
-            return;
-          }
-          const next: QueuedEditState = {
-            editLeaseId: lease.editLeaseId,
-            expiresAt: lease.expiresAt,
-            status: lease.prompt.status === "retained" ? "retained" : "queued",
-            operationId: globalThis.crypto.randomUUID(),
-            originalDraft: draftRef.current,
-            ...(pendingRequestId === null
-              ? {}
-              : { originalPendingRequestId: pendingRequestId }),
-            ...(pendingText === null
-              ? {}
-              : { originalPendingText: pendingText }),
-            promptId: prompt.promptId,
-          };
-          lastLeaseRenewalAt.current = Date.now();
-          setLeaseActivityVersion(0);
-          setQueuedEdit(next);
-          setDraft(lease.prompt.text);
-          setPendingRequestId(null);
-          setPendingText(null);
-          writeSessionValue(composerLeaseKey(props.draftScopeKey), {
-            ...next,
-            editText: lease.prompt.text,
-            lastActivityAt: Date.now(),
-          } satisfies StoredQueuedEdit);
-          textareaRef.current?.focus();
-        })
-        .catch((error: unknown) => {
-          if (queueAcquireGenerationRef.current === acquireGeneration) {
-            setQueueError(
-              error instanceof Error ? error.message : String(error),
-            );
-          }
-        })
-        .finally(() => {
-          if (queueAcquireGenerationRef.current === acquireGeneration) {
-            queueAcquirePendingRef.current = false;
-            setQueueAcquirePending(false);
-          }
-        });
-    },
-    [
-      draft,
-      pendingRequestId,
-      pendingText,
-      props.client,
-      props.draftScopeKey,
-      queuedEdit,
-    ],
-  );
-
-  const finishQueuedEdit = useCallback((): void => {
-    if (
-      !queuedEdit ||
-      (queuedEdit.leaseLost && queuedEdit.retainedSendText === undefined) ||
-      !draft.trim() ||
-      isSubmitting
-    )
-      return;
-    const generation = draftScopeGeneration.current;
-    setIsSubmitting(true);
-    setQueueError(null);
-    const input = {
-      editLeaseId: queuedEdit.editLeaseId,
-      promptId: queuedEdit.promptId,
-      text: queuedEdit.retainedSendText ?? draft.trim(),
-    };
-    const operationId =
-      queuedEdit.operationId ?? globalThis.crypto.randomUUID();
-    if (
-      !queuedEdit.operationId ||
-      (queuedEdit.status === "retained" &&
-        queuedEdit.retainedSendText === undefined)
-    ) {
-      const next = {
-        ...queuedEdit,
-        operationId,
-        ...(queuedEdit.status === "retained"
-          ? { retainedSendText: input.text }
-          : {}),
-      };
-      queuedEditRef.current = next;
-      setQueuedEdit(next);
-      writeSessionValue(composerLeaseKey(props.draftScopeKey), {
-        ...next,
-        editText: draft,
-        lastActivityAt: Date.now(),
-      } satisfies StoredQueuedEdit);
-    }
-    const mutation =
-      queuedEdit.status === "retained"
-        ? props.client.resubmitRetainedPrompt({ ...input, operationId })
-        : props.client.editQueuedPrompt(input);
-    void mutation
-      .then(() => {
-        if (
-          generation !== draftScopeGeneration.current ||
-          queuedEditRef.current?.editLeaseId !== queuedEdit.editLeaseId
-        )
-          return;
-        const restored = queuedEdit.originalDraft;
-        setQueuedEdit(null);
-        setDraft(restored);
-        setPendingRequestId(queuedEdit.originalPendingRequestId ?? null);
-        setPendingText(queuedEdit.originalPendingText ?? null);
-        persistDraft(
-          restored,
-          queuedEdit.originalPendingRequestId,
-          queuedEdit.originalPendingText,
-        );
-        removeSessionValue(composerLeaseKey(props.draftScopeKey));
-      })
-      .catch((error: unknown) => {
-        if (
-          generation !== draftScopeGeneration.current ||
-          queuedEditRef.current?.editLeaseId !== queuedEdit.editLeaseId
-        )
-          return;
-        const message = error instanceof Error ? error.message : String(error);
-        setQueueError(
-          queuedEdit.status === "retained"
-            ? `Send outcome unknown. Retry the same send to recover its receipt. ${message}. Esc restores your draft.`
-            : message,
-        );
-      })
-      .finally(() => {
-        if (generation === draftScopeGeneration.current) setIsSubmitting(false);
-      });
-  }, [
-    draft,
-    isSubmitting,
-    persistDraft,
-    props.client,
-    props.draftScopeKey,
-    queuedEdit,
-  ]);
-
-  const releaseQueuedEdit = useCallback((): void => {
-    if (!queuedEdit) return;
-    const current = queuedEdit;
-    void props.client
-      .releasePromptEditLease({
-        editLeaseId: current.editLeaseId,
-        promptId: current.promptId,
-      })
-      .catch(() => undefined);
-    setQueuedEdit(null);
-    setDraft(current.originalDraft);
-    setPendingRequestId(current.originalPendingRequestId ?? null);
-    setPendingText(current.originalPendingText ?? null);
-    persistDraft(
-      current.originalDraft,
-      current.originalPendingRequestId,
-      current.originalPendingText,
-    );
-    removeSessionValue(composerLeaseKey(props.draftScopeKey));
-  }, [persistDraft, props.client, props.draftScopeKey, queuedEdit]);
-
-  const cancelQueuedPrompt = useCallback(
-    (promptId: string): void => {
-      const generation = draftScopeGeneration.current;
-      const editLeaseId =
-        queuedEdit?.promptId === promptId ? queuedEdit.editLeaseId : undefined;
-      void props.client
-        .cancelQueuedPrompt({
-          ...(editLeaseId === undefined ? {} : { editLeaseId }),
-          promptId,
-        })
-        .then(() => {
-          if (generation !== draftScopeGeneration.current) return;
-          if (
-            queuedEdit?.promptId === promptId &&
-            queuedEditRef.current?.editLeaseId === editLeaseId
-          ) {
-            setQueuedEdit(null);
-            setDraft(queuedEdit.originalDraft);
-            setPendingRequestId(queuedEdit.originalPendingRequestId ?? null);
-            setPendingText(queuedEdit.originalPendingText ?? null);
-            persistDraft(
-              queuedEdit.originalDraft,
-              queuedEdit.originalPendingRequestId,
-              queuedEdit.originalPendingText,
-            );
-            removeSessionValue(composerLeaseKey(props.draftScopeKey));
-          }
-        })
-        .catch((error: unknown) => {
-          if (generation !== draftScopeGeneration.current) return;
-          setQueueError(error instanceof Error ? error.message : String(error));
-        });
-    },
-    [persistDraft, props.client, props.draftScopeKey, queuedEdit],
-  );
-
   const send = useCallback(() => {
     const text = draft.trim();
     if (props.readOnly || !text || !canSend) {
       return;
     }
     if (queuedEdit) {
-      finishQueuedEdit();
+      queue.finishQueuedEdit();
       return;
     }
     const generation = draftScopeGeneration.current;
@@ -845,109 +269,25 @@ export function Composer(props: {
   }, [
     canSend,
     draft,
-    finishQueuedEdit,
+    draftRef,
+    draftScopeGeneration,
+    editRevision,
     pendingRequestId,
     persistDraft,
     props.draftScopeKey,
     props.onSubmit,
+    props.readOnly,
+    queue,
     queuedEdit,
+    setDraft,
+    setPendingRequestId,
+    setPendingText,
   ]);
-
-  const cycleMode = useCallback(() => {
-    const mode = props.model.mode === "auto" ? "plan" : "auto";
-    props.onSetPermission({ mode });
-  }, [props.onSetPermission, props.model.mode]);
-
-  const runSlashCommand = useCallback(
-    (item: SlashPaletteItem | undefined) => {
-      if (!canUseSlash) {
-        return;
-      }
-      const commandText = item?.label ?? draft.trim();
-      if (!commandText) {
-        return;
-      }
-      if (item?.executionKind === "overlay") {
-        props.onStructuredCommand({ item, text: draft.trim() || item.label });
-        updateDraft("");
-        setSlashDismissedDraft(null);
-        setSlashError(null);
-        return;
-      }
-      const generation = draftScopeGeneration.current;
-      const revision = editRevision.current;
-      setIsSubmitting(true);
-      void props
-        .onSubmit(commandText)
-        .then((sent) => {
-          if (
-            sent &&
-            generation === draftScopeGeneration.current &&
-            revision === editRevision.current
-          ) {
-            updateDraft("");
-            setSlashDismissedDraft(null);
-          }
-        })
-        .finally(() => {
-          if (generation === draftScopeGeneration.current)
-            setIsSubmitting(false);
-        });
-    },
-    [
-      canUseSlash,
-      draft,
-      props.onStructuredCommand,
-      props.onSubmit,
-      updateDraft,
-    ],
-  );
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (isImeComposing(event)) {
-        return;
-      }
-      if (slashOpen) {
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          setSlashIndex((index) => Math.min(index + 1, slashItems.length - 1));
-          return;
-        }
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          setSlashIndex((index) => Math.max(index - 1, 0));
-          return;
-        }
-        if (event.key === "PageDown") {
-          event.preventDefault();
-          setSlashIndex((index) => Math.min(index + 5, slashItems.length - 1));
-          return;
-        }
-        if (event.key === "PageUp") {
-          event.preventDefault();
-          setSlashIndex((index) => Math.max(index - 5, 0));
-          return;
-        }
-        if (event.key === "Tab" && !event.shiftKey) {
-          event.preventDefault();
-          if (selectedCommand) {
-            updateDraft(selectedCommand.label);
-            setSlashDismissedDraft(null);
-          }
-          return;
-        }
-        if (event.key === "Enter" && !event.shiftKey) {
-          event.preventDefault();
-          runSlashCommand(selectedCommand);
-          return;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          setSlashDismissedDraft(draft);
-          return;
-        }
-      }
+      if (isImeComposing(event)) return;
+      if (slash.handlePaletteKey(event)) return;
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         send();
@@ -955,17 +295,19 @@ export function Composer(props: {
       }
       if (event.key === "Escape" && queuedEdit) {
         event.preventDefault();
-        releaseQueuedEdit();
+        queue.releaseQueuedEdit();
         return;
       }
       if (event.key === "Tab" && event.shiftKey) {
         event.preventDefault();
-        cycleMode();
+        props.onSetPermission({
+          mode: props.model.mode === "auto" ? "plan" : "auto",
+        });
         return;
       }
       if (event.key === "Escape" && props.model.canStop) {
         const now = Date.now();
-        if (now - lastEscapeAt.current < 650) {
+        if (now - lastEscapeAt.current < DOUBLE_ESCAPE_MS) {
           props.onStop();
           lastEscapeAt.current = 0;
         } else {
@@ -973,21 +315,18 @@ export function Composer(props: {
         }
       }
     },
-    [
-      cycleMode,
-      draft,
-      props.onStop,
-      props.model.canStop,
-      queuedEdit,
-      releaseQueuedEdit,
-      runSlashCommand,
-      selectedCommand,
-      send,
-      slashItems.length,
-      slashOpen,
-      updateDraft,
-    ],
+    [props, queue, queuedEdit, send, slash],
   );
+
+  const blockReadOnly = (event: {
+    preventDefault(): void;
+    stopPropagation(): void;
+  }): void => {
+    if (props.readOnly) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
 
   return (
     <section
@@ -997,18 +336,8 @@ export function Composer(props: {
         className="ohb-composer-content"
         inert={props.readOnly}
         aria-hidden={props.readOnly ? true : undefined}
-        onClickCapture={(event) => {
-          if (props.readOnly) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-        }}
-        onKeyDownCapture={(event) => {
-          if (props.readOnly) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-        }}
+        onClickCapture={blockReadOnly}
+        onKeyDownCapture={blockReadOnly}
       >
         {props.topContent}
         <div className="ohb-steer-recovery" ref={recoveryRef}>
@@ -1018,7 +347,7 @@ export function Composer(props: {
             scopeKey={props.draftScopeKey}
             resend={async (input) => {
               const generation = draftScopeGeneration.current;
-              setResendError(null);
+              state.setResendError(null);
               let receipt: Awaited<
                 ReturnType<typeof props.client.resendSteerInput>
               >;
@@ -1027,7 +356,7 @@ export function Composer(props: {
               } catch (caught: unknown) {
                 // Kept here, not on the row: SSE may remove the row first.
                 if (generation === draftScopeGeneration.current)
-                  setResendError(
+                  state.setResendError(
                     caught instanceof Error ? caught.message : String(caught),
                   );
                 throw caught;
@@ -1036,100 +365,37 @@ export function Composer(props: {
                 generation === draftScopeGeneration.current &&
                 receipt.steer?.status === "error"
               ) {
-                setResendError(
+                state.setResendError(
                   `Accepted in queue · ${receipt.steer.error.message}`,
                 );
               }
               return receipt;
             }}
           />
-          {resendError ? (
+          {state.resendError ? (
             <p
               className="ohb-unsent-steer ohb-resend-error ohb-slash-error"
               role="alert"
               tabIndex={0}
             >
-              {resendError}
+              {state.resendError}
             </p>
           ) : null}
         </div>
-        {props.queuedPrompts.length > 0 ? (
-          <section className="ohb-prompt-queue" aria-label="Queued prompts">
-            <div className="ohb-prompt-queue-header">
-              <span>Queued {String(props.queuedPrompts.length)}</span>
-              {props.queuedPrompts.length > 5 ? (
-                <button
-                  onClick={() => {
-                    setQueueExpanded((expanded) => !expanded);
-                  }}
-                  title={
-                    queueExpanded
-                      ? "Collapse queued prompts"
-                      : "Show all queued prompts"
-                  }
-                  type="button"
-                >
-                  {queueExpanded ? "Show less" : "Show all"}
-                </button>
-              ) : null}
-            </div>
-            <div className="ohb-prompt-queue-items">
-              {visibleQueuedPrompts.map((prompt) => {
-                const editing = queuedEdit?.promptId === prompt.promptId;
-                return (
-                  <div
-                    className={`ohb-prompt-queue-item ${editing ? "is-editing" : ""}`}
-                    key={prompt.promptId}
-                  >
-                    <span className="ohb-prompt-queue-text">
-                      <span aria-hidden="true">↳ </span>
-                      <span>{prompt.text}</span>
-                      {prompt.status === "retained" ? (
-                        <small> · Retained</small>
-                      ) : null}
-                      {editing ? <small> · editing</small> : null}
-                    </span>
-                    <SteerButton
-                      prompt={prompt}
-                      runId={props.model.activeRunId}
-                      disabled={
-                        isSubmitting ||
-                        queueAcquirePending ||
-                        editing ||
-                        props.model.disabled
-                      }
-                      steer={(input) => props.client.steerQueuedPrompt(input)}
-                    />
-                    <button
-                      aria-label={`Edit prompt: ${prompt.text}`}
-                      title="Edit prompt"
-                      className="ohb-prompt-queue-edit"
-                      disabled={isSubmitting || queueAcquirePending}
-                      onClick={() => {
-                        beginQueuedEdit(prompt);
-                      }}
-                      type="button"
-                    >
-                      <Pencil size={13} />
-                    </button>
-                    <button
-                      aria-label={`Delete prompt: ${prompt.text}`}
-                      className="ohb-prompt-queue-cancel"
-                      disabled={isSubmitting || queueAcquirePending}
-                      onClick={() => {
-                        cancelQueuedPrompt(prompt.promptId);
-                      }}
-                      title="Delete prompt"
-                      type="button"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
+        <PromptQueue
+          prompts={props.queuedPrompts}
+          expanded={state.queueExpanded}
+          onToggleExpanded={() => {
+            state.setQueueExpanded((expanded) => !expanded);
+          }}
+          editingPromptId={queuedEdit?.promptId}
+          busy={isSubmitting || state.queueAcquirePending}
+          disabled={props.model.disabled}
+          activeRunId={props.model.activeRunId}
+          steer={(input) => props.client.steerQueuedPrompt(input)}
+          onEdit={queue.beginQueuedEdit}
+          onCancel={queue.cancelQueuedPrompt}
+        />
         <GoalComposerStrip
           disabled={
             Boolean(props.readOnly) ||
@@ -1144,148 +410,60 @@ export function Composer(props: {
           scopeKey={props.draftScopeKey}
           sessionId={props.model.activeSessionId ?? props.activeSession?.id}
         />
-        <div
-          className={`ohb-composer-input${props.model.mode === "plan" ? " is-plan" : ""}`}
-          ref={composerInputRef}
-        >
-          {slashOpen ? (
-            <SlashPalette
-              items={slashItems}
-              onHover={setSlashIndex}
-              onRun={(item) => {
-                runSlashCommand(item);
-              }}
-              placement={props.compact ? "down" : "up"}
-              selectedIndex={slashIndex}
-            />
-          ) : null}
-          <div className="ohb-composer-text">
-            <TypewriterPlaceholder
-              active={showTypewriterPlaceholder}
-              phrases={COMPOSER_PLACEHOLDER_PHRASES}
-            />
-            <textarea
-              aria-label={`Message, ${props.model.mode} mode, ${props.model.permissionLevel} permission`}
-              disabled={props.model.disabled || isSubmitting}
-              readOnly={queuedEdit?.retainedSendText !== undefined}
-              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                const nextDraft = event.target.value;
-                updateDraft(nextDraft);
-                setSlashIndex(0);
-                if (nextDraft !== slashDismissedDraft) {
-                  setSlashDismissedDraft(null);
-                }
-              }}
-              onBlur={() => {
-                setIsFocused(false);
-              }}
-              onFocus={() => {
-                setIsFocused(true);
-              }}
-              onKeyDown={onKeyDown}
-              placeholder={composerPlaceholder(
-                props.connectionKind,
-                props.model.isRunning,
-              )}
-              ref={textareaRef}
-              rows={1}
-              value={draft}
-            />
-          </div>
-          {completionSuffix && selectedCommand ? (
-            <span className="ohb-slash-completion" aria-hidden="true">
-              <span>⇥ {selectedCommand.label}</span>
-            </span>
-          ) : null}
-          {slashError || queueError || queuedEdit ? (
-            <div className="ohb-composer-feedback">
-              {slashError ? (
-                <span className="ohb-slash-error">{slashError}</span>
-              ) : null}
-              {queueError ? (
-                <span className="ohb-slash-error">{queueError}</span>
-              ) : null}
-              {queuedEdit ? (
-                <span className="ohb-composer-hint ohb-queued-edit-hint">
-                  {queuedEdit.retainedSendText !== undefined
-                    ? "Retained send · Enter retry the same send"
-                    : queuedEdit.status === "retained"
-                      ? "Editing retained prompt · Enter send"
-                      : "Editing queued prompt · Enter save"}{" "}
-                  · Esc restore draft
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="ohb-composer-bar">
-            {props.permissionControl}
-            <div className="ohb-composer-bar-spacer" />
-            <ReasoningControl
+        <ComposerInput
+          inputRef={composerInputRef}
+          textareaRef={textareaRef}
+          planMode={props.model.mode === "plan"}
+          compact={props.compact === true}
+          draft={draft}
+          ariaLabel={`Message, ${props.model.mode} mode, ${props.model.permissionLevel} permission`}
+          placeholder={composerPlaceholder(
+            props.connectionKind,
+            props.model.isRunning,
+            props.activeSession !== null,
+          )}
+          disabled={props.model.disabled || isSubmitting}
+          readOnly={queuedEdit?.retainedSendText !== undefined}
+          onChange={(nextDraft) => {
+            updateDraft(nextDraft);
+            slash.onDraftEdited(nextDraft);
+          }}
+          onKeyDown={onKeyDown}
+          slash={{
+            open: slash.slashOpen,
+            items: slash.slashItems,
+            selectedIndex: slash.slashIndex,
+            error: slash.slashError,
+            onHover: slash.setSlashIndex,
+            onRun: slash.runSlashCommand,
+          }}
+          queueError={state.queueError}
+          queuedEdit={queuedEdit}
+          controls={
+            <ComposerControls
               client={props.client}
               session={props.activeSession}
-              onChange={(reasoning) => {
+              permissionControl={props.permissionControl}
+              permission={{
+                level: props.model.permissionLevel,
+                disabled: props.model.disabled,
+                onSet: props.onSetPermission,
+              }}
+              modelControl={props.modelControl}
+              onReasoningChange={(reasoning) => {
                 selectedReasoning.current = reasoning;
               }}
+              showStop={showStop}
+              stopLabel={props.stopLabel}
+              canStop={props.model.canStop}
+              onStop={props.onStop}
+              canSend={canSend}
+              sendLabel={sendLabel(queuedEdit)}
+              admitting={props.isPromptAdmitting}
+              onSend={send}
             />
-            {showStop ? (
-              <button
-                aria-busy={props.stopLabel !== undefined}
-                aria-label={props.stopLabel ?? "Stop run"}
-                className="ohb-stop-button"
-                disabled={props.stopLabel !== undefined || !props.model.canStop}
-                onClick={props.onStop}
-                title={props.stopLabel ?? "Stop run"}
-                type="button"
-              >
-                {props.stopLabel ? (
-                  <LoaderCircle
-                    aria-hidden="true"
-                    className="ohb-stop-pending"
-                    size={14}
-                  />
-                ) : (
-                  <Square size={14} />
-                )}
-              </button>
-            ) : (
-              <button
-                aria-busy={props.isPromptAdmitting}
-                aria-label={
-                  queuedEdit
-                    ? queuedEdit.retainedSendText !== undefined
-                      ? "Retry retained send"
-                      : queuedEdit.status === "retained"
-                        ? "Send retained prompt"
-                        : "Save queued prompt"
-                    : "Send message"
-                }
-                className="ohb-send-button"
-                disabled={!canSend}
-                onClick={send}
-                title={
-                  queuedEdit
-                    ? queuedEdit.retainedSendText !== undefined
-                      ? "Retry retained send"
-                      : queuedEdit.status === "retained"
-                        ? "Send retained prompt"
-                        : "Save queued prompt"
-                    : "Send message"
-                }
-                type="button"
-              >
-                {props.isPromptAdmitting ? (
-                  <LoaderCircle
-                    aria-hidden="true"
-                    className="ohb-send-spinner"
-                    size={14}
-                  />
-                ) : (
-                  <Send size={14} />
-                )}
-              </button>
-            )}
-          </div>
-        </div>
+          }
+        />
       </div>
       {props.readOnly ? (
         <div className="ohb-composer-readonly-label">Read-only subagent</div>
@@ -1294,9 +472,20 @@ export function Composer(props: {
   );
 }
 
+function sendLabel(
+  queuedEdit: import("./draft-storage.js").QueuedEditState | null,
+): string {
+  if (!queuedEdit) return "Send message";
+  if (queuedEdit.retainedSendText !== undefined) return "Retry retained send";
+  return queuedEdit.status === "retained"
+    ? "Send retained prompt"
+    : "Save queued prompt";
+}
+
 function composerPlaceholder(
   connectionKind: string,
   isRunning: boolean,
+  inSession: boolean,
 ): string {
   if (
     ["connecting", "reconnecting", "resyncing", "disconnected"].includes(
@@ -1305,8 +494,8 @@ function composerPlaceholder(
   ) {
     return "Draft while reconnecting…";
   }
-  if (isRunning) {
-    return "run in progress";
-  }
-  return "";
+  if (isRunning) return "Steer now or queue a follow-up...";
+  return inSession
+    ? "Follow up, or type / for commands"
+    : "Describe a task, or type / for commands";
 }

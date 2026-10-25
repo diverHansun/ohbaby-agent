@@ -4,6 +4,14 @@
 >
 > 前置：goals-duty.md 已确认。
 
+## 2026-10 改版后的运行时与侧栏
+
+当前入口为 `App → AppController → AppShell / Sidebar / SessionScreen`，运行时已从 `runtime.ts` 拆到 `runtime/`。全局项目与会话目录由 `runtime/global-layer.ts` 和 `store/global-catalog.ts` 管理；活动会话的客户端与 SSE 由实例层维护。下文早期的 ProjectRail、SessionSidebar 和单文件 runtime 描述以这次改版为准，视觉规格见 [redesign-2026-10](./redesign-2026-10/README.md)。
+
+improve-3 的移动、搜索走无目录限定的全局客户端。移动等待服务器确认，不替换活动客户端；下一轮通过既有会话目录规则切换。隐藏项目同时移除目录项和缓存行，列表刷新与分页都校验写入代次。归档其他会话使用独立 HTTP 客户端，不触发当前会话历史同步。
+
+搜索并发状态只由 `ui/search/useSessionSearch.ts` 持有，查询响应不写入活动会话投影。`SidebarSearch` 负责输入、结果与键盘；`SessionMenu`、`ProjectMenu` 复用 `shared/Menu`。菜单与归档的短暂乐观状态属于全局目录展示，不改变 SSE 投影中的消息和审批事实。实施证据见 [improve-3 验收](./redesign-2026-10/improve-3/05-implementation-acceptance.md)。
+
 ---
 
 ## 1. Architecture Overview（总体架构）

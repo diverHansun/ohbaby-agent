@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { Bot, ChevronRight } from "lucide-react";
 import type { ReactElement } from "react";
 import type {
   UiMessage,
@@ -8,6 +8,7 @@ import type {
 } from "ohbaby-sdk";
 import { ToolCard } from "../conversation/tool-card.js";
 import { useExecutionDuration } from "../conversation/use-execution-duration.js";
+import { Spinner } from "../shared/Spinner.js";
 
 export function subagentStatusLabel(
   status: UiSubagentExecution["status"],
@@ -106,11 +107,14 @@ export function DelegationRow({
         if (execution) onOpen(execution, event.currentTarget);
       }}
     >
+      {execution?.status === "running" ? (
+        <Spinner size={13} />
+      ) : (
+        <Bot aria-hidden="true" className="ohb-delegation-icon" size={14} />
+      )}
       <span
-        aria-hidden="true"
-        className={`ohb-delegation-dot is-${execution?.status ?? "pending"}`}
-      />
-      <span className="ohb-delegation-copy">
+        className={`ohb-delegation-copy is-${execution?.status ?? (call.status === "failed" ? "failed" : "pending")}`}
+      >
         <span className="ohb-delegation-title">{delegationTitle(call)}</span>
         <span className="ohb-delegation-meta">
           {(execution ? subagentStatusLabel(execution.status) : undefined) ??

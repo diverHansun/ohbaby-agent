@@ -1,122 +1,254 @@
-.ohb-permission-layer {
-  bottom: 12px;
-  left: 24px;
+/* Approval panel (03 §4.6): floats at the bottom of the message area, about
+   560px wide, no page scrim. Collapsed it shrinks to its title row. */
+.ohb-approval-layer {
+  bottom: 16px;
+  display: flex;
+  justify-content: center;
+  left: 16px;
   pointer-events: none;
   position: absolute;
-  right: 24px;
+  right: 16px;
   z-index: 18;
 }
 
-.ohb-app-content-main .ohb-permission-layer {
-  position: absolute;
-}
-
-.ohb-permission-modal {
-  align-items: center;
-  animation: ohb-slide-up 160ms ease-out;
-  background: #f5f8ff;
-  border: 1px solid #d8e1f0;
-  border-radius: 9px;
+.ohb-approval-panel {
+  animation: ohb-slide-up var(--duration) var(--ease);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-menu);
   display: flex;
-  gap: 14px;
-  margin: 0 auto;
-  max-width: 720px;
-  padding: 13px 15px;
+  flex-direction: column;
+  max-height: calc(100dvh - 120px);
+  overflow: hidden;
   pointer-events: auto;
+  width: min(var(--content-width), 100%);
 }
 
-.ohb-permission-copy {
+/* Header (after pi-web's request dialog): a status line, then the title. */
+.ohb-approval-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 6px;
+  padding: 14px 10px 10px 18px;
+}
+
+.ohb-approval-heading {
   flex: 1;
   min-width: 0;
+}
+
+.ohb-approval-source {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+.ohb-approval-heading h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
-.ohb-permission-copy h2 {
-  font-size: 14px;
-  line-height: 1.3;
-  margin: 0;
+.ohb-approval-panel.is-collapsed .ohb-approval-header {
+  padding-bottom: 14px;
 }
 
-.ohb-permission-copy p,
-.ohb-permission-copy span {
-  color: #8a8d94;
-  display: block;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 12px;
-  margin: 3px 0 0;
+.ohb-approval-panel.is-collapsed .ohb-approval-heading h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ohb-permission-actions {
+.ohb-approval-heading h2:focus {
+  outline: none;
+}
+
+.ohb-approval-pager {
+  align-items: center;
+  color: var(--text-dim);
   display: flex;
-  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  gap: 2px;
+}
+
+.ohb-approval-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 18px 14px;
+}
+
+.ohb-approval-detail {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.ohb-approval-status {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 12px;
   gap: 8px;
+  padding: 0 18px 12px;
+}
+
+.ohb-approval-status button,
+.ohb-permission-sync button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 6px;
+  text-decoration: underline;
+}
+
+/* Footer bar: Stop on the left, choices on the right, primary last. */
+.ohb-permission-actions {
+  align-items: center;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+}
+
+.ohb-permission-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .ohb-perm-btn {
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   display: inline-flex;
   font-size: 13px;
   font-weight: 500;
   gap: 7px;
   justify-content: center;
-  min-height: 36px;
-  padding: 0 13px;
+  letter-spacing: -0.01em;
+  min-height: 32px;
+  padding: 0 14px;
+  transition:
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
 }
 
 .ohb-perm-allow-primary {
-  background: #5f86c4;
-  border-color: #5278bb;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  order: 2;
 }
 
-.ohb-perm-allow-primary:hover {
-  background: #5278bb;
+.ohb-perm-allow-primary:not(:disabled):hover {
+  background: var(--accent-hover);
 }
 
 .ohb-perm-allow-secondary {
-  background: #eef2f9;
-  border-color: #d8e1f0;
-  color: #4a6ba6;
-}
-
-.ohb-perm-allow-secondary:hover {
-  background: #e3ebf6;
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+  color: var(--text);
+  order: 1;
 }
 
 .ohb-perm-deny {
-  background: #faf3e4;
-  border-color: #ead7ad;
-  color: #8f6f2f;
+  background: transparent;
+  color: var(--text-muted);
+  order: 0;
 }
 
-.ohb-perm-deny:hover {
-  background: #f4ead2;
+.ohb-perm-allow-secondary:not(:disabled):hover,
+.ohb-perm-deny:not(:disabled):hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .ohb-perm-abort {
-  background: rgba(196, 117, 107, 0.16);
-  border-color: #c4756b;
-  color: #a0493d;
-  margin-left: 6px;
+  background: transparent;
+  border-color: var(--danger-border);
+  color: var(--danger-ink);
 }
 
-.ohb-perm-abort:hover {
-  background: rgba(196, 117, 107, 0.24);
+.ohb-perm-abort:not(:disabled):hover {
+  background: var(--danger-soft);
 }
 
-.ohb-app-content.has-approval .ohb-root-conversation > .ohb-stream {
+/* Stopping is a quiet text action here; the black Stop lives in the composer. */
+.ohb-approval-stop {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 13px;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.ohb-approval-stop:not(:disabled):hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-permission-sync {
+  align-items: center;
+  color: var(--danger-ink);
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  margin: 8px auto 0;
+  max-width: var(--content-width);
+  padding: 0 16px;
+  width: 100%;
+}
+
+.ohb-permission-sync button {
+  color: var(--danger-ink);
+}
+
+.ohb-main-body.has-approval .ohb-root-conversation > .ohb-stream {
   padding-bottom: var(--approval-space, 176px);
 }
-.ohb-permission-modal h2:focus {
-  outline: none;
-}
-.ohb-permission-modal {
-  box-sizing: border-box;
-  max-height: calc(100dvh - 80px);
-  overflow-y: auto;
-}
-.ohb-permission-actions {
-  flex-wrap: wrap;
+
+@media (max-width: 639px) {
+  .ohb-approval-layer {
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+  }
+
+  .ohb-perm-btn {
+    font-size: 15px;
+    min-height: 44px;
+  }
+
+  .ohb-approval-status button,
+  .ohb-permission-sync button,
+  .ohb-approval-stop {
+    min-height: 44px;
+  }
 }

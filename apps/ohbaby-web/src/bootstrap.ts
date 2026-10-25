@@ -1,4 +1,7 @@
-import { createOhbabyWebRuntime, type OhbabyWebRuntime } from "./runtime.js";
+import {
+  createOhbabyWebRuntime,
+  type OhbabyWebRuntime,
+} from "./runtime/index.js";
 import type { OhbabyBootstrapConfig } from "./api/daemon/wire.js";
 import { mountBootstrapError, mountOhbabyWebApp } from "./ui/App.js";
 import "./ui/styles.css";
@@ -39,23 +42,31 @@ function readBootstrapConfig(): OhbabyBootstrapConfig {
   };
 }
 
-try {
-  const runtime = createOhbabyWebRuntime(readBootstrapConfig());
-  window.__OHBABY_WEB__ = runtime;
-  runtime.ready
-    .then(() => {
-      mountOhbabyWebApp(runtime);
-      window.dispatchEvent(
-        new CustomEvent("ohbaby:web-ready", { detail: runtime }),
-      );
-    })
-    .catch((error: unknown) => {
-      mountBootstrapError(error);
-      window.dispatchEvent(
-        new CustomEvent("ohbaby:web-error", { detail: error }),
-      );
-    });
-} catch (error) {
-  mountBootstrapError(error);
-  window.dispatchEvent(new CustomEvent("ohbaby:web-error", { detail: error }));
+// `vite dev` only: `?mock=<scenario>` renders a fixed state without a daemon
+// (06 §5). Production builds drop this branch and the dev module.
+async function createRuntime(): Promise<OhbabyWebRuntime> {
+  if (import.meta.env.DEV) {
+    const scenario = new URLSearchParams(window.location.search).get("mock");
+    if (scenario) {
+      const { createMockRuntime } = await import("./dev/mock-runtime.js");
+      return createMockRuntime(scenario);
+    }
+  }
+  return createOhbabyWebRuntime(readBootstrapConfig());
 }
+
+createRuntime()
+  .then(async (runtime) => {
+    window.__OHBABY_WEB__ = runtime;
+    await runtime.ready;
+    mountOhbabyWebApp(runtime);
+    window.dispatchEvent(
+      new CustomEvent("ohbaby:web-ready", { detail: runtime }),
+    );
+  })
+  .catch((error: unknown) => {
+    mountBootstrapError(error);
+    window.dispatchEvent(
+      new CustomEvent("ohbaby:web-error", { detail: error }),
+    );
+  });

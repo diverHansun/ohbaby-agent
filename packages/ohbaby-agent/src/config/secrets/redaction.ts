@@ -1,4 +1,4 @@
-import type { McpServerConfig } from "../mcp/types.js";
+import type { McpServerConfig, McpStdioConfig } from "../mcp/types.js";
 
 /** Project validated configuration URLs without changing their executable saved value. */
 export function redactSettingsUrl(
@@ -32,6 +32,26 @@ export function redactSettingsError(
   error: string,
   configs: readonly McpServerConfig[] = [],
 ): string {
+  return redactText(error, settingsSecrets(configs));
+}
+
+/** Mask credentials only in the public projection, never in executable args. */
+export function redactSettingsArgs(config: McpStdioConfig): string[] {
+  const secrets = settingsSecrets([config]);
+  return config.args.map((argument) => {
+    const urlsRedacted = argument.replace(/https?:\/\/[^\s"'<>]+/giu, (url) => {
+      try {
+        return redactSettingsUrl(url, secrets);
+      } catch {
+        // Args need not be valid URLs; an unparseable address is not safe to show.
+        return "[REDACTED]";
+      }
+    });
+    return redactText(urlsRedacted, secrets);
+  });
+}
+
+function settingsSecrets(configs: readonly McpServerConfig[]): string[] {
   const secrets: string[] = [];
   for (const config of configs) {
     if (config.type === "stdio") {
@@ -52,13 +72,28 @@ export function redactSettingsError(
           /^--?(api[-_]?key|(?:access[-_]?|refresh[-_]?)?token|password|secret|credential|authorization|headers?)(?:=(.*))?$/i.exec(
             argument,
           );
-        if (credentialArgument) {
+        const shortHeader = argument.startsWith("-H");
+        if (credentialArgument || shortHeader) {
           const value =
-            credentialArgument.at(2) ?? config.args.at(index + 1) ?? "";
-          secrets.push(value);
-          if (/^headers?$/i.test(credentialArgument.at(1) ?? "")) {
-            const separator = value.indexOf(":");
-            if (separator >= 0) secrets.push(value.slice(separator + 1).trim());
+            credentialArgument?.at(2) ??
+            (shortHeader && argument.length > 2
+              ? argument.slice(2)
+              : (config.args.at(index + 1) ?? ""));
+          addArgumentSecrets(
+            secrets,
+            value,
+            shortHeader || /^headers?$/i.test(credentialArgument?.at(1) ?? ""),
+          );
+          continue;
+        }
+        // A shell's -c command is one argument. Collect its sensitive values
+        // here so args and errors, including value-only errors, share masking.
+        for (const pattern of [
+          /(?:^|\s)--?(api[-_]?key|(?:access[-_]?|refresh[-_]?)?token|password|secret|credential|authorization|headers?)(?:\s+|=)("(?:\\.|[^"\\])*"|'[^']*'|\S+)/giu,
+          /(?:^|\s)-(H)\s*("(?:\\.|[^"\\])*"|'[^']*'|\S+)/gu,
+        ]) {
+          for (const [, flag, value] of argument.matchAll(pattern)) {
+            addArgumentSecrets(secrets, value, /^(?:H|headers?)$/i.test(flag));
           }
         }
       }
@@ -77,7 +112,25 @@ export function redactSettingsError(
       }
     }
   }
-  return redactKnownSecrets(error, secrets)
+  return secrets;
+}
+
+function addArgumentSecrets(
+  secrets: string[],
+  value: string,
+  header: boolean,
+): void {
+  const unquoted = value.replace(/^(["'])([\s\S]*)\1$/, "$2");
+  secrets.push(value, unquoted);
+  const separator = header ? unquoted.indexOf(":") : -1;
+  if (separator >= 0) {
+    const credential = unquoted.slice(separator + 1).trim();
+    secrets.push(credential, credential.replace(/^(?:Basic|Bearer)\s+/i, ""));
+  }
+}
+
+function redactText(value: string, secrets: readonly string[]): string {
+  return redactKnownSecrets(value, secrets)
     .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[REDACTED]@")
     .replace(/(\bBearer\s+)[^\s,;"']+/gi, "$1[REDACTED]")
     .replace(

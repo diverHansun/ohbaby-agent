@@ -101,7 +101,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     : coreReady && daemonSnapshot?.activeSessionId === activeSessionId
       ? (snapshotStatus ?? { kind: "idle" })
       : { kind: "idle" };
-  const permission = daemonSnapshot?.permission;
+  const permission = snapshot.permission ?? daemonSnapshot?.permission;
   const pendingPermissions = snapshot.permissionSync.requests;
   const attentionStatus: UiRunStatus = pendingPermissions.length
     ? { kind: "waiting-for-permission", requestId: pendingPermissions[0].id }
@@ -258,6 +258,20 @@ function selectActiveRun(
       (sessionId === undefined || run.sessionId === sessionId) &&
       run.status.kind === "waiting-for-permission",
   );
+}
+
+const ABNORMAL_CONNECTION: readonly HeaderModel["connectionKind"][] = [
+  "connecting",
+  "reconnecting",
+  "resyncing",
+  "disconnected",
+];
+
+/** The transport is not live; the header says so, and nothing else should. */
+export function isConnectionAbnormal(
+  kind: HeaderModel["connectionKind"],
+): boolean {
+  return ABNORMAL_CONNECTION.includes(kind);
 }
 
 function selectConnectionKind(

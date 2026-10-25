@@ -133,6 +133,8 @@ MCP 的 `env` 和 `headers` 值经常是 token，读取时只返回键名。修�
 
 所有接口沿用 daemon 的 token 鉴权和 `{ ok: false, error: { code, message } }` 错误格式。写接口的成功响应返回该分区更新后的读取结果，客户端不必再查一次。
 
+> 2026-10-24 补充（Web 改版 improve-4 Stage A）：全局设置路由的所有错误响应都带 code（`UNAUTHORIZED`、`INVALID_JSON`、`REQUEST_TOO_LARGE`、`MODEL_NOT_FOUND`、`MODEL_CONFIG_INCOMPLETE`、`MCP_SERVER_NOT_FOUND`、`VALIDATION_FAILED`、`SETTINGS_ACCESS_FAILED`）。`VALIDATION_FAILED` 另带 `fields: [{ path, message }]`：`path` 是请求体里的字段路径，`message` 由后端按校验类型生成固定文案，不回显提交的值。类型见 SDK `UiSettingsErrorResponse`。实例层设置路由、MCP 重连的错误格式不变。详见 [Web 改版 improve-4 02](../../../ohbaby-web/redesign-2026-10/improve-4/02-plan-and-change-scope.md)。
+
 全局与实例接口共用 `/v1/settings/` 前缀，全局路由必须按精确路径注册，不能用前缀通配，否则会截走 `mcp/status`、`search-api-key` 等实例请求。全局路由只在有 `InstanceStore` 时挂载，生产环境的 daemon 总是满足。
 
 ### 全局层（不需要目录头）

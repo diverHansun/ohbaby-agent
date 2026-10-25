@@ -30,9 +30,6 @@ import type {
   DirectoryPickerListResponse,
   DirectoryPickerRootsResponse,
   ExecuteCommandRequest,
-  ModelConnectRequest,
-  ModelConnectResponse,
-  ModelContextWindowProbeResponse,
   OhbabyBootstrapConfig,
   OkResponse,
   PermissionResponseRequest,
@@ -42,8 +39,6 @@ import type {
   PromptLeaseResponse,
   PromptMutationResponse,
   RegisterClientResponse,
-  SearchApiKeyRequest,
-  SearchApiKeyResponse,
   SetPermissionRequest,
   SnapshotResponse,
   SubmitPromptRequest,
@@ -52,7 +47,11 @@ import type {
   WorkspaceOpenResponse,
 } from "./wire.js";
 import { workspaceDirectoryHeaders } from "ohbaby-sdk";
-import type { UiInteractionResponse, UiSlashCommandSurface } from "ohbaby-sdk";
+import type {
+  UiInteractionResponse,
+  UiSettingsFieldError,
+  UiSlashCommandSurface,
+} from "ohbaby-sdk";
 
 export interface DaemonHttpClientOptions {
   readonly baseUrl: string;
@@ -66,7 +65,29 @@ interface ErrorResponseBody {
   readonly error?: {
     readonly message?: string;
     readonly code?: string;
+    readonly targetDirectory?: string;
+    readonly fields?: unknown;
   };
+}
+
+/** Fields the transport keeps from a daemon error body. */
+export interface DaemonRequestError extends Error {
+  readonly code?: string;
+  readonly status: number;
+  /** Present on `SESSION_MOVED`: the directory the next request must use. */
+  readonly targetDirectory?: string;
+  /** Present on settings `VALIDATION_FAILED`: which request fields are invalid. */
+  readonly fields?: readonly UiSettingsFieldError[];
+}
+
+export function isDaemonRequestError(
+  error: unknown,
+): error is DaemonRequestError {
+  return (
+    error instanceof Error &&
+    "status" in error &&
+    typeof (error as { status: unknown }).status === "number"
+  );
 }
 
 function requestUrl(baseUrl: string, path: string): string {
@@ -492,29 +513,6 @@ export class DaemonHttpClient {
     return this.request("/v1/model", { signal: options.signal });
   }
 
-  probeModelContextWindow(
-    input: ModelConnectRequest,
-  ): Promise<ModelContextWindowProbeResponse> {
-    return this.request("/v1/model/context-window-probe", {
-      body: input,
-      method: "POST",
-    });
-  }
-
-  connectModel(input: ModelConnectRequest): Promise<ModelConnectResponse> {
-    return this.request("/v1/model", {
-      body: input,
-      method: "POST",
-    });
-  }
-
-  setSearchApiKey(input: SearchApiKeyRequest): Promise<SearchApiKeyResponse> {
-    return this.request("/v1/settings/search-api-key", {
-      body: input,
-      method: "POST",
-    });
-  }
-
   getContextWindowUsage(
     sessionId: string,
   ): Promise<ContextWindowUsageResponse> {
@@ -552,12 +550,13 @@ export class DaemonHttpClient {
     });
   }
 
-  private async request<T>(
+  /** Shared transport: auth, JSON, cancellation and error parsing. */
+  async request<T>(
     path: string,
     options: {
       readonly body?: unknown;
       readonly includeDirectory?: boolean;
-      readonly method?: "DELETE" | "GET" | "PATCH" | "POST";
+      readonly method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
       readonly signal?: AbortSignal;
     } = {},
   ): Promise<T> {
@@ -592,9 +591,15 @@ export class DaemonHttpClient {
         isErrorBody(value) && typeof value.error?.message === "string"
           ? value.error.message
           : `Daemon request failed with HTTP ${String(response.status)}`;
+      const body = isErrorBody(value) ? value.error : undefined;
+      const fields = fieldErrors(body?.fields);
       throw Object.assign(new Error(message), {
-        code: isErrorBody(value) ? value.error?.code : undefined,
+        code: body?.code,
         status: response.status,
+        ...(typeof body?.targetDirectory === "string"
+          ? { targetDirectory: body.targetDirectory }
+          : {}),
+        ...(fields === undefined ? {} : { fields }),
       });
     }
     return value as T;
@@ -611,6 +616,25 @@ export function createDaemonHttpClient(
     directory: config.directory,
     ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
     token: config.token,
+  });
+}
+
+/** Keeps only well-formed `{ path, message }` entries of an error body. */
+function fieldErrors(value: unknown): UiSettingsFieldError[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((entry: unknown): UiSettingsFieldError[] => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const { path, message } = entry as { path?: unknown; message?: unknown };
+    if (!Array.isArray(path) || typeof message !== "string") return [];
+    return [
+      {
+        path: path.filter(
+          (part): part is string | number =>
+            typeof part === "string" || typeof part === "number",
+        ),
+        message,
+      },
+    ];
   });
 }
 

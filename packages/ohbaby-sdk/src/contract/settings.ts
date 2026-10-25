@@ -214,3 +214,32 @@ export interface UiSettingsModelProbeResponse {
   readonly ok: true;
   readonly reasoning: import("./connect-model.js").UiReasoningCapabilityView;
 }
+
+/** Stable codes on every global settings route failure. */
+export type UiSettingsErrorCode =
+  | "VALIDATION_FAILED"
+  | "MODEL_NOT_FOUND"
+  | "MODEL_CONFIG_INCOMPLETE"
+  | "MCP_SERVER_NOT_FOUND"
+  | "UNAUTHORIZED"
+  | "INVALID_JSON"
+  | "REQUEST_TOO_LARGE"
+  | "SETTINGS_ACCESS_FAILED";
+/**
+ * One invalid field. `path` follows the request body (e.g. `["defaults",
+ * "timeout"]`); `message` is fixed wording and never quotes the submitted value.
+ */
+export interface UiSettingsFieldError {
+  readonly path: readonly (string | number)[];
+  readonly message: string;
+}
+export interface UiSettingsError {
+  readonly code: UiSettingsErrorCode;
+  readonly message: string;
+  /** Present on `VALIDATION_FAILED`. */
+  readonly fields?: readonly UiSettingsFieldError[];
+}
+export interface UiSettingsErrorResponse {
+  readonly ok: false;
+  readonly error: UiSettingsError;
+}

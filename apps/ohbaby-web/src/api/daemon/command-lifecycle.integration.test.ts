@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createInProcessUiBackendClient } from "ohbaby-agent";
 import { createDaemonServerApp } from "ohbaby-server";
-import { createOhbabyWebRuntime } from "../../runtime.js";
+import { createOhbabyWebRuntime } from "../../runtime/index.js";
 
 interface Fixture {
   runtime: ReturnType<typeof createOhbabyWebRuntime>;

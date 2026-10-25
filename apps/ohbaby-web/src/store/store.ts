@@ -25,6 +25,7 @@ import type {
   UiSessionView,
   UiSessionIndexEntry,
   UiCurrentModelConfig,
+  UiPermissionState,
   UiEvent,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -49,6 +50,7 @@ export interface OhbabyWebStore {
   setHistoryState(state: "loading" | "ready" | "error", error?: string): void;
   setUnknownPromptRequests(records: readonly UnknownPromptRequest[]): void;
   setPermissionSync(state: PermissionSyncState): void;
+  setPermission(permission: UiPermissionState): void;
   setSessionIndex(sessions: readonly UiSessionIndexEntry[]): void;
   applyEvent(event: UiEvent, seqNum: number, source?: UiEventSource): boolean;
   getSnapshot(): StoreSnapshot;
@@ -68,6 +70,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     historyHasMore: false,
     historyStale: false,
     unknownPromptRequests: [],
+    permission: null,
     permissionSync: {
       status: "idle",
       binding: null,
@@ -78,6 +81,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     sessionIndex: [],
     connectionState: "connecting",
     currentModel: null,
+    currentModelLoaded: false,
     error: null,
     view: createInitialViewState(),
   });
@@ -517,6 +521,9 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     setPermissionSync(permissionSync): void {
       publish({ ...snapshot, permissionSync });
     },
+    setPermission(permission): void {
+      publish({ ...snapshot, permission });
+    },
     setSessionIndex(sessionIndex): void {
       publish({ ...snapshot, sessionIndex });
     },
@@ -593,6 +600,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       }
       publish({
         ...snapshot,
+        permission:
+          event.type === "permission.updated"
+            ? event.permission
+            : snapshot.permission,
         view:
           "timestamp" in event &&
           event.timestamp !== undefined &&
@@ -615,6 +626,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     replaceSnapshot(nextSnapshot, seqNum): void {
       publish({
         ...snapshot,
+        permission: nextSnapshot.permission ?? null,
         view: {
           ...replaceSnapshot(nextSnapshot, seqNum),
           commandNotices: snapshot.view.commandNotices,
@@ -637,10 +649,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       publish({ ...snapshot, connectionState: state });
     },
     setCurrentModel(model): void {
-      if (snapshot.currentModel === model) {
+      if (snapshot.currentModel === model && snapshot.currentModelLoaded) {
         return;
       }
-      publish({ ...snapshot, currentModel: model });
+      publish({ ...snapshot, currentModel: model, currentModelLoaded: true });
     },
     setError(error): void {
       if (snapshot.error === error) {

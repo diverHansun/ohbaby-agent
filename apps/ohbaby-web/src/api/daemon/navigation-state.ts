@@ -1,14 +1,16 @@
-const STORAGE_KEY = "ohbaby.web.navigation.v1";
+const STORAGE_KEY = "ohbaby.web.navigation.v2";
+const LEGACY_STORAGE_KEY = "ohbaby.web.navigation.v1";
 
+/** The session to reopen on a plain reload; null means a new-chat draft. */
 export interface WebNavigationState {
-  readonly selectedDirectory: string | null;
-  readonly sessionByDirectory: Readonly<Record<string, string>>;
+  readonly lastSession: {
+    readonly sessionId: string;
+    /** Request directory when the session was last open. */
+    readonly directory: string;
+  } | null;
 }
 
-const EMPTY_STATE: WebNavigationState = {
-  selectedDirectory: null,
-  sessionByDirectory: {},
-};
+const EMPTY_STATE: WebNavigationState = { lastSession: null };
 
 function storage(): Storage | undefined {
   try {
@@ -30,39 +32,57 @@ function storage(): Storage | undefined {
 }
 
 export function readWebNavigationState(): WebNavigationState {
-  const value = storage()?.getItem(STORAGE_KEY);
-  if (!value) {
-    return EMPTY_STATE;
-  }
   try {
-    const parsed: unknown = JSON.parse(value);
-    if (typeof parsed !== "object" || parsed === null) {
-      return EMPTY_STATE;
-    }
-    const selectedDirectory =
-      "selectedDirectory" in parsed &&
-      typeof parsed.selectedDirectory === "string"
-        ? parsed.selectedDirectory
-        : null;
-    const rawSessions =
-      "sessionByDirectory" in parsed &&
-      typeof parsed.sessionByDirectory === "object" &&
-      parsed.sessionByDirectory !== null
-        ? parsed.sessionByDirectory
-        : {};
-    const sessionByDirectory = Object.fromEntries(
-      Object.entries(rawSessions).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
-      ),
-    );
-    return { selectedDirectory, sessionByDirectory };
+    const value = storage()?.getItem(STORAGE_KEY);
+    if (value) return parseState(JSON.parse(value));
+    const legacy = storage()?.getItem(LEGACY_STORAGE_KEY);
+    return legacy ? parseLegacyState(JSON.parse(legacy)) : EMPTY_STATE;
   } catch {
     return EMPTY_STATE;
   }
 }
 
+function parseState(value: unknown): WebNavigationState {
+  if (typeof value !== "object" || value === null || !("lastSession" in value))
+    return EMPTY_STATE;
+  const last: unknown = value.lastSession;
+  return typeof last === "object" &&
+    last !== null &&
+    "sessionId" in last &&
+    "directory" in last &&
+    typeof last.sessionId === "string" &&
+    typeof last.directory === "string"
+    ? { lastSession: { sessionId: last.sessionId, directory: last.directory } }
+    : EMPTY_STATE;
+}
+
+/** v1 kept a selected directory and its last session; that pair still reopens. */
+function parseLegacyState(value: unknown): WebNavigationState {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("selectedDirectory" in value) ||
+    typeof value.selectedDirectory !== "string" ||
+    !("sessionByDirectory" in value) ||
+    typeof value.sessionByDirectory !== "object" ||
+    value.sessionByDirectory === null
+  )
+    return EMPTY_STATE;
+  const directory = value.selectedDirectory;
+  const sessionId: unknown = (
+    value.sessionByDirectory as Record<string, unknown>
+  )[directory];
+  return typeof sessionId === "string"
+    ? { lastSession: { sessionId, directory } }
+    : EMPTY_STATE;
+}
+
 export function writeWebNavigationState(state: WebNavigationState): void {
-  storage()?.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    storage()?.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Navigation memory is a convenience; denial only loses the reload target.
+  }
 }
 
 export function replaceNavigationHash(input: {

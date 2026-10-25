@@ -1,28 +1,5 @@
 import type { ReactElement } from "react";
-
-export function TextField(props: {
-  readonly label: string;
-  readonly onChange: (value: string) => void;
-  readonly onBlur?: () => void;
-  readonly placeholder?: string;
-  readonly type?: "password" | "text";
-  readonly value: string;
-}): ReactElement {
-  return (
-    <label className="ohb-structured-field">
-      <span>{props.label}</span>
-      <input
-        onBlur={props.onBlur}
-        onChange={(event) => {
-          props.onChange(event.target.value);
-        }}
-        placeholder={props.placeholder}
-        type={props.type ?? "text"}
-        value={props.value}
-      />
-    </label>
-  );
-}
+import { Spinner } from "../shared/Spinner.js";
 
 export interface OverlayStatus {
   readonly kind: "busy" | "error" | "idle" | "success";
@@ -39,6 +16,7 @@ export function OverlayStatusLine(props: {
     <div
       className={`ohb-structured-status ohb-structured-${props.status.kind}`}
     >
+      {props.status.kind === "busy" ? <Spinner size={12} /> : null}
       {props.status.message}
     </div>
   );

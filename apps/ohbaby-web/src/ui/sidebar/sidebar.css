@@ -1,0 +1,424 @@
+/* Sidebar (03 §4.4): wordmark, New chat, project groups and single-line rows. */
+.ohb-sidebar {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: var(--sidebar-width);
+  width: var(--sidebar-width);
+}
+
+.ohb-sidebar-top {
+  align-items: center;
+  display: flex;
+  flex: none;
+  height: var(--header-height);
+  justify-content: space-between;
+  padding: 0 8px 0 16px;
+}
+
+.ohb-sidebar-nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  padding: 4px 8px 8px;
+}
+
+.ohb-sidebar-nav-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  display: flex;
+  font-size: 13.5px;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+  transition: background var(--duration-fast) var(--ease);
+  width: 100%;
+}
+
+.ohb-sidebar-nav-item svg {
+  color: var(--text-muted);
+}
+
+.ohb-sidebar-nav-item:not(:disabled):hover {
+  background: var(--bg-hover);
+}
+
+.ohb-sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+}
+
+/* Bottom of the sidebar: the settings entry (D2). */
+.ohb-sidebar-footer {
+  border-top: 1px solid var(--border);
+  flex: none;
+  padding: 6px 8px 8px;
+}
+
+.ohb-sidebar-section-title {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 11.5px;
+  font-weight: 500;
+  justify-content: space-between;
+  padding: 10px 2px 4px 10px;
+}
+
+.ohb-project-group + .ohb-project-group {
+  margin-top: 2px;
+}
+
+.ohb-project-heading {
+  align-items: center;
+  border-radius: var(--radius-md);
+  display: flex;
+  min-height: var(--row-height);
+  position: relative;
+}
+
+.ohb-project-heading:hover {
+  background: var(--bg-hover);
+}
+
+.ohb-project-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  display: flex;
+  flex: 1;
+  font-size: 13.5px;
+  gap: 8px;
+  min-height: var(--row-height);
+  min-width: 0;
+  padding: 0 4px 0 8px;
+  text-align: left;
+}
+
+.ohb-project-group.is-current .ohb-project-toggle {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.ohb-project-chevron {
+  color: var(--text-dim);
+  flex: none;
+  transition: transform var(--duration-fast) var(--ease);
+}
+
+.ohb-project-folder {
+  color: var(--text-dim);
+  flex: none;
+}
+
+.ohb-project-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.ohb-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-project-actions {
+  display: flex;
+  gap: 0;
+  opacity: 0;
+  padding-right: 2px;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.ohb-project-heading:hover .ohb-project-actions,
+.ohb-project-actions:focus-within {
+  opacity: 1;
+}
+
+.ohb-project-actions .ohb-icon-button {
+  height: 24px;
+  width: 24px;
+}
+
+.ohb-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-anchor: none;
+  padding: 2px 0 6px 14px;
+}
+
+.ohb-sidebar-section-actions {
+  display: inline-flex;
+}
+
+.ohb-sidebar-section-toggle {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  width: 100%;
+}
+
+.ohb-sidebar-section-toggle > span:first-child {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.ohb-sidebar-section-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.ohb-group-footer {
+  display: flex;
+  gap: 4px;
+  padding: 0 0 6px 12px;
+}
+
+.ohb-group-more {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text-dim);
+  display: inline-flex;
+  font-size: 12px;
+  min-height: 24px;
+  padding: 0 10px;
+}
+
+button.ohb-group-more:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-sidebar-status {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  margin: 8px 10px;
+}
+
+.ohb-sidebar-status button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.ohb-session-pin-error {
+  color: var(--danger-ink);
+  font-size: 12px;
+  margin: 4px 10px;
+}
+
+/* Session row: single line, title and a faint relative time. */
+.ohb-session-row {
+  align-items: center;
+  border-radius: var(--radius-md);
+  display: flex;
+  min-height: var(--row-height);
+  position: relative;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.ohb-session-row:hover,
+.ohb-session-row.is-menu-open {
+  background: var(--bg-hover);
+}
+
+.ohb-session-row.ohb-session-active {
+  background: var(--bg-selected);
+}
+
+.ohb-session-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  display: flex;
+  flex: 1;
+  font-size: 13.5px;
+  gap: 8px;
+  min-height: var(--row-height);
+  min-width: 0;
+  padding: 0 4px 0 10px;
+  text-align: left;
+}
+
+.ohb-session-row.ohb-session-active .ohb-session-main {
+  color: var(--text);
+}
+
+.ohb-session-main:disabled {
+  opacity: 1;
+}
+
+.ohb-session-copy {
+  align-items: baseline;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ohb-session-title {
+  flex: 1;
+  font-weight: 400;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ohb-session-title > span {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.ohb-session-title:not(.is-scrolling) > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.ohb-session-meta {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  justify-content: flex-end;
+  min-width: 18px;
+}
+
+.ohb-session-meta > small {
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.ohb-session-row.ohb-session-active .ohb-session-meta > small {
+  color: var(--text-muted);
+}
+
+/* Waiting for approval: an amber dot, labelled for assistive technology. */
+.ohb-session-awaiting {
+  background: var(--warning);
+  border-radius: 50%;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
+/* Time gives way to Archive and the menu on hover; activity marks stay. */
+.ohb-session-row:hover .ohb-session-meta > small,
+.ohb-session-row.is-menu-open .ohb-session-meta > small,
+.ohb-session-row:focus-within .ohb-session-meta > small {
+  visibility: hidden;
+}
+
+.ohb-session-hover-actions {
+  display: flex;
+  opacity: 0;
+  position: absolute;
+  right: 4px;
+}
+
+.ohb-session-row:hover .ohb-session-hover-actions,
+.ohb-session-row.is-menu-open .ohb-session-hover-actions,
+.ohb-session-hover-actions:focus-within {
+  opacity: 1;
+}
+
+.ohb-session-pin,
+.ohb-session-archive,
+.ohb-session-actions {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+  display: inline-flex;
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.ohb-session-pin:hover,
+.ohb-session-archive:hover,
+.ohb-session-actions:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* As a drawer over the conversation the sidebar is solid, so text behind it
+   does not show through. */
+@media (max-width: 1023px) {
+  .ohb-sidebar {
+    background: var(--bg-panel-solid);
+  }
+}
+
+/* Phones (03 §3.3, §5): 44px rows and touch targets; row actions stay visible
+   because there is no hover. */
+@media (max-width: 639px) {
+  .ohb-sidebar {
+    --row-height: 44px;
+  }
+
+  .ohb-sidebar-nav-item {
+    font-size: 15px;
+    min-height: 44px;
+  }
+
+  .ohb-project-toggle,
+  .ohb-session-main {
+    font-size: 15px;
+  }
+
+  .ohb-project-actions {
+    opacity: 1;
+  }
+
+  .ohb-project-actions .ohb-icon-button,
+  .ohb-session-pin,
+  .ohb-session-archive,
+  .ohb-session-actions {
+    height: 44px;
+    width: 44px;
+  }
+
+  .ohb-session-hover-actions {
+    opacity: 1;
+    position: static;
+  }
+
+  .ohb-session-meta > small {
+    display: none;
+  }
+}
+
+/* Touch screens wider than a phone have no hover either: keep row actions reachable. */
+@media (hover: none) {
+  .ohb-project-actions,
+  .ohb-session-hover-actions {
+    opacity: 1;
+  }
+
+  .ohb-session-hover-actions {
+    position: static;
+  }
+}

@@ -315,4 +315,8 @@ export type {
   UiSettingsMcpStatusResponse,
   UiSettingsSkillsResponse,
   UiSettingsAgentsResponse,
+  UiSettingsErrorCode,
+  UiSettingsFieldError,
+  UiSettingsError,
+  UiSettingsErrorResponse,
 } from "./contract/settings.js";

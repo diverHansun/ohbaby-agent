@@ -1,7 +1,7 @@
 import { sessionViewFromSnapshot } from "./session-recovery.test-utils.js";
 import { describe, expect, it } from "vitest";
 import type { UiPermissionRequest } from "ohbaby-sdk";
-import { createOhbabyWebRuntime } from "../../runtime.js";
+import { createOhbabyWebRuntime } from "../../runtime/index.js";
 import type { WebSseEvent } from "./wire.js";
 
 const binding = {
@@ -267,8 +267,11 @@ describe("independent web approval recovery", () => {
     const test = fixture({ selectedChild: true });
     try {
       await test.runtime.ready;
+      // The error arrives after the approval retry backoff (about 0.9s).
       await expect
-        .poll(() => test.runtime.store.getSnapshot().permissionSync.status)
+        .poll(() => test.runtime.store.getSnapshot().permissionSync.status, {
+          timeout: 3_000,
+        })
         .toBe("error");
       expect(test.runtime.store.getSnapshot().permissionSync.error).toContain(
         "Return to a main session to approve requests.",

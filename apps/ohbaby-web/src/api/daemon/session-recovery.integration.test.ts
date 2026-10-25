@@ -3,7 +3,7 @@ import type { UiSessionView, UiBackendClient, UiEvent } from "ohbaby-sdk";
 import {
   createOhbabyWebRuntime,
   type OhbabyWebRuntime,
-} from "../../runtime.js";
+} from "../../runtime/index.js";
 import type { WebSseEvent } from "./wire.js";
 const binding = {
   permissionEpoch: "epoch",

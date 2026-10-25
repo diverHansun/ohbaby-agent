@@ -24,7 +24,7 @@ import {
 } from "./ExecutionProgress.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
 import { projectRunProcesses, type RunProcess } from "./run-process.js";
-import { isNearBottom, scrollToBottom } from "./streamScroll.js";
+import { isNearBottom, scrollToBottom, scrollsNested } from "./streamScroll.js";
 
 export interface PromptProjectionModel {
   readonly clientRequestId: string;
@@ -395,11 +395,63 @@ export function ConversationStream(props: {
       return;
     }
     let userScroll = false;
+    let lastTop = element.scrollTop;
+    let touchY: number | undefined;
     const markUserScroll = (): void => {
       userScroll = true;
     };
+    // Leaving the bottom must win at once: waiting for the scroll event lets a
+    // streaming update snap back first and cancel the user's smooth scroll.
+    const leaveBottom = (): void => {
+      userScroll = true;
+      if (!stickToBottomRef.current) return;
+      stickToBottomRef.current = false;
+      readingPosition.sticky = false;
+      if (scheduledScrollRef.current !== null) {
+        globalThis.clearTimeout(scheduledScrollRef.current);
+        scheduledScrollRef.current = null;
+      }
+    };
+    const onWheel = (event: WheelEvent): void => {
+      if (event.deltaY < 0 && !scrollsNested(event.target, element)) {
+        leaveBottom();
+      } else {
+        markUserScroll();
+      }
+    };
+    const onTouchStart = (event: TouchEvent): void => {
+      touchY = event.touches.item(0)?.clientY;
+    };
+    const onTouchMove = (event: TouchEvent): void => {
+      const y = event.touches.item(0)?.clientY;
+      // A finger moving down scrolls the content up.
+      if (
+        touchY !== undefined &&
+        y !== undefined &&
+        y > touchY &&
+        !scrollsNested(event.target, element)
+      )
+        leaveBottom();
+      else markUserScroll();
+      touchY = y;
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (
+        ["ArrowUp", "PageUp", "Home"].includes(event.key) &&
+        !scrollsNested(event.target, element)
+      )
+        leaveBottom();
+      else markUserScroll();
+    };
     const onScroll = (): void => {
-      if (userScroll) stickToBottomRef.current = isNearBottom(element);
+      const movedUp = element.scrollTop < lastTop;
+      lastTop = element.scrollTop;
+      // Only a user scroll heading down can re-arm following.
+      if (userScroll && !movedUp) {
+        stickToBottomRef.current = isNearBottom(element);
+      } else if (userScroll && movedUp) {
+        stickToBottomRef.current = false;
+      }
       readingPosition.top = element.scrollTop;
       readingPosition.sticky = stickToBottomRef.current;
       const top = element.getBoundingClientRect().top;
@@ -418,16 +470,18 @@ export function ConversationStream(props: {
       userScroll = false;
     };
     element.addEventListener("scroll", onScroll);
-    element.addEventListener("wheel", markUserScroll, { passive: true });
-    element.addEventListener("touchmove", markUserScroll, { passive: true });
+    element.addEventListener("wheel", onWheel, { passive: true });
+    element.addEventListener("touchstart", onTouchStart, { passive: true });
+    element.addEventListener("touchmove", onTouchMove, { passive: true });
     element.addEventListener("pointerdown", markUserScroll);
-    element.addEventListener("keydown", markUserScroll);
+    element.addEventListener("keydown", onKeyDown);
     return (): void => {
       element.removeEventListener("scroll", onScroll);
-      element.removeEventListener("wheel", markUserScroll);
-      element.removeEventListener("touchmove", markUserScroll);
+      element.removeEventListener("wheel", onWheel);
+      element.removeEventListener("touchstart", onTouchStart);
+      element.removeEventListener("touchmove", onTouchMove);
       element.removeEventListener("pointerdown", markUserScroll);
-      element.removeEventListener("keydown", markUserScroll);
+      element.removeEventListener("keydown", onKeyDown);
     };
   }, [readingPosition, props.onNearEnd]);
 

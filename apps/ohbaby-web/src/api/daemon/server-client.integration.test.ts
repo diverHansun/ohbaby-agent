@@ -28,7 +28,7 @@ import type {
   UiPromptReceiptQuery,
   UiPromptReceiptResult,
 } from "ohbaby-sdk";
-import { createOhbabyWebRuntime } from "../../runtime.js";
+import { createOhbabyWebRuntime } from "../../runtime/index.js";
 import type { OhbabyBootstrapConfig } from "./wire.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
@@ -989,8 +989,6 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
           command.executionKind,
         ]),
       ).toEqual([
-        ["connect", "connectModel", "overlay"],
-        ["connect-search", "connectSearch", "overlay"],
         ["compact", "compactSession", "overlay"],
         ["status", "executeCommand", "passthrough"],
         ["skill.hansun-db", "executeCommand", "skill"],
@@ -1034,44 +1032,24 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         surface: "tui",
       });
 
-      await client.probeModelContextWindow({
-        apiKeyEnv: "ZHIPU_API_KEY",
-        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-        interfaceProvider: "openai-compatible",
-        model: "glm-4.7",
-        provider: "zhipu",
-      });
-      await client.connectModel({
-        apiKeyEnv: "ZHIPU_API_KEY",
-        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-        interfaceProvider: "openai-compatible",
-        model: "glm-4.7",
-        provider: "zhipu",
-      });
-      await client.setSearchApiKey({
-        apiKeyEnv: "TAVILY_API_KEY",
-        provider: "tavily",
-      });
+      // Model and search setup moved to Settings; the Web client sends nothing.
+      await expect(
+        client.connectModel({
+          baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+          interfaceProvider: "openai-compatible",
+          model: "glm-4.7",
+          provider: "zhipu",
+        }),
+      ).rejects.toThrow("Settings");
+      await expect(
+        client.setSearchApiKey({ provider: "tavily" }),
+      ).rejects.toThrow("Settings");
       await client.getContextWindowUsage({ sessionId: "session_1" });
       await client.compactSession({ force: true, sessionId: "session_1" });
 
-      expect(backend.probeInputs[0]).toMatchObject({
-        apiKeyEnv: "ZHIPU_API_KEY",
-        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-        interfaceProvider: "openai-compatible",
-        model: "glm-4.7",
-        provider: "zhipu",
-      });
-      expect(backend.connectInputs[0]).toMatchObject({
-        apiKeyEnv: "ZHIPU_API_KEY",
-        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-        interfaceProvider: "openai-compatible",
-        model: "glm-4.7",
-        provider: "zhipu",
-      });
-      expect(backend.searchInputs).toEqual([
-        { apiKeyEnv: "TAVILY_API_KEY", provider: "tavily" },
-      ]);
+      expect(backend.probeInputs).toEqual([]);
+      expect(backend.connectInputs).toEqual([]);
+      expect(backend.searchInputs).toEqual([]);
       expect(backend.compactInputs).toMatchObject([
         {
           force: true,

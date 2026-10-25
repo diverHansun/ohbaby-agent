@@ -7,6 +7,8 @@ import {
   OverlayStatusLine,
 } from "./overlay-controls.js";
 
+const IDLE_STATUS: OverlayStatus = { kind: "idle", message: "" };
+
 export function CompactOverlayBody(props: {
   readonly client: Pick<UiBackendClient, "getContextWindowUsage">;
   readonly compacting: boolean;
@@ -15,17 +17,11 @@ export function CompactOverlayBody(props: {
 }): ReactElement {
   const { sessionId } = props;
   const [usage, setUsage] = useState<UiContextWindowUsage | null>(null);
-  const [status, setStatus] = useState<OverlayStatus>({
-    kind: "idle",
-    message: sessionId ? "" : "No active session to compact.",
-  });
+  const [status, setStatus] = useState<OverlayStatus>(IDLE_STATUS);
 
   useEffect(() => {
     setUsage(null);
-    setStatus({
-      kind: "idle",
-      message: sessionId ? "" : "No active session to compact.",
-    });
+    setStatus(IDLE_STATUS);
     if (!sessionId) {
       return;
     }
@@ -61,6 +57,9 @@ export function CompactOverlayBody(props: {
       <OverlayStatusLine status={status} />
       <div className="ohb-structured-actions">
         <button
+          // `/compact` then Enter, Enter again runs it; a disabled button
+          // stays unfocused, so the dialog falls back to the close button.
+          autoFocus
           className="ohb-button-primary"
           disabled={!sessionId || props.compacting}
           onClick={() => {
@@ -85,21 +84,24 @@ function ContextUsageCard(props: {
   return (
     <div className="ohb-structured-result">
       <div>
-        <span>model</span>
+        <span>Model</span>
         <strong>{usage.modelId}</strong>
       </div>
       <div className="ohb-compact-usage">
-        <span>context</span>
-        <strong>
-          {formatTokenCount(usage.currentTokens)} /{" "}
-          {formatTokenCount(usage.contextWindowTokens)}
-          <em>{`${String(Math.round(usage.contextWindowRatio * 100))}%`}</em>
-        </strong>
-        <i
-          aria-hidden="true"
-          className={ratio >= 0.9 ? "is-high" : undefined}
-          style={{ width: `${String(ratio * 100)}%` }}
-        />
+        <span>Context</span>
+        <div>
+          <strong>
+            {formatTokenCount(usage.currentTokens)} /{" "}
+            {formatTokenCount(usage.contextWindowTokens)}
+            <em>{`${String(Math.round(usage.contextWindowRatio * 100))}%`}</em>
+          </strong>
+          <b aria-hidden="true">
+            <i
+              className={ratio >= 0.9 ? "is-high" : undefined}
+              style={{ width: `${String(ratio * 100)}%` }}
+            />
+          </b>
+        </div>
       </div>
     </div>
   );

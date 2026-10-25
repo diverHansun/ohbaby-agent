@@ -15,7 +15,6 @@ import type { CommandNotice } from "../../api/daemon/wire.js";
 
 export interface SlashPaletteItem {
   readonly command: UiWebCommandSpec;
-  readonly accent: "blue" | "gold" | "pink";
   readonly action: UiWebCommandSpec["action"];
   readonly argsHint: string;
   readonly categoryLabel: string;
@@ -75,7 +74,6 @@ export function createSlashPaletteItems(
     const showCategory = categoryLabel !== previousCategory;
     previousCategory = categoryLabel;
     return {
-      accent: slashCommandAccent(command.category),
       action: command.action,
       argsHint: command.argsHint ?? "",
       categoryLabel,
@@ -92,16 +90,6 @@ function isWebPaletteCommand(command: UiWebCommandSpec): boolean {
   return (
     command.action !== "executeCommand" || isWebPassthroughCommandId(command.id)
   );
-}
-
-export function slashCompletionSuffix(
-  item: SlashPaletteItem | undefined,
-  draft: string,
-): string {
-  if (!item || !draft || !item.label.startsWith(draft)) {
-    return "";
-  }
-  return item.label.slice(draft.length);
 }
 
 export function selectedSlashItem(
@@ -345,31 +333,11 @@ function compareSlashCommands(
 }
 
 function categoryLabelForCommand(command: UiWebCommandSpec): string {
-  return isSetupOverlay(command)
-    ? "Setup"
-    : (CATEGORY_LABELS[command.category] ?? "Command");
+  return CATEGORY_LABELS[command.category] ?? "Command";
 }
 
 function categoryOrderForCommand(command: UiWebCommandSpec): number {
-  return isSetupOverlay(command)
-    ? CATEGORY_ORDER.setup
-    : (CATEGORY_ORDER[command.category] ?? 100);
-}
-
-function isSetupOverlay(command: UiWebCommandSpec): boolean {
-  return (
-    command.action === "connectModel" || command.action === "connectSearch"
-  );
-}
-
-function slashCommandAccent(category: string): SlashPaletteItem["accent"] {
-  if (category === "session") {
-    return "gold";
-  }
-  if (category === "system") {
-    return "pink";
-  }
-  return "blue";
+  return CATEGORY_ORDER[command.category] ?? 100;
 }
 
 function formatContextWindow(

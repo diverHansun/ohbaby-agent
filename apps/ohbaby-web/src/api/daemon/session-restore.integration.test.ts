@@ -1,7 +1,7 @@
 import { sessionViewFromSnapshot } from "./session-recovery.test-utils.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UiPermissionBinding, UiSnapshot } from "ohbaby-sdk";
-import { createOhbabyWebRuntime } from "../../runtime.js";
+import { createOhbabyWebRuntime } from "../../runtime/index.js";
 import {
   readWebNavigationState,
   writeWebNavigationState,
@@ -282,8 +282,7 @@ describe("remembered Web session restoration", () => {
       },
     });
     writeWebNavigationState({
-      selectedDirectory: "/repo",
-      sessionByDirectory: { "/repo": "remembered" },
+      lastSession: { sessionId: "remembered", directory: "/repo" },
     });
   });
   afterEach(() => {
@@ -311,7 +310,7 @@ describe("remembered Web session restoration", () => {
           app.runtime.store.getSnapshot().view.snapshot?.activeSessionId,
         ).toBe("remembered");
       });
-      expect(readWebNavigationState().sessionByDirectory["/repo"]).toBe(
+      expect(readWebNavigationState().lastSession?.sessionId).toBe(
         "remembered",
       );
     } finally {
@@ -365,13 +364,11 @@ describe("remembered Web session restoration", () => {
       expect(app.runtime.store.getSnapshot().connectionState).toBe("live");
       expect(app.runtime.client).not.toBeNull();
       expect(app.selections).toEqual([]);
-      expect(readWebNavigationState().sessionByDirectory["/repo"]).toBe(
+      expect(readWebNavigationState().lastSession?.sessionId).toBe(
         "remembered",
       );
       await app.runtime.selectSession("explicit");
-      expect(readWebNavigationState().sessionByDirectory["/repo"]).toBe(
-        "explicit",
-      );
+      expect(readWebNavigationState().lastSession?.sessionId).toBe("explicit");
     } finally {
       app.releaseHistory();
       await app.runtime.dispose();
@@ -415,9 +412,7 @@ describe("remembered Web session restoration", () => {
           app.runtime.store.getSnapshot().view.snapshot?.activeSessionId,
         ).toBe("explicit");
       });
-      expect(readWebNavigationState().sessionByDirectory["/repo"]).toBe(
-        "explicit",
-      );
+      expect(readWebNavigationState().lastSession?.sessionId).toBe("explicit");
     } finally {
       app.releaseIndex();
       app.releaseHistory();

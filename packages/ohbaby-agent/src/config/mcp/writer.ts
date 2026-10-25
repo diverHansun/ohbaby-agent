@@ -6,7 +6,7 @@ import { z } from "zod";
 import { resolveReadPathWithLegacy } from "../../paths/index.js";
 import { coordinateModelConfig } from "../llm/config-coordination.js";
 import { writeFileAtomically } from "../secrets/atomic-file.js";
-import { redactSettingsUrl } from "../secrets/redaction.js";
+import { redactSettingsArgs, redactSettingsUrl } from "../secrets/redaction.js";
 import {
   getGlobalMcpConfigPath,
   getLegacyGlobalMcpConfigPath,
@@ -59,12 +59,13 @@ function projectServer(
   config: McpServerConfig,
 ): UiSettingsGlobalMcpServer {
   const { type: transport, ...common } = config;
-  // URLs may contain credentials; args deliberately remain unchanged by contract.
+  // Read-only projections mask credentials; execution retains the saved values.
   if (config.type === "stdio") {
     const { env, ...fields } = common as Omit<typeof config, "type">;
     return {
       name,
       ...fields,
+      args: redactSettingsArgs(config),
       transport,
       envKeys: Object.keys(env ?? {}),
       headerKeys: [] as string[],

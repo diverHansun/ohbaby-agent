@@ -3,7 +3,7 @@ import type { SessionSyncState, UiSessionView } from "ohbaby-sdk";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionSyncNotice } from "./SessionStatus.js";
+import { SessionSyncNotice } from "./SessionBanners.js";
 import {
   INITIAL_LOAD_BANNER_DELAY_MS,
   isSessionRecovery,
@@ -87,7 +87,7 @@ describe("useSessionSyncBanner", () => {
     const notice = container.querySelector('[role="status"]');
     expect(notice?.textContent).toBe("Loading conversation…");
     expect(notice?.getAttribute("aria-live")).toBe("polite");
-    expect(container.querySelector(".ohb-error-banner")).toBeNull();
+    expect(container.querySelector(".ohb-banner")).toBeNull();
     render(state({ scope: { ...scope, bindingGeneration: 2 } }));
     expect(current).toBeNull();
   });

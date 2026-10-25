@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture } from "../api/daemon/new-session.test-support.js";
-import { createOhbabyWebRuntime } from "../runtime.js";
+import { createOhbabyWebRuntime } from "../runtime/index.js";
 import { OhbabyWebApp } from "./App.js";
 
 (

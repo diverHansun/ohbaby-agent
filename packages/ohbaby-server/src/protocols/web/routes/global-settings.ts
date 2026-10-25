@@ -33,7 +33,8 @@ import {
   getAgentPackageVersion,
   type SettingsDomain,
 } from "ohbaby-agent";
-import { readJsonWithLimit, webErrorBody } from "../request-helpers.js";
+import { readJsonWithLimit } from "../request-helpers.js";
+import { settingsErrorBody, validationFields } from "./settings-errors.js";
 
 interface GlobalSettingsRoutesContext {
   isAuthorized(header: string | undefined): boolean;
@@ -51,44 +52,14 @@ export function registerGlobalSettingsRoutes(
     (work: (context: Context) => Promise<Response>) =>
     async (context: Context): Promise<Response> => {
       if (!ctx.isAuthorized(context.req.header("authorization")))
-        return context.json(webErrorBody("Unauthorized"), 401);
+        return context.json(
+          settingsErrorBody("UNAUTHORIZED", "Unauthorized"),
+          401,
+        );
       try {
         return await work(context);
       } catch (error) {
-        const code =
-          typeof error === "object" && error !== null && "code" in error
-            ? error.code
-            : undefined;
-        if (code === "MODEL_NOT_FOUND")
-          return context.json(
-            {
-              ok: false,
-              error: {
-                code: "MODEL_NOT_FOUND",
-                message: "Model entry not found",
-              },
-            },
-            404,
-          );
-        if (code === "MODEL_CONFIG_INCOMPLETE")
-          return context.json(
-            {
-              ok: false,
-              error: {
-                code: "MODEL_CONFIG_INCOMPLETE",
-                message: "Model configuration incomplete",
-              },
-            },
-            400,
-          );
-        if (code === "MCP_SERVER_NOT_FOUND")
-          return context.json(webErrorBody("Global MCP server not found"), 404);
-        if (
-          code === "VALIDATION_FAILED" ||
-          (error instanceof Error && error.name === "ZodError")
-        )
-          return context.json(webErrorBody("Invalid settings"), 400);
-        return context.json(webErrorBody("Unable to access settings"), 500);
+        return settingsFailure(context, error);
       }
     };
   const modelOptions = {
@@ -107,11 +78,7 @@ export function registerGlobalSettingsRoutes(
     "/v1/settings/models/profiles",
     handle(async (context) => {
       const parsed = await readJsonWithLimit(context.req.raw);
-      if (!parsed.ok)
-        return context.json(
-          webErrorBody(parsed.message),
-          parsed.status as 400 | 413,
-        );
+      if (!parsed.ok) return unreadableBody(context, parsed);
       const result = await createModelEntry(
         ModelEntryCreateSchema.parse(parsed.value),
         modelOptions,
@@ -127,11 +94,7 @@ export function registerGlobalSettingsRoutes(
     "/v1/settings/models/profiles/:id",
     handle(async (context) => {
       const parsed = await readJsonWithLimit(context.req.raw);
-      if (!parsed.ok)
-        return context.json(
-          webErrorBody(parsed.message),
-          parsed.status as 400 | 413,
-        );
+      if (!parsed.ok) return unreadableBody(context, parsed);
       const result = await updateModelEntry(
         context.req.param("id") ?? "",
         ModelEntryPatchSchema.parse(parsed.value),
@@ -148,11 +111,7 @@ export function registerGlobalSettingsRoutes(
     "/v1/settings/models/active",
     handle(async (context) => {
       const parsed = await readJsonWithLimit(context.req.raw);
-      if (!parsed.ok)
-        return context.json(
-          webErrorBody(parsed.message),
-          parsed.status as 400 | 413,
-        );
+      if (!parsed.ok) return unreadableBody(context, parsed);
       const { id } = ModelEntrySelectSchema.parse(parsed.value);
       const result = await selectModelEntry(id, modelOptions);
       void startModelEntryDiscovery(id, {
@@ -170,11 +129,7 @@ export function registerGlobalSettingsRoutes(
     "/v1/settings/models/probe",
     handle(async (context) => {
       const parsed = await readJsonWithLimit(context.req.raw);
-      if (!parsed.ok)
-        return context.json(
-          webErrorBody(parsed.message),
-          parsed.status as 400 | 413,
-        );
+      if (!parsed.ok) return unreadableBody(context, parsed);
       const { id } = ModelEntrySelectSchema.parse(parsed.value);
       return context.json({
         ok: true,
@@ -238,11 +193,7 @@ export function registerGlobalSettingsRoutes(
     "/v1/settings/search",
     handle(async (context) => {
       const parsed = await readJsonWithLimit(context.req.raw);
-      if (!parsed.ok)
-        return context.json(
-          webErrorBody(parsed.message),
-          parsed.status as 400 | 413,
-        );
+      if (!parsed.ok) return unreadableBody(context, parsed);
       const patch = SearchSettingsPatchSchema.parse(parsed.value);
       const settings = await updateSearchSettings(patch);
       await ctx.notify(["search"]);
@@ -265,11 +216,7 @@ export function registerGlobalSettingsRoutes(
     "/v1/settings/mcp/servers/:name",
     handle(async (context) => {
       const parsed = await readJsonWithLimit(context.req.raw);
-      if (!parsed.ok)
-        return context.json(
-          webErrorBody(parsed.message),
-          parsed.status as 400 | 413,
-        );
+      if (!parsed.ok) return unreadableBody(context, parsed);
       const patch = McpServerPatchSchema.parse(parsed.value);
       const name = context.req.param("name") ?? "";
       const server = await updateGlobalMcpServer(name, patch);
@@ -295,4 +242,54 @@ export function registerGlobalSettingsRoutes(
       } satisfies UiSettingsMcpServerDeleteResponse);
     }),
   );
+}
+
+function settingsFailure(context: Context, error: unknown): Response {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? error.code
+      : undefined;
+  if (code === "MODEL_NOT_FOUND")
+    return context.json(
+      settingsErrorBody("MODEL_NOT_FOUND", "Model entry not found"),
+      404,
+    );
+  if (code === "MODEL_CONFIG_INCOMPLETE")
+    return context.json(
+      settingsErrorBody(
+        "MODEL_CONFIG_INCOMPLETE",
+        "Model configuration incomplete",
+      ),
+      400,
+    );
+  if (code === "MCP_SERVER_NOT_FOUND")
+    return context.json(
+      settingsErrorBody("MCP_SERVER_NOT_FOUND", "Global MCP server not found"),
+      404,
+    );
+  if (
+    code === "VALIDATION_FAILED" ||
+    (error instanceof Error && error.name === "ZodError")
+  )
+    return context.json(
+      settingsErrorBody(
+        "VALIDATION_FAILED",
+        "Invalid settings",
+        validationFields(error),
+      ),
+      400,
+    );
+  return context.json(
+    settingsErrorBody("SETTINGS_ACCESS_FAILED", "Unable to access settings"),
+    500,
+  );
+}
+
+function unreadableBody(
+  context: Context,
+  parsed: { readonly message: string; readonly status: number },
+): Response {
+  return parsed.status === 413
+    ? context.json(settingsErrorBody("REQUEST_TOO_LARGE", parsed.message), 413)
+    : context.json(settingsErrorBody("INVALID_JSON", parsed.message), 400);
 }

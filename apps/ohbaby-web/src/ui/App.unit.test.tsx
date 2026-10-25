@@ -14,8 +14,12 @@ import { createSessionSync, type UiSessionView } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { OhbabyWebRuntime } from "../runtime.js";
+import type { OhbabyWebRuntime } from "../runtime/index.js";
 import type { OhbabyWebStore } from "../store/store.js";
+import { createMockSettingsApi } from "../dev/mock-settings.js";
+import { SettingsLayer } from "../runtime/settings-layer.js";
+import { createDraftStore } from "../store/draft.js";
+import { createGlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore } from "../store/store.js";
 import { OhbabyWebApp } from "./App.js";
 
@@ -70,9 +74,8 @@ interface FakeRuntime {
   readonly listDirectoryPicker: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["listDirectoryPicker"]>
   >;
-  readonly openWorkspace: ReturnType<
-    typeof vi.fn<OhbabyWebRuntime["openWorkspace"]>
-  >;
+  readonly openFolder: ReturnType<typeof vi.fn<OhbabyWebRuntime["openFolder"]>>;
+  readonly openDraft: ReturnType<typeof vi.fn<OhbabyWebRuntime["openDraft"]>>;
   readonly runtime: OhbabyWebRuntime;
   readonly selectSession: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["selectSession"]>
@@ -87,9 +90,6 @@ interface FakeRuntime {
     typeof vi.fn<UiBackendClient["submitPromptAccepted"]>
   >;
   readonly store: OhbabyWebStore;
-  readonly switchWorkspace: ReturnType<
-    typeof vi.fn<OhbabyWebRuntime["switchWorkspace"]>
-  >;
 }
 
 const mountedApps: MountedApp[] = [];
@@ -293,6 +293,199 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_400);
   });
 
+  it("lets an upward wheel leave the bottom before streamed output lands", async () => {
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+    if (!stream) {
+      throw new Error("stream not found");
+    }
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_000,
+      scrollTop: 0,
+    });
+    await waitFor(() => stream.scrollTop === 1_000);
+
+    // The wheel fires before the browser's smooth scroll moves scrollTop.
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_200,
+      scrollTop: 600,
+    });
+    act(() => {
+      stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -20 }));
+      fake.store.replaceSnapshot(
+        snapshotWithMessageText(initial, "streamed token"),
+        2,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(600);
+
+    // A small upward step still inside the near-bottom band must not re-stick.
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_200,
+      scrollTop: 780,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_200,
+      scrollTop: 770,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -10 }));
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_400,
+      scrollTop: 770,
+    });
+    act(() => {
+      fake.store.replaceSnapshot(
+        snapshotWithMessageText(initial, "more streamed tokens"),
+        3,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(770);
+  });
+
+  it.each(["wheel", "touch", "ArrowUp", "PageUp", "Home"])(
+    "keeps following while %s scrolls a tool output, then stops at its upper edge",
+    async (input) => {
+      const base = snapshotWithStatus({ kind: "running", runId: "run_1" });
+      const initial: UiSnapshot = {
+        ...base,
+        sessions: base.sessions.map((session) => ({
+          ...session,
+          messages: [
+            ...session.messages.map((message) => ({
+              ...message,
+              id: "user_message",
+            })),
+            {
+              id: "message_tool",
+              createdAt: timestamp,
+              role: "assistant",
+              parts: [
+                {
+                  type: "tool-call",
+                  call: {
+                    id: "call_read",
+                    name: "read",
+                    input: { path: "long.txt" },
+                    status: "completed",
+                  },
+                },
+                {
+                  type: "tool-result",
+                  result: {
+                    callId: "call_read",
+                    output: "Long tool output\n".repeat(80),
+                  },
+                },
+              ],
+            },
+            {
+              id: "message_1",
+              createdAt: timestamp,
+              role: "assistant",
+              parts: [{ type: "text", text: "hello" }],
+            },
+          ],
+        })),
+      };
+      const fake = createFakeRuntime({ snapshot: initial });
+      const app = mountApp(fake.runtime);
+      act(() =>
+        app.container
+          .querySelector<HTMLButtonElement>(".ohb-tool-panel button")
+          ?.click(),
+      );
+      const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+      const output = app.container.querySelector<HTMLElement>(
+        ".ohb-tool-output pre",
+      );
+      if (!stream || !output)
+        throw new Error("expected stream and expanded output");
+      // JSDOM has no layout or imported CSS; supply the tool output's real
+      // scrolling geometry while keeping the application event handlers.
+      output.style.overflowY = "auto";
+      setScrollMetrics(output, {
+        clientHeight: 200,
+        scrollHeight: 1_000,
+        scrollTop: 100,
+      });
+      setScrollMetrics(stream, {
+        clientHeight: 400,
+        scrollHeight: 1_000,
+        scrollTop: 0,
+      });
+      await waitFor(() => stream.scrollTop === 1_000);
+      const scrollUp = (): void => {
+        if (input === "wheel") {
+          output.dispatchEvent(
+            new WheelEvent("wheel", { bubbles: true, deltaY: -20 }),
+          );
+        } else if (input === "touch") {
+          for (const [type, y] of [
+            ["touchstart", 100],
+            ["touchmove", 120],
+          ] as const) {
+            const event = new Event(type, { bubbles: true });
+            Object.defineProperty(event, "touches", {
+              value: { item: () => ({ clientY: y }) },
+            });
+            output.dispatchEvent(event);
+          }
+        } else {
+          output.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, key: input }),
+          );
+        }
+      };
+      setScrollMetrics(stream, {
+        clientHeight: 400,
+        scrollHeight: 1_200,
+        scrollTop: 600,
+      });
+      act(() => {
+        scrollUp();
+        fake.store.replaceSnapshot(
+          snapshotWithMessageText(initial, "more content"),
+          2,
+        );
+      });
+      await flushTimers();
+      expect(stream.scrollTop).toBe(1_200);
+
+      output.scrollTop = 0;
+      setScrollMetrics(stream, {
+        clientHeight: 400,
+        scrollHeight: 1_400,
+        scrollTop: 800,
+      });
+      act(() => {
+        scrollUp();
+        fake.store.replaceSnapshot(
+          snapshotWithMessageText(initial, "more content again"),
+          3,
+        );
+      });
+      await flushTimers();
+      expect(stream.scrollTop).toBe(800);
+    },
+  );
+
   it("keeps the scroll anchor after scrolling up while a pending prompt is still visible", async () => {
     const admission =
       deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
@@ -417,7 +610,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_600);
   });
 
-  it("shows the idle typewriter only while the composer is empty and unfocused", async () => {
+  it("uses a fixed placeholder instead of an animated typewriter", () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
@@ -426,27 +619,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     if (!(textarea instanceof HTMLTextAreaElement)) {
       throw new Error("textarea not found");
     }
-
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-composer-typewriter")),
+    expect(textarea.placeholder).toMatch(
+      /^(Describe a task|Follow up), or type \/ for commands$/u,
     );
-    expect(textarea.placeholder).toBe("");
-
-    await act(async () => {
-      textarea.focus();
-      await Promise.resolve();
-    });
-    expect(app.container.querySelector(".ohb-composer-typewriter")).toBeNull();
-
-    await act(async () => {
-      textarea.blur();
-      await Promise.resolve();
-    });
-    expect(
-      app.container.querySelector(".ohb-composer-typewriter"),
-    ).not.toBeNull();
-
-    await setTextareaValue(app.container, "a");
     expect(app.container.querySelector(".ohb-composer-typewriter")).toBeNull();
   });
 
@@ -471,9 +646,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     }
     expect(stopButton.querySelector("span")).toBeNull();
     expect(stopButton.textContent).not.toContain("Stop");
-    expect(
-      runningApp.container.querySelector(".ohb-status-pill > span"),
-    ).toBeNull();
     await act(async () => {
       stopButton.click();
       await Promise.resolve();
@@ -492,10 +664,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     }
     Object.defineProperty(textarea, "scrollHeight", {
       configurable: true,
-      value: 66,
+      value: 72,
     });
     await setTextareaValue(app.container, "line one\nline two\nline three");
-    expect(textarea.style.height).toBe("66px");
+    expect(textarea.style.height).toBe("72px");
     expect(textarea.style.overflowY).toBe("hidden");
 
     Object.defineProperty(textarea, "scrollHeight", {
@@ -506,7 +678,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container,
       "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten",
     );
-    expect(textarea.style.height).toBe("154px");
+    expect(textarea.style.height).toBe("168px");
     expect(textarea.style.overflowY).toBe("auto");
   });
 
@@ -517,11 +689,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     const runningApp = mountApp(running.runtime);
     const runningTextarea = runningApp.container.querySelector("textarea");
     expect(runningTextarea?.getAttribute("placeholder")).toBe(
-      "run in progress",
+      "Steer now or queue a follow-up...",
     );
-    expect(
-      runningApp.container.querySelector(".ohb-composer-typewriter"),
-    ).toBeNull();
 
     const unavailable = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
@@ -533,9 +702,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(unavailableTextarea?.getAttribute("placeholder")).toBe(
       "Draft while reconnecting…",
     );
-    expect(
-      unavailableApp.container.querySelector(".ohb-composer-typewriter"),
-    ).toBeNull();
   });
 
   it("does not send or prevent default while an IME is composing", async () => {
@@ -973,7 +1139,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
   it("restores a session draft without waiting for snapshot events", () => {
     globalThis.sessionStorage.setItem(
-      "ohbaby:composer:/repo-a:session_1",
+      "ohbaby:composer:session_1",
       JSON.stringify({
         clientRequestId: "request_pending",
         pendingText: "restored draft",
@@ -989,6 +1155,26 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(
       textarea instanceof HTMLTextAreaElement ? textarea.value : null,
     ).toBe("restored draft");
+  });
+
+  it("shows the Lychee mark and the in-flow composer when no session is selected", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector(".ohb-main-body-empty")).not.toBeNull();
+    expect(
+      app.container.querySelector(".ohb-draft-hero .ohb-lychee-mark"),
+    ).not.toBeNull();
+    expect(
+      app.container.querySelector(".ohb-draft-hero .ohb-wordmark"),
+    ).toBeNull();
+    expect(app.container.querySelector(".ohb-composer-hero")).not.toBeNull();
   });
 
   it("selects the receipt session after submitting from an empty project", async () => {
@@ -1018,6 +1204,304 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.selectSession).toHaveBeenCalledWith("session_new");
   });
 
+  it.each(["accepted", "rejected"] as const)(
+    "keeps another draft usable when the previous first prompt is %s late",
+    async (outcome) => {
+      const pendingReceipt =
+        deferred<
+          Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>
+        >();
+      const initial: UiSnapshot = {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      };
+      const fake = createFakeRuntime({ snapshot: initial });
+      let requestId = "";
+      fake.submitPromptAccepted.mockImplementationOnce((_text, options) => {
+        requestId = options?.clientRequestId ?? "";
+        return pendingReceipt.promise;
+      });
+      const app = mountApp(fake.runtime);
+
+      await setTextareaValue(app.container, "slow first prompt");
+      await pressTextareaKey(app.container, "Enter");
+      // Exercise selection isolation independently of a replacement client.
+      await act(async () => {
+        await fake.runtime.openDraft(null);
+        fake.store.replaceSnapshot(initial, 2);
+      });
+      await setTextareaValue(app.container, "new draft still being written");
+      await act(async () => {
+        if (outcome === "accepted") {
+          pendingReceipt.resolve({
+            clientRequestId: requestId,
+            createdAt: timestamp,
+            promptId: "prompt_late",
+            sessionId: "session_late",
+            status: "queued",
+            userMessageId: "message_late",
+          });
+        } else {
+          pendingReceipt.reject(new Error("old draft admission failed"));
+        }
+        await pendingReceipt.promise.catch(() => undefined);
+      });
+
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+      expect(fake.selectSession).not.toHaveBeenCalled();
+      expect(app.container.textContent).not.toContain("slow first prompt");
+      expect(app.container.textContent).not.toContain(
+        "old draft admission failed",
+      );
+      expect(app.container.querySelector(".ohb-draft-hero")).not.toBeNull();
+      expect(app.container.querySelector(".ohb-project-picker")).not.toBeNull();
+      expect(textareaValue(app.container)).toBe(
+        "new draft still being written",
+      );
+      expect(
+        app.container.querySelector<HTMLButtonElement>(".ohb-send-button")
+          ?.disabled,
+      ).toBe(false);
+
+      await pressTextareaKey(app.container, "Enter");
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(2);
+      expect(fake.submitPromptAccepted.mock.calls[1]?.[0]).toBe(
+        "new draft still being written",
+      );
+      expect(textareaValue(app.container)).toBe("");
+      expect(app.container.textContent).toContain(
+        "new draft still being written",
+      );
+    },
+  );
+
+  it("unblocks the new draft after replacing the client while a first prompt is pending", async () => {
+    const initial: UiSnapshot = {
+      ...snapshotWithStatus({ kind: "idle" }),
+      activeSessionId: null,
+      sessions: [],
+    };
+    const first = createFakeRuntime({ snapshot: initial });
+    const second = createFakeRuntime({ snapshot: initial });
+    const pendingReceipt =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    first.submitPromptAccepted.mockReturnValue(pendingReceipt.promise);
+    const nextReceipt =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    second.submitPromptAccepted.mockReturnValue(nextReceipt.promise);
+    let connectedClient = first.client;
+    Object.defineProperty(first.runtime, "client", {
+      get: () => connectedClient,
+    });
+    vi.spyOn(first.runtime, "submitPrompt").mockImplementation(
+      (text, options) => connectedClient.submitPromptAccepted(text, options),
+    );
+    const app = mountApp(first.runtime);
+
+    await setTextareaValue(app.container, "old client first prompt");
+    await pressTextareaKey(app.container, "Enter");
+    await setTextareaValue(app.container, "draft survives the client change");
+    await act(async () => {
+      connectedClient = second.client;
+      first.store.replaceSnapshot(initial, 2);
+      await Promise.resolve();
+    });
+
+    expect(app.container.textContent).not.toContain("old client first prompt");
+    expect(app.container.querySelector(".ohb-draft-hero")).not.toBeNull();
+    expect(app.container.querySelector(".ohb-project-picker")).not.toBeNull();
+    expect(textareaValue(app.container)).toBe(
+      "draft survives the client change",
+    );
+    expect(
+      app.container.querySelector<HTMLButtonElement>(".ohb-send-button")
+        ?.disabled,
+    ).toBe(false);
+
+    await pressTextareaKey(app.container, "Enter");
+    expect(second.submitPromptAccepted.mock.calls[0]?.[0]).toBe(
+      "draft survives the client change",
+    );
+    expect(app.container.textContent).toContain(
+      "draft survives the client change",
+    );
+    await act(async () => {
+      pendingReceipt.reject(new Error("old client failed"));
+      await pendingReceipt.promise.catch(() => undefined);
+    });
+    expect(app.container.textContent).not.toContain("old client failed");
+    expect(app.container.textContent).toContain(
+      "draft survives the client change",
+    );
+    expect(textareaValue(app.container)).toBe("");
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-busy"),
+    ).toBe("true");
+  });
+
+  it("keeps the first prompt projected when its receipt automatically binds the session", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    fake.submitPromptAccepted.mockImplementation((_text, options) => {
+      // acceptBinding updates the selected session before submitPrompt resolves,
+      // without advancing the runtime's user-selection generation.
+      fake.store.replaceSnapshot(snapshotWithStatus({ kind: "idle" }), 2);
+      return Promise.resolve({
+        clientRequestId: options?.clientRequestId ?? "request_generated",
+        createdAt: timestamp,
+        promptId: "prompt_bound",
+        sessionId: "session_1",
+        status: "queued",
+        userMessageId: "message_bound",
+      });
+    });
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "automatically bound first prompt");
+    await pressTextareaKey(app.container, "Enter");
+
+    expect(fake.selectSession).not.toHaveBeenCalled();
+    expect(app.container.textContent).toContain(
+      "automatically bound first prompt",
+    );
+    expect(
+      app.container
+        .querySelector(".ohb-message-pending")
+        ?.getAttribute("data-user-message-id"),
+    ).toBe("message_bound");
+    expect(app.container.querySelector(".ohb-draft-hero")).toBeNull();
+  });
+
+  it.each(["accepted", "rejected"] as const)(
+    "keeps a session prompt pending across an automatic move until it is %s",
+    async (outcome) => {
+      const initial = snapshotWithStatus({ kind: "idle" });
+      const fake = createFakeRuntime({ snapshot: initial });
+      const pendingReceipt =
+        deferred<
+          Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>
+        >();
+      fake.submitPromptAccepted.mockReturnValue(pendingReceipt.promise);
+      let connectedClient = fake.client;
+      Object.defineProperty(fake.runtime, "client", {
+        get: () => connectedClient,
+      });
+      const app = mountApp(fake.runtime);
+
+      await setTextareaValue(app.container, "prompt follows the session move");
+      await pressTextareaKey(app.container, "Enter");
+      const requestId =
+        fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "";
+      // SESSION_MOVED replaces the client and resynchronizes the same session
+      // inside submitPrompt, without starting a new user selection.
+      await act(async () => {
+        connectedClient = { ...fake.client };
+        fake.store.reset();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        fake.store.replaceSnapshot(initial, 2);
+        fake.store.setPermissionSync({
+          ...fake.store.getSnapshot().permissionSync,
+          status: "ready",
+        });
+        fake.store.setConnectionState("live");
+        await Promise.resolve();
+      });
+
+      expect(app.container.textContent).toContain(
+        "prompt follows the session move",
+      );
+      expect(
+        app.container
+          .querySelector(".ohb-send-button")
+          ?.getAttribute("aria-busy"),
+      ).toBe("true");
+      await setTextareaValue(app.container, "next draft stays here");
+      expect(
+        app.container.querySelector<HTMLButtonElement>(".ohb-send-button")
+          ?.disabled,
+      ).toBe(true);
+      await pressTextareaKey(app.container, "Enter");
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        if (outcome === "accepted") {
+          pendingReceipt.resolve({
+            clientRequestId: requestId,
+            createdAt: timestamp,
+            promptId: "prompt_moved",
+            sessionId: "session_1",
+            status: "queued",
+            userMessageId: "message_moved",
+          });
+        } else {
+          pendingReceipt.reject(new Error("target admission failed"));
+        }
+        await pendingReceipt.promise.catch(() => undefined);
+      });
+
+      expect(textareaValue(app.container)).toBe("next draft stays here");
+      expect(
+        app.container
+          .querySelector(".ohb-send-button")
+          ?.getAttribute("aria-busy"),
+      ).toBe("false");
+      if (outcome === "rejected") {
+        expect(app.container.textContent).toContain("target admission failed");
+        expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+      } else {
+        expect(
+          app.container
+            .querySelector(".ohb-message-pending")
+            ?.getAttribute("data-user-message-id"),
+        ).toBe("message_moved");
+        act(() => {
+          fake.store.replaceSnapshot(
+            {
+              ...initial,
+              prompts: [
+                promptSubmission({
+                  clientRequestId: requestId,
+                  promptId: "prompt_moved",
+                  status: "succeeded",
+                  text: "prompt follows the session move",
+                  userMessageId: "message_moved",
+                }),
+              ],
+              sessions: initial.sessions.map((session) => ({
+                ...session,
+                messages: [
+                  {
+                    createdAt: timestamp,
+                    id: "message_moved",
+                    parts: [
+                      { type: "text", text: "prompt follows the session move" },
+                    ],
+                    role: "user",
+                  },
+                ],
+              })),
+            },
+            3,
+          );
+        });
+        expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+        expect(
+          app.container.textContent.match(/prompt follows the session move/gu),
+        ).toHaveLength(1);
+      }
+    },
+  );
+
   it("commits the first prompt and startup feedback before admission resolves", async () => {
     const pendingReceipt =
       deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
@@ -1034,8 +1518,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     await setTextareaValue(app.container, "visible on the next frame");
     await pressTextareaKey(app.container, "Enter");
 
-    expect(app.container.querySelector(".ohb-app")?.className).toContain(
-      "ohb-app-main",
+    expect(app.container.querySelector(".ohb-main-body")?.className).toContain(
+      "ohb-main-body-chat",
     );
     expect(app.container.querySelector("textarea")?.textContent).toBe("");
     expect(textareaValue(app.container)).toBe("");
@@ -1120,6 +1604,32 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toHaveLength(1);
   });
 
+  it("leaves transport errors to the header and words them for people", () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    act(() => {
+      fake.store.setError("Failed to fetch");
+      fake.store.setConnectionState("reconnecting");
+    });
+    expect(app.container.querySelector(".ohb-banner-error")).toBeNull();
+    expect(
+      app.container.querySelector(".ohb-connection-state")?.textContent,
+    ).toBe("Reconnecting…");
+
+    act(() => {
+      fake.store.setConnectionState("live");
+    });
+    const banner = app.container.querySelector(".ohb-banner-error");
+    expect(banner?.textContent).toBe(
+      "Can't reach ohbaby. Check that it's still running.",
+    );
+    // A state error clears itself, so it offers no Dismiss that cannot work.
+    expect(banner?.querySelector(".ohb-banner-close")).toBeNull();
+  });
+
   it.each(["reconnecting", "resyncing"] as const)(
     "keeps the last-known stop action disabled while %s",
     (connectionState) => {
@@ -1130,7 +1640,9 @@ describe("OhbabyWebApp slash command interactions", () => {
       act(() => {
         fake.store.setConnectionState(connectionState);
       });
-      expect(app.container.textContent).toContain(connectionState);
+      expect(
+        app.container.querySelector(".ohb-connection-state")?.textContent,
+      ).toBe(connectionState === "reconnecting" ? "Reconnecting…" : "Syncing…");
       expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(
         1,
       );
@@ -1403,7 +1915,14 @@ describe("OhbabyWebApp slash command interactions", () => {
         sessions: [],
       },
     });
-    fake.selectSession.mockReturnValue(selection.promise);
+    let selectionGeneration = 0;
+    vi.spyOn(fake.runtime, "getSelectionGeneration").mockImplementation(
+      () => selectionGeneration,
+    );
+    fake.selectSession.mockImplementation(() => {
+      selectionGeneration += 1;
+      return selection.promise;
+    });
     const app = mountApp(fake.runtime);
 
     await setTextareaValue(app.container, "accepted before navigation");
@@ -2093,7 +2612,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       userMessageId: "message_queued",
     };
     globalThis.sessionStorage.setItem(
-      "ohbaby:composer:/repo-a:session_1",
+      "ohbaby:composer:session_1",
       JSON.stringify({
         clientRequestId: "request_pending",
         pendingText: "pending draft",
@@ -2293,11 +2812,11 @@ describe("OhbabyWebApp slash command interactions", () => {
 
   it("preserves expired editing separately from the original draft and blocks implicit submission", async () => {
     globalThis.sessionStorage.setItem(
-      "ohbaby:composer:/repo-a:session_1",
+      "ohbaby:composer:session_1",
       JSON.stringify({ text: "older draft" }),
     );
     globalThis.sessionStorage.setItem(
-      "ohbaby:composer-lease:/repo-a:session_1",
+      "ohbaby:composer-lease:session_1",
       JSON.stringify({
         editLeaseId: "expired_lease",
         editText: "preserve edited buffer",
@@ -2319,12 +2838,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     expect(textareaValue(app.container)).toBe("preserve edited buffer");
     expect(
-      globalThis.sessionStorage.getItem("ohbaby:composer:/repo-a:session_1"),
+      globalThis.sessionStorage.getItem("ohbaby:composer:session_1"),
     ).toContain("older draft");
     expect(
-      globalThis.sessionStorage.getItem(
-        "ohbaby:composer-lease:/repo-a:session_1",
-      ),
+      globalThis.sessionStorage.getItem("ohbaby:composer-lease:session_1"),
     ).toContain("preserve edited buffer");
     await pressTextareaKey(app.container, "Enter");
     expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
@@ -2451,13 +2968,29 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     await setTextareaValue(app.container, "/");
-    await waitFor(() => slashCompletionText(app.container).includes("/skills"));
+    await waitFor(() => selectedSlashText(app.container).includes("/skills"));
 
     await pressTextareaKey(app.container, "PageDown");
-    expect(slashCompletionText(app.container)).toContain("/status");
+    expect(selectedSlashText(app.container)).toContain("/status");
 
     await pressTextareaKey(app.container, "PageUp");
-    expect(slashCompletionText(app.container)).toContain("/skills");
+    expect(selectedSlashText(app.container)).toContain("/skills");
+  });
+
+  it("keeps the completed command highlighted after Tab narrows the list", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["skills", "status"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => selectedSlashText(app.container).includes("/skills"));
+    await pressTextareaKey(app.container, "ArrowDown");
+    await pressTextareaKey(app.container, "Tab");
+
+    expect(app.container.querySelector("textarea")?.value).toBe("/status");
+    expect(selectedSlashText(app.container)).toContain("/status");
   });
 
   it("keeps skill commands out of the top-level slash palette", async () => {
@@ -2765,11 +3298,11 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toEqual(["cache", "hit 61%"]);
   });
 
-  it("marks no-args slash rows without changing rows that have args", async () => {
+  it("renders an args hint only for slash rows that take args", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    fake.listCommands.mockResolvedValue(catalog(["status", "connect"]));
+    fake.listCommands.mockResolvedValue(catalog(["status", "goal"]));
     const app = mountApp(fake.runtime);
 
     await setTextareaValue(app.container, "/");
@@ -2779,15 +3312,13 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container.querySelectorAll<HTMLButtonElement>(".ohb-slash-row"),
     );
     const statusRow = rows.find((row) => row.textContent.includes("/status"));
-    const connectRow = rows.find((row) => row.textContent.includes("/connect"));
-    expect(statusRow?.classList.contains("ohb-slash-row-no-args")).toBe(true);
-    expect(statusRow?.querySelector(".ohb-slash-args")).not.toBeNull();
+    const goalRow = rows.find((row) => row.textContent.includes("/goal"));
+    expect(statusRow?.querySelector(".ohb-slash-args")).toBeNull();
     expect(
       statusRow?.querySelector(".ohb-slash-description")?.textContent,
     ).toBe("Show backend status");
-    expect(connectRow?.classList.contains("ohb-slash-row-no-args")).toBe(false);
-    expect(connectRow?.querySelector(".ohb-slash-args")?.textContent).toBe(
-      "[--provider <name>] [--model <name>]",
+    expect(goalRow?.querySelector(".ohb-slash-args")?.textContent).toBe(
+      "[<objective> | status]",
     );
   });
 
@@ -2830,7 +3361,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("keeps an empty context ring separated in a conversation header", () => {
+  it("shows an empty context ring in the main header", () => {
     const snapshot = snapshotWithStatus({ kind: "idle" });
     const fake = createFakeRuntime({
       snapshot: {
@@ -2849,14 +3380,11 @@ describe("OhbabyWebApp slash command interactions", () => {
       },
     });
     const app = mountApp(fake.runtime);
-    const statusbar = app.container.querySelector(".ohb-statusbar");
+    const header = app.container.querySelector(".ohb-main-header");
 
     expect(
-      statusbar?.querySelector(
-        'button[aria-label="Context usage unavailable"]',
-      ),
+      header?.querySelector('button[aria-label="Context usage unavailable"]'),
     ).not.toBeNull();
-    expect(statusbar?.querySelectorAll(".ohb-divider")).toHaveLength(2);
   });
 
   it("renders measured context usage in the conversation header", () => {
@@ -2891,7 +3419,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(
       app.container.querySelector(
-        '.ohb-statusbar button[aria-label^="25% context used"]',
+        '.ohb-main-header button[aria-label^="25% context used"]',
       ),
     ).not.toBeNull();
   });
@@ -2910,9 +3438,9 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(fake.setPermission).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(app.container.querySelector(".ohb-app")?.hasAttribute("inert")).toBe(
-      false,
-    );
+    expect(
+      app.container.querySelector(".ohb-shell")?.hasAttribute("inert"),
+    ).toBe(false);
     expect(document.activeElement).toBe(
       app.container.querySelector(".ohb-permission-toggle"),
     );
@@ -2937,9 +3465,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     const cancel = document.querySelector<HTMLButtonElement>(
       'button[title="Not now"]',
     );
-    expect(app.container.querySelector(".ohb-app")?.hasAttribute("inert")).toBe(
-      true,
-    );
+    expect(
+      app.container.querySelector(".ohb-shell")?.hasAttribute("inert"),
+    ).toBe(true);
 
     await act(async () => {
       confirm?.dispatchEvent(
@@ -3156,91 +3684,55 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container.querySelector(".ohb-sidebar-new .lucide-square-pen"),
     ).not.toBeNull();
     expect(
-      app.container.querySelector(".ohb-sidebar-new .lucide-plus"),
-    ).toBeNull();
-
-    expect(
-      app.container.querySelector(".ohb-sidebar")?.hasAttribute("inert"),
-    ).toBe(true);
-    await clickButton(app.container, "Expand sessions");
-    expect(
-      app.container.querySelector(".ohb-sidebar")?.hasAttribute("inert"),
+      app.container.querySelector(".ohb-shell-sidebar")?.hasAttribute("inert"),
     ).toBe(false);
+    await clickButton(app.container, "Collapse sidebar");
+    expect(
+      app.container.querySelector(".ohb-shell-sidebar")?.hasAttribute("inert"),
+    ).toBe(true);
+    await clickButton(app.container, "Open sidebar");
     expect(
       app.container.querySelector('button[aria-label="Select Session 2"]')
         ?.textContent,
     ).not.toContain("0 messages");
 
-    await clickButton(app.container, "New session");
+    await clickButton(app.container, "New chat");
     await clickButton(app.container, "Select Session 2");
 
-    expect(fake.createSession).toHaveBeenCalledTimes(1);
+    expect(fake.openDraft).toHaveBeenCalledTimes(1);
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
   });
 
-  it("switches the selected workspace from the project rail", async () => {
+  it("starts a new chat in a project from its sidebar group", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
-    const project = app.container.querySelector(
-      'button[aria-label="Open repo-b"]',
-    );
-    if (!(project instanceof HTMLButtonElement)) {
-      throw new Error("project rail button not found");
-    }
 
-    await act(async () => {
-      project.click();
-      await Promise.resolve();
-    });
+    await clickButton(app.container, "New chat in repo-b");
 
-    expect(fake.switchWorkspace).toHaveBeenCalledWith("/repo-b");
+    expect(fake.openDraft).toHaveBeenCalledWith("/repo-b");
   });
 
-  it("removes a project from the rail through its context menu", async () => {
+  it("hides a project through its group menu", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
-    const project = app.container.querySelector(
-      'button[aria-label="Open repo-b"]',
-    );
-    if (!(project instanceof HTMLButtonElement)) {
-      throw new Error("project rail button not found");
-    }
 
-    await act(async () => {
-      project.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          clientX: 20,
-          clientY: 30,
-        }),
-      );
-      await Promise.resolve();
-    });
-    const remove = Array.from(
-      app.container.querySelectorAll('[role="menuitem"]'),
-    ).find((element) => element.textContent === "Remove from project rail");
-    if (!(remove instanceof HTMLButtonElement)) {
-      throw new Error("remove project action not found");
-    }
-    await act(async () => {
-      remove.click();
-      await Promise.resolve();
-    });
+    await clickButton(app.container, "Project actions for repo-b");
+    await clickButton(document.body, "Hide project");
 
     expect(fake.hideWorkspace).toHaveBeenCalledWith("/repo-b");
   });
 
-  it("opens the web directory picker from the project rail", async () => {
+  it("opens the web directory picker from the sidebar", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Open project");
+    await clickButton(app.container, "Open folder…");
 
     await waitFor(
       () =>
@@ -3249,7 +3741,7 @@ describe("OhbabyWebApp slash command interactions", () => {
           ?.textContent.includes("C:\\") === true,
     );
     expect(fake.getDirectoryPickerRoots).toHaveBeenCalledTimes(1);
-    expect(fake.openWorkspace).not.toHaveBeenCalled();
+    expect(fake.openFolder).not.toHaveBeenCalled();
     const root = [...app.container.querySelectorAll("button")].find((button) =>
       button.textContent.includes("C:\\"),
     );
@@ -3278,17 +3770,17 @@ describe("OhbabyWebApp slash command interactions", () => {
       await Promise.resolve();
     });
 
-    expect(fake.openWorkspace).toHaveBeenCalledWith("C:\\");
+    expect(fake.openFolder).toHaveBeenCalledWith("C:\\");
   });
 
   it("keeps the directory picker open when opening a directory fails", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    fake.openWorkspace.mockRejectedValueOnce(new Error("Scope unavailable"));
+    fake.openFolder.mockRejectedValueOnce(new Error("Scope unavailable"));
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Open project");
+    await clickButton(app.container, "Open folder…");
     await waitFor(
       () =>
         app.container
@@ -3413,20 +3905,27 @@ describe("OhbabyWebApp slash command interactions", () => {
       });
       fake.exportSession.mockRejectedValue(error);
       const app = mountApp(fake.runtime);
-      await clickButton(app.container, "Expand sessions");
       await clickButton(app.container, "Actions for Session 2");
-      await clickButton(document.body, "Export");
+      await clickButton(document.body, "Export…");
       await clickButton(document.body, "HTML");
-      expect(
-        app.container.querySelector(".ohb-error-banner")?.textContent,
-      ).toContain(expected);
-      expect(fake.exportSession).toHaveBeenCalledWith("session_2", "html");
+      await waitFor(() =>
+        Boolean(
+          app.container
+            .querySelector(".ohb-notice-stack .ohb-banner")
+            ?.textContent.includes(expected),
+        ),
+      );
+      expect(fake.exportSession).toHaveBeenCalledWith(
+        "session_2",
+        "html",
+        "/repo-a",
+      );
       expect(fake.selectSession).not.toHaveBeenCalled();
       expect(document.querySelector('[role="menu"]')).toBeNull();
     },
   );
 
-  it("archives sidebar sessions after confirmation without selecting the row", async () => {
+  it("archives sidebar sessions without confirmation or selecting the row", async () => {
     const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
     const fake = createFakeRuntime({
       snapshot: {
@@ -3444,45 +3943,14 @@ describe("OhbabyWebApp slash command interactions", () => {
         ],
       },
     });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const confirm = vi.spyOn(window, "confirm");
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Actions for Session 2");
     await clickButton(document.body, "Archive");
 
-    expect(confirm).toHaveBeenCalledWith("Archive this session?");
-    expect(fake.archiveSession).toHaveBeenCalledWith("session_2");
-    expect(fake.selectSession).not.toHaveBeenCalled();
-    confirm.mockRestore();
-  });
-
-  it("does not archive sidebar sessions when confirmation is cancelled", async () => {
-    const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
-    const fake = createFakeRuntime({
-      snapshot: {
-        ...snapshotWithStatus({ kind: "idle" }),
-        activeSessionId: "session_1",
-        sessions: [
-          first,
-          {
-            createdAt: timestamp,
-            id: "session_2",
-            messages: [],
-            title: "Session 2",
-            updatedAt: "2026-06-13T00:00:00.000Z",
-          },
-        ],
-      },
-    });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const app = mountApp(fake.runtime);
-
-    await clickButton(app.container, "Expand sessions");
-    await clickButton(app.container, "Actions for Session 2");
-    await clickButton(document.body, "Archive");
-
-    expect(fake.archiveSession).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(fake.archiveSession).toHaveBeenCalledWith("session_2", "/repo-a");
     expect(fake.selectSession).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
@@ -3498,7 +3966,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Select Session");
 
     expect(fake.selectSession).toHaveBeenCalledWith("session_1");
@@ -3544,7 +4011,6 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.textContent).not.toContain("loaded transcript");
 
-    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Select Session");
 
     await waitFor(() =>
@@ -3552,353 +4018,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     expect(app.container.textContent).toContain("resume this session");
     expect(fake.selectSession).toHaveBeenCalledWith("session_1");
-  });
-
-  it("opens the structured connect overlay from the slash palette", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect", "status"]));
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    await setInputValue(app.container, "Provider", "zhipu");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://open.bigmodel.cn/api/paas/v4",
-    );
-    await setInputValue(app.container, "API key env", "ZHIPU_API_KEY");
-    await setInputValue(app.container, "Model", "glm-4.7");
-    await clickButton(app.container, "Save model");
-
-    expect(fake.connectModel).toHaveBeenCalledWith({
-      apiKeyEnv: "ZHIPU_API_KEY",
-      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-      interfaceProvider: "openai-compatible",
-      model: "glm-4.7",
-      provider: "zhipu",
-    });
-    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
-  });
-
-  it("warns about a duplicate Chat request path before saving without blocking the save", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await setInputValue(app.container, "Provider", "fixture");
-    await setInputValue(app.container, "Model", "model");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://fixture.test/v1/chat/completions",
-    );
-    expect(app.container.textContent).toMatch(/request path/i);
-    await clickButton(app.container, "Save model");
-    expect(fake.connectModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        baseUrl: "https://fixture.test/v1/chat/completions",
-        interfaceProvider: "openai-compatible",
-      }),
-    );
-  });
-
-  it("uses provider-neutral guidance for an empty model configuration", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    expect(
-      Array.from(
-        app.container.querySelectorAll(".ohb-structured-grid input"),
-      ).map((input) => input.getAttribute("placeholder")),
-    ).toEqual([
-      "Enter provider name",
-      "Enter model identifier",
-      "Enter provider API base URL",
-      "Enter API key environment variable name",
-      "Optional; saved to .env when provided",
-      "Optional; auto-detected when blank",
-      "Optional; uses provider default when blank",
-    ]);
-    expect(app.container.textContent).not.toMatch(/zhipu|glm-4\.7|bigmodel/i);
-  });
-
-  it("shows backend connect warnings after saving from the structured overlay", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    fake.connectModel.mockResolvedValueOnce({
-      apiKeyEnv: "ZHIPU_API_KEY",
-      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-      contextWindowSource: "default",
-      contextWindowTokens: 128_000,
-      envPath: ".env",
-      interfaceProvider: "openai-compatible",
-      model: "glm-4.7",
-      modelJsonPath: "model.json",
-      provider: "zhipu",
-      saved: true,
-      warning:
-        "API key env ZHIPU_API_KEY is configured but no value was found.",
-    });
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    await setInputValue(app.container, "Provider", "zhipu");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://open.bigmodel.cn/api/paas/v4",
-    );
-    await setInputValue(app.container, "API key env", "ZHIPU_API_KEY");
-    await setInputValue(app.container, "Model", "glm-4.7");
-    await clickButton(app.container, "Save model");
-
-    await waitFor(() =>
-      app.container.textContent.includes(
-        "API key env ZHIPU_API_KEY is configured but no value was found.",
-      ),
-    );
-    expect(app.container.textContent).toContain("warning");
-  });
-
-  it("infers the initial missing protocol once and preserves it after URL changes", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await setInputValue(app.container, "Provider", "fixture");
-    await setInputValue(app.container, "Model", "model");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://fixture.test/anthropic",
-    );
-    const input = Array.from(app.container.querySelectorAll("input")).find(
-      (candidate) => candidate.value === "https://fixture.test/anthropic",
-    );
-    if (!input) throw new Error("Base URL input missing");
-    await act(async () => {
-      input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-      await Promise.resolve();
-    });
-    await setInputValue(app.container, "Base URL", "https://fixture.test/v1");
-    await clickButton(app.container, "Save model");
-    expect(fake.connectModel).toHaveBeenCalledWith(
-      expect.objectContaining({ interfaceProvider: "anthropic" }),
-    );
-  });
-
-  it("prefills the saved Responses protocol and preserves it when changing URL and key", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    // eslint-disable-next-line @typescript-eslint/unbound-method -- This client method is a Vitest mock.
-    vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
-      provider: "fixture",
-      model: "model",
-      baseUrl: "https://fixture.test/v1",
-      interfaceProvider: "openai-responses",
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector('select[aria-label="Protocol"]')),
-    );
-    expect(
-      app.container.querySelector<HTMLSelectElement>(
-        'select[aria-label="Protocol"]',
-      )?.value,
-    ).toBe("openai-responses");
-    await setInputValue(
-      app.container,
-      "Base URL",
-      "https://fixture.test/anthropic",
-    );
-    await setInputValue(app.container, "API key env", "FIXTURE_KEY");
-    await clickButton(app.container, "Save model");
-    expect(fake.connectModel).toHaveBeenCalledWith(
-      expect.objectContaining({ interfaceProvider: "openai-responses" }),
-    );
-  });
-
-  it("keeps dirty protocol and fields when current-model initialization resolves late", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    const current =
-      deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
-    // eslint-disable-next-line @typescript-eslint/unbound-method -- This client method is a Vitest mock.
-    vi.mocked(fake.client.getCurrentModel).mockReturnValue(current.promise);
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await setInputValue(app.container, "Provider", "draft");
-    await setInputValue(app.container, "Model", "draft-model");
-    await setInputValue(app.container, "Base URL", "https://draft.test/v1");
-    await act(async () => {
-      current.resolve({
-        provider: "saved",
-        model: "saved-model",
-        baseUrl: "https://saved.test/anthropic",
-        interfaceProvider: "anthropic",
-      });
-      await Promise.resolve();
-    });
-    await clickButton(app.container, "Save model");
-    expect(fake.connectModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "draft",
-        model: "draft-model",
-        interfaceProvider: "openai-compatible",
-      }),
-    );
-  });
-
-  it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
-    "preserves selected %s protocol while editing connection fields",
-    async (protocol) => {
-      const fake = createFakeRuntime({
-        snapshot: snapshotWithStatus({ kind: "idle" }),
-      });
-      fake.listCommands.mockResolvedValue(catalog(["connect"]));
-      const app = mountApp(fake.runtime);
-      await setTextareaValue(app.container, "/");
-      await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-      await pressTextareaKey(app.container, "Enter");
-      await waitFor(() =>
-        Boolean(app.container.querySelector(".ohb-structured-overlay")),
-      );
-      const select = app.container.querySelector<HTMLSelectElement>(
-        'select[aria-label="Protocol"]',
-      );
-      if (!select) throw new Error("Protocol select was not rendered");
-      expect(Array.from(select.options).map((option) => option.value)).toEqual([
-        "openai-compatible",
-        "openai-responses",
-        "anthropic",
-      ]);
-      await act(async () => {
-        select.value = protocol;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-        await Promise.resolve();
-      });
-      await setInputValue(app.container, "Provider", "fixture");
-      await setInputValue(app.container, "Model", "fixture-model");
-      await setInputValue(
-        app.container,
-        "Base URL",
-        "https://fixture.test/anthropic",
-      );
-      await setInputValue(app.container, "API key env", "FIXTURE_KEY");
-      await setInputValue(app.container, "Context window", "8192");
-      await setInputValue(app.container, "Max output", "1024");
-      await clickButton(app.container, "Save model");
-      expect(fake.connectModel).toHaveBeenCalledWith(
-        expect.objectContaining({ interfaceProvider: protocol }),
-      );
-    },
-  );
-
-  it("submits structured connect overlay without API key env", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    await setInputValue(app.container, "Provider", "lmstudio");
-    await setInputValue(app.container, "Base URL", "http://127.0.0.1:1234/v1");
-    await setInputValue(app.container, "Model", "local-model");
-    await clickButton(app.container, "Save model");
-
-    expect(fake.connectModel).toHaveBeenCalledWith({
-      baseUrl: "http://127.0.0.1:1234/v1",
-      interfaceProvider: "openai-compatible",
-      model: "local-model",
-      provider: "lmstudio",
-    });
-  });
-
-  it("opens the structured search overlay from the slash palette", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["connect-search"]));
-    const app = mountApp(fake.runtime);
-
-    await setTextareaValue(app.container, "/");
-    await waitFor(() =>
-      slashPaletteText(app.container).includes("/connect-search"),
-    );
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-
-    await setInputValue(app.container, "API key env", "TAVILY_API_KEY");
-    await setInputValue(app.container, "API key", "tvly-test");
-    await clickButton(app.container, "Save search key");
-
-    expect(fake.setSearchApiKey).toHaveBeenCalledWith({
-      apiKey: "tvly-test",
-      apiKeyEnv: "TAVILY_API_KEY",
-      provider: "tavily",
-    });
-    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
   it("opens the structured compact overlay from the slash palette", async () => {
@@ -4007,7 +4126,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     expect(
-      app.container.querySelector(".ohb-empty-status .ohb-goal-chip"),
+      app.container.querySelector(".ohb-main-header .ohb-goal-chip"),
     ).toBeNull();
     const strip = app.container.querySelector(".ohb-composer .ohb-goal-strip");
     expect(strip).not.toBeNull();
@@ -4045,10 +4164,12 @@ describe("OhbabyWebApp slash command interactions", () => {
       );
     });
     expect(
-      app.container.querySelector(".ohb-statusbar .ohb-goal-chip"),
+      app.container.querySelector(".ohb-main-header .ohb-goal-chip"),
     ).toBeNull();
     expect(
-      app.container.querySelector(".ohb-statusbar .ohb-context-usage-control"),
+      app.container.querySelector(
+        ".ohb-main-header .ohb-context-usage-control",
+      ),
     ).not.toBeNull();
     expect(
       app.container.querySelector(".ohb-composer .ohb-goal-strip")?.textContent,
@@ -4557,6 +4678,31 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector(".ohb-goal-chip")).toBeNull();
   });
 
+  it("keeps the slash palette and its catalog through unrelated store refreshes", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["status", "compact"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/status"));
+    const calls = fake.listCommands.mock.calls.length;
+
+    act(() => {
+      fake.store.setCurrentModel({
+        provider: "zhipu",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
+        model: "glm-4.7",
+      });
+    });
+    await flushTimers();
+
+    expect(slashPaletteText(app.container)).toContain("/status");
+    expect(fake.listCommands.mock.calls.length).toBe(calls);
+  });
+
   it("shows compact failures in the error banner", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -4580,10 +4726,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     await clickButton(app.container, "Compact session");
 
     await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-error-banner")),
+      Boolean(app.container.querySelector(".ohb-banner-error")),
     );
     expect(
-      app.container.querySelector(".ohb-error-banner")?.textContent,
+      app.container.querySelector(".ohb-banner-error")?.textContent,
     ).toContain("Compaction failed: summary failed");
   });
 });
@@ -4725,14 +4871,17 @@ function createFakeRuntime(input: {
       searchJsonPath: "search.json",
     }),
   );
-  const switchWorkspace = vi.fn<OhbabyWebRuntime["switchWorkspace"]>(() =>
-    Promise.resolve(),
-  );
+  // Opening a draft or a session is a new user choice, as in the runtime.
+  let selection = 0;
+  const openDraft = vi.fn<OhbabyWebRuntime["openDraft"]>(() => {
+    selection += 1;
+    return Promise.resolve();
+  });
   const hideWorkspace = vi.fn<OhbabyWebRuntime["hideWorkspace"]>(() =>
     Promise.resolve(),
   );
-  const openWorkspace = vi.fn<OhbabyWebRuntime["openWorkspace"]>(() =>
-    Promise.resolve(),
+  const openFolder = vi.fn<OhbabyWebRuntime["openFolder"]>((directory) =>
+    Promise.resolve(directory),
   );
   const getDirectoryPickerRoots = vi.fn<
     OhbabyWebRuntime["getDirectoryPickerRoots"]
@@ -4770,6 +4919,26 @@ function createFakeRuntime(input: {
     ],
     selectedDirectory: "/repo-a",
   } as const;
+  // Like a daemon without global routes: the instance index is the whole list.
+  const globalCatalog = createGlobalCatalogStore();
+  globalCatalog.setProjects(workspaceSnapshot.scopes, "/default");
+  const mirrorIndex = (): void => {
+    globalCatalog.replaceSessions(
+      store.getSnapshot().sessionIndex.map((entry) => ({
+        id: entry.id,
+        title: entry.title,
+        status: "active" as const,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        messageCount: 0,
+        projectDirectory: "/repo-a",
+        workingDirectory: "/repo-a",
+      })),
+      undefined,
+    );
+  };
+  mirrorIndex();
+  store.subscribe(mirrorIndex);
   const submitPromptAccepted = vi.fn<UiBackendClient["submitPromptAccepted"]>(
     (_text, options) =>
       Promise.resolve({
@@ -4893,7 +5062,8 @@ function createFakeRuntime(input: {
     hideWorkspace,
     listCommands,
     listDirectoryPicker,
-    openWorkspace,
+    openDraft,
+    openFolder,
     runtime: {
       retryPermissions: vi.fn(),
       retrySession: vi.fn(),
@@ -4902,6 +5072,8 @@ function createFakeRuntime(input: {
       forgetUnknownPrompt: vi.fn(),
       abortSession,
       archiveSession,
+      moveSession: () => Promise.resolve(),
+      searchSessions: () => Promise.resolve({ results: [] }),
       exportSession,
       client,
       createSession,
@@ -4911,21 +5083,35 @@ function createFakeRuntime(input: {
       hideWorkspace,
       listDirectoryPicker,
       listWebCommands: listCommands,
-      openWorkspace,
+      openDraft,
+      openFolder,
+      // Sidebar opens go through selectSession so tests observe one entry point.
+      openSession: (sessionId): Promise<void> => {
+        selection += 1;
+        return selectSession(sessionId);
+      },
+      getSelectionGeneration: () => selection,
       getWorkspaceSnapshot: () => workspaceSnapshot,
       ready: Promise.resolve(),
-      refreshWorkspaces: () => Promise.resolve(),
+      refreshCatalog: () => Promise.resolve(),
+      loadMoreSessions: () => Promise.resolve(),
+      catalog: globalCatalog,
+      draft: createDraftStore(),
+      settings: new SettingsLayer(
+        createMockSettingsApi("settings", () => Promise.resolve()),
+        () => "/repo-a",
+      ),
+      submitPrompt: (text, options) =>
+        client.submitPromptAccepted(text, options),
       selectSession,
       store,
       subscribeWorkspaces: () => () => undefined,
-      switchWorkspace,
     },
     selectSession,
     setPermission,
     setSearchApiKey,
     store,
     submitPromptAccepted,
-    switchWorkspace,
   };
 }
 
@@ -5068,12 +5254,7 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
     commands: ids.map((id) => ({
       ...(id === "goal"
         ? { acceptsArguments: true, argsHint: "[<objective> | status]" }
-        : id === "connect"
-          ? {
-              acceptsArguments: true,
-              argsHint: "[--provider <name>] [--model <name>]",
-            }
-          : {}),
+        : {}),
       action: catalogAction(id),
       argumentMode: catalogArgumentMode(id),
       category: catalogCategory(id),
@@ -5082,13 +5263,9 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
           ? "Use Hansun knowledge base"
           : id === "skills"
             ? "List available skills"
-            : id === "connect"
-              ? "Connect model"
-              : id === "connect-search"
-                ? "Connect search"
-                : id === "compact"
-                  ? "Compact session"
-                  : "Show backend status",
+            : id === "compact"
+              ? "Compact session"
+              : "Show backend status",
       executionKind:
         id === "skill.hansun-db"
           ? "skill"
@@ -5104,14 +5281,7 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
   };
 }
 
-type CatalogId =
-  | "compact"
-  | "connect"
-  | "connect-search"
-  | "goal"
-  | "skill.hansun-db"
-  | "skills"
-  | "status";
+type CatalogId = "compact" | "goal" | "skill.hansun-db" | "skills" | "status";
 
 function catalogAction(
   id: CatalogId,
@@ -5119,10 +5289,6 @@ function catalogAction(
   switch (id) {
     case "compact":
       return "compactSession";
-    case "connect":
-      return "connectModel";
-    case "connect-search":
-      return "connectSearch";
     case "goal":
       return "openGoalPanel";
     case "skill.hansun-db":
@@ -5149,9 +5315,6 @@ function catalogCategory(id: CatalogId): string {
     case "compact":
     case "goal":
       return "session";
-    case "connect":
-    case "connect-search":
-      return "setup";
     case "skill.hansun-db":
     case "skills":
       return "skill";
@@ -5380,8 +5543,8 @@ function slashPaletteText(container: ParentNode): string {
   return container.querySelector(".ohb-slash-palette")?.textContent ?? "";
 }
 
-function slashCompletionText(container: ParentNode): string {
-  return container.querySelector(".ohb-slash-completion")?.textContent ?? "";
+function selectedSlashText(container: ParentNode): string {
+  return container.querySelector(".ohb-slash-selected")?.textContent ?? "";
 }
 
 async function pressTextareaKey(
@@ -5447,36 +5610,6 @@ async function clickButton(
   }
   await act(async () => {
     button.click();
-    await Promise.resolve();
-  });
-}
-
-async function setInputValue(
-  container: ParentNode,
-  labelText: string,
-  value: string,
-): Promise<void> {
-  const labels = Array.from(container.querySelectorAll("label"));
-  const label = labels.find(
-    (candidate) => candidate.querySelector("span")?.textContent === labelText,
-  );
-  const input = label?.querySelector("input");
-  if (!(input instanceof HTMLInputElement)) {
-    throw new Error(`input not found: ${labelText}`);
-  }
-  const descriptor = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    "value",
-  );
-  await act(async () => {
-    if (descriptor?.set) {
-      // eslint-disable-next-line @typescript-eslint/unbound-method -- React controlled inputs need the native input setter in jsdom tests.
-      const setValue = descriptor.set;
-      Reflect.apply(setValue, input, [value]);
-    } else {
-      input.value = value;
-    }
-    input.dispatchEvent(new Event("input", { bubbles: true }));
     await Promise.resolve();
   });
 }
@@ -5680,103 +5813,6 @@ it("keeps the reasoning selector for an identified model that cannot disable rea
     Array.from(select?.options ?? []).map((option) => option.text),
   ).toEqual(["On"]);
 });
-it("ignores a late probe after a newer edited model probe resolves", async () => {
-  const fake = createFakeRuntime({
-    snapshot: snapshotWithStatus({ kind: "idle" }),
-  });
-  fake.listCommands.mockResolvedValue(catalog(["connect"]));
-  const first =
-    deferred<Awaited<ReturnType<UiBackendClient["probeModelContextWindow"]>>>();
-  vi.mocked(fake.client.probeModelContextWindow)
-    .mockReturnValueOnce(first.promise)
-    .mockResolvedValueOnce({
-      contextWindowTokens: 222222,
-      contextWindowSource: "detected",
-    });
-  const app = mountApp(fake.runtime);
-  await setTextareaValue(app.container, "/");
-  await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-  await pressTextareaKey(app.container, "Enter");
-  await waitFor(() =>
-    Boolean(app.container.querySelector(".ohb-structured-overlay")),
-  );
-  await setInputValue(app.container, "Provider", "p");
-  await setInputValue(app.container, "Model", "a");
-  await setInputValue(app.container, "Base URL", "https://p.test/v1");
-  await clickButton(app.container, "Probe context");
-  await setInputValue(app.container, "Model", "b");
-  await clickButton(app.container, "Probe context");
-  await act(async () => {
-    first.resolve({
-      contextWindowTokens: 111111,
-      contextWindowSource: "detected",
-    });
-    await Promise.resolve();
-  });
-  expect(app.container.textContent).not.toContain("111");
-});
-
-it.each(["late initialization", "draft edit during save"])(
-  "keeps the saved headline after %s",
-  async (scenario) => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    const initial =
-      deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
-    const saved =
-      deferred<Awaited<ReturnType<UiBackendClient["connectModel"]>>>();
-    if (scenario === "late initialization")
-      vi.mocked(fake.client.getCurrentModel).mockReturnValue(initial.promise);
-    fake.connectModel.mockReturnValue(saved.promise);
-    fake.listCommands.mockResolvedValue(catalog(["connect"]));
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/");
-    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await setInputValue(app.container, "Provider", "new-provider");
-    await setInputValue(app.container, "Model", "new-model");
-    await setInputValue(app.container, "Base URL", "https://new.test/v1");
-    await clickButton(app.container, "Save model");
-    if (scenario === "draft edit during save")
-      await setInputValue(app.container, "Model", "unsaved-draft");
-    await act(async () => {
-      saved.resolve({
-        provider: "new-provider",
-        model: "new-model",
-        baseUrl: "https://new.test/v1",
-        interfaceProvider: "openai-compatible",
-        saved: true,
-        modelJsonPath: "model.json",
-        envPath: ".env",
-        contextWindowSource: "default",
-        contextWindowTokens: 128000,
-      });
-      await Promise.resolve();
-    });
-    await act(async () => {
-      initial.resolve({
-        provider: "old-provider",
-        model: "old-model",
-        baseUrl: "https://old.test/v1",
-        interfaceProvider: "openai-compatible",
-      });
-      await Promise.resolve();
-    });
-    expect(app.container.textContent).toContain(
-      "Current model: new-provider · new-model",
-    );
-    if (scenario === "draft edit during save") {
-      await clickButton(app.container, "Save model");
-      expect(fake.connectModel).toHaveBeenLastCalledWith(
-        expect.objectContaining({ model: "unsaved-draft" }),
-      );
-    }
-  },
-);
 it("clears old workspace reasoning while the new client metadata is pending", async () => {
   const first = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -6408,8 +6444,7 @@ describe("feature boundary late-result isolation", () => {
     expect(textareaValue(app.container)).toBe("");
     expect(
       JSON.parse(
-        sessionStorage.getItem("ohbaby:composer:/repo-a:session_1") ??
-          '{"text":""}',
+        sessionStorage.getItem("ohbaby:composer:session_1") ?? '{"text":""}',
       ),
     ).toMatchObject({ text: "" });
   });
@@ -6486,7 +6521,7 @@ describe("feature boundary late-result isolation", () => {
   it("does not let old lease recovery failure clear the new scope's queued editor", async () => {
     for (const id of ["session_1", "session_2"]) {
       sessionStorage.setItem(
-        `ohbaby:composer-lease:/repo-a:${id}`,
+        `ohbaby:composer-lease:${id}`,
         JSON.stringify({
           editLeaseId: `lease_${id}`,
           editText: `editing ${id}`,
@@ -6552,7 +6587,7 @@ function storeEditLease(
   text: string,
 ): void {
   sessionStorage.setItem(
-    `ohbaby:composer-lease:/repo-a:${sessionId}`,
+    `ohbaby:composer-lease:${sessionId}`,
     JSON.stringify({
       editLeaseId,
       editText: text,
@@ -6590,12 +6625,12 @@ describe("queued edit identity isolation", () => {
       old.reject(new Error("old A failure"));
       await old.promise.catch(() => undefined);
     });
-    expect(
-      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
-    ).toContain("lease_new_A");
-    expect(
-      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
-    ).toContain("new A edit");
+    expect(sessionStorage.getItem("ohbaby:composer-lease:session_1")).toContain(
+      "lease_new_A",
+    );
+    expect(sessionStorage.getItem("ohbaby:composer-lease:session_1")).toContain(
+      "new A edit",
+    );
   });
   it.each(["edit", "release"])(
     "recovery success preserves a later %s of the same lease",
@@ -6620,9 +6655,7 @@ describe("queued edit identity isolation", () => {
         });
         await pending.promise;
       });
-      const stored = sessionStorage.getItem(
-        "ohbaby:composer-lease:/repo-a:session_1",
-      );
+      const stored = sessionStorage.getItem("ohbaby:composer-lease:session_1");
       if (action === "edit") expect(stored).toContain("new edit");
       else expect(stored).toBeNull();
     },
@@ -6677,9 +6710,9 @@ describe("queued edit identity isolation", () => {
     });
     expect(textareaValue(app.container)).toBe("queued two");
     expect(app.container.querySelector(".ohb-queued-edit-hint")).not.toBeNull();
-    expect(
-      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
-    ).toContain("lease_q2");
+    expect(sessionStorage.getItem("ohbaby:composer-lease:session_1")).toContain(
+      "lease_q2",
+    );
   });
 });
 
@@ -6725,10 +6758,10 @@ it("temporarily hides the mounted composer and todo during root approval, retain
       ?.getAttribute("aria-expanded"),
   ).toBe("false");
   expect(document.activeElement).toBe(
-    app.container.querySelector(".ohb-permission-modal h2"),
+    app.container.querySelector(".ohb-approval-panel h2"),
   );
   const stop = app.container.querySelector<HTMLButtonElement>(
-    '.ohb-permission-modal [aria-label="Stop run"]',
+    '.ohb-approval-panel [aria-label="Stop run"]',
   );
   expect(stop).not.toBeNull();
   await act(async () => {
@@ -6762,7 +6795,7 @@ it("keeps the composer visible for an approval sync error without an actual requ
       requests: [],
     });
   });
-  expect(app.container.querySelector(".ohb-permission-modal")).toBeNull();
+  expect(app.container.querySelector(".ohb-approval-panel")).toBeNull();
   expect(
     app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
       .display,
@@ -6803,7 +6836,7 @@ it("reserves the measured approval height and updates it when the card resizes",
         0,
         0,
         700,
-        this.classList.contains("ohb-permission-modal") ? height : 0,
+        this.classList.contains("ohb-approval-panel") ? height : 0,
       );
     });
   const original = globalThis.ResizeObserver;
@@ -6834,8 +6867,7 @@ it("reserves the measured approval height and updates it when the card resizes",
         requests: [permissionRequest()],
       });
     });
-    const content =
-      app.container.querySelector<HTMLElement>(".ohb-app-content");
+    const content = app.container.querySelector<HTMLElement>(".ohb-main-body");
     expect(content?.style.getPropertyValue("--approval-space")).toBe("244px");
     act(() => {
       height = 340;
@@ -6908,7 +6940,7 @@ it("keeps the child shell read-only and returns focus to pending approval when i
     trigger?.click();
     await Promise.resolve();
   });
-  expect(app.container.querySelector(".ohb-permission-modal")).toBeNull();
+  expect(app.container.querySelector(".ohb-approval-panel")).toBeNull();
   expect(app.container.querySelector(".ohb-subagent-view")).not.toBeNull();
   expect(
     app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
@@ -6924,7 +6956,7 @@ it("keeps the child shell read-only and returns focus to pending approval when i
     await new Promise((resolve) => setTimeout(resolve, 30));
   });
   expect(document.activeElement).toBe(
-    app.container.querySelector(".ohb-permission-modal h2"),
+    app.container.querySelector(".ohb-approval-panel h2"),
   );
   expect(document.activeElement).not.toBe(trigger);
 });

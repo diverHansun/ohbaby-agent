@@ -10,8 +10,6 @@ import type {
   UiReasoningConfig,
   UiCompactSessionResult,
   UiContextWindowUsage,
-  UiConnectModelResult,
-  UiConnectModelInterfaceProvider,
   UiCurrentModelConfig,
   UiPermissionLevel,
   UiPermissionMode,
@@ -21,12 +19,11 @@ import type {
   UiPromptReceipt,
   UiPromptEditLease,
   UiPromptSubmission,
-  UiProbeModelContextWindowResult,
-  UiSetSearchApiKeyResult,
   UiWebCommandCatalog,
   UiSlashCommandInvocation,
   UiSlashCommandOutput,
   UiSnapshot,
+  UiDefaultWorkspace,
 } from "ohbaby-sdk";
 
 export type WebStartupIntent = DaemonStartupIntent;
@@ -54,6 +51,8 @@ export interface WorkspaceSnapshot {
 
 export interface WorkspaceScopesResponse {
   readonly ok: true;
+  /** Absent only when the daemon has no project registry. */
+  readonly defaultWorkspace?: UiDefaultWorkspace;
   readonly scopes: readonly WorkspaceScopeSummary[];
 }
 
@@ -140,9 +139,13 @@ export interface StoreSnapshot {
   readonly historyStale: boolean;
   readonly unknownPromptRequests: readonly UnknownPromptRequest[];
   readonly permissionSync: PermissionSyncState;
+  /** Instance permission policy also exists before a draft has a session. */
+  readonly permission: UiPermissionState | null;
   readonly sessionIndex: readonly UiSessionIndexEntry[];
   readonly connectionState: ConnectionState;
   readonly currentModel: UiCurrentModelConfig | null;
+  /** True once the current model was read; `currentModel: null` then means none is configured. */
+  readonly currentModelLoaded: boolean;
   readonly error: string | null;
   readonly view: ViewState;
 }
@@ -204,38 +207,6 @@ export interface CommandCatalogResponse {
 export interface CurrentModelResponse {
   readonly model: UiCurrentModelConfig | null;
   readonly ok: true;
-}
-
-export interface ModelConnectRequest {
-  readonly provider?: string;
-  readonly baseUrl: string;
-  readonly interfaceProvider?: UiConnectModelInterfaceProvider;
-  readonly apiKeyEnv?: string;
-  readonly apiKey?: string;
-  readonly model: string;
-  readonly contextWindowTokens?: number;
-  readonly maxOutputTokens?: number;
-}
-
-export interface ModelConnectResponse {
-  readonly model: UiConnectModelResult;
-  readonly ok: true;
-}
-
-export interface ModelContextWindowProbeResponse {
-  readonly ok: true;
-  readonly probe: UiProbeModelContextWindowResult;
-}
-
-export interface SearchApiKeyRequest {
-  readonly apiKey?: string;
-  readonly apiKeyEnv?: string;
-  readonly provider?: "tavily";
-}
-
-export interface SearchApiKeyResponse {
-  readonly ok: true;
-  readonly search: UiSetSearchApiKeyResult;
 }
 
 export interface ContextWindowUsageResponse {

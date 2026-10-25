@@ -1,0 +1,471 @@
+import type {
+  UiGlobalSession,
+  UiCurrentModelConfig,
+  UiMessage,
+  UiPermissionRequest,
+  UiSession,
+  UiSnapshot,
+} from "ohbaby-sdk";
+import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
+
+/**
+ * Dev-only scenarios for `vite dev` with `?mock=<name>` (06 §5). improve-1 ships
+ * the current-behaviour samples; improve-2 upgrades them to global data.
+ */
+export interface MockScenario {
+  readonly snapshot: UiSnapshot;
+  readonly workspace: WorkspaceSnapshot;
+  readonly model: UiCurrentModelConfig | null;
+  /** The global list, newest first; the mock pages it 100 rows at a time. */
+  readonly sessions: readonly UiGlobalSession[];
+  /** Seeded into the global pin set when this browser has none yet. */
+  readonly pins?: Readonly<Record<string, number>>;
+}
+
+export const DEFAULT_WORKSPACE = "/Users/demo/.ohbaby/workspace";
+
+const now = Date.now();
+const iso = (minutesAgo: number): string =>
+  new Date(now - minutesAgo * 60_000).toISOString();
+
+const model: UiCurrentModelConfig = {
+  provider: "deepseek",
+  baseUrl: "https://api.deepseek.com/v1",
+  interfaceProvider: "openai-compatible",
+  model: "deepseek-v4.1-flash",
+  contextWindowTokens: 128_000,
+};
+
+const workspace: WorkspaceSnapshot = {
+  scopes: [
+    {
+      available: true,
+      directory: "/Users/demo/Projects/ohbaby-agent",
+      lastOpenedAt: 3,
+      loaded: true,
+      position: 0,
+    },
+    {
+      available: true,
+      directory: "/Users/demo/Projects/pi-web",
+      lastOpenedAt: 2,
+      loaded: false,
+      position: 1,
+    },
+    {
+      available: true,
+      directory: "/Users/demo/notes",
+      lastOpenedAt: 1,
+      loaded: false,
+      position: 2,
+    },
+  ],
+  selectedDirectory: "/Users/demo/Projects/ohbaby-agent",
+};
+
+const titles = [
+  "Refactor the session sidebar",
+  "Why does the composer jump on resize?",
+  "Add JSONL export to the session menu",
+  "Review the settings backend contract",
+  "Fix flaky reconnect test",
+  "Explain the steer queue lease",
+  "Draft release notes for 0.9",
+  "Compare pi-web and Claude layouts",
+];
+
+function session(
+  id: string,
+  title: string,
+  minutesAgo: number,
+  messages: readonly UiMessage[] = [],
+): UiSession {
+  return {
+    id,
+    title,
+    createdAt: iso(minutesAgo + 30),
+    updatedAt: iso(minutesAgo),
+    messages,
+  };
+}
+
+const history = titles.map((title, index) =>
+  session(`session_${String(index + 2)}`, title, (index + 1) * 600),
+);
+
+const runningMessages: readonly UiMessage[] = [
+  {
+    id: "m1",
+    role: "user",
+    createdAt: iso(4),
+    parts: [
+      {
+        type: "text",
+        text: "The sidebar feels cramped. Tighten the rows and make the active session obvious without adding colour.",
+      },
+    ],
+  },
+  {
+    id: "m2",
+    role: "assistant",
+    runId: "run_1",
+    createdAt: iso(4),
+    parts: [
+      {
+        type: "reasoning",
+        text: "Look at the row height tokens and the active-row style first.",
+      },
+      {
+        type: "text",
+        text: "I'll start by reading the sidebar styles and the row component, then propose a tighter layout.",
+      },
+      {
+        type: "tool-call",
+        call: {
+          id: "call_1",
+          name: "read_file",
+          input: { path: "apps/ohbaby-web/src/ui/sidebar/sidebar.css" },
+          status: "completed",
+        },
+      },
+      {
+        type: "tool-result",
+        result: {
+          callId: "call_1",
+          output: ".ohb-session-row { min-height: var(--row-height); }",
+          details: { kind: "read", startLine: 1, shownLineCount: 258 },
+        },
+      },
+      {
+        type: "tool-call",
+        call: {
+          id: "call_2",
+          name: "grep",
+          input: { pattern: "ohb-session-active", path: "apps/ohbaby-web/src" },
+          status: "completed",
+        },
+      },
+      {
+        type: "tool-result",
+        result: {
+          callId: "call_2",
+          output: "sidebar/SessionRow.tsx:117",
+          details: { kind: "search", unit: "matches", count: 1 },
+        },
+      },
+      {
+        type: "text",
+        text: "The rows use a 30px minimum height and the active row only changes its background. Next I'll run the sidebar tests before editing.",
+      },
+      {
+        type: "tool-call",
+        call: {
+          id: "call_3",
+          name: "bash",
+          input: {
+            command: "pnpm exec vitest run apps/ohbaby-web/src/ui/sidebar",
+          },
+          status: "running",
+        },
+      },
+    ],
+  },
+];
+
+const runningSession = session(
+  "session_1",
+  "Tighten the sidebar rows",
+  1,
+  runningMessages,
+);
+
+const approval: UiPermissionRequest = {
+  id: "perm_1",
+  sessionId: "session_1",
+  rootSessionId: "session_1",
+  callId: "call_3",
+  messageId: "m2",
+  runId: "run_1",
+  createdAt: now,
+  title: "Allow bash?",
+  description: "pnpm exec vitest run apps/ohbaby-web/src/ui/sidebar",
+  choices: [
+    { id: "deny", label: "Deny", intent: "deny" },
+    { id: "allow_once", label: "Allow once", intent: "allow" },
+    { id: "allow_always", label: "Always allow", intent: "allow" },
+  ],
+};
+
+const base = {
+  permission: { level: "default", mode: "auto", sessionRules: [] },
+  permissions: [],
+  runs: [],
+  status: { kind: "idle" },
+} satisfies Partial<UiSnapshot>;
+
+function running(withApproval: boolean): UiSnapshot {
+  return {
+    ...base,
+    activeSessionId: "session_1",
+    sessions: [runningSession, ...history],
+    status: { kind: "running", runId: "run_1" },
+    runs: [
+      {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: iso(4),
+        updatedAt: iso(0),
+        status: { kind: "running", runId: "run_1" },
+      },
+    ],
+    permissions: withApproval
+      ? [
+          approval,
+          {
+            ...approval,
+            id: "perm_2",
+            title: "Allow write_file?",
+            description: "apps/ohbaby-web/src/ui/sidebar/sidebar.css",
+          },
+        ]
+      : [],
+    todos: [
+      {
+        sessionId: "session_1",
+        visible: true,
+        todos: [
+          {
+            content: "Read sidebar styles and row component",
+            status: "completed",
+          },
+          { content: "Run the sidebar tests", status: "in_progress" },
+          { content: "Tighten row height and active style", status: "pending" },
+        ],
+      },
+    ],
+    contextWindowUsages: [
+      {
+        sessionId: "session_1",
+        modelId: model.model,
+        currentTokens: 92_000,
+        contextWindowTokens: 128_000,
+        contextWindowRatio: 0.72,
+        estimatedAt: iso(0),
+      },
+    ],
+  };
+}
+
+const agentProject = "/Users/demo/Projects/ohbaby-agent";
+const piProject = "/Users/demo/Projects/pi-web";
+const notesProject = "/Users/demo/notes";
+const archiveProject = "/Users/demo/Projects/archive-tool";
+
+function globalRow(
+  id: string,
+  title: string,
+  minutesAgo: number,
+  projectDirectory: string | null,
+  extra: Partial<UiGlobalSession> = {},
+): UiGlobalSession {
+  return {
+    id,
+    title,
+    status: "active",
+    createdAt: iso(minutesAgo + 30),
+    updatedAt: iso(minutesAgo),
+    messageCount: 4,
+    projectDirectory,
+    workingDirectory: projectDirectory ?? DEFAULT_WORKSPACE,
+    ...extra,
+  };
+}
+
+function byRecency(
+  rows: readonly UiGlobalSession[],
+): readonly UiGlobalSession[] {
+  return [...rows].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+}
+
+/** 3 projects (one with 30 chats), 5 chats without a project, 2 pinned (06 §5). */
+function typicalSessions(): readonly UiGlobalSession[] {
+  const rows: UiGlobalSession[] = history.map((entry, index) =>
+    globalRow(entry.id, entry.title, (index + 1) * 600, agentProject),
+  );
+  for (let index = rows.length; index < 30; index++)
+    rows.push(
+      globalRow(
+        `agent_${String(index)}`,
+        `Earlier agent task ${String(index + 1)}`,
+        (index + 1) * 900,
+        agentProject,
+      ),
+    );
+  ["Port the session tree", "Search snippet styling", "Pinned layout"].forEach(
+    (title, index) => {
+      rows.push(
+        globalRow(`pi_${String(index)}`, title, 45 + index * 400, piProject),
+      );
+    },
+  );
+  ["Reading list", "Meeting notes"].forEach((title, index) => {
+    rows.push(
+      globalRow(
+        `notes_${String(index)}`,
+        title,
+        3000 + index * 2000,
+        notesProject,
+      ),
+    );
+  });
+  [
+    "Quick question",
+    "Translate a paragraph",
+    "Regex for ISO dates",
+    "What is a CRDT?",
+    "Weekend plan",
+  ].forEach((title, index) => {
+    rows.push(
+      globalRow(`loose_${String(index)}`, title, 5 + index * 700, null),
+    );
+  });
+  return byRecency(rows);
+}
+
+/** 600 chats across 4 projects, so Show more has to page (06 §5 many). */
+function manySessions(): readonly UiGlobalSession[] {
+  const projects = [agentProject, piProject, notesProject];
+  return byRecency(
+    Array.from({ length: 600 }, (_, index) =>
+      globalRow(
+        `many_${String(index)}`,
+        `Chat ${String(index + 1)}`,
+        index * 37,
+        // The fourth project's chats are old and rare, so it fills late.
+        index % 20 === 0
+          ? archiveProject
+          : (projects[index % 3] ?? agentProject),
+      ),
+    ),
+  );
+}
+
+const typicalPins = { agent_12: now - 2, pi_1: now - 1 };
+
+export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
+  fresh: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: { scopes: [], selectedDirectory: DEFAULT_WORKSPACE },
+    model,
+    sessions: [],
+  }),
+  typical: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model,
+    sessions: typicalSessions(),
+    pins: typicalPins,
+  }),
+  many: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: {
+      ...workspace,
+      scopes: [
+        ...workspace.scopes,
+        {
+          available: true,
+          directory: "/Users/demo/Projects/archive-tool",
+          lastOpenedAt: 0,
+          loaded: false,
+          position: 3,
+        },
+      ],
+    },
+    model,
+    sessions: manySessions(),
+  }),
+  search: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: {
+      ...workspace,
+      scopes: [
+        ...workspace.scopes,
+        ...Array.from({ length: 7 }, (_, index) => ({
+          available: true,
+          directory: `/Users/demo/Projects/sample-${String(index + 1)}`,
+          lastOpenedAt: 0,
+          loaded: false,
+          position: index + 3,
+        })),
+      ],
+    },
+    model,
+    sessions: [...typicalSessions(), ...manySessions()],
+  }),
+  running: () => ({
+    snapshot: running(false),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, agentProject),
+      ...typicalSessions(),
+    ]),
+  }),
+  approval: () => ({
+    snapshot: running(true),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, agentProject),
+      ...typicalSessions(),
+    ]),
+  }),
+  // Moved to pi-web while running: this turn stays in ohbaby-agent (06 §5).
+  "pending-move": () => ({
+    snapshot: running(false),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, piProject, {
+        workingDirectory: agentProject,
+        pendingWorkingDirectory: piProject,
+      }),
+      ...typicalSessions(),
+    ]),
+  }),
+  // Settings data comes from mock-settings.ts under the same names (06 §5).
+  settings: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model,
+    sessions: typicalSessions(),
+    pins: typicalPins,
+  }),
+  "settings-empty": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: { scopes: [], selectedDirectory: DEFAULT_WORKSPACE },
+    model: null,
+    sessions: [],
+  }),
+  // A keyless legacy model and no default: completing it sets the default.
+  "settings-legacy": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace: { scopes: [], selectedDirectory: DEFAULT_WORKSPACE },
+    model: null,
+    sessions: [],
+  }),
+  "settings-errors": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model,
+    sessions: typicalSessions(),
+  }),
+  "no-model": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model: null,
+    sessions: typicalSessions(),
+  }),
+};

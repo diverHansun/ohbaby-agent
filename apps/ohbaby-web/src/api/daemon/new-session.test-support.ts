@@ -11,7 +11,7 @@ import {
   closeDatabase,
   getDatabase,
 } from "../../../../../packages/ohbaby-agent/src/services/database/index.js";
-import { createOhbabyWebRuntime } from "../../runtime.js";
+import { createOhbabyWebRuntime } from "../../runtime/index.js";
 
 const llmClient: LLMClientInstance<{ readonly kind: "fixture" }> = {
   provider: {

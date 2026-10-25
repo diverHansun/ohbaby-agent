@@ -1,18 +1,20 @@
-/* Single bootstrap entry. Imports follow the original rule order, including
-   shared layout blocks and the final cross-feature overrides. */
+/* Single bootstrap entry: tokens, then reset and shared blocks, then each
+   feature's own stylesheet. */
+@import "./styles/tokens.css";
 @import "./styles/base.css";
-@import "./styles/layout.css";
-@import "./session/status.css";
+@import "./shared/shared.css";
+@import "./shared/context-usage.css";
+@import "./shell/shell.css";
+@import "./sidebar/sidebar.css";
+@import "./search/search.css";
+@import "./session/session.css";
 @import "./conversation/messages.css";
 @import "./commands/notices.css";
-@import "./workspace/directory-picker.css";
 @import "./commands/overlays.css";
-@import "./styles/conversation-layout.css";
+@import "./workspace/directory-picker.css";
 @import "./composer/composer.css";
-@import "./permissions/policy.css";
 @import "./composer/controls.css";
+@import "./permissions/policy.css";
 @import "./permissions/permissions.css";
-@import "./styles/empty-state.css";
-@import "./styles/overrides.css";
 @import "./session/subagents.css";
-@import "./session/sidebar.css";
+@import "./settings/settings.css";

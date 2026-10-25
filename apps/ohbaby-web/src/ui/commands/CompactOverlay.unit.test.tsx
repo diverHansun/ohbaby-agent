@@ -143,6 +143,47 @@ describe("StructuredCommandOverlay compact", () => {
     }
   });
 
+  it("focuses Compact session on open, or Close when there is no session", async () => {
+    const client = {
+      getContextWindowUsage: (): Promise<null> => Promise.resolve(null),
+    } as unknown as Parameters<typeof StructuredCommandOverlay>[0]["client"];
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = (sessionId: string | undefined): void => {
+      root.render(
+        <StructuredCommandOverlay
+          activeGoal={null}
+          client={client}
+          compacting={false}
+          key={sessionId ?? "none"}
+          onClose={vi.fn()}
+          onCompact={vi.fn()}
+          onExecuteSlashCommand={vi.fn()}
+          overlay={{ commandLabel: "/compact", kind: "compact" }}
+          sessionId={sessionId}
+        />,
+      );
+    };
+    try {
+      await flush(() => {
+        render("session");
+      });
+      expect(document.activeElement?.getAttribute("title")).toBe(
+        "Compact session",
+      );
+      await flush(() => {
+        render(undefined);
+      });
+      expect(document.activeElement?.getAttribute("title")).toBe("Close");
+    } finally {
+      act(() => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it("closes on backdrop click", async () => {
     const onClose = vi.fn();
     const client = {

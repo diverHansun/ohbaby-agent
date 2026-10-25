@@ -1,7 +1,7 @@
-/* Composer and slash palette rules retain the interleaved shared button rules in their original order. */
+/* Composer card, slash palette, queued prompts, goal strip and steer recovery. */
 .ohb-prompt-queue {
-  background: #fafafa;
-  border: 1px solid #e2e2e2;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 10px 10px 0 0;
   margin: 0 auto -5px;
@@ -14,7 +14,7 @@
 
 .ohb-prompt-queue-header {
   align-items: center;
-  color: #777;
+  color: var(--text-muted);
   display: flex;
   font-size: 11px;
   font-weight: 500;
@@ -25,7 +25,7 @@
 .ohb-prompt-queue-header button {
   background: transparent;
   border: 0;
-  color: #666;
+  color: var(--text-muted);
   font: inherit;
   padding: 2px 4px;
 }
@@ -47,7 +47,7 @@
 
 .ohb-prompt-queue-item:hover,
 .ohb-prompt-queue-item.is-editing {
-  background: #f0f0f0;
+  background: var(--bg-hover);
 }
 
 .ohb-prompt-queue-edit,
@@ -57,7 +57,7 @@
   background: transparent;
   border: 0;
   border-radius: 4px;
-  color: #777;
+  color: var(--text-muted);
   display: inline-flex;
   flex: 0 0 auto;
   font: inherit;
@@ -74,31 +74,31 @@
 .ohb-prompt-queue-steer > button:disabled,
 .ohb-prompt-queue-edit:disabled,
 .ohb-prompt-queue-cancel:disabled {
-  color: #aaa;
+  color: var(--text-dim);
   cursor: default;
 }
 
 .ohb-prompt-queue button:not(:disabled):hover {
-  background: #e8e8e8;
-  color: #333;
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .ohb-prompt-queue button:focus-visible {
-  outline: 2px solid #8b8b8b;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .ohb-prompt-queue .ohb-prompt-queue-cancel:not(:disabled):hover {
-  color: #a8554c;
+  color: var(--danger-ink);
 }
 
 .ohb-goal-strip {
   align-items: center;
-  background: #f8f9fb;
-  border: 1px solid #e2e5ec;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 10px 10px 0 0;
-  color: #767b84;
+  color: var(--text-muted);
   display: flex;
   font-size: 12.5px;
   gap: 8px;
@@ -133,19 +133,19 @@
 }
 
 .ohb-goal-strip-icon {
-  color: #7c8089;
+  color: var(--text-dim);
   flex: 0 0 auto;
 }
 
 .ohb-goal-strip-status {
-  color: #26282d;
+  color: var(--text);
   flex: 0 0 auto;
   font-weight: 500;
   white-space: nowrap;
 }
 
 .ohb-goal-strip-objective {
-  color: #767b84;
+  color: var(--text-muted);
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -154,9 +154,9 @@
 }
 
 .ohb-goal-strip-meta {
-  color: #8a8d94;
+  color: var(--text-dim);
   flex: 0 0 auto;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   white-space: nowrap;
 }
@@ -173,7 +173,7 @@
   background: transparent;
   border: 0;
   border-radius: 5px;
-  color: #767b84;
+  color: var(--text-muted);
   display: inline-flex;
   flex: 0 0 auto;
   height: 24px;
@@ -183,44 +183,49 @@
 }
 
 .ohb-goal-strip-button:not(:disabled):hover {
-  background: #eceef2;
-  color: #26282d;
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .ohb-goal-strip-button:focus-visible {
-  outline: 2px solid #8a8d94;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .ohb-goal-strip-button:disabled {
-  color: #b4b8c0;
+  color: var(--text-dim);
   cursor: default;
 }
 
 .ohb-composer-input {
   align-items: stretch;
-  background: #ffffff;
-  border: 1px solid #d9dce2;
-  border-radius: 11px;
-  box-shadow:
-    0 0 0 3px rgba(64, 72, 88, 0.06),
-    0 1px 2px rgba(30, 34, 44, 0.04);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 10px;
   margin: 0 auto;
-  max-width: 800px;
-  padding: 12px 11px 9px 16px;
+  max-width: var(--content-width);
+  padding: 16px 12px 10px 18px;
   position: relative;
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
   width: 100%;
   z-index: 2;
 }
 
+.ohb-composer-input:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-card), var(--ring-soft);
+}
+
 .ohb-composer-input.is-plan {
-  border-color: #e6d6a8;
-  box-shadow:
-    0 0 0 3px rgba(201, 162, 63, 0.16),
-    0 1px 2px rgba(30, 34, 44, 0.04);
+  border-color: var(--warning-border);
 }
 
 .ohb-composer-text {
@@ -235,13 +240,13 @@
 .ohb-composer textarea {
   background: transparent;
   border: 0;
-  color: #26282d;
+  color: var(--text);
   flex: 1;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 14px;
-  line-height: 22px;
-  max-height: 154px;
-  min-height: 22px;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 24px;
+  max-height: 168px;
+  min-height: 24px;
   min-width: 0;
   outline: 0;
   overflow-y: auto;
@@ -253,37 +258,20 @@
   z-index: 1;
 }
 
-.ohb-composer-typewriter {
-  align-items: center;
-  color: #aeb8c8;
-  display: flex;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  gap: 1px;
-  left: 0;
-  overflow: hidden;
-  pointer-events: none;
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  white-space: nowrap;
-  z-index: 0;
+.ohb-composer textarea::placeholder {
+  color: var(--text-dim);
 }
 
-.ohb-composer-typewriter-cursor {
-  animation: ohb-pulse 1s steps(1, end) infinite;
-  background: #5f86c4;
-  display: inline-block;
-  height: 16px;
-  width: 1px;
-}
-
+/* Solid, not glass: when it opens over the empty-state heading, text behind
+   must not show through. */
 .ohb-slash-palette {
-  animation: ohb-pop 140ms ease;
-  background: #ffffff;
-  border: 1px solid #e4e4e4;
-  border-radius: 12px;
-  box-shadow: 0 10px 34px rgba(30, 34, 44, 0.14);
+  animation: ohb-pop var(--duration-fast) var(--ease);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-menu);
+  display: flex;
+  flex-direction: column;
   left: 0;
   overflow: hidden;
   position: absolute;
@@ -299,78 +287,50 @@
   top: calc(100% + 10px);
 }
 
+/* The palette's max-height comes from the room left in the viewport; the
+   list takes what the hint line leaves and scrolls. */
 .ohb-slash-palette-list {
+  flex: 1 1 auto;
   max-height: 320px;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px;
 }
 
 .ohb-slash-category {
-  color: #b6bac1;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  padding: 9px 10px 5px;
-  text-transform: uppercase;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 8px 10px 4px;
 }
 
+/* Name, description, then the selected row's args hint pushed to the end.
+   A fixed name column lines every description up. */
 .ohb-slash-row {
   align-items: center;
-  background: #ffffff;
+  background: transparent;
   border: 0;
-  border-radius: 8px;
-  color: #26282d;
+  border-radius: var(--radius-md);
+  color: var(--text);
   cursor: pointer;
   display: grid;
-  gap: 10px;
-  grid-template-columns: 7px minmax(128px, 144px) minmax(136px, 1fr) minmax(
-      148px,
-      1fr
-    );
-  min-height: 31px;
-  padding: 9px 11px;
+  gap: 12px;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  text-align: left;
   width: 100%;
-}
-
-.ohb-slash-row-no-args {
-  grid-template-columns: 7px minmax(128px, 144px) minmax(0, 1fr);
-}
-
-.ohb-slash-row-no-args .ohb-slash-args {
-  display: none;
-}
-
-.ohb-slash-row-no-args .ohb-slash-description {
-  grid-column: 3;
 }
 
 .ohb-slash-selected,
 .ohb-slash-row:hover {
-  background: #f4f6fb;
+  background: var(--bg-hover);
 }
 
-.ohb-slash-dot {
-  border-radius: 50%;
-  flex: none;
-  height: 7px;
-  width: 7px;
-}
-
-.ohb-slash-dot-blue {
-  background: #5f86c4;
-}
-
-.ohb-slash-dot-gold {
-  background: #c9a23f;
-}
-
-.ohb-slash-dot-pink {
-  background: #c97e92;
-}
-
-.ohb-slash-row span:nth-child(2) {
-  color: #26282d;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+.ohb-slash-row > span {
+  color: var(--text);
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
   min-width: 0;
@@ -379,74 +339,49 @@
   white-space: nowrap;
 }
 
-.ohb-slash-row small {
-  color: #aeb2ba;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 11.5px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .ohb-slash-row em {
-  color: #8a8d94;
-  font-size: 12px;
+  color: var(--text-dim);
+  font-size: 13px;
   font-style: normal;
   min-width: 0;
   overflow: hidden;
-  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ohb-slash-palette footer {
-  align-items: center;
-  background: #fcfcfc;
-  border-top: 1px solid #f1f1f1;
-  color: #aeb2ba;
-  display: flex;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 11px;
-  gap: 16px;
-  padding: 8px 13px;
+.ohb-slash-args {
+  color: var(--text-dim);
+  display: none;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ohb-slash-palette footer span:last-child {
-  margin-left: auto;
+.ohb-slash-selected .ohb-slash-args {
+  display: block;
 }
 
-.ohb-slash-palette footer b {
-  color: #8a8d94;
-  font-weight: 500;
-}
-
-.ohb-slash-completion {
-  align-items: center;
-  background: #f4f6fb;
-  border: 1px solid #e4e9f2;
-  border-radius: 6px;
-  color: #8a8d94;
-  display: inline-flex;
+.ohb-slash-hint {
+  border-top: 1px solid var(--border);
   flex: none;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--text-dim);
   font-size: 11px;
-  min-height: 28px;
-  justify-content: center;
-  padding: 0 8px;
-  width: 82px;
+  padding: 6px 16px;
 }
 
 .ohb-slash-error {
-  color: #a8554c;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--danger-ink);
   font-size: 12px;
+  line-height: 18px;
 }
 
 .ohb-button,
 .ohb-button-primary {
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   display: inline-flex;
   gap: 7px;
   justify-content: center;
@@ -459,55 +394,78 @@
   align-items: center;
   border-radius: 50%;
   display: inline-flex;
-  flex: 0 0 32px;
-  height: 32px;
+  flex: 0 0 30px;
+  height: 30px;
   justify-content: center;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0;
-  width: 32px;
+  width: 30px;
 }
 
 .ohb-send-button,
 .ohb-button-primary {
-  background: #5f86c4;
-  border: 1px solid #5278bb;
-  color: #ffffff;
+  background: var(--accent);
+  border: 0;
+  color: var(--accent-contrast);
 }
 
-.ohb-send-spinner {
+/* Enabling fades in rather than snapping; a press shrinks it slightly. */
+.ohb-send-button {
+  transition:
+    background-color var(--duration) var(--ease),
+    color var(--duration) var(--ease),
+    transform var(--duration-fast) var(--ease);
+}
+
+.ohb-send-button:not(:disabled):active {
+  transform: scale(0.92);
+}
+
+.ohb-send-button:not(:disabled):hover,
+.ohb-button-primary:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+.ohb-send-button:disabled {
+  background: var(--bg-selected);
+  color: var(--text-dim);
+  opacity: 1;
+}
+
+.ohb-send-spinner,
+.ohb-stop-pending {
   animation: ohb-spin 1s linear infinite;
 }
 
-@keyframes ohb-spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* Stop matches Send (Claude, Cursor): a black circle with a white square. */
+.ohb-stop-button {
+  background: var(--accent);
+  border: 0;
+  color: var(--accent-contrast);
 }
 
-.ohb-stop-button {
-  background: #ffffff;
-  border: 1px solid #e4e4e4;
-  color: #6b6d73;
+.ohb-stop-button:not(:disabled):hover {
+  background: var(--accent-hover);
 }
 
 .ohb-button {
-  background: #ffffff;
-  border: 1px solid #e4e4e4;
-  color: #6b6d73;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
 }
 
 .ohb-stop-button svg {
-  color: #c4756b;
-  fill: #c4756b;
+  color: currentColor;
 }
 
 .ohb-composer-bar {
   align-items: center;
   display: flex;
-  gap: 7px;
-  min-height: 32px;
+  gap: 4px;
+  margin-left: -6px;
+  min-height: 30px;
   position: relative;
-  width: 100%;
+  width: calc(100% + 6px);
 }
 
 .ohb-composer-bar-spacer {
@@ -523,7 +481,7 @@
 }
 
 .ohb-prompt-queue-text {
-  color: #525252;
+  color: var(--text-muted);
   font-size: 13px;
   line-height: 20px;
   padding: 4px 7px;
@@ -536,7 +494,7 @@
 
 .ohb-prompt-queue-text > span[aria-hidden],
 .ohb-prompt-queue-text small {
-  color: #8b8b8b;
+  color: var(--text-dim);
 }
 
 .ohb-prompt-queue-text small {
@@ -544,13 +502,13 @@
 }
 
 .ohb-steer-recovery {
-  background: #fafafa;
+  background: var(--bg-subtle);
   display: flow-root;
 }
 
 .ohb-unsent-steer {
   box-sizing: border-box;
-  color: #6b6d73;
+  color: var(--text-muted);
   font-size: 12px;
   margin: 0 auto 6px;
   max-width: 784px;
@@ -561,7 +519,7 @@
 .ohb-unsent-steer > summary {
   align-items: center;
   border-radius: 5px;
-  color: #6b6d73;
+  color: var(--text-muted);
   cursor: pointer;
   display: inline-flex;
   flex-wrap: wrap;
@@ -578,18 +536,18 @@
 }
 
 .ohb-unsent-steer > summary:hover {
-  background: rgba(38, 40, 45, 0.04);
-  color: #26282d;
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .ohb-unsent-steer > summary:focus-visible {
   border-radius: 5px;
-  outline: 2px solid #8a8d94;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .ohb-unsent-steer-chevron {
-  color: #8a8d94;
+  color: var(--text-dim);
   flex: 0 0 auto;
   transition: transform 120ms ease;
 }
@@ -599,14 +557,14 @@ details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
 }
 
 .ohb-unsent-steer-count {
-  color: #54565c;
+  color: var(--text-muted);
   font-weight: 500;
 }
 
 .ohb-unsent-steer-state,
 .ohb-steer-recovery-state {
-  color: #8a8d94;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
@@ -631,7 +589,7 @@ details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
 }
 
 .ohb-steer-recovery-item:hover {
-  background: rgba(38, 40, 45, 0.035);
+  background: var(--bg-hover);
 }
 
 .ohb-steer-recovery-body {
@@ -643,7 +601,7 @@ details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
 }
 
 .ohb-steer-recovery-text {
-  color: #3a3d45;
+  color: var(--text);
   font: inherit;
   font-size: 12.5px;
   line-height: 19px;
@@ -658,7 +616,7 @@ details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
 
 .ohb-steer-recovery-text:focus-visible {
   border-radius: 4px;
-  outline: 2px solid #8a8d94;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -667,10 +625,10 @@ details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
   background: transparent;
   border: 0;
   border-radius: 5px;
-  color: #6b6d73;
+  color: var(--text-muted);
   display: inline-flex;
   flex: 0 0 auto;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   gap: 4px;
   height: 24px;
@@ -682,17 +640,17 @@ details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
 }
 
 .ohb-steer-recovery-resend:not(:disabled):hover {
-  background: #eceef2;
-  color: #26282d;
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .ohb-steer-recovery-resend:focus-visible {
-  outline: 2px solid #8a8d94;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .ohb-steer-recovery-resend:disabled {
-  color: #aeb2ba;
+  color: var(--text-dim);
   cursor: default;
 }
 
@@ -706,4 +664,57 @@ details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
   overflow-y: auto;
   overflow-wrap: anywhere;
   padding: 2px 10px;
+}
+
+@media (max-width: 720px) {
+  .ohb-composer-input {
+    max-width: none;
+  }
+
+  .ohb-prompt-queue:has(+ .ohb-goal-strip),
+  .ohb-unsent-steer,
+  .ohb-goal-strip {
+    max-width: none;
+    width: calc(100% - 8px);
+  }
+
+  .ohb-goal-strip {
+    padding: 5px 7px 11px 10px;
+  }
+
+  .ohb-slash-selected .ohb-slash-args,
+  .ohb-slash-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .ohb-goal-strip-meta {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .ohb-composer-input {
+    gap: 6px;
+  }
+}
+
+/* Phones (03 §3.3): send and stop keep their size but get a 44px hit area. */
+@media (max-width: 639px) {
+  .ohb-composer-bar .ohb-send-button,
+  .ohb-composer-bar .ohb-stop-button {
+    flex-basis: 36px;
+    height: 36px;
+    min-height: 36px;
+    position: relative;
+    width: 36px;
+  }
+
+  .ohb-composer-bar .ohb-send-button::after,
+  .ohb-composer-bar .ohb-stop-button::after {
+    content: "";
+    inset: -4px;
+    position: absolute;
+  }
 }

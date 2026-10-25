@@ -10,7 +10,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryGoalPersistence } from "../../../../packages/ohbaby-agent/src/goals/persistence.js";
-import { createOhbabyWebRuntime } from "../runtime.js";
+import { createOhbabyWebRuntime } from "../runtime/index.js";
 import { OhbabyWebApp } from "./App.js";
 
 (
@@ -454,7 +454,7 @@ describe("goal resume through the rendered app, real Web runtime and command bac
         });
         await waitFor(() => {
           expect(
-            f.container.querySelector(".ohb-error-banner[role=alert]")
+            f.container.querySelector(".ohb-banner-error[role=alert]")
               ?.textContent,
           ).toContain("Invalid resume budget");
         });

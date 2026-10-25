@@ -859,3 +859,139 @@ it("global target probes and active selection refresh through HTTP, emitting bot
     );
   }
 });
+
+it("returns stable codes and value-free field errors on every global settings failure", async () => {
+  const sentinel = "value-sentinel";
+  const model = await request("models/profiles", "POST", {
+    provider: "custom",
+    model: "",
+    baseUrl: `ftp://${sentinel}.example/v1`,
+    interfaceProvider: sentinel,
+    contextWindowTokens: -3,
+  });
+  expect(model.status).toBe(400);
+  const modelText = await model.text();
+  expect(modelText).not.toContain(sentinel);
+  const modelBody = JSON.parse(
+    modelText,
+  ) as import("ohbaby-sdk").UiSettingsErrorResponse;
+  expect(modelBody.error.code).toBe("VALIDATION_FAILED");
+  expect(modelBody.error.fields).toEqual(
+    expect.arrayContaining([
+      { path: ["model"], message: "Required" },
+      { path: ["baseUrl"], message: "Must be an http or https URL" },
+      {
+        path: ["interfaceProvider"],
+        message:
+          "Must be one of: openai-compatible, openai-responses, anthropic",
+      },
+      { path: ["contextWindowTokens"], message: "Must be greater than 0" },
+    ]),
+  );
+
+  const search = await request("search", "PUT", {
+    defaults: { timeout: 0, maxResults: 50, topic: sentinel },
+  });
+  expect(search.status).toBe(400);
+  const searchText = await search.text();
+  expect(searchText).not.toContain(sentinel);
+  const searchBody = JSON.parse(
+    searchText,
+  ) as import("ohbaby-sdk").UiSettingsErrorResponse;
+  expect(searchBody.error.code).toBe("VALIDATION_FAILED");
+  expect(searchBody.error.fields).toEqual(
+    expect.arrayContaining([
+      { path: ["defaults", "timeout"], message: "Must be at least 1" },
+      { path: ["defaults", "maxResults"], message: "Must be at most 20" },
+    ]),
+  );
+
+  const patchMissing = await request("models/profiles/missing", "PATCH", {
+    label: "x",
+  });
+  expect(patchMissing.status).toBe(404);
+  expect(await patchMissing.json()).toMatchObject({
+    error: { code: "MODEL_NOT_FOUND" },
+  });
+  const mcpMissing = await request("mcp/servers/no-such", "DELETE");
+  expect(mcpMissing.status).toBe(404);
+  expect(await mcpMissing.json()).toMatchObject({
+    error: { code: "MCP_SERVER_NOT_FOUND" },
+  });
+
+  const unauthorized = await fetch(
+    `${required(server).url}/v1/settings/models`,
+  );
+  expect(unauthorized.status).toBe(401);
+  expect(await unauthorized.json()).toMatchObject({
+    ok: false,
+    error: { code: "UNAUTHORIZED" },
+  });
+
+  const url = `${required(server).url}/v1/settings/search`;
+  const headers = {
+    authorization: "Bearer test-token",
+    "content-type": "application/json",
+  };
+  const invalidJson = await fetch(url, { method: "PUT", headers, body: "{" });
+  expect(invalidJson.status).toBe(400);
+  expect(await invalidJson.json()).toMatchObject({
+    error: { code: "INVALID_JSON" },
+  });
+  const tooLarge = await fetch(url, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ baseUrl: "x".repeat(1024 * 1024 + 1) }),
+  });
+  expect(tooLarge.status).toBe(413);
+  expect(await tooLarge.json()).toMatchObject({
+    error: { code: "REQUEST_TOO_LARGE" },
+  });
+
+  await mkdir(join(home, "tools"), { recursive: true });
+  await writeFile(join(home, "tools/search.json"), "{");
+  const broken = await request("search");
+  expect(broken.status).toBe(500);
+  expect(await broken.json()).toMatchObject({
+    error: { code: "SETTINGS_ACCESS_FAILED" },
+  });
+});
+
+it("finishes a keyless legacy entry when the patch confirms no key reference", async () => {
+  await json(join(home, "model.json"), {
+    provider: "zenmux",
+    defaultModel: "missing",
+    apiConfig: { baseUrl: "http://localhost:1/v1" },
+    llmParams: { maxTokens: 8192 },
+    models: [
+      {
+        id: "legacy",
+        provider: "zenmux",
+        model: "history",
+        baseUrl: "http://localhost:1/v1",
+        interfaceProvider: "anthropic",
+        contextWindowTokens: 12000,
+      },
+    ],
+  });
+  const before = (await (
+    await request("models")
+  ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+  const legacy = before.models.find((model) => model.model === "history");
+  expect(legacy?.configurationComplete).toBe(false);
+  const id = legacy?.id ?? "";
+  // An empty patch leaves it unfinished; apiKeyEnv: null is the explicit choice.
+  const empty = (await (
+    await request(`models/profiles/${id}`, "PATCH", {})
+  ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+  expect(
+    empty.models.find((model) => model.id === id)?.configurationComplete,
+  ).toBe(false);
+  const done = (await (
+    await request(`models/profiles/${id}`, "PATCH", { apiKeyEnv: null })
+  ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+  const entry = done.models.find((model) => model.id === id);
+  expect(entry?.configurationComplete).toBe(true);
+  expect(entry?.apiKeyConfigured).toBe(false);
+  expect((await request("models/active", "POST", { id })).status).toBe(200);
+});

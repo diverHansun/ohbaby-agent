@@ -15,12 +15,11 @@ export const WEB_PASSTHROUGH_COMMAND_IDS = [
 export type UiWebPassthroughCommandId =
   (typeof WEB_PASSTHROUGH_COMMAND_IDS)[number];
 
-export const WEB_OVERLAY_COMMAND_IDS = [
-  "connect",
-  "connect-search",
-  "compact",
-  "goal",
-] as const;
+/**
+ * Model and search setup moved to the Web settings dialog (D18), so
+ * `connect` and `connect-search` stay TUI commands only.
+ */
+export const WEB_OVERLAY_COMMAND_IDS = ["compact", "goal"] as const;
 
 export type UiWebOverlayCommandId = (typeof WEB_OVERLAY_COMMAND_IDS)[number];
 
@@ -28,8 +27,6 @@ export type UiWebCommandExecutionKind = "passthrough" | "overlay" | "skill";
 
 export type UiWebCommandAction =
   | "executeCommand"
-  | "connectModel"
-  | "connectSearch"
   | "compactSession"
   | "openGoalPanel";
 
@@ -55,8 +52,6 @@ const WEB_OVERLAY_COMMAND_ACTIONS: ReadonlyMap<
   UiWebOverlayCommandId,
   Exclude<UiWebCommandAction, "executeCommand">
 > = new Map([
-  ["connect", "connectModel"],
-  ["connect-search", "connectSearch"],
   ["compact", "compactSession"],
   ["goal", "openGoalPanel"],
 ]);
@@ -75,8 +70,6 @@ const WEB_OVERLAY_COMMAND_PATHS: ReadonlyMap<
   UiWebOverlayCommandId,
   readonly string[]
 > = new Map([
-  ["connect", ["connect"]],
-  ["connect-search", ["connect-search"]],
   ["compact", ["compact"]],
   ["goal", ["goal"]],
 ]);
@@ -215,8 +208,8 @@ export function supportsWebPassthroughCommandInvocation(
 }
 
 // Overlay commands whose panel actions execute the same command id through
-// the raw command API. The other overlays (connect/connect-search/compact)
-// use dedicated RPCs and must stay rejected by /v1/commands.
+// the raw command API. Compact uses a dedicated RPC and must stay rejected
+// by /v1/commands.
 const WEB_OVERLAY_EXECUTABLE_COMMAND_IDS: ReadonlySet<string> = new Set([
   "goal",
 ]);
