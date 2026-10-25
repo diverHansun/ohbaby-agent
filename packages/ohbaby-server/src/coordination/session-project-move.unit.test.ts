@@ -1,7 +1,7 @@
 import {
-  SessionProjectMoveError,
+  SessionWorkspaceMoveError,
   type CoreSession,
-  type SessionProjectMovePlan,
+  type SessionWorkspaceMovePlan,
 } from "ohbaby-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -15,8 +15,8 @@ function session(overrides: Partial<CoreSession> = {}): CoreSession {
   return {
     id: "s1",
     projectId: "global",
-    projectRoot: "/repo/a",
-    projectDirectory: "/repo/a",
+    workingDirectory: "/repo/a",
+    workspaceDirectory: "/repo/a",
     title: "First",
     agentName: "default",
     createdAt: 0,
@@ -30,18 +30,21 @@ function session(overrides: Partial<CoreSession> = {}): CoreSession {
 }
 
 function plan(
-  overrides: Partial<SessionProjectMovePlan> = {},
-): SessionProjectMovePlan {
+  overrides: Partial<SessionWorkspaceMovePlan> = {},
+): SessionWorkspaceMovePlan {
   return {
     sessionId: "s1",
-    binding: { projectDirectory: "/repo/b", pendingProjectRoot: "/repo/b" },
+    binding: {
+      workspaceDirectory: "/repo/b",
+      pendingWorkingDirectory: "/repo/b",
+    },
     queueRoot: "/repo/b",
     needsQueueHandover: false,
     ...overrides,
   };
 }
 
-function createDeps(movePlan: SessionProjectMovePlan): {
+function createDeps(movePlan: SessionWorkspaceMovePlan): {
   readonly deps: SessionProjectMoveDeps;
   readonly planMove: ReturnType<typeof vi.fn>;
   readonly commitMove: ReturnType<typeof vi.fn>;
@@ -51,17 +54,17 @@ function createDeps(movePlan: SessionProjectMovePlan): {
 } {
   const planMove = vi.fn(() => movePlan);
   const commitMove = vi.fn(() =>
-    Promise.resolve(session({ projectDirectory: "/repo/b" })),
+    Promise.resolve(session({ workspaceDirectory: "/repo/b" })),
   );
   const adopt = vi.fn(() => Promise.resolve());
   const discoverProject = vi.fn(() => Promise.resolve());
   const loadQueueOwner = vi.fn(() =>
-    Promise.resolve({ adoptSessionProjectMove: adopt }),
+    Promise.resolve({ adoptSessionWorkspaceMove: adopt }),
   );
   const catalog: GlobalSessionCatalog = {
     list: vi.fn(),
     search: vi.fn(),
-    get: vi.fn(() => session({ pendingProjectRoot: "/repo/b" })),
+    get: vi.fn(() => session({ pendingWorkingDirectory: "/repo/b" })),
     planMove,
     commitMove,
   };
@@ -93,7 +96,7 @@ describe("moveSessionProject", () => {
     expect(fixture.discoverProject).toHaveBeenCalledWith("/repo/b");
     expect(fixture.commitMove).toHaveBeenCalledTimes(1);
     expect(fixture.loadQueueOwner).not.toHaveBeenCalled();
-    expect(moved.projectDirectory).toBe("/repo/b");
+    expect(moved.workspaceDirectory).toBe("/repo/b");
   });
 
   it("lets the queue owner take the binding and its queued prompts", async () => {
@@ -105,7 +108,7 @@ describe("moveSessionProject", () => {
     expect(fixture.loadQueueOwner).toHaveBeenCalledWith("/repo/b");
     expect(fixture.adopt).toHaveBeenCalledWith(handover);
     expect(fixture.commitMove).not.toHaveBeenCalled();
-    expect(moved.pendingProjectRoot).toBe("/repo/b");
+    expect(moved.pendingWorkingDirectory).toBe("/repo/b");
   });
 
   it("leaves a project without resolving or registering a directory", async () => {
@@ -138,7 +141,7 @@ describe("moveSessionProject", () => {
   it("passes catalog errors through", async () => {
     const fixture = createDeps(plan());
     fixture.planMove.mockImplementation(() => {
-      throw new SessionProjectMoveError("SESSION_ARCHIVED", "archived");
+      throw new SessionWorkspaceMoveError("SESSION_ARCHIVED", "archived");
     });
 
     await expect(

@@ -643,4 +643,15 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       UPDATE session SET project_directory = project_root WHERE project_root <> '';
     `,
   },
+  {
+    // Rename session directories without changing their values. Older builds
+    // cannot read the upgraded schema; keep an offline backup for rollback.
+    version: "026_session_workspace_naming",
+    requiresOfflineBackup: true,
+    sql: `
+      ALTER TABLE session RENAME COLUMN project_directory TO workspace_directory;
+      ALTER TABLE session RENAME COLUMN project_root TO working_directory;
+      ALTER TABLE session RENAME COLUMN pending_project_root TO pending_working_directory;
+    `,
+  },
 ];

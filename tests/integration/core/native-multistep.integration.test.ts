@@ -185,7 +185,7 @@ it("replays two native tool roundtrips in one Run exactly once, then continues t
     initDatabase({ dbPath: join(directory, "agent.db") });
     getDatabase()
       .prepare(
-        `INSERT INTO ${schema.session.tableName} (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ${schema.session.tableName} (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         sessionId,

@@ -479,7 +479,12 @@ export async function createUiRuntimeComposition(
     readonly title?: string;
   }): Promise<void> {
     if (sessionManager.ensureRoot) {
-      await sessionManager.ensureRoot(input);
+      await sessionManager.ensureRoot({
+        agentName: input.agentName,
+        id: input.id,
+        workingDirectory: input.projectRoot,
+        title: input.title,
+      });
       return;
     }
     if (await sessionManager.get(input.id)) {

@@ -29,7 +29,7 @@ import {
   globalMcpOverriddenIn,
   McpServerPatchSchema,
   resolveOhbabyHome,
-  ensureDefaultWorkspaceDirectory,
+  ensureDefaultDirectory,
   getAgentPackageVersion,
   type SettingsDomain,
 } from "ohbaby-agent";
@@ -172,7 +172,7 @@ export function registerGlobalSettingsRoutes(
         ok: true,
         version: ctx.packageVersion ?? getAgentPackageVersion(),
         ohbabyHome: resolveOhbabyHome(),
-        defaultWorkspace: await ensureDefaultWorkspaceDirectory(),
+        defaultWorkspace: await ensureDefaultDirectory(),
         ...(ctx.diagnosticsFile
           ? { diagnosticsFile: ctx.diagnosticsFile }
           : {}),

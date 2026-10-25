@@ -10,23 +10,23 @@ import {
   SessionNotFoundError,
 } from "./errors.js";
 import {
-  isSessionInProjectRoot,
-  normalizeSessionProjectRoot,
-  withSessionExecutionRoot,
-} from "./project-root.js";
+  isSessionInWorkingDirectory,
+  normalizeSessionDirectory,
+  withSessionWorkingDirectory,
+} from "./working-directory.js";
 import type {
   ListSessionOptions,
   Session,
-  SessionExecutionRootInput,
+  SessionWorkingDirectoryInput,
   SessionStore,
 } from "./types.js";
 
 export interface SessionRow {
   readonly id: string;
   readonly project_id: string;
-  readonly project_root: string;
-  readonly project_directory: string | null;
-  readonly pending_project_root: string | null;
+  readonly working_directory: string;
+  readonly workspace_directory: string | null;
+  readonly pending_working_directory: string | null;
   readonly agent: string | null;
   readonly parent_id: string | null;
   readonly title: string | null;
@@ -44,63 +44,63 @@ interface SessionData {
   readonly isSubagent?: boolean;
 }
 
-interface ProjectRootRow {
-  readonly project_root: string;
+interface WorkingDirectoryRow {
+  readonly working_directory: string;
   readonly latest_updated_at: number;
 }
 
-export function listKnownSessionProjectRoots(
+export function listKnownSessionWorkingDirectories(
   database: DatabaseConnection = getDatabase(),
 ): readonly string[] {
   const rows = database
-    .prepare<ProjectRootRow>(
-      `SELECT project_root, MAX(updated_at) AS latest_updated_at FROM (
-         SELECT project_root, updated_at FROM ${schema.session.tableName}
+    .prepare<WorkingDirectoryRow>(
+      `SELECT working_directory, MAX(updated_at) AS latest_updated_at FROM (
+         SELECT working_directory, updated_at FROM ${schema.session.tableName}
          UNION ALL
-         SELECT pending_project_root AS project_root, updated_at
-         FROM ${schema.session.tableName} WHERE pending_project_root IS NOT NULL
+         SELECT pending_working_directory AS working_directory, updated_at
+         FROM ${schema.session.tableName} WHERE pending_working_directory IS NOT NULL
        )
-       WHERE project_root <> ''
-       GROUP BY project_root
-       ORDER BY latest_updated_at DESC, project_root ASC`,
+       WHERE working_directory <> ''
+       GROUP BY working_directory
+       ORDER BY latest_updated_at DESC, working_directory ASC`,
     )
     .all();
-  const projectRoots = new Map<string, string>();
+  const workingDirectories = new Map<string, string>();
   for (const row of rows) {
-    const normalized = normalizeSessionProjectRoot(row.project_root);
-    if (!projectRoots.has(normalized)) {
-      projectRoots.set(normalized, row.project_root);
+    const normalized = normalizeSessionDirectory(row.working_directory);
+    if (!workingDirectories.has(normalized)) {
+      workingDirectories.set(normalized, row.working_directory);
     }
   }
-  return [...projectRoots.values()];
+  return [...workingDirectories.values()];
 }
 
-export interface SessionProjectBinding {
-  /** Sidebar project; undefined removes the session from every project. */
-  readonly projectDirectory?: string;
+export interface SessionWorkspaceBinding {
+  /** Sidebar workspace; undefined removes the session from every workspace. */
+  readonly workspaceDirectory?: string;
   /** Next-turn execution directory; undefined cancels a pending change. */
-  readonly pendingProjectRoot?: string;
+  readonly pendingWorkingDirectory?: string;
 }
 
 /**
- * Writes the project binding directly. Run inside the caller's transaction
+ * Writes the workspace binding directly. Run inside the caller's transaction
  * when queued prompts move with it; the execution directory never changes here.
  */
-export function writeSessionProjectBinding(
+export function writeSessionWorkspaceBinding(
   db: DatabaseConnection,
   sessionId: string,
-  binding: SessionProjectBinding,
+  binding: SessionWorkspaceBinding,
   updatedAt: number,
 ): Session {
   const result = db
     .prepare(
       `UPDATE ${schema.session.tableName}
-       SET project_directory = ?, pending_project_root = ?, updated_at = ?
+       SET workspace_directory = ?, pending_working_directory = ?, updated_at = ?
        WHERE id = ?`,
     )
     .run(
-      binding.projectDirectory ?? null,
-      binding.pendingProjectRoot ?? null,
+      binding.workspaceDirectory ?? null,
+      binding.pendingWorkingDirectory ?? null,
       updatedAt,
       sessionId,
     );
@@ -119,20 +119,20 @@ export function writeSessionProjectBinding(
 }
 
 /**
- * The default workspace is never a project. Migration 025 cannot know its
+ * The default directory is never a workspace. Migration 025 cannot know its
  * path, so sessions that ran there before the upgrade are fixed at startup.
  * Safe to repeat: new sessions never get this binding.
  */
-export function clearDefaultWorkspaceProjectBindings(
+export function clearDefaultDirectoryWorkspaceBindings(
   db: DatabaseConnection,
-  defaultWorkspaceDirectories: readonly string[],
+  defaultDirectories: readonly string[],
 ): number {
   let changed = 0;
-  for (const directory of new Set(defaultWorkspaceDirectories)) {
+  for (const directory of new Set(defaultDirectories)) {
     changed += db
       .prepare(
         `UPDATE ${schema.session.tableName}
-         SET project_directory = NULL WHERE project_directory = ?`,
+         SET workspace_directory = NULL WHERE workspace_directory = ?`,
       )
       .run(directory).changes;
   }
@@ -190,13 +190,13 @@ export function rowToSession(row: SessionRow): Session {
   return {
     id: row.id,
     projectId: row.project_id,
-    projectRoot: row.project_root,
-    ...(row.project_directory === null
+    workingDirectory: row.working_directory,
+    ...(row.workspace_directory === null
       ? {}
-      : { projectDirectory: row.project_directory }),
-    ...(row.pending_project_root === null
+      : { workspaceDirectory: row.workspace_directory }),
+    ...(row.pending_working_directory === null
       ? {}
-      : { pendingProjectRoot: row.pending_project_root }),
+      : { pendingWorkingDirectory: row.pending_working_directory }),
     title: row.title ?? "",
     agentName: row.agent ?? "default",
     createdAt: row.created_at,
@@ -242,14 +242,14 @@ export function createDatabaseSessionStore(
     try {
       db.prepare(
         `INSERT INTO ${schema.session.tableName}
-          (id, project_id, project_root, project_directory, pending_project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
+          (id, project_id, working_directory, workspace_directory, pending_working_directory, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         session.id,
         session.projectId,
-        session.projectRoot,
-        session.projectDirectory ?? null,
-        session.pendingProjectRoot ?? null,
+        session.workingDirectory,
+        session.workspaceDirectory ?? null,
+        session.pendingWorkingDirectory ?? null,
         session.agentName,
         session.parentId ?? null,
         session.title,
@@ -271,15 +271,15 @@ export function createDatabaseSessionStore(
   function writeRow(session: Session): void {
     db.prepare(
       `UPDATE ${schema.session.tableName}
-       SET project_id = ?, project_root = ?, project_directory = ?, pending_project_root = ?,
+       SET project_id = ?, working_directory = ?, workspace_directory = ?, pending_working_directory = ?,
            agent = ?, parent_id = ?, title = ?, status = ?,
            created_at = ?, updated_at = ?, message_count = ?, last_message_at = ?, data = ?
        WHERE id = ?`,
     ).run(
       session.projectId,
-      session.projectRoot,
-      session.projectDirectory ?? null,
-      session.pendingProjectRoot ?? null,
+      session.workingDirectory,
+      session.workspaceDirectory ?? null,
+      session.pendingWorkingDirectory ?? null,
       session.agentName,
       session.parentId ?? null,
       session.title,
@@ -296,13 +296,13 @@ export function createDatabaseSessionStore(
   function upsertRow(session: Session): void {
     db.prepare(
       `INSERT INTO ${schema.session.tableName}
-        (id, project_id, project_root, project_directory, pending_project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
+        (id, project_id, working_directory, workspace_directory, pending_working_directory, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id,
-        project_root = excluded.project_root,
-        project_directory = excluded.project_directory,
-        pending_project_root = excluded.pending_project_root,
+        working_directory = excluded.working_directory,
+        workspace_directory = excluded.workspace_directory,
+        pending_working_directory = excluded.pending_working_directory,
         agent = excluded.agent,
         parent_id = excluded.parent_id,
         title = excluded.title,
@@ -315,9 +315,9 @@ export function createDatabaseSessionStore(
     ).run(
       session.id,
       session.projectId,
-      session.projectRoot,
-      session.projectDirectory ?? null,
-      session.pendingProjectRoot ?? null,
+      session.workingDirectory,
+      session.workspaceDirectory ?? null,
+      session.pendingWorkingDirectory ?? null,
       session.agentName,
       session.parentId ?? null,
       session.title,
@@ -492,8 +492,8 @@ export function createDatabaseSessionStore(
         });
       },
 
-      listByProjectRoot(
-        projectRoot: string,
+      listByWorkingDirectory(
+        workingDirectory: string,
         options: ListSessionOptions = {},
       ): Promise<Session[]> {
         return withAsyncBoundary(() => {
@@ -501,7 +501,9 @@ export function createDatabaseSessionStore(
           const limit = normalizeLimit(options.limit);
           if (transaction) {
             return listTransactionSessions(transaction)
-              .filter((session) => isSessionInProjectRoot(session, projectRoot))
+              .filter((session) =>
+                isSessionInWorkingDirectory(session, workingDirectory),
+              )
               .filter(
                 (session) =>
                   options.status === undefined ||
@@ -528,7 +530,9 @@ export function createDatabaseSessionStore(
             .all(...params);
           return rows
             .map(rowToSession)
-            .filter((session) => isSessionInProjectRoot(session, projectRoot))
+            .filter((session) =>
+              isSessionInWorkingDirectory(session, workingDirectory),
+            )
             .slice(0, limit)
             .map(cloneSession);
         });
@@ -634,9 +638,9 @@ export function createDatabaseSessionStore(
         }, transaction);
       },
 
-      recordExecutionRoot(
+      recordWorkingDirectory(
         sessionId: string,
-        input: SessionExecutionRootInput,
+        input: SessionWorkingDirectoryInput,
       ): Promise<Session> {
         return withWriteBoundary(() => {
           const existing = transaction
@@ -646,7 +650,7 @@ export function createDatabaseSessionStore(
             throw new SessionNotFoundError(sessionId);
           }
           const updated: Session = {
-            ...withSessionExecutionRoot(existing, input),
+            ...withSessionWorkingDirectory(existing, input),
             updatedAt: input.updatedAt,
           };
           if (transaction) {

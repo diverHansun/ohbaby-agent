@@ -19,7 +19,7 @@ it("keeps real SQLite run transitions and history reads behind the same committe
   try {
     getDatabase()
       .prepare(
-        `INSERT INTO ${schema.session.tableName} (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ${schema.session.tableName} (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         "session",

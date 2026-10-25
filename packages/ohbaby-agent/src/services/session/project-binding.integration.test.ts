@@ -3,21 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
-import { ensureDefaultWorkspaceDirectory } from "../../paths/index.js";
+import { ensureDefaultDirectory } from "../../paths/index.js";
 import { DatabasePromptSubmissionStore } from "../../runtime/prompt-scheduler/database-store.js";
 import { closeDatabase, getDatabase, initDatabase } from "../database/index.js";
 import { INITIAL_MIGRATIONS } from "../database/migrations.js";
 import {
   createDatabaseSessionStore,
   readSessionRow,
-  writeSessionProjectBinding,
+  writeSessionWorkspaceBinding,
 } from "./database-store.js";
 import { createSessionManager } from "./manager.js";
 import {
-  commitSessionProjectMove,
-  planSessionProjectMove,
-  SessionProjectMoveError,
-} from "./project-move.js";
+  commitSessionWorkspaceMove,
+  planSessionWorkspaceMove,
+  SessionWorkspaceMoveError,
+} from "./workspace-move.js";
 import type { SessionManager } from "./types.js";
 
 let root: string;
@@ -84,22 +84,22 @@ function moveErrorCode(operation: () => unknown): string | undefined {
   try {
     operation();
   } catch (error) {
-    return error instanceof SessionProjectMoveError ? error.code : undefined;
+    return error instanceof SessionWorkspaceMoveError ? error.code : undefined;
   }
   return undefined;
 }
 
 describe("session project binding", () => {
   it("leaves default-workspace sessions without a project and keeps subagents with their parent", async () => {
-    const defaultWorkspace = await ensureDefaultWorkspaceDirectory();
+    const defaultWorkspace = await ensureDefaultDirectory();
     const chat = await manager.create(defaultWorkspace);
     const project = await manager.create("/repo/a");
     const child = await manager.create("/repo/a", { parentId: project.id });
 
-    expect(chat.projectDirectory).toBeUndefined();
-    expect(project.projectDirectory).toBe("/repo/a");
-    expect(child.projectDirectory).toBe("/repo/a");
-    expect(readSessionRow(getDatabase(), chat.id)?.projectDirectory).toBe(
+    expect(chat.workspaceDirectory).toBeUndefined();
+    expect(project.workspaceDirectory).toBe("/repo/a");
+    expect(child.workspaceDirectory).toBe("/repo/a");
+    expect(readSessionRow(getDatabase(), chat.id)?.workspaceDirectory).toBe(
       undefined,
     );
   });
@@ -110,7 +110,7 @@ describe("session project binding", () => {
     initDatabase({
       dbPath,
       migrations: INITIAL_MIGRATIONS.filter(
-        (migration) => migration.version !== "025_session_project_binding",
+        (migration) => migration.version < "025",
       ),
     });
     getDatabase()
@@ -123,13 +123,13 @@ describe("session project binding", () => {
 
     initDatabase({ dbPath });
     const migrated = readSessionRow(getDatabase(), "legacy");
-    expect(migrated?.projectRoot).toBe("/repo/legacy");
-    expect(migrated?.projectDirectory).toBe("/repo/legacy");
+    expect(migrated?.workingDirectory).toBe("/repo/legacy");
+    expect(migrated?.workspaceDirectory).toBe("/repo/legacy");
 
-    writeSessionProjectBinding(getDatabase(), "legacy", {}, 2);
+    writeSessionWorkspaceBinding(getDatabase(), "legacy", {}, 2);
     closeDatabase();
     initDatabase({ dbPath });
-    expect(readSessionRow(getDatabase(), "legacy")?.projectDirectory).toBe(
+    expect(readSessionRow(getDatabase(), "legacy")?.workspaceDirectory).toBe(
       undefined,
     );
   });
@@ -137,65 +137,70 @@ describe("session project binding", () => {
   it("moves to another project at the next turn and leaves a project keeping the directory", async () => {
     const session = await manager.create("/repo/a");
 
-    const toB = planSessionProjectMove(session.id, "/repo/b");
+    const toB = planSessionWorkspaceMove(session.id, "/repo/b");
     expect(toB).toMatchObject({
-      binding: { projectDirectory: "/repo/b", pendingProjectRoot: "/repo/b" },
+      binding: {
+        workspaceDirectory: "/repo/b",
+        pendingWorkingDirectory: "/repo/b",
+      },
       queueRoot: "/repo/b",
       needsQueueHandover: false,
     });
-    const moved = await commitSessionProjectMove(toB);
+    const moved = await commitSessionWorkspaceMove(toB);
     expect(moved).toMatchObject({
       id: session.id,
-      projectRoot: "/repo/a",
-      projectDirectory: "/repo/b",
-      pendingProjectRoot: "/repo/b",
+      workingDirectory: "/repo/a",
+      workspaceDirectory: "/repo/b",
+      pendingWorkingDirectory: "/repo/b",
     });
 
     // Leaving cancels the change that has not started and keeps /repo/a.
-    const removed = await commitSessionProjectMove(
-      planSessionProjectMove(session.id, null),
+    const removed = await commitSessionWorkspaceMove(
+      planSessionWorkspaceMove(session.id, null),
     );
-    expect(removed.projectRoot).toBe("/repo/a");
-    expect(removed.projectDirectory).toBeUndefined();
-    expect(removed.pendingProjectRoot).toBeUndefined();
+    expect(removed.workingDirectory).toBe("/repo/a");
+    expect(removed.workspaceDirectory).toBeUndefined();
+    expect(removed.pendingWorkingDirectory).toBeUndefined();
 
     // Moving back to the directory it runs in needs no pending change.
-    const back = planSessionProjectMove(session.id, "/repo/a");
-    expect(back.binding).toEqual({ projectDirectory: "/repo/a" });
+    const back = planSessionWorkspaceMove(session.id, "/repo/a");
+    expect(back.binding).toEqual({ workspaceDirectory: "/repo/a" });
   });
 
   it("applies a pending directory only for the turn that runs there", async () => {
     const session = await manager.create("/repo/a");
-    await commitSessionProjectMove(
-      planSessionProjectMove(session.id, "/repo/b"),
+    await commitSessionWorkspaceMove(
+      planSessionWorkspaceMove(session.id, "/repo/b"),
     );
 
-    const started = await manager.recordExecutionRoot(session.id, "/repo/b");
-    expect(started.projectRoot).toBe("/repo/b");
-    expect(started.pendingProjectRoot).toBeUndefined();
-    expect(started.projectDirectory).toBe("/repo/b");
+    const started = await manager.recordWorkingDirectory(session.id, "/repo/b");
+    expect(started.workingDirectory).toBe("/repo/b");
+    expect(started.pendingWorkingDirectory).toBeUndefined();
+    expect(started.workspaceDirectory).toBe("/repo/b");
 
     // A newer target chosen while a turn starts elsewhere is kept.
-    await commitSessionProjectMove(
-      planSessionProjectMove(session.id, "/repo/c"),
+    await commitSessionWorkspaceMove(
+      planSessionWorkspaceMove(session.id, "/repo/c"),
     );
-    const other = await manager.recordExecutionRoot(session.id, "/repo/b");
-    expect(other.pendingProjectRoot).toBe("/repo/c");
+    const other = await manager.recordWorkingDirectory(session.id, "/repo/b");
+    expect(other.pendingWorkingDirectory).toBe("/repo/c");
   });
 
   it("lists a moving session in both its current and target workspace", async () => {
     const session = await manager.create("/repo/a");
-    await commitSessionProjectMove(
-      planSessionProjectMove(session.id, "/repo/b"),
+    await commitSessionWorkspaceMove(
+      planSessionWorkspaceMove(session.id, "/repo/b"),
     );
 
-    const inA = await manager.listByProjectRoot("/repo/a");
-    const inB = await manager.listByProjectRoot("/repo/b");
+    const inA = await manager.listByWorkingDirectory("/repo/a");
+    const inB = await manager.listByWorkingDirectory("/repo/b");
     expect(inA.map((item) => item.id)).toEqual([session.id]);
     expect(inB.map((item) => item.id)).toEqual([session.id]);
 
-    await manager.recordExecutionRoot(session.id, "/repo/b");
-    await expect(manager.listByProjectRoot("/repo/a")).resolves.toEqual([]);
+    await manager.recordWorkingDirectory(session.id, "/repo/b");
+    await expect(manager.listByWorkingDirectory("/repo/a")).resolves.toEqual(
+      [],
+    );
   });
 
   it("hands queued prompts to the target workspace in order and leaves started prompts alone", async () => {
@@ -220,7 +225,7 @@ describe("session project binding", () => {
       createdAt: 5,
     });
 
-    const plan = planSessionProjectMove(session.id, "/repo/b");
+    const plan = planSessionWorkspaceMove(session.id, "/repo/b");
     expect(plan.needsQueueHandover).toBe(true);
 
     const target = new DatabasePromptSubmissionStore({
@@ -231,7 +236,12 @@ describe("session project binding", () => {
       sessionId: session.id,
       scopeKey: "/repo/b",
       beforeAdopt: () => {
-        writeSessionProjectBinding(getDatabase(), session.id, plan.binding, 99);
+        writeSessionWorkspaceBinding(
+          getDatabase(),
+          session.id,
+          plan.binding,
+          99,
+        );
       },
     });
 
@@ -241,17 +251,17 @@ describe("session project binding", () => {
       scopeKey: "/repo/a",
       status: "running",
     });
-    expect(readSessionRow(getDatabase(), session.id)?.pendingProjectRoot).toBe(
-      "/repo/b",
-    );
+    expect(
+      readSessionRow(getDatabase(), session.id)?.pendingWorkingDirectory,
+    ).toBe("/repo/b");
   });
 
   it("returns queued prompts to the kept directory when leaving before the change starts", async () => {
     const session = await manager.create("/repo/a");
-    writeSessionProjectBinding(
+    writeSessionWorkspaceBinding(
       getDatabase(),
       session.id,
-      { projectDirectory: "/repo/b", pendingProjectRoot: "/repo/b" },
+      { workspaceDirectory: "/repo/b", pendingWorkingDirectory: "/repo/b" },
       50,
     );
     queuePrompt({
@@ -261,7 +271,7 @@ describe("session project binding", () => {
       createdAt: 60,
     });
 
-    const leave = planSessionProjectMove(session.id, null);
+    const leave = planSessionWorkspaceMove(session.id, null);
     expect(leave).toMatchObject({
       binding: {},
       queueRoot: "/repo/a",
@@ -272,14 +282,14 @@ describe("session project binding", () => {
   it("rejects moving subagent and archived sessions", async () => {
     const parent = await manager.create("/repo/a");
     const child = await manager.create("/repo/a", { parentId: parent.id });
-    expect(() => planSessionProjectMove(child.id, "/repo/b")).toThrow(
-      SessionProjectMoveError,
+    expect(() => planSessionWorkspaceMove(child.id, "/repo/b")).toThrow(
+      SessionWorkspaceMoveError,
     );
     await manager.update(parent.id, { status: "archived" });
     expect(
-      moveErrorCode(() => planSessionProjectMove(parent.id, "/repo/b")),
+      moveErrorCode(() => planSessionWorkspaceMove(parent.id, "/repo/b")),
     ).toBe("SESSION_ARCHIVED");
-    expect(moveErrorCode(() => planSessionProjectMove("missing", null))).toBe(
+    expect(moveErrorCode(() => planSessionWorkspaceMove("missing", null))).toBe(
       "SESSION_NOT_FOUND",
     );
   });

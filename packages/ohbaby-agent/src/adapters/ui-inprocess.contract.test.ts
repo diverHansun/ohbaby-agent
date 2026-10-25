@@ -2924,7 +2924,7 @@ describe("createInProcessUiBackendClient", () => {
       id: "session_child",
       isSubagent: false,
       projectId: "project_1",
-      projectRoot: process.cwd(),
+      workingDirectory: process.cwd(),
       stats: { messageCount: 1 },
       status: "active",
       title: "Primary before role change",
@@ -2938,7 +2938,7 @@ describe("createInProcessUiBackendClient", () => {
       isSubagent: true,
       parentId: "session_parent",
       projectId: "project_1",
-      projectRoot: process.cwd(),
+      workingDirectory: process.cwd(),
       stats: { messageCount: 1 },
       status: "active",
       title: "Child",
@@ -2968,7 +2968,7 @@ describe("createInProcessUiBackendClient", () => {
         create: () => Promise.resolve(currentCoreSession),
         get: () => Promise.resolve(currentCoreSession),
         listByProject: () => Promise.resolve([currentCoreSession]),
-        listByProjectRoot: () => Promise.resolve([currentCoreSession]),
+        listByWorkingDirectory: () => Promise.resolve([currentCoreSession]),
         update: () => Promise.resolve(currentCoreSession),
       },
     });
@@ -4120,7 +4120,7 @@ describe("createInProcessUiBackendClient", () => {
       id: "session_1",
       isSubagent: false,
       projectId: "project:todo-recovery",
-      projectRoot,
+      workingDirectory: projectRoot,
       stats: { messageCount: 1 },
       status: "active",
       title: "Existing",
@@ -4255,7 +4255,7 @@ describe("createInProcessUiBackendClient", () => {
       id: "session_1",
       isSubagent: false,
       projectId: "project:todo-goal-rebuild",
-      projectRoot,
+      workingDirectory: projectRoot,
       stats: { messageCount: 1 },
       status: "active",
       title: "Existing Goal Todo",
@@ -9496,7 +9496,7 @@ describe("createInProcessUiBackendClient", () => {
       isSubagent: true,
       parentId: "session_parent",
       projectId: "project_repo",
-      projectRoot: "D:/repo",
+      workingDirectory: "D:/repo",
       stats: { messageCount: 0 },
       status: "active" as const,
       title: "Child empty",
@@ -9509,7 +9509,7 @@ describe("createInProcessUiBackendClient", () => {
       id: "session_primary_empty",
       isSubagent: false,
       projectId: "project_repo",
-      projectRoot: "D:/repo",
+      workingDirectory: "D:/repo",
       stats: { messageCount: 0 },
       status: "active" as const,
       title: "Primary empty",
@@ -9552,7 +9552,7 @@ describe("createInProcessUiBackendClient", () => {
         listByProject() {
           return Promise.resolve([]);
         },
-        listByProjectRoot() {
+        listByWorkingDirectory() {
           return Promise.resolve([]);
         },
         update(sessionId: string) {
@@ -9875,7 +9875,7 @@ describe("createInProcessUiBackendClient", () => {
         id: input.id,
         isSubagent: false,
         projectId: "project_1",
-        projectRoot,
+        workingDirectory: projectRoot,
         stats: { messageCount: 0 },
         status: input.status ?? "active",
         title: input.title,
@@ -9938,7 +9938,7 @@ describe("createInProcessUiBackendClient", () => {
         listByProject() {
           return Promise.resolve([]);
         },
-        listByProjectRoot() {
+        listByWorkingDirectory() {
           return Promise.resolve([remainingCoreSession]);
         },
         update() {
@@ -10091,7 +10091,7 @@ describe("createInProcessUiBackendClient", () => {
           id: input.id,
           isSubagent: input.isSubagent ?? false,
           projectId: input.projectId ?? currentProject.id,
-          projectRoot: input.projectRoot ?? currentProject.rootPath,
+          workingDirectory: input.projectRoot ?? currentProject.rootPath,
           stats: { messageCount: 1 },
           status: input.status ?? "active",
           title: input.title ?? input.id,
@@ -10269,7 +10269,7 @@ describe("createInProcessUiBackendClient", () => {
         id: "current_non_git",
         isSubagent: false,
         projectId: currentProject.id,
-        projectRoot: currentProject.rootPath,
+        workingDirectory: currentProject.rootPath,
         stats: { messageCount: 1 },
         status: "active",
         title: "Current non-git",
@@ -10282,7 +10282,7 @@ describe("createInProcessUiBackendClient", () => {
         id: "other_non_git",
         isSubagent: false,
         projectId: otherProject.id,
-        projectRoot: otherProject.rootPath,
+        workingDirectory: otherProject.rootPath,
         stats: { messageCount: 1 },
         status: "active",
         title: "Other non-git",

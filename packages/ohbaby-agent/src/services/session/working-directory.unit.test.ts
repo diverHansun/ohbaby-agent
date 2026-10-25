@@ -1,25 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
-  isSessionProjectRootCaseInsensitivePlatform,
-  normalizeSessionProjectRoot,
-  sameSessionProjectRoot,
-} from "./project-root.js";
+  isSessionDirectoryCaseInsensitivePlatform,
+  normalizeSessionDirectory,
+  sameSessionDirectory,
+} from "./working-directory.js";
 
 describe("session project root comparison", () => {
   it("normalizes path separators and trailing slashes", () => {
     expect(
-      normalizeSessionProjectRoot("D:\\Repo\\", { caseInsensitive: false }),
+      normalizeSessionDirectory("D:\\Repo\\", { caseInsensitive: false }),
     ).toBe("D:/Repo");
   });
 
   it("keeps differently-cased POSIX roots distinct when comparison is case-sensitive", () => {
     expect(
-      sameSessionProjectRoot("/repo/App", "/repo/app", {
+      sameSessionDirectory("/repo/App", "/repo/app", {
         caseInsensitive: false,
       }),
     ).toBe(false);
     expect(
-      sameSessionProjectRoot("/repo/App/", "/repo/App", {
+      sameSessionDirectory("/repo/App/", "/repo/App", {
         caseInsensitive: false,
       }),
     ).toBe(true);
@@ -27,15 +27,15 @@ describe("session project root comparison", () => {
 
   it("folds case when comparison is case-insensitive", () => {
     expect(
-      sameSessionProjectRoot("D:\\Repo\\", "d:/repo", {
+      sameSessionDirectory("D:\\Repo\\", "d:/repo", {
         caseInsensitive: true,
       }),
     ).toBe(true);
   });
 
   it("defaults to case-insensitive comparison only on Windows", () => {
-    expect(isSessionProjectRootCaseInsensitivePlatform("win32")).toBe(true);
-    expect(isSessionProjectRootCaseInsensitivePlatform("linux")).toBe(false);
-    expect(isSessionProjectRootCaseInsensitivePlatform("darwin")).toBe(false);
+    expect(isSessionDirectoryCaseInsensitivePlatform("win32")).toBe(true);
+    expect(isSessionDirectoryCaseInsensitivePlatform("linux")).toBe(false);
+    expect(isSessionDirectoryCaseInsensitivePlatform("darwin")).toBe(false);
   });
 });

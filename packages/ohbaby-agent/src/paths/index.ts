@@ -16,11 +16,11 @@ export {
   type OhbabyPathOptions,
 } from "./ohbaby-home.js";
 export {
-  DEFAULT_WORKSPACE_DIR_MODE,
-  defaultWorkspaceBoundary,
-  ensureDefaultWorkspaceDirectory,
-  isDefaultWorkspaceDirectory,
+  DEFAULT_DIRECTORY_MODE,
+  defaultDirectoryBoundary,
+  ensureDefaultDirectory,
+  isDefaultDirectory,
   isSameCanonicalDirectory,
-  resolveDefaultWorkspaceDirectory,
-} from "./default-workspace.js";
+  resolveDefaultDirectory,
+} from "./default-directory.js";
 export { resolveReadPathWithLegacy } from "./read-fallback.js";

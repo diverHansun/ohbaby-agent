@@ -11,7 +11,7 @@ import type { ExportDependencies } from "./types.js";
 const session: Session = {
   id: "session_1_abc",
   projectId: "project",
-  projectRoot: "/repo",
+  workingDirectory: "/repo",
   title: "中文讨论",
   agentName: "build",
   status: "archived",

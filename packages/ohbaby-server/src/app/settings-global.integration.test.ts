@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   createInProcessUiBackendClient,
-  ensureDefaultWorkspaceDirectory,
+  ensureDefaultDirectory,
 } from "ohbaby-agent";
 import { McpManager } from "../../../ohbaby-agent/src/mcp/core/manager.js";
 import { createDaemonHttpServer } from "../runtime/daemon/server.js";
@@ -201,7 +201,7 @@ it("T8 T9 T10 exposes authorized header-free globals, field patches, safe errors
   expect(await about.json()).toMatchObject({
     version: "test-version",
     ohbabyHome: home,
-    defaultWorkspace: await ensureDefaultWorkspaceDirectory(),
+    defaultWorkspace: await ensureDefaultDirectory(),
     diagnosticsFile: join(root, "logs/daemon/log.jsonl"),
     logDirectory: join(root, "logs/daemon"),
   });

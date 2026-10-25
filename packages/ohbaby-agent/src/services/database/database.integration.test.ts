@@ -205,6 +205,7 @@ describe("services/database", () => {
       { version: "023_prompt_naming_source" },
       { version: "024_prompt_resend_parent" },
       { version: "025_session_project_binding" },
+      { version: "026_session_workspace_naming" },
     ]);
   });
 
@@ -334,7 +335,7 @@ describe("services/database", () => {
 
     db.prepare(
       `INSERT INTO ${schema.session.tableName}
-        (id, project_id, project_root, agent, parent_id, title, status, created_at, updated_at, message_count, data)
+        (id, project_id, working_directory, agent, parent_id, title, status, created_at, updated_at, message_count, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       "child_1",
@@ -568,7 +569,7 @@ describe("services/database", () => {
       withTransaction((db) => {
         db.prepare(
           `INSERT INTO ${schema.session.tableName}
-            (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+            (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           "session_1",
@@ -606,7 +607,7 @@ describe("services/database", () => {
     await withTransaction((db) => {
       db.prepare(
         `INSERT INTO ${schema.session.tableName}
-          (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+          (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         "session_1",
@@ -639,7 +640,7 @@ describe("services/database", () => {
       await Promise.resolve();
       db.prepare(
         `INSERT INTO ${schema.session.tableName}
-          (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+          (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         "session_1",
@@ -679,7 +680,7 @@ describe("services/database", () => {
       escaped = Promise.resolve().then(() => {
         db.prepare(
           `INSERT INTO ${schema.session.tableName}
-            (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+            (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           "session_1",
@@ -717,7 +718,7 @@ describe("services/database", () => {
     const thenableOperation = ((db: DatabaseConnection) => {
       db.prepare(
         `INSERT INTO ${schema.session.tableName}
-          (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+          (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         "session_1",
@@ -753,7 +754,7 @@ describe("services/database", () => {
     const db = getDatabase();
     const insertSession = db.prepare(
       `INSERT INTO ${schema.session.tableName}
-        (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+        (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     insertSession.run(
@@ -816,7 +817,7 @@ describe("services/database", () => {
     const db = getDatabase();
     const insertSession = db.prepare(
       `INSERT INTO ${schema.session.tableName}
-        (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+        (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     insertSession.run(

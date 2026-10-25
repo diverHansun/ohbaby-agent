@@ -4,13 +4,13 @@ import {
   SessionNotFoundError,
 } from "./errors.js";
 import {
-  isSessionInProjectRoot,
-  withSessionExecutionRoot,
-} from "./project-root.js";
+  isSessionInWorkingDirectory,
+  withSessionWorkingDirectory,
+} from "./working-directory.js";
 import type {
   ListSessionOptions,
   Session,
-  SessionExecutionRootInput,
+  SessionWorkingDirectoryInput,
   SessionStore,
 } from "./types.js";
 
@@ -80,13 +80,15 @@ export function createInMemorySessionStore(): SessionStore {
       return Promise.resolve(items);
     },
 
-    listByProjectRoot(
-      projectRoot: string,
+    listByWorkingDirectory(
+      workingDirectory: string,
       options: ListSessionOptions = {},
     ): Promise<Session[]> {
       const limit = normalizeLimit(options.limit);
       const items = Array.from(sessions.values())
-        .filter((session) => isSessionInProjectRoot(session, projectRoot))
+        .filter((session) =>
+          isSessionInWorkingDirectory(session, workingDirectory),
+        )
         .filter(
           (session) =>
             options.status === undefined || session.status === options.status,
@@ -157,16 +159,16 @@ export function createInMemorySessionStore(): SessionStore {
       return Promise.resolve(cloneSession(updated));
     },
 
-    recordExecutionRoot(
+    recordWorkingDirectory(
       sessionId: string,
-      input: SessionExecutionRootInput,
+      input: SessionWorkingDirectoryInput,
     ): Promise<Session> {
       const existing = sessions.get(sessionId);
       if (!existing) {
         return Promise.reject(new SessionNotFoundError(sessionId));
       }
       const updated = {
-        ...withSessionExecutionRoot(existing, input),
+        ...withSessionWorkingDirectory(existing, input),
         updatedAt: input.updatedAt,
       };
       sessions.set(sessionId, cloneSession(updated));

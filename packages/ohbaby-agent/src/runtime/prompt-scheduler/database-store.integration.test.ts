@@ -29,7 +29,7 @@ describe("DatabasePromptSubmissionStore", () => {
     getDatabase()
       .prepare(
         `INSERT INTO session
-          (id, project_id, project_root, title, status, created_at, updated_at, data)
+          (id, project_id, working_directory, title, status, created_at, updated_at, data)
          VALUES (?, ?, ?, ?, 'active', ?, ?, '{}')`,
       )
       .run("session_1", "project_1", "/workspace", "Test", now, now);
@@ -197,7 +197,7 @@ describe("DatabasePromptSubmissionStore", () => {
     getDatabase()
       .prepare(
         `INSERT INTO session
-          (id, project_id, project_root, title, status, created_at, updated_at, data)
+          (id, project_id, working_directory, title, status, created_at, updated_at, data)
          VALUES (?, ?, ?, ?, 'active', ?, ?, '{}')`,
       )
       .run("session_2", "project_2", "/workspace-2", "Test 2", now, now);

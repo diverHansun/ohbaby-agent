@@ -66,7 +66,7 @@ function createSessionManager(): {
         isSubagent: options.parentId !== undefined,
         parentId: options.parentId,
         projectId: "project",
-        projectRoot: projectDirectory,
+        workingDirectory: projectDirectory,
         stats: { messageCount: 0 },
         status: "active",
         title: options.title ?? "Session",

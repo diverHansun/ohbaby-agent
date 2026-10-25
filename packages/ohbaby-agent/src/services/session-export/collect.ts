@@ -230,7 +230,7 @@ export async function collectExportDocument(
       session: {
         id: session.id,
         title: session.title,
-        projectRoot: session.projectRoot,
+        projectRoot: session.workingDirectory,
         agent: session.agentName,
         status: session.status,
         createdAt: new Date(session.createdAt).toISOString(),

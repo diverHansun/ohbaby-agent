@@ -50,7 +50,7 @@ it.each([
       initDatabase({ dbPath });
       getDatabase()
         .prepare(
-          "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES ('s','p',?,'s','active',1,1,'{}')",
+          "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES ('s','p',?,'s','active',1,1,'{}')",
         )
         .run(root);
       closeDatabase();

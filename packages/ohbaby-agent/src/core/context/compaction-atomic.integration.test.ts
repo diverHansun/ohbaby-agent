@@ -49,7 +49,7 @@ function insertSession(sessionId: string): void {
   getDatabase()
     .prepare(
       `INSERT INTO ${schema.session.tableName}
-        (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+        (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(

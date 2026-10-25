@@ -10,20 +10,20 @@ export {
   createSessionManager,
 } from "./manager.js";
 export {
-  clearDefaultWorkspaceProjectBindings,
+  clearDefaultDirectoryWorkspaceBindings,
   createDatabaseSessionStore,
-  listKnownSessionProjectRoots,
+  listKnownSessionWorkingDirectories,
   readSessionRow,
-  writeSessionProjectBinding,
-  type SessionProjectBinding,
+  writeSessionWorkspaceBinding,
+  type SessionWorkspaceBinding,
 } from "./database-store.js";
 export {
-  SessionProjectMoveError,
-  commitSessionProjectMove,
-  planSessionProjectMove,
-  type SessionProjectMoveErrorCode,
-  type SessionProjectMovePlan,
-} from "./project-move.js";
+  SessionWorkspaceMoveError,
+  commitSessionWorkspaceMove,
+  planSessionWorkspaceMove,
+  type SessionWorkspaceMoveErrorCode,
+  type SessionWorkspaceMovePlan,
+} from "./workspace-move.js";
 export {
   GLOBAL_SESSION_PAGE_DEFAULT_LIMIT,
   GLOBAL_SESSION_PAGE_MAX_LIMIT,
@@ -54,16 +54,16 @@ export {
   generateSessionTitle,
 } from "./title-generator.js";
 export {
-  isSessionInProjectRoot,
-  isSessionProjectRootCaseInsensitivePlatform,
-  normalizeSessionProjectRoot,
-  resolveSessionProjectBinding,
-  sameSessionProjectRoot,
-  sessionTargetProjectRoot,
-  withSessionExecutionRoot,
-} from "./project-root.js";
+  isSessionInWorkingDirectory,
+  isSessionDirectoryCaseInsensitivePlatform,
+  normalizeSessionDirectory,
+  resolveSessionWorkspaceBinding,
+  sameSessionDirectory,
+  sessionTargetWorkingDirectory,
+  withSessionWorkingDirectory,
+} from "./working-directory.js";
 export type { GenerateSessionTitleInput } from "./title-generator.js";
-export type { SessionProjectRootCompareOptions } from "./project-root.js";
+export type { SessionDirectoryCompareOptions } from "./working-directory.js";
 export type {
   CreateSessionOptions,
   ListSessionOptions,

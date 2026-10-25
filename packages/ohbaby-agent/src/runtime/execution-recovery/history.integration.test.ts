@@ -25,7 +25,7 @@ it("preserves the real tool result committed by another SQLite connection after 
     initDatabase({ dbPath: path });
     getDatabase()
       .prepare(
-        "INSERT INTO session (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data) VALUES ('s', 'p', '/fixture', 'primary', 'fixture', 'active', 1, 1, 0, '{}')",
+        "INSERT INTO session (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data) VALUES ('s', 'p', '/fixture', 'primary', 'fixture', 'active', 1, 1, 0, '{}')",
       )
       .run();
     const manager = createMessageManager({

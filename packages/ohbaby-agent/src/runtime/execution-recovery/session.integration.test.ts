@@ -56,7 +56,7 @@ it("checks 6000 old terminal histories once on cold entry without no-op write tr
     initDatabase({ dbPath: join(root, "facts.db") });
     const db = getDatabase();
     db.prepare(
-      "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES ('s','p',?,'s','active',1,1,'{}')",
+      "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES ('s','p',?,'s','active',1,1,'{}')",
     ).run(root);
     const insert = db.prepare(
       "INSERT INTO run_ledger(run_id,session_id,trigger,status,created_at,started_at,ended_at,inputs_closed_at,inputs_close_reason,owner_id,owner_pid) VALUES (?,'s','user',?,1,2,3,3,?,'dead-owner',2147483647)",
@@ -104,7 +104,7 @@ it.each(["succeeded", "failed", "cancelled"] as const)(
       initDatabase({ dbPath: join(root, "facts.db") });
       getDatabase()
         .prepare(
-          "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES ('s','p',?,'s','active',1,1,'{}')",
+          "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES ('s','p',?,'s','active',1,1,'{}')",
         )
         .run(root);
       const f = recovery();
@@ -177,7 +177,7 @@ it("reopens a partially repaired recovery run and finishes its history despite a
     initDatabase({ dbPath });
     getDatabase()
       .prepare(
-        "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES ('s','p',?,'s','active',1,1,'{}')",
+        "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES ('s','p',?,'s','active',1,1,'{}')",
       )
       .run(root);
     const f = recovery();

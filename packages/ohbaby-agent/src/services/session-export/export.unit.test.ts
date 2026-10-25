@@ -18,7 +18,7 @@ function deps(id = "session_1760000000000_k3x9ab1"): ExportDependencies {
           id,
           title: "中文 👋",
           projectId: "p",
-          projectRoot: "/repo",
+          workingDirectory: "/repo",
           agentName: "build",
           status: "active",
           createdAt: 1,

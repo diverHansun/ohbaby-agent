@@ -19,11 +19,11 @@ export function toUiGlobalSession(session: CoreSession): UiGlobalSession {
     createdAt: new Date(session.createdAt).toISOString(),
     updatedAt: new Date(session.updatedAt).toISOString(),
     messageCount: session.stats.messageCount,
-    projectDirectory: session.projectDirectory ?? null,
-    workingDirectory: session.projectRoot,
-    ...(session.pendingProjectRoot === undefined
+    projectDirectory: session.workspaceDirectory ?? null,
+    workingDirectory: session.workingDirectory,
+    ...(session.pendingWorkingDirectory === undefined
       ? {}
-      : { pendingWorkingDirectory: session.pendingProjectRoot }),
+      : { pendingWorkingDirectory: session.pendingWorkingDirectory }),
   };
 }
 

@@ -38,7 +38,7 @@ function coreSession(input: {
     id: input.id,
     isSubagent: input.isSubagent ?? false,
     projectId: "project_repo",
-    projectRoot: input.projectRoot ?? "D:/repo",
+    workingDirectory: input.projectRoot ?? "D:/repo",
     stats: { messageCount: input.messageCount ?? 0 },
     status: "active",
     title: input.title ?? "New session",
@@ -186,7 +186,7 @@ describe("resolveSessionForNewPrompt", () => {
       listByProject() {
         return Promise.resolve([]);
       },
-      listByProjectRoot() {
+      listByWorkingDirectory() {
         return Promise.resolve([]);
       },
       update() {
@@ -235,7 +235,7 @@ describe("resolveSessionForNewPrompt", () => {
       listByProject() {
         return Promise.resolve([]);
       },
-      listByProjectRoot() {
+      listByWorkingDirectory() {
         return Promise.resolve([occupied, empty]);
       },
       update() {

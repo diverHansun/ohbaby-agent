@@ -56,7 +56,7 @@ describe("source recovery against SQLite", () => {
     for (const id of ["a", "b"])
       getDatabase()
         .prepare(
-          "INSERT INTO session (id, project_id, project_root, title, status, created_at, updated_at, data) VALUES (?, 'project', '/workspace', ?, 'active', 1, 1, '{}')",
+          "INSERT INTO session (id, project_id, working_directory, title, status, created_at, updated_at, data) VALUES (?, 'project', '/workspace', ?, 'active', 1, 1, '{}')",
         )
         .run(id, id);
     clock = 1000;
@@ -485,7 +485,7 @@ describe("source recovery against SQLite", () => {
       messages: [],
     }));
     const insertSession = db.prepare(
-      "INSERT INTO session (id, project_id, project_root, title, status, created_at, updated_at, data) VALUES (?, 'project', ?, ?, 'active', 1, 1, '{}')",
+      "INSERT INTO session (id, project_id, working_directory, title, status, created_at, updated_at, data) VALUES (?, 'project', ?, ?, 'active', 1, 1, '{}')",
     );
     const insertMessage = db.prepare(
       "INSERT INTO message (id, session_id, role, agent, created_at, updated_at, data) VALUES (?, ?, 'user', 'test', ?, ?, ?)",

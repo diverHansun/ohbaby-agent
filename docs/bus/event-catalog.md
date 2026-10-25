@@ -29,6 +29,6 @@ Bus is the internal domain event bus. This catalog records scope, required conte
 | tool-scheduler.status-changed | ToolScheduler | run | domain, tests | high | callId, toolName, timestamp | known-gap | no | Missing runId/sessionId/messageId; run stream owns visible tool events. |
 | tool-scheduler.execution-started | ToolScheduler | run | domain, tests | high | callId, toolName, timestamp | known-gap | no | Missing runId/sessionId/messageId; run stream owns visible tool events. |
 | tool-scheduler.execution-completed | ToolScheduler | run | domain, tests | high | callId, toolName, timestamp | known-gap | no | Missing runId/sessionId/messageId; run stream owns visible tool events. |
-| session.created | Session | project | domain, tests | low | session.id, session.projectRoot | complete | no | Domain event; UI session projection remains separate. |
-| session.updated | Session | project | domain, tests | low | session.id, session.projectRoot | complete | no | Domain event; UI session projection remains separate. |
+| session.created | Session | project | domain, tests | low | session.id, session.workingDirectory | complete | no | Domain event; UI session projection remains separate. |
+| session.updated | Session | project | domain, tests | low | session.id, session.workingDirectory | complete | no | Domain event; UI session projection remains separate. |
 | session.removed | Session | project | domain, tests | low | sessionId | complete | no | Domain event; UI session projection remains separate. |

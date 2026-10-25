@@ -7,7 +7,7 @@ import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
 } from "ohbaby-llm";
-import { ensureDefaultWorkspaceDirectory } from "../paths/index.js";
+import { ensureDefaultDirectory } from "../paths/index.js";
 import {
   closeDatabase,
   getDatabase,
@@ -15,9 +15,9 @@ import {
 } from "../services/database/index.js";
 import { INITIAL_MIGRATIONS } from "../services/database/migrations.js";
 import {
-  commitSessionProjectMove,
+  commitSessionWorkspaceMove,
   getGlobalSession,
-  planSessionProjectMove,
+  planSessionWorkspaceMove,
 } from "../services/session/index.js";
 import {
   createPersistentUiBackendClient,
@@ -129,8 +129,8 @@ describe("moving a session between workspaces", () => {
       sessionId: "session_move",
     });
     await clientA.waitForPrompt(first.promptId);
-    await commitSessionProjectMove(
-      planSessionProjectMove("session_move", workspaceB),
+    await commitSessionWorkspaceMove(
+      planSessionWorkspaceMove("session_move", workspaceB),
     );
 
     await expect(
@@ -151,11 +151,11 @@ describe("moving a session between workspaces", () => {
 
     expect(getGlobalSession("session_move")).toMatchObject({
       id: "session_move",
-      projectRoot: workspaceB,
-      projectDirectory: workspaceB,
+      workingDirectory: workspaceB,
+      workspaceDirectory: workspaceB,
     });
     expect(
-      getGlobalSession("session_move")?.pendingProjectRoot,
+      getGlobalSession("session_move")?.pendingWorkingDirectory,
     ).toBeUndefined();
     const turnInB = logB.turns.at(-1) ?? "";
     expect(turnInB).toContain("hello from a");
@@ -190,18 +190,20 @@ describe("moving a session between workspaces", () => {
         sessionId: "session_queue",
       });
 
-      const plan = planSessionProjectMove("session_queue", workspaceB);
+      const plan = planSessionWorkspaceMove("session_queue", workspaceB);
       expect(plan.needsQueueHandover).toBe(true);
-      await clientB.adoptSessionProjectMove(plan);
+      await clientB.adoptSessionWorkspaceMove(plan);
       expect(getGlobalSession("session_queue")).toMatchObject({
-        projectRoot: workspaceA,
-        pendingProjectRoot: workspaceB,
+        workingDirectory: workspaceA,
+        pendingWorkingDirectory: workspaceB,
       });
 
       // The target must not start while the original turn still runs.
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(logB.turns).toHaveLength(0);
-      expect(getGlobalSession("session_queue")?.projectRoot).toBe(workspaceA);
+      expect(getGlobalSession("session_queue")?.workingDirectory).toBe(
+        workspaceA,
+      );
       // Viewing follows membership: the running workspace and the target
       // both open the session; only new turns are routed to the target.
       await expect(
@@ -229,7 +231,7 @@ describe("moving a session between workspaces", () => {
       ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
       expect(logA.turns).toHaveLength(1);
       expect(getGlobalSession("session_queue")).toMatchObject({
-        projectRoot: workspaceB,
+        workingDirectory: workspaceB,
       });
       // The target re-read the turn that finished in A before running its own.
       if (!clientB.getSessionView)
@@ -254,11 +256,11 @@ describe("moving a session between workspaces", () => {
   });
 
   it("upgrades sessions that ran in the default workspace before the binding existed", async () => {
-    const defaultWorkspace = await ensureDefaultWorkspaceDirectory();
+    const defaultWorkspace = await ensureDefaultDirectory();
     initDatabase({
       dbPath: join(root, "agent.db"),
       migrations: INITIAL_MIGRATIONS.filter(
-        (migration) => migration.version !== "025_session_project_binding",
+        (migration) => migration.version < "025",
       ),
     });
     const insert = getDatabase().prepare(
@@ -272,10 +274,10 @@ describe("moving a session between workspaces", () => {
     createClient(workspaceA, createLLM({ log: { turns: [] } }));
 
     expect(getGlobalSession("legacy_chat")).toMatchObject({
-      projectRoot: defaultWorkspace,
+      workingDirectory: defaultWorkspace,
     });
-    expect(getGlobalSession("legacy_chat")?.projectDirectory).toBeUndefined();
-    expect(getGlobalSession("legacy_project")?.projectDirectory).toBe(
+    expect(getGlobalSession("legacy_chat")?.workspaceDirectory).toBeUndefined();
+    expect(getGlobalSession("legacy_project")?.workspaceDirectory).toBe(
       workspaceA,
     );
   });

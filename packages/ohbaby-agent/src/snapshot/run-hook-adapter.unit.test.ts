@@ -141,7 +141,7 @@ describe("createSnapshotHookExecutor", () => {
         id: "session_1",
         isSubagent: false,
         projectId: "project_1",
-        projectRoot: workdir,
+        workingDirectory: workdir,
         stats: { messageCount: 0 },
         status: "active",
         title: "Snapshot session",

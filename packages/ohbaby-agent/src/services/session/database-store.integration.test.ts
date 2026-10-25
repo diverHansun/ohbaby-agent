@@ -8,7 +8,7 @@ import { closeDatabase, initDatabase } from "../database/index.js";
 import { DuplicateSessionError, SessionNotFoundError } from "./errors.js";
 import {
   createDatabaseSessionStore,
-  listKnownSessionProjectRoots,
+  listKnownSessionWorkingDirectories,
 } from "./database-store.js";
 import type { Session, SessionStore } from "./types.js";
 
@@ -18,7 +18,7 @@ function createSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "session_1",
     projectId: "project_1",
-    projectRoot: "D:/repo",
+    workingDirectory: "D:/repo",
     title: "Session",
     agentName: "default",
     createdAt: 1_000,
@@ -68,7 +68,7 @@ describe("createDatabaseSessionStore", () => {
 
     await expect(store.get("session_1")).resolves.toMatchObject({
       title: "Session",
-      projectRoot: "D:/repo",
+      workingDirectory: "D:/repo",
     });
   });
 
@@ -114,7 +114,7 @@ describe("createDatabaseSessionStore", () => {
       createSession({
         id: "other_project",
         projectId: "project_2",
-        projectRoot: "D:/other",
+        workingDirectory: "D:/other",
         updatedAt: 2_000,
       }),
     );
@@ -139,19 +139,19 @@ describe("createDatabaseSessionStore", () => {
       createSession({
         id: "same_root_other_project",
         projectId: "legacy_project",
-        projectRoot: "D:\\repo\\",
+        workingDirectory: "D:\\repo\\",
         updatedAt: 2_500,
       }),
     );
     await expect(
-      store.listByProjectRoot("D:/repo", { status: "active" }),
+      store.listByWorkingDirectory("D:/repo", { status: "active" }),
     ).resolves.toMatchObject([
       { id: "child_1" },
       { id: "same_root_other_project" },
       { id: "old_active" },
     ]);
     await expect(
-      store.listByProjectRoot("D:/repo", { status: "active", limit: 2 }),
+      store.listByWorkingDirectory("D:/repo", { status: "active", limit: 2 }),
     ).resolves.toMatchObject([
       { id: "child_1" },
       { id: "same_root_other_project" },
@@ -170,26 +170,29 @@ describe("createDatabaseSessionStore", () => {
     await store.insert(
       createSession({
         id: "repo_old",
-        projectRoot: "D:/repo",
+        workingDirectory: "D:/repo",
         updatedAt: 1_000,
       }),
     );
     await store.insert(
       createSession({
         id: "other_new",
-        projectRoot: "D:/other",
+        workingDirectory: "D:/other",
         updatedAt: 3_000,
       }),
     );
     await store.insert(
       createSession({
         id: "repo_new",
-        projectRoot: "D:\\repo\\",
+        workingDirectory: "D:\\repo\\",
         updatedAt: 2_000,
       }),
     );
 
-    expect(listKnownSessionProjectRoots()).toEqual(["D:/other", "D:\\repo\\"]);
+    expect(listKnownSessionWorkingDirectories()).toEqual([
+      "D:/other",
+      "D:\\repo\\",
+    ]);
   });
 
   it("rolls back transaction writes when an operation fails", async () => {
@@ -214,7 +217,7 @@ describe("createDatabaseSessionStore", () => {
         createSession({
           id: "same_root_other_project",
           projectId: "legacy_project",
-          projectRoot: "D:\\repo\\",
+          workingDirectory: "D:\\repo\\",
           updatedAt: 2_000,
         }),
       );
@@ -222,13 +225,13 @@ describe("createDatabaseSessionStore", () => {
         createSession({
           id: "other_project",
           projectId: "project_2",
-          projectRoot: "D:/other",
+          workingDirectory: "D:/other",
           updatedAt: 3_000,
         }),
       );
 
       await expect(
-        transaction.listByProjectRoot("D:/repo", {
+        transaction.listByWorkingDirectory("D:/repo", {
           status: "active",
           limit: 1,
         }),

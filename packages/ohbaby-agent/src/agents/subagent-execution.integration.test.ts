@@ -26,7 +26,7 @@ function fixture(): {
 } {
   const parent = {
     id: "parent",
-    projectRoot: "/repo",
+    workingDirectory: "/repo",
     isSubagent: false,
   } as Session;
   const child = {
@@ -299,7 +299,7 @@ describe("accepted subagent execution host", () => {
       id: "child",
       parentId: "parent",
       isSubagent: true,
-      projectRoot: "/repo",
+      workingDirectory: "/repo",
     } as Session);
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(f.turn).not.toHaveBeenCalled();
@@ -329,7 +329,7 @@ describe("accepted subagent execution host", () => {
       id: "child",
       parentId: "parent",
       isSubagent: true,
-      projectRoot: "/repo",
+      workingDirectory: "/repo",
     } as Session);
     await vi.waitFor(async () => {
       expect((await f.executionStore.listByRootRun("root_A"))[0].status).toBe(

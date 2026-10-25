@@ -2,7 +2,7 @@ import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
 import type { ReasoningConfig } from "ohbaby-llm";
 import type { AgentInstanceFactory } from "../core/agents/index.js";
 import {
-  sessionTargetProjectRoot,
+  sessionTargetWorkingDirectory,
   type Session,
   type SessionManager,
 } from "../services/session/index.js";
@@ -51,7 +51,7 @@ export class AgentService {
       maxSteps: params.maxSteps ?? runtimeAgent.config.maxSteps,
       modelId: this.options.modelId,
       // A pending project change takes effect with this turn.
-      projectRoot: sessionTargetProjectRoot(session),
+      projectRoot: sessionTargetWorkingDirectory(session),
       sessionId: session.id,
       type: "primary",
     });

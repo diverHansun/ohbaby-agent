@@ -35,7 +35,7 @@ import type {
 } from "../../runtime/run-ledger/index.js";
 import {
   resolveSessionDisplayTitle,
-  isSessionInProjectRoot,
+  isSessionInWorkingDirectory,
   type Session,
   type SessionManager,
 } from "../../services/session/index.js";
@@ -56,7 +56,7 @@ const HIDDEN_TRANSCRIPT_TOOLS = new Set([
 export interface PersistentUiStateStoreOptions {
   readonly sessionManager: Pick<
     SessionManager,
-    "get" | "listByProjectRoot" | "update"
+    "get" | "listByWorkingDirectory" | "update"
   >;
   readonly messageManager: Pick<MessageManager, "listBySession">;
   readonly runLedger: RunLedger;
@@ -297,7 +297,7 @@ function sessionToUiSession(input: {
     messages: input.messages
       .map(messageToUiMessage)
       .filter((message): message is UiMessage => message !== undefined),
-    projectRoot: input.session.projectRoot,
+    projectRoot: input.session.workingDirectory,
     reasoning: input.session.reasoning,
     title: resolveSessionDisplayTitle({
       messages: input.messages,
@@ -447,7 +447,7 @@ export function createPersistentUiStateStore(
 
   function isInCurrentProject(session: Session, projectRoot: string): boolean {
     // A session moving here is visible before its first turn in this workspace.
-    return isSessionInProjectRoot(session, projectRoot);
+    return isSessionInWorkingDirectory(session, projectRoot);
   }
 
   async function readUiSession(session: Session): Promise<UiSession> {
@@ -476,7 +476,7 @@ export function createPersistentUiStateStore(
     const selectedActiveSessionId = activeSessionId;
     const recentSessions = (
       await withSessionTransactionRetry(() =>
-        options.sessionManager.listByProjectRoot(projectRoot, {
+        options.sessionManager.listByWorkingDirectory(projectRoot, {
           limit: sessionLimit,
           status: "active",
         }),
@@ -546,7 +546,7 @@ export function createPersistentUiStateStore(
       const projectRoot = await currentProjectRoot();
       const sessions = (
         await withSessionTransactionRetry(() =>
-          options.sessionManager.listByProjectRoot(projectRoot, {
+          options.sessionManager.listByWorkingDirectory(projectRoot, {
             status: "active",
           }),
         )
@@ -554,7 +554,7 @@ export function createPersistentUiStateStore(
       return sessions.map((session) => ({
         id: session.id,
         title: session.title,
-        projectRoot: session.projectRoot,
+        projectRoot: session.workingDirectory,
         createdAt: new Date(session.createdAt).toISOString(),
         updatedAt: new Date(session.updatedAt).toISOString(),
       }));

@@ -1922,7 +1922,7 @@ describe("createPersistentUiBackendClient", () => {
       getDatabase()
         .prepare(
           `INSERT INTO ${schema.session.tableName}
-           (id, project_id, project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
+           (id, project_id, working_directory, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
@@ -2358,7 +2358,7 @@ describe("createPersistentUiBackendClient", () => {
           // The recovery contract validates the full child Run identity.
           getDatabase()
             .prepare(
-              `INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) SELECT ?,project_id,project_root,'child','active',1,1,'{}' FROM session WHERE id=?`,
+              `INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) SELECT ?,project_id,working_directory,'child','active',1,1,'{}' FROM session WHERE id=?`,
             )
             .run("child-" + id, sessionId);
           await ledger.createPending({

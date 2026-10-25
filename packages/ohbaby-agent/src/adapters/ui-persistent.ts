@@ -10,7 +10,7 @@ import {
 } from "../runtime/shutdown.js";
 import { createSessionExecutionRecovery } from "../runtime/execution-recovery/session.js";
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
@@ -23,7 +23,7 @@ import {
   createMessageManager,
 } from "../core/message/index.js";
 import { Project } from "../project/index.js";
-import { resolveDefaultWorkspaceDirectory } from "../paths/index.js";
+import { resolveDefaultDirectory, resolveOhbabyHome } from "../paths/index.js";
 import {
   closeDatabase,
   getDatabase,
@@ -31,11 +31,11 @@ import {
   type DatabaseConnection,
 } from "../services/database/index.js";
 import {
-  clearDefaultWorkspaceProjectBindings,
+  clearDefaultDirectoryWorkspaceBindings,
   createDatabaseSessionStore,
   createSessionManager,
-  writeSessionProjectBinding,
-  type SessionProjectMovePlan,
+  writeSessionWorkspaceBinding,
+  type SessionWorkspaceMovePlan,
 } from "../services/session/index.js";
 import { createSqliteGoalPersistence } from "../goals/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
@@ -113,14 +113,14 @@ export interface PersistentUiBackendClient
    * Commits a project change whose queued prompts this workspace takes over:
    * the binding and the queue move in one write, then the queue is re-read.
    */
-  adoptSessionProjectMove(plan: SessionProjectMovePlan): Promise<void>;
+  adoptSessionWorkspaceMove(plan: SessionWorkspaceMovePlan): Promise<void>;
   closeAdmission(): void;
   dispose(options?: ShutdownOptions): Promise<CleanupResult>;
 }
 
 /** Stored roots may use either the resolved or the real path of the default workspace. */
-function defaultWorkspaceForms(): readonly string[] {
-  const directory = resolveDefaultWorkspaceDirectory();
+function defaultDirectoryForms(): readonly string[] {
+  const directory = resolveDefaultDirectory();
   try {
     return [directory, realpathSync.native(directory)];
   } catch {
@@ -238,7 +238,7 @@ function createSnapshotExecutor(input: {
 function withStartupRecovery(
   client: InProcessUiBackendClient,
   recovery: Promise<unknown>,
-): Omit<PersistentUiBackendClient, "adoptSessionProjectMove"> {
+): Omit<PersistentUiBackendClient, "adoptSessionWorkspaceMove"> {
   let recovered = false;
   let startupFailureReported = false;
   const startup = recovery.then(() => {
@@ -643,7 +643,7 @@ async function resolvePersistentStartupSession(input: {
     return;
   }
   const candidates = (
-    await input.sessionManager.listByProjectRoot(input.projectRoot, {
+    await input.sessionManager.listByWorkingDirectory(input.projectRoot, {
       status: "active",
     })
   ).map((session) => ({
@@ -676,13 +676,40 @@ function resolveStartupSessionMode(
   return { type: "fresh" };
 }
 
+/** Only other daemon processes can block this process's offline upgrade. */
+function knownDaemonWriterPids(): number[] {
+  try {
+    const raw = readFileSync(
+      path.join(resolveOhbabyHome(), "server", "daemon.pid"),
+      "utf8",
+    );
+    const record: unknown = JSON.parse(raw);
+    const pid =
+      typeof record === "object" && record !== null && "pid" in record
+        ? record.pid
+        : undefined;
+    return typeof pid === "number" &&
+      Number.isSafeInteger(pid) &&
+      pid > 0 &&
+      pid !== process.pid
+      ? [pid]
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function createPersistentUiBackendClient(
   options: PersistentUiBackendOptions = {},
 ): PersistentUiBackendClient {
   const now = numericNow(options.now);
-  initDatabase({ dbPath: options.dbPath, now });
+  initDatabase({
+    dbPath: options.dbPath,
+    now,
+    knownWriterPids: knownDaemonWriterPids(),
+  });
   const db = getDatabase();
-  clearDefaultWorkspaceProjectBindings(db, defaultWorkspaceForms());
+  clearDefaultDirectoryWorkspaceBindings(db, defaultDirectoryForms());
   const bus = options.bus ?? createBus();
   const messageManager = createMessageManager({
     bus,
@@ -763,9 +790,12 @@ export function createPersistentUiBackendClient(
     }
   }
   const startupReady = Promise.resolve().then(async () => {
-    const sessions = await sessionManager.listByProjectRoot(await projectRoot, {
-      status: "active",
-    });
+    const sessions = await sessionManager.listByWorkingDirectory(
+      await projectRoot,
+      {
+        status: "active",
+      },
+    );
     // Recover roots independently. Explicit entry retries failed scopes; reads stay pure.
     await Promise.allSettled(
       sessions
@@ -820,14 +850,16 @@ export function createPersistentUiBackendClient(
   });
   const client = withStartupRecovery(inProcessClient, startupReady);
   return Object.assign(client, {
-    async adoptSessionProjectMove(plan: SessionProjectMovePlan): Promise<void> {
+    async adoptSessionWorkspaceMove(
+      plan: SessionWorkspaceMovePlan,
+    ): Promise<void> {
       // Startup recovery owns this scope's queue until it has finished.
       await startupReady;
       await promptSubmissionStore.adoptQueuedSession({
         sessionId: plan.sessionId,
         scopeKey: promptScopeKey,
         beforeAdopt: () => {
-          writeSessionProjectBinding(db, plan.sessionId, plan.binding, now());
+          writeSessionWorkspaceBinding(db, plan.sessionId, plan.binding, now());
         },
       });
       inProcessClient.wakePromptQueue();

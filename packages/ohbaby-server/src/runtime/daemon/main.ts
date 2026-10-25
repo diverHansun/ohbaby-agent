@@ -4,13 +4,13 @@ import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,
   getAgentPackageVersion,
-  commitSessionProjectMove,
+  commitSessionWorkspaceMove,
   getGlobalSession,
-  isDefaultWorkspaceDirectory,
+  isDefaultDirectory,
   listGlobalSessions,
-  listKnownSessionProjectRoots,
+  listKnownSessionWorkingDirectories,
   McpManager,
-  planSessionProjectMove,
+  planSessionWorkspaceMove,
   searchGlobalSessions,
   NOOP_LOGGER,
   beginDatabaseShutdown,
@@ -464,7 +464,7 @@ async function restoreWorkspaceInRunningDaemon(input: {
   readonly scopeRoot: string;
   readonly stateFile: JsonDaemonStateFile;
 }): Promise<void> {
-  if (isDefaultWorkspaceDirectory(input.scopeRoot)) return;
+  if (isDefaultDirectory(input.scopeRoot)) return;
   const state = await input.stateFile.read();
   const url = state === undefined ? undefined : urlFromState(state);
   if (!url || !state?.authToken) {
@@ -538,22 +538,22 @@ async function startFreshDaemon(input: {
       const backend = createBackend(input.scopeRoot);
       const releaseDatabase = retainLocalDaemonDatabase();
       const workspaceRegistry = createWorkspaceRegistryIfAvailable();
-      if (!isDefaultWorkspaceDirectory(input.scopeRoot))
+      if (!isDefaultDirectory(input.scopeRoot))
         await workspaceRegistry?.open(input.scopeRoot);
       server = createDaemonHttpServer({
         authToken: input.authToken,
         backend,
         createWorkspaceBackend: createBackend,
         host: input.options.host ?? DEFAULT_HOST,
-        listKnownWorkspaceScopes: () => listKnownSessionProjectRoots(),
+        listKnownWorkspaceScopes: () => listKnownSessionWorkingDirectories(),
         logger,
         sessionCatalog: {
           list: (query) => listGlobalSessions(query),
           search: (query) => searchGlobalSessions(query),
           get: (sessionId) => getGlobalSession(sessionId),
           planMove: (sessionId, projectDirectory) =>
-            planSessionProjectMove(sessionId, projectDirectory),
-          commitMove: (plan) => commitSessionProjectMove(plan),
+            planSessionWorkspaceMove(sessionId, projectDirectory),
+          commitMove: (plan) => commitSessionWorkspaceMove(plan),
         },
         workspaceRegistry,
         onClientConnected: (clientId) => {

@@ -23,7 +23,7 @@ const parent: Session = {
   id: "parent_1",
   isSubagent: false,
   projectId: "project_1",
-  projectRoot: "/repo",
+  workingDirectory: "/repo",
   stats: { messageCount: 0 },
   status: "active",
   title: "Parent",

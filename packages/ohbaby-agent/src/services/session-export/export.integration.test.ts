@@ -30,7 +30,7 @@ const now = new Date("2026-10-17T07:30:12Z");
 const session: Session = {
   id: "session_archived",
   projectId: "p",
-  projectRoot: "/archived-project",
+  workingDirectory: "/archived-project",
   title: "中文历史",
   agentName: "build",
   status: "archived",

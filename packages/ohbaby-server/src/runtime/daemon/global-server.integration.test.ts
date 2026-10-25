@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   CoreSession,
-  SessionProjectMovePlan,
+  SessionWorkspaceMovePlan,
   WorkspaceRegistryEntry,
   WorkspaceRegistryStore,
 } from "ohbaby-agent";
@@ -18,10 +18,10 @@ import { createDaemonHttpServer, type WorkspaceBackend } from "./server.js";
 
 function createBackend(
   dispose = vi.fn(),
-  adoptSessionProjectMove?: WorkspaceBackend["adoptSessionProjectMove"],
+  adoptSessionWorkspaceMove?: WorkspaceBackend["adoptSessionWorkspaceMove"],
 ): WorkspaceBackend {
   return {
-    ...(adoptSessionProjectMove ? { adoptSessionProjectMove } : {}),
+    ...(adoptSessionWorkspaceMove ? { adoptSessionWorkspaceMove } : {}),
     dispose,
     getSessionIndex: vi.fn(() => Promise.resolve([])),
     getPermissionSnapshot: vi.fn(
@@ -620,8 +620,8 @@ function coreSession(overrides: Partial<CoreSession> = {}): CoreSession {
   return {
     id: "s1",
     projectId: "global",
-    projectRoot: "/repo/a",
-    projectDirectory: "/repo/a",
+    workingDirectory: "/repo/a",
+    workspaceDirectory: "/repo/a",
     title: "First",
     agentName: "default",
     createdAt: 0,
@@ -718,7 +718,10 @@ describe("global daemon session routes", () => {
     const adopt = vi.fn(() => Promise.resolve());
     const list = vi.fn(() => ({
       sessions: [
-        coreSession({ pendingProjectRoot: repoB, projectDirectory: repoB }),
+        coreSession({
+          pendingWorkingDirectory: repoB,
+          workspaceDirectory: repoB,
+        }),
       ],
       nextCursor: "next",
     }));
@@ -736,12 +739,15 @@ describe("global daemon session routes", () => {
       (
         sessionId: string,
         projectDirectory: string | null,
-      ): SessionProjectMovePlan => ({
+      ): SessionWorkspaceMovePlan => ({
         sessionId,
         binding:
           projectDirectory === null
             ? {}
-            : { projectDirectory, pendingProjectRoot: projectDirectory },
+            : {
+                workspaceDirectory: projectDirectory,
+                pendingWorkingDirectory: projectDirectory,
+              },
         queueRoot: projectDirectory ?? repoA,
         needsQueueHandover: projectDirectory !== null,
       }),
@@ -750,10 +756,13 @@ describe("global daemon session routes", () => {
       list,
       search,
       get: () =>
-        coreSession({ projectDirectory: repoB, pendingProjectRoot: repoB }),
+        coreSession({
+          workspaceDirectory: repoB,
+          pendingWorkingDirectory: repoB,
+        }),
       planMove,
       commitMove: () =>
-        Promise.resolve(coreSession({ projectDirectory: undefined })),
+        Promise.resolve(coreSession({ workspaceDirectory: undefined })),
     };
     const server = createDaemonHttpServer({
       authToken: "token",

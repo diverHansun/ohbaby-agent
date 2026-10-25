@@ -107,11 +107,11 @@ class RejectingInsertStore implements SessionStore {
     return this.inner.listByProject(projectId, options);
   }
 
-  listByProjectRoot(
-    projectRoot: string,
-    options?: Parameters<SessionStore["listByProjectRoot"]>[1],
+  listByWorkingDirectory(
+    workingDirectory: string,
+    options?: Parameters<SessionStore["listByWorkingDirectory"]>[1],
   ): Promise<Session[]> {
-    return this.inner.listByProjectRoot(projectRoot, options);
+    return this.inner.listByWorkingDirectory(workingDirectory, options);
   }
 
   listChildren(
@@ -132,11 +132,11 @@ class RejectingInsertStore implements SessionStore {
     return this.inner.update(sessionId, patch);
   }
 
-  recordExecutionRoot(
+  recordWorkingDirectory(
     sessionId: string,
-    input: Parameters<SessionStore["recordExecutionRoot"]>[1],
+    input: Parameters<SessionStore["recordWorkingDirectory"]>[1],
   ): Promise<Session> {
-    return this.inner.recordExecutionRoot(sessionId, input);
+    return this.inner.recordWorkingDirectory(sessionId, input);
   }
 
   remove(sessionId: string): Promise<void> {
@@ -162,8 +162,8 @@ describe("SessionManager", () => {
     expect(session).toEqual({
       id: "session_test_1",
       projectId: "project:D:/repo",
-      projectRoot: "root:D:/repo",
-      projectDirectory: "root:D:/repo",
+      workingDirectory: "root:D:/repo",
+      workspaceDirectory: "root:D:/repo",
       title: "Implement daemon",
       agentName: "coder",
       createdAt: 1_000,
@@ -193,15 +193,15 @@ describe("SessionManager", () => {
     const session = await manager.ensureRoot({
       agentName: "build",
       id: "root_session",
-      projectRoot: "D:/repo",
+      workingDirectory: "D:/repo",
       title: "Root",
     });
 
     expect(session).toEqual({
       id: "root_session",
       projectId: "project:D:/repo",
-      projectRoot: "root:D:/repo",
-      projectDirectory: "root:D:/repo",
+      workingDirectory: "root:D:/repo",
+      workspaceDirectory: "root:D:/repo",
       title: "Root",
       agentName: "build",
       createdAt: 1_000,
@@ -227,7 +227,7 @@ describe("SessionManager", () => {
     const session = await manager.ensureRoot({
       agentName: "research",
       id: "root_session",
-      projectRoot: "D:/other",
+      workingDirectory: "D:/other",
       title: "Changed",
     });
 
@@ -251,7 +251,7 @@ describe("SessionManager", () => {
     expect(child).toMatchObject({
       id: "session_test_2",
       projectId: parent.projectId,
-      projectRoot: parent.projectRoot,
+      workingDirectory: parent.workingDirectory,
       parentId: parent.id,
       title: "Explore",
       agentName: "explorer",

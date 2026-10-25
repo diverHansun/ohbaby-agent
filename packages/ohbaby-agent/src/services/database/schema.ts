@@ -9,9 +9,9 @@ export const schema = {
   session: table("session", {
     id: "id",
     projectId: "project_id",
-    projectRoot: "project_root",
-    projectDirectory: "project_directory",
-    pendingProjectRoot: "pending_project_root",
+    workingDirectory: "working_directory",
+    workspaceDirectory: "workspace_directory",
+    pendingWorkingDirectory: "pending_working_directory",
     agent: "agent",
     parentId: "parent_id",
     title: "title",

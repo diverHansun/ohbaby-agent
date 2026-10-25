@@ -59,7 +59,7 @@ for (const backend of ["memory", "sqlite"] as const)
         initDatabase({ dbPath: join(dir, "agent.db") });
         getDatabase()
           .prepare(
-            "INSERT INTO session(id,project_id,project_root,agent,title,status,created_at,updated_at,message_count,data) VALUES ('session','project','/repo','default','test','active',1,1,0,'{}')",
+            "INSERT INTO session(id,project_id,working_directory,agent,title,status,created_at,updated_at,message_count,data) VALUES ('session','project','/repo','default','test','active',1,1,0,'{}')",
           )
           .run();
       }

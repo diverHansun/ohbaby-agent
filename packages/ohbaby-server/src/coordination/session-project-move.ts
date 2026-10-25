@@ -1,8 +1,8 @@
 import {
-  SessionProjectMoveError,
+  SessionWorkspaceMoveError,
   type CoreSession,
   type GlobalSessionPage,
-  type SessionProjectMovePlan,
+  type SessionWorkspaceMovePlan,
   type SessionSearchPage,
 } from "ohbaby-agent";
 
@@ -21,13 +21,13 @@ export interface GlobalSessionCatalog {
   planMove(
     sessionId: string,
     projectDirectory: string | null,
-  ): SessionProjectMovePlan;
-  commitMove(plan: SessionProjectMovePlan): Promise<CoreSession>;
+  ): SessionWorkspaceMovePlan;
+  commitMove(plan: SessionWorkspaceMovePlan): Promise<CoreSession>;
 }
 
 /** A workspace that can take over a moved session's queued prompts. */
 export interface SessionQueueOwner {
-  adoptSessionProjectMove?(plan: SessionProjectMovePlan): Promise<void>;
+  adoptSessionWorkspaceMove?(plan: SessionWorkspaceMovePlan): Promise<void>;
 }
 
 export interface SessionProjectMoveDeps {
@@ -74,13 +74,13 @@ export async function moveSessionProject(
     return deps.catalog.commitMove(plan);
   }
   const owner = await deps.loadQueueOwner(plan.queueRoot);
-  if (!owner?.adoptSessionProjectMove) {
+  if (!owner?.adoptSessionWorkspaceMove) {
     throw new Error("Workspace cannot take over queued prompts");
   }
-  await owner.adoptSessionProjectMove(plan);
+  await owner.adoptSessionWorkspaceMove(plan);
   const session = deps.catalog.get(sessionId);
   if (!session) {
-    throw new SessionProjectMoveError(
+    throw new SessionWorkspaceMoveError(
       "SESSION_NOT_FOUND",
       `Session not found: ${sessionId}`,
     );

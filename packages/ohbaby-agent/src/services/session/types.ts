@@ -13,11 +13,11 @@ export interface Session {
   readonly id: string;
   readonly projectId: string;
   /** Execution directory used by the current or most recent turn. */
-  readonly projectRoot: string;
-  /** Sidebar project; absent means the session has no project. */
-  readonly projectDirectory?: string;
-  /** Execution directory for the next turn after a project change. */
-  readonly pendingProjectRoot?: string;
+  readonly workingDirectory: string;
+  /** Sidebar workspace; absent means the session has no workspace. */
+  readonly workspaceDirectory?: string;
+  /** Execution directory for the next turn after a workspace change. */
+  readonly pendingWorkingDirectory?: string;
   readonly title: string;
   readonly agentName: string;
   readonly createdAt: number;
@@ -61,9 +61,9 @@ export interface UpdateSessionPatch {
   readonly agentName?: string;
 }
 
-export interface SessionExecutionRootInput {
+export interface SessionWorkingDirectoryInput {
   readonly projectId: string;
-  readonly projectRoot: string;
+  readonly workingDirectory: string;
   readonly updatedAt: number;
 }
 
@@ -79,24 +79,21 @@ export interface RemoveSessionOptions {
 export interface EnsureRootSessionInput {
   readonly id: string;
   readonly agentName: string;
-  readonly projectRoot: string;
+  readonly workingDirectory: string;
   readonly title?: string;
 }
 
 export interface SessionManager {
   ensureRoot(input: EnsureRootSessionInput): Promise<Session>;
-  create(
-    projectDirectory: string,
-    options?: CreateSessionOptions,
-  ): Promise<Session>;
-  findReusableEmptyPrimary(projectDirectory: string): Promise<Session | null>;
+  create(directory: string, options?: CreateSessionOptions): Promise<Session>;
+  findReusableEmptyPrimary(directory: string): Promise<Session | null>;
   get(sessionId: string): Promise<Session | null>;
   listByProject(
     projectId: string,
     options?: ListSessionOptions,
   ): Promise<Session[]>;
-  listByProjectRoot(
-    projectRoot: string,
+  listByWorkingDirectory(
+    workingDirectory: string,
     options?: ListSessionOptions,
   ): Promise<Session[]>;
   listChildren(
@@ -115,7 +112,10 @@ export interface SessionManager {
    * Records the directory a starting turn runs in. A pending change to that
    * directory is now applied; a newer pending target is kept.
    */
-  recordExecutionRoot(sessionId: string, projectRoot: string): Promise<Session>;
+  recordWorkingDirectory(
+    sessionId: string,
+    workingDirectory: string,
+  ): Promise<Session>;
   remove(sessionId: string, options?: RemoveSessionOptions): Promise<void>;
 }
 
@@ -126,8 +126,8 @@ export interface SessionStore {
     projectId: string,
     options?: ListSessionOptions,
   ): Promise<Session[]>;
-  listByProjectRoot(
-    projectRoot: string,
+  listByWorkingDirectory(
+    workingDirectory: string,
     options?: ListSessionOptions,
   ): Promise<Session[]>;
   listChildren(
@@ -141,9 +141,9 @@ export interface SessionStore {
     patch: Partial<Session>,
     condition?: { readonly expectedTitle: string },
   ): Promise<Session>;
-  recordExecutionRoot(
+  recordWorkingDirectory(
     sessionId: string,
-    input: SessionExecutionRootInput,
+    input: SessionWorkingDirectoryInput,
   ): Promise<Session>;
   remove(sessionId: string): Promise<void>;
   withTransaction<T>(

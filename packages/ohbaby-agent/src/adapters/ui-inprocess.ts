@@ -152,12 +152,12 @@ import {
   sessionTitleIntent,
   generateSessionTitle,
   isDefaultSessionTitle,
-  isSessionInProjectRoot,
+  isSessionInWorkingDirectory,
   resolveSessionDisplayTitle,
-  sameSessionProjectRoot,
+  sameSessionDirectory,
   SessionEvent,
   SessionMovedError,
-  sessionTargetProjectRoot,
+  sessionTargetWorkingDirectory,
 } from "../services/session/index.js";
 import {
   createPermissionManager,
@@ -2289,9 +2289,9 @@ export function createInProcessUiBackendClient(
     if (
       !session ||
       (core
-        ? !isSessionInProjectRoot(core, projectRoot)
+        ? !isSessionInWorkingDirectory(core, projectRoot)
         : session.projectRoot !== undefined &&
-          !sameSessionProjectRoot(session.projectRoot, projectRoot))
+          !sameSessionDirectory(session.projectRoot, projectRoot))
     )
       throw permissionError(
         "PERMISSION_SCOPE_CHANGED",
@@ -2332,7 +2332,12 @@ export function createInProcessUiBackendClient(
   ): Promise<boolean> {
     if (
       !candidate ||
-      !sameSessionProjectRoot(candidate.projectRoot, projectRoot)
+      !sameSessionDirectory(
+        "stats" in candidate
+          ? candidate.workingDirectory
+          : candidate.projectRoot,
+        projectRoot,
+      )
     )
       return false;
     if ("stats" in candidate) {
@@ -2388,7 +2393,7 @@ export function createInProcessUiBackendClient(
     const excluded = new Set(inactive.excludeSessionIds);
     if (reuseSessionId) excluded.add(reuseSessionId);
     const candidates = sessionManager
-      ? await sessionManager.listByProjectRoot(projectRoot, {
+      ? await sessionManager.listByWorkingDirectory(projectRoot, {
           status: "active",
         })
       : (await stateStore.readSnapshot()).sessions;
@@ -2428,7 +2433,10 @@ export function createInProcessUiBackendClient(
         created: false,
         id: reusable.id,
         title: reusable.title,
-        projectRoot: reusable.projectRoot,
+        projectRoot:
+          "stats" in reusable
+            ? reusable.workingDirectory
+            : reusable.projectRoot,
         createdAt:
           "stats" in reusable
             ? new Date(reusable.createdAt).toISOString()
@@ -2660,8 +2668,8 @@ export function createInProcessUiBackendClient(
     if (
       session.projectRoot &&
       !(core
-        ? isSessionInProjectRoot(core, projectRoot)
-        : sameSessionProjectRoot(session.projectRoot, projectRoot))
+        ? isSessionInWorkingDirectory(core, projectRoot)
+        : sameSessionDirectory(session.projectRoot, projectRoot))
     )
       throw new Error("Session belongs to another workspace");
     await options.sessionManager?.update(input.sessionId, {
@@ -2728,7 +2736,7 @@ export function createInProcessUiBackendClient(
   > {
     const projectRoot = await resolveProjectRoot();
     if (options.sessionManager) {
-      const sessions = await options.sessionManager.listByProjectRoot(
+      const sessions = await options.sessionManager.listByWorkingDirectory(
         projectRoot,
         {
           status: "active",
@@ -2739,7 +2747,7 @@ export function createInProcessUiBackendClient(
           .filter(
             (session) =>
               isPrimarySession(session) &&
-              isSessionInProjectRoot(session, projectRoot),
+              isSessionInWorkingDirectory(session, projectRoot),
           )
           .sort(sortCoreSessionsByUpdatedAtDesc)
           .map(async (session) => ({
@@ -2755,7 +2763,7 @@ export function createInProcessUiBackendClient(
       .filter(
         (session) =>
           session.projectRoot === undefined ||
-          sameSessionProjectRoot(session.projectRoot, projectRoot),
+          sameSessionDirectory(session.projectRoot, projectRoot),
       )
       .sort(sortUiSessionsByUpdatedAtDesc)
       .map((session) => ({
@@ -2906,13 +2914,19 @@ export function createInProcessUiBackendClient(
 
     if (snapshot.activeSessionId === sessionId) {
       const remainingSessions = (
-        await options.sessionManager.listByProjectRoot(session.projectRoot, {
-          status: "active",
-        })
+        await options.sessionManager.listByWorkingDirectory(
+          session.workingDirectory,
+          {
+            status: "active",
+          },
+        )
       )
         .filter(isPrimarySession)
         .filter((candidate) =>
-          sameSessionProjectRoot(candidate.projectRoot, session.projectRoot),
+          sameSessionDirectory(
+            candidate.workingDirectory,
+            session.workingDirectory,
+          ),
         )
         .sort(sortCoreSessionsByUpdatedAtDesc);
       await setActiveSessionAndReconcileStatus(
@@ -2929,8 +2943,8 @@ export function createInProcessUiBackendClient(
   ): Promise<string | undefined> {
     const session = await options.sessionManager?.get(sessionId);
     if (!session) return undefined;
-    const target = sessionTargetProjectRoot(session);
-    return sameSessionProjectRoot(target, await resolveProjectRoot())
+    const target = sessionTargetWorkingDirectory(session);
+    return sameSessionDirectory(target, await resolveProjectRoot())
       ? undefined
       : target;
   }
@@ -2957,9 +2971,12 @@ export function createInProcessUiBackendClient(
       await assertSessionRoutable(sessionId);
     } else if (
       session &&
-      !isSessionInProjectRoot(session, await resolveProjectRoot())
+      !isSessionInWorkingDirectory(session, await resolveProjectRoot())
     ) {
-      throw new SessionMovedError(sessionId, sessionTargetProjectRoot(session));
+      throw new SessionMovedError(
+        sessionId,
+        sessionTargetWorkingDirectory(session),
+      );
     }
     if (session?.isSubagent === true || session?.parentId !== undefined) {
       const action =
@@ -3188,7 +3205,7 @@ export function createInProcessUiBackendClient(
     return {
       projectRoot:
         uiSession?.projectRoot ??
-        coreSession?.projectRoot ??
+        coreSession?.workingDirectory ??
         (await resolveProjectRoot()),
       sessionId,
     };
@@ -3285,7 +3302,7 @@ export function createInProcessUiBackendClient(
     }
     const projectRoot =
       uiSession?.projectRoot ??
-      coreSession?.projectRoot ??
+      coreSession?.workingDirectory ??
       (await resolveProjectRoot());
 
     const runtime = await runtimeController.getRuntime();
@@ -3475,12 +3492,12 @@ export function createInProcessUiBackendClient(
         shouldGenerateSessionTitle = session.title === temporaryTitle;
       }
       const resolvedProjectRoot = existingCoreSession
-        ? sessionTargetProjectRoot(existingCoreSession)
+        ? sessionTargetWorkingDirectory(existingCoreSession)
         : (session.projectRoot ?? baseProjectRoot);
       if (
         existingCoreSession &&
-        !sameSessionProjectRoot(
-          existingCoreSession.projectRoot,
+        !sameSessionDirectory(
+          existingCoreSession.workingDirectory,
           resolvedProjectRoot,
         )
       ) {
@@ -3593,12 +3610,12 @@ export function createInProcessUiBackendClient(
         // project change become the session's execution directory.
         if (
           existingCoreSession &&
-          !sameSessionProjectRoot(
-            existingCoreSession.projectRoot,
+          !sameSessionDirectory(
+            existingCoreSession.workingDirectory,
             resolvedProjectRoot,
           )
         ) {
-          await options.sessionManager?.recordExecutionRoot?.(
+          await options.sessionManager?.recordWorkingDirectory?.(
             session.id,
             resolvedProjectRoot,
           );

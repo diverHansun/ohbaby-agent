@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  defaultWorkspaceBoundary,
+  defaultDirectoryBoundary,
   isSameCanonicalDirectory,
 } from "../paths/index.js";
 import { getGitProjectId } from "./project-identifier.js";
@@ -39,7 +39,7 @@ export async function getProjectRoot(
   if (!(await isExistingDirectory(current))) {
     return null;
   }
-  const boundary = defaultWorkspaceBoundary(current);
+  const boundary = defaultDirectoryBoundary(current);
 
   for (;;) {
     if (await hasGitBoundary(current)) {

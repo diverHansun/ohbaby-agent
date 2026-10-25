@@ -16,9 +16,9 @@ import {
   createSessionIdGenerator,
   createShutdownOptions,
   collectCleanup,
-  ensureDefaultWorkspaceDirectory,
-  isDefaultWorkspaceDirectory,
-  type SessionProjectMovePlan,
+  ensureDefaultDirectory,
+  isDefaultDirectory,
+  type SessionWorkspaceMovePlan,
   type CleanupResult,
   type CleanupTaskResult,
   type ShutdownOptions,
@@ -96,7 +96,7 @@ export type WorkspaceBackend = UiBackendClient &
   UiPromptQueueExecutionPort &
   Partial<InstanceSettingsReader & InstanceSettingsControl> & {
     /** Persistent workspaces take over a moved session's queued prompts. */
-    adoptSessionProjectMove?(plan: SessionProjectMovePlan): Promise<void>;
+    adoptSessionWorkspaceMove?(plan: SessionWorkspaceMovePlan): Promise<void>;
     closeAdmission?(): void;
     dispose?(
       options?: ShutdownOptions,
@@ -371,11 +371,11 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     // The default workspace runs sessions without a project; it is never
     // listed or registered as one.
     const defaultWorkspace = {
-      directory: await ensureDefaultWorkspaceDirectory(),
+      directory: await ensureDefaultDirectory(),
     };
     const loaded = new Set(
       (this.instanceStore?.loadedScopeKeys() ?? []).filter(
-        (directory) => !isDefaultWorkspaceDirectory(directory),
+        (directory) => !isDefaultDirectory(directory),
       ),
     );
     const available = new Set<string>(loaded);
@@ -383,7 +383,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       []) {
       try {
         const scope = await resolveWorkspaceScope(directory);
-        if (!isDefaultWorkspaceDirectory(scope)) available.add(scope);
+        if (!isDefaultDirectory(scope)) available.add(scope);
       } catch (error) {
         if (!(error instanceof WorkspaceScopeError)) {
           throw error;
@@ -406,7 +406,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       if (
         entry.visibility !== "visible" ||
         available.has(entry.scopeKey) ||
-        isDefaultWorkspaceDirectory(entry.scopeKey)
+        isDefaultDirectory(entry.scopeKey)
       ) {
         continue;
       }
@@ -426,8 +426,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       .list()
       .filter(
         (entry) =>
-          entry.visibility === "visible" &&
-          !isDefaultWorkspaceDirectory(entry.scopeKey),
+          entry.visibility === "visible" && !isDefaultDirectory(entry.scopeKey),
       )
       .map((entry) => ({
         available: available.has(entry.scopeKey),
@@ -496,7 +495,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   ): Promise<Response> {
     try {
       const directory = await resolveWorkspaceScope(requestedDirectory);
-      if (isDefaultWorkspaceDirectory(directory)) {
+      if (isDefaultDirectory(directory)) {
         return context.json(
           {
             error: {
@@ -706,7 +705,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         {
           catalog,
           resolveScope: resolveWorkspaceScope,
-          isDefaultWorkspace: isDefaultWorkspaceDirectory,
+          isDefaultWorkspace: isDefaultDirectory,
           discoverProject: (directory) =>
             this.options.workspaceRegistry?.ensureDiscovered([directory]) ??
             Promise.resolve(),

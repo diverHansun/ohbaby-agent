@@ -7,7 +7,7 @@ function createSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "session_1",
     projectId: "project_1",
-    projectRoot: "D:/repo",
+    workingDirectory: "D:/repo",
     title: "Session",
     agentName: "default",
     createdAt: 1_000,
@@ -56,7 +56,7 @@ describe("createInMemorySessionStore", () => {
       createSession({
         id: "other_project",
         projectId: "project_2",
-        projectRoot: "D:/other",
+        workingDirectory: "D:/other",
         updatedAt: 2_000,
       }),
     );
@@ -72,18 +72,18 @@ describe("createInMemorySessionStore", () => {
       createSession({
         id: "same_root_other_project",
         projectId: "legacy_project",
-        projectRoot: "D:\\repo\\",
+        workingDirectory: "D:\\repo\\",
         updatedAt: 2_500,
       }),
     );
     await expect(
-      store.listByProjectRoot("D:/repo", { status: "active" }),
+      store.listByWorkingDirectory("D:/repo", { status: "active" }),
     ).resolves.toMatchObject([
       { id: "same_root_other_project" },
       { id: "old_active" },
     ]);
     await expect(
-      store.listByProjectRoot("D:/repo", { status: "active", limit: 1 }),
+      store.listByWorkingDirectory("D:/repo", { status: "active", limit: 1 }),
     ).resolves.toMatchObject([{ id: "same_root_other_project" }]);
     await expect(store.getRecent(2)).resolves.toMatchObject([
       { id: "new_archived" },

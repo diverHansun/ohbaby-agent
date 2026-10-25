@@ -40,7 +40,7 @@ export interface PermissionSourcePort extends PermissionPort {
 
 type Relation = Pick<
   Session,
-  "parentId" | "projectId" | "projectRoot" | "isSubagent"
+  "parentId" | "projectId" | "workingDirectory" | "isSubagent"
 >;
 
 interface SourceResolution {
@@ -72,7 +72,7 @@ function relation(session: Session): Relation {
   return {
     parentId: session.parentId,
     projectId: session.projectId,
-    projectRoot: canonicalRoot(session.projectRoot),
+    workingDirectory: canonicalRoot(session.workingDirectory),
     isSubagent: session.isSubagent,
   };
 }
@@ -81,7 +81,7 @@ function sameRelation(left: Relation, right: Relation): boolean {
   return (
     left.parentId === right.parentId &&
     left.projectId === right.projectId &&
-    left.projectRoot === right.projectRoot &&
+    left.workingDirectory === right.workingDirectory &&
     left.isSubagent === right.isSubagent
   );
 }
@@ -188,7 +188,7 @@ export function createPermissionSourcePort(
       current.nodes.set(node.id, identity);
       assertCurrent(current);
       if (
-        identity.projectRoot !== workspace ||
+        identity.workingDirectory !== workspace ||
         (projectId !== undefined && node.projectId !== projectId)
       ) {
         invalidate(node.id);

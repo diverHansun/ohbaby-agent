@@ -27,24 +27,24 @@ function addSession(input: {
   readonly id: string;
   readonly updatedAt: number;
   readonly title?: string;
-  readonly projectRoot?: string;
-  readonly projectDirectory?: string | null;
+  readonly workingDirectory?: string;
+  readonly workspaceDirectory?: string | null;
   readonly status?: "active" | "archived";
   readonly parentId?: string;
 }): void {
   getDatabase()
     .prepare(
       `INSERT INTO session
-        (id, project_id, project_root, project_directory, parent_id, title,
+        (id, project_id, working_directory, workspace_directory, parent_id, title,
          status, created_at, updated_at, data)
        VALUES (?, 'global', ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.id,
-      input.projectRoot ?? "/repo/a",
-      input.projectDirectory === undefined
-        ? (input.projectRoot ?? "/repo/a")
-        : input.projectDirectory,
+      input.workingDirectory ?? "/repo/a",
+      input.workspaceDirectory === undefined
+        ? (input.workingDirectory ?? "/repo/a")
+        : input.workspaceDirectory,
       input.parentId ?? null,
       input.title ?? input.id,
       input.status ?? "active",
@@ -114,20 +114,20 @@ function searchIds(query: string): readonly string[] {
 
 describe("listGlobalSessions", () => {
   it("lists active root sessions of every project, newest first, page by page", () => {
-    addSession({ id: "a1", updatedAt: 10, projectRoot: "/repo/a" });
-    addSession({ id: "b1", updatedAt: 30, projectRoot: "/repo/b" });
+    addSession({ id: "a1", updatedAt: 10, workingDirectory: "/repo/a" });
+    addSession({ id: "b1", updatedAt: 30, workingDirectory: "/repo/b" });
     addSession({
       id: "chat",
       updatedAt: 20,
-      projectRoot: "/home/.ohbaby/workspace/default",
-      projectDirectory: null,
+      workingDirectory: "/home/.ohbaby/workspace/default",
+      workspaceDirectory: null,
     });
     addSession({ id: "archived", updatedAt: 40, status: "archived" });
     addSession({ id: "child", updatedAt: 50, parentId: "a1" });
 
     const first = listGlobalSessions({ limit: 2 });
     expect(first.sessions.map((session) => session.id)).toEqual(["b1", "chat"]);
-    expect(first.sessions[1]?.projectDirectory).toBeUndefined();
+    expect(first.sessions[1]?.workspaceDirectory).toBeUndefined();
     const second = listGlobalSessions({ limit: 2, cursor: first.nextCursor });
     expect(second.sessions.map((session) => session.id)).toEqual(["a1"]);
     expect(second.nextCursor).toBeUndefined();
@@ -156,14 +156,14 @@ describe("listGlobalSessions", () => {
     addSession({
       id: "hidden-session",
       updatedAt: 3,
-      projectRoot: "/repo/hidden",
+      workingDirectory: "/repo/hidden",
       title: "needle",
     });
     addSession({
       id: "moved-out",
       updatedAt: 2,
-      projectRoot: "/repo/hidden",
-      projectDirectory: null,
+      workingDirectory: "/repo/hidden",
+      workspaceDirectory: null,
     });
     addSession({ id: "visible", updatedAt: 1 });
 

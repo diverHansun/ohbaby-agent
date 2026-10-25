@@ -23,7 +23,7 @@ it.each(["memory", "sqlite"])(
     initDatabase({ dbPath: path });
     getDatabase()
       .prepare(
-        "INSERT INTO session (id,project_id,project_root,title,status,created_at,updated_at,data) VALUES ('s','p','/work','t','active',1,1,'{}')",
+        "INSERT INTO session (id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES ('s','p','/work','t','active',1,1,'{}')",
       )
       .run();
     const store =
@@ -76,7 +76,7 @@ it("existing session metadata persists independent preferences and supports clea
     await store.insert({
       id,
       projectId: "p",
-      projectRoot: "/work",
+      workingDirectory: "/work",
       title: "t",
       agentName: "default",
       createdAt: 1,
@@ -108,7 +108,7 @@ it("migrates pre-reasoning submissions and reads legacy sessions without prefere
   });
   getDatabase()
     .prepare(
-      "INSERT INTO session (id,project_id,project_root,title,status,created_at,updated_at,data) VALUES ('s','p','/work','t','active',1,1,'{}')",
+      "INSERT INTO session (id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES ('s','p','/work','t','active',1,1,'{}')",
     )
     .run();
   getDatabase()

@@ -995,7 +995,7 @@ export class SessionSubagentHost {
     role: SubagentRole,
     description?: string,
   ): Promise<Session> {
-    return this.options.sessionManager.create(parent.projectRoot, {
+    return this.options.sessionManager.create(parent.workingDirectory, {
       agentName: role,
       parentId: parent.id,
       title: description,
@@ -1558,7 +1558,7 @@ export class SessionSubagentHost {
         maxSteps: runtimeAgent.config.maxSteps,
         modelId: this.options.modelId,
         parentSessionId: record.parentSessionId,
-        projectRoot: session.projectRoot,
+        projectRoot: session.workingDirectory,
         sessionId: record.sessionId,
         type: "sub",
       });

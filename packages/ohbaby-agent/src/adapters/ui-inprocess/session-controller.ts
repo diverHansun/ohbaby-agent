@@ -3,16 +3,16 @@ import type {
   Session as CoreSession,
   SessionManager,
 } from "../../services/session/index.js";
-import { sameSessionProjectRoot } from "../../services/session/index.js";
+import { sameSessionDirectory } from "../../services/session/index.js";
 
 export type InProcessSessionManager = Pick<
   SessionManager,
-  "create" | "get" | "listByProject" | "listByProjectRoot" | "update"
+  "create" | "get" | "listByProject" | "listByWorkingDirectory" | "update"
 > &
   Partial<
     Pick<
       SessionManager,
-      "findReusableEmptyPrimary" | "incrementStats" | "recordExecutionRoot"
+      "findReusableEmptyPrimary" | "incrementStats" | "recordWorkingDirectory"
     >
   >;
 
@@ -40,7 +40,7 @@ export function sessionMetadataToUiSession(session: CoreSession): UiSession {
     id: session.id,
     messages: [],
     reasoning: session.reasoning,
-    projectRoot: session.projectRoot,
+    projectRoot: session.workingDirectory,
     title: session.title,
     updatedAt: new Date(session.updatedAt).toISOString(),
   };
@@ -86,7 +86,7 @@ export function isReusableUiSession(
 ): boolean {
   return (
     session.messages.length === 0 &&
-    sameSessionProjectRoot(session.projectRoot, projectRoot)
+    sameSessionDirectory(session.projectRoot, projectRoot)
   );
 }
 
@@ -100,7 +100,7 @@ function isReusableCoreSession(
     isPrimarySession(session) &&
     session.status === "active" &&
     session.stats.messageCount === 0 &&
-    sameSessionProjectRoot(session.projectRoot, projectRoot)
+    sameSessionDirectory(session.workingDirectory, projectRoot)
   );
 }
 
@@ -131,7 +131,7 @@ function withCoreProjectRoot(
   }
   return {
     ...session,
-    projectRoot: coreSession.projectRoot,
+    projectRoot: coreSession.workingDirectory,
   };
 }
 
@@ -255,7 +255,7 @@ export async function resolveSessionForNewPrompt(
   if (firstResolved) return firstResolved;
 
   if (input.sessionManager) {
-    const coreCandidates = await input.sessionManager.listByProjectRoot(
+    const coreCandidates = await input.sessionManager.listByWorkingDirectory(
       input.projectRoot,
       { status: "active" },
     );

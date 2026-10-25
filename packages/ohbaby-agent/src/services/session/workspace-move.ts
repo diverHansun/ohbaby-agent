@@ -5,33 +5,33 @@ import {
 } from "../database/index.js";
 import {
   readSessionRow,
-  writeSessionProjectBinding,
-  type SessionProjectBinding,
+  writeSessionWorkspaceBinding,
+  type SessionWorkspaceBinding,
 } from "./database-store.js";
 import {
-  resolveSessionProjectBinding,
-  sameSessionProjectRoot,
-} from "./project-root.js";
+  resolveSessionWorkspaceBinding,
+  sameSessionDirectory,
+} from "./working-directory.js";
 import type { Session } from "./types.js";
 
-export type SessionProjectMoveErrorCode =
+export type SessionWorkspaceMoveErrorCode =
   | "SESSION_NOT_FOUND"
   | "SESSION_NOT_ROOT"
   | "SESSION_ARCHIVED";
 
-export class SessionProjectMoveError extends Error {
+export class SessionWorkspaceMoveError extends Error {
   constructor(
-    readonly code: SessionProjectMoveErrorCode,
+    readonly code: SessionWorkspaceMoveErrorCode,
     message: string,
   ) {
     super(message);
-    this.name = "SessionProjectMoveError";
+    this.name = "SessionWorkspaceMoveError";
   }
 }
 
-export interface SessionProjectMovePlan {
+export interface SessionWorkspaceMovePlan {
   readonly sessionId: string;
-  readonly binding: SessionProjectBinding;
+  readonly binding: SessionWorkspaceBinding;
   /** Directory whose workspace must own the session's queued prompts. */
   readonly queueRoot: string;
   /** Queued prompts currently held by another directory's workspace. */
@@ -39,24 +39,24 @@ export interface SessionProjectMovePlan {
 }
 
 /**
- * Plans a project change. `projectDirectory` must already be a validated
- * workspace scope; null removes the session from its project.
+ * Plans a workspace change. `workspaceDirectory` must already be a validated
+ * workspace scope; null removes the session from its workspace.
  */
-export function planSessionProjectMove(
+export function planSessionWorkspaceMove(
   sessionId: string,
-  projectDirectory: string | null,
+  workspaceDirectory: string | null,
   db: DatabaseConnection = getDatabase(),
-): SessionProjectMovePlan {
+): SessionWorkspaceMovePlan {
   const session = readSessionRow(db, sessionId);
   if (!session) {
-    throw new SessionProjectMoveError(
+    throw new SessionWorkspaceMoveError(
       "SESSION_NOT_FOUND",
       `Session not found: ${sessionId}`,
     );
   }
   assertMovable(session);
-  const binding = resolveSessionProjectBinding(session, projectDirectory);
-  const queueRoot = binding.pendingProjectRoot ?? session.projectRoot;
+  const binding = resolveSessionWorkspaceBinding(session, workspaceDirectory);
+  const queueRoot = binding.pendingWorkingDirectory ?? session.workingDirectory;
   const queuedScopes = db
     .prepare<{ readonly scope_key: string }>(
       `SELECT DISTINCT scope_key FROM prompt_submission
@@ -68,41 +68,46 @@ export function planSessionProjectMove(
     binding,
     queueRoot,
     needsQueueHandover: queuedScopes.some(
-      (row) => !sameSessionProjectRoot(row.scope_key, queueRoot),
+      (row) => !sameSessionDirectory(row.scope_key, queueRoot),
     ),
   };
 }
 
 /** Commits a plan that has no queued prompts to hand over. */
-export function commitSessionProjectMove(
-  plan: SessionProjectMovePlan,
+export function commitSessionWorkspaceMove(
+  plan: SessionWorkspaceMovePlan,
   db: DatabaseConnection = getDatabase(),
   now: () => number = Date.now,
 ): Promise<Session> {
   return runWriteTransaction(db, () => {
     const session = readSessionRow(db, plan.sessionId);
     if (!session) {
-      throw new SessionProjectMoveError(
+      throw new SessionWorkspaceMoveError(
         "SESSION_NOT_FOUND",
         `Session not found: ${plan.sessionId}`,
       );
     }
     assertMovable(session);
-    return writeSessionProjectBinding(db, plan.sessionId, plan.binding, now());
+    return writeSessionWorkspaceBinding(
+      db,
+      plan.sessionId,
+      plan.binding,
+      now(),
+    );
   });
 }
 
 function assertMovable(session: Session): void {
   if (session.parentId !== undefined || session.isSubagent) {
-    throw new SessionProjectMoveError(
+    throw new SessionWorkspaceMoveError(
       "SESSION_NOT_ROOT",
-      "Only root sessions can change project",
+      "Only root sessions can change workspace",
     );
   }
   if (session.status !== "active") {
-    throw new SessionProjectMoveError(
+    throw new SessionWorkspaceMoveError(
       "SESSION_ARCHIVED",
-      "Archived sessions cannot change project",
+      "Archived sessions cannot change workspace",
     );
   }
 }

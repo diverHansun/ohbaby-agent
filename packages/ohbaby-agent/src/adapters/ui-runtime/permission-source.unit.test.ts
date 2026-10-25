@@ -21,7 +21,7 @@ function session(id: string, parentId?: string): Session {
     id,
     parentId,
     projectId: "project",
-    projectRoot: process.cwd(),
+    workingDirectory: process.cwd(),
     title: id,
     agentName: "default",
     createdAt: 1,
@@ -168,7 +168,7 @@ describe("permission source port", () => {
       "cross workspace",
       [
         session("child", "root"),
-        { ...session("root"), projectRoot: path.dirname(process.cwd()) },
+        { ...session("root"), workingDirectory: path.dirname(process.cwd()) },
       ],
     ],
     ["orphan subagent", [{ ...session("child"), isSubagent: true }]],
@@ -372,7 +372,7 @@ describe("permission source port", () => {
     const link = path.join(directory, "workspace");
     await symlink(process.cwd(), link);
     const { port, manager } = setup([
-      { ...session("child"), projectRoot: link },
+      { ...session("child"), workingDirectory: link },
     ]);
     const answer = port.ask(input());
     const pending = await waitPending(manager);

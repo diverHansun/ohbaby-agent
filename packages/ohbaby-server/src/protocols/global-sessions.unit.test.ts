@@ -10,9 +10,9 @@ import {
 const session: CoreSession = {
   id: "s1",
   projectId: "global",
-  projectRoot: "/repo/a",
-  pendingProjectRoot: "/repo/b",
-  projectDirectory: "/repo/b",
+  workingDirectory: "/repo/a",
+  pendingWorkingDirectory: "/repo/b",
+  workspaceDirectory: "/repo/b",
   title: "First",
   agentName: "default",
   createdAt: 0,
@@ -39,8 +39,8 @@ describe("global session wire format", () => {
     expect(
       toUiGlobalSession({
         ...session,
-        projectDirectory: undefined,
-        pendingProjectRoot: undefined,
+        workspaceDirectory: undefined,
+        pendingWorkingDirectory: undefined,
       }),
     ).toMatchObject({ projectDirectory: null, workingDirectory: "/repo/a" });
   });

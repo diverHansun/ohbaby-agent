@@ -79,7 +79,7 @@ it.each([
       updatedAt: 1,
       isSubagent: false,
       projectId: "project",
-      projectRoot: process.cwd(),
+      workingDirectory: process.cwd(),
       stats: { messageCount: 0 },
       status: "active",
       title: "parent",

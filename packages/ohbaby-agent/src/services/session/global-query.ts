@@ -108,7 +108,7 @@ export function getGlobalSession(
  * Matching is by project, not execution directory, so a session moved out
  * of a hidden project's directory stays listed.
  */
-const NOT_IN_HIDDEN_PROJECT = `(project_directory IS NULL OR project_directory NOT IN (
+const NOT_IN_HIDDEN_WORKSPACE = `(workspace_directory IS NULL OR workspace_directory NOT IN (
   SELECT scope_key FROM ${schema.workspaceRegistry.tableName} WHERE visibility = 'hidden'
 ))`;
 
@@ -127,7 +127,7 @@ export function listGlobalSessions(
     .prepare<SessionRow>(
       `SELECT * FROM ${schema.session.tableName}
        WHERE parent_id IS NULL AND status = 'active'
-         AND ${NOT_IN_HIDDEN_PROJECT}
+         AND ${NOT_IN_HIDDEN_WORKSPACE}
          AND (? IS NULL OR updated_at < ? OR (updated_at = ? AND id < ?))
        ORDER BY updated_at DESC, id DESC
        LIMIT ?`,

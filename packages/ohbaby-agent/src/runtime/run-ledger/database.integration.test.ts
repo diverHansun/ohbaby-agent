@@ -56,7 +56,7 @@ function insertSession(id = "session_1"): void {
   getDatabase()
     .prepare(
       `INSERT INTO ${schema.session.tableName}
-        (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+        (id, project_id, working_directory, agent, title, status, created_at, updated_at, message_count, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(id, "project_1", "D:/repo", "default", id, "active", 1, 1, 0, "{}");

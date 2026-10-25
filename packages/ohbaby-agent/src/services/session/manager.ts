@@ -1,7 +1,7 @@
 import { createBus, type BusInstance } from "../../bus/index.js";
-import { isDefaultWorkspaceDirectory } from "../../paths/index.js";
+import { isDefaultDirectory } from "../../paths/index.js";
 import { createSessionIdGenerator } from "./id-generator.js";
-import { sameSessionProjectRoot } from "./project-root.js";
+import { sameSessionDirectory } from "./working-directory.js";
 import { SessionEvent } from "./events.js";
 import { createInMemorySessionStore } from "./store.js";
 import {
@@ -77,17 +77,17 @@ function createSessionRecord(input: {
   readonly now: number;
   readonly parent?: Session;
 }): Session {
-  // Subagents keep their parent's project; the default workspace has none.
-  const projectDirectory = input.parent
-    ? input.parent.projectDirectory
-    : isDefaultWorkspaceDirectory(input.project.rootPath)
+  // Subagents keep their parent's workspace; the default directory has none.
+  const workspaceDirectory = input.parent
+    ? input.parent.workspaceDirectory
+    : isDefaultDirectory(input.project.rootPath)
       ? undefined
       : input.project.rootPath;
   return {
     id: input.id,
     projectId: input.project.id,
-    projectRoot: input.project.rootPath,
-    ...(projectDirectory === undefined ? {} : { projectDirectory }),
+    workingDirectory: input.project.rootPath,
+    ...(workspaceDirectory === undefined ? {} : { workspaceDirectory }),
     title: input.options.title ?? defaultTitle(input.now),
     agentName: input.options.agentName ?? DEFAULT_AGENT_NAME,
     createdAt: input.now,
@@ -107,7 +107,7 @@ export function createSessionManager(
   const createSessionId = options.createSessionId ?? createSessionIdGenerator();
 
   async function create(
-    projectDirectory: string,
+    directory: string,
     createOptions: CreateSessionOptions = {},
   ): Promise<Session> {
     const createdAt = now();
@@ -118,10 +118,10 @@ export function createSessionManager(
       parent = await getExistingSession(createOptions.parentId, options);
       project = {
         id: parent.projectId,
-        rootPath: parent.projectRoot,
+        rootPath: parent.workingDirectory,
       };
     } else {
-      project = await options.projectResolver.fromDirectory(projectDirectory);
+      project = await options.projectResolver.fromDirectory(directory);
     }
 
     const session = createSessionRecord({
@@ -155,11 +155,8 @@ export function createSessionManager(
   return {
     create,
 
-    async findReusableEmptyPrimary(
-      projectDirectory: string,
-    ): Promise<Session | null> {
-      const project =
-        await options.projectResolver.fromDirectory(projectDirectory);
+    async findReusableEmptyPrimary(directory: string): Promise<Session | null> {
+      const project = await options.projectResolver.fromDirectory(directory);
       const sessions = await options.store.listByProject(project.id, {
         status: "active",
       });
@@ -170,7 +167,7 @@ export function createSessionManager(
           (session) =>
             !session.isSubagent &&
             session.stats.messageCount === 0 &&
-            sameSessionProjectRoot(session.projectRoot, project.rootPath),
+            sameSessionDirectory(session.workingDirectory, project.rootPath),
         ) ?? null
       );
     },
@@ -181,7 +178,7 @@ export function createSessionManager(
         return existing;
       }
 
-      return create(input.projectRoot, {
+      return create(input.workingDirectory, {
         agentName: input.agentName,
         id: input.id,
         title: input.title,
@@ -199,11 +196,14 @@ export function createSessionManager(
       return options.store.listByProject(projectId, listOptions);
     },
 
-    listByProjectRoot(
-      projectRoot: string,
+    listByWorkingDirectory(
+      workingDirectory: string,
       listOptions?: ListSessionOptions,
     ): Promise<Session[]> {
-      return options.store.listByProjectRoot(projectRoot, listOptions);
+      return options.store.listByWorkingDirectory(
+        workingDirectory,
+        listOptions,
+      );
     },
 
     listChildren(
@@ -258,14 +258,15 @@ export function createSessionManager(
       return updated;
     },
 
-    async recordExecutionRoot(
+    async recordWorkingDirectory(
       sessionId: string,
-      projectRoot: string,
+      workingDirectory: string,
     ): Promise<Session> {
-      const project = await options.projectResolver.fromDirectory(projectRoot);
-      const updated = await options.store.recordExecutionRoot(sessionId, {
+      const project =
+        await options.projectResolver.fromDirectory(workingDirectory);
+      const updated = await options.store.recordWorkingDirectory(sessionId, {
         projectId: project.id,
-        projectRoot: project.rootPath,
+        workingDirectory: project.rootPath,
         updatedAt: now(),
       });
       options.bus.publish(SessionEvent.Updated, { session: updated });

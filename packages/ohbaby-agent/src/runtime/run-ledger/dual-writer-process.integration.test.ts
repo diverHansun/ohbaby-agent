@@ -157,7 +157,7 @@ describe("TUI and serve dual-writer run claim", () => {
     getDatabase()
       .prepare(
         `INSERT INTO session
-          (id, project_id, project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
+          (id, project_id, working_directory, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
@@ -224,7 +224,7 @@ it("keeps another live process's queued and running work intact, and recovers on
   for (const id of ["session_shared", "session_other"])
     getDatabase()
       .prepare(
-        "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES (?,?,?,?,'active',1,1,'{}')",
+        "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES (?,?,?,?,'active',1,1,'{}')",
       )
       .run(id, "project", directory, id);
   closeDatabase();

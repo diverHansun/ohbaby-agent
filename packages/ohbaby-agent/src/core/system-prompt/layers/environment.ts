@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
-  defaultWorkspaceBoundary,
+  defaultDirectoryBoundary,
   isSameCanonicalDirectory,
 } from "../../../paths/index.js";
 import type { EnvironmentInfo } from "../types.js";
@@ -35,7 +35,7 @@ export function formatEnvironmentDate(date: Date): string {
 
 async function defaultIsGitRepo(directory: string): Promise<boolean> {
   let current = path.resolve(directory);
-  const boundary = defaultWorkspaceBoundary(current);
+  const boundary = defaultDirectoryBoundary(current);
 
   for (;;) {
     try {

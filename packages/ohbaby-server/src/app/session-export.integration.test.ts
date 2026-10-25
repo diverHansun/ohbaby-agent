@@ -28,7 +28,7 @@ describe("persistent session export over HTTP", () => {
     const session = {
       id: "archive_session",
       projectId: "p",
-      projectRoot: directory,
+      workingDirectory: directory,
       title: "历史",
       agentName: "build",
       status: "archived" as const,

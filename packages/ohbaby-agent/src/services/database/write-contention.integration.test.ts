@@ -138,7 +138,7 @@ it.each(writers)(
     const session = {
       id: "s",
       projectId: "p",
-      projectRoot: "/fixture",
+      workingDirectory: "/fixture",
       title: "test",
       agentName: "default",
       createdAt: 1,
@@ -365,7 +365,7 @@ it("rejects a stale staged session replacement instead of losing another store u
   await first.insert({
     id: "s",
     projectId: "p",
-    projectRoot: "/fixture",
+    workingDirectory: "/fixture",
     title: "original",
     agentName: "default",
     createdAt: 1,
@@ -481,7 +481,7 @@ it("releases session staging ownership before an asynchronously waiting commit",
   await store.insert({
     id: "s",
     projectId: "p",
-    projectRoot: "/fixture",
+    workingDirectory: "/fixture",
     title: "original",
     agentName: "default",
     createdAt: 1,
