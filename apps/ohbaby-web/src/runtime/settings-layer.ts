@@ -66,6 +66,10 @@ export class SettingsLayer {
   private readonly inflight = new Map<string, Promise<void>>();
   private readonly watched = new Map<SettingsKind, number>();
   private readonly stale = new Set<SettingsKind>();
+  private readonly writes = {
+    models: Promise.resolve(),
+    search: Promise.resolve(),
+  };
   private flush: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -162,36 +166,46 @@ export class SettingsLayer {
   }
 
   createModel(input: UiSettingsModelCreate): Promise<UiSettingsModels> {
-    return this.writeModels(this.api.createModel(input));
+    return this.enqueueWrite("models", () => this.api.createModel(input));
   }
 
   updateModel(
     id: string,
     patch: UiSettingsModelPatch,
   ): Promise<UiSettingsModels> {
-    return this.writeModels(this.api.updateModel(id, patch));
+    return this.enqueueWrite("models", () => this.api.updateModel(id, patch));
   }
 
   selectModel(id: string): Promise<UiSettingsModels> {
-    return this.writeModels(this.api.selectModel(id));
+    return this.enqueueWrite("models", () => this.api.selectModel(id));
   }
 
   deleteModel(id: string): Promise<UiSettingsModels> {
-    return this.writeModels(this.api.deleteModel(id));
+    return this.enqueueWrite("models", () => this.api.deleteModel(id));
   }
 
   deleteProvider(provider: string): Promise<UiSettingsModels> {
-    return this.writeModels(this.api.deleteProvider(provider));
+    return this.enqueueWrite("models", () => this.api.deleteProvider(provider));
   }
 
-  async updateSearch(patch: UiSettingsSearchUpdate): Promise<UiSettingsSearch> {
-    return this.write("search", await this.api.updateSearch(patch));
+  updateSearch(patch: UiSettingsSearchUpdate): Promise<UiSettingsSearch> {
+    return this.enqueueWrite("search", () => this.api.updateSearch(patch));
   }
 
-  private async writeModels(
-    pending: Promise<UiSettingsModels>,
-  ): Promise<UiSettingsModels> {
-    return this.write("models", await pending);
+  /** Keep writes and their cache updates in user order within each section. */
+  private enqueueWrite<K extends "models" | "search">(
+    kind: K,
+    action: () => Promise<SettingsData[K]>,
+  ): Promise<SettingsData[K]> {
+    const pending = this.writes[kind]
+      .then(action)
+      .then((data) => this.write(kind, data));
+    // A failed request still rejects its caller, but must not block later edits.
+    this.writes[kind] = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
   }
 
   /** A confirmed write wins over every read that started before it. */

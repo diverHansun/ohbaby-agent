@@ -1009,9 +1009,145 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.selectSession).toHaveBeenCalledWith("session_new");
   });
 
-  it("does not open a late first-prompt session after the user opened another draft", async () => {
+  it.each(["accepted", "rejected"] as const)(
+    "keeps another draft usable when the previous first prompt is %s late",
+    async (outcome) => {
+      const pendingReceipt =
+        deferred<
+          Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>
+        >();
+      const initial: UiSnapshot = {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      };
+      const fake = createFakeRuntime({ snapshot: initial });
+      let requestId = "";
+      fake.submitPromptAccepted.mockImplementationOnce((_text, options) => {
+        requestId = options?.clientRequestId ?? "";
+        return pendingReceipt.promise;
+      });
+      const app = mountApp(fake.runtime);
+
+      await setTextareaValue(app.container, "slow first prompt");
+      await pressTextareaKey(app.container, "Enter");
+      // Exercise selection isolation independently of a replacement client.
+      await act(async () => {
+        await fake.runtime.openDraft(null);
+        fake.store.replaceSnapshot(initial, 2);
+      });
+      await setTextareaValue(app.container, "new draft still being written");
+      await act(async () => {
+        if (outcome === "accepted") {
+          pendingReceipt.resolve({
+            clientRequestId: requestId,
+            createdAt: timestamp,
+            promptId: "prompt_late",
+            sessionId: "session_late",
+            status: "queued",
+            userMessageId: "message_late",
+          });
+        } else {
+          pendingReceipt.reject(new Error("old draft admission failed"));
+        }
+        await pendingReceipt.promise.catch(() => undefined);
+      });
+
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+      expect(fake.selectSession).not.toHaveBeenCalled();
+      expect(app.container.textContent).not.toContain("slow first prompt");
+      expect(app.container.textContent).not.toContain(
+        "old draft admission failed",
+      );
+      expect(app.container.querySelector(".ohb-draft-hero")).not.toBeNull();
+      expect(app.container.querySelector(".ohb-project-picker")).not.toBeNull();
+      expect(textareaValue(app.container)).toBe(
+        "new draft still being written",
+      );
+      expect(
+        app.container.querySelector<HTMLButtonElement>(".ohb-send-button")
+          ?.disabled,
+      ).toBe(false);
+
+      await pressTextareaKey(app.container, "Enter");
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(2);
+      expect(fake.submitPromptAccepted.mock.calls[1]?.[0]).toBe(
+        "new draft still being written",
+      );
+      expect(textareaValue(app.container)).toBe("");
+      expect(app.container.textContent).toContain(
+        "new draft still being written",
+      );
+    },
+  );
+
+  it("unblocks the new draft after replacing the client while a first prompt is pending", async () => {
+    const initial: UiSnapshot = {
+      ...snapshotWithStatus({ kind: "idle" }),
+      activeSessionId: null,
+      sessions: [],
+    };
+    const first = createFakeRuntime({ snapshot: initial });
+    const second = createFakeRuntime({ snapshot: initial });
     const pendingReceipt =
       deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    first.submitPromptAccepted.mockReturnValue(pendingReceipt.promise);
+    const nextReceipt =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    second.submitPromptAccepted.mockReturnValue(nextReceipt.promise);
+    let connectedClient = first.client;
+    Object.defineProperty(first.runtime, "client", {
+      get: () => connectedClient,
+    });
+    vi.spyOn(first.runtime, "submitPrompt").mockImplementation(
+      (text, options) => connectedClient.submitPromptAccepted(text, options),
+    );
+    const app = mountApp(first.runtime);
+
+    await setTextareaValue(app.container, "old client first prompt");
+    await pressTextareaKey(app.container, "Enter");
+    await setTextareaValue(app.container, "draft survives the client change");
+    await act(async () => {
+      connectedClient = second.client;
+      first.store.replaceSnapshot(initial, 2);
+      await Promise.resolve();
+    });
+
+    expect(app.container.textContent).not.toContain("old client first prompt");
+    expect(app.container.querySelector(".ohb-draft-hero")).not.toBeNull();
+    expect(app.container.querySelector(".ohb-project-picker")).not.toBeNull();
+    expect(textareaValue(app.container)).toBe(
+      "draft survives the client change",
+    );
+    expect(
+      app.container.querySelector<HTMLButtonElement>(".ohb-send-button")
+        ?.disabled,
+    ).toBe(false);
+
+    await pressTextareaKey(app.container, "Enter");
+    expect(second.submitPromptAccepted.mock.calls[0]?.[0]).toBe(
+      "draft survives the client change",
+    );
+    expect(app.container.textContent).toContain(
+      "draft survives the client change",
+    );
+    await act(async () => {
+      pendingReceipt.reject(new Error("old client failed"));
+      await pendingReceipt.promise.catch(() => undefined);
+    });
+    expect(app.container.textContent).not.toContain("old client failed");
+    expect(app.container.textContent).toContain(
+      "draft survives the client change",
+    );
+    expect(textareaValue(app.container)).toBe("");
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-busy"),
+    ).toBe("true");
+  });
+
+  it("keeps the first prompt projected when its receipt automatically binds the session", async () => {
     const fake = createFakeRuntime({
       snapshot: {
         ...snapshotWithStatus({ kind: "idle" }),
@@ -1019,34 +1155,157 @@ describe("OhbabyWebApp slash command interactions", () => {
         sessions: [],
       },
     });
-    let requestId = "";
     fake.submitPromptAccepted.mockImplementation((_text, options) => {
-      requestId = options?.clientRequestId ?? "";
-      return pendingReceipt.promise;
+      // acceptBinding updates the selected session before submitPrompt resolves,
+      // without advancing the runtime's user-selection generation.
+      fake.store.replaceSnapshot(snapshotWithStatus({ kind: "idle" }), 2);
+      return Promise.resolve({
+        clientRequestId: options?.clientRequestId ?? "request_generated",
+        createdAt: timestamp,
+        promptId: "prompt_bound",
+        sessionId: "session_1",
+        status: "queued",
+        userMessageId: "message_bound",
+      });
     });
     const app = mountApp(fake.runtime);
 
-    await setTextareaValue(app.container, "slow first prompt");
+    await setTextareaValue(app.container, "automatically bound first prompt");
     await pressTextareaKey(app.container, "Enter");
-    // New chat in the same directory keeps the client; only the choice changes.
-    await act(async () => {
-      await fake.runtime.openDraft(null);
-    });
-    await act(async () => {
-      pendingReceipt.resolve({
-        clientRequestId: requestId,
-        createdAt: timestamp,
-        promptId: "prompt_late",
-        sessionId: "session_late",
-        status: "queued",
-        userMessageId: "message_late",
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    });
 
-    expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
     expect(fake.selectSession).not.toHaveBeenCalled();
+    expect(app.container.textContent).toContain(
+      "automatically bound first prompt",
+    );
+    expect(
+      app.container
+        .querySelector(".ohb-message-pending")
+        ?.getAttribute("data-user-message-id"),
+    ).toBe("message_bound");
+    expect(app.container.querySelector(".ohb-draft-hero")).toBeNull();
   });
+
+  it.each(["accepted", "rejected"] as const)(
+    "keeps a session prompt pending across an automatic move until it is %s",
+    async (outcome) => {
+      const initial = snapshotWithStatus({ kind: "idle" });
+      const fake = createFakeRuntime({ snapshot: initial });
+      const pendingReceipt =
+        deferred<
+          Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>
+        >();
+      fake.submitPromptAccepted.mockReturnValue(pendingReceipt.promise);
+      let connectedClient = fake.client;
+      Object.defineProperty(fake.runtime, "client", {
+        get: () => connectedClient,
+      });
+      const app = mountApp(fake.runtime);
+
+      await setTextareaValue(app.container, "prompt follows the session move");
+      await pressTextareaKey(app.container, "Enter");
+      const requestId =
+        fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "";
+      // SESSION_MOVED replaces the client and resynchronizes the same session
+      // inside submitPrompt, without starting a new user selection.
+      await act(async () => {
+        connectedClient = { ...fake.client };
+        fake.store.reset();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        fake.store.replaceSnapshot(initial, 2);
+        fake.store.setPermissionSync({
+          ...fake.store.getSnapshot().permissionSync,
+          status: "ready",
+        });
+        fake.store.setConnectionState("live");
+        await Promise.resolve();
+      });
+
+      expect(app.container.textContent).toContain(
+        "prompt follows the session move",
+      );
+      expect(
+        app.container
+          .querySelector(".ohb-send-button")
+          ?.getAttribute("aria-busy"),
+      ).toBe("true");
+      await setTextareaValue(app.container, "next draft stays here");
+      expect(
+        app.container.querySelector<HTMLButtonElement>(".ohb-send-button")
+          ?.disabled,
+      ).toBe(true);
+      await pressTextareaKey(app.container, "Enter");
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        if (outcome === "accepted") {
+          pendingReceipt.resolve({
+            clientRequestId: requestId,
+            createdAt: timestamp,
+            promptId: "prompt_moved",
+            sessionId: "session_1",
+            status: "queued",
+            userMessageId: "message_moved",
+          });
+        } else {
+          pendingReceipt.reject(new Error("target admission failed"));
+        }
+        await pendingReceipt.promise.catch(() => undefined);
+      });
+
+      expect(textareaValue(app.container)).toBe("next draft stays here");
+      expect(
+        app.container
+          .querySelector(".ohb-send-button")
+          ?.getAttribute("aria-busy"),
+      ).toBe("false");
+      if (outcome === "rejected") {
+        expect(app.container.textContent).toContain("target admission failed");
+        expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+      } else {
+        expect(
+          app.container
+            .querySelector(".ohb-message-pending")
+            ?.getAttribute("data-user-message-id"),
+        ).toBe("message_moved");
+        act(() => {
+          fake.store.replaceSnapshot(
+            {
+              ...initial,
+              prompts: [
+                promptSubmission({
+                  clientRequestId: requestId,
+                  promptId: "prompt_moved",
+                  status: "succeeded",
+                  text: "prompt follows the session move",
+                  userMessageId: "message_moved",
+                }),
+              ],
+              sessions: initial.sessions.map((session) => ({
+                ...session,
+                messages: [
+                  {
+                    createdAt: timestamp,
+                    id: "message_moved",
+                    parts: [
+                      { type: "text", text: "prompt follows the session move" },
+                    ],
+                    role: "user",
+                  },
+                ],
+              })),
+            },
+            3,
+          );
+        });
+        expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+        expect(
+          app.container.textContent.match(/prompt follows the session move/gu),
+        ).toHaveLength(1);
+      }
+    },
+  );
 
   it("commits the first prompt and startup feedback before admission resolves", async () => {
     const pendingReceipt =
@@ -1433,7 +1692,14 @@ describe("OhbabyWebApp slash command interactions", () => {
         sessions: [],
       },
     });
-    fake.selectSession.mockReturnValue(selection.promise);
+    let selectionGeneration = 0;
+    vi.spyOn(fake.runtime, "getSelectionGeneration").mockImplementation(
+      () => selectionGeneration,
+    );
+    fake.selectSession.mockImplementation(() => {
+      selectionGeneration += 1;
+      return selection.promise;
+    });
     const app = mountApp(fake.runtime);
 
     await setTextareaValue(app.container, "accepted before navigation");

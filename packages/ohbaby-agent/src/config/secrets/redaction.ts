@@ -47,18 +47,7 @@ export function redactSettingsArgs(config: McpStdioConfig): string[] {
         return "[REDACTED]";
       }
     });
-    // A shell's -c command is one argument: mask common sensitive flags there
-    // as well as the separate argument values collected in settingsSecrets.
-    const flagsRedacted = urlsRedacted
-      .replace(
-        /((?:^|\s)--?(?:api[-_]?key|(?:access[-_]?|refresh[-_]?)?token|password|secret|credential|authorization|headers?)(?:\s+|=(?=["'])))(?:"(?:\\.|[^"\\])*"|'[^']*'|\S+)/giu,
-        "$1[REDACTED]",
-      )
-      .replace(
-        /((?:^|\s)-H\s+)(?:"(?:\\.|[^"\\])*"|'[^']*'|\S+)/gu,
-        "$1[REDACTED]",
-      );
-    return redactText(flagsRedacted, secrets);
+    return redactText(urlsRedacted, secrets);
   });
 }
 
@@ -83,17 +72,28 @@ function settingsSecrets(configs: readonly McpServerConfig[]): string[] {
           /^--?(api[-_]?key|(?:access[-_]?|refresh[-_]?)?token|password|secret|credential|authorization|headers?)(?:=(.*))?$/i.exec(
             argument,
           );
-        const shortHeader = argument === "-H";
+        const shortHeader = argument.startsWith("-H");
         if (credentialArgument || shortHeader) {
           const value =
-            credentialArgument?.at(2) ?? config.args.at(index + 1) ?? "";
-          secrets.push(value);
-          if (
-            shortHeader ||
-            /^headers?$/i.test(credentialArgument?.at(1) ?? "")
-          ) {
-            const separator = value.indexOf(":");
-            if (separator >= 0) secrets.push(value.slice(separator + 1).trim());
+            credentialArgument?.at(2) ??
+            (shortHeader && argument.length > 2
+              ? argument.slice(2)
+              : (config.args.at(index + 1) ?? ""));
+          addArgumentSecrets(
+            secrets,
+            value,
+            shortHeader || /^headers?$/i.test(credentialArgument?.at(1) ?? ""),
+          );
+          continue;
+        }
+        // A shell's -c command is one argument. Collect its sensitive values
+        // here so args and errors, including value-only errors, share masking.
+        for (const pattern of [
+          /(?:^|\s)--?(api[-_]?key|(?:access[-_]?|refresh[-_]?)?token|password|secret|credential|authorization|headers?)(?:\s+|=)("(?:\\.|[^"\\])*"|'[^']*'|\S+)/giu,
+          /(?:^|\s)-(H)\s*("(?:\\.|[^"\\])*"|'[^']*'|\S+)/gu,
+        ]) {
+          for (const [, flag, value] of argument.matchAll(pattern)) {
+            addArgumentSecrets(secrets, value, /^(?:H|headers?)$/i.test(flag));
           }
         }
       }
@@ -113,6 +113,20 @@ function settingsSecrets(configs: readonly McpServerConfig[]): string[] {
     }
   }
   return secrets;
+}
+
+function addArgumentSecrets(
+  secrets: string[],
+  value: string,
+  header: boolean,
+): void {
+  const unquoted = value.replace(/^(["'])([\s\S]*)\1$/, "$2");
+  secrets.push(value, unquoted);
+  const separator = header ? unquoted.indexOf(":") : -1;
+  if (separator >= 0) {
+    const credential = unquoted.slice(separator + 1).trim();
+    secrets.push(credential, credential.replace(/^(?:Basic|Bearer)\s+/i, ""));
+  }
 }
 
 function redactText(value: string, secrets: readonly string[]): string {

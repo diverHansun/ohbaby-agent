@@ -13,6 +13,11 @@ import {
 import type { ViewModel } from "./selectors.js";
 import type { CommandInputError } from "./useCommandOverlays.js";
 
+interface ScopedPromptAttempt extends LocalPromptAttempt {
+  readonly client: OhbabyWebRuntime["client"];
+  readonly selectionGeneration: number;
+}
+
 /**
  * Submits prompts and slash commands for the active conversation, and keeps the
  * local attempts shown until the server-side prompt record replaces them.
@@ -53,20 +58,41 @@ export function usePromptSubmission(input: {
     setActionError,
   } = input;
   const [localPromptAttempts, setLocalPromptAttempts] = useState<
-    readonly LocalPromptAttempt[]
+    readonly ScopedPromptAttempt[]
   >([]);
-  const promptProjection = useMemo(
-    () => selectPromptProjection({ attempts: localPromptAttempts, view }),
-    [localPromptAttempts, view],
+  const client = runtime.client;
+  const selectionGeneration = runtime.getSelectionGeneration();
+  // Empty drafts share a storage key, but belong to their submitting client
+  // and selection. A bound session may change clients while following a move.
+  const currentPromptAttempts = useMemo(
+    () =>
+      localPromptAttempts.filter(
+        (attempt) =>
+          attempt.selectionGeneration === selectionGeneration &&
+          (view.composer.activeSessionId !== undefined ||
+            attempt.client === client),
+      ),
+    [
+      client,
+      localPromptAttempts,
+      selectionGeneration,
+      view.composer.activeSessionId,
+    ],
   );
-  const isPromptAdmitting = localPromptAttempts.some(
+  const promptProjection = useMemo(
+    () => selectPromptProjection({ attempts: currentPromptAttempts, view }),
+    [currentPromptAttempts, view],
+  );
+  const isPromptAdmitting = currentPromptAttempts.some(
     (attempt) =>
       attempt.userMessageId === undefined &&
       localAttemptSessionMatches(attempt, view.composer.activeSessionId),
   );
 
   useEffect(() => {
-    const keepAttempt = (attempt: LocalPromptAttempt): boolean =>
+    const keepAttempt = (attempt: ScopedPromptAttempt): boolean =>
+      attempt.selectionGeneration === selectionGeneration &&
+      (attempt.submittedSessionId !== undefined || attempt.client === client) &&
       shouldKeepPromptAttempt(attempt, view.snapshot);
     // Even a same-state setter can schedule work while SyncLane stream updates
     // are pending. Only enqueue cleanup when this snapshot retires an attempt.
@@ -75,7 +101,7 @@ export function usePromptSubmission(input: {
       const next = attempts.filter(keepAttempt);
       return next.length === attempts.length ? attempts : next;
     });
-  }, [localPromptAttempts, view.snapshot]);
+  }, [client, localPromptAttempts, selectionGeneration, view.snapshot]);
 
   const submitSlashCommand = useCallback(
     async (text: string, clientRequestId?: string): Promise<boolean> => {
@@ -148,10 +174,16 @@ export function usePromptSubmission(input: {
       const submittedSessionId = view.composer.activeSessionId;
       const submittingClient = runtime.client;
       const submittingSelection = runtime.getSelectionGeneration();
+      const isCurrentSubmission = (): boolean =>
+        runtime.getSelectionGeneration() === submittingSelection &&
+        (submittedSessionId === undefined
+          ? runtime.client === submittingClient
+          : runtime.store.getSnapshot().sessionSync.scope?.sessionId ===
+            submittedSessionId);
       const placement =
         submittedSessionId !== undefined &&
         (hasActiveTurnForSession(view.snapshot, submittedSessionId) ||
-          localPromptAttempts.some(
+          currentPromptAttempts.some(
             (attempt) =>
               attempt.placement === "conversation" &&
               localAttemptSessionMatches(attempt, submittedSessionId),
@@ -165,10 +197,12 @@ export function usePromptSubmission(input: {
             (attempt) => attempt.clientRequestId !== requestId,
           ),
           {
+            client: submittingClient,
             clientRequestId: requestId,
             createdAt: new Date().toISOString(),
             originSessionId: submittedSessionId ?? null,
             placement,
+            selectionGeneration: submittingSelection,
             ...(submittedSessionId === undefined ? {} : { submittedSessionId }),
             text,
           },
@@ -180,54 +214,64 @@ export function usePromptSubmission(input: {
             ? {}
             : { sessionId: submittedSessionId }),
         });
-        if (receipt.steer?.status === "error") {
+        if (receipt.steer?.status === "error" && isCurrentSubmission()) {
           setActionError(`Accepted in queue · ${receipt.steer.error.message}`);
         }
         if (receipt.clientRequestId !== requestId) {
           throw new Error("Prompt receipt did not match this submission");
+        }
+        let receiptSelection = submittingSelection;
+        // A first prompt opens its new session, unless the user moved to
+        // another draft or session meanwhile: that choice wins (B15).
+        if (
+          submittedSessionId === undefined &&
+          isCurrentSubmission() &&
+          runtime.store.getSnapshot().sessionSync.scope === null &&
+          runtime.getWorkspaceSnapshot().selectedDirectory === selectedDirectory
+        ) {
+          const opening = runtime.selectSession(receipt.sessionId);
+          // Our own selection keeps the accepted prompt visible while binding
+          // completes; a later user selection will still hide it.
+          receiptSelection = runtime.getSelectionGeneration();
+          void opening.catch((error: unknown) => {
+            if (
+              runtime.client === submittingClient &&
+              runtime.getSelectionGeneration() === receiptSelection
+            )
+              setActionError(
+                `Prompt accepted, but the session could not be opened: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+          });
         }
         setLocalPromptAttempts((attempts) =>
           attempts.map((attempt) =>
             attempt.clientRequestId === requestId
               ? {
                   ...attempt,
+                  selectionGeneration: receiptSelection,
                   submittedSessionId: receipt.sessionId,
                   userMessageId: receipt.userMessageId,
                 }
               : attempt,
           ),
         );
-        // A first prompt opens its new session, unless the user moved to
-        // another draft or session meanwhile: that choice wins (B15).
-        if (
-          submittedSessionId === undefined &&
-          runtime.client === submittingClient &&
-          runtime.getSelectionGeneration() === submittingSelection &&
-          runtime.store.getSnapshot().sessionSync.scope === null &&
-          runtime.getWorkspaceSnapshot().selectedDirectory === selectedDirectory
-        ) {
-          void runtime
-            .selectSession(receipt.sessionId)
-            .catch((error: unknown) => {
-              setActionError(
-                `Prompt accepted, but the session could not be opened: ${
-                  error instanceof Error ? error.message : String(error)
-                }`,
-              );
-            });
-        }
         return true;
       } catch (error) {
         setLocalPromptAttempts((attempts) =>
           attempts.filter((attempt) => attempt.clientRequestId !== requestId),
         );
-        setActionError(error instanceof Error ? error.message : String(error));
+        if (isCurrentSubmission())
+          setActionError(
+            error instanceof Error ? error.message : String(error),
+          );
         return false;
       }
     },
     [
       clearActionError,
-      localPromptAttempts,
+      currentPromptAttempts,
       runtime,
       selectedDirectory,
       setActionError,

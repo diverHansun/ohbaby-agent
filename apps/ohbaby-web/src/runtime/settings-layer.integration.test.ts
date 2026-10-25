@@ -1,4 +1,4 @@
-import type { UiSettingsModels } from "ohbaby-sdk";
+import type { UiSettingsModels, UiSettingsSearch } from "ohbaby-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { selectSettings } from "../store/settings-cache.js";
 import { DEFAULT, fakeDaemon } from "./fake-daemon.test-support.js";
@@ -29,6 +29,20 @@ function models(
   };
 }
 
+function search(timeout: number): UiSettingsSearch {
+  return {
+    provider: "tavily",
+    apiKeyEnv: null,
+    apiKeyConfigured: false,
+    defaults: {
+      searchDepth: "basic",
+      maxResults: 5,
+      topic: "general",
+      timeout,
+    },
+  };
+}
+
 async function started(
   daemon: ReturnType<typeof fakeDaemon>,
 ): Promise<OhbabyWebRuntime> {
@@ -45,6 +59,143 @@ async function started(
 }
 
 describe("settings data through the real client", () => {
+  it("keeps the last model choice when the first write response is delayed", async () => {
+    const daemon = fakeDaemon();
+    let active = "a";
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let committed!: () => void;
+    const firstCommitted = new Promise<void>((resolve) => {
+      committed = resolve;
+    });
+    daemon.settings = async (
+      method,
+      path,
+      _directory,
+      body,
+    ): Promise<Response | undefined> => {
+      if (method === "GET" && path === "/v1/settings/models")
+        return Response.json({ ok: true, ...models(["a", "b", "c"], active) });
+      if (method !== "POST" || path !== "/v1/settings/models/active")
+        return undefined;
+      active = (body as { id: string }).id;
+      const response = Response.json({
+        ok: true,
+        ...models(["a", "b", "c"], active),
+      });
+      if (active === "b") {
+        committed();
+        await held;
+      }
+      return response;
+    };
+    const runtime = await started(daemon);
+    const first = runtime.settings.selectModel("b");
+    await firstCommitted;
+    const last = runtime.settings.selectModel("c");
+    // A change-event read may finish while the first response is still in transit.
+    await runtime.settings.load("models", { force: true });
+    release();
+    await Promise.all([first, last]);
+    expect(active).toBe("c");
+    expect(
+      selectSettings(runtime.settings.cache.getSnapshot(), "models").data
+        ?.active?.id,
+    ).toBe("c");
+  });
+
+  it("keeps the last search edit when an earlier save response is delayed", async () => {
+    const daemon = fakeDaemon();
+    let timeout = 60;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let committed!: () => void;
+    const firstCommitted = new Promise<void>((resolve) => {
+      committed = resolve;
+    });
+    daemon.settings = async (
+      method,
+      path,
+      _directory,
+      body,
+    ): Promise<Response | undefined> => {
+      if (path !== "/v1/settings/search") return undefined;
+      if (method === "PUT") {
+        timeout = (body as { defaults: { timeout: number } }).defaults.timeout;
+        const response = Response.json({ ok: true, ...search(timeout) });
+        if (timeout === 90) {
+          committed();
+          await held;
+        }
+        return response;
+      }
+      return Response.json({ ok: true, ...search(timeout) });
+    };
+    const runtime = await started(daemon);
+    const first = runtime.settings.updateSearch({ defaults: { timeout: 90 } });
+    await firstCommitted;
+    const last = runtime.settings.updateSearch({ defaults: { timeout: 120 } });
+    await runtime.settings.load("search", { force: true });
+    release();
+    await Promise.all([first, last]);
+    expect(timeout).toBe(120);
+    expect(
+      selectSettings(runtime.settings.cache.getSnapshot(), "search").data
+        ?.defaults.timeout,
+    ).toBe(120);
+  });
+
+  it("allows search edits during a pending model write and continues after its failure", async () => {
+    const daemon = fakeDaemon();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    daemon.settings = async (
+      method,
+      path,
+      _directory,
+      body,
+    ): Promise<Response | undefined> => {
+      if (method === "PUT" && path === "/v1/settings/search")
+        return Response.json({ ok: true, ...search(90) });
+      if (method !== "POST" || path !== "/v1/settings/models/active")
+        return undefined;
+      const { id } = body as { id: string };
+      if (id === "missing") {
+        await held;
+        return Response.json(
+          {
+            ok: false,
+            error: { code: "MODEL_NOT_FOUND", message: "Model not found" },
+          },
+          { status: 404 },
+        );
+      }
+      return Response.json({ ok: true, ...models(["a", "b"], id) });
+    };
+    const runtime = await started(daemon);
+    const failure = expect(
+      runtime.settings.selectModel("missing"),
+    ).rejects.toMatchObject({ status: 404 });
+    const last = runtime.settings.selectModel("b");
+    await runtime.settings.updateSearch({ defaults: { timeout: 90 } });
+    expect(
+      selectSettings(runtime.settings.cache.getSnapshot(), "search").data
+        ?.defaults.timeout,
+    ).toBe(90);
+    release();
+    await Promise.all([failure, last]);
+    expect(
+      selectSettings(runtime.settings.cache.getSnapshot(), "models").data
+        ?.active?.id,
+    ).toBe("b");
+  });
+
   it("forwards model.invalidated and settings.changed from the event stream", async () => {
     const daemon = fakeDaemon();
     let reads = 0;

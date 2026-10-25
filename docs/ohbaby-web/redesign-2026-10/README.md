@@ -67,6 +67,8 @@
 
 2026-10-24：**improve-4 实施完成，等待用户审查。** 按 4a、4b 先后完成：全局设置路由的错误码与字段错误、设置弹窗的五个分区、输入框模型菜单、手机“更多”，Web 端的 `/connect` 浮层已删除。Web 59 个文件、719 个用例通过，并用真实 daemon 走查。差异、遗留和提交批次见 [improve-4 验收](improve-4/05-implementation-acceptance.md)。四批全部结束后再写根目录 09 整体验收。
 
+2026-10-25：合并前发现的 MCP 参数脱敏、设置写响应顺序和新草稿旧气泡三项问题已修复，并补齐回归与真实页面验证。当前代码无剩余合并阻塞，仍保留在 `codex/redesign`，未合并到 `main`；最新测试与边界见 [合并前回归修复](improve-4/05-implementation-acceptance.md#合并前回归修复2026-10-25)。
+
 | 批次 | 内容 | 依赖 | 文档 |
 |---|---|---|---|
 | improve-1 | 设计 token、全局样式重写、基础组件、两栏外壳、顶栏、消息与审批换肤；拆 `SessionScreen`、`Composer` | 无 | [improve-1](improve-1/02-plan-and-change-scope.md) |

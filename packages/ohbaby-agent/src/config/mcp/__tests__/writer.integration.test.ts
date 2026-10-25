@@ -172,8 +172,14 @@ it.each([
   "server --api-key 'audit secret' --port 8080",
   'server --api-key="audit secret" --port 8080',
   "server --header='Authorization: Basic audit-secret' --port 8080",
+  'server --headers="X-Custom-Auth: audit secret" --port 8080',
+  "server --header=X-Custom-Auth:audit-secret --port 8080",
+  "server --headers=X-Custom-Auth:audit-secret --port 8080",
   "server -H 'Authorization: Bearer audit-secret' --port 8080",
   "server -H 'Authorization: Basic audit-secret' --port 8080",
+  "server -H'Authorization: Basic audit-secret' --port 8080",
+  'server -H"X-Custom-Auth: audit secret" --port 8080',
+  "server -HX-Custom-Auth:audit-secret --port 8080",
 ])(
   "masks credentials in a shell command argument without changing its execution: %s",
   async (script) => {
