@@ -2,10 +2,12 @@ import {
   globalSessionRequestDirectory,
   parseSlashCommandInput,
   resolveSlashCommand,
+  SESSION_RUNNING_ERROR_CODE,
   type SubmitPromptOptions,
   type UiBackendClient,
   type UiCommandCompletion,
   type UiGlobalSession,
+  type UiGlobalSessionPage,
   type UiPromptReceipt,
   type UiSessionExport,
   type UiSessionSearchPage,
@@ -22,6 +24,7 @@ import { createDraftStore, type DraftStore } from "../store/draft.js";
 import type { GlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore, type OhbabyWebStore } from "../store/store.js";
 import { sessionMovedTarget, waitForSessionReady } from "./session-moved.js";
+import { isDaemonRequestError } from "../api/daemon/http.js";
 import { SettingsClient } from "../api/daemon/settings-client.js";
 import { GlobalLayer } from "./global-layer.js";
 import { InstanceLayer } from "./instance-layer.js";
@@ -59,6 +62,12 @@ export interface OhbabyWebRuntime {
     sessionId: string,
     workspaceDirectory: string | null,
   ): Promise<void>;
+  /** Settings › Archived: one page, most recently archived first. */
+  listArchivedSessions(cursor?: string): Promise<UiGlobalSessionPage>;
+  /** Puts an archived chat back in the sidebar, in its workspace or Recents. */
+  unarchiveSession(sessionId: string): Promise<void>;
+  /** Permanently deletes an archived chat; the server refuses any other. */
+  deleteSession(sessionId: string): Promise<void>;
   searchSessions(input: {
     query: string;
     cursor?: string;
@@ -275,6 +284,12 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     } catch (error) {
       if (row) this.catalog.upsertSession(row);
       settle();
+      // The sidebar only knows activity for the connected instance (04 §2.3).
+      if (
+        isDaemonRequestError(error) &&
+        error.code === SESSION_RUNNING_ERROR_CODE
+      )
+        throw new Error("Stop the chat before archiving.", { cause: error });
       throw error;
     }
     settle();
@@ -289,6 +304,18 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     workspaceDirectory: string | null,
   ): Promise<void> {
     return this.global.moveSession(sessionId, workspaceDirectory);
+  }
+
+  listArchivedSessions(cursor?: string): Promise<UiGlobalSessionPage> {
+    return this.global.listArchivedSessions(cursor);
+  }
+
+  unarchiveSession(sessionId: string): Promise<void> {
+    return this.global.unarchiveSession(sessionId);
+  }
+
+  deleteSession(sessionId: string): Promise<void> {
+    return this.global.deleteSession(sessionId);
   }
 
   searchSessions(input: {

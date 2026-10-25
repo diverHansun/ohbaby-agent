@@ -199,3 +199,55 @@ it.each(["hide", "archive"] as const)(
     expect(runtime.catalog.getSnapshot().loadingMore).toBe(false);
   },
 );
+
+it("lists, restores and deletes archived chats through the global routes", async () => {
+  const daemon = fakeDaemon([
+    session("kept", "/a", "/a"),
+    session("restored", "/a", "/a"),
+    session("deleted", null, "/default"),
+  ]);
+  const runtime = start(daemon.fetch);
+  await runtime.ready;
+  await runtime.archiveSession("restored", "/a");
+  await runtime.archiveSession("deleted", "/default");
+  const ids = (): string[] =>
+    runtime.catalog.getSnapshot().sessions.map((row) => row.id);
+  expect(ids()).toEqual(["kept"]);
+
+  const page = await runtime.listArchivedSessions();
+  expect(page.sessions.map((row) => [row.id, row.status])).toEqual(
+    expect.arrayContaining([
+      ["restored", "archived"],
+      ["deleted", "archived"],
+    ]),
+  );
+  expect(
+    daemon.requests.find(
+      (request) => request.path === "/v1/sessions" && request.method === "GET",
+    )?.directory,
+  ).toBeUndefined();
+
+  await runtime.unarchiveSession("restored");
+  expect(ids()).toContain("restored");
+  await runtime.deleteSession("deleted");
+  expect(daemon.sessions.has("deleted")).toBe(false);
+  expect((await runtime.listArchivedSessions()).sessions).toEqual([]);
+  // Only archived chats can be deleted; the server says so.
+  await expect(runtime.deleteSession("kept")).rejects.toMatchObject({
+    code: "SESSION_NOT_ARCHIVED",
+    status: 409,
+  });
+});
+
+it("explains a refused archive of a running chat and puts the row back", async () => {
+  const daemon = fakeDaemon([session("busy", "/a", "/a")]);
+  daemon.running.add("busy");
+  const runtime = start(daemon.fetch);
+  await runtime.ready;
+  await expect(runtime.archiveSession("busy", "/a")).rejects.toThrow(
+    "Stop the chat before archiving.",
+  );
+  expect(runtime.catalog.getSnapshot().sessions.map((row) => row.id)).toEqual([
+    "busy",
+  ]);
+});

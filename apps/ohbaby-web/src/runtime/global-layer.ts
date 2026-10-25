@@ -1,4 +1,8 @@
-import type { UiGlobalSession, UiSessionSearchPage } from "ohbaby-sdk";
+import type {
+  UiGlobalSession,
+  UiGlobalSessionPage,
+  UiSessionSearchPage,
+} from "ohbaby-sdk";
 import { GlobalSessionsClient } from "../api/daemon/global-sessions.js";
 import {
   createDaemonHttpClient,
@@ -18,6 +22,8 @@ import {
 const PAGE_SIZE = 100;
 /** Show more stops after this many pages; the next click continues. */
 const MAX_PAGES_PER_LOAD = 10;
+/** Archived chats are read a page per Show more. */
+const ARCHIVED_PAGE_SIZE = 50;
 
 /**
  * Directory-independent state: workspaces, the global session list and the
@@ -176,6 +182,32 @@ export class GlobalLayer {
       settle();
       void this.refresh();
     }
+  }
+
+  /** One page of archived chats for Settings › Archived, most recently archived first. */
+  listArchivedSessions(cursor?: string): Promise<UiGlobalSessionPage> {
+    return this.sessions.listSessions({
+      status: "archived",
+      limit: ARCHIVED_PAGE_SIZE,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+  }
+
+  /** The restored row goes straight into the list; the refresh brings its workspace back. */
+  async unarchiveSession(sessionId: string): Promise<void> {
+    const settle = this.beginWrite();
+    try {
+      this.catalog.upsertSession(
+        await this.sessions.unarchiveSession(sessionId),
+      );
+    } finally {
+      settle();
+      void this.refresh();
+    }
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.sessions.deleteSession(sessionId);
   }
 
   searchSessions(input: {

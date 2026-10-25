@@ -75,7 +75,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
   const global = (session: WorldSession): UiGlobalSession => ({
     id: session.id,
     title: session.title,
-    status: "active",
+    status: session.archived ? "archived" : "active",
     createdAt: session.updatedAt,
     updatedAt: session.updatedAt,
     messageCount: 1,
@@ -176,11 +176,14 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
             })),
         });
       if (path === "/v1/sessions" && request.method === "GET") {
+        // Archived chats are listed from hidden workspaces too (D9).
+        const archived = url.searchParams.get("status") === "archived";
         const active = [...sessions.values()]
-          .filter(
-            (session) =>
-              !session.archived &&
-              !hidden.has(session.workspaceDirectory ?? ""),
+          .filter((session) =>
+            archived
+              ? session.archived === true
+              : !session.archived &&
+                !hidden.has(session.workspaceDirectory ?? ""),
           )
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         const offset = Number(url.searchParams.get("cursor") ?? "0");
@@ -379,9 +382,49 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
             { ok: false, error: { message: "client is not registered" } },
             { status: 409 },
           );
+        if (daemon.running.has(archive[1]))
+          return Response.json(
+            {
+              ok: false,
+              error: { code: "SESSION_RUNNING", message: "Session is busy" },
+            },
+            { status: 409 },
+          );
         const session = sessions.get(archive[1]);
         if (session) session.archived = true;
         return Response.json({ ok: true });
+      }
+      const unarchive = /^\/v1\/sessions\/([^/]+)\/unarchive$/.exec(path);
+      const removed =
+        request.method === "DELETE"
+          ? /^\/v1\/sessions\/([^/]+)$/.exec(path)
+          : null;
+      const target = unarchive?.[1] ?? removed?.[1];
+      if (target && (unarchive || removed)) {
+        const session = sessions.get(target);
+        if (!session)
+          return Response.json(
+            {
+              ok: false,
+              error: { code: "SESSION_NOT_FOUND", message: target },
+            },
+            { status: 404 },
+          );
+        if (!session.archived)
+          return Response.json(
+            {
+              ok: false,
+              error: { code: "SESSION_NOT_ARCHIVED", message: target },
+            },
+            { status: 409 },
+          );
+        if (removed) {
+          sessions.delete(target);
+          return Response.json({ ok: true, deletedSessionIds: [target] });
+        }
+        session.archived = false;
+        session.updatedAt = new Date().toISOString();
+        return Response.json({ ok: true, session: global(session) });
       }
       const exported = /^\/v1\/sessions\/([^/]+)\/export$/.exec(path);
       if (exported?.[1] && client)
