@@ -90,3 +90,11 @@ PermissionCall、PermissionAskInput、PermissionPatternInput 和现有 Permissio
 分类聚合 commands 的 danger，不完整至少 mutating。单条完整 git/docker 延续 arityKey；普通命令使用完整规范化文本，多命令 allow 要整体匹配，不将 npm run test 扩成 npm *。不完整审批展示原始命令，不能生成可长期保存的规则。
 
 主代理与子代理走同一入口，原有根会话归属、TUI/Web 主会话审批及 owner 清理保持。回归覆盖 `tests/integration/shell-tools/analysis-permission.integration.test.ts`、`bash-binding.integration.test.ts` 及既有权限/scheduler 测试，包括排队新 deny、Full Access 变化重试、回复时复核与固定执行参数。完整数据流见 [Shell 架构](../shell/architecture.md)。
+
+## 四、CoreAPI 边界测试的 CI 隔离
+
+2026-10-25 的 [CI 运行 40192550886](https://github.com/diverHansun/ohbaby-agent/actions/runs/40192550886) 中，Windows 的 `core-api-permission.integration.test.ts` 超过 10 秒限制，实际耗时 24.1 秒；同组其余 92 条测试及 Linux/macOS 任务通过。
+
+此用例覆盖同步订阅、审批快照和 AbortSignal，不验证重启后的持久化。夹具使用真实默认 host、SQLite 内存库、完整 schema/migrations 和本地 RPC；磁盘持久化仍由数据库与真实 daemon 集成测试负责。host 构造和释放失败时也必须恢复环境变量。
+
+诊断时给磁盘 SQLite 的每次迁移 COMMIT 临时增加 450 ms 同步延迟，原夹具在 11.8 秒触发同样的超时，内存夹具在同一条件下 25 ms 通过。该实验验证了磁盘延迟可触发此症状，并不证明原 Windows runner 的唯一瓶颈。探针没有提交，也没有提高 timeout、添加 retry 或删除断言。正式改动后，CI 的六文件 Permission runtime integration 测试组本地 93 条全部通过；平台结果由三系统 CI 矩阵验证。

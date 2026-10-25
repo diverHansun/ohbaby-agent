@@ -1,17 +1,16 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createRPC, type CoreAPI } from "ohbaby-sdk";
-import { buildCoreAPIImpl } from "./core-api-factory.js";
+import { buildCoreAPIImpl, type CoreApiHost } from "./core-api-factory.js";
 
 describe("default CoreAPI approval boundary", () => {
   it("subscribes synchronously and queries approvals through the actual persistent host", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "ohbaby-core-approval-"));
-    vi.stubEnv("OHBABY_DB_PATH", join(directory, "agent.db"));
-    const host = await buildCoreAPIImpl();
+    // Exercise the real persistent host and schema without disk migration latency.
+    // This test covers the approval API boundary, not persistence across restarts.
+    vi.stubEnv("OHBABY_DB_PATH", ":memory:");
+    let host: CoreApiHost | undefined;
     let unsubscribe: (() => void) | undefined;
     try {
+      host = await buildCoreAPIImpl();
       const rpc = createRPC<CoreAPI>();
       rpc.connectImpl(host.core);
       const client = rpc.createProxy(host.callbacks);
@@ -36,10 +35,12 @@ describe("default CoreAPI approval boundary", () => {
         }),
       ).rejects.toMatchObject({ name: "AbortError" });
     } finally {
-      if (typeof unsubscribe === "function") unsubscribe();
-      await host.dispose();
-      vi.unstubAllEnvs();
-      await rm(directory, { recursive: true, force: true });
+      try {
+        if (typeof unsubscribe === "function") unsubscribe();
+        await host?.dispose();
+      } finally {
+        vi.unstubAllEnvs();
+      }
     }
   });
 });
