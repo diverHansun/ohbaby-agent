@@ -5,6 +5,10 @@ import {
   createPersistentUiBackendClient,
   getAgentPackageVersion,
   commitSessionWorkspaceMove,
+  restoreArchivedSession,
+  deleteArchivedSession,
+  cleanupDeletedSessionFiles,
+  sessionFilesCleanupFailed,
   getGlobalSession,
   isDefaultDirectory,
   listGlobalSessions,
@@ -548,6 +552,20 @@ async function startFreshDaemon(input: {
         listKnownWorkspaceScopes: () => listKnownSessionWorkingDirectories(),
         logger,
         sessionCatalog: {
+          restore: (sessionId, restoreInput) =>
+            restoreArchivedSession(sessionId, restoreInput),
+          delete: async (sessionId) => {
+            const result = await deleteArchivedSession(sessionId);
+            // Defaults share the persistent backend's OHBABY_STORAGE_ROOT/data root.
+            await cleanupDeletedSessionFiles(result, {
+              log: (error) => {
+                emitDiagnosticSafely(logger, sessionFilesCleanupFailed, {
+                  error,
+                });
+              },
+            });
+            return result;
+          },
           list: (query) => listGlobalSessions(query),
           search: (query) => searchGlobalSessions(query),
           get: (sessionId) => getGlobalSession(sessionId),

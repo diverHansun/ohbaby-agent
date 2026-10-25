@@ -2965,6 +2965,7 @@ describe("createInProcessUiBackendClient", () => {
         status: { kind: "idle" },
       },
       sessionManager: {
+        listChildren: () => Promise.resolve([]),
         create: () => Promise.resolve(currentCoreSession),
         get: () => Promise.resolve(currentCoreSession),
         listByProject: () => Promise.resolve([currentCoreSession]),
@@ -9534,6 +9535,7 @@ describe("createInProcessUiBackendClient", () => {
       },
       llmClient: createFakeLLMClient([]),
       sessionManager: {
+        listChildren: () => Promise.resolve([]),
         create() {
           throw new Error("should reuse the primary session");
         },
@@ -9771,7 +9773,73 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshotEvent).toMatchObject({ selectedSessionId: "session_2" });
   });
 
-  it("archives the only active persistent session and clears the active session", async () => {
+  it.each(["root-run", "descendant-run", "queued", "starting"])(
+    "rejects archive for durable %s work",
+    async (kind) => {
+      const directory = await mkdtemp(join(tmpdir(), "ohbaby-archive-busy-"));
+      initDatabase({ dbPath: join(directory, "agent.db") });
+      const bus = createBus();
+      const sessionManager = createSessionManager({
+        bus,
+        store: createDatabaseSessionStore(),
+        projectResolver: Project,
+        messageCleaner: { removeMessages: () => Promise.resolve() },
+      });
+      const root = await sessionManager.create(directory);
+      const child = await sessionManager.create(directory, {
+        parentId: root.id,
+      });
+      const grandchild = await sessionManager.create(directory, {
+        parentId: child.id,
+      });
+      const runLedger = createDatabaseRunLedger();
+      const prompts = new DatabasePromptSubmissionStore();
+      const client = createInProcessUiBackendClient({
+        projectDirectory: directory,
+        sessionManager,
+        runLedger,
+        promptSubmissionStore: prompts,
+      });
+      try {
+        if (kind.endsWith("run")) {
+          // A separate ledger instance models work admitted by another runtime.
+          await createDatabaseRunLedger().createPending({
+            runId: "busy",
+            sessionId: kind === "root-run" ? root.id : grandchild.id,
+            triggerSource: "user",
+          });
+        } else {
+          await prompts.accept({
+            promptId: "queued",
+            clientRequestId: "queued",
+            scopeKey: "/other-workspace",
+            sessionId: root.id,
+            userMessageId: "future",
+            text: "hello",
+            maxQueuedPrompts: 100,
+          });
+          if (kind === "starting") await prompts.claim("queued");
+        }
+        await expect(
+          client.archiveSession({ sessionId: root.id }),
+        ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+        expect((await sessionManager.get(root.id))?.status).toBe("active");
+        if (kind.endsWith("run")) {
+          await runLedger.markRunning("busy");
+          await runLedger.markSucceeded("busy");
+        } else if (kind === "queued") await prompts.cancelQueued("queued");
+        else await prompts.finish("queued", { status: "succeeded" });
+        await client.archiveSession({ sessionId: root.id });
+        expect((await sessionManager.get(root.id))?.status).toBe("archived");
+      } finally {
+        await client.dispose();
+        closeDatabase();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rejects archiving a running session, then archives it after completion", async () => {
     const projectRoot = process.cwd();
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -9827,12 +9895,15 @@ describe("createInProcessUiBackendClient", () => {
     }
 
     try {
-      await (
-        client as unknown as {
-          archiveSession(input: { readonly sessionId: string }): Promise<void>;
-        }
-      ).archiveSession({ sessionId: "session_1" });
-
+      await expect(
+        client.archiveSession({ sessionId: "session_1" }),
+      ).rejects.toMatchObject({ name: "SessionRunBusyError" });
+      await expect(sessionManager.get("session_1")).resolves.toMatchObject({
+        status: "active",
+      });
+      releaseRun.resolve(undefined);
+      await submission;
+      await client.archiveSession({ sessionId: "session_1" });
       await expect(sessionManager.get("session_1")).resolves.toMatchObject({
         status: "archived",
       });
@@ -9841,9 +9912,6 @@ describe("createInProcessUiBackendClient", () => {
         sessions: [],
         status: { kind: "idle" },
       });
-
-      releaseRun.resolve(undefined);
-      await submission;
       await expect(
         executeStatusData(client, "session_1", "inv_late_archived_cache"),
       ).resolves.toMatchObject({
@@ -9920,6 +9988,7 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createFakeLLMClient([]),
       projectDirectory: projectRoot,
       sessionManager: {
+        listChildren: () => Promise.resolve([]),
         create() {
           throw new Error("create should not be called");
         },

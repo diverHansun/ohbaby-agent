@@ -986,6 +986,38 @@ export function createOpenApiDocument(
         },
       },
       "/v1/sessions": {
+        get: {
+          summary: "List root sessions across workspaces",
+          parameters: [
+            {
+              name: "status",
+              in: "query",
+              schema: {
+                type: "string",
+                enum: ["active", "archived"],
+                default: "active",
+              },
+            },
+            {
+              name: "limit",
+              in: "query",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: 500,
+                default: 100,
+              },
+            },
+            { name: "cursor", in: "query", schema: { type: "string" } },
+          ],
+          responses: {
+            "200": {
+              description:
+                "Session page with optional nextCursor; archived pages include hidden workspaces",
+            },
+            "400": { description: "INVALID_QUERY or INVALID_CURSOR" },
+          },
+        },
         post: {
           responses: {
             "200": {
@@ -1055,11 +1087,41 @@ export function createOpenApiDocument(
           summary: "Select a session",
         },
       },
+      "/v1/sessions/{id}/unarchive": {
+        post: {
+          summary:
+            "Restore an archived root session without loading its workspace",
+          responses: {
+            "200": {
+              description: "Restored session in UiGlobalSession format",
+            },
+            "404": { description: "SESSION_NOT_FOUND" },
+            "409": { description: "SESSION_NOT_ROOT or SESSION_NOT_ARCHIVED" },
+          },
+        },
+      },
+      "/v1/sessions/{id}": {
+        delete: {
+          summary:
+            "Permanently delete an archived root session and every descendant",
+          responses: {
+            "200": { description: "Deleted session IDs in deletedSessionIds" },
+            "404": { description: "SESSION_NOT_FOUND" },
+            "409": {
+              description:
+                "SESSION_NOT_ROOT, SESSION_NOT_ARCHIVED or SESSION_RUNNING",
+            },
+          },
+        },
+      },
       "/v1/sessions/{id}/archive": {
         patch: {
           responses: {
             "200": {
               description: "Session archived",
+            },
+            "409": {
+              description: "SESSION_RUNNING: stop the session before archiving",
             },
             "404": {
               description: "Session not found",

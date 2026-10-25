@@ -22,6 +22,7 @@ export {
   serverStopFailed,
   serverStopped,
   sessionTitleGenerationFailed,
+  sessionFilesCleanupFailed,
   tokenUsageNormalization,
 } from "./events.js";
 export {

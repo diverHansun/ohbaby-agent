@@ -174,6 +174,7 @@ describe("resolveSessionForNewPrompt", () => {
       title: "Core empty",
     });
     const manager: InProcessSessionManager = {
+      listChildren: () => Promise.resolve([]),
       create() {
         throw new Error("create should not be called");
       },
@@ -223,6 +224,7 @@ describe("resolveSessionForNewPrompt", () => {
     const occupied = coreSession({ id: "occupied_first" });
     const empty = coreSession({ id: "cold_empty_second" });
     const manager: InProcessSessionManager = {
+      listChildren: () => Promise.resolve([]),
       create() {
         throw new Error("should reuse cold root");
       },

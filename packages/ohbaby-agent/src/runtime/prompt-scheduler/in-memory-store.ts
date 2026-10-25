@@ -458,6 +458,14 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       .sort((a, b) => a.createdAt - b.createdAt)[0]?.titleExpected;
   }
 
+  async hasUnfinishedForSession(sessionId: string): Promise<boolean> {
+    return [...this.records.values()].some(
+      (record) =>
+        record.sessionId === sessionId &&
+        ["queued", "starting", "running"].includes(record.status),
+    );
+  }
+
   async hasForSession(scopeKey: string, sessionId: string): Promise<boolean> {
     for (const record of this.records.values()) {
       if (record.scopeKey === scopeKey && record.sessionId === sessionId)

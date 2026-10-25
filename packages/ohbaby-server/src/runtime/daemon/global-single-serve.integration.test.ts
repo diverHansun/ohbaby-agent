@@ -1,5 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -340,6 +347,148 @@ async function startedCount(path: string): Promise<number> {
 }
 
 describe("global single serve across real processes", () => {
+  it("archives, restores, restarts and permanently deletes sessions through the real daemon", async () => {
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "ohbaby-real-archive-")),
+    );
+    cleanupDirectories.push(root);
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const common = {
+      authToken: "archive-e2e",
+      dbPath: join(root, "agent.db"),
+      homeDirectory: join(root, "home"),
+      ohbabyHome: join(root, "config"),
+      workdir: repo,
+    };
+    const child = spawnServe(common);
+    const ready = await waitForReady(child);
+    let origin = new URL(ready.url).origin;
+    const headers = {
+      authorization: `Bearer ${common.authToken}`,
+      "content-type": "application/json",
+      "x-ohbaby-directory": repo,
+      "x-ohbaby-client-id": "archive-client",
+    };
+    const globalHeaders = {
+      authorization: headers.authorization,
+      "content-type": "application/json",
+    };
+    expect(
+      (
+        await fetch(`${origin}/v1/clients`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ clientId: "archive-client" }),
+        })
+      ).status,
+    ).toBe(200);
+    const id = await createServerSession(origin, headers);
+    const url = (): string => `${origin}/v1/sessions/${id}`;
+    expect(
+      (await fetch(url(), { method: "DELETE", headers: globalHeaders })).status,
+    ).toBe(409);
+    expect(
+      (await fetch(`${url()}/archive`, { method: "PATCH", headers })).status,
+    ).toBe(200);
+    const archived = await (
+      await fetch(`${origin}/v1/sessions?status=archived`, {
+        headers: globalHeaders,
+      })
+    ).json();
+    expect(archived).toMatchObject({ sessions: [{ id, status: "archived" }] });
+    expect(
+      (
+        await fetch(`${origin}/v1/scopes/hide`, {
+          method: "POST",
+          headers: globalHeaders,
+          body: JSON.stringify({ directory: repo }),
+        })
+      ).status,
+    ).toBe(200);
+    const restored = await fetch(`${url()}/unarchive`, {
+      method: "POST",
+      headers: globalHeaders,
+    });
+    expect(restored.status).toBe(200);
+    expect(await restored.json()).toMatchObject({
+      session: { id, status: "active" },
+    });
+    const scopes = await (
+      await fetch(`${origin}/v1/scopes`, { headers: globalHeaders })
+    ).json();
+    expect(scopes).toMatchObject({
+      scopes: [expect.objectContaining({ available: true })],
+    });
+    expect(
+      (await fetch(`${url()}/archive`, { method: "PATCH", headers })).status,
+    ).toBe(200);
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await rm(repo, { recursive: true });
+    const defaultDirectory = join(common.ohbabyHome, "workspace/default");
+    await mkdir(defaultDirectory, { recursive: true });
+    const restarted = spawnServe({ ...common, workdir: defaultDirectory });
+    origin = new URL((await waitForReady(restarted)).url).origin;
+    const missingFolderRestore = await fetch(`${url()}/unarchive`, {
+      method: "POST",
+      headers: globalHeaders,
+    });
+    expect(missingFolderRestore.status).toBe(200);
+    const expectedDefaultDirectory: unknown =
+      expect.stringContaining("workspace/default");
+    expect(await missingFolderRestore.json()).toMatchObject({
+      session: {
+        id,
+        workspaceDirectory: null,
+        pendingWorkingDirectory: expectedDefaultDirectory,
+      },
+    });
+    const defaultHeaders = {
+      ...headers,
+      "x-ohbaby-directory": defaultDirectory,
+    };
+    expect(
+      (
+        await fetch(`${origin}/v1/clients`, {
+          method: "POST",
+          headers: defaultHeaders,
+          body: JSON.stringify({ clientId: "archive-client" }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await fetch(`${url()}/archive`, {
+          method: "PATCH",
+          headers: defaultHeaders,
+        })
+      ).status,
+    ).toBe(200);
+    const deleted = await fetch(url(), {
+      method: "DELETE",
+      headers: globalHeaders,
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toMatchObject({ deletedSessionIds: [id] });
+    const listed = await (
+      await fetch(`${origin}/v1/sessions?status=archived`, {
+        headers: globalHeaders,
+      })
+    ).json();
+    expect(listed).toMatchObject({ sessions: [] });
+    expect(
+      (
+        await fetch(`${url()}/unarchive`, {
+          method: "POST",
+          headers: globalHeaders,
+        })
+      ).status,
+    ).toBe(404);
+    restarted.kill("SIGTERM");
+    await waitForExit(restarted);
+  }, 30_000);
+
   it("reuses the default workspace without registering it as a project", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-default-reuse-"));
     cleanupDirectories.push(root);

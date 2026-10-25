@@ -1,6 +1,8 @@
 import {
   SessionWorkspaceMoveError,
   type CoreSession,
+  type RestoreArchivedSessionInput,
+  type DeletedSessionData,
   type GlobalSessionPage,
   type SessionWorkspaceMovePlan,
   type SessionSearchPage,
@@ -11,12 +13,18 @@ export interface GlobalSessionCatalog {
   list(input: {
     readonly limit?: number;
     readonly cursor?: string;
+    readonly status?: "active" | "archived";
   }): GlobalSessionPage;
   search(input: {
     readonly query: string;
     readonly limit?: number;
     readonly cursor?: string;
   }): SessionSearchPage;
+  restore(
+    sessionId: string,
+    input: RestoreArchivedSessionInput,
+  ): Promise<CoreSession>;
+  delete(sessionId: string): Promise<DeletedSessionData>;
   get(sessionId: string): CoreSession | null;
   planMove(
     sessionId: string,

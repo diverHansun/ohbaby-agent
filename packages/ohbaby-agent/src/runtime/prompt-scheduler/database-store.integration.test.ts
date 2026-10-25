@@ -85,6 +85,10 @@ describe("DatabasePromptSubmissionStore", () => {
           });
       }
       expect((await store.get("receipt"))?.status).toBe(status);
+      expect(await store.hasUnfinishedForSession("session_1")).toBe(
+        ["queued", "starting", "running"].includes(status),
+      );
+      expect(await store.hasUnfinishedForSession("other-session")).toBe(false);
       expect(await store.hasForSession("/workspace", "session_1")).toBe(true);
       expect(await store.hasForSession("/other", "session_1")).toBe(false);
       expect(await store.hasForSession("/workspace", "other-session")).toBe(

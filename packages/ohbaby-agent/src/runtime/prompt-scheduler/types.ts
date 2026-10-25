@@ -189,6 +189,8 @@ export interface PromptSubmissionStore {
   ): Promise<PromptSubmissionRecord>;
   listQueued(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
   listVisible(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
+  /** Unfinished work across all scopes, including a pending workspace move. */
+  hasUnfinishedForSession(sessionId: string): Promise<boolean>;
   /** Durable receipt existence, including terminal history without message/run associations. */
   hasForSession(scopeKey: string, sessionId: string): Promise<boolean>;
   /** Original admission title remains recoverable even when its prompt was cancelled. */

@@ -1,5 +1,6 @@
 import type {
   UiGlobalSession,
+  UiGlobalSessionStatus,
   UiGlobalSessionPage,
   UiSessionSearchPage,
 } from "ohbaby-sdk";
@@ -66,6 +67,14 @@ export function parseGlobalSessionLimit(
   return parsed;
 }
 
+export function parseGlobalSessionStatus(
+  value: string | undefined,
+): UiGlobalSessionStatus {
+  if (value === undefined) return "active";
+  if (value === "active" || value === "archived") return value;
+  throw invalid("INVALID_QUERY", "status must be active or archived");
+}
+
 /** A directory selects a workspace; an explicit null leaves the current one. */
 export function parseSessionWorkspaceUpdate(body: unknown): string | null {
   const requested =
@@ -103,6 +112,8 @@ export function globalSessionErrorStatus(
       return 404;
     case "SESSION_NOT_ROOT":
     case "SESSION_ARCHIVED":
+    case "SESSION_NOT_ARCHIVED":
+    case "SESSION_RUNNING":
       return 409;
     default:
       return 500;

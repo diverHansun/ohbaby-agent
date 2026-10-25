@@ -755,6 +755,8 @@ describe("global daemon session routes", () => {
       }),
     );
     const catalog: GlobalSessionCatalog = {
+      restore: vi.fn(),
+      delete: vi.fn(),
       list,
       search,
       get: () =>
@@ -798,7 +800,11 @@ describe("global daemon session routes", () => {
           },
         ],
       });
-      expect(list).toHaveBeenCalledWith({ limit: 2, cursor: "abc" });
+      expect(list).toHaveBeenCalledWith({
+        limit: 2,
+        cursor: "abc",
+        status: "active",
+      });
       expect(
         (await fetch(`${server.url}/v1/sessions?limit=0`, { headers })).status,
       ).toBe(400);

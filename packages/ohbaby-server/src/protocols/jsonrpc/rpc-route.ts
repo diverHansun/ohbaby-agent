@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import {
   parseNewSessionCommandArgs,
+  SessionRunBusyError,
   type UiPromptQueueExecutionPort,
 } from "ohbaby-agent";
 import type {
@@ -866,20 +867,23 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
       }
     } catch (error) {
       const status =
-        parsed.request.method === "exportSession"
-          ? sessionExportErrorStatus(error)
-          : isRecord(error) && error.code === "SESSION_SCOPE_CHANGED"
-            ? 409
-            : isRecord(error) && error.code === "SESSION_RECOVERY_UNSUPPORTED"
-              ? 426
-              : isRecord(error) && error.code === "INVALID_SESSION_QUERY"
-                ? 400
-                : isDaemonForbiddenError(error)
-                  ? 403
-                  : isRecord(error) &&
-                      error.code === "INVALID_CLIENT_REQUEST_ID"
-                    ? 400
-                    : 500;
+        parsed.request.method === "archiveSession" &&
+        error instanceof SessionRunBusyError
+          ? 409
+          : parsed.request.method === "exportSession"
+            ? sessionExportErrorStatus(error)
+            : isRecord(error) && error.code === "SESSION_SCOPE_CHANGED"
+              ? 409
+              : isRecord(error) && error.code === "SESSION_RECOVERY_UNSUPPORTED"
+                ? 426
+                : isRecord(error) && error.code === "INVALID_SESSION_QUERY"
+                  ? 400
+                  : isDaemonForbiddenError(error)
+                    ? 403
+                    : isRecord(error) &&
+                        error.code === "INVALID_CLIENT_REQUEST_ID"
+                      ? 400
+                      : 500;
       return context.json(
         createDaemonRpcFailure(parsed.request.id, error),
         status,

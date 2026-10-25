@@ -81,3 +81,13 @@ export type {
   UpdateSessionPatch,
 } from "./types.js";
 export type { SanitizePromptOptions } from "./prompt-sanitizer.js";
+
+export {
+  restoreArchivedSession,
+  deleteArchivedSession,
+  SessionArchiveError,
+  type SessionArchiveErrorCode,
+  type RestoreArchivedSessionInput,
+  type DeletedSessionData,
+} from "./archive.js";
+export { cleanupDeletedSessionFiles } from "./archive-files.js";

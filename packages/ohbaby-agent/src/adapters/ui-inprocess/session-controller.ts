@@ -7,7 +7,12 @@ import { sameSessionDirectory } from "../../services/session/index.js";
 
 export type InProcessSessionManager = Pick<
   SessionManager,
-  "create" | "get" | "listByProject" | "listByWorkingDirectory" | "update"
+  | "create"
+  | "get"
+  | "listChildren"
+  | "listByProject"
+  | "listByWorkingDirectory"
+  | "update"
 > &
   Partial<
     Pick<

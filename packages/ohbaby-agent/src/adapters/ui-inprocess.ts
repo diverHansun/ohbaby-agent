@@ -2899,6 +2899,28 @@ export function createInProcessUiBackendClient(
       throw new Error(`Cannot archive subagent session: ${sessionId}`);
     }
 
+    const seen = new Set<string>();
+    const pending = [sessionId];
+    while (pending.length > 0) {
+      const id = pending.pop();
+      if (id === undefined) break;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const runs = await sourceLedger.getActiveRuns(id);
+      if (
+        activePromptsBySession.has(id) ||
+        runs.length > 0 ||
+        (await promptSubmissionStore.hasUnfinishedForSession(id))
+      ) {
+        throw new SessionRunBusyError(
+          sessionId,
+          runs.map((run) => run.runId),
+        );
+      }
+      const children = await options.sessionManager.listChildren(id);
+      pending.push(...children.map((child) => child.id));
+    }
+
     await options.sessionManager.update(sessionId, { status: "archived" });
     retirePromptCacheSession(sessionId);
     await stateStore.removeSession?.(sessionId);

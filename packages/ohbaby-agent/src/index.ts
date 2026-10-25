@@ -242,3 +242,13 @@ export {
 } from "./config/llm/writer.js";
 
 export { startModelEntryDiscovery } from "./config/llm/apply-active-model-config.js";
+
+export {
+  restoreArchivedSession,
+  deleteArchivedSession,
+  SessionArchiveError,
+  type SessionArchiveErrorCode,
+  type RestoreArchivedSessionInput,
+  type DeletedSessionData,
+} from "./services/session/archive.js";
+export { cleanupDeletedSessionFiles } from "./services/session/archive-files.js";

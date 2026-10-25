@@ -26,6 +26,7 @@ import type {
 import { daemonAuthHeader } from "../auth/token.js";
 import {
   createInProcessUiBackendClient,
+  SessionRunBusyError,
   type PersistentUiBackendOptions,
 } from "ohbaby-agent";
 import { createDaemonServerApp } from "./create-app.js";
@@ -2502,6 +2503,47 @@ describe("createDaemonServerApp", () => {
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.archivedSessions).toEqual(["session_2"]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("reports SESSION_RUNNING for archive over both REST and RPC", async () => {
+    const backend = new FakeBackend();
+    backend.archiveError = new SessionRunBusyError("session_2", ["run"]);
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        method: "POST",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ clientId: "client_web" }),
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/session_2/archive",
+        {
+          method: "PATCH",
+          headers: { ...authHeaders(), "x-ohbaby-client-id": "client_web" },
+        },
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "SESSION_RUNNING" },
+      });
+      const rpc = await handle.app.request("/api/rpc", {
+        method: "POST",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "archive",
+          clientId: "client_web",
+          method: "archiveSession",
+          params: [{ sessionId: "session_2" }],
+        }),
+      });
+      expect(rpc.status).toBe(409);
+      expect(await rpc.json()).toMatchObject({
+        error: { code: "SESSION_RUNNING" },
+      });
     } finally {
       await handle.dispose();
     }

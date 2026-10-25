@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { registerGlobalSettingsRoutes } from "../../protocols/web/routes/global-settings.js";
 import type {
@@ -14,6 +15,7 @@ import {
 } from "ohbaby-sdk";
 import {
   createSessionIdGenerator,
+  SessionArchiveError,
   createShutdownOptions,
   collectCleanup,
   ensureDefaultDirectory,
@@ -54,6 +56,7 @@ import {
 import {
   globalSessionErrorStatus,
   parseGlobalSessionLimit,
+  parseGlobalSessionStatus,
   parseSessionWorkspaceUpdate,
   toUiGlobalSession,
   toUiGlobalSessionPage,
@@ -307,6 +310,12 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     this.app.get("/v1/sessions", (context) => this.listGlobalSessions(context));
     this.app.post("/v1/sessions/:sessionId/workspace", (context) =>
       this.moveSessionWorkspace(context),
+    );
+    this.app.post("/v1/sessions/:sessionId/unarchive", (context) =>
+      this.restoreArchivedSession(context),
+    );
+    this.app.delete("/v1/sessions/:sessionId", (context) =>
+      this.deleteArchivedSession(context),
     );
     // A retired global endpoint must not fall through to scoped dispatch,
     // which would otherwise require a request-directory header and return 400.
@@ -666,6 +675,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     if (catalog instanceof Response) return catalog;
     try {
       const page = catalog.list({
+        status: parseGlobalSessionStatus(context.req.query("status")),
         limit: parseGlobalSessionLimit(context.req.query("limit")),
         cursor: context.req.query("cursor"),
       });
@@ -685,6 +695,51 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         cursor: context.req.query("cursor"),
       });
       return context.json({ ok: true, ...toUiSessionSearchPage(page) });
+    } catch (error) {
+      return this.globalSessionFailure(context, error);
+    }
+  }
+
+  private async restoreArchivedSession(context: Context): Promise<Response> {
+    const catalog = this.globalSessionCatalog(context);
+    if (catalog instanceof Response) return catalog;
+    try {
+      const sessionId = context.req.param("sessionId") ?? "";
+      const current = catalog.get(sessionId);
+      if (!current)
+        throw new SessionArchiveError("SESSION_NOT_FOUND", sessionId);
+      const workspaceAvailable =
+        current.workspaceDirectory !== undefined &&
+        (await resolveWorkspaceScope(current.workspaceDirectory).then(
+          (directory) => directory === current.workspaceDirectory,
+          () => false,
+        ));
+      const nextDirectoryExists = await stat(
+        current.pendingWorkingDirectory ?? current.workingDirectory,
+      ).then(
+        (info) => info.isDirectory(),
+        () => false,
+      );
+      const session = await catalog.restore(sessionId, {
+        workspaceAvailable,
+        nextDirectoryExists,
+        defaultDirectory: await ensureDefaultDirectory(),
+        now: this.options.now(),
+      });
+      if (session.workspaceDirectory)
+        await this.options.workspaceRegistry?.open(session.workspaceDirectory);
+      return context.json({ ok: true, session: toUiGlobalSession(session) });
+    } catch (error) {
+      return this.globalSessionFailure(context, error);
+    }
+  }
+
+  private async deleteArchivedSession(context: Context): Promise<Response> {
+    const catalog = this.globalSessionCatalog(context);
+    if (catalog instanceof Response) return catalog;
+    try {
+      const result = await catalog.delete(context.req.param("sessionId") ?? "");
+      return context.json({ ok: true, deletedSessionIds: result.sessionIds });
     } catch (error) {
       return this.globalSessionFailure(context, error);
     }

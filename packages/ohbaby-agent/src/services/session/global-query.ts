@@ -27,6 +27,7 @@ export class InvalidGlobalSessionCursorError extends Error {
 export interface GlobalSessionPageInput {
   readonly limit?: number;
   readonly cursor?: string;
+  readonly status?: "active" | "archived";
 }
 
 export interface GlobalSessionPage {
@@ -116,23 +117,25 @@ const NOT_IN_HIDDEN_WORKSPACE = `(workspace_directory IS NULL OR workspace_direc
 const VISIBLE_MESSAGE = `(json_extract(m.data, '$.runtimeInput.kind') IS NULL
   OR json_extract(m.data, '$.runtimeInput.kind') = 'user-steer')`;
 
-/** Active root sessions of every project, newest first. */
+/** Root sessions of the requested status, newest first. */
 export function listGlobalSessions(
   input: GlobalSessionPageInput = {},
   db: DatabaseConnection = getDatabase(),
 ): GlobalSessionPage {
   const limit = normalizeGlobalSessionLimit(input.limit);
   const cursor = decodeCursor(input.cursor);
+  const status = input.status ?? "active";
   const rows = db
     .prepare<SessionRow>(
       `SELECT * FROM ${schema.session.tableName}
-       WHERE parent_id IS NULL AND status = 'active'
-         AND ${NOT_IN_HIDDEN_WORKSPACE}
+       WHERE parent_id IS NULL AND status = ?
+         ${status === "active" ? `AND ${NOT_IN_HIDDEN_WORKSPACE}` : ""}
          AND (? IS NULL OR updated_at < ? OR (updated_at = ? AND id < ?))
        ORDER BY updated_at DESC, id DESC
        LIMIT ?`,
     )
     .all(
+      status,
       cursor?.updatedAt ?? null,
       cursor?.updatedAt ?? null,
       cursor?.updatedAt ?? null,

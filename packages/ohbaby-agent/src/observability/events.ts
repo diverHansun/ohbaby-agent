@@ -172,3 +172,10 @@ export const durationClockAnomaly = defineDiagnosticEvent({
   fields: { identity: diagnosticField.externalId("operation") },
   level: "warn",
 });
+
+export const sessionFilesCleanupFailed = defineDiagnosticEvent({
+  component: "server",
+  event: "session.files.cleanup.failed",
+  fields: { error: diagnosticField.externalError() },
+  level: "warn",
+});

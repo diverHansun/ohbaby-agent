@@ -648,6 +648,16 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       .get(scopeKey, sessionId)?.title_expected;
   }
 
+  async hasUnfinishedForSession(sessionId: string): Promise<boolean> {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM ${this.tableName} WHERE session_id = ? AND status IN ('queued', 'starting', 'running') LIMIT 1`,
+        )
+        .get(sessionId) !== undefined
+    );
+  }
+
   async hasForSession(scopeKey: string, sessionId: string): Promise<boolean> {
     return (
       this.db

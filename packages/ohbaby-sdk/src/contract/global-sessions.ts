@@ -3,6 +3,13 @@
 /** The next turn of a moved session must run in `targetDirectory`. */
 export const SESSION_MOVED_ERROR_CODE = "SESSION_MOVED";
 
+export const SESSION_RUNNING_ERROR_CODE = "SESSION_RUNNING";
+export const SESSION_NOT_ARCHIVED_ERROR_CODE = "SESSION_NOT_ARCHIVED";
+export type UiGlobalSessionStatus = "active" | "archived";
+export interface UiSessionDeleteResult {
+  readonly deletedSessionIds: readonly string[];
+}
+
 export interface UiDefaultDirectory {
   /** Real working directory for sessions started without a workspace. */
   readonly directory: string;
@@ -11,7 +18,7 @@ export interface UiDefaultDirectory {
 export interface UiGlobalSession {
   readonly id: string;
   readonly title: string;
-  readonly status: "active" | "archived";
+  readonly status: UiGlobalSessionStatus;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly messageCount: number;

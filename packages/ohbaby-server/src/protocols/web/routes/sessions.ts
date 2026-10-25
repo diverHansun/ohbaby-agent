@@ -1,3 +1,4 @@
+import { SessionRunBusyError } from "ohbaby-agent";
 import { Hono } from "hono";
 import { isUiReasoningConfig, type UiBackendClient } from "ohbaby-sdk";
 import { selectPermissionSession } from "../../../coordination/permission-access.js";
@@ -247,6 +248,11 @@ export function registerSessionMutationRoutes(
       });
       return context.json({ ok: true });
     } catch (error) {
+      if (error instanceof SessionRunBusyError)
+        return context.json(
+          { ok: false, error: { code: error.code, message: error.message } },
+          409,
+        );
       return context.json(
         webErrorBody(errorMessage(error)),
         mutationErrorStatus(error),

@@ -23,6 +23,7 @@ export class InvalidRunTransitionError extends Error {
 }
 
 export class SessionRunBusyError extends Error {
+  readonly code = "SESSION_RUNNING";
   constructor(
     readonly sessionId: string,
     readonly activeRunIds: readonly string[],

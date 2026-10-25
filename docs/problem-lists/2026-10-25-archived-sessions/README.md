@@ -8,7 +8,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-10-25 | 首轮 | 归档规则修补、列出 / 恢复 / 删除接口、SDK、Web 的 Archived 分区、权威文档同步 | 规划完成，等待实施 |
+| [improve-1](improve-1/00-discussion.md) | 2026-10-25 | 首轮 | 归档规则修补、列出 / 恢复 / 删除接口、SDK、Web 的 Archived 分区、权威文档同步 | Stage 1、2 后端已实施，待用户验收；Stage 3、4 待前端实施 |
 
 ## 前置依赖
 
@@ -23,12 +23,12 @@
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 接口、规则、分阶段实施、关键改动清单 |
 | [03 参考项目](improve-1/03-reference-projects.md) | deepseek-harness、ZCode、kimi-code、opencode、pi 的归档与删除做法 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 验收场景和发布门 |
-| 05 实施验收 | 实施完成后由验收会话写入 `improve-1/05-implementation-acceptance.md` |
+| [05 后端实施与验收](improve-1/05-implementation-acceptance.md) | 后端接口交接、实现差异、测试与后续前端边界 |
 
 ## 实施契约
 
 - 02 是实施依据，04 是验收依据。规划会话不写代码。
-- 分工：Stage 1、2（后端核心、服务端与 SDK）由用户实施；Stage 3、4（Web 与文档同步）由 agent 在后端完成后实施。
+- 当前分工以 2026-10-25 的实施请求为准：Stage 1、2（后端核心、服务端与 SDK）由 agent 实施并提交；用户验收后实施前端。前端完成后由 agent 做原生浏览器端到端测试，全部通过后再合并和 push。00、02 中的原分工保留为历史记录。
 - 不另建模块级 `improve-N/` 文档；受影响的 Web 设计文档在 Stage 4 直接同步。
 
 ## 相关文档

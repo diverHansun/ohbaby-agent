@@ -62,6 +62,8 @@ function createDeps(movePlan: SessionWorkspaceMovePlan): {
     Promise.resolve({ adoptSessionWorkspaceMove: adopt }),
   );
   const catalog: GlobalSessionCatalog = {
+    restore: vi.fn(),
+    delete: vi.fn(),
     list: vi.fn(),
     search: vi.fn(),
     get: vi.fn(() => session({ pendingWorkingDirectory: "/repo/b" })),

@@ -430,11 +430,8 @@ export class GitSnapshotEngine implements DiffEngine {
   }
 
   private async deleteRef(state: GitState, ref: string): Promise<void> {
-    await this.git(
-      state,
-      [...this.worktreeArgs(state, ["update-ref", "-d", ref])],
-      { cwd: state.workdir },
-    );
+    // Ref deletion only needs the sidecar; archived workdirs may no longer exist.
+    await this.gitRaw(["--git-dir", state.gitdir, "update-ref", "-d", ref]);
   }
 
   private async updateRef(
