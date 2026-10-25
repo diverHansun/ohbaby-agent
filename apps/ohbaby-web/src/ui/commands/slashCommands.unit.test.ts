@@ -6,7 +6,6 @@ import {
   createSlashPaletteItems,
   safeHelpCommands,
   selectedSlashItem,
-  slashCompletionSuffix,
   statusContextWindowUsage,
   statusPromptCacheUsage,
   statusRows,
@@ -122,19 +121,17 @@ describe("ohbaby-web slash commands UI helpers", () => {
     });
   });
 
-  it("selects and completes the active slash command", () => {
+  it("clamps the selection to the matching commands", () => {
     const items = createSlashPaletteItems(commandCatalog(), "/sta");
     const selected = selectedSlashItem(items, 10);
 
     expect(selected?.label).toBe("/status");
-    expect(slashCompletionSuffix(selected, "/sta")).toBe("tus");
   });
 
   it("keeps the /skill input alias canonical in palette labels", () => {
     const items = createSlashPaletteItems(commandCatalog(), "/skill");
 
     expect(items.map((item) => item.label)).toEqual(["/skills"]);
-    expect(slashCompletionSuffix(items[0], "/skill")).toBe("s");
   });
 
   it("creates result modal models only for read-only command outputs", () => {

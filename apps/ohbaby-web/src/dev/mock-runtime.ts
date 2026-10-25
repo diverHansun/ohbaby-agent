@@ -3,6 +3,7 @@ import type {
   UiSnapshot,
   UiSessionSearchPage,
   UiSessionSearchResult,
+  UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import type { OhbabyWebRuntime } from "../runtime/index.js";
 import { createDraftStore } from "../store/draft.js";
@@ -13,6 +14,60 @@ import { selectSettings } from "../store/settings-cache.js";
 import { globalSessionPinsKey } from "../ui/sidebar/session-pins.js";
 import { DEFAULT_WORKSPACE, mockScenarios } from "./mock-scenarios.js";
 import { createMockSettingsApi } from "./mock-settings.js";
+
+/** A few real-shaped commands so the slash palette can be previewed. */
+const MOCK_COMMANDS: UiWebCommandCatalog = {
+  version: "mock",
+  commands: [
+    {
+      action: "compactSession",
+      argumentMode: "structured",
+      argsHint: "[--session_id <id>] [--force]",
+      category: "session",
+      description: "Compact the current session context",
+      executionKind: "overlay",
+      id: "compact",
+      path: ["compact"],
+      source: "builtin",
+      surfaces: ["tui"],
+    },
+    {
+      acceptsArguments: true,
+      action: "openGoalPanel",
+      argumentMode: "argv",
+      argsHint: "[<objective> | status | pause | resume [<turns> turns]]",
+      category: "session",
+      description: "Create and control a long-running goal",
+      executionKind: "overlay",
+      id: "goal",
+      path: ["goal"],
+      source: "builtin",
+      surfaces: ["tui"],
+    },
+    {
+      action: "executeCommand",
+      argumentMode: "argv",
+      category: "skills",
+      description: "List available skills",
+      executionKind: "passthrough",
+      id: "skills",
+      path: ["skills"],
+      source: "builtin",
+      surfaces: ["tui"],
+    },
+    {
+      action: "executeCommand",
+      argumentMode: "argv",
+      category: "system",
+      description: "Show backend status",
+      executionKind: "passthrough",
+      id: "status",
+      path: ["status"],
+      source: "builtin",
+      surfaces: ["tui"],
+    },
+  ],
+};
 
 const MOCK_PAGE = 100;
 
@@ -114,8 +169,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
       get(_target, key): unknown {
         if (key === "then") return undefined;
         if (key === "listCommands")
-          return (): Promise<unknown> =>
-            Promise.resolve({ commands: [], version: "mock" });
+          return (): Promise<unknown> => Promise.resolve(MOCK_COMMANDS);
         if (key === "respondPermission" || key === "abortRun") return resolved;
         // Event subscriptions are synchronous and return an unsubscribe function.
         if (typeof key === "string" && key.startsWith("subscribe"))
@@ -210,7 +264,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     },
     listDirectoryPicker: (directory) =>
       Promise.resolve({ ok: true, directory, parent: null, children: [] }),
-    listWebCommands: () => Promise.resolve({ commands: [], version: "mock" }),
+    listWebCommands: () => Promise.resolve(MOCK_COMMANDS),
     openDraft: resolved,
     openFolder: (folder) => Promise.resolve(folder),
     openSession: (id): Promise<void> => {

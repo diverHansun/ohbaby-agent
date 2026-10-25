@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createSlashPaletteItems,
   selectedSlashItem,
-  slashCompletionSuffix,
   type SlashPaletteItem,
 } from "../commands/slashCommands.js";
 import type { StructuredCommandRequest } from "../commands/StructuredCommandOverlay.js";
@@ -29,7 +28,6 @@ export function useSlashPalette(input: {
   readonly setSlashIndex: (index: number) => void;
   readonly slashError: string | null;
   readonly selectedCommand: SlashPaletteItem | undefined;
-  readonly completionSuffix: string | null | undefined;
   readonly runSlashCommand: (item: SlashPaletteItem | undefined) => void;
   /** Handles palette keys; returns true when the key was consumed. */
   readonly handlePaletteKey: (
@@ -71,7 +69,6 @@ export function useSlashPalette(input: {
     [canUseSlash, draft, slashCatalog],
   );
   const selectedCommand = selectedSlashItem(slashItems, slashIndex);
-  const completionSuffix = slashCompletionSuffix(selectedCommand, draft);
   const slashOpen =
     draft.startsWith("/") &&
     slashDismissedDraft !== draft &&
@@ -219,7 +216,6 @@ export function useSlashPalette(input: {
     setSlashIndex,
     slashError,
     selectedCommand,
-    completionSuffix,
     runSlashCommand,
     handlePaletteKey,
     onDraftEdited,

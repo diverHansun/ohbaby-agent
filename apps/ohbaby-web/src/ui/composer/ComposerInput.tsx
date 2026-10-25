@@ -29,8 +29,6 @@ export function ComposerInput(props: {
     readonly open: boolean;
     readonly items: readonly SlashPaletteItem[];
     readonly selectedIndex: number;
-    readonly selected: SlashPaletteItem | undefined;
-    readonly completionSuffix: string | null | undefined;
     readonly error: string | null;
     readonly onHover: (index: number) => void;
     readonly onRun: (item: SlashPaletteItem) => void;
@@ -69,11 +67,6 @@ export function ComposerInput(props: {
           value={props.draft}
         />
       </div>
-      {slash.completionSuffix && slash.selected ? (
-        <span className="ohb-slash-completion" aria-hidden="true">
-          <span>⇥ {slash.selected.label}</span>
-        </span>
-      ) : null}
       {slash.error || props.queueError || queuedEdit ? (
         <div className="ohb-composer-feedback">
           {slash.error ? (

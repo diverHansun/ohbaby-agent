@@ -293,6 +293,72 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_400);
   });
 
+  it("lets an upward wheel leave the bottom before streamed output lands", async () => {
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+    if (!stream) {
+      throw new Error("stream not found");
+    }
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_000,
+      scrollTop: 0,
+    });
+    await waitFor(() => stream.scrollTop === 1_000);
+
+    // The wheel fires before the browser's smooth scroll moves scrollTop.
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_200,
+      scrollTop: 600,
+    });
+    act(() => {
+      stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -20 }));
+      fake.store.replaceSnapshot(
+        snapshotWithMessageText(initial, "streamed token"),
+        2,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(600);
+
+    // A small upward step still inside the near-bottom band must not re-stick.
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_200,
+      scrollTop: 780,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_200,
+      scrollTop: 770,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -10 }));
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_400,
+      scrollTop: 770,
+    });
+    act(() => {
+      fake.store.replaceSnapshot(
+        snapshotWithMessageText(initial, "more streamed tokens"),
+        3,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(770);
+  });
+
   it("keeps the scroll anchor after scrolling up while a pending prompt is still visible", async () => {
     const admission =
       deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
@@ -2747,13 +2813,29 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     await setTextareaValue(app.container, "/");
-    await waitFor(() => slashCompletionText(app.container).includes("/skills"));
+    await waitFor(() => selectedSlashText(app.container).includes("/skills"));
 
     await pressTextareaKey(app.container, "PageDown");
-    expect(slashCompletionText(app.container)).toContain("/status");
+    expect(selectedSlashText(app.container)).toContain("/status");
 
     await pressTextareaKey(app.container, "PageUp");
-    expect(slashCompletionText(app.container)).toContain("/skills");
+    expect(selectedSlashText(app.container)).toContain("/skills");
+  });
+
+  it("keeps the completed command highlighted after Tab narrows the list", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["skills", "status"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => selectedSlashText(app.container).includes("/skills"));
+    await pressTextareaKey(app.container, "ArrowDown");
+    await pressTextareaKey(app.container, "Tab");
+
+    expect(app.container.querySelector("textarea")?.value).toBe("/status");
+    expect(selectedSlashText(app.container)).toContain("/status");
   });
 
   it("keeps skill commands out of the top-level slash palette", async () => {
@@ -3061,7 +3143,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toEqual(["cache", "hit 61%"]);
   });
 
-  it("marks no-args slash rows without changing rows that have args", async () => {
+  it("renders an args hint only for slash rows that take args", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
@@ -3076,12 +3158,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     const statusRow = rows.find((row) => row.textContent.includes("/status"));
     const goalRow = rows.find((row) => row.textContent.includes("/goal"));
-    expect(statusRow?.classList.contains("ohb-slash-row-no-args")).toBe(true);
-    expect(statusRow?.querySelector(".ohb-slash-args")).not.toBeNull();
+    expect(statusRow?.querySelector(".ohb-slash-args")).toBeNull();
     expect(
       statusRow?.querySelector(".ohb-slash-description")?.textContent,
     ).toBe("Show backend status");
-    expect(goalRow?.classList.contains("ohb-slash-row-no-args")).toBe(false);
     expect(goalRow?.querySelector(".ohb-slash-args")?.textContent).toBe(
       "[<objective> | status]",
     );
@@ -5308,8 +5388,8 @@ function slashPaletteText(container: ParentNode): string {
   return container.querySelector(".ohb-slash-palette")?.textContent ?? "";
 }
 
-function slashCompletionText(container: ParentNode): string {
-  return container.querySelector(".ohb-slash-completion")?.textContent ?? "";
+function selectedSlashText(container: ParentNode): string {
+  return container.querySelector(".ohb-slash-selected")?.textContent ?? "";
 }
 
 async function pressTextareaKey(

@@ -153,15 +153,14 @@ describe("web layout styles", () => {
 
   it("keeps slash command rows aligned without category dots", () => {
     expectCssRule(".ohb-slash-row", [
-      "grid-template-columns: minmax(128px, 144px) minmax(136px, 1fr) minmax(148px, 1fr)",
+      "grid-template-columns: 112px minmax(0, 1fr) auto",
+      "text-align: left",
     ]);
-    expectCssRule(".ohb-slash-row-no-args", [
-      "grid-template-columns: minmax(128px, 144px) minmax(0, 1fr)",
-    ]);
-    expectCssRule(".ohb-slash-row-no-args .ohb-slash-description", [
-      "grid-column: 2",
-    ]);
+    expectCssRule(".ohb-slash-args", ["display: none"]);
+    expectCssRule(".ohb-slash-selected .ohb-slash-args", ["display: block"]);
     expect(css).not.toContain(".ohb-slash-dot");
+    expect(css).not.toContain(".ohb-slash-completion");
+    expectCssRule(".ohb-slash-hint", ["font-size: 11px"]);
   });
 
   it("keeps every skill card track bounded and truncatable", () => {

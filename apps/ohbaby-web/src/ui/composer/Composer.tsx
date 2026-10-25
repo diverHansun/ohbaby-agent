@@ -433,8 +433,6 @@ export function Composer(props: {
             open: slash.slashOpen,
             items: slash.slashItems,
             selectedIndex: slash.slashIndex,
-            selected: slash.selectedCommand,
-            completionSuffix: slash.completionSuffix,
             error: slash.slashError,
             onHover: slash.setSlashIndex,
             onRun: slash.runSlashCommand,

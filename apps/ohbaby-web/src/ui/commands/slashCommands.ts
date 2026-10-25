@@ -92,16 +92,6 @@ function isWebPaletteCommand(command: UiWebCommandSpec): boolean {
   );
 }
 
-export function slashCompletionSuffix(
-  item: SlashPaletteItem | undefined,
-  draft: string,
-): string {
-  if (!item || !draft || !item.label.startsWith(draft)) {
-    return "";
-  }
-  return item.label.slice(draft.length);
-}
-
 export function selectedSlashItem(
   items: readonly SlashPaletteItem[],
   selectedIndex: number,
