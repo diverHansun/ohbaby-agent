@@ -8,7 +8,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-10-25 | 首轮 | 归档规则修补、列出 / 恢复 / 删除接口、SDK、Web 的 Archived 分区、权威文档同步 | Stage 1、2 后端已实施，待用户验收；Stage 3、4 待前端实施 |
+| [improve-1](improve-1/00-discussion.md) | 2026-10-25 | 首轮 | 归档规则修补、列出 / 恢复 / 删除接口、SDK、Web 的 Archived 分区、权威文档同步 | Stage 1 至 4 已实施：后端已验收，Web 与文档同步完成，待用户验收后合并 |
 
 ## 前置依赖
 
@@ -23,7 +23,7 @@
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 接口、规则、分阶段实施、关键改动清单 |
 | [03 参考项目](improve-1/03-reference-projects.md) | deepseek-harness、ZCode、kimi-code、opencode、pi 的归档与删除做法 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 验收场景和发布门 |
-| [05 后端实施与验收](improve-1/05-implementation-acceptance.md) | 后端接口交接、实现差异、测试与后续前端边界 |
+| [05 实施与验收](improve-1/05-implementation-acceptance.md) | 后端接口交接与验收、Web 实现差异、测试与浏览器走查 |
 
 ## 实施契约
 

@@ -13,6 +13,9 @@
 | `POST /v1/scopes/hide` | 工作区菜单 › Hide workspace | 成功后刷新工作区和会话列表，清除该工作区已缓存的侧栏行；主区正在看的会话保持打开 |
 | `GET /v1/sessions?limit&cursor` | Sidebar 会话树 | 一页 100 条，跨所有工作区，按更新时间倒序；前端按 `workspaceDirectory` 分组 |
 | `GET /v1/sessions/search?q&limit&cursor` | SidebarSearch | 直接渲染结果；分页用 `nextCursor` |
+| `GET /v1/sessions?status=archived&limit&cursor` | ArchivedSection | 一页 50 条，按归档时间（`updatedAt`）倒序，包括隐藏工作区里的会话；列表只存在分区组件里 |
+| `POST /v1/sessions/:id/unarchive` | ArchivedSection › Restore | 用返回的会话信息写入全局列表并刷新，被隐藏的工作区随之重新出现；`404` 或 `SESSION_NOT_ARCHIVED` 时直接移除这一行 |
+| `DELETE /v1/sessions/:id` | ArchivedSection › Delete | 只对已归档的根会话有效，子代理会话一起删除；错误处理同上 |
 | `POST /v1/sessions/:id/workspace` | SessionMenu › Move to workspace / Remove from workspace | 成功后用返回的会话信息替换列表里这一项；当前打开的会话只更新缓存的请求目录，顶栏在下一轮开始后更新 |
 
 SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工作区议题 improve-1 的 05 记录）。本次在 Web 的 `api/daemon/global-sessions.ts` 实现调用、复用 SDK 类型，与 improve-2 的改动面一致；不为这次改版另造一套 SDK HTTP 客户端。
@@ -25,7 +28,7 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 |---|---|---|
 | `/v1/sessions/:id/view`、`/history`、SSE `/v1/events` | SessionScreen | 不变。目录取 `globalSessionRequestDirectory(session)`（有待生效目录时用它） |
 | `POST /v1/prompts` | 草稿首发 | 草稿 client 连在草稿所选工作区，没有选就连 `defaultDirectory.directory`；不带会话 ID 发送，服务端接纳时创建会话（improve-2 调整，不再先调 `POST /v1/sessions`） |
-| `/v1/sessions/:id/archive`、`/export` | SessionMenu | 目录取该会话的执行目录；操作其他目录的会话不能切换当前 SSE 或覆盖当前选择 |
+| `/v1/sessions/:id/archive`、`/export` | SessionMenu | 目录取该会话的执行目录；操作其他目录的会话不能切换当前 SSE 或覆盖当前选择。归档运行中的会话返回 `409 SESSION_RUNNING`，通知显示 `Stop the chat before archiving.` |
 | `GET /v1/model` | 实例模型状态、ReasoningControl | improve-4 继续保留；`BrowserDaemonClient.refreshModel` 和 `model.invalidated` 仍依赖它 |
 | `POST /v1/model`、`/v1/settings/search-api-key` | 第一批的 `/connect` 浮层 | improve-4 移除 Web 写调用，改走全局设置接口；服务端旧接口保留给 TUI |
 | `/v1/sessions/index` | 会话行的运行状态（见 §3.4） | 只对当前已连接的实例 |

@@ -42,6 +42,7 @@
 | `ModelsSection` / `ModelEditor` | 功能区 / 组合 | 模型列表与编辑子页 | `ui/settings/` | 新增 |
 | `McpSection` / `McpDetails` | 功能区 / 组合 | MCP 配置与状态列表、原地展开的只读详情 | `ui/settings/mcp/` | 新增 |
 | `SearchSection`、`SkillsSection`、`AboutSection` | 功能区 | 单页表单与只读列表 | `ui/settings/` | 新增 |
+| `ArchivedSection` | 功能区 | 已归档会话列表：自己分页，不进设置缓存；每行恢复或确认后永久删除（归档会话议题 D9） | `ui/settings/` | 新增 |
 | `ModelMenu` | 组合 | 输入框控制行的模型菜单（第二批） | `ui/composer/` | 新增 |
 | `ComposerMoreMenu` | 组合 | 手机（< 640px）控制行的“更多”：Thinking 二级列表和 Full access 开关，复用 `Menu`（improve-4 4b，D29） | `ui/composer/` | 新增 |
 | `ConnectOverlay` | — | — | `ui/commands/` | 第二批删除（D18） |

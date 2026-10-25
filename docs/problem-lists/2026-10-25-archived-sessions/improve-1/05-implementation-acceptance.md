@@ -1,4 +1,4 @@
-# 5. 后端实施与验收
+# 5. 实施与验收
 
 ## 5.1 范围与结论
 
@@ -6,7 +6,7 @@
 - 实施分支：`codex/archived-sessions-backend`，基于 `71f97f3d`。
 - 本次范围：02 的 Stage 1、2，核心会话规则、全局 HTTP 路由、SDK 契约、OpenAPI 与后端测试。
 - 分工以本次用户请求为准：agent 完成后端并提交；用户验收并实施前端；前端完成后再做原生浏览器端到端验证，最后才合并到 main 并 push。00、02 保留原规划，不回写历史分工。
-- 本轮仍未全部完成：Stage 3、4 的前端界面、Web mock、浏览器走查和 Web 设计文档同步尚未实施。
+- 后端提交时 Stage 3、4（Web 界面、mock、浏览器走查、设计文档同步）尚未实施；之后在同一分支完成，记录见 5.7。
 
 ## 5.2 前端对接
 
@@ -60,7 +60,7 @@ SDK 导出 `UiGlobalSessionStatus`、`UiSessionDeleteResult`、`SESSION_RUNNING_
 | T9 对外忙碌错误 | `create-app.unit.test.ts`：REST 与 JSON-RPC 均返回 409 和 `SESSION_RUNNING` |
 | 主代理端到端 | `global-single-serve.integration.test.ts` 新增真实 daemon 进程用例：创建 → 拒绝直接删除活跃会话 → 归档 → 列表 → 隐藏工作区 → 恢复 → 再归档 → 重启并删除原目录 → 恢复到 Recents → 归档并永久删除 → 恢复返回 404。由主代理执行，使用临时目录和数据库 |
 | 子代理审查 | 独立只读检查实现与 02/04，未发现可确认的 P1/P2 阻断问题 |
-| T10–T14 | 本批未实施；前端完成后验收 |
+| T10–T14 | 见 5.7 |
 
 命令结果：
 
@@ -81,3 +81,41 @@ SDK 导出 `UiGlobalSessionStatus`、`UiSessionDeleteResult`、`SESSION_RUNNING_
 - 子代理重新检查了 deepseek-harness、ZCode、kimi-code 的相关源码，03 中主要结论成立。deepseek-harness 还有归档后的模型步骤门禁，ohbaby 本次不照搬该插件机制。ZCode 在事务内重新检查归档状态，支持本次把删除前置条件放进事务的做法。
 - [Claude Code Desktop 官方文档](https://code.claude.com/docs/en/desktop#archive-a-session)描述归档入口和 Unarchive；[查找归档会话](https://code.claude.com/docs/en/desktop#organize-and-find-sessions)说明可从 Archived 列表找回。这里只借鉴可恢复的会话组织方式，不推断闭源内部数据实现。
 - Cursor 的旧 History 文档当前重定向到概览，查到的 Agents Window 页面没有给出足够明确的永久删除约束，因此本次不据此新增规则；以用户确认的 D1–D10 和本地参考源码为准。
+
+## 5.7 前端实施与验收（Stage 3、4）
+
+- 日期：2026-10-25，同一分支，提交 `a296befb`、`072cb05c`、`da1d7061`、`14f6b875`，文档同步单独提交。
+- 后端验收：重新跑了 6 个相关测试文件（核心恢复与删除、文件清理、HTTP 路由、REST 与 JSON-RPC 忙碌错误、归档前检查、真实 daemon 端到端），325 条全部通过；读代码确认删除条件和删除操作在同一个写事务里，和 02、04 一致。
+
+### 实现与 02 的差异
+
+| 项 | 实际实现 | 原因 |
+|---|---|---|
+| 接口层 | `GlobalSessionsClient.listSessions` 加 `status` 参数，新增 `unarchiveSession`、`deleteSession`；`GlobalLayer` 和运行时门面各加 3 个方法 | 照 02 Stage 3 第 2 步；`ArchivedSection` 只拿到运行时的这 3 个方法 |
+| 行的样式 | 用 `SettingsRow`，整组放在一张圆角卡片里；删除是垃圾桶图标（悬停变红），恢复是浅底文字按钮 | 参照 Codex 和 ZCode：设置页里两个按钮常显，不靠悬停出现 |
+| 时间 | `Archived 3d ago`，悬停显示完整日期 | 列表里相对时间好扫，完整日期按需看 |
+| 分页 | 一页 50 条 | 设置页一次看不了 100 条，50 条够用，翻页也快 |
+| 已在别处恢复或删除 | 收到 `404` 或 `SESSION_NOT_ARCHIVED` 时直接移除这一行，不报错 | 用户想要的结果已经成立 |
+| 屏幕阅读器 | 恢复或删除后在隐藏的 `role="status"` 里读出结果 | 界面不弹通知（D10），读屏用户仍要知道结果 |
+| 忙碌提示 | 侧栏菜单项后加 `Running`；服务端 `SESSION_RUNNING` 统一显示 `Stop the chat before archiving.` | 原始错误文案带会话 ID 和运行 ID，用户看不懂 |
+| mock | 新增 `archived`、`archived-many`（120 条，测分页）、`archived-error`（首次读取和每次删除失败）3 个场景 | 02 只要求 `archived`；另两个用来走查分页和失败状态 |
+
+没有做的仍按 D10：搜索、按工作区分组、一键删除全部、Undo。
+
+### 验证记录
+
+| 验收项 | 证据 |
+|---|---|
+| T10 分区 | `ArchivedSection.unit.test.tsx`：行说明文字、空状态、300 ms 后才显示 Loading、失败重试、Show more |
+| T11 恢复与删除 | 同上：恢复后行消失、焦点到下一行或分区本身；删除先确认、焦点在 Cancel、失败时确认框保留；已在别处恢复时静默移除。`SettingsDialog.integration.test.tsx`：6 个分区顺序，恢复后会话以无工作区状态进入全局列表，删除后不再出现。`session-runtime.operations.integration.test.ts`：经 fake daemon 走完列表、恢复、删除，删除未归档会话得到 409 |
+| T12 侧栏禁用归档 | `Sidebar.unit.test.tsx`：`running`、`awaiting` 时悬停按钮和菜单项禁用并有提示，快捷键 `a` 不触发；`idle` 可用。运行时测试覆盖 409 时显示提示并把行放回 |
+| T13 浏览器走查（mock） | `archived` 场景：恢复后进入 Recents 顶部、焦点移到下一行；删除确认后行消失；`archived-many` 翻页 50 → 100；`archived-error` 失败后 Retry 成功；`running` 场景归档按钮和菜单项置灰；`fresh` 空状态；手机宽度 375 px 无横向滚动 |
+| T13 浏览器走查（真实 daemon） | 用临时 `HOME`、`OHBABY_HOME` 和数据库启动编译后的 daemon，建 6 个会话、归档 4 个、删掉其中一个工作区文件夹。界面上：恢复后回到原工作区顶部；文件夹已删的会话进入 Recents，接口显示下一轮目录为默认目录；删除后搜索没有结果，再恢复返回 404 |
+| T14 文档同步 | `rg` 检查无命中；README D12、00、01（新增 UC-SETTINGS-06）、04、05、06 已同步 |
+
+命令结果：
+
+- Web 全量：67 个测试文件、788 条通过。
+- `pnpm typecheck`：通过。
+- ESLint（提交钩子）：0 errors；本次新增代码没有新警告。
+- Prettier：本次改动的文件通过。
