@@ -454,7 +454,7 @@ describe("goal resume through the rendered app, real Web runtime and command bac
         });
         await waitFor(() => {
           expect(
-            f.container.querySelector(".ohb-error-banner[role=alert]")
+            f.container.querySelector(".ohb-banner-error[role=alert]")
               ?.textContent,
           ).toContain("Invalid resume budget");
         });

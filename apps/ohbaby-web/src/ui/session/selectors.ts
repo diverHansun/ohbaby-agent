@@ -260,6 +260,20 @@ function selectActiveRun(
   );
 }
 
+const ABNORMAL_CONNECTION: readonly HeaderModel["connectionKind"][] = [
+  "connecting",
+  "reconnecting",
+  "resyncing",
+  "disconnected",
+];
+
+/** The transport is not live; the header says so, and nothing else should. */
+export function isConnectionAbnormal(
+  kind: HeaderModel["connectionKind"],
+): boolean {
+  return ABNORMAL_CONNECTION.includes(kind);
+}
+
 function selectConnectionKind(
   connectionState: ConnectionState,
   status: UiRunStatus,

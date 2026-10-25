@@ -1,5 +1,7 @@
 import type { ReactElement } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
+import { Banner } from "../shared/Banner.js";
+import { readableError } from "../shared/error-text.js";
 import type { SessionSyncBanner } from "./use-session-sync-banner.js";
 
 /** Loading and recovery state of the open conversation; silent when it is healthy. */
@@ -19,22 +21,17 @@ export function SessionSyncNotice(props: {
         Loading conversation…
       </div>
     );
-  return (
-    <div
-      className="ohb-error-banner"
-      role={props.state === "error" ? "alert" : "status"}
-    >
-      <span>
-        {props.state === "recovering"
-          ? "Recovering conversation… Your draft remains editable."
-          : `Conversation unavailable: ${props.error ?? "Recovery failed"}`}
-      </span>
-      {props.state === "error" ? (
-        <button type="button" onClick={props.onRetry}>
-          Retry conversation
-        </button>
-      ) : null}
-    </div>
+  return props.state === "recovering" ? (
+    <Banner
+      tone="info"
+      message="Recovering conversation… Your draft remains editable."
+    />
+  ) : (
+    <Banner
+      tone="error"
+      message={`Conversation unavailable: ${readableError(props.error ?? "Recovery failed")}`}
+      actions={[{ label: "Retry conversation", onClick: props.onRetry }]}
+    />
   );
 }
 
@@ -50,42 +47,42 @@ export function SessionBanners(props: {
   return (
     <>
       {promptRecoveryReminders.length > 0 ? (
-        <div className="ohb-error-banner" role="status">
-          <span>
-            {promptRecoveryReminders.some(
+        <Banner
+          tone="attention"
+          message={
+            promptRecoveryReminders.some(
               (request) => request.status === "epoch-changed",
             )
               ? "The backend restarted. A previous submission could not be confirmed; check its original conversation before sending again."
-              : "Submission result is unknown. Check its receipt before sending again."}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              void runtime.retryUnknownPrompts();
-            }}
-          >
-            Check submission
-          </button>
-          {promptRecoveryReminders.map((request) => (
-            <button
-              key={request.clientRequestId}
-              type="button"
-              disabled={request.submitting}
-              title="Remove this local reminder. The original submission may still have run; this does not cancel or resend it."
-              onClick={() => {
+              : "Submission result is unknown. Check its receipt before sending again."
+          }
+          actions={[
+            {
+              label: "Check submission",
+              onClick: () => {
+                void runtime.retryUnknownPrompts();
+              },
+            },
+            ...promptRecoveryReminders.map((request) => ({
+              label: "Forget pending submission",
+              disabled: request.submitting,
+              title:
+                "Remove this local reminder. The original submission may still have run; this does not cancel or resend it.",
+              onClick: () => {
                 runtime.forgetUnknownPrompt(request.clientRequestId);
-              }}
-            >
-              Forget pending submission
-            </button>
-          ))}
-        </div>
+              },
+            })),
+          ]}
+        />
       ) : null}
-      {props.reasoningMissing ? (
-        <div className="ohb-error-banner" role="status">
-          Some thinking could not be saved and is no longer available.
-        </div>
-      ) : null}
+      <Banner
+        tone="info"
+        message={
+          props.reasoningMissing
+            ? "Some thinking could not be saved and is no longer available."
+            : null
+        }
+      />
     </>
   );
 }

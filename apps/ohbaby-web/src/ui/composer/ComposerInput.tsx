@@ -7,6 +7,7 @@ import type {
 } from "react";
 import { SlashPalette } from "../commands/SlashPalette.js";
 import type { SlashPaletteItem } from "../commands/slashCommands.js";
+import { readableError } from "../shared/error-text.js";
 import type { QueuedEditState } from "./draft-storage.js";
 
 /**
@@ -70,10 +71,14 @@ export function ComposerInput(props: {
       {slash.error || props.queueError || queuedEdit ? (
         <div className="ohb-composer-feedback">
           {slash.error ? (
-            <span className="ohb-slash-error">{slash.error}</span>
+            <span className="ohb-slash-error">
+              {readableError(slash.error)}
+            </span>
           ) : null}
           {props.queueError ? (
-            <span className="ohb-slash-error">{props.queueError}</span>
+            <span className="ohb-slash-error">
+              {readableError(props.queueError)}
+            </span>
           ) : null}
           {queuedEdit ? (
             <span className="ohb-composer-hint ohb-queued-edit-hint">

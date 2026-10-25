@@ -1,16 +1,21 @@
 import { PanelLeft } from "lucide-react";
 import type { ReactElement } from "react";
-import type { HeaderModel } from "../session/selectors.js";
+import {
+  type HeaderModel,
+  isConnectionAbnormal,
+} from "../session/selectors.js";
 import { ContextUsageControl } from "../shared/ContextUsage.js";
 import { IconButton } from "../shared/IconButton.js";
 import { compactHomePath } from "../workspace/workspace-labels.js";
 
-const ABNORMAL_CONNECTION: readonly HeaderModel["connectionKind"][] = [
-  "connecting",
-  "reconnecting",
-  "resyncing",
-  "disconnected",
-];
+const CONNECTION_LABELS: Partial<
+  Record<HeaderModel["connectionKind"], string>
+> = {
+  connecting: "Connecting…",
+  reconnecting: "Reconnecting…",
+  resyncing: "Syncing…",
+  disconnected: "Offline",
+};
 
 /**
  * Top bar of the main area: sidebar toggle when the sidebar is closed,
@@ -29,8 +34,7 @@ export function MainHeader(props: {
   readonly onOpenContextUsage?: () => void;
 }): ReactElement {
   const abnormal =
-    props.hasClient &&
-    ABNORMAL_CONNECTION.includes(props.header.connectionKind);
+    props.hasClient && isConnectionAbnormal(props.header.connectionKind);
   return (
     <header className="ohb-main-header">
       {props.sidebarOpen ? null : (
@@ -59,7 +63,8 @@ export function MainHeader(props: {
             className={`ohb-connection-state ohb-connection-${props.header.connectionKind}`}
             role="status"
           >
-            {props.header.statusLabel}
+            <span className="ohb-connection-dot" aria-hidden="true" />
+            {CONNECTION_LABELS[props.header.connectionKind]}
           </span>
         ) : null}
         {props.sessionId ? (

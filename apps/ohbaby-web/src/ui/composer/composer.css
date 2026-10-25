@@ -374,8 +374,8 @@
 
 .ohb-slash-error {
   color: var(--danger-ink);
-  font-family: var(--font-mono);
   font-size: 12px;
+  line-height: 18px;
 }
 
 .ohb-button,

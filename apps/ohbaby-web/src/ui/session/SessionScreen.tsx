@@ -9,9 +9,11 @@ import { ModelMenu } from "../composer/ModelMenu.js";
 import { TodoDock } from "../conversation/TodoDock.js";
 import { ApprovalPanel } from "../permissions/ApprovalPanel.js";
 import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
-import { ErrorBanner } from "../shared/ErrorBanner.js";
+import { Banner } from "../shared/Banner.js";
+import { readableError } from "../shared/error-text.js";
 import { DraftHero } from "./DraftHero.js";
 import { selectPersistedPromptError } from "./prompt-projection.js";
+import { isConnectionAbnormal } from "./selectors.js";
 import { SessionBanners, SessionSyncNotice } from "./SessionBanners.js";
 import { SessionConversation } from "./SessionConversation.js";
 import { SubagentView } from "./SubagentView.js";
@@ -78,12 +80,23 @@ export function SessionScreen({
     () => selectPersistedPromptError(view),
     [view],
   );
-  const errorBannerMessage =
-    actionError ??
-    view.error ??
-    (persistedPromptError?.promptId === dismissedPromptErrorId
+  const promptErrorMessage =
+    persistedPromptError?.promptId === dismissedPromptErrorId
       ? null
-      : (persistedPromptError?.message ?? null));
+      : (persistedPromptError?.message ?? null);
+  // While the transport is down the header shows it; its errors stay quiet.
+  const stateError = isConnectionAbnormal(view.header.connectionKind)
+    ? null
+    : view.error;
+  // State errors clear themselves, so only action and prompt errors dismiss.
+  const errorBanner =
+    actionError !== null
+      ? { message: actionError, dismissable: true }
+      : stateError
+        ? { message: stateError, dismissable: false }
+        : promptErrorMessage
+          ? { message: promptErrorMessage, dismissable: true }
+          : null;
   const clearActionError = useCallback(() => {
     setActionError(null);
     setDismissedPromptErrorId(persistedPromptError?.promptId ?? null);
@@ -183,21 +196,27 @@ export function SessionScreen({
         cancelLabel={stopRequest.label}
         permissions={view.pendingPermissions}
       />
-      <SessionSyncNotice
-        state={sessionSyncBanner}
-        error={storeSnapshot.sessionSync.error}
-        onRetry={() => {
-          runtime.retrySession();
-        }}
-      />
-      <SessionBanners
-        runtime={runtime}
-        promptRecoveryReminders={promptRecoveryReminders}
-        reasoningMissing={
-          storeSnapshot.sessionSync.view?.reasoningMissing === true
-        }
-      />
-      <ErrorBanner message={errorBannerMessage} onDismiss={clearActionError} />
+      <div className="ohb-banner-stack">
+        <SessionSyncNotice
+          state={sessionSyncBanner}
+          error={storeSnapshot.sessionSync.error}
+          onRetry={() => {
+            runtime.retrySession();
+          }}
+        />
+        <SessionBanners
+          runtime={runtime}
+          promptRecoveryReminders={promptRecoveryReminders}
+          reasoningMissing={
+            storeSnapshot.sessionSync.view?.reasoningMissing === true
+          }
+        />
+        <Banner
+          tone="error"
+          message={errorBanner ? readableError(errorBanner.message) : null}
+          onDismiss={errorBanner?.dismissable ? clearActionError : undefined}
+        />
+      </div>
       {showMain ? (
         <SessionConversation
           runtime={runtime}
@@ -277,7 +296,8 @@ export function SessionScreen({
           connectionKind={view.header.connectionKind}
           topContent={
             <>
-              <ErrorBanner
+              <Banner
+                tone="error"
                 message={
                   overlays.commandInputError?.scopeKey === draftScopeKey
                     ? overlays.commandInputError.message

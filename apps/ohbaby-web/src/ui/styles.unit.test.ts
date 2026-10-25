@@ -117,7 +117,7 @@ describe("web layout styles", () => {
       .map((match) => match[1])
       .join("\n");
     expect(phone).toMatch(
-      /\.ohb-icon-button,\s*\.ohb-notice-close\s*\{[^}]*height: 44px;[^}]*width: 44px/u,
+      /\.ohb-icon-button,\s*\.ohb-banner-close\s*\{[^}]*height: 44px;[^}]*width: 44px/u,
     );
     expect(phone).toMatch(/\.ohb-sidebar\s*\{[^}]*--row-height: 44px/u);
     expect(phone).toMatch(/\.ohb-perm-btn\s*\{[^}]*min-height: 44px/u);

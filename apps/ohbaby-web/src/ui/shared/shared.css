@@ -284,54 +284,79 @@
 }
 
 /* Notices: top-right, failures and background events only (D16). */
+/* Top-right notices: the same card as the inline banner, stacked. */
 .ohb-notice-stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: min(420px, calc(100vw - 32px));
+  gap: 6px;
+  max-width: min(460px, calc(100vw - 32px));
   position: fixed;
   right: 16px;
   top: calc(var(--header-height) + 10px);
   z-index: 200;
 }
 
-.ohb-notice {
+/* Notice card (pi-web): plain surface, hairline edge, soft shadow; only the
+   dot carries the type, so nothing shouts. */
+.ohb-banner {
   align-items: flex-start;
-  animation: ohb-slide-up var(--duration) var(--ease);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  background: var(--bg-glass);
+  animation: ohb-pop var(--duration) var(--ease);
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-menu);
-  color: var(--text);
+  border-radius: 14px;
+  box-shadow: var(--shadow-notice);
+  color: var(--text-muted);
   display: flex;
-  font-size: 13px;
+  font-size: 13.5px;
   gap: 10px;
-  line-height: 1.45;
-  padding: 10px 10px 10px 14px;
+  line-height: 21px;
+  margin: 8px auto;
+  max-width: var(--content-width);
+  padding: 9px 8px 9px 14px;
+  width: 100%;
 }
 
-.ohb-notice-dot {
-  background: var(--text-dim);
+.ohb-banner-dot {
+  background: var(--notice-info);
   border-radius: 50%;
   flex: none;
   height: 7px;
-  margin-top: 6px;
+  margin-top: 7px;
   width: 7px;
 }
 
-.ohb-notice-error .ohb-notice-dot {
-  background: var(--danger);
+.ohb-banner-error .ohb-banner-dot {
+  background: var(--notice-error);
 }
 
-.ohb-notice-message {
+.ohb-banner-attention .ohb-banner-dot {
+  background: var(--notice-attention);
+}
+
+.ohb-banner-message {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.ohb-notice-close {
+.ohb-banner-action {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 21px;
+  padding: 0 8px;
+  transition: background-color var(--duration-fast) var(--ease);
+}
+
+.ohb-banner-action:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.ohb-banner-close {
   align-items: center;
   background: transparent;
   border: 0;
@@ -339,67 +364,63 @@
   color: var(--text-dim);
   display: inline-flex;
   flex: none;
-  height: 22px;
+  height: 21px;
   justify-content: center;
   padding: 0;
+  transition:
+    background-color var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
   width: 22px;
 }
 
-.ohb-notice-close:hover {
+.ohb-banner-close:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+.ohb-composer .ohb-banner {
+  margin: 0 auto 8px;
+}
+
+.ohb-notice-stack .ohb-banner {
+  margin: 0 0 0 auto;
+  width: fit-content;
+}
+
+/* The conversation's banners, in order. In the empty state they float above
+   the heading instead of joining its centred column, so the mark and greeting
+   never move. */
+.ohb-banner-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 16px;
+}
+
+.ohb-banner-stack:empty {
+  display: none;
+}
+
+.ohb-banner-stack .ohb-banner {
+  margin: 8px auto 0;
+}
+
+.ohb-main-body-empty > .ohb-banner-stack {
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 4px;
+  /* Under the hero composer (10), so its slash palette opens over banners. */
+  z-index: 5;
 }
 
 /* Keep phone overrides after the base button rules so the hit areas survive. */
 @media (max-width: 639px) {
   .ohb-icon-button,
-  .ohb-notice-close {
+  .ohb-banner-close {
     height: 44px;
     width: 44px;
   }
-}
-
-/* Inline error: where it happened, reason plus a way out. */
-.ohb-error-banner {
-  align-items: center;
-  background: var(--danger-soft);
-  border: 1px solid var(--danger-border);
-  border-radius: var(--radius-md);
-  color: var(--danger-ink);
-  display: flex;
-  font-size: 13px;
-  gap: 12px;
-  line-height: 1.45;
-  margin: 8px auto;
-  max-width: var(--content-width);
-  padding: 8px 10px 8px 12px;
-  width: calc(100% - 32px);
-}
-
-.ohb-error-banner > span {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.ohb-error-banner button {
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-xs);
-  color: var(--danger-ink);
-  flex: none;
-  font-size: 12.5px;
-  font-weight: 500;
-  padding: 4px 6px;
-}
-
-.ohb-error-banner button:hover {
-  background: var(--danger-soft);
-}
-
-.ohb-composer .ohb-error-banner {
-  margin: 0 auto 8px;
-  width: 100%;
 }
 
 /* Buttons for dialogs and forms: one solid primary action, the rest are

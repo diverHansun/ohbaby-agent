@@ -1,5 +1,6 @@
-import { X } from "lucide-react";
 import type { ReactElement } from "react";
+import { Banner } from "./Banner.js";
+import { readableError } from "./error-text.js";
 
 export interface NoticeItem {
   readonly id: string;
@@ -9,7 +10,7 @@ export interface NoticeItem {
 
 /**
  * Top-right notices for failures that happen away from where the user is looking.
- * Successful operations never produce a notice (D16).
+ * Successful operations never produce a notice (D16). Same card as the inline banner.
  */
 export function NoticeStack(props: {
   readonly notices: readonly NoticeItem[];
@@ -19,24 +20,14 @@ export function NoticeStack(props: {
   return (
     <div className="ohb-notice-stack" aria-live="polite">
       {props.notices.map((notice) => (
-        <div
+        <Banner
           key={notice.id}
-          className={`ohb-notice ohb-notice-${notice.kind}`}
-          role={notice.kind === "error" ? "alert" : "status"}
-        >
-          <span className="ohb-notice-dot" aria-hidden="true" />
-          <span className="ohb-notice-message">{notice.message}</span>
-          <button
-            type="button"
-            className="ohb-notice-close"
-            aria-label="Dismiss"
-            onClick={() => {
-              props.onDismiss(notice.id);
-            }}
-          >
-            <X size={13} aria-hidden="true" />
-          </button>
-        </div>
+          tone={notice.kind}
+          message={readableError(notice.message)}
+          onDismiss={() => {
+            props.onDismiss(notice.id);
+          }}
+        />
       ))}
     </div>
   );

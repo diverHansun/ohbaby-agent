@@ -87,7 +87,7 @@ describe("useSessionSyncBanner", () => {
     const notice = container.querySelector('[role="status"]');
     expect(notice?.textContent).toBe("Loading conversation…");
     expect(notice?.getAttribute("aria-live")).toBe("polite");
-    expect(container.querySelector(".ohb-error-banner")).toBeNull();
+    expect(container.querySelector(".ohb-banner")).toBeNull();
     render(state({ scope: { ...scope, bindingGeneration: 2 } }));
     expect(current).toBeNull();
   });

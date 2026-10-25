@@ -51,6 +51,12 @@
   --success-ink: #166534;
   --success-soft: rgba(16, 185, 129, 0.09);
 
+  /* Notice dots (pi-web cards): red only for errors, Linear's lavender-blue
+     for "worth a look", neutral grey for information. */
+  --notice-error: var(--danger);
+  --notice-attention: #5e6ad2;
+  --notice-info: #a1a1aa;
+
   /* Brand: the wordmark (D5) and the Lychee mark (D26) only */
   --brand-oh: #c9a23f;
   --brand-ba: #c97e92;
@@ -72,6 +78,8 @@
     0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.1);
   --shadow-menu:
     0 1px 2px rgba(0, 0, 0, 0.06), 0 12px 32px -12px rgba(0, 0, 0, 0.2);
+  --shadow-notice:
+    0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
   --shadow-modal:
     0 2px 6px rgba(0, 0, 0, 0.06), 0 24px 60px -18px rgba(0, 0, 0, 0.28);
 

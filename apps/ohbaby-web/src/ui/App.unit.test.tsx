@@ -1477,6 +1477,32 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toHaveLength(1);
   });
 
+  it("leaves transport errors to the header and words them for people", () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    act(() => {
+      fake.store.setError("Failed to fetch");
+      fake.store.setConnectionState("reconnecting");
+    });
+    expect(app.container.querySelector(".ohb-banner-error")).toBeNull();
+    expect(
+      app.container.querySelector(".ohb-connection-state")?.textContent,
+    ).toBe("Reconnecting…");
+
+    act(() => {
+      fake.store.setConnectionState("live");
+    });
+    const banner = app.container.querySelector(".ohb-banner-error");
+    expect(banner?.textContent).toBe(
+      "Can't reach ohbaby. Check that it's still running.",
+    );
+    // A state error clears itself, so it offers no Dismiss that cannot work.
+    expect(banner?.querySelector(".ohb-banner-close")).toBeNull();
+  });
+
   it.each(["reconnecting", "resyncing"] as const)(
     "keeps the last-known stop action disabled while %s",
     (connectionState) => {
@@ -1487,7 +1513,9 @@ describe("OhbabyWebApp slash command interactions", () => {
       act(() => {
         fake.store.setConnectionState(connectionState);
       });
-      expect(app.container.textContent).toContain(connectionState);
+      expect(
+        app.container.querySelector(".ohb-connection-state")?.textContent,
+      ).toBe(connectionState === "reconnecting" ? "Reconnecting…" : "Syncing…");
       expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(
         1,
       );
@@ -3756,7 +3784,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       await waitFor(() =>
         Boolean(
           app.container
-            .querySelector(".ohb-notice")
+            .querySelector(".ohb-notice-stack .ohb-banner")
             ?.textContent.includes(expected),
         ),
       );
@@ -4571,10 +4599,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     await clickButton(app.container, "Compact session");
 
     await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-error-banner")),
+      Boolean(app.container.querySelector(".ohb-banner-error")),
     );
     expect(
-      app.container.querySelector(".ohb-error-banner")?.textContent,
+      app.container.querySelector(".ohb-banner-error")?.textContent,
     ).toContain("Compaction failed: summary failed");
   });
 });
