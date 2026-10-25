@@ -46,16 +46,16 @@ export class GlobalSessionsClient {
     return page;
   }
 
-  /** A directory assigns the project; null removes the session from its project. */
+  /** A directory assigns the workspace; null removes the session from its workspace. */
   async moveSession(
     sessionId: string,
-    projectDirectory: string | null,
+    workspaceDirectory: string | null,
   ): Promise<UiGlobalSession> {
     const response = await this.http.request<{
       readonly ok: true;
       readonly session: UiGlobalSession;
-    }>(`/v1/sessions/${encodeURIComponent(sessionId)}/project`, {
-      body: { projectDirectory },
+    }>(`/v1/sessions/${encodeURIComponent(sessionId)}/workspace`, {
+      body: { workspaceDirectory },
       includeDirectory: false,
       method: "POST",
     });

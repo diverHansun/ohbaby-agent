@@ -18,7 +18,7 @@ export function AboutSection(props: {
     ? [
         ["Version", about.version],
         ["ohbaby home", about.ohbabyHome],
-        ["Default workspace", about.defaultWorkspace],
+        ["Default directory", about.defaultDirectory],
         ["Diagnostics file", about.diagnosticsFile],
         ["Log directory", about.logDirectory],
       ]

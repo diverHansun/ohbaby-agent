@@ -46,7 +46,7 @@ import type {
   WorkspaceScopesResponse,
   WorkspaceOpenResponse,
 } from "./wire.js";
-import { workspaceDirectoryHeaders } from "ohbaby-sdk";
+import { requestDirectoryHeaders } from "ohbaby-sdk";
 import type {
   UiInteractionResponse,
   UiSettingsFieldError,
@@ -565,7 +565,7 @@ export class DaemonHttpClient {
       authorization: `Bearer ${this.token}`,
       ...(this.directory === undefined || options.includeDirectory === false
         ? {}
-        : workspaceDirectoryHeaders(this.directory)),
+        : requestDirectoryHeaders(this.directory)),
       "x-ohbaby-client-id": this.clientId,
     };
     if (options.body !== undefined) {

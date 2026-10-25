@@ -9,7 +9,7 @@ const session = {
   createdAt: "2026-10-24T00:00:00.000Z",
   updatedAt: "2026-10-24T00:00:00.000Z",
   messageCount: 2,
-  projectDirectory: null,
+  workspaceDirectory: null,
   workingDirectory: "/home/u/.ohbaby/workspace",
 };
 
@@ -79,10 +79,10 @@ describe("global session transport", () => {
     );
     expect(moved).toEqual(session);
     expect(fake.requests[0]?.url).toBe(
-      "http://localhost:4096/v1/sessions/s%2F1/project",
+      "http://localhost:4096/v1/sessions/s%2F1/workspace",
     );
     expect(fake.requests[0]?.init?.method).toBe("POST");
-    expect(fake.requests[0]?.init?.body).toBe('{"projectDirectory":null}');
+    expect(fake.requests[0]?.init?.body).toBe('{"workspaceDirectory":null}');
   });
 });
 

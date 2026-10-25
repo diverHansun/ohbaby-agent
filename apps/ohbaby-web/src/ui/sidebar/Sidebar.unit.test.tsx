@@ -32,7 +32,7 @@ const loadMore =
 
 function row(
   id: string,
-  projectDirectory: string | null,
+  workspaceDirectory: string | null,
   updatedAt: string,
 ): UiGlobalSession {
   return {
@@ -42,8 +42,8 @@ function row(
     createdAt: updatedAt,
     updatedAt,
     messageCount: 1,
-    projectDirectory,
-    workingDirectory: projectDirectory ?? "/default",
+    workspaceDirectory,
+    workingDirectory: workspaceDirectory ?? "/default",
   };
 }
 const scope = (directory: string): WorkspaceScopeSummary => ({

@@ -8,7 +8,7 @@ beforeEach(() => {
 
 describe("draft project", () => {
   it("starts at No project and survives a reload of the store", () => {
-    expect(createDraftStore().getSnapshot().projectDirectory).toBeNull();
+    expect(createDraftStore().getSnapshot().workspaceDirectory).toBeNull();
     const store = createDraftStore();
     let notified = 0;
     store.subscribe(() => {
@@ -17,13 +17,13 @@ describe("draft project", () => {
     store.setProject("/a");
     store.setProject("/a");
     expect(notified).toBe(1);
-    expect(createDraftStore().getSnapshot().projectDirectory).toBe("/a");
+    expect(createDraftStore().getSnapshot().workspaceDirectory).toBe("/a");
     store.setProject(null);
-    expect(createDraftStore().getSnapshot().projectDirectory).toBeNull();
+    expect(createDraftStore().getSnapshot().workspaceDirectory).toBeNull();
   });
 
   it("ignores unreadable stored values", () => {
     sessionStorage.setItem("ohbaby:draft-project:new", "{broken");
-    expect(createDraftStore().getSnapshot().projectDirectory).toBeNull();
+    expect(createDraftStore().getSnapshot().workspaceDirectory).toBeNull();
   });
 });

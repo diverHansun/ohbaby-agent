@@ -24,7 +24,7 @@ export function mountOhbabyWebApp(runtime: OhbabyWebRuntime): void {
     legacyDraftProject !== null &&
     (runtime.store.getSnapshot().permissionSync.binding?.rootSessionId ??
       null) === null &&
-    runtime.draft.getSnapshot().projectDirectory === null &&
+    runtime.draft.getSnapshot().workspaceDirectory === null &&
     runtime.catalog
       .getSnapshot()
       .projects.some((project) => project.directory === legacyDraftProject)

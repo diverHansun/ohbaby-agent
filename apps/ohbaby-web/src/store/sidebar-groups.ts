@@ -22,7 +22,7 @@ export interface SidebarProject {
 export interface SidebarSessionItem {
   readonly id: string;
   readonly title: string;
-  readonly projectDirectory: string | null;
+  readonly workspaceDirectory: string | null;
   /** Directory of the current turn: header, live stream and approvals use it. */
   readonly workingDirectory: string;
   /** Where reopening and the next turn go; a pending move wins. */
@@ -66,7 +66,7 @@ export function baseCount(key: SidebarGroupKey): number {
 
 /**
  * Groups the loaded global list for the sidebar: Pinned, then projects in
- * server order, then No project. Grouping follows `projectDirectory` only;
+ * server order, then No project. Grouping follows `workspaceDirectory` only;
  * a project the scope list does not know gets a temporary group so no row
  * is lost. Pinned rows appear only in Pinned.
  */
@@ -85,11 +85,11 @@ export function selectSidebarGroups(input: {
   for (const session of input.sessions) {
     const item = toItem(session, input);
     if (item.pinned) pinned.push(item);
-    else if (item.projectDirectory === null) noProject.push(item);
+    else if (item.workspaceDirectory === null) noProject.push(item);
     else {
-      const rows = byProject.get(item.projectDirectory) ?? [];
+      const rows = byProject.get(item.workspaceDirectory) ?? [];
       rows.push(item);
-      byProject.set(item.projectDirectory, rows);
+      byProject.set(item.workspaceDirectory, rows);
     }
   }
   pinned.sort(
@@ -152,7 +152,7 @@ function toItem(
   return {
     id: session.id,
     title: session.title,
-    projectDirectory: session.projectDirectory,
+    workspaceDirectory: session.workspaceDirectory,
     workingDirectory: session.workingDirectory,
     requestDirectory: globalSessionRequestDirectory(session),
     updatedAt: session.updatedAt,
@@ -172,9 +172,9 @@ export function countGroupRows(
     const pinned = Object.hasOwn(pins, session.id);
     const rowKey: SidebarGroupKey = pinned
       ? "pinned"
-      : session.projectDirectory === null
+      : session.workspaceDirectory === null
         ? "no-project"
-        : projectGroupKey(session.projectDirectory);
+        : projectGroupKey(session.workspaceDirectory);
     if (rowKey === key) count += 1;
   }
   return count;

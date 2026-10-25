@@ -30,14 +30,14 @@ it.each([false, true])(
     const binding = runtime.store.getSnapshot().permissionSync.binding;
     const aborted = [...daemon.abortedStreams];
     await runtime.moveSession("chat", "/b");
-    expect(runtime.catalog.getSnapshot().sessions[0]?.projectDirectory).toBe(
+    expect(runtime.catalog.getSnapshot().sessions[0]?.workspaceDirectory).toBe(
       "/b",
     );
     expect(runtime.client).toBe(client);
     expect(runtime.store.getSnapshot().permissionSync.binding).toEqual(binding);
     expect(daemon.abortedStreams).toEqual(aborted);
     expect(
-      daemon.requests.find((request) => request.path.endsWith("/project"))
+      daemon.requests.find((request) => request.path.endsWith("/workspace"))
         ?.directory,
     ).toBeUndefined();
     if (!running) {
@@ -54,25 +54,25 @@ it("waits for a successful move and retains the working directory on removal", a
     release = resolve;
   });
   const runtime = start(async (input, init) => {
-    if (new URL(new Request(input, init).url).pathname.endsWith("/project"))
+    if (new URL(new Request(input, init).url).pathname.endsWith("/workspace"))
       await hold;
     return daemon.fetch(input, init);
   });
   await runtime.ready;
-  daemon.failing.add("/v1/sessions/chat/project");
+  daemon.failing.add("/v1/sessions/chat/workspace");
   const failed = runtime.moveSession("chat", "/b");
-  expect(runtime.catalog.getSnapshot().sessions[0]?.projectDirectory).toBe(
+  expect(runtime.catalog.getSnapshot().sessions[0]?.workspaceDirectory).toBe(
     "/a",
   );
   release();
   await expect(failed).rejects.toThrow("unavailable");
-  expect(runtime.catalog.getSnapshot().sessions[0]?.projectDirectory).toBe(
+  expect(runtime.catalog.getSnapshot().sessions[0]?.workspaceDirectory).toBe(
     "/a",
   );
   daemon.failing.clear();
   await runtime.moveSession("chat", null);
   expect(runtime.catalog.getSnapshot().sessions[0]).toMatchObject({
-    projectDirectory: null,
+    workspaceDirectory: null,
     workingDirectory: "/a",
   });
 });

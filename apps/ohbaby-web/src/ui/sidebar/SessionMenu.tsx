@@ -21,7 +21,7 @@ export function SessionMenu(props: {
   readonly anchor: SessionMenuAnchor;
   readonly pinned: boolean;
   readonly title: string;
-  readonly projectDirectory: string | null;
+  readonly workspaceDirectory: string | null;
   readonly projects: readonly SidebarProject[];
   readonly onMove: (directory: string | null) => void;
   readonly onClose: (restoreFocus: boolean) => void;
@@ -65,22 +65,22 @@ export function SessionMenu(props: {
             type="button"
             title={project.directory}
             disabled={
-              !project.available || project.directory === props.projectDirectory
+              !project.available || project.directory === props.workspaceDirectory
             }
             onClick={() => { props.onMove(project.directory); }}
           >
-            {project.directory === props.projectDirectory ? (
+            {project.directory === props.workspaceDirectory ? (
               <Check aria-hidden="true" size={13} />
             ) : null}
             <span>{workspaceLabel(project.directory)}</span>
-            {project.directory === props.projectDirectory ? (
+            {project.directory === props.workspaceDirectory ? (
               <small>(current)</small>
             ) : !project.available ? (
               <small>Unavailable</small>
             ) : null}
           </button>
         ))}
-        {props.projectDirectory !== null ? (
+        {props.workspaceDirectory !== null ? (
           <>
             <div className="ohb-menu-separator" role="separator" />
             <button

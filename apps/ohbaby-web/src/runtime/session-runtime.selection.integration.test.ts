@@ -90,7 +90,7 @@ it("keeps the newer draft project when an earlier selection of the same project 
   await selected(runtime, null);
 
   const receipt = await runtime.submitPrompt("send to the chosen project");
-  expect(runtime.draft.getSnapshot().projectDirectory).toBe("/b");
+  expect(runtime.draft.getSnapshot().workspaceDirectory).toBe("/b");
   expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/b");
   expect(daemon.sessions.get(receipt.sessionId)?.workingDirectory).toBe("/b");
 });

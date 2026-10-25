@@ -185,7 +185,7 @@ export function SessionList(props: SessionListProps): ReactElement {
           pinned={menuSession.pinned}
           title={menuSession.title}
           projects={props.projects}
-          projectDirectory={menuSession.projectDirectory}
+          workspaceDirectory={menuSession.workspaceDirectory}
           onMove={(directory) => {
             closeMenu(true);
             props.onMoveSession(menuSession, directory);

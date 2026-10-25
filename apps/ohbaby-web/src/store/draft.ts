@@ -2,7 +2,7 @@ const PROJECT_KEY = "ohbaby:draft-project:new";
 
 export interface DraftSnapshot {
   /** Project chosen for the new-chat draft; null means No project. */
-  readonly projectDirectory: string | null;
+  readonly workspaceDirectory: string | null;
 }
 
 export interface DraftStore {
@@ -17,7 +17,7 @@ export interface DraftStore {
  * keeps them and another tab does not share them.
  */
 export function createDraftStore(): DraftStore {
-  let snapshot: DraftSnapshot = { projectDirectory: readProject() };
+  let snapshot: DraftSnapshot = { workspaceDirectory: readProject() };
   const listeners = new Set<() => void>();
   return {
     getSnapshot: (): DraftSnapshot => snapshot,
@@ -27,10 +27,10 @@ export function createDraftStore(): DraftStore {
         listeners.delete(listener);
       };
     },
-    setProject: (projectDirectory): void => {
-      if (projectDirectory === snapshot.projectDirectory) return;
-      snapshot = { projectDirectory };
-      writeProject(projectDirectory);
+    setProject: (workspaceDirectory): void => {
+      if (workspaceDirectory === snapshot.workspaceDirectory) return;
+      snapshot = { workspaceDirectory };
+      writeProject(workspaceDirectory);
       for (const listener of listeners) listener();
     },
   };

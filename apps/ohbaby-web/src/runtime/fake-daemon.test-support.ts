@@ -18,7 +18,7 @@ export interface WorldSession {
   id: string;
   title: string;
   updatedAt: string;
-  projectDirectory: string | null;
+  workspaceDirectory: string | null;
   workingDirectory: string;
   pendingWorkingDirectory?: string;
   archived?: boolean;
@@ -79,7 +79,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
     createdAt: session.updatedAt,
     updatedAt: session.updatedAt,
     messageCount: 1,
-    projectDirectory: session.projectDirectory,
+    workspaceDirectory: session.workspaceDirectory,
     workingDirectory: session.workingDirectory,
     ...(session.pendingWorkingDirectory === undefined
       ? {}
@@ -164,7 +164,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
       if (path === "/v1/scopes")
         return Response.json({
           ok: true,
-          defaultWorkspace: { directory: DEFAULT },
+          defaultDirectory: { directory: DEFAULT },
           scopes: ["/a", "/b"]
             .filter((value) => !hidden.has(value))
             .map((value, position) => ({
@@ -179,7 +179,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
         const active = [...sessions.values()]
           .filter(
             (session) =>
-              !session.archived && !hidden.has(session.projectDirectory ?? ""),
+              !session.archived && !hidden.has(session.workspaceDirectory ?? ""),
           )
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         const offset = Number(url.searchParams.get("cursor") ?? "0");
@@ -215,13 +215,13 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
             })),
         });
       }
-      const move = /^\/v1\/sessions\/([^/]+)\/project$/.exec(path);
+      const move = /^\/v1\/sessions\/([^/]+)\/workspace$/.exec(path);
       if (move?.[1]) {
         const value = sessions.get(decodeURIComponent(move[1]));
         if (!value) throw new Error("Missing session");
-        const project = (body as { projectDirectory: string | null })
-          .projectDirectory;
-        value.projectDirectory = project;
+        const project = (body as { workspaceDirectory: string | null })
+          .workspaceDirectory;
+        value.workspaceDirectory = project;
         if (project === null) delete value.pendingWorkingDirectory;
         else value.pendingWorkingDirectory = project;
         return Response.json({ ok: true, session: global(value) });
@@ -353,7 +353,7 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
             id: sessionId,
             title: prompt.text,
             updatedAt: `2026-10-24T00:00:0${String(created)}.000Z`,
-            projectDirectory:
+            workspaceDirectory:
               client.directory === DEFAULT ? null : client.directory,
             workingDirectory: client.directory,
           });
@@ -401,9 +401,9 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
 
 export function session(
   id: string,
-  projectDirectory: string | null,
+  workspaceDirectory: string | null,
   workingDirectory: string,
   updatedAt = "2026-10-01T00:00:00.000Z",
 ): WorldSession {
-  return { id, title: id, updatedAt, projectDirectory, workingDirectory };
+  return { id, title: id, updatedAt, workspaceDirectory, workingDirectory };
 }

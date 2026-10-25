@@ -265,7 +265,7 @@ function globalRow(
   id: string,
   title: string,
   minutesAgo: number,
-  projectDirectory: string | null,
+  workspaceDirectory: string | null,
   extra: Partial<UiGlobalSession> = {},
 ): UiGlobalSession {
   return {
@@ -275,8 +275,8 @@ function globalRow(
     createdAt: iso(minutesAgo + 30),
     updatedAt: iso(minutesAgo),
     messageCount: 4,
-    projectDirectory,
-    workingDirectory: projectDirectory ?? DEFAULT_WORKSPACE,
+    workspaceDirectory,
+    workingDirectory: workspaceDirectory ?? DEFAULT_WORKSPACE,
     ...extra,
   };
 }

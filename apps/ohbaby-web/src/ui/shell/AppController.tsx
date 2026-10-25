@@ -181,7 +181,7 @@ export function AppController(props: {
 
   const draftPicker = (
     <ProjectPicker
-      value={draft.projectDirectory}
+      value={draft.workspaceDirectory}
       projects={catalog.projects}
       disabled={workspaceActionCount > 0}
       loadFailed={catalog.projectsStatus === "error"}
@@ -212,9 +212,9 @@ export function AppController(props: {
           activity={activity}
           disabled={view.composer.disabled}
           onCollapse={close}
-          onNewChat={(projectDirectory) => {
+          onNewChat={(workspaceDirectory) => {
             dismissDrawer();
-            void runWorkspaceAction(() => runtime.openDraft(projectDirectory));
+            void runWorkspaceAction(() => runtime.openDraft(workspaceDirectory));
           }}
           onSelectSession={(session) => {
             dismissDrawer();
@@ -252,7 +252,7 @@ export function AppController(props: {
           onOpenSidebar={openSidebar}
           title={view.activeSession?.title}
           workingDirectory={
-            view.activeSession?.projectRoot ??
+            view.activeSession?.workingDirectory ??
             workspace.selectedDirectory ??
             undefined
           }

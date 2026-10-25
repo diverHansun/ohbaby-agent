@@ -83,7 +83,7 @@ export function createGlobalCatalogStore(): GlobalCatalogStore {
           (project) => project.directory !== directory,
         ),
         sessions: snapshot.sessions.filter(
-          (session) => session.projectDirectory !== directory,
+          (session) => session.workspaceDirectory !== directory,
         ),
       });
     },

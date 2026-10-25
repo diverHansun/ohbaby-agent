@@ -57,7 +57,7 @@ export class GlobalLayer {
       if (writes !== this.writes) return;
       this.catalog.setProjects(
         response.scopes,
-        response.defaultWorkspace?.directory ?? null,
+        response.defaultDirectory?.directory ?? null,
       );
     } catch (error) {
       this.catalog.failProjects();
@@ -160,13 +160,13 @@ export class GlobalLayer {
 
   async moveSession(
     sessionId: string,
-    projectDirectory: string | null,
+    workspaceDirectory: string | null,
   ): Promise<void> {
     const settle = this.beginWrite();
     try {
       const session = await this.sessions.moveSession(
         sessionId,
-        projectDirectory,
+        workspaceDirectory,
       );
       this.catalog.upsertSession(session);
     } finally {

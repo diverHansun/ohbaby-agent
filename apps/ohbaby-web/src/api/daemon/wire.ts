@@ -23,7 +23,7 @@ import type {
   UiSlashCommandInvocation,
   UiSlashCommandOutput,
   UiSnapshot,
-  UiDefaultWorkspace,
+  UiDefaultDirectory,
 } from "ohbaby-sdk";
 
 export type WebStartupIntent = DaemonStartupIntent;
@@ -51,8 +51,8 @@ export interface WorkspaceSnapshot {
 
 export interface WorkspaceScopesResponse {
   readonly ok: true;
-  /** Absent only when the daemon has no project registry. */
-  readonly defaultWorkspace?: UiDefaultWorkspace;
+  /** Absent only when the daemon has no workspace registry. */
+  readonly defaultDirectory?: UiDefaultDirectory;
   readonly scopes: readonly WorkspaceScopeSummary[];
 }
 

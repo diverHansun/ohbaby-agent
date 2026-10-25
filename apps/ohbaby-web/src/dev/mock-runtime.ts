@@ -101,7 +101,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   const page = (offset: number): void => {
     const visible = sessions.filter(
       (row) =>
-        row.status !== "archived" && !hidden.has(row.projectDirectory ?? ""),
+        row.status !== "archived" && !hidden.has(row.workspaceDirectory ?? ""),
     );
     const rows = visible.slice(offset, offset + MOCK_PAGE);
     const next = offset + MOCK_PAGE;
@@ -205,7 +205,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
       if (!previous) return Promise.reject(new Error("Chat no longer exists"));
       const moved = {
         ...previous,
-        projectDirectory: directory,
+        workspaceDirectory: directory,
         ...(directory === null ? {} : { pendingWorkingDirectory: directory }),
       };
       sessions = sessions.map((row) => (row.id === id ? moved : row));

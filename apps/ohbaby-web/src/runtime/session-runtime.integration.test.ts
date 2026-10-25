@@ -70,7 +70,7 @@ afterEach(async () => {
 describe("session-centric runtime", () => {
   it.each([null, "/b"])(
     "reloads the new draft in %s instead of reopening the previous session",
-    async (projectDirectory) => {
+    async (workspaceDirectory) => {
       vi.stubGlobal("localStorage", memoryStorage());
       vi.stubGlobal("sessionStorage", memoryStorage());
       const daemon = fakeDaemon([session("previous", null, DEFAULT)]);
@@ -80,7 +80,7 @@ describe("session-centric runtime", () => {
       await waitForSession(runtime, "previous");
       expect(readWebNavigationState().lastSession?.sessionId).toBe("previous");
 
-      await runtime.openDraft(projectDirectory);
+      await runtime.openDraft(workspaceDirectory);
       await waitForSession(runtime, null);
       expect(readWebNavigationState().lastSession).toBeNull();
       await runtime.dispose();
@@ -88,10 +88,10 @@ describe("session-centric runtime", () => {
       const reloaded = start(daemon);
       await reloaded.ready;
       await waitForSession(reloaded, null);
-      expect(reloaded.draft.getSnapshot().projectDirectory).toBe(
-        projectDirectory,
+      expect(reloaded.draft.getSnapshot().workspaceDirectory).toBe(
+        workspaceDirectory,
       );
-      expect(instanceDirectory(reloaded)).toBe(projectDirectory ?? DEFAULT);
+      expect(instanceDirectory(reloaded)).toBe(workspaceDirectory ?? DEFAULT);
     },
   );
 
@@ -113,7 +113,7 @@ describe("session-centric runtime", () => {
       clientRequestId: "first",
     });
     expect(daemon.sessions.get(receipt.sessionId)).toMatchObject({
-      projectDirectory: null,
+      workspaceDirectory: null,
       workingDirectory: DEFAULT,
     });
     await vi.waitFor(() => {
@@ -131,9 +131,9 @@ describe("session-centric runtime", () => {
     await waitForSession(runtime, null);
 
     expect(instanceDirectory(runtime)).toBe("/a");
-    expect(runtime.draft.getSnapshot().projectDirectory).toBe("/a");
+    expect(runtime.draft.getSnapshot().workspaceDirectory).toBe("/a");
     const receipt = await runtime.submitPrompt("in a");
-    expect(daemon.sessions.get(receipt.sessionId)?.projectDirectory).toBe("/a");
+    expect(daemon.sessions.get(receipt.sessionId)?.workspaceDirectory).toBe("/a");
   });
 
   it("opens a session removed from its project at its working directory, not the default workspace", async () => {
@@ -349,7 +349,7 @@ describe("session-centric runtime", () => {
     await waitForSession(runtime, null);
 
     expect(instanceDirectory(runtime)).toBe(DEFAULT);
-    expect(runtime.draft.getSnapshot().projectDirectory).toBeNull();
+    expect(runtime.draft.getSnapshot().workspaceDirectory).toBeNull();
   });
 
   it("keeps a running turn bound when its session has moved, and says when the next turn applies", async () => {
@@ -410,7 +410,7 @@ describe("session-centric runtime", () => {
     await expect(runtime.openDraft("/b")).rejects.toThrow("unavailable");
 
     expect(instanceDirectory(runtime)).toBe(DEFAULT);
-    expect(runtime.draft.getSnapshot().projectDirectory).toBeNull();
+    expect(runtime.draft.getSnapshot().workspaceDirectory).toBeNull();
   });
 
   it("does not re-read the whole list when switching instances", async () => {

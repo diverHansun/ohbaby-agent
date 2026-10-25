@@ -226,7 +226,7 @@ function emptyState(): MockSettingsState {
 const ABOUT: SettingsAbout = {
   version: "0.1.16",
   ohbabyHome: "/Users/demo/.ohbaby",
-  defaultWorkspace: DEFAULT_WORKSPACE,
+  defaultDirectory: DEFAULT_WORKSPACE,
   diagnosticsFile: "/Users/demo/.ohbaby/logs/daemon/log.jsonl",
   logDirectory: "/Users/demo/.ohbaby/logs/daemon",
 };

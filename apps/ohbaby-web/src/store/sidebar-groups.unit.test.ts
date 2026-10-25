@@ -10,7 +10,7 @@ import {
 
 function session(
   id: string,
-  projectDirectory: string | null,
+  workspaceDirectory: string | null,
   extra: Partial<UiGlobalSession> = {},
 ): UiGlobalSession {
   return {
@@ -20,8 +20,8 @@ function session(
     createdAt: "2026-10-01T00:00:00.000Z",
     updatedAt: "2026-10-01T00:00:00.000Z",
     messageCount: 1,
-    projectDirectory,
-    workingDirectory: projectDirectory ?? "/default",
+    workspaceDirectory,
+    workingDirectory: workspaceDirectory ?? "/default",
     ...extra,
   };
 }
@@ -33,7 +33,7 @@ function scope(directory: string, available = true): WorkspaceScopeSummary {
 const none = new Map<string, never>();
 
 describe("sidebar groups", () => {
-  it("groups by projectDirectory only, keeps server project order and adds unknown projects", () => {
+  it("groups by workspaceDirectory only, keeps server project order and adds unknown projects", () => {
     const groups = selectSidebarGroups({
       projects: [scope("/b"), scope("/a", false)],
       sessions: [

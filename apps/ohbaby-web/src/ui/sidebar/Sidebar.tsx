@@ -69,7 +69,7 @@ export interface SidebarProps {
   readonly disabled: boolean;
   readonly onCollapse: () => void;
   /** `null` starts a draft in No project. */
-  readonly onNewChat: (projectDirectory: string | null) => void;
+  readonly onNewChat: (workspaceDirectory: string | null) => void;
   readonly onSelectSession: (session: SidebarSessionItem) => void;
   readonly onArchiveSession: (session: SidebarSessionItem) => Promise<boolean>;
   readonly onExportSession: (
@@ -160,7 +160,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
   );
   const activeProject =
     catalog.sessions.find((session) => session.id === props.activeSessionId)
-      ?.projectDirectory ?? null;
+      ?.workspaceDirectory ?? null;
 
   const toggle = useCallback((key: string): void => {
     setCollapsed((current) => {

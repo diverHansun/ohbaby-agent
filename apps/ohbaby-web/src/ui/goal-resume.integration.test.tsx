@@ -92,7 +92,7 @@ async function fixture(
       {
         id: "session_1",
         title: "Goal session",
-        projectRoot: directory,
+        workingDirectory: directory,
         messages: [],
         createdAt: timestamp,
         updatedAt: timestamp,

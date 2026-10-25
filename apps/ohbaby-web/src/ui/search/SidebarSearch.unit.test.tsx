@@ -29,7 +29,7 @@ const page = (id: string, nextCursor?: string): UiSessionSearchPage => ({
         createdAt: "",
         updatedAt: "",
         messageCount: 1,
-        projectDirectory: null,
+        workspaceDirectory: null,
         workingDirectory: "/",
       },
       matchType: "message",

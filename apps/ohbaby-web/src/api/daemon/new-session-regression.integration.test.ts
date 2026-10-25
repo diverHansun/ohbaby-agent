@@ -339,7 +339,7 @@ describe("New session real persistent REST regression", () => {
         const first = await f.backend.createSession();
         const db = getDatabase();
         if (kind === "foreign-project")
-          db.prepare("UPDATE session SET project_root = ? WHERE id = ?").run(
+          db.prepare("UPDATE session SET working_directory = ? WHERE id = ?").run(
             "/another-project",
             first.id,
           );

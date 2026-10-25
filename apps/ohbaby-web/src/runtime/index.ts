@@ -57,7 +57,7 @@ export interface OhbabyWebRuntime {
   archiveSession(sessionId: string, directory?: string): Promise<void>;
   moveSession(
     sessionId: string,
-    projectDirectory: string | null,
+    workspaceDirectory: string | null,
   ): Promise<void>;
   searchSessions(input: {
     query: string;
@@ -73,7 +73,7 @@ export interface OhbabyWebRuntime {
   /** Creates or reuses an empty session in the connected instance. */
   createSession(): Promise<void>;
   /** A new-chat draft; `null` is No project and runs in the default workspace. */
-  openDraft(projectDirectory?: string | null): Promise<void>;
+  openDraft(workspaceDirectory?: string | null): Promise<void>;
   /** Opens a session at `directory`, or at its request directory when known. */
   openSession(sessionId: string, directory?: string): Promise<void>;
   /** Selects a session in the connected instance, e.g. after a first prompt. */
@@ -218,9 +218,9 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     await this.instance.requireClient().createSessionForRuntime();
   }
 
-  async openDraft(projectDirectory: string | null = null): Promise<void> {
-    const previous = this.draft.getSnapshot().projectDirectory;
-    this.draft.setProject(projectDirectory);
+  async openDraft(workspaceDirectory: string | null = null): Promise<void> {
+    const previous = this.draft.getSnapshot().workspaceDirectory;
+    this.draft.setProject(workspaceDirectory);
     const directory = this.draftDirectory();
     if (directory === null) {
       this.draft.setProject(previous);
@@ -286,9 +286,9 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   moveSession(
     sessionId: string,
-    projectDirectory: string | null,
+    workspaceDirectory: string | null,
   ): Promise<void> {
-    return this.global.moveSession(sessionId, projectDirectory);
+    return this.global.moveSession(sessionId, workspaceDirectory);
   }
 
   searchSessions(input: {
@@ -427,7 +427,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   async hideWorkspace(directory: string): Promise<void> {
     await this.global.hideScope(directory);
     await this.global.refresh();
-    if (this.draft.getSnapshot().projectDirectory !== directory) return;
+    if (this.draft.getSnapshot().workspaceDirectory !== directory) return;
     if (this.boundSessionId() === null && this.instance.directory === directory)
       await this.openDraft(null);
     else this.draft.setProject(null);
@@ -484,7 +484,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     }
     await this.global.refreshSessions();
     const { defaultWorkspace, projects } = this.catalog.getSnapshot();
-    const draftProject = this.draft.getSnapshot().projectDirectory;
+    const draftProject = this.draft.getSnapshot().workspaceDirectory;
     if (
       draftProject !== null &&
       !projects.some(
@@ -559,7 +559,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     this.instance.forgetLastSession();
     const message = error instanceof Error ? error.message : String(error);
     const failed = this.instance.directory;
-    if (this.projectOf(failed) === this.draft.getSnapshot().projectDirectory)
+    if (this.projectOf(failed) === this.draft.getSnapshot().workspaceDirectory)
       this.draft.setProject(null);
     const directory = this.draftDirectory();
     if (directory !== null && directory !== failed && !this.instance.client) {
@@ -652,7 +652,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   /** Directory a new-chat draft runs in: its project, else the default workspace. */
   private draftDirectory(): string | null {
     return (
-      this.draft.getSnapshot().projectDirectory ??
+      this.draft.getSnapshot().workspaceDirectory ??
       this.catalog.getSnapshot().defaultWorkspace
     );
   }
@@ -740,7 +740,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
               createdAt: entry.createdAt,
               updatedAt: entry.updatedAt,
               messageCount: 0,
-              projectDirectory: directory,
+              workspaceDirectory: directory,
               workingDirectory: directory,
             })),
           undefined,
