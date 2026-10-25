@@ -68,6 +68,33 @@ afterEach(async () => {
 });
 
 describe("session-centric runtime", () => {
+  it.each([null, "/b"])(
+    "reloads the new draft in %s instead of reopening the previous session",
+    async (projectDirectory) => {
+      vi.stubGlobal("localStorage", memoryStorage());
+      vi.stubGlobal("sessionStorage", memoryStorage());
+      const daemon = fakeDaemon([session("previous", null, DEFAULT)]);
+      const runtime = start(daemon);
+      await runtime.ready;
+      await runtime.openSession("previous");
+      await waitForSession(runtime, "previous");
+      expect(readWebNavigationState().lastSession?.sessionId).toBe("previous");
+
+      await runtime.openDraft(projectDirectory);
+      await waitForSession(runtime, null);
+      expect(readWebNavigationState().lastSession).toBeNull();
+      await runtime.dispose();
+
+      const reloaded = start(daemon);
+      await reloaded.ready;
+      await waitForSession(reloaded, null);
+      expect(reloaded.draft.getSnapshot().projectDirectory).toBe(
+        projectDirectory,
+      );
+      expect(instanceDirectory(reloaded)).toBe(projectDirectory ?? DEFAULT);
+    },
+  );
+
   it("starts a draft in the default workspace without creating a session; the first prompt creates it there", async () => {
     const daemon = fakeDaemon();
     const runtime = start(daemon);

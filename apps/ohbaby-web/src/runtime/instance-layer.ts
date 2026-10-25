@@ -312,7 +312,15 @@ export class InstanceLayer {
 
   /** Remembers the bound session for reloads and the shareable hash. */
   private persistActiveSession(): void {
-    if (this.restoring || this.pendingRestore) return;
+    // Closing a client publishes cleanup state with its old session still
+    // present. It must not overwrite the user's newly selected draft.
+    if (
+      !this.activeClient ||
+      this.activeClient.closed ||
+      this.restoring ||
+      this.pendingRestore
+    )
+      return;
     const directory = this.directoryValue;
     const { permissionSync, view } = this.store.getSnapshot();
     // A delayed history response may still describe the previous selection.

@@ -69,6 +69,10 @@ export class BrowserDaemonClient implements UiBackendClient {
     return this.sync.connect();
   }
 
+  get closed(): boolean {
+    return this.sync.closed;
+  }
+
   close(): Promise<void> {
     return this.sync.close();
   }
