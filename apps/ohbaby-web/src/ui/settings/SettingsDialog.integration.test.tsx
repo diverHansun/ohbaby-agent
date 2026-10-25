@@ -124,6 +124,12 @@ async function key(target: Element, name: string): Promise<void> {
   });
 }
 
+function archivedTitles(): string[] {
+  return [
+    ...dialog().querySelectorAll(".ohb-archived-list .ohb-settings-row-title"),
+  ].map((title) => title.textContent);
+}
+
 async function openSettings(
   container: HTMLElement,
 ): Promise<HTMLButtonElement> {
@@ -143,7 +149,14 @@ describe("settings dialog", () => {
     const nav = [
       ...dialog().querySelectorAll<HTMLButtonElement>(".ohb-settings-nav-item"),
     ].map((item) => item.textContent.trim());
-    expect(nav).toEqual(["Models", "MCP", "Skills", "Web search", "About"]);
+    expect(nav).toEqual([
+      "Models",
+      "MCP",
+      "Skills",
+      "Web search",
+      "Archived",
+      "About",
+    ]);
     expect(
       dialog().querySelector("[aria-current='page']")?.textContent,
     ).toContain("Models");
@@ -634,6 +647,40 @@ describe("settings dialog", () => {
     await click(button(dialog(), "About"));
     await until(() => dialog().textContent.includes("0.1.16"), "About");
     expect(dialog().textContent).toContain("Diagnostics file");
+  });
+
+  it("restores an archived chat to Recents and deletes another after confirming", async () => {
+    const runtime = createMockRuntime("archived");
+    const container = mount(runtime);
+    await openSettings(container);
+    await click(button(dialog(), "Archived"));
+    const onboarding = "Sketch the old prototype's onboarding";
+    await until(() => dialog().textContent.includes(onboarding), "archived");
+    expect(dialog().textContent).toContain("old-prototype · Archived");
+    await click(button(dialog(), `Restore “${onboarding}”`));
+    await until(
+      () => !archivedTitles().includes(onboarding),
+      "the restored row to leave",
+    );
+    // Its workspace folder is gone, so it comes back without one (D4).
+    expect(
+      runtime.catalog
+        .getSnapshot()
+        .sessions.find((session) => session.title === onboarding),
+    ).toMatchObject({ status: "active", workspaceDirectory: null });
+
+    const reading = "Reading list for the week";
+    await click(button(dialog(), `Delete “${reading}”`));
+    await click(button(document.body, "Delete"));
+    await until(
+      () => !archivedTitles().includes(reading),
+      "the deleted row to leave",
+    );
+    expect(
+      runtime.catalog
+        .getSnapshot()
+        .sessions.some((session) => session.title === reading),
+    ).toBe(false);
   });
 });
 

@@ -663,3 +663,150 @@
     max-width: 160px;
   }
 }
+
+/* Archived (archived-sessions D9): one quiet card of rows, like Codex.
+   Delete is an icon that turns red on hover; Restore is the soft button. */
+.ohb-archived:focus {
+  outline: none;
+}
+
+.ohb-archived-lede {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 20px;
+  max-width: 520px;
+}
+
+.ohb-archived-list {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0 16px;
+}
+
+.ohb-archived-item:last-child .ohb-settings-row {
+  border-bottom: 0;
+}
+
+.ohb-archived-item .ohb-settings-row {
+  min-height: 60px;
+}
+
+.ohb-archived-item .ohb-settings-row-label {
+  gap: 3px;
+}
+
+.ohb-archived-item .ohb-settings-row-title {
+  font-weight: 500;
+}
+
+.ohb-archived-item .ohb-settings-row-description {
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-archived-item .ohb-settings-row-control {
+  gap: 6px;
+}
+
+.ohb-archived-item .ohb-settings-row-error {
+  margin: -4px 0 12px;
+}
+
+.ohb-archived-delete:not(:disabled):hover {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+}
+
+.ohb-archived-delete:disabled {
+  opacity: 0.4;
+}
+
+.ohb-archived-restore {
+  align-items: center;
+  background: var(--bg-hover);
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  display: inline-flex;
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.ohb-archived-restore:not(:disabled):hover {
+  background: var(--bg-selected);
+}
+
+.ohb-archived-restore:disabled {
+  color: var(--text-muted);
+}
+
+.ohb-archived-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.ohb-archived-empty {
+  align-items: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.ohb-archived-empty-icon {
+  align-items: center;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-dim);
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  margin-bottom: 8px;
+  width: 40px;
+}
+
+.ohb-archived-empty-title {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.ohb-archived-empty-hint {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0;
+}
+
+.ohb-visually-hidden {
+  clip-path: inset(50%);
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+@media (max-width: 639px) {
+  .ohb-archived-list {
+    padding: 0 12px;
+  }
+
+  .ohb-archived-restore {
+    padding: 0 10px;
+  }
+}

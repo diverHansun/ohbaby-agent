@@ -1,6 +1,12 @@
-export type SettingsSection = "models" | "mcp" | "skills" | "search" | "about";
+export type SettingsSection =
+  | "models"
+  | "mcp"
+  | "skills"
+  | "search"
+  | "archived"
+  | "about";
 
-/** The five sections in navigation order (D12). */
+/** The six sections in navigation order (D12, archived-sessions D9). */
 export const SETTINGS_SECTIONS: readonly {
   readonly id: SettingsSection;
   readonly label: string;
@@ -9,6 +15,7 @@ export const SETTINGS_SECTIONS: readonly {
   { id: "mcp", label: "MCP" },
   { id: "skills", label: "Skills" },
   { id: "search", label: "Web search" },
+  { id: "archived", label: "Archived" },
   { id: "about", label: "About" },
 ];
 

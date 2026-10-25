@@ -303,6 +303,7 @@ export function AppController(props: {
           {settingsDialog.state.mounted ? (
             <SettingsDialog
               settings={runtime.settings}
+              archive={runtime}
               state={settingsDialog.state}
               onClose={settingsDialog.close}
               onSelectSection={settingsDialog.selectSection}

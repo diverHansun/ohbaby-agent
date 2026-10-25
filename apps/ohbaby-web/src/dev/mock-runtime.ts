@@ -70,6 +70,7 @@ const MOCK_COMMANDS: UiWebCommandCatalog = {
 };
 
 const MOCK_PAGE = 100;
+const ARCHIVED_PAGE = 50;
 
 /** Seeds the scenario's pins once, so a viewer's own pin changes persist. */
 function seedPins(pins: Readonly<Record<string, number>> | undefined): void {
@@ -128,6 +129,8 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   };
 
   const resolved = (): Promise<void> => Promise.resolve();
+  // `archived-error`: the first read fails, so Retry can be tried.
+  let archivedReads = 0;
   // `&delay=<ms>` slows settings requests so loading states can be seen.
   const delayMs = Number(
     new URLSearchParams(location.search).get("delay") ?? 0,
@@ -196,9 +199,51 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     forgetUnknownPrompt: () => undefined,
     abortSession: resolved,
     archiveSession: (id): Promise<void> => {
-      sessions = sessions.filter((row) => row.id !== id);
+      sessions = sessions.map((row) =>
+        row.id === id
+          ? { ...row, status: "archived", updatedAt: new Date().toISOString() }
+          : row,
+      );
       catalog.removeSession(id);
       return Promise.resolve();
+    },
+    listArchivedSessions: async (cursor) => {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (name === "archived-error" && archivedReads++ === 0)
+        throw new Error("Can't reach ohbaby. Check that it's still running.");
+      const archived = sessions
+        .filter((row) => row.status === "archived")
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      const offset = Number(cursor ?? 0);
+      const next = offset + ARCHIVED_PAGE;
+      return {
+        sessions: archived.slice(offset, next),
+        ...(next < archived.length ? { nextCursor: String(next) } : {}),
+      };
+    },
+    unarchiveSession: async (id): Promise<void> => {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const row = sessions.find((entry) => entry.id === id);
+      if (row?.status !== "archived")
+        throw new Error("This chat is no longer archived.");
+      // A workspace folder that is gone sends the chat to Recents (D4).
+      const available = workspace.scopes.some(
+        (scope) => scope.directory === row.workspaceDirectory,
+      );
+      const restored = {
+        ...row,
+        status: "active" as const,
+        updatedAt: new Date().toISOString(),
+        workspaceDirectory: available ? row.workspaceDirectory : null,
+      };
+      sessions = sessions.map((entry) => (entry.id === id ? restored : entry));
+      catalog.upsertSession(restored);
+    },
+    deleteSession: async (id): Promise<void> => {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (name === "archived-error")
+        throw new Error("The chat couldn't be deleted. Try again.");
+      sessions = sessions.filter((row) => row.id !== id);
     },
     moveSession: (id, directory): Promise<void> => {
       const previous = sessions.find((row) => row.id === id);

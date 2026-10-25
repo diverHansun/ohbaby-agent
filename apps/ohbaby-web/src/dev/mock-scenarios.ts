@@ -352,6 +352,60 @@ function manySessions(): readonly UiGlobalSession[] {
   );
 }
 
+/**
+ * 8 archived chats (D9 mock): one per kind of row, including a workspace
+ * whose folder is gone, so Restore sends it to Recents.
+ */
+function archivedSessions(): readonly UiGlobalSession[] {
+  const archived = { status: "archived" as const };
+  return byRecency([
+    globalRow(
+      "arch_0",
+      "Implement improve-1 phase optimisations",
+      50,
+      agentWorkspace,
+      archived,
+    ),
+    globalRow(
+      "arch_1",
+      "Investigate subagent dispatch and message blocking (improve-3)",
+      1_500,
+      agentWorkspace,
+      archived,
+    ),
+    globalRow(
+      "arch_2",
+      "Sketch the old prototype's onboarding",
+      4_000,
+      "/Users/demo/Projects/old-prototype",
+      archived,
+    ),
+    globalRow("arch_3", "Port the session tree", 9_000, piWorkspace, archived),
+    globalRow(
+      "arch_4",
+      "Optimise the system-prompt module",
+      20_000,
+      agentWorkspace,
+      archived,
+    ),
+    globalRow(
+      "arch_5",
+      "Generate a file named AGENTS.md that serves as a contributor guide for this repository, covering layout, commands and style",
+      40_000,
+      null,
+      archived,
+    ),
+    globalRow(
+      "arch_6",
+      "Reading list for the week",
+      90_000,
+      notesWorkspace,
+      archived,
+    ),
+    globalRow("arch_7", "", 200_000, null, archived),
+  ]);
+}
+
 const typicalPins = { agent_12: now - 2, pi_1: now - 1 };
 
 export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
@@ -461,6 +515,30 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     workspace,
     model,
     sessions: typicalSessions(),
+  }),
+  // Settings › Archived (D9): restore, delete, and a folder that is gone.
+  archived: () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model,
+    sessions: [...typicalSessions(), ...archivedSessions()],
+    pins: typicalPins,
+  }),
+  // 120 archived chats, so Show more pages.
+  "archived-many": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: [] },
+    workspace,
+    model,
+    sessions: manySessions()
+      .slice(0, 120)
+      .map((row) => ({ ...row, status: "archived" as const })),
+  }),
+  // The first read and every delete fail.
+  "archived-error": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model,
+    sessions: [...typicalSessions(), ...archivedSessions()],
   }),
   "no-model": () => ({
     snapshot: { ...base, activeSessionId: null, sessions: history },

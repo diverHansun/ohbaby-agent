@@ -7,6 +7,10 @@ import { focusableIn, trapTab } from "../shared/focus-trap.js";
 import { IconButton } from "../shared/IconButton.js";
 import { isPhoneViewport } from "../shared/viewport.js";
 import { AboutSection } from "./AboutSection.js";
+import {
+  ArchivedSection,
+  type ArchivedSessionsApi,
+} from "./ArchivedSection.js";
 import { McpSection } from "./mcp/McpSection.js";
 import { ModelsSection } from "./ModelsSection.js";
 import { SearchSection } from "./SearchSection.js";
@@ -24,6 +28,7 @@ import type { SettingsDialogState } from "./useSettingsDialog.js";
  */
 export function SettingsDialog(props: {
   readonly settings: SettingsLayer;
+  readonly archive: ArchivedSessionsApi;
   readonly state: SettingsDialogState;
   readonly onClose: () => void;
   readonly onSelectSection: (section: SettingsSection) => void;
@@ -148,6 +153,7 @@ export function SettingsDialog(props: {
             <Section
               section={state.section}
               settings={props.settings}
+              archive={props.archive}
               visible={state.open}
             />
           </div>
@@ -162,6 +168,7 @@ export function SettingsDialog(props: {
 function Section(props: {
   readonly section: SettingsSection;
   readonly settings: SettingsLayer;
+  readonly archive: ArchivedSessionsApi;
   readonly visible: boolean;
 }): ReactElement {
   const { settings, visible } = props;
@@ -174,6 +181,8 @@ function Section(props: {
       return <SkillsSection settings={settings} visible={visible} />;
     case "search":
       return <SearchSection settings={settings} visible={visible} />;
+    case "archived":
+      return <ArchivedSection archive={props.archive} visible={visible} />;
     case "about":
       return <AboutSection settings={settings} visible={visible} />;
   }
