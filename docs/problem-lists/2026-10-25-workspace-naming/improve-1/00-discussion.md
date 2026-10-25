@@ -35,7 +35,7 @@
 | SDK 与 REST 契约 | 字段和类型直接改名，不保留旧名字的兼容层 |
 | 默认目录 | 代码里的 default workspace 改叫 default directory，磁盘路径不变 |
 | Web 命名 | `Projects` → `Workspaces`，`Hide project` → `Hide workspace`，草稿选择器显示 `No workspace`，其余菜单文案同步 |
-| Web Recents | `No project` 分组改为侧栏底部的 Recents：只放没有工作区的会话，按更新时间倒序，不能折叠 |
+| Web Recents | `No project` 分组改为侧栏底部的 Recents：包含所有可见活跃会话（含工作区与置顶会话），按更新时间倒序，不能折叠 |
 | 分批 | 同一轮内分 4 个 Stage：存储层与核心；服务端与 SDK 契约；Web；文档同步。每个 Stage 结束时类型检查和测试保持通过 |
 | 分工 | Stage 1、2 由用户实施；Stage 3、4 由 agent 在后端完成后实施 |
 | 关键改动清单 | 用户要求写入 02 |

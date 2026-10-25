@@ -423,7 +423,7 @@ button.ohb-group-more:hover {
   }
 }
 
-/* Recents rows belong to no group, so they sit flush with workspace headings (Codex). */
+/* Recents spans all workspaces; rows sit flush with workspace headings. */
 .ohb-sidebar-recents .ohb-sidebar-list {
   padding-left: 0;
 }

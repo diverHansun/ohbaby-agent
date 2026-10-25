@@ -35,7 +35,7 @@ Stage 4  权威文档同步
 | 服务端 scope 命名 | 不改 | scope 指“目录对应的运行实例”，含义正确 | 全部改成 workspace | 无 |
 | 会话导出格式 | 字段 `session.projectRoot` 不改，导出时从 `workingDirectory` 取值 | 已发布的文件格式，改它要升版本 | 升到 version 2 | 导出文件里的名字和内部名字不同 |
 | Web 折叠状态 | key 升到 `ohbaby.web.sidebar.collapsed.v2`，旧值丢弃 | 外观偏好，不值得写转换代码 | 读旧值转换前缀 | 升级后分组全部展开一次 |
-| Recents | 只放无工作区会话，按更新时间倒序，不能折叠，沿用现有分页 | 用户确认；全局目录已按 `updatedAt` 排序 | 放全部会话（会和工作区分组重复） | 名字可能让人以为是“全部最近会话” |
+| Recents | 包含全部可见活跃会话（含工作区与置顶会话），按更新时间倒序，不能折叠，沿用现有分页 | 用户于联合验收时明确要求全量 Recents；全局目录已按 `updatedAt` 排序 | 仅列无工作区会话 | 与工作区、Pinned 形成重复入口，这是预期行为 |
 
 ## 2.3 分阶段实施
 
@@ -145,7 +145,7 @@ Stage 4  权威文档同步
 
 ### Stage 3：Web 界面（agent 实施）
 
-**目标**：用户看不到 project 字样（Git 相关和 Skills 来源除外），无工作区会话出现在 Recents。
+**目标**：用户看不到 project 字样（Git 相关和 Skills 来源除外），所有可见活跃会话出现在 Recents。
 
 **做法**：
 
@@ -168,7 +168,7 @@ Stage 4  权威文档同步
    | `The default workspace is not available. Choose a project to start.` | `The default directory is not available. Choose a workspace to start.` |
    | `Open project`（目录选择对话框） | `Open workspace` |
 
-4. Recents：在所有工作区分组之后渲染，标题是普通文字、没有折叠按钮；内容是 `workspaceDirectory === null` 且未置顶的会话，顺序沿用全局目录的 `updatedAt` 倒序；分页沿用现有的 6 条起步、Show more 每次加 20 条。显示条件也沿用现状（`sidebar-groups.ts:138-141`）：本地已加载的行为空**并且**服务端没有更多页时才隐藏，否则用户就没有入口去加载更早的无工作区会话。
+4. Recents：在所有工作区分组之后渲染，标题是普通文字、没有折叠按钮；内容是全部全局目录会话，包括有工作区、无工作区和置顶会话，顺序沿用全局目录的 `updatedAt` 倒序；分页沿用现有的 6 条起步、Show more 每次加 20 条。显示条件也沿用现状（`sidebar-groups.ts:138-141`）：本地已加载的行为空**并且**服务端没有更多页时才隐藏，否则用户就没有入口去加载更早的会话。
 5. 浏览器存储：折叠状态 key 改为 `ohbaby.web.sidebar.collapsed.v2`，启动时 `removeItem` 掉 v1、不转换旧值；草稿 key 改为 `ohbaby:draft-workspace:new`。
 6. mock 场景改名（`agentProject` → `agentWorkspace` 等，场景说明改成 workspace），相关测试同步。
 

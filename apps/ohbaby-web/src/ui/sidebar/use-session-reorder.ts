@@ -1,10 +1,10 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 /** Capture before a pin mutation, animate the same keyed rows after React commits. */
-export function useSessionReorder(
-  listRef: RefObject<HTMLDivElement | null>,
-  order: string,
-): { prepare: (focus: HTMLElement | null) => void; reordering: boolean } {
+export function useSessionReorder(listRef: RefObject<HTMLDivElement | null>): {
+  prepare: (focus: HTMLElement | null) => void;
+  reordering: boolean;
+} {
   const pending = useRef<{
     positions: Map<string, number>;
     scrollTop: number;
@@ -31,6 +31,7 @@ export function useSessionReorder(
     clearTimeout(timeout.current);
     pending.current = { positions, scrollTop: list.scrollTop, focus };
   };
+  // A pin change in Recents keeps row order; still consume the pending focus repair.
   useLayoutEffect(() => {
     const before = pending.current;
     const list = listRef.current;
@@ -66,7 +67,7 @@ export function useSessionReorder(
       animations.current = [];
       setReordering(false);
     }, 220);
-  }, [order, listRef]);
+  });
   useLayoutEffect(
     () => (): void => {
       clearTimeout(timeout.current);

@@ -43,4 +43,4 @@
 
 升级后的数据库不支持直接降级。要回退，先停掉所有进程，使用升级前备份恢复数据库，再启动旧版本；备份之后新增的数据不会出现在恢复后的数据库中。默认目录的磁盘路径 `<OHBABY_HOME>/workspace/default` 不变，不搬动用户文件。
 
-Web 与 daemon、远程 TUI 应使用同版本。升级后刷新所有已打开的 Web 页面。本分支的前端改造和联调验收仍需完成后才能一起发布。
+Web 与 daemon、远程 TUI 应使用同版本。升级后刷新所有已打开的 Web 页面。前后端命名已统一，联调记录见 [实施与验收记录](../problem-lists/2026-10-25-workspace-naming/improve-1/05-implementation-acceptance.md)。侧栏 Recents 汇总全部可见活跃会话，含工作区与置顶会话，按更新时间倒序；工作区分组仍保留，移动或置顶不会把会话从 Recents 排除。

@@ -69,7 +69,7 @@
 
 2026-10-25：合并前发现的 MCP 参数脱敏、设置写响应顺序和新草稿旧气泡三项问题已修复，并补齐回归与真实页面验证；该轮按要求暂不合并，结果见 [合并前回归修复](improve-4/05-implementation-acceptance.md#合并前回归修复2026-10-25)。随后用户完成 improve-5、improve-6，并授权测试后合并。本轮又修复嵌套滚动、MCP 失败文字颜色和新草稿刷新导航，Web 766 项通过，实际浏览器操作复验通过；完整范围、测试与限制见 [09 整体验收](09-implementation-acceptance.md)。
 
-2026-10-25：**工作区命名统一。** 侧栏的 project 改叫 workspace（Workspaces、Hide workspace、Move to workspace、草稿选择器 No workspace），无工作区会话改为侧栏底部不能折叠的 Recents，空工作区显示 `No chats`；project 只指 Git 仓库身份。本组 00–08 的术语已同步，用例编号 `UC-PROJECT-*` 保留不改。方案与验收见 [工作区命名统一](../../problem-lists/2026-10-25-workspace-naming/README.md)。
+2026-10-25：**工作区命名统一。** 侧栏的 project 改叫 workspace（Workspaces、Hide workspace、Move to workspace、草稿选择器 No workspace），侧栏底部不能折叠的 Recents 汇总所有可见活跃会话（包括工作区与置顶会话），空工作区显示 `No chats`；project 只指 Git 仓库身份。本组 00–08 的术语已同步，用例编号 `UC-PROJECT-*` 保留不改。方案与验收见 [工作区命名统一](../../problem-lists/2026-10-25-workspace-naming/README.md)。
 
 | 批次 | 内容 | 依赖 | 文档 |
 |---|---|---|---|

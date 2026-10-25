@@ -120,9 +120,11 @@ function click(label: string): void {
   });
 }
 function order(): string[] {
-  return Array.from(container.querySelectorAll(".ohb-session-title")).map(
-    (element) => element.textContent,
-  );
+  return Array.from(
+    container.querySelectorAll(
+      "section:not(.ohb-sidebar-recents) .ohb-session-title",
+    ),
+  ).map((element) => element.textContent);
 }
 function pin(id: string): void {
   click(`Actions for Chat ${id}`);
@@ -338,6 +340,7 @@ it("groups by workspace with Recents last and starts new chats with or without a
   ).toBe("Recents");
   expect(recents?.querySelector(".ohb-sidebar-section-toggle")).toBeNull();
   expect(recents?.textContent).toContain("Chat N");
+  expect(recents?.textContent).toContain("Chat P");
   click("New chat");
   click("New chat in repo");
   expect(newChat.mock.calls).toEqual([[null], ["/repo"]]);
@@ -525,4 +528,79 @@ it("offers Remove from workspace only to a chat with a workspace", () => {
   click("Actions for Chat N");
   click("Move to workspace…");
   expect(document.body.textContent).not.toContain("Remove from workspace");
+});
+
+it("keeps workspace and pinned chats in Recents through moves and pages all sessions", async () => {
+  const recentRows = Array.from({ length: 10 }, (_, index) =>
+    row(
+      `R${String(index)}`,
+      index % 2 ? null : "/repo",
+      `2026-09-${String(20 - index)}T00:00:00Z`,
+    ),
+  );
+  render({ catalog: catalog(recentRows, { nextCursor: "next" }) });
+  const recentSection = (): HTMLElement => {
+    const section = container.querySelector<HTMLElement>(
+      'section[aria-label="Recents"]',
+    );
+    if (!section) throw new Error("Missing Recents");
+    return section;
+  };
+  const recentIds = (): (string | null)[] =>
+    Array.from(recentSection().querySelectorAll("[data-session-id]")).map(
+      (element) => element.getAttribute("data-session-id"),
+    );
+  expect(recentIds()).toEqual(["R0", "R1", "R2", "R3", "R4", "R5"]);
+  pin("R0");
+  expect(recentIds()).toEqual(["R0", "R1", "R2", "R3", "R4", "R5"]);
+  render({
+    catalog: catalog(
+      recentRows.map((item) =>
+        item.id === "R0" ? { ...item, workspaceDirectory: null } : item,
+      ),
+      { nextCursor: "next" },
+    ),
+  });
+  expect(recentIds()).toContain("R0");
+  await act(async () => {
+    const more = Array.from(recentSection().querySelectorAll("button")).find(
+      (element) => element.textContent === "Show more · 4",
+    );
+    if (!more) throw new Error("Missing Recents Show more");
+    more.click();
+    await Promise.resolve();
+  });
+  expect(recentIds()).toHaveLength(10);
+  const [[enough]] = loadMore.mock.calls;
+  expect(enough(recentRows)).toBe(false);
+  expect(
+    enough([
+      ...recentRows,
+      ...Array.from({ length: 16 }, (_, index) =>
+        row(`S${String(index)}`, "/repo", "2026-08-01T00:00:00Z"),
+      ),
+    ]),
+  ).toBe(true);
+});
+
+it("restores Recents menu focus after pinning and unpinning without reordering", () => {
+  const recents = container.querySelector('section[aria-label="Recents"]');
+  if (!recents) throw new Error("Missing Recents");
+  const trigger = recents.querySelector<HTMLButtonElement>(
+    '[aria-label="Actions for Chat B"]',
+  );
+  if (!trigger) throw new Error("Missing Recents menu trigger");
+  for (const label of ["Pin", "Unpin"]) {
+    act(() => {
+      trigger.click();
+    });
+    expect(document.activeElement).toBe(button(label));
+    click(label);
+    expect(document.activeElement).toBe(trigger);
+    expect(
+      Array.from(recents.querySelectorAll("[data-session-id]")).map((element) =>
+        element.getAttribute("data-session-id"),
+      ),
+    ).toEqual(["A", "B", "C"]);
+  }
 });

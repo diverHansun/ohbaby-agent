@@ -87,6 +87,8 @@ pnpm exec vitest run --no-file-parallelism $(rg --files packages | rg '\.integra
 
 ## 5.6 前端实施与整轮验收（2026-10-25）
 
+本节记录前端首轮验收；其中“Recents 仅无工作区、移入后消失”的行为已被用户后续明确要求替代，最终行为见 5.7。
+
 ### 后端复核
 
 前端动手前，对 5.1–5.5 做了独立复核，没有发现需要返工的问题：
@@ -129,3 +131,27 @@ pnpm exec vitest run --no-file-parallelism $(rg --files packages | rg '\.integra
 - 临时环境里，用户真实的 `~/.ohbaby/workspace/default` 被当作普通工作区显示，是因为临时环境的默认目录换了位置；真实环境中它会被识别为默认目录并过滤。
 - `many` 场景下 Pinned 区在置顶会话尚未加载时只显示 `Show more`，属于改动前已有的行为，本轮未改。
 - 归档会话管理按计划在 `../../2026-10-25-archived-sessions/` 另行实施。
+
+
+## 5.7 联合验收与全量 Recents 修正（2026-10-25）
+
+用户在合并前明确：Recents 应包含所有最近会话，不能仅列没有工作区的会话。因此修订 00、02–04 及 Web 权威文档中的旧约定：Recents 复用全局目录的全部可见活跃会话，包含有工作区、无工作区和置顶会话，按服务器的更新时间顺序显示。同一会话可以同时出现在 Recents 与工作区或 Pinned；移入、移出、置顶均不从 Recents 排除。归档及主动隐藏工作区的既有过滤约定不变。
+
+实现只调整侧栏 selector 和分页计数，没有新增接口或复制状态。先修改回归测试，确认旧实现失败，再修复。独立子代理发现 Recents 菜单 Pin/Unpin 后因为列表顺序不变而丢失焦点；新增专门定位 Recents 菜单的失败测试后，让重排 hook 在 commit 时消费 pending 焦点恢复请求，修复后由子代理复核，未发现剩余阻断问题。
+
+| 最终检查 | 结果 |
+|---|---|
+| `pnpm test:unit` | 375 个文件，4,674 项通过、2 项跳过 |
+| `pnpm test:contract` | 37 个文件，567 项通过 |
+| `pnpm test:integration` | 191 个文件，1,827 项通过；包括 Web 与编译 CLI 集成测试 |
+| `pnpm typecheck`、`pnpm build` | 通过 |
+| `pnpm lint` | 0 错误，122 个存量警告 |
+| Recents 专项测试与子代理复核 | 2 个文件、28 项通过；包含工作区与置顶会话、移动保留、分页计数，以及 Pin/Unpin 焦点恢复 |
+| mock 浏览器 | `typical` 的 Recents 按 6 → 26 → 40 条展开到完整列表，包含工作区与置顶会话；移入工作区后仍保留；从 Recents 菜单置顶后焦点回到原菜单按钮；390×844 手机侧栏正常 |
+| 编译服务浏览器 E2E | 用 `node scripts/run-compiled-web-e2e.mjs` 在当前进程启动真实编译 daemon、SQLite 与 Web 静态资源，模型使用本地 scripted provider。创建工作区会话、真实 read 工具读取 fixture、后续消息、刷新恢复均通过；运行上下文标记不泄露，消息不重复 |
+| 真实移动与持久化 | 从 Recents 移出工作区后工作区显示 `No chats`，Recents 保留会话；移回后两处均有入口；两次操作均刷新确认，消息及当前会话不变；About 显示 `Default directory`；控制台无错误 |
+| E2E 后端与退出 | 3 次主模型请求，工具结果已消费、缓存键稳定、每次请求只有一个运行上下文；`E2E_BACKEND_PASS`、`E2E_CLEANUP_PASS`、`E2E_DIAGNOSTICS_PASS` 全部通过，PID 与端口释放 |
+
+原生 Chrome 尝试受到用户手动切换页面干扰，因此实际浏览器走查使用 Codex 内置浏览器；没有使用 headless 浏览器替代 UI 交互。所有本轮服务数据来自临时 fixture，不读取或修改用户日常数据库。真实用户数据库副本升级的证据沿用 5.6，本轮没有重复迁移该副本。E2E 模型为本地可控响应，不能视为外部模型服务的可用性验收。
+
+按用户最终指示，仅合并到本地 `main` 并删除已合并的本地 `codex/workspace`，不推送远程。

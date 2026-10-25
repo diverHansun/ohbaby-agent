@@ -25,7 +25,7 @@ Composer 通过 `topContent` 接收 SessionScreen 装配的 TodoDock，通过 `p
 
 ## 0. Sidebar / SessionMenu / SidebarSearch
 
-侧栏依次是 Pinned、各工作区分组，以及底部不能折叠的 Recents（无工作区会话，按时间倒序，和工作区标题左对齐）；空工作区显示 `No chats`。置顶按服务端地址保存。会话行尾的 … 与右键打开同一个菜单，一级为 Pin / Unpin、Move to workspace…、Export…、Archive。工作区与格式在原位置切换二级列表；工作区多于 8 个时显示过滤框。移动中行内显示 spinner，成功后更新归属，失败保留原行并显示错误通知。
+侧栏依次是 Pinned、各工作区分组，以及底部不能折叠的 Recents（全部可见活跃会话，含工作区和置顶会话，按时间倒序，和工作区标题左对齐）；空工作区显示 `No chats`。置顶按服务端地址保存。会话行尾的 … 与右键打开同一个菜单，一级为 Pin / Unpin、Move to workspace…、Export…、Archive。工作区与格式在原位置切换二级列表；工作区多于 8 个时显示过滤框。移动中行内显示 spinner，成功后更新归属，失败保留原行并显示错误通知。
 
 Search 在侧栏内展开，非空查询结果替换会话树。250ms 防抖、取消旧请求；标题命中在前，正文片段为纯文本并限制两行。Cmd/Ctrl+K 打开或重新聚焦搜索；Escape 关闭当前层，输入法合成期间不拦截选字键。手机菜单复用贴底面板，菜单项高 48px。细节及验证见 [improve-3 验收](../redesign-2026-10/improve-3/05-implementation-acceptance.md)。
 

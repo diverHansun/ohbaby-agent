@@ -94,7 +94,7 @@ export function SessionList(props: SessionListProps): ReactElement {
       document.removeEventListener("pointerdown", cancelFocus);
     };
   }, []);
-  const { prepare, reordering } = useSessionReorder(listRef, orderedIds);
+  const { prepare, reordering } = useSessionReorder(listRef);
   useEffect(() => {
     mounted.current = true;
     return (): void => {

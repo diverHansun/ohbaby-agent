@@ -27,7 +27,7 @@
 | T7 | 移动路由 | 集成（服务端） | `POST /v1/sessions/:id/workspace` 带 `{ workspaceDirectory: "/abs" }` 成功；`null` 表示移出；传默认目录返回 400 和 `DEFAULT_DIRECTORY_NOT_WORKSPACE`；请求体用旧字段 `projectDirectory` 返回 400；旧路径 `/project` 返回 404 | 2 |
 | T8 | 目录与设置接口 | 集成 | `GET /v1/scopes` 和 `GET /v1/settings/about` 返回 `defaultDirectory`，不再有 `defaultWorkspace`；`POST /v1/scopes/open` 打开默认目录返回 400 和 `DEFAULT_DIRECTORY_NOT_WORKSPACE` | 2 |
 | T9 | 快照字段 | 契约 | `UiSession.workingDirectory`、`UiSessionIndexEntry.workingDirectory`、`UiGlobalSession.workspaceDirectory` 有值；旧字段不存在；TUI 页脚显示运行目录 | 2 |
-| T10 | 侧栏分组 | 单元（`store/sidebar-groups.unit`） | 分组顺序是 Pinned → 各工作区 → Recents；Recents 只含 `workspaceDirectory === null` 且未置顶的会话，按 `updatedAt` 倒序；本地没有这类会话**并且**服务端没有更多页时 `recents` 为 `null`，本地没有但还有更多页时仍然显示（保留 Show more 入口）；分页与 Show more 和改名前一致 | 3 |
+| T10 | 侧栏分组 | 单元（`store/sidebar-groups.unit`） | 分组顺序是 Pinned → 各工作区 → Recents；Recents 包含全部全局目录会话（包括有工作区、无工作区、置顶），按 `updatedAt` 倒序；本地没有这类会话**并且**服务端没有更多页时 `recents` 为 `null`，本地没有但还有更多页时仍然显示（保留 Show more 入口）；分页与 Show more 和改名前一致 | 3 |
 | T11 | 侧栏渲染 | 单元（`ui/sidebar/Sidebar.unit`） | 标题 `Workspaces` 和 `Recents`；Recents 没有折叠按钮；工作区菜单显示 `Hide workspace` | 3 |
 | T12 | 浏览器存储 | 单元 | 折叠状态读写 `ohbaby.web.sidebar.collapsed.v2`；存在 v1 时不报错、不读取，并把 v1 删除；草稿读写 `ohbaby:draft-workspace:new` | 3 |
 | T13 | 浏览器走查 | 手工（mock 的 `typical` 场景和真实 daemon 各走一遍） | 见 4.5 发布门第 6 项 | 3 |
@@ -65,7 +65,7 @@
 | 3 | 旧列名只留在已发布迁移和迁移测试里 | `rg -n "project_root\|project_directory\|pending_project_root" packages apps --glob '!**/dist/**'` |
 | 4 | 契约里没有本概念的 project 命名 | `rg -n "projectDirectory\|UiSessionProjectUpdate\|DEFAULT_WORKSPACE_NOT_PROJECT\|WORKSPACE_DIRECTORY_HEADER\|defaultWorkspace" packages/ohbaby-sdk/src packages/ohbaby-server/src apps/ohbaby-web/src --glob '!**/dist/**'`，剩余命中逐条确认属于 b 类 |
 | 5 | Web 没有用户可见的 project 文案（Skills 来源除外） | `rg -n "[Pp]roject" apps/ohbaby-web/src --glob '!**/*.test.*'`，逐条对照 01 §1.5 的“不属于本概念”清单 |
-| 6 | 浏览器走查 | 侧栏显示 Workspaces 和底部的 Recents；Recents 不能折叠、按时间排序；把 Recents 里的会话移到工作区后它离开 Recents；从工作区移出后回到 Recents；草稿选择器显示 `No workspace`；手机宽度下侧栏正常 |
+| 6 | 浏览器走查 | 侧栏显示 Workspaces 和底部的 Recents；Recents 不能折叠、按时间排序；把 Recents 里的会话移入或移出工作区后仍留在 Recents；置顶后也保留；Show more 按全部会话计数；草稿选择器显示 `No workspace`；手机宽度下侧栏正常 |
 | 7 | 真实数据库升级 | 拿一份改名前的数据库副本启动新 daemon：生成备份文件，侧栏会话和工作区与升级前一致 |
 | 8 | 发布说明 | 写明 `ohbaby-sdk` 和 `ohbaby-agent` 的不兼容变化、改名对照表、“不能降级，回退需用备份”、“升级前退出所有 ohbaby 进程”、“升级后刷新已打开的 Web 页面” |
 
@@ -79,4 +79,4 @@
 | 未刷新的旧网页 | 旧页面读不到 `projectDirectory`，侧栏分组出错 | 发布说明要求刷新 | 用户没看发布说明时会遇到一次报错，刷新后恢复 |
 | 回退 | 用户装回旧版本后 daemon 起不来 | 升级前自动备份 | 备份之后产生的新会话会丢失；写进发布说明 |
 | Web 存储 key | 旧 v1 值格式不对导致崩溃 | 不读 v1；T12 | 低 |
-| Recents 和置顶 | 置顶的无工作区会话同时出现在 Pinned 和 Recents | 沿用“置顶的会话只出现在 Pinned”的规则；T10 | 低 |
+| Recents 和置顶 | 错误地从 Recents 排除置顶会话 | Pinned 与 Recents 是重复入口；置顶只影响工作区分组，不改变 Recents；T10 | 低 |

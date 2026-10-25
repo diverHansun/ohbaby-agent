@@ -31,7 +31,7 @@
 | deepseek-harness、kimi-code、ZCode | 用户选的目录叫 workspace，会话运行目录叫 `cwd` / `workingDirectory` / `workspacePath` | 和本议题的术语表一致 | **采纳**：workspace 和 working directory 两个名字 |
 | opencode、ZCode | project 留给更高一层的概念（Git 身份或多目录容器） | ohbaby 核心 `project` 模块就是 Git 身份 | **采纳**：project 只指 Git 仓库身份 |
 | deepseek-harness | 会话头部保存最初的目录，另记一个“当前运行目录” | 与 ohbaby 的 `working_directory` + `pending_working_directory` 思路相同 | 已有，**只改名** |
-| Codex、ZCode | 无项目会话放在按时间排序的列表里，不作为一个“项目” | 用户要的就是这个 | **采纳**：Recents，只放无工作区会话 |
+| Codex、ZCode | 无项目会话放在按时间排序的列表里，不作为一个“项目” | 用户要的就是这个 | **修订**：Recents 汇总全部可见活跃会话，以用户联合验收时的明确要求为准 |
 | deepseek-harness | 存储格式每次变化都留一份带日期的记录，新字段用默认值兼容旧数据 | 本次改列名是不可逆变化 | **部分采纳**：用迁移注释和本议题文档记录；不另建持久化变更目录 |
 | ZCode | 已发布的 SQL 迁移和校验值从不修改，用新迁移修正旧结果 | 本次不能改 `001`、`025` | **采纳**：只追加 `026` |
 | pi | 会话文件按版本链式迁移（v1 → v2 → v3），读取时升级 | 说明“只追加、按序升级”是常见做法 | 参考，ohbaby 已有同类迁移运行器 |
@@ -48,6 +48,6 @@
 ## 3.5 对 02 的影响
 
 - 术语表（00 §2）直接来自 3.3 的前两行。
-- Recents 只放无工作区会话（02 Stage 3）参考了 Codex 和 ZCode。
+- Recents 的平铺形式参考了 Codex 和 ZCode；其范围按用户最新要求汇总全部可见活跃会话（02 Stage 3）。
 - 只追加迁移、不改已发布迁移（02 Stage 1 第 1 步）参考了 ZCode。
 - 归档相关的做法（deepseek-harness 恢复到原位置、ZCode 在 Settings 里做归档管理并强制“先归档才能删”）留给 `2026-10-25-archived-sessions` 议题。

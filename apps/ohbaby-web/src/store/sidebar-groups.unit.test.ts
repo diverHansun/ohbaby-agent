@@ -55,11 +55,16 @@ describe("sidebar groups", () => {
     expect(groups.workspaces[0]?.sessions.map((item) => item.id)).toEqual([
       "4",
     ]);
-    expect(groups.recents?.sessions.map((item) => item.id)).toEqual(["2"]);
+    expect(groups.recents?.sessions.map((item) => item.id)).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+    ]);
     expect(groups.pinned).toBeNull();
   });
 
-  it("shows pinned rows only in Pinned, newest pin first", () => {
+  it("keeps pinned rows in Recents while ordering Pinned newest pin first", () => {
     const groups = selectSidebarGroups({
       workspaces: [scope("/a")],
       sessions: [session("1", "/a"), session("2", "/a"), session("3", null)],
@@ -72,7 +77,11 @@ describe("sidebar groups", () => {
     expect(groups.workspaces[0]?.sessions.map((item) => item.id)).toEqual([
       "2",
     ]);
-    expect(groups.recents).toBeNull();
+    expect(groups.recents?.sessions.map((item) => item.id)).toEqual([
+      "1",
+      "2",
+      "3",
+    ]);
   });
 
   it("pages 6 per group and 8 for Pinned, counts only loaded rows, and keeps an entry while pages remain", () => {
@@ -105,7 +114,8 @@ describe("sidebar groups", () => {
     expect(empty.canShowMore).toBe(true);
     expect(groups.pinned?.visible).toHaveLength(8);
     expect(groups.pinned?.hiddenLoaded).toBe(2);
-    expect(groups.recents?.sessions).toHaveLength(0);
+    expect(groups.recents?.sessions).toHaveLength(40);
+    expect(groups.recents?.visible).toHaveLength(6);
     expect(groups.recents?.canShowMore).toBe(true);
   });
 
@@ -195,6 +205,6 @@ describe("group row count", () => {
     const pins = { "2": 1 };
     expect(countGroupRows(workspaceGroupKey("/a"), sessions, pins)).toBe(2);
     expect(countGroupRows("pinned", sessions, pins)).toBe(1);
-    expect(countGroupRows("recents", sessions, pins)).toBe(1);
+    expect(countGroupRows("recents", sessions, pins)).toBe(4);
   });
 });

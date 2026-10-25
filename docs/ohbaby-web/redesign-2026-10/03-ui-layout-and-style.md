@@ -371,7 +371,7 @@ Web search 是一页表单（API key、> More options：Key variable、Base URL�
 | 会话 | Chat | Session、Conversation、Thread |
 | 新建草稿 | New / New chat | New session |
 | 工作区 | Workspace | Project、Folder |
-| 无工作区会话列表 | Recents（草稿选择器里为 No workspace） | No project、Default、Ungrouped |
+| 全部可见活跃会话列表 | Recents（无工作区草稿选择器里为 No workspace） | No project、Default、Ungrouped |
 | 打开工作区目录 | Open folder… | Open workspace、Add workspace |
 | 换工作区 | Move to workspace… | Change workspace |
 | 移出工作区 | Remove from workspace | Detach、Ungroup |
