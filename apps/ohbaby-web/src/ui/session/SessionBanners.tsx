@@ -59,7 +59,7 @@ export function SessionBanners(props: {
           actions={[
             {
               label: "Check submission",
-              onClick: () => {
+              onClick: (): void => {
                 void runtime.retryUnknownPrompts();
               },
             },
@@ -68,7 +68,7 @@ export function SessionBanners(props: {
               disabled: request.submitting,
               title:
                 "Remove this local reminder. The original submission may still have run; this does not cancel or resend it.",
-              onClick: () => {
+              onClick: (): void => {
                 runtime.forgetUnknownPrompt(request.clientRequestId);
               },
             })),
