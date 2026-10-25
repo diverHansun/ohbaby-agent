@@ -400,12 +400,12 @@ export function createOpenApiDocument(
     },
     SettingsAboutResponse: {
       type: "object",
-      required: ["ok", "version", "ohbabyHome", "defaultWorkspace"],
+      required: ["ok", "version", "ohbabyHome", "defaultDirectory"],
       properties: {
         ok: { const: true },
         version: string,
         ohbabyHome: string,
-        defaultWorkspace: string,
+        defaultDirectory: string,
         diagnosticsFile: string,
         logDirectory: string,
       },
@@ -417,7 +417,7 @@ export function createOpenApiDocument(
     required: true,
     schema: { type: "string", minLength: 1 },
     description:
-      "Workspace directory; percent-encode UTF-8 characters when needed for HTTP headers.",
+      "Request directory; percent-encode UTF-8 characters when needed for HTTP headers.",
   };
   const pathParameter = (
     name: string,

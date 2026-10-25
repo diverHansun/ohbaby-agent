@@ -129,7 +129,7 @@ async function fixture(scripts: readonly ProviderScript[]) {
           id: "session_1",
           title: "Cache accounting",
           messages: [],
-          projectRoot: directory,
+          workingDirectory: directory,
           createdAt: "2026-09-15T00:00:00.000Z",
           updatedAt: "2026-09-15T00:00:00.000Z",
         },

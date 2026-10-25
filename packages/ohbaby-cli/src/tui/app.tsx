@@ -1231,7 +1231,7 @@ export function OhbabyTerminalApp({
             loadCatalog={loadCatalog}
             onCommandPanelOpen={openCommandPanel}
             permission={permission}
-            projectRoot={activeSession?.projectRoot}
+            workingDirectory={activeSession?.workingDirectory}
             model={footerModel}
             reasoning={activeSession?.reasoning}
             queuedPrompts={queuedPrompts}

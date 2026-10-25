@@ -172,7 +172,7 @@ export function registerGlobalSettingsRoutes(
         ok: true,
         version: ctx.packageVersion ?? getAgentPackageVersion(),
         ohbabyHome: resolveOhbabyHome(),
-        defaultWorkspace: await ensureDefaultDirectory(),
+        defaultDirectory: await ensureDefaultDirectory(),
         ...(ctx.diagnosticsFile
           ? { diagnosticsFile: ctx.diagnosticsFile }
           : {}),

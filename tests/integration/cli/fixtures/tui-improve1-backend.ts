@@ -27,7 +27,7 @@ export function createTuiReviewBackend(historyLines = 40) {
     session: {
       id: "review-session",
       title: "TUI review",
-      projectRoot: "/review/中文-project",
+      workingDirectory: "/review/中文-project",
       reasoning: { effort: "high" },
       createdAt: now,
       updatedAt: now,

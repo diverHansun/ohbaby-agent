@@ -164,6 +164,9 @@ describe("collectExportDocument", () => {
     ];
     const before = structuredClone(input);
     const result = await collectExportDocument(deps(input), session.id, now);
+    expect(result.header.version).toBe(1);
+    expect(result.header.session.projectRoot).toBe(session.workingDirectory);
+    expect(result.header.session).not.toHaveProperty("workingDirectory");
     expect(result.messages[0].parts).toEqual([
       { type: "reasoning", text: "思考", endReason: "interrupted" },
       { type: "text", text: "你好 👋" },

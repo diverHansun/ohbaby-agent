@@ -44,7 +44,7 @@ it("reads bounded in-process source history on PageUp and follows archive withou
   await sessionManager.ensureRoot({
     id: "history-root",
     agentName: "test",
-    projectRoot: process.cwd(),
+    workingDirectory: process.cwd(),
     title: "History",
   });
   const backend = createInProcessUiBackendClient({

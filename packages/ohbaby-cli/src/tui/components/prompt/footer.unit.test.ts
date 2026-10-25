@@ -91,7 +91,7 @@ describe("footer current configuration", () => {
   it.each([120, 80, 60, 12])("bounds both rows at %i columns", (width) => {
     const rows = formatFooterRows({
       width,
-      projectRoot: "/users/test/项目/中文路径/🙂/very-long-project-name",
+      workingDirectory: "/users/test/项目/中文路径/🙂/very-long-project-name",
       model,
       reasoning: { effort: "high" },
       permission: { mode: "auto", level: "default", sessionRules: [] },

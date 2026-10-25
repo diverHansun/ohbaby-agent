@@ -18,7 +18,7 @@ function uiSession(input: {
     createdAt: BASE_TIME,
     id: input.id,
     messages: input.messages ?? [],
-    projectRoot: input.projectRoot ?? "D:/repo",
+    workingDirectory: input.projectRoot ?? "D:/repo",
     title: input.title ?? "New session",
     updatedAt: BASE_TIME,
   };

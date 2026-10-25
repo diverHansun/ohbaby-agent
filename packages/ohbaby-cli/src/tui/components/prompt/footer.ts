@@ -49,7 +49,7 @@ export function footerEffort(
 
 export function formatFooterRows(input: {
   readonly width: number;
-  readonly projectRoot?: string;
+  readonly workingDirectory?: string;
   readonly model?: UiCurrentModelConfig | null;
   readonly reasoning?: UiReasoningConfig | null;
   readonly permission?: UiPermissionState;
@@ -57,7 +57,7 @@ export function formatFooterRows(input: {
 }): readonly [string, string] {
   const width = Math.max(1, Math.floor(input.width));
   const home = homedir();
-  const path = input.projectRoot?.trim();
+  const path = input.workingDirectory?.trim();
   const project = !path
     ? "unknown"
     : path === home

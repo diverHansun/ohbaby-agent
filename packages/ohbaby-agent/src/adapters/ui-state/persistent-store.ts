@@ -297,7 +297,7 @@ function sessionToUiSession(input: {
     messages: input.messages
       .map(messageToUiMessage)
       .filter((message): message is UiMessage => message !== undefined),
-    projectRoot: input.session.workingDirectory,
+    workingDirectory: input.session.workingDirectory,
     reasoning: input.session.reasoning,
     title: resolveSessionDisplayTitle({
       messages: input.messages,
@@ -554,7 +554,7 @@ export function createPersistentUiStateStore(
       return sessions.map((session) => ({
         id: session.id,
         title: session.title,
-        projectRoot: session.workingDirectory,
+        workingDirectory: session.workingDirectory,
         createdAt: new Date(session.createdAt).toISOString(),
         updatedAt: new Date(session.updatedAt).toISOString(),
       }));

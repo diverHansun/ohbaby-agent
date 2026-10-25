@@ -2767,7 +2767,7 @@ describe("OhbabyTerminalApp", () => {
           createdAt: "2026-05-14T00:00:00.000Z",
           id: "session_empty",
           messages: [],
-          projectRoot: "D:/Projects/app",
+          workingDirectory: "D:/Projects/app",
           title: "New session",
           updatedAt: "2026-05-14T00:00:00.000Z",
         },
@@ -3660,7 +3660,7 @@ describe("OhbabyTerminalApp", () => {
         {
           createdAt: "2026-05-14T00:00:00.000Z",
           id: "session_2",
-          projectRoot: "/workspace/second-project",
+          workingDirectory: "/workspace/second-project",
           messages: [],
           title: "Second",
           updatedAt: "2026-05-14T00:00:01.000Z",
@@ -3701,7 +3701,7 @@ describe("OhbabyTerminalApp", () => {
         {
           createdAt: "2026-05-14T00:00:00.000Z",
           id: "session_2",
-          projectRoot: "/workspace/second-project",
+          workingDirectory: "/workspace/second-project",
           messages: [],
           title: "Second",
           updatedAt: "2026-05-14T00:00:01.000Z",

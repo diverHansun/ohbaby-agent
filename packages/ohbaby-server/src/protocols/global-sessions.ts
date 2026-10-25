@@ -19,7 +19,7 @@ export function toUiGlobalSession(session: CoreSession): UiGlobalSession {
     createdAt: new Date(session.createdAt).toISOString(),
     updatedAt: new Date(session.updatedAt).toISOString(),
     messageCount: session.stats.messageCount,
-    projectDirectory: session.workspaceDirectory ?? null,
+    workspaceDirectory: session.workspaceDirectory ?? null,
     workingDirectory: session.workingDirectory,
     ...(session.pendingWorkingDirectory === undefined
       ? {}
@@ -66,17 +66,17 @@ export function parseGlobalSessionLimit(
   return parsed;
 }
 
-/** A directory selects a project; an explicit null leaves the current one. */
-export function parseSessionProjectUpdate(body: unknown): string | null {
+/** A directory selects a workspace; an explicit null leaves the current one. */
+export function parseSessionWorkspaceUpdate(body: unknown): string | null {
   const requested =
-    typeof body === "object" && body !== null && "projectDirectory" in body
-      ? body.projectDirectory
+    typeof body === "object" && body !== null && "workspaceDirectory" in body
+      ? body.workspaceDirectory
       : undefined;
   if (requested === null) return null;
   if (typeof requested !== "string" || requested.length === 0) {
     throw invalid(
       "INVALID_DIRECTORY",
-      "projectDirectory must be a directory path or null",
+      "workspaceDirectory must be a directory path or null",
     );
   }
   return requested;
@@ -93,7 +93,7 @@ export function globalSessionErrorStatus(
     case "INVALID_QUERY":
     case "INVALID_CURSOR":
     case "INVALID_DIRECTORY":
-    case "DEFAULT_WORKSPACE_NOT_PROJECT":
+    case "DEFAULT_DIRECTORY_NOT_WORKSPACE":
     case "directory-required":
     case "directory-must-be-absolute":
     case "directory-unavailable":

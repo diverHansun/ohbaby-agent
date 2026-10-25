@@ -5,11 +5,11 @@ import {
 } from "ohbaby-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
-  DefaultWorkspaceNotProjectError,
-  moveSessionProject,
+  DefaultDirectoryNotWorkspaceError,
+  moveSessionWorkspace,
   type GlobalSessionCatalog,
-  type SessionProjectMoveDeps,
-} from "./session-project-move.js";
+  type SessionWorkspaceMoveDeps,
+} from "./session-workspace-move.js";
 
 function session(overrides: Partial<CoreSession> = {}): CoreSession {
   return {
@@ -45,10 +45,10 @@ function plan(
 }
 
 function createDeps(movePlan: SessionWorkspaceMovePlan): {
-  readonly deps: SessionProjectMoveDeps;
+  readonly deps: SessionWorkspaceMoveDeps;
   readonly planMove: ReturnType<typeof vi.fn>;
   readonly commitMove: ReturnType<typeof vi.fn>;
-  readonly discoverProject: ReturnType<typeof vi.fn>;
+  readonly discoverWorkspace: ReturnType<typeof vi.fn>;
   readonly loadQueueOwner: ReturnType<typeof vi.fn>;
   readonly adopt: ReturnType<typeof vi.fn>;
 } {
@@ -57,7 +57,7 @@ function createDeps(movePlan: SessionWorkspaceMovePlan): {
     Promise.resolve(session({ workspaceDirectory: "/repo/b" })),
   );
   const adopt = vi.fn(() => Promise.resolve());
-  const discoverProject = vi.fn(() => Promise.resolve());
+  const discoverWorkspace = vi.fn(() => Promise.resolve());
   const loadQueueOwner = vi.fn(() =>
     Promise.resolve({ adoptSessionWorkspaceMove: adopt }),
   );
@@ -73,27 +73,27 @@ function createDeps(movePlan: SessionWorkspaceMovePlan): {
       catalog,
       resolveScope: (directory) =>
         Promise.resolve(directory.replace(/\/sub$/u, "")),
-      isDefaultWorkspace: (directory) =>
+      isDefaultDirectory: (directory) =>
         directory === "/home/.ohbaby/workspace/default",
-      discoverProject,
+      discoverWorkspace,
       loadQueueOwner,
     },
     planMove,
     commitMove,
-    discoverProject,
+    discoverWorkspace,
     loadQueueOwner,
     adopt,
   };
 }
 
-describe("moveSessionProject", () => {
+describe("moveSessionWorkspace", () => {
   it("resolves the project scope and writes the binding directly without queued prompts", async () => {
     const fixture = createDeps(plan());
 
-    const moved = await moveSessionProject(fixture.deps, "s1", "/repo/b/sub");
+    const moved = await moveSessionWorkspace(fixture.deps, "s1", "/repo/b/sub");
 
     expect(fixture.planMove).toHaveBeenCalledWith("s1", "/repo/b");
-    expect(fixture.discoverProject).toHaveBeenCalledWith("/repo/b");
+    expect(fixture.discoverWorkspace).toHaveBeenCalledWith("/repo/b");
     expect(fixture.commitMove).toHaveBeenCalledTimes(1);
     expect(fixture.loadQueueOwner).not.toHaveBeenCalled();
     expect(moved.workspaceDirectory).toBe("/repo/b");
@@ -103,7 +103,7 @@ describe("moveSessionProject", () => {
     const handover = plan({ needsQueueHandover: true });
     const fixture = createDeps(handover);
 
-    const moved = await moveSessionProject(fixture.deps, "s1", "/repo/b");
+    const moved = await moveSessionWorkspace(fixture.deps, "s1", "/repo/b");
 
     expect(fixture.loadQueueOwner).toHaveBeenCalledWith("/repo/b");
     expect(fixture.adopt).toHaveBeenCalledWith(handover);
@@ -114,18 +114,22 @@ describe("moveSessionProject", () => {
   it("leaves a project without resolving or registering a directory", async () => {
     const fixture = createDeps(plan({ binding: {}, queueRoot: "/repo/a" }));
 
-    await moveSessionProject(fixture.deps, "s1", null);
+    await moveSessionWorkspace(fixture.deps, "s1", null);
 
     expect(fixture.planMove).toHaveBeenCalledWith("s1", null);
-    expect(fixture.discoverProject).not.toHaveBeenCalled();
+    expect(fixture.discoverWorkspace).not.toHaveBeenCalled();
   });
 
   it("refuses the default workspace as a project", async () => {
     const fixture = createDeps(plan());
 
     await expect(
-      moveSessionProject(fixture.deps, "s1", "/home/.ohbaby/workspace/default"),
-    ).rejects.toBeInstanceOf(DefaultWorkspaceNotProjectError);
+      moveSessionWorkspace(
+        fixture.deps,
+        "s1",
+        "/home/.ohbaby/workspace/default",
+      ),
+    ).rejects.toBeInstanceOf(DefaultDirectoryNotWorkspaceError);
     expect(fixture.planMove).not.toHaveBeenCalled();
   });
 
@@ -134,7 +138,7 @@ describe("moveSessionProject", () => {
     fixture.loadQueueOwner.mockResolvedValue({});
 
     await expect(
-      moveSessionProject(fixture.deps, "s1", "/repo/b"),
+      moveSessionWorkspace(fixture.deps, "s1", "/repo/b"),
     ).rejects.toThrow("Workspace cannot take over queued prompts");
   });
 
@@ -145,7 +149,7 @@ describe("moveSessionProject", () => {
     });
 
     await expect(
-      moveSessionProject(fixture.deps, "s1", null),
+      moveSessionWorkspace(fixture.deps, "s1", null),
     ).rejects.toMatchObject({
       code: "SESSION_ARCHIVED",
     });

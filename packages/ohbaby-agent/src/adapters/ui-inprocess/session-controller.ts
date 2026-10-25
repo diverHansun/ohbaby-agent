@@ -40,7 +40,7 @@ export function sessionMetadataToUiSession(session: CoreSession): UiSession {
     id: session.id,
     messages: [],
     reasoning: session.reasoning,
-    projectRoot: session.workingDirectory,
+    workingDirectory: session.workingDirectory,
     title: session.title,
     updatedAt: new Date(session.updatedAt).toISOString(),
   };
@@ -86,7 +86,7 @@ export function isReusableUiSession(
 ): boolean {
   return (
     session.messages.length === 0 &&
-    sameSessionDirectory(session.projectRoot, projectRoot)
+    sameSessionDirectory(session.workingDirectory, projectRoot)
   );
 }
 
@@ -126,12 +126,12 @@ function withCoreProjectRoot(
   session: UiSession,
   coreSession: CoreSession | null | undefined,
 ): UiSession {
-  if (session.projectRoot || !coreSession) {
+  if (session.workingDirectory || !coreSession) {
     return session;
   }
   return {
     ...session,
-    projectRoot: coreSession.workingDirectory,
+    workingDirectory: coreSession.workingDirectory,
   };
 }
 

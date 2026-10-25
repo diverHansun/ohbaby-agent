@@ -30,7 +30,7 @@ export interface UiPermissionResponseContext {
 export interface UiSessionIndexEntry {
   readonly id: string;
   readonly title: string;
-  readonly projectRoot?: string;
+  readonly workingDirectory?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly parentId?: string;

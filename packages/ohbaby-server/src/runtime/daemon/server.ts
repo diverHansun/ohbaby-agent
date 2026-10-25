@@ -7,9 +7,9 @@ import type {
 } from "ohbaby-agent";
 import {
   isLoopbackHost,
-  WORKSPACE_DIRECTORY_ENCODING_HEADER,
-  WORKSPACE_DIRECTORY_ENCODING_PERCENT_UTF8,
-  WORKSPACE_DIRECTORY_HEADER,
+  REQUEST_DIRECTORY_ENCODING_HEADER,
+  REQUEST_DIRECTORY_ENCODING_PERCENT_UTF8,
+  REQUEST_DIRECTORY_HEADER,
   type UiBackendClient,
 } from "ohbaby-sdk";
 import {
@@ -48,13 +48,13 @@ import {
 } from "../workspace-scope.js";
 import { isAuthorizedDaemonRequest } from "../../auth/token.js";
 import {
-  moveSessionProject,
+  moveSessionWorkspace,
   type GlobalSessionCatalog,
-} from "../../coordination/session-project-move.js";
+} from "../../coordination/session-workspace-move.js";
 import {
   globalSessionErrorStatus,
   parseGlobalSessionLimit,
-  parseSessionProjectUpdate,
+  parseSessionWorkspaceUpdate,
   toUiGlobalSession,
   toUiGlobalSessionPage,
   toUiSessionSearchPage,
@@ -305,8 +305,13 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       this.searchGlobalSessions(context),
     );
     this.app.get("/v1/sessions", (context) => this.listGlobalSessions(context));
+    this.app.post("/v1/sessions/:sessionId/workspace", (context) =>
+      this.moveSessionWorkspace(context),
+    );
+    // A retired global endpoint must not fall through to scoped dispatch,
+    // which would otherwise require a request-directory header and return 400.
     this.app.post("/v1/sessions/:sessionId/project", (context) =>
-      this.moveSessionProject(context),
+      context.notFound(),
     );
     const dispatch = (context: Context): Promise<Response> =>
       this.dispatchWorkspaceRequest(context);
@@ -368,9 +373,9 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         401,
       );
     }
-    // The default workspace runs sessions without a project; it is never
+    // The default directory runs sessions without a workspace; it is never
     // listed or registered as one.
-    const defaultWorkspace = {
+    const defaultDirectory = {
       directory: await ensureDefaultDirectory(),
     };
     const loaded = new Set(
@@ -399,7 +404,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
             Number(right.loaded) - Number(left.loaded) ||
             left.directory.localeCompare(right.directory),
         );
-      return context.json({ defaultWorkspace, ok: true, scopes });
+      return context.json({ defaultDirectory, ok: true, scopes });
     }
 
     for (const entry of registry.list()) {
@@ -435,7 +440,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         loaded: loaded.has(entry.scopeKey),
         position: entry.position,
       }));
-    return context.json({ defaultWorkspace, ok: true, scopes });
+    return context.json({ defaultDirectory, ok: true, scopes });
   }
 
   private async readDirectoryBody(
@@ -499,8 +504,8 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         return context.json(
           {
             error: {
-              code: "DEFAULT_WORKSPACE_NOT_PROJECT",
-              message: "The default workspace cannot be opened as a project",
+              code: "DEFAULT_DIRECTORY_NOT_WORKSPACE",
+              message: "The default directory cannot be opened as a workspace",
             },
             ok: false,
           },
@@ -685,7 +690,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     }
   }
 
-  private async moveSessionProject(context: Context): Promise<Response> {
+  private async moveSessionWorkspace(context: Context): Promise<Response> {
     const catalog = this.globalSessionCatalog(context);
     if (catalog instanceof Response) return catalog;
     let body: unknown;
@@ -701,19 +706,19 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       );
     }
     try {
-      const session = await moveSessionProject(
+      const session = await moveSessionWorkspace(
         {
           catalog,
           resolveScope: resolveWorkspaceScope,
-          isDefaultWorkspace: isDefaultDirectory,
-          discoverProject: (directory) =>
+          isDefaultDirectory: isDefaultDirectory,
+          discoverWorkspace: (directory) =>
             this.options.workspaceRegistry?.ensureDiscovered([directory]) ??
             Promise.resolve(),
           loadQueueOwner: async (directory) =>
             (await this.instanceStore?.load(directory))?.backend,
         },
         context.req.param("sessionId") ?? "",
-        parseSessionProjectUpdate(body),
+        parseSessionWorkspaceUpdate(body),
       );
       return context.json({ ok: true, session: toUiGlobalSession(session) });
     } catch (error) {
@@ -765,10 +770,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   }
 
   private workspaceDirectoryFromRequest(context: Context): string | Response {
-    const directory = context.req.header(WORKSPACE_DIRECTORY_HEADER) ?? "";
+    const directory = context.req.header(REQUEST_DIRECTORY_HEADER) ?? "";
     if (
-      context.req.header(WORKSPACE_DIRECTORY_ENCODING_HEADER) !==
-      WORKSPACE_DIRECTORY_ENCODING_PERCENT_UTF8
+      context.req.header(REQUEST_DIRECTORY_ENCODING_HEADER) !==
+      REQUEST_DIRECTORY_ENCODING_PERCENT_UTF8
     ) {
       return directory;
     }

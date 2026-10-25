@@ -140,7 +140,7 @@ export interface UiSettingsAboutResponse {
   /** Directory containing the active diagnostic file, when logging is enabled. */
   readonly logDirectory?: string;
   readonly diagnosticsFile?: string;
-  readonly defaultWorkspace: string;
+  readonly defaultDirectory: string;
 }
 
 export interface UiSettingsModelCreate {

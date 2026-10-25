@@ -101,7 +101,7 @@ export interface UiSession {
   readonly reasoning?: UiReasoningConfig;
   readonly id: string;
   readonly title: string;
-  readonly projectRoot?: string;
+  readonly workingDirectory?: string;
   readonly messages: readonly UiMessage[];
   readonly createdAt: string;
   readonly updatedAt: string;

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   globalSessionErrorStatus,
   parseGlobalSessionLimit,
-  parseSessionProjectUpdate,
+  parseSessionWorkspaceUpdate,
   toUiGlobalSession,
 } from "./global-sessions.js";
 
@@ -25,6 +25,7 @@ const session: CoreSession = {
 
 describe("global session wire format", () => {
   it("separates the project from the working directories", () => {
+    expect(toUiGlobalSession(session)).not.toHaveProperty("projectDirectory");
     expect(toUiGlobalSession(session)).toEqual({
       id: "s1",
       title: "First",
@@ -32,7 +33,7 @@ describe("global session wire format", () => {
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(1_000).toISOString(),
       messageCount: 2,
-      projectDirectory: "/repo/b",
+      workspaceDirectory: "/repo/b",
       workingDirectory: "/repo/a",
       pendingWorkingDirectory: "/repo/b",
     });
@@ -42,7 +43,7 @@ describe("global session wire format", () => {
         workspaceDirectory: undefined,
         pendingWorkingDirectory: undefined,
       }),
-    ).toMatchObject({ projectDirectory: null, workingDirectory: "/repo/a" });
+    ).toMatchObject({ workspaceDirectory: null, workingDirectory: "/repo/a" });
   });
 
   it("parses page sizes", () => {
@@ -56,18 +57,21 @@ describe("global session wire format", () => {
   });
 
   it("requires a directory or an explicit null", () => {
-    expect(parseSessionProjectUpdate({ projectDirectory: "/repo" })).toBe(
+    expect(parseSessionWorkspaceUpdate({ workspaceDirectory: "/repo" })).toBe(
       "/repo",
     );
-    expect(parseSessionProjectUpdate({ projectDirectory: null })).toBeNull();
+    expect(
+      parseSessionWorkspaceUpdate({ workspaceDirectory: null }),
+    ).toBeNull();
     for (const invalid of [
       {},
-      { projectDirectory: "" },
-      { projectDirectory: 1 },
+      { projectDirectory: "/repo" },
+      { workspaceDirectory: "" },
+      { workspaceDirectory: 1 },
       null,
     ]) {
-      expect(() => parseSessionProjectUpdate(invalid)).toThrow(
-        "projectDirectory must be a directory path or null",
+      expect(() => parseSessionWorkspaceUpdate(invalid)).toThrow(
+        "workspaceDirectory must be a directory path or null",
       );
     }
   });
@@ -79,7 +83,7 @@ describe("global session wire format", () => {
       400,
     );
     expect(
-      globalSessionErrorStatus(failure("DEFAULT_WORKSPACE_NOT_PROJECT")),
+      globalSessionErrorStatus(failure("DEFAULT_DIRECTORY_NOT_WORKSPACE")),
     ).toBe(400);
     expect(globalSessionErrorStatus(failure("SESSION_NOT_FOUND"))).toBe(404);
     expect(globalSessionErrorStatus(failure("SESSION_ARCHIVED"))).toBe(409);

@@ -256,7 +256,7 @@ describe("moving a session between workspaces", () => {
   });
 
   it("upgrades sessions that ran in the default workspace before the binding existed", async () => {
-    const defaultWorkspace = await ensureDefaultDirectory();
+    const defaultDirectory = await ensureDefaultDirectory();
     initDatabase({
       dbPath: join(root, "agent.db"),
       migrations: INITIAL_MIGRATIONS.filter(
@@ -267,14 +267,14 @@ describe("moving a session between workspaces", () => {
       `INSERT INTO session (id, project_id, project_root, status, created_at, updated_at)
        VALUES (?, 'global', ?, 'active', 1, 1)`,
     );
-    insert.run("legacy_chat", defaultWorkspace);
+    insert.run("legacy_chat", defaultDirectory);
     insert.run("legacy_project", workspaceA);
     closeDatabase();
 
     createClient(workspaceA, createLLM({ log: { turns: [] } }));
 
     expect(getGlobalSession("legacy_chat")).toMatchObject({
-      workingDirectory: defaultWorkspace,
+      workingDirectory: defaultDirectory,
     });
     expect(getGlobalSession("legacy_chat")?.workspaceDirectory).toBeUndefined();
     expect(getGlobalSession("legacy_project")?.workspaceDirectory).toBe(

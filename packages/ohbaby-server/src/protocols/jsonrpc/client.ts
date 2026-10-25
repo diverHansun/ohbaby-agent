@@ -9,7 +9,7 @@ import {
 } from "ohbaby-agent";
 import {
   submitPromptAndWait as composeSubmitPromptAndWait,
-  workspaceDirectoryHeaders,
+  requestDirectoryHeaders,
 } from "ohbaby-sdk";
 import type {
   SDKAPI,
@@ -973,7 +973,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       ...(this.authToken === undefined
         ? {}
         : { authorization: daemonAuthHeader(this.authToken) }),
-      ...workspaceDirectoryHeaders(this.directory),
+      ...requestDirectoryHeaders(this.directory),
     };
   }
 }

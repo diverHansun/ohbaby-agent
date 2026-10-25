@@ -7,9 +7,10 @@ import type {
   WorkspaceRegistryEntry,
   WorkspaceRegistryStore,
 } from "ohbaby-agent";
+import { ensureDefaultDirectory } from "ohbaby-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { daemonAuthHeader } from "../../auth/token.js";
-import type { GlobalSessionCatalog } from "../../coordination/session-project-move.js";
+import type { GlobalSessionCatalog } from "../../coordination/session-workspace-move.js";
 import {
   DirectoryBrowserError,
   type DirectoryBrowser,
@@ -291,7 +292,7 @@ describe("global daemon workspace routing", () => {
       });
       expect(initial.status).toBe(200);
       await expect(initial.json()).resolves.toEqual({
-        defaultWorkspace: { directory: anyDirectory },
+        defaultDirectory: { directory: anyDirectory },
         ok: true,
         scopes: [
           {
@@ -322,7 +323,7 @@ describe("global daemon workspace routing", () => {
         headers: { authorization },
       });
       await expect(afterLoad.json()).resolves.toEqual({
-        defaultWorkspace: { directory: anyDirectory },
+        defaultDirectory: { directory: anyDirectory },
         ok: true,
         scopes: [
           {
@@ -405,7 +406,7 @@ describe("global daemon workspace routing", () => {
       });
       const scopes = await fetch(`${server.url}/v1/scopes`, { headers });
       await expect(scopes.json()).resolves.toEqual({
-        defaultWorkspace: { directory: anyDirectory },
+        defaultDirectory: { directory: anyDirectory },
         ok: true,
         scopes: [],
       });
@@ -666,7 +667,7 @@ describe("global daemon session routes", () => {
   it("returns the default workspace without listing or opening it as a project", async () => {
     const { home, repoA } = await createRepos();
     const registry = createRegistry(() => 1);
-    const defaultWorkspace = await realpath(
+    const defaultDirectory = await realpath(
       await mkdir(join(home, ".ohbaby", "workspace", "default"), {
         recursive: true,
       }).then(() => join(home, ".ohbaby", "workspace", "default")),
@@ -675,7 +676,7 @@ describe("global daemon session routes", () => {
       authToken: "token",
       backend: createBackend(),
       createWorkspaceBackend: () => createBackend(),
-      listKnownWorkspaceScopes: () => [repoA, defaultWorkspace],
+      listKnownWorkspaceScopes: () => [repoA, defaultDirectory],
       port: 0,
       scopeRoot: repoA,
       workspaceRegistry: registry,
@@ -685,27 +686,28 @@ describe("global daemon session routes", () => {
       const headers = { authorization: daemonAuthHeader("token") };
       // A loaded default-workspace instance must not leak into the project list.
       await fetch(`${server.url}/v1/sessions/index`, {
-        headers: { ...headers, "x-ohbaby-directory": defaultWorkspace },
+        headers: { ...headers, "x-ohbaby-directory": defaultDirectory },
       });
       const scopes = await fetch(`${server.url}/v1/scopes`, { headers });
       const body = (await scopes.json()) as {
-        readonly defaultWorkspace: { readonly directory: string };
+        readonly defaultDirectory: { readonly directory: string };
         readonly scopes: readonly { readonly directory: string }[];
       };
-      expect(body.defaultWorkspace.directory).toBe(defaultWorkspace);
+      expect(body.defaultDirectory.directory).toBe(defaultDirectory);
+      expect(body).not.toHaveProperty("defaultWorkspace");
       expect(body.scopes.map((scope) => scope.directory)).toEqual([repoA]);
       expect(
-        registry.list().some((entry) => entry.scopeKey === defaultWorkspace),
+        registry.list().some((entry) => entry.scopeKey === defaultDirectory),
       ).toBe(false);
 
       const open = await fetch(`${server.url}/v1/scopes/open`, {
-        body: JSON.stringify({ directory: defaultWorkspace }),
+        body: JSON.stringify({ directory: defaultDirectory }),
         headers,
         method: "POST",
       });
       expect(open.status).toBe(400);
       await expect(open.json()).resolves.toMatchObject({
-        error: { code: "DEFAULT_WORKSPACE_NOT_PROJECT" },
+        error: { code: "DEFAULT_DIRECTORY_NOT_WORKSPACE" },
       });
     } finally {
       await server.stop();
@@ -738,18 +740,18 @@ describe("global daemon session routes", () => {
     const planMove = vi.fn(
       (
         sessionId: string,
-        projectDirectory: string | null,
+        workspaceDirectory: string | null,
       ): SessionWorkspaceMovePlan => ({
         sessionId,
         binding:
-          projectDirectory === null
+          workspaceDirectory === null
             ? {}
             : {
-                workspaceDirectory: projectDirectory,
-                pendingWorkingDirectory: projectDirectory,
+                workspaceDirectory: workspaceDirectory,
+                pendingWorkingDirectory: workspaceDirectory,
               },
-        queueRoot: projectDirectory ?? repoA,
-        needsQueueHandover: projectDirectory !== null,
+        queueRoot: workspaceDirectory ?? repoA,
+        needsQueueHandover: workspaceDirectory !== null,
       }),
     );
     const catalog: GlobalSessionCatalog = {
@@ -790,7 +792,7 @@ describe("global daemon session routes", () => {
         sessions: [
           {
             id: "s1",
-            projectDirectory: repoB,
+            workspaceDirectory: repoB,
             workingDirectory: "/repo/a",
             pendingWorkingDirectory: repoB,
           },
@@ -814,14 +816,14 @@ describe("global daemon session routes", () => {
       });
 
       const post = (body: unknown): Promise<Response> =>
-        fetch(`${server.url}/v1/sessions/s1/project`, {
+        fetch(`${server.url}/v1/sessions/s1/workspace`, {
           body: JSON.stringify(body),
           headers,
           method: "POST",
         });
-      const moved = await post({ projectDirectory: join(repoB, ".") });
+      const moved = await post({ workspaceDirectory: join(repoB, ".") });
       await expect(moved.json()).resolves.toMatchObject({
-        session: { projectDirectory: repoB, pendingWorkingDirectory: repoB },
+        session: { workspaceDirectory: repoB, pendingWorkingDirectory: repoB },
       });
       expect(planMove).toHaveBeenCalledWith("s1", repoB);
       expect(adopt).toHaveBeenCalledTimes(1);
@@ -830,12 +832,26 @@ describe("global daemon session routes", () => {
       );
 
       await expect(
-        (await post({ projectDirectory: null })).json(),
+        (await post({ workspaceDirectory: null })).json(),
       ).resolves.toMatchObject({
-        session: { projectDirectory: null },
+        session: { workspaceDirectory: null },
       });
       expect((await post({})).status).toBe(400);
-      expect((await post({ projectDirectory: "/missing/dir" })).status).toBe(
+      expect((await post({ projectDirectory: repoB })).status).toBe(400);
+      const oldRoute = await fetch(`${server.url}/v1/sessions/s1/project`, {
+        body: JSON.stringify({ workspaceDirectory: repoB }),
+        headers,
+        method: "POST",
+      });
+      expect(oldRoute.status).toBe(404);
+      const defaultDirectory = await realpath(await ensureDefaultDirectory());
+      const rejected = await post({ workspaceDirectory: defaultDirectory });
+      expect(rejected.status).toBe(400);
+      await expect(rejected.json()).resolves.toMatchObject({
+        error: { code: "DEFAULT_DIRECTORY_NOT_WORKSPACE" },
+      });
+
+      expect((await post({ workspaceDirectory: "/missing/dir" })).status).toBe(
         400,
       );
     } finally {

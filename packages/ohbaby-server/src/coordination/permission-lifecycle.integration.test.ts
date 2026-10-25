@@ -615,7 +615,7 @@ async function realPermissionValidationFixture(
       activeSessionId: "root",
       sessions: index.map((session) => ({
         ...session,
-        projectRoot: directory,
+        workingDirectory: directory,
         messages: [],
       })),
       runs: [],

@@ -2290,8 +2290,8 @@ export function createInProcessUiBackendClient(
       !session ||
       (core
         ? !isSessionInWorkingDirectory(core, projectRoot)
-        : session.projectRoot !== undefined &&
-          !sameSessionDirectory(session.projectRoot, projectRoot))
+        : session.workingDirectory !== undefined &&
+          !sameSessionDirectory(session.workingDirectory, projectRoot))
     )
       throw permissionError(
         "PERMISSION_SCOPE_CHANGED",
@@ -2332,12 +2332,7 @@ export function createInProcessUiBackendClient(
   ): Promise<boolean> {
     if (
       !candidate ||
-      !sameSessionDirectory(
-        "stats" in candidate
-          ? candidate.workingDirectory
-          : candidate.projectRoot,
-        projectRoot,
-      )
+      !sameSessionDirectory(candidate.workingDirectory, projectRoot)
     )
       return false;
     if ("stats" in candidate) {
@@ -2433,10 +2428,7 @@ export function createInProcessUiBackendClient(
         created: false,
         id: reusable.id,
         title: reusable.title,
-        projectRoot:
-          "stats" in reusable
-            ? reusable.workingDirectory
-            : reusable.projectRoot,
+        workingDirectory: reusable.workingDirectory,
         createdAt:
           "stats" in reusable
             ? new Date(reusable.createdAt).toISOString()
@@ -2457,7 +2449,7 @@ export function createInProcessUiBackendClient(
       : {
           id: sessionIds.next(),
           title: "New session",
-          projectRoot,
+          workingDirectory: projectRoot,
           createdAt,
           updatedAt: createdAt,
           messages: [],
@@ -2469,7 +2461,7 @@ export function createInProcessUiBackendClient(
       created: true,
       id: session.id,
       title: session.title,
-      projectRoot: session.projectRoot,
+      workingDirectory: session.workingDirectory,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     };
@@ -2666,10 +2658,10 @@ export function createInProcessUiBackendClient(
     if (!session) throw new Error(`Session ${input.sessionId} not found`);
     const projectRoot = await resolveProjectRoot();
     if (
-      session.projectRoot &&
+      session.workingDirectory &&
       !(core
         ? isSessionInWorkingDirectory(core, projectRoot)
-        : sameSessionDirectory(session.projectRoot, projectRoot))
+        : sameSessionDirectory(session.workingDirectory, projectRoot))
     )
       throw new Error("Session belongs to another workspace");
     await options.sessionManager?.update(input.sessionId, {
@@ -2762,8 +2754,8 @@ export function createInProcessUiBackendClient(
     return snapshot.sessions
       .filter(
         (session) =>
-          session.projectRoot === undefined ||
-          sameSessionDirectory(session.projectRoot, projectRoot),
+          session.workingDirectory === undefined ||
+          sameSessionDirectory(session.workingDirectory, projectRoot),
       )
       .sort(sortUiSessionsByUpdatedAtDesc)
       .map((session) => ({
@@ -2780,8 +2772,11 @@ export function createInProcessUiBackendClient(
     const activeSession = snapshot.sessions.find(
       (session) => session.id === snapshot.activeSessionId,
     );
-    if (activeSession?.projectRoot && activeSession.projectRoot !== "") {
-      return activeSession.projectRoot;
+    if (
+      activeSession?.workingDirectory &&
+      activeSession.workingDirectory !== ""
+    ) {
+      return activeSession.workingDirectory;
     }
     return resolveProjectRoot();
   }
@@ -2853,7 +2848,7 @@ export function createInProcessUiBackendClient(
           id: sessionIds.next(),
           title,
           messages: [],
-          projectRoot,
+          workingDirectory: projectRoot,
           createdAt,
           updatedAt: createdAt,
         };
@@ -3204,7 +3199,7 @@ export function createInProcessUiBackendClient(
 
     return {
       projectRoot:
-        uiSession?.projectRoot ??
+        uiSession?.workingDirectory ??
         coreSession?.workingDirectory ??
         (await resolveProjectRoot()),
       sessionId,
@@ -3301,7 +3296,7 @@ export function createInProcessUiBackendClient(
       return null;
     }
     const projectRoot =
-      uiSession?.projectRoot ??
+      uiSession?.workingDirectory ??
       coreSession?.workingDirectory ??
       (await resolveProjectRoot());
 
@@ -3493,7 +3488,7 @@ export function createInProcessUiBackendClient(
       }
       const resolvedProjectRoot = existingCoreSession
         ? sessionTargetWorkingDirectory(existingCoreSession)
-        : (session.projectRoot ?? baseProjectRoot);
+        : (session.workingDirectory ?? baseProjectRoot);
       if (
         existingCoreSession &&
         !sameSessionDirectory(

@@ -480,7 +480,7 @@ async function restoreWorkspaceInRunningDaemon(input: {
   });
   if (!response.ok) {
     throw new Error(
-      `Could not restore ${input.scopeRoot} in the global project rail (HTTP ${String(response.status)})`,
+      `Could not restore ${input.scopeRoot} in the workspace list (HTTP ${String(response.status)})`,
     );
   }
 }
@@ -551,8 +551,8 @@ async function startFreshDaemon(input: {
           list: (query) => listGlobalSessions(query),
           search: (query) => searchGlobalSessions(query),
           get: (sessionId) => getGlobalSession(sessionId),
-          planMove: (sessionId, projectDirectory) =>
-            planSessionWorkspaceMove(sessionId, projectDirectory),
+          planMove: (sessionId, workspaceDirectory) =>
+            planSessionWorkspaceMove(sessionId, workspaceDirectory),
           commitMove: (plan) => commitSessionWorkspaceMove(plan),
         },
         workspaceRegistry,

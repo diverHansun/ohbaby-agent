@@ -198,10 +198,12 @@ it("T8 T9 T10 exposes authorized header-free globals, field patches, safe errors
   ).toBe(401);
   const about = await request("about");
   expect(about.status).toBe(200);
-  expect(await about.json()).toMatchObject({
+  const aboutBody: unknown = await about.json();
+  expect(aboutBody).not.toHaveProperty("defaultWorkspace");
+  expect(aboutBody).toMatchObject({
     version: "test-version",
     ohbabyHome: home,
-    defaultWorkspace: await ensureDefaultDirectory(),
+    defaultDirectory: await ensureDefaultDirectory(),
     diagnosticsFile: join(root, "logs/daemon/log.jsonl"),
     logDirectory: join(root, "logs/daemon"),
   });

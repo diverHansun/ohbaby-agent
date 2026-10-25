@@ -108,10 +108,10 @@ export function createInMemoryUiStateStore(
     getSessionIndex(): Promise<readonly Omit<UiSession, "messages">[]> {
       return Promise.resolve(
         snapshot.sessions.map(
-          ({ id, title, projectRoot, createdAt, updatedAt }) => ({
+          ({ id, title, workingDirectory, createdAt, updatedAt }) => ({
             id,
             title,
-            ...(projectRoot === undefined ? {} : { projectRoot }),
+            ...(workingDirectory === undefined ? {} : { workingDirectory }),
             createdAt,
             updatedAt,
           }),

@@ -18,7 +18,7 @@ describe("prompt two-line footer", () => {
             catalog={null}
             client={{} as CoreAPI}
             disabled={false}
-            projectRoot="/workspace/❤️/中文项目"
+            workingDirectory="/workspace/❤️/中文项目"
             model={{
               provider: "test",
               baseUrl: "https://example.test",

@@ -67,7 +67,7 @@ export interface PromptProps {
   readonly client: CoreAPI;
   readonly executeCommand?: CoreAPI["executeCommand"];
   readonly contextWindowUsage?: string;
-  readonly projectRoot?: string;
+  readonly workingDirectory?: string;
   readonly model?: UiCurrentModelConfig | null;
   readonly reasoning?: UiReasoningConfig | null;
   readonly disabled: boolean;
@@ -103,7 +103,7 @@ export function Prompt({
   client,
   executeCommand,
   contextWindowUsage = "",
-  projectRoot,
+  workingDirectory,
   model,
   reasoning,
   disabled,
@@ -957,7 +957,7 @@ export function Prompt({
 
   const footerRows = formatFooterRows({
     width: layout.contentWidth,
-    projectRoot,
+    workingDirectory,
     model,
     reasoning:
       !activeSessionId &&

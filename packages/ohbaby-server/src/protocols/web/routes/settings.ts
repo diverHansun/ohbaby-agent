@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { WORKSPACE_DIRECTORY_HEADER } from "ohbaby-sdk";
+import { REQUEST_DIRECTORY_HEADER } from "ohbaby-sdk";
 import { webErrorBody } from "../request-helpers.js";
 import type { DaemonRouteContext } from "./context.js";
 
@@ -10,7 +10,7 @@ export function registerSettingsRoutes(
   app.post("/v1/settings/mcp/reconnect", async (context) => {
     if (!ctx.isAuthorized(context.req.header("authorization")))
       return context.json(webErrorBody("Unauthorized"), 401);
-    if (!context.req.header(WORKSPACE_DIRECTORY_HEADER)?.trim())
+    if (!context.req.header(REQUEST_DIRECTORY_HEADER)?.trim())
       return context.json(webErrorBody("x-ohbaby-directory is required"), 400);
     const reconnect = ctx.options.backend.reconnectSettingsMcp;
     if (!reconnect)
@@ -53,7 +53,7 @@ export function registerSettingsRoutes(
       if (!ctx.isAuthorized(context.req.header("authorization"))) {
         return context.json(webErrorBody("Unauthorized"), 401);
       }
-      if (!context.req.header(WORKSPACE_DIRECTORY_HEADER)?.trim()) {
+      if (!context.req.header(REQUEST_DIRECTORY_HEADER)?.trim()) {
         return context.json(
           webErrorBody("x-ohbaby-directory is required"),
           400,

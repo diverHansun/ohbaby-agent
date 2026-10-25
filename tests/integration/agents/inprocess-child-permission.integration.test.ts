@@ -114,7 +114,7 @@ describe("actual in-process child approvals", () => {
           {
             id: root.id,
             title: root.title,
-            projectRoot: directory,
+            workingDirectory: directory,
             createdAt: new Date(root.createdAt).toISOString(),
             updatedAt: new Date(root.updatedAt).toISOString(),
             messages: [],

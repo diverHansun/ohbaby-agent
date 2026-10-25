@@ -20,7 +20,7 @@ export interface GlobalSessionCatalog {
   get(sessionId: string): CoreSession | null;
   planMove(
     sessionId: string,
-    projectDirectory: string | null,
+    workspaceDirectory: string | null,
   ): SessionWorkspaceMovePlan;
   commitMove(plan: SessionWorkspaceMovePlan): Promise<CoreSession>;
 }
@@ -30,46 +30,46 @@ export interface SessionQueueOwner {
   adoptSessionWorkspaceMove?(plan: SessionWorkspaceMovePlan): Promise<void>;
 }
 
-export interface SessionProjectMoveDeps {
+export interface SessionWorkspaceMoveDeps {
   readonly catalog: GlobalSessionCatalog;
   /** Canonical workspace scope; rejects missing or non-directory paths. */
   readonly resolveScope: (directory: string) => Promise<string>;
-  readonly isDefaultWorkspace: (directory: string) => boolean;
-  /** Makes a project that was never opened visible; hidden ones stay hidden. */
-  readonly discoverProject?: (directory: string) => Promise<unknown>;
+  readonly isDefaultDirectory: (directory: string) => boolean;
+  /** Makes a workspace that was never opened visible; hidden ones stay hidden. */
+  readonly discoverWorkspace?: (directory: string) => Promise<unknown>;
   readonly loadQueueOwner: (
     directory: string,
   ) => Promise<SessionQueueOwner | undefined>;
 }
 
-export class DefaultWorkspaceNotProjectError extends Error {
-  readonly code = "DEFAULT_WORKSPACE_NOT_PROJECT";
+export class DefaultDirectoryNotWorkspaceError extends Error {
+  readonly code = "DEFAULT_DIRECTORY_NOT_WORKSPACE";
 
   constructor() {
-    super("The default workspace is not a project");
-    this.name = "DefaultWorkspaceNotProjectError";
+    super("The default directory cannot be used as a workspace");
+    this.name = "DefaultDirectoryNotWorkspaceError";
   }
 }
 
 /**
- * Moves a session into a project, or out of its project with `null`.
+ * Moves a session into a workspace, or out of its workspace with `null`.
  * Queued prompts held by another directory move with the binding in the
  * target workspace's own write; otherwise the binding is written directly.
  */
-export async function moveSessionProject(
-  deps: SessionProjectMoveDeps,
+export async function moveSessionWorkspace(
+  deps: SessionWorkspaceMoveDeps,
   sessionId: string,
   requestedDirectory: string | null,
 ): Promise<CoreSession> {
-  let projectDirectory: string | null = null;
+  let workspaceDirectory: string | null = null;
   if (requestedDirectory !== null) {
-    projectDirectory = await deps.resolveScope(requestedDirectory);
-    if (deps.isDefaultWorkspace(projectDirectory)) {
-      throw new DefaultWorkspaceNotProjectError();
+    workspaceDirectory = await deps.resolveScope(requestedDirectory);
+    if (deps.isDefaultDirectory(workspaceDirectory)) {
+      throw new DefaultDirectoryNotWorkspaceError();
     }
-    await deps.discoverProject?.(projectDirectory);
+    await deps.discoverWorkspace?.(workspaceDirectory);
   }
-  const plan = deps.catalog.planMove(sessionId, projectDirectory);
+  const plan = deps.catalog.planMove(sessionId, workspaceDirectory);
   if (!plan.needsQueueHandover) {
     return deps.catalog.commitMove(plan);
   }

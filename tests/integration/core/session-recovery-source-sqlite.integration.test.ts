@@ -479,7 +479,7 @@ describe("source recovery against SQLite", () => {
     const roots = Array.from({ length: 100 }, (_, index) => ({
       id: `root-${String(index).padStart(3, "0")}`,
       title: `Root ${String(index)}`,
-      projectRoot: directory,
+      workingDirectory: directory,
       createdAt: "2026-09-25",
       updatedAt: "2026-09-25",
       messages: [],
@@ -1124,7 +1124,7 @@ describe("source recovery against SQLite", () => {
           {
             id: "a",
             title: "A",
-            projectRoot: directory,
+            workingDirectory: directory,
             messages: [],
             createdAt: "2026-09-25",
             updatedAt: "2026-09-25",
@@ -1190,7 +1190,7 @@ describe("source recovery against SQLite", () => {
         sessions: ["a", "b"].map((id) => ({
           id,
           title: id,
-          projectRoot: directory,
+          workingDirectory: directory,
           messages: [],
           createdAt: "2026-09-25",
           updatedAt: "2026-09-25",

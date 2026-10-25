@@ -91,8 +91,8 @@ function moveErrorCode(operation: () => unknown): string | undefined {
 
 describe("session project binding", () => {
   it("leaves default-workspace sessions without a project and keeps subagents with their parent", async () => {
-    const defaultWorkspace = await ensureDefaultDirectory();
-    const chat = await manager.create(defaultWorkspace);
+    const defaultDirectory = await ensureDefaultDirectory();
+    const chat = await manager.create(defaultDirectory);
     const project = await manager.create("/repo/a");
     const child = await manager.create("/repo/a", { parentId: project.id });
 

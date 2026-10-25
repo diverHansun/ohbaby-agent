@@ -23,10 +23,10 @@ export {
   globalSessionRequestDirectory,
 } from "./contract/global-sessions.js";
 export type {
-  UiDefaultWorkspace,
+  UiDefaultDirectory,
   UiGlobalSession,
   UiGlobalSessionPage,
-  UiSessionProjectUpdate,
+  UiSessionWorkspaceUpdate,
   UiSessionSearchMatchType,
   UiSessionSearchPage,
   UiSessionSearchResult,
@@ -85,11 +85,11 @@ export {
   isConnectModelInterfaceProvider,
 } from "./contract/connect-model.js";
 export {
-  WORKSPACE_DIRECTORY_ENCODING_HEADER,
-  WORKSPACE_DIRECTORY_ENCODING_PERCENT_UTF8,
-  WORKSPACE_DIRECTORY_HEADER,
-  workspaceDirectoryHeaders,
-} from "./contract/workspace-directory-header.js";
+  REQUEST_DIRECTORY_ENCODING_HEADER,
+  REQUEST_DIRECTORY_ENCODING_PERCENT_UTF8,
+  REQUEST_DIRECTORY_HEADER,
+  requestDirectoryHeaders,
+} from "./contract/request-directory-header.js";
 export type {
   UiSearchProvider,
   UiSetSearchApiKeyInput,
