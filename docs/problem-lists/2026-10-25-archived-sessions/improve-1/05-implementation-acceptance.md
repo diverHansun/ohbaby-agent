@@ -146,8 +146,8 @@ SDK 导出 `UiGlobalSessionStatus`、`UiSessionDeleteResult`、`SESSION_RUNNING_
 | 删除确认键盘 | 默认焦点为 Cancel，Tab 在 Cancel/Delete 间循环；Escape 取消且 Settings 保持打开，焦点回到原删除按钮 |
 | 视觉 | 桌面布局和 375 px 窄屏均检查；标题截断保留操作按钮，页面宽度等于视口，无按钮横向越界；确认框窄屏文字正常换行 |
 | 控制台 | 真实服务页面无 error/warn |
-| 真实浏览器永久删除 | 已到最终 Delete 确认框，目标为隔离测试服务内的 `E2E Delete disposable fixture`；原生浏览器永久删除规则要求操作时确认，等待用户回复后执行与核对。未以其他工具代替该点击 |
+| 真实浏览器永久删除 | 用户确认后由主代理在原生浏览器点击 Delete；确认框关闭，归档行消失，读屏状态报告 Deleted。重载并加载全部分页后为 53 条，目标不再出现；只读数据库核对目标 ID 不存在，其他 55 个会话仍保留 |
 
-隔离环境使用单独的数据库、`OHBABY_HOME`、存储目录和 daemon 状态文件，不修改真实会话，也不改进程的 `HOME`。截图保存在当前 Codex 会话的 visualizations 目录：`archived-desktop.jpg`、`archived-mobile.jpg`、`archived-delete-confirm.jpg`。
+隔离环境使用单独的数据库、`OHBABY_HOME`、存储目录和 daemon 状态文件，不修改真实会话，也不改进程的 `HOME`。截图保存在当前 Codex 会话的 visualizations 目录：`archived-desktop.jpg`、`archived-mobile.jpg`、`archived-delete-confirm.jpg`、`archived-delete-complete.jpg`。
 
-本轮命令结果：Web 全量 67 个文件、791 条测试通过；Web 构建（含 TypeScript）通过；受影响文件 ESLint / Prettier 通过；真实 daemon 生命周期集成用例通过（创建、归档、恢复、重启、目录失效、删除及 404）。浏览器永久删除的最后一步仍单独待确认，因此暂未进行 main 合并与 push。
+本轮命令结果：Web 全量 67 个文件、791 条测试通过；Web 构建（含 TypeScript）通过；受影响文件 ESLint / Prettier 通过；真实 daemon 生命周期集成用例通过（创建、归档、恢复、重启、目录失效、删除及 404）。用户确认后已完成浏览器永久删除与持久化核对，本轮验收无遗留阻断问题。
