@@ -201,6 +201,62 @@ describe("ArchivedSection", () => {
     );
   });
 
+  it.each(["refresh", "next page"])(
+    "discards a stale %s response after restoring a row",
+    async (kind) => {
+      let finishRead!: (page: UiGlobalSessionPage) => void;
+      const list = pager([{ sessions: [first, second], nextCursor: "1" }]);
+      const archive = api([], { listArchivedSessions: list });
+      const container = await mount(archive);
+      list.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRead = resolve;
+          }),
+      );
+      if (kind === "refresh") {
+        const root = roots.at(-1);
+        if (!root) throw new Error("missing mounted root");
+        act(() => {
+          root.render(<ArchivedSection archive={archive} visible={false} />);
+        });
+        act(() => {
+          root.render(<ArchivedSection archive={archive} visible />);
+        });
+      } else {
+        await click(button("Show more"));
+      }
+      await click(button("Restore “Refactor the sidebar”"));
+      list.mockResolvedValue({ sessions: [second] });
+      act(() => {
+        finishRead({ sessions: [first, second] });
+      });
+      await settle();
+      expect(rowTitles(container)).toEqual(["Weekend plan"]);
+      expect(container.textContent).not.toContain("Loading…");
+    },
+  );
+
+  it("keeps focus in a newer delete dialog when a restore finishes", async () => {
+    let finishRestore!: () => void;
+    await mount(
+      api([{ sessions: [first, second] }], {
+        unarchiveSession: () =>
+          new Promise((resolve) => {
+            finishRestore = resolve;
+          }),
+      }),
+    );
+    await click(button("Restore “Refactor the sidebar”"));
+    await click(button("Delete “Weekend plan”"));
+    expect(document.activeElement).toBe(button("Cancel"));
+    act(() => {
+      finishRestore();
+    });
+    await settle();
+    expect(document.activeElement).toBe(button("Cancel"));
+  });
+
   it("drops a row restored elsewhere instead of showing an error", async () => {
     const container = await mount(
       api([{ sessions: [first, second] }], {

@@ -95,15 +95,19 @@ export function ArchivedSection(props: {
   const sectionRef = useRef<HTMLElement>(null);
   // A later read wins; an earlier one answering late is dropped.
   const reads = useRef(0);
+  // Reads started before a successful mutation must be refreshed.
+  const mutations = useRef(0);
   // After a row leaves, focus goes to the next row, else the section.
   const focusNext = useRef<string | null | undefined>(undefined);
 
   const load = useCallback(async (): Promise<void> => {
     const read = ++reads.current;
+    const mutation = mutations.current;
     setList((current) => ({ ...current, status: "loading", error: null }));
     try {
       const page = await archive.listArchivedSessions();
       if (read !== reads.current) return;
+      if (mutation !== mutations.current) return void load();
       setNow(Date.now());
       setList({
         ...INITIAL,
@@ -113,6 +117,7 @@ export function ArchivedSection(props: {
       });
     } catch (error) {
       if (read !== reads.current) return;
+      if (mutation !== mutations.current) return void load();
       setList((current) => ({
         ...current,
         status: "error",
@@ -129,10 +134,12 @@ export function ArchivedSection(props: {
     const cursor = list.nextCursor;
     if (cursor === undefined || list.loadingMore) return;
     const read = reads.current;
+    const mutation = mutations.current;
     setList((current) => ({ ...current, loadingMore: true, moreError: null }));
     try {
       const page = await archive.listArchivedSessions(cursor);
       if (read !== reads.current) return;
+      if (mutation !== mutations.current) return void load();
       setList((current) => {
         const seen = new Set(current.rows.map((row) => row.id));
         return {
@@ -147,6 +154,7 @@ export function ArchivedSection(props: {
       });
     } catch (error) {
       if (read !== reads.current) return;
+      if (mutation !== mutations.current) return void load();
       setList((current) => ({
         ...current,
         loadingMore: false,
@@ -163,6 +171,7 @@ export function ArchivedSection(props: {
   };
 
   const removeRow = (id: string): void => {
+    mutations.current += 1;
     const index = list.rows.findIndex((row) => row.id === id);
     const neighbour =
       list.rows.at(index + 1) ??
@@ -179,6 +188,7 @@ export function ArchivedSection(props: {
     const target = focusNext.current;
     if (target === undefined) return;
     focusNext.current = undefined;
+    if (!visible || confirm !== null) return;
     const section = sectionRef.current;
     const restore =
       target === null
@@ -190,7 +200,7 @@ export function ArchivedSection(props: {
             .find((row) => row.dataset.sessionId === target)
             ?.querySelector<HTMLElement>(".ohb-archived-restore");
     (restore ?? section)?.focus({ preventScroll: true });
-  }, [list.rows]);
+  }, [list.rows, visible, confirm]);
 
   const restore = async (session: UiGlobalSession): Promise<void> => {
     setRow(session.id, { busy: true });
