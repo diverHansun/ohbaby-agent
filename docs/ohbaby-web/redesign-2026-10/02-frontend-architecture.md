@@ -20,7 +20,7 @@
 - 现有的模态（目录选择、命令结果）继续用现有实现，只改样式。
 - 组件里不直接 `fetch`，继续走 `api/daemon` 和 SDK client。
 
-**为什么不引入 Radix**：2026-10-22 用户要求照 pi-web 做，pi-web 的菜单是自己写的。原来需要二级子菜单的“Project”，改成点“Move to project…”后，在原位置换成项目列表（03 §4.4），于是最难写的二级子菜单就不需要了。剩下的定位和键盘逻辑，照 pi-web 写一个通用 Menu 就够了。
+**为什么不引入 Radix**：2026-10-22 用户要求照 pi-web 做，pi-web 的菜单是自己写的。原来需要二级子菜单的“Project”（现为 Workspace），改成点“Move to workspace…”后，在原位置换成工作区列表（03 §4.4），于是最难写的二级子菜单就不需要了。剩下的定位和键盘逻辑，照 pi-web 写一个通用 Menu 就够了。
 
 ## 2. 渲染策略
 
@@ -34,7 +34,7 @@
 src/
   runtime/            由 runtime.ts 拆成 façade、全局层、实例层、草稿（improve-2，见 §3.2）
   api/daemon/
-    global-sessions.ts  新增全局接口：会话列表、搜索、改项目归属（improve-2）
+    global-sessions.ts  新增全局接口：会话列表、搜索、改工作区归属（improve-2）
     settings-client.ts  improve-2 提供最小模型读取，improve-4 扩展完整设置接口
     client.ts           实例 client，按职责拆出 client-sync、client-prompts、client-commands（improve-2）
   store/
@@ -42,12 +42,12 @@ src/
   ui/
     App.tsx           挂载应用控制层，不再区分“有无 workspace”
     shell/            新增：AppController（runtime 接线、视图切换、目录选择）、AppShell（布局、收起、窄屏抽屉）
-    sidebar/          新增：由 session/SessionSidebar 等迁入并改写；项目分组、会话行、会话菜单
+    sidebar/          新增：由 session/SessionSidebar 等迁入并改写；工作区分组、会话行、会话菜单
     search/           新增：侧栏内的搜索框与结果列表（由 sidebar 挂载）
     settings/         新增（第二批）：设置弹窗与各分区
     session/          SessionScreen 继续组合对话视图；草稿态并入这里
     conversation/     不变（只改样式）
-    composer/         Composer 拆出 ComposerControls、ComposerInput 和项目选择器（见 05）
+    composer/         Composer 拆出 ComposerControls、ComposerInput 和工作区选择器（见 05）
     commands/         improve-1 换肤；improve-4 删除 Web 的 connect 浮层及入口
     permissions/      审批改为非模态 ApprovalPanel；权限控制移入输入框
     shared/           新增无业务依赖的基础组件
@@ -71,10 +71,10 @@ src/
 
 ```text
 全局层（不带目录头，token 鉴权）
-  ├── 项目列表 GET /v1/scopes（含 defaultWorkspace）
+  ├── 工作区列表 GET /v1/scopes（含 defaultDirectory）
   ├── 会话列表 GET /v1/sessions
   ├── 搜索     GET /v1/sessions/search
-  └── 改归属   POST /v1/sessions/:id/project
+  └── 改归属   POST /v1/sessions/:id/workspace
 
 实例层（带 x-ohbaby-directory，同一时间只连一个）
   └── 当前会话的执行目录 → client + SSE（沿用现有 BrowserDaemonClient）
@@ -82,9 +82,9 @@ src/
 
 - 侧栏和搜索只读全局层，不依赖某个实例。
 - 打开会话时，按服务端返回的执行目录（有待生效目录时优先用它）切换实例 client。旧 client 失效后再启用新的，沿用现有切换保证。
-- 草稿没有会话，但连着草稿目录（所选项目或默认目录）的一个新 client，这个 client 不绑定会话（2026-10-24 实施时调整，见 [improve-2 验收 §2](improve-2/05-implementation-acceptance.md)）。这样草稿里的权限、模型、思考强度控件和斜杠命令都按草稿目录工作；换项目就换一个新 client。第一次发送时直接发 prompt，由服务端在接纳时创建会话，前端再选中回执里的会话。需要已有会话的命令（如 `/compact`、`/goal`）在草稿里打开浮层说明原因，不静默失败。
+- 草稿没有会话，但连着草稿目录（所选工作区或默认目录）的一个新 client，这个 client 不绑定会话（2026-10-24 实施时调整，见 [improve-2 验收 §2](improve-2/05-implementation-acceptance.md)）。这样草稿里的权限、模型、思考强度控件和斜杠命令都按草稿目录工作；换工作区就换一个新 client。第一次发送时直接发 prompt，由服务端在接纳时创建会话，前端再选中回执里的会话。需要已有会话的命令（如 `/compact`、`/goal`）在草稿里打开浮层说明原因，不静默失败。
 - 收到“会话已移动”的错误时，由 runtime 统一处理：换到目标目录的 client，重发，并切换 SSE。UI 层不感知这件事。同一次发送最多自动重发 2 次，仍然失败就按普通发送失败处理（04 §2.2）。该会话还有进行中的一轮或待审批请求时不自动跟随，提示“这一轮结束后生效”；跟随期间用户打开了别的会话或草稿，也不跟随。
-- 已打开会话在运行中改项目时，保留当前执行目录的 client、SSE 和审批绑定直到本轮结束；只更新下一轮的请求目录。重新打开会话仍按 `globalSessionRequestDirectory` 取目录。归档、导出其他目录的会话使用短期 HTTP 请求，不切走当前对话的 SSE。
+- 已打开会话在运行中改工作区时，保留当前执行目录的 client、SSE 和审批绑定直到本轮结束；只更新下一轮的请求目录。重新打开会话仍按 `globalSessionRequestDirectory` 取目录。归档、导出其他目录的会话使用短期 HTTP 请求，不切走当前对话的 SSE。
 - `SESSION_MOVED` 只重放被明确拒绝的原请求，保留 `clientRequestId`、会话 ID 和冻结的正文，不把超时或未知提交结果当成移动重试。HTTP 层必须保留 `targetDirectory`，切换过程中继续用 generation 防止旧请求写回。
 - 设置页（第二批）按“当前会话的执行目录，或草稿所选目录，或默认目录”取实例。
 
@@ -103,12 +103,12 @@ shared 不反向依赖任何功能目录
 | 类型 | 内容 | 放在哪里 |
 |---|---|---|
 | URL（hash） | 当前会话 ID 和执行目录 | 沿用 `replaceNavigationHash`；设置是弹窗，不进 hash（D2） |
-| 服务端状态：全局 | 项目列表、会话列表（分页）、搜索结果 | store 新增的全局切片；REST 拉取，触发刷新的时机见 06 |
+| 服务端状态：全局 | 工作区列表、会话列表（分页）、搜索结果 | store 新增的全局切片；REST 拉取，触发刷新的时机见 06 |
 | 服务端状态：实例 | 当前会话的消息、运行状态、审批、模型、上下文用量 | 不变：SSE → eventReducer → store |
-| 浏览器本地 | 草稿文字和草稿所选项目；侧栏收起、项目分组折叠；置顶；设置上次停留的分区 | 草稿沿用 `draft-storage` 的 sessionStorage（按标签页隔离，刷新保留），但 key 改为不含目录（06 §3.5）；其余用 localStorage。置顶改为全局 key（06 §3.6）。读写都包 try/catch，读不到就用默认值 |
+| 浏览器本地 | 草稿文字和草稿所选工作区；侧栏收起、工作区分组折叠；置顶；设置上次停留的分区 | 草稿沿用 `draft-storage` 的 sessionStorage（按标签页隔离，刷新保留），但 key 改为不含目录（06 §3.5）；其余用 localStorage。置顶改为全局 key（06 §3.6）。读写都包 try/catch，读不到就用默认值 |
 | 组件局部 | 菜单开关、搜索框输入、hover | useState |
 
-规则：会话的项目归属、执行目录只认服务端返回的值，前端不自己推断。
+规则：会话的工作区归属、执行目录只认服务端返回的值，前端不自己推断。
 
 ## 5. 组件层级
 
@@ -116,13 +116,13 @@ shared 不反向依赖任何功能目录
 AppController（订阅 runtime、组合功能区）
 └── AppShell（通过区域插槽接收内容，布局不含业务）
     └── 功能区：Sidebar / SidebarSearch / SessionScreen / SettingsDialog
-    └── 组合组件：SessionRow、ProjectGroup、ComposerControls、ProjectPicker …
+    └── 组合组件：SessionRow、WorkspaceGroup、ComposerControls、WorkspacePicker …
         └── 基础组件：IconButton、Menu（照 pi-web 自写）、Spinner、Kbd …
 ```
 
 - AppShell 只管区域划分、收起和窄屏抽屉，不知道“会话”是什么。
 - AppController 负责目录选择和侧栏/设置/对话的接线；断开提示由控制层提供给外壳。草稿没有实例 client 属于正常状态，不能因此显示断开。
-- 基础组件不认识业务概念。比如 `Menu` 不知道 Project 菜单，Project 菜单由 sidebar 组合出来。
+- 基础组件不认识业务概念。比如 `Menu` 不知道 Workspace 菜单，Workspace 菜单由 sidebar 组合出来。
 - 具体清单与契约见 05。
 
 ## 6. 错误处理
@@ -130,10 +130,10 @@ AppController（订阅 runtime、组合功能区）
 | 错误 | 在哪处理 | 怎么显示 |
 |---|---|---|
 | 发送或创建会话失败 | Composer | 输入框上方一行提示，保留文字，可再次发送 |
-| 会话加载失败、执行目录不可用 | SessionScreen | 主区内显示原因，带“重试”或“换项目”的引导 |
+| 会话加载失败、执行目录不可用 | SessionScreen | 主区内显示原因，带“重试”或“换工作区”的引导 |
 | 侧栏列表加载失败 | Sidebar | 列表位置显示一行错误和“重试”，不影响主区 |
 | 搜索失败 | SidebarSearch | 结果区提示，保留关键词 |
-| 改项目归属失败 | Sidebar | 侧栏不变，在对话区右上角显示通知（03 §4.8） |
+| 改工作区归属失败 | Sidebar | 侧栏不变，在对话区右上角显示通知（03 §4.8） |
 | 会话已移动 | runtime | 自动换目录重发，不显示 |
 | daemon 断开 | AppShell | 主区顶部一条提示，恢复后消失；常态不显示连接状态 |
 | 设置分区读取失败（第二批） | SettingsDialog | 只有该分区显示错误和“重试” |

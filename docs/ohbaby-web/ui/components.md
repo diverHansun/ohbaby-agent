@@ -10,8 +10,8 @@
 
 | 功能 | 当前实现落点 | 状态边界 |
 | --- | --- | --- |
-| 项目目录选择 | `composer/ProjectPicker.tsx`、`workspace/directory-picker/DirectoryPickerDialog.tsx` | workspace 数据与导航由 runtime 提供 |
-| 全局会话侧栏 / 菜单 | `sidebar/Sidebar.tsx`、`SessionMenu.tsx`、`ProjectMenu.tsx` | 接收全局目录、运行状态及动作，菜单复用 `shared/Menu` |
+| 工作区目录选择 | `composer/WorkspacePicker.tsx`、`workspace/directory-picker/DirectoryPickerDialog.tsx` | workspace 数据与导航由 runtime 提供 |
+| 全局会话侧栏 / 菜单 | `sidebar/Sidebar.tsx`、`SessionMenu.tsx`、`WorkspaceMenu.tsx` | 接收全局目录、运行状态及动作，菜单复用 `shared/Menu` |
 | 侧栏全局搜索 | `search/SidebarSearch.tsx`、`useSessionSearch.ts` | hook 独占查询并发与分页；AppController 仅持有打开状态、聚焦请求 |
 | 消息 / 工具 / 计时 / TodoDock | `conversation/ConversationStream.tsx`、`MessageRow.tsx`、`tool-card.tsx`、`ExecutionProgress.tsx`、`TodoDock.tsx` | 消息事实只读；根消息局部状态留在 conversation，子会话阅读缓存由根会话持有 |
 | 输入 / 队列编辑 / reasoning | `composer/Composer.tsx`、`draft-storage.ts`、`ReasoningControl.tsx` | 唯一草稿、租约生命周期和键盘链 |
@@ -25,7 +25,7 @@ Composer 通过 `topContent` 接收 SessionScreen 装配的 TodoDock，通过 `p
 
 ## 0. Sidebar / SessionMenu / SidebarSearch
 
-侧栏按 Pinned、Projects、No project 分组，置顶按服务端地址保存。会话行尾的 … 与右键打开同一个菜单，一级为 Pin / Unpin、Move to project…、Export…、Archive。项目与格式在原位置切换二级列表；项目多于 8 个时显示过滤框。移动中行内显示 spinner，成功后更新归属，失败保留原行并显示错误通知。
+侧栏依次是 Pinned、各工作区分组，以及底部不能折叠的 Recents（无工作区会话，按时间倒序，和工作区标题左对齐）；空工作区显示 `No chats`。置顶按服务端地址保存。会话行尾的 … 与右键打开同一个菜单，一级为 Pin / Unpin、Move to workspace…、Export…、Archive。工作区与格式在原位置切换二级列表；工作区多于 8 个时显示过滤框。移动中行内显示 spinner，成功后更新归属，失败保留原行并显示错误通知。
 
 Search 在侧栏内展开，非空查询结果替换会话树。250ms 防抖、取消旧请求；标题命中在前，正文片段为纯文本并限制两行。Cmd/Ctrl+K 打开或重新聚焦搜索；Escape 关闭当前层，输入法合成期间不拦截选字键。手机菜单复用贴底面板，菜单项高 48px。细节及验证见 [improve-3 验收](../redesign-2026-10/improve-3/05-implementation-acceptance.md)。
 

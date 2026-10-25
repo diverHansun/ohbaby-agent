@@ -6,7 +6,7 @@
 
 | 层级 | 放在哪里 | 判定 |
 |---|---|---|
-| 基础组件 | `ui/shared/` | 不认识会话、项目这些概念，换个产品也能用 |
+| 基础组件 | `ui/shared/` | 不认识会话、工作区这些概念，换个产品也能用 |
 | 组合组件 | 各功能目录 | 为某个场景组合基础组件 |
 | 功能区 | `ui/shell`、`ui/sidebar`、`ui/search`、`ui/session`、`ui/settings` | 从 store 取数据、调用 runtime |
 
@@ -25,13 +25,13 @@
 | `AppController` | 功能区 | runtime 接线、视图切换、目录选择，向外壳提供区域内容 | `ui/shell/` | 新增 |
 | `AppShell` | 组合 | 侧栏 + 主区布局、收起、窄屏抽屉 | `ui/shell/` | 新增 |
 | `Sidebar` | 功能区 | 顶栏、会话树或搜索结果、底部设置入口 | `ui/sidebar/` | 改写自 `SessionSidebar` |
-| `ProjectGroup` | 组合 | 项目分组标题、折叠、Show more | `ui/sidebar/` | 新增 |
+| `WorkspaceGroup` | 组合 | 工作区分组标题、折叠、Show more | `ui/sidebar/` | 新增 |
 | `SessionRow` | 组合 | 会话行 | `ui/sidebar/` | 改写 |
-| `SessionMenu` | 组合 | 会话菜单与项目列表两级视图 | `ui/sidebar/` | 改写自 `SessionActionsMenu` |
+| `SessionMenu` | 组合 | 会话菜单与工作区列表两级视图 | `ui/sidebar/` | 改写自 `SessionActionsMenu` |
 | `SidebarSearch` | 功能区 | 搜索框、结果列表、分页 | `ui/search/` | 新增 |
 | `MainHeader` | 组合 | 主区顶栏：侧栏开关、标题、目录、上下文用量 | `ui/shell/` | 改写自 `SessionStatus` 的顶栏部分 |
-| `DraftHero` | 组合 | 草稿态的 Lychee 标识 + 项目选择条 | `ui/session/` | 改写自空态 hero |
-| `ProjectPicker` | 组合 | 草稿里的项目选择条和下拉 | `ui/composer/` | 新增 |
+| `DraftHero` | 组合 | 草稿态的 Lychee 标识 + 工作区选择条 | `ui/session/` | 改写自空态 hero |
+| `WorkspacePicker` | 组合 | 草稿里的工作区选择条和下拉 | `ui/composer/` | 新增 |
 | `ComposerControls` | 组合 | 输入卡片内底部的控制行 | `ui/composer/` | 从 `Composer` 拆出 |
 | `ApprovalPanel` | 组合 | 消息区内的审批浮层 | `ui/permissions/` | 改写自 `PermissionModal` |
 | `SettingsDialog` | 功能区 | 设置弹窗：分区导航 + 分区内容 + 编辑子页切换，不进 URL（第二批，D2） | `ui/settings/` | 新增 |
@@ -53,7 +53,7 @@
 ### Menu
 
 - **Purpose**：所有弹出菜单的唯一实现，照 pi-web `SidebarMenu.tsx`。
-- **Use when**：会话菜单、项目菜单、项目选择下拉、控制行里的模型 / 思考强度 / 权限模式选择。
+- **Use when**：会话菜单、工作区菜单、工作区选择下拉、控制行里的模型 / 思考强度 / 权限模式选择。
 - **Do not use when**：需要用户填写多个字段（用现有模态）；审批（用 `ApprovalPanel`）。
 - **Anatomy**：可选的过滤框 / 条目（图标、文字、右侧快捷键或勾选）/ 分隔线 / 小标题。
 - **States**：见 04 §1。
@@ -84,24 +84,24 @@
 
 ### SessionMenu
 
-- **Purpose**：会话的置顶、移动项目、导出、归档。
-- **Anatomy**：第一级 `Pin/Unpin`、`Move to project…`、`Export…`、分隔线、`Archive`；第二级是项目列表加 `Remove from project`，或导出格式 `HTML`、`JSONL`。
-- **States**：main、projects、export、submitting。
+- **Purpose**：会话的置顶、移动工作区、导出、归档。
+- **Anatomy**：第一级 `Pin/Unpin`、`Move to workspace…`、`Export…`、分隔线、`Archive`；第二级是工作区列表加 `Remove from workspace`，或导出格式 `HTML`、`JSONL`。
+- **States**：main、workspaces、export、submitting。
 - **API**：
   - `session: SidebarSessionItem`
-  - `projects: readonly SidebarProject[]`
-  - `onTogglePin()`、`onArchive()`、`onMove(projectDirectory: string | null)`、`onExport(format)`、`onClose()`
+  - `workspaces: readonly SidebarWorkspace[]`
+  - `onTogglePin()`、`onArchive()`、`onMove(workspaceDirectory: string | null)`、`onExport(format)`、`onClose()`
 - **Accessibility**：第二级里按 Esc 回到第一级，再按一次关闭。
 
-### ProjectPicker
+### WorkspacePicker
 
-- **Purpose**：在草稿里选择项目。会话发出后不再使用。
+- **Purpose**：在草稿里选择工作区。会话发出后不再使用。
 - **Use when**：草稿态，输入框上方。
-- **Do not use when**：已有会话换项目（用 `SessionMenu`）。
-- **States**：no-project、selected、open。
+- **Do not use when**：已有会话换工作区（用 `SessionMenu`）。
+- **States**：no-workspace、selected、open。
 - **API**：
-  - `value: string | null`（项目目录，`null` 表示 No project）
-  - `projects: readonly SidebarProject[]`
+  - `value: string | null`（工作区目录，`null` 表示 No workspace）
+  - `workspaces: readonly SidebarWorkspace[]`
   - `onChange(directory: string | null)`、`onOpenFolder()`
 - **行为**：选择或更换都不影响输入框文字。
 
@@ -151,7 +151,7 @@
 
 以下是“模式”，由多个组件组合实现，不做成一个大组件：
 
-- **草稿首发**：`DraftHero` + `ProjectPicker` + `Composer`，由 `SessionScreen` 组合。
+- **草稿首发**：`DraftHero` + `WorkspacePicker` + `Composer`，由 `SessionScreen` 组合。
 - **侧栏搜索切换**：`Sidebar` 根据搜索框是否有内容，在会话树和 `SidebarSearch` 之间切换。
 - **撤销提示**：不做。服务端没有取消归档的接口；归档后行直接消失，不另外提示（D16）。
 - **列表加编辑子页**：`ModelsSection` + `ModelEditor` 由设置弹窗按内存里的状态切换，不进 URL；编辑子页返回所属列表，× 或 Esc 关闭整个弹窗。

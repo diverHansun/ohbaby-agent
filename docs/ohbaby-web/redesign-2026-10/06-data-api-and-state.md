@@ -8,12 +8,12 @@
 
 | 接口 | 谁用 | 怎么用 |
 |---|---|---|
-| `GET /v1/scopes` | Sidebar（项目分组）、ProjectPicker、SessionMenu 的项目列表 | 服务端已返回 `defaultWorkspace.directory` 和可见项目列表（隐藏项目已过滤，默认目录不在其中），按服务端顺序显示。Web 的 `WorkspaceScopesResponse` 类型还没有 `defaultWorkspace`，要补上 |
-| `POST /v1/scopes/open` | 打开文件夹 | 成功后刷新项目列表；从草稿打开时，草稿选中新项目 |
-| `POST /v1/scopes/hide` | 项目菜单 › Hide project | 成功后刷新项目和会话列表，清除该项目已缓存的侧栏行；主区正在看的会话保持打开 |
-| `GET /v1/sessions?limit&cursor` | Sidebar 会话树 | 一页 100 条，跨所有项目，按更新时间倒序；前端按 `projectDirectory` 分组 |
+| `GET /v1/scopes` | Sidebar（工作区分组）、WorkspacePicker、SessionMenu 的工作区列表 | 服务端已返回 `defaultDirectory.directory` 和可见工作区列表（隐藏工作区已过滤，默认目录不在其中），按服务端顺序显示。Web 的 `WorkspaceScopesResponse` 类型还没有 `defaultDirectory`，要补上 |
+| `POST /v1/scopes/open` | 打开文件夹 | 成功后刷新工作区列表；从草稿打开时，草稿选中新工作区 |
+| `POST /v1/scopes/hide` | 工作区菜单 › Hide workspace | 成功后刷新工作区和会话列表，清除该工作区已缓存的侧栏行；主区正在看的会话保持打开 |
+| `GET /v1/sessions?limit&cursor` | Sidebar 会话树 | 一页 100 条，跨所有工作区，按更新时间倒序；前端按 `workspaceDirectory` 分组 |
 | `GET /v1/sessions/search?q&limit&cursor` | SidebarSearch | 直接渲染结果；分页用 `nextCursor` |
-| `POST /v1/sessions/:id/project` | SessionMenu › Move to project / Remove from project | 成功后用返回的会话信息替换列表里这一项；当前打开的会话只更新缓存的请求目录，顶栏在下一轮开始后更新 |
+| `POST /v1/sessions/:id/workspace` | SessionMenu › Move to workspace / Remove from workspace | 成功后用返回的会话信息替换列表里这一项；当前打开的会话只更新缓存的请求目录，顶栏在下一轮开始后更新 |
 
 SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工作区议题 improve-1 的 05 记录）。本次在 Web 的 `api/daemon/global-sessions.ts` 实现调用、复用 SDK 类型，与 improve-2 的改动面一致；不为这次改版另造一套 SDK HTTP 客户端。
 
@@ -24,7 +24,7 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 | 接口 | 谁用 | 说明 |
 |---|---|---|
 | `/v1/sessions/:id/view`、`/history`、SSE `/v1/events` | SessionScreen | 不变。目录取 `globalSessionRequestDirectory(session)`（有待生效目录时用它） |
-| `POST /v1/prompts` | 草稿首发 | 草稿 client 连在草稿所选项目，没有选就连 `defaultWorkspace.directory`；不带会话 ID 发送，服务端接纳时创建会话（improve-2 调整，不再先调 `POST /v1/sessions`） |
+| `POST /v1/prompts` | 草稿首发 | 草稿 client 连在草稿所选工作区，没有选就连 `defaultDirectory.directory`；不带会话 ID 发送，服务端接纳时创建会话（improve-2 调整，不再先调 `POST /v1/sessions`） |
 | `/v1/sessions/:id/archive`、`/export` | SessionMenu | 目录取该会话的执行目录；操作其他目录的会话不能切换当前 SSE 或覆盖当前选择 |
 | `GET /v1/model` | 实例模型状态、ReasoningControl | improve-4 继续保留；`BrowserDaemonClient.refreshModel` 和 `model.invalidated` 仍依赖它 |
 | `POST /v1/model`、`/v1/settings/search-api-key` | 第一批的 `/connect` 浮层 | improve-4 移除 Web 写调用，改走全局设置接口；服务端旧接口保留给 TUI |
@@ -66,7 +66,7 @@ MCP 只读（D25）：Web 不调用 MCP 配置 PUT / DELETE 或 `POST /v1/settin
 ### 2.1 侧栏
 
 ```typescript
-interface SidebarProject {
+interface SidebarWorkspace {
   directory: string;          // 身份
   name: string;               // 根目录名
 }
@@ -74,7 +74,7 @@ interface SidebarProject {
 interface SidebarSessionItem {
   id: string;
   title: string;
-  projectDirectory: string | null;   // 分组依据
+  workspaceDirectory: string | null;   // 分组依据
   workingDirectory: string;          // 当前轮执行目录；顶栏、当前流与审批沿用它
   requestDirectory: string;          // 重新打开和下一轮请求用：待生效目录优先
   updatedAt: string;                 // 显示为相对时间
@@ -84,16 +84,16 @@ interface SidebarSessionItem {
 
 interface SidebarGroups {
   pinned: SidebarSessionItem[];
-  projects: { project: SidebarProject; sessions: SidebarSessionItem[]; visibleCount: number }[];
-  noProject: SidebarSessionItem[];
+  workspaces: { workspace: SidebarWorkspace; sessions: SidebarSessionItem[]; visibleCount: number }[];
+  recents: SidebarSessionItem[];
 }
 ```
 
 规则：
 
-- 分组只看 `projectDirectory`。`null` 进 No project；工作目录是什么不影响分组（improve-1：无项目不等于默认目录）。
-- 隐藏项目的会话由服务端从列表里排除（improve-1 T8），前端不做隐藏过滤。
-- `projectDirectory` 不在项目列表里（比如 TUI 刚建的目录还没登记，或项目列表读取失败）时，用目录名临时建一个分组，不丢会话。
+- 分组只看 `workspaceDirectory`。`null` 进侧栏底部的 Recents；工作目录是什么不影响分组（improve-1：无工作区不等于默认目录）。
+- 隐藏工作区的会话由服务端从列表里排除（improve-1 T8），前端不做隐藏过滤。
+- `workspaceDirectory` 不在工作区列表里（比如 TUI 刚建的目录还没登记，或工作区列表读取失败）时，用目录名临时建一个分组，不丢会话。
 - 置顶的会话只在 Pinned 区出现，不在原分组里重复出现（沿用现有做法）。
 
 ### 2.2 设置
@@ -159,23 +159,23 @@ interface McpServerRow {
 
 ### 3.1 列表加载与分页
 
-- 首次加载拉第一页（100 条）和项目列表。
-- 每个分组先显示 6 条，Pinned 先显示 8 条（03 §4.4）。点 `Show more` 先展开已经加载的部分；不够 20 条并且全局还有 `nextCursor` 时，继续串行翻页，直到该组凑够、游标耗尽或用户取消。全局游标未耗尽时，空项目组和尚未加载到条目的 Pinned 区也要保留加载入口，不能因为当前页中没有该组数据就永远无法加载。
+- 首次加载拉第一页（100 条）和工作区列表。
+- 每个分组先显示 6 条，Pinned 先显示 8 条（03 §4.4）。点 `Show more` 先展开已经加载的部分；不够 20 条并且全局还有 `nextCursor` 时，继续串行翻页，直到该组凑够、游标耗尽或用户取消。全局游标未耗尽时，空工作区分组和尚未加载到条目的 Pinned 区也要保留加载入口，不能因为当前页中没有该组数据就永远无法加载。
 - 接口不返回每组总数。分组计数只表示已加载条数，`Show more · N` 的 N 也只表示已加载但折叠的条数；还有未知页时用 `Show more`，不伪造总数。
-- 服务端没有按项目过滤的接口，所以一个不常用项目的旧会话，可能要多拉几页才会出现。这一版接受这个代价：找旧会话可以直接搜索，搜索覆盖全部历史。如果以后发现明显不够用，再给 `GET /v1/sessions` 加项目过滤参数。
+- 服务端没有按工作区过滤的接口，所以一个不常用工作区的旧会话，可能要多拉几页才会出现。这一版接受这个代价：找旧会话可以直接搜索，搜索覆盖全部历史。如果以后发现明显不够用，再给 `GET /v1/sessions` 加工作区过滤参数。
 
 ### 3.2 什么时候刷新
 
 | 时机 | 做法 |
 |---|---|
-| 创建会话、改归属、归档、隐藏项目 | 用接口返回值或已知结果原地更新，再重新校验已加载范围 |
+| 创建会话、改归属、归档、隐藏工作区 | 用接口返回值或已知结果原地更新，再重新校验已加载范围 |
 | 当前实例 SSE 报告会话标题或状态变化 | 原地更新这一项 |
-| 窗口重新激活、SSE 重连 | 重新拉项目列表，从首页串行重取至少先前已加载的条数；使用本轮返回的新游标。完整成功后按 ID 去重并替换已加载范围，保留分组展开数量与滚动位置 |
+| 窗口重新激活、SSE 重连 | 重新拉工作区列表，从首页串行重取至少先前已加载的条数；使用本轮返回的新游标。完整成功后按 ID 去重并替换已加载范围，保留分组展开数量与滚动位置 |
 | 打开搜索 | 不预加载；输入后防抖 250ms 再请求 |
 
 刷新失败时保留旧数据，不提示；只有完全没有数据时才显示原因和 Retry（04 §2.3）。
 
-刷新期间不清空屏幕，但完成后不能只把新首页与旧页做永久并集，否则别处归档、隐藏或换项目的旧行不会移除。若刷新过程中本窗口有写操作，以操作后的新一轮刷新收敛，旧响应不得覆盖已确认的操作。
+刷新期间不清空屏幕，但完成后不能只把新首页与旧页做永久并集，否则别处归档、隐藏或换工作区的旧行不会移除。若刷新过程中本窗口有写操作，以操作后的新一轮刷新收敛，旧响应不得覆盖已确认的操作。
 
 ### 3.3 并发与乱序
 
@@ -196,9 +196,9 @@ interface McpServerRow {
 ### 3.5 草稿
 
 - 存储：沿用 `draft-storage` 的 sessionStorage（按标签页隔离，刷新保留）。
-- key：现在的草稿 key 含 `selectedDirectory` 和会话 ID（`SessionScreen.tsx` 的 `draftScopeKey`），换项目会换 key、读不到原文字。改为：草稿用固定的 `new`，已有会话用会话 ID，都不含目录。
-- 所选项目：和草稿文字放在一起，只保存目录。打开页面时，如果该目录已不在项目列表里，就回到 No project。
-- 点“New chat”总是从 No project 开始，并清空上一份草稿的项目选择，不沿用旧的 `selectedDirectory`（improve-1 T19）。从项目分组的 `[+]` 进入时预选该项目。
+- key：现在的草稿 key 含 `selectedDirectory` 和会话 ID（`SessionScreen.tsx` 的 `draftScopeKey`），换工作区会换 key、读不到原文字。改为：草稿用固定的 `new`，已有会话用会话 ID，都不含目录。
+- 所选工作区：和草稿文字放在一起，只保存目录。打开页面时，如果该目录已不在工作区列表里，就回到 No workspace。
+- 点“New chat”总是从 No workspace 开始，并清空上一份草稿的工作区选择，不沿用旧的 `selectedDirectory`（improve-1 T19）。从工作区分组的 `[+]` 进入时预选该工作区。
 - 第一次发送成功后，`new` 草稿清空。
 - 草稿连着草稿目录的实例，模型是否配置沿用实例的 `GET /v1/model`；读取失败时不当成未配置。`GET /v1/settings/models` 的客户端随 improve-4 的设置页一起做（improve-2 调整）。
 - 首发一步完成：在不绑定会话的实例里发 prompt，服务端接纳时创建会话。被明确拒绝时不留下会话，超时走现有未知结果恢复，不盲目重发；保留 `clientRequestId` 和冻结正文规则。请求期间用户切到其他草稿/会话时，晚到的结果不得抢回选择或清空新输入。
@@ -215,7 +215,7 @@ interface McpServerRow {
 - **读取**：进入某个分区时读取该分区的数据，不预加载其他分区。模型列表在 store 里缓存，ModelMenu 打开时如果缓存超过 30 秒就重新读取。
 - **写入**：模型和搜索设置等服务端返回后再更新，不做乐观更新；写接口返回的结果直接替换缓存。MCP 没有写入流程。
 - **别处的改动**：当前实例的 SSE 收到 `settings.changed` 时，按 `domains` 让对应缓存失效；当前在看的分区立即重新读取。编辑子页有未保存的输入时只刷新只读区，不覆盖输入。`model.invalidated` 同样让模型缓存失效。
-- **实例层用哪个目录**：打开设置前所在会话的请求目录（有待生效目录时用它）；在草稿里用所选项目，没选用 `defaultWorkspace.directory`。目录只用于请求，页面上不显示。
+- **实例层用哪个目录**：打开设置前所在会话的请求目录（有待生效目录时用它）；在草稿里用所选工作区，没选用 `defaultDirectory.directory`。目录只用于请求，页面上不显示。
 - **设置分区记忆**：上次停留的分区存在 localStorage，刷新页面后第一次打开用它。同一次页面内，关闭弹窗只是隐藏，再打开时分区、编辑子页和未保存输入原样恢复（D2、04 §2.6）；编辑子页不写进 localStorage。
 - **从草稿跳来再回去**：草稿点发送发现没有模型时，打开设置弹窗并直接进入 Models（覆盖弹窗之前停留的位置，手机上也直接进 Models），同时在内存里记一个“来自草稿发送”标记。标记还在时，只要默认模型从无变有（D20 自动设为默认，或手动 Set as default），就关闭弹窗，下面就是原来的草稿，文字还在。用户自己关闭弹窗时清除标记。“没有模型”的判断沿用现有的 `GET /v1/model`（`SessionScreen` 的 `modelMissing`），读取失败不算没有模型。
 - **不能只靠 `settings.changed`**：草稿态连着草稿目录的实例，能收到该实例的事件；但 agent 直接改配置文件、或改动发生在别的进程时，不一定有事件。所以除了事件，每次进入分区、窗口重新激活时也重新读取当前分区。
@@ -227,12 +227,12 @@ interface McpServerRow {
 | 错误 | 来源 | 界面表现（04） |
 |---|---|---|
 | `SESSION_MOVED` | 实例层，发送或续跑时 | runtime 换到返回的目标目录重发并切换 SSE，不提示；同一次发送最多重发 2 次，仍失败按发送失败处理（04 §2.2） |
-| 执行目录不存在或不可读 | 实例层，打开会话时 | 消息区原因 + `Move to project…`（04 §2.2） |
+| 执行目录不存在或不可读 | 实例层，打开会话时 | 消息区原因 + `Move to workspace…`（04 §2.2） |
 | 模型未配置 | 第一批：`/v1/model` 返回空；第二批：`GET /v1/settings/models` 的 `active` 为 `null` | 点发送时打开配置入口，不提前提示（04 §2.1） |
 | `VALIDATION_FAILED`（需后端补，§1.3） | 设置写接口 | 按 `fields[].path` 写在对应输入框下；找不到对应字段时写在 Save 旁 |
 | `MODEL_NOT_FOUND` | 模型写接口 | 条目已被别处删除：回到列表并刷新，不另外提示 |
 | `MODEL_CONFIG_INCOMPLETE` | 设为默认 | 打开该条目的编辑子页（04 §2.6） |
-| 改归属失败（目标项目无效等） | 全局层 | 行留在原处 + 右上角错误通知（04 §2.5） |
+| 改归属失败（目标工作区无效等） | 全局层 | 行留在原处 + 右上角错误通知（04 §2.5） |
 | `INVALID_QUERY` | 搜索、列表 | 按未知错误处理（前端不会构造非法参数，出现就是 bug） |
 | 401 token 失效 | 任意 | 沿用现有处理 |
 | 网络断开 / daemon 停止 | 任意 | 对话区顶部断开提示，自动重连（04 §2.1） |
@@ -248,15 +248,15 @@ interface McpServerRow {
 
 | 场景 | 内容 | 对应 | 优先级 |
 |---|---|---|---|
-| `fresh` | 无项目、无会话、模型已配置 | 04 §2.3 全新用户，UC-DRAFT-01 | 先做 |
-| `typical` | 3 个项目（其中一个 30 条会话）、5 条无项目会话、2 条置顶 | UC-SIDEBAR-01/02，侧栏和菜单走查 | 先做 |
+| `fresh` | 无工作区、无会话、模型已配置 | 04 §2.3 全新用户，UC-DRAFT-01 | 先做 |
+| `typical` | 3 个工作区（其中一个 30 条会话）、5 条无工作区会话、2 条置顶 | UC-SIDEBAR-01/02，侧栏和菜单走查 | 先做 |
 | `running` | 当前会话运行中，含工具调用和插话；可切换为等待审批 | UC-CHAT-01，审批浮层 | 先做 |
-| `pending-move` | 当前会话运行中且已换项目，待下一轮生效 | UC-PROJECT-01 | 先做 |
+| `pending-move` | 当前会话运行中且已换工作区，待下一轮生效 | UC-PROJECT-01 | 先做 |
 | `no-model` | 模型未配置 | 04 §2.1 | 按需 |
 | `settings` | 3 个 provider、6 个模型（其中一个 Needs setup、一个是默认）；3 台 MCP 服务器（已连接、失败、停用）；若干全局 Skills；搜索已配置 key | UC-SETTINGS-02 至 05 | 第二批先做 |
 | `settings-empty` | 没有模型、没有 MCP 服务器、搜索未配置 | 04 §2.6 空态 | 第二批先做 |
 | `settings-errors` | 模型/搜索保存返回 `VALIDATION_FAILED`（4a 先做）；MCP 配置或状态读取失败（4b 补上） | 04 §2.6、§4 | 第二批先做 |
-| `many` | 600 条会话，跨 4 个项目，多页 | 分页、Show more | 按需 |
+| `many` | 600 条会话，跨 4 个工作区，多页 | 分页、Show more | 按需 |
 | `missing-dir` | 当前会话的执行目录不存在 | 04 §2.2 | 按需 |
 | `search` | 标题命中、正文命中、无结果三种关键词 | UC-SEARCH-01 | 按需 |
 | `errors` | 列表、搜索、改归属接口返回错误 | 04 各错误行 | 按需 |

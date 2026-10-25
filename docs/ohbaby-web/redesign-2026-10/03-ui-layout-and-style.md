@@ -11,7 +11,7 @@
 | 内容是主角 | 助手回复是直接排在页面上的文字，没有底色和边框 | 每条消息都放在一张卡片里 |
 | 平，不套 | 没有卡片里再放卡片、按钮外再套一圈边框；工具栏按钮都是无边框的文字按钮，hover 才有底色 | 设置页每项一张卡片，卡片里又是一个带边框的按钮组 |
 | 常态安静，异常明确 | 正常时看不到连接状态、端口、版本；出问题时有一条写清原因的提示 | 顶栏常驻绿色的“已连接” |
-| 少提示（D16） | 只在操作失败或用户没法继续时出现提示；操作成功、状态切换、“下一轮生效”这类信息不额外说明，由界面本身的变化体现 | 保存后弹 `Saved`；换项目后提示“下一轮在新目录运行”；归档后弹 `Chat archived` |
+| 少提示（D16） | 只在操作失败或用户没法继续时出现提示；操作成功、状态切换、“下一轮生效”这类信息不额外说明，由界面本身的变化体现 | 保存后弹 `Saved`；换工作区后提示“下一轮在新目录运行”；归档后弹 `Chat archived` |
 | 品牌只在字标和 Lychee 标识 | 除了“oh/ba/by”字标和空状态的荔枝图标，界面上找不到金、粉、蓝、红这些品牌色 | 发送按钮用品牌蓝 |
 | 一个强调色，用得很少 | 强调色（近黑）只出现在发送按钮、当前会话左侧竖条、运行中转圈和焦点上 | 链接、标签、图标都是强调色 |
 | 状态不只靠颜色 | 运行中有转圈，等待审批有圆点加提示，错误有文字 | 只用红点、绿点区分状态 |
@@ -23,7 +23,7 @@
 
 | 来源 | 借什么 | 标志性特征（验收时逐条核对） |
 |---|---|---|
-| Claude 桌面端截图 | 配色和侧栏 | 主区接近中性的白，侧栏浅灰略深一档；侧栏是入口加按项目分组的单行会话，分组标题小而淡；输入框下方没有花哨元素 |
+| Claude 桌面端截图 | 配色和侧栏 | 主区接近中性的白，侧栏浅灰略深一档；侧栏是入口加按工作区分组的单行会话，分组标题小而淡；输入框下方没有花哨元素 |
 | Codex 桌面端截图 | 玻璃质感、输入框 | 侧栏半透明，透出背后的底色；输入框卡片上方是项目和环境选择，卡片里底部一行放模型和发送 |
 | Cursor 桌面端截图 | 空状态和行尾信息 | 空状态是一组居中的选择器加输入框；会话行尾是淡色相对时间；发送是深色圆形按钮 |
 | pi-web（代码来源） | 侧栏、会话树、菜单、消息、通知的结构和尺寸 | 侧栏顶部和主区顶部是同高（36px）的一条，底线连在一起；会话行 28px、12px 字 |
@@ -43,7 +43,7 @@
 - 其他地方都不出现（启动失败页除外，那里没有侧栏）。思考中的指示不再用三色波点
 
 **Lychee 标识**（D26）：agent 的名字叫 Lychee，用单色线性荔枝图标（圆形果实、几道鳞纹、一片叶子），颜色 `--brand-lychee`，描边风格和 lucide 一致：
-- 空状态，项目选择条上方，约 56px（D31）
+- 空状态，工作区选择条上方，约 56px（D31）
 - favicon 用同一图形，加粗描边、减少鳞纹，保证 16px 下能认出
 - 其他地方都不出现，消息旁也不加
 
@@ -131,20 +131,20 @@
 |                             |                                                  |
 | v ohbaby-agent              |                    (lychee)                      |  <- Lychee 标识，约 56px
 |     Refactor runtime     3h |                                                  |
-|     Sidebar redesign     1d |    [folder] No project v                         |  <- 项目选择条，在输入框卡片正上方
+|     Sidebar redesign     1d |    [folder] No workspace v                       |  <- 工作区选择条，在输入框卡片正上方
 |     Show more · 12          |    +--------------------------------------------+|
 | > open-img-gen              |    | Ask anything...                            ||  <- 玻璃卡片
 |                             |    | [Ask v]            [gpt-5 v] [Med v] (^) ||  <- 卡片底部一行：左权限；右模型、思考强度、圆形发送
-| v No project                |    +--------------------------------------------+|
-|     Quick question       5m |                                                  |
+|   Recents                   |    +--------------------------------------------+|
+|   Quick question         5m |                                                  |
 |                             |                                                  |
 |-----------------------------|                                                  |
 | [gear] Settings             |                                                  |
 +-----------------------------+--------------------------------------------------+
 ```
 
-- Lychee 标识、项目选择条和输入框卡片是一组，整体在主区大致垂直居中（D23，照 Cursor）。没有标语，没有问候语，没有示例卡片。
-- 项目选择条（照 pi-web `.new-session-context`）：文件夹图标 + 等宽字体的项目名 + 下拉箭头，无边框，hover 才有底色。选项：No project、已有项目、Open folder…。
+- Lychee 标识、工作区选择条和输入框卡片是一组，整体在主区大致垂直居中（D23，照 Cursor）。没有标语，没有问候语，没有示例卡片。
+- 工作区选择条（照 pi-web `.new-session-context`）：文件夹图标 + 等宽字体的工作区名 + 下拉箭头，无边框，hover 才有底色。选项：No workspace、已有工作区、Open folder…。
 
 ### 4.3 会话态
 
@@ -155,8 +155,8 @@
 | v ohbaby-agent              |                                                  |
 | |   Refactor runtime     (o)|                    +----------------------------+|  <- 用户消息：右对齐，浅灰底
 |     Sidebar redesign     1d |                    | Split the runtime into ... ||
-| v No project                |                    +----------------------------+|
-|     Quick question       5m |  Sure. I'll start by reading runtime.ts.         |  <- 助手：纯文字
+|   Recents                   |                    +----------------------------+|
+|   Quick question         5m |  Sure. I'll start by reading runtime.ts.         |  <- 助手：纯文字
 |                             |  > 6 tool calls · 12s                            |  <- 过程折叠组
 |                             |  The facade now owns two layers...               |
 |                             |                                                  |
@@ -196,37 +196,37 @@
 |     Fix login bug        2d |
 |                             |
 | PROJECTS               [+]  |   [+] = Open folder…
-| v ohbaby-agent      [+][..] |   hover：[+] 在该项目新建对话，[..] 项目菜单
+| v ohbaby-agent      [+][..] |   hover：[+] 在该工作区新建对话，[..] 工作区菜单
 | |   Refactor runtime     (o)|   当前会话：左侧竖条 + 选中底色
 |     Sidebar redes  [a][..]  |   hover：时间换成 归档[a] 和 菜单[..]
 |     Show more · 12          |   每组先显示 6 条，Pinned 8 条，每点一次多 20 条
-| > open-img-gen              |   折叠的项目，不显示会话数（D30）
+| > open-img-gen              |   折叠的工作区，不显示会话数（D30）
 |                             |
 | v NO PROJECT                |
-|     Quick question       5m |
+|   Quick question         5m |
 |                             |
 |-----------------------------|
 | [gear] Settings             |   底部固定，整行按钮，32px 高
 +-----------------------------+
 ```
 
-会话菜单和移动项目（照 pi-web `SidebarMenu.tsx`，没有二级子菜单）：
+会话菜单和移动工作区（照 pi-web `SidebarMenu.tsx`，没有二级子菜单）：
 
 ```
-会话菜单 [..]              点 Move to project… 后，原位置换成项目列表
+会话菜单 [..]              点 Move to workspace… 后，原位置换成工作区列表
 +------------------------+  +-----------------------------+
-| Pin                  P |  | [Filter projects...       ] |  <- 项目多时出现过滤框
-| Move to project...   M |  | v ohbaby-agent    (current) |
+| Pin                  P |  | [Filter workspaces...       ] |  <- 工作区多时出现过滤框
+| Move to workspace...   M |  | v ohbaby-agent    (current) |
 | Export...            E |  |   open-img-gen              |
 | ---------------------- |  | --------------------------- |
-| Archive              A |  | Remove from project         |
+| Archive              A |  | Remove from workspace         |
 +------------------------+  +-----------------------------+
 ```
 
 - 菜单挂在 body 上，`position: fixed`。锚点是按钮或右键位置；下方放不下就向上翻；离视口边缘留 8px。
 - 键盘：↑↓ 移动、Enter 选择、Esc 关闭，单字母快捷键；关闭后焦点回到触发按钮。
 - 菜单项 28px 高、12px 字、圆角 5；危险项文字用 `--danger-ink`。
-- 项目分组标题的 `[..]` 菜单只有一项：Hide project（沿用现有隐藏规则）。
+- 工作区分组标题的 `[..]` 菜单只有一项：Hide workspace（沿用现有隐藏规则）。
 
 侧栏收起后宽度过渡到 0，主区顶栏的 `[=]` 用来重新展开。
 
@@ -239,11 +239,11 @@
 | [login error             x] |   29px 高输入框，圆角 7
 |-----------------------------|
 | Fix login bug               |   标题命中排前；命中词高亮
-| ohbaby-agent           2d   |   第二行：项目名（无项目时写 No project）和时间，10px dim
+| ohbaby-agent           2d   |   第二行：工作区名（无工作区时写 No workspace）和时间，10px dim
 |-----------------------------|
 | Quick question              |
 | ...the login error happens  |   正文命中：多一行片段
-| No project             5m   |
+| No workspace           5m   |
 +-----------------------------+
 ```
 
@@ -370,11 +370,11 @@ Web search 是一页表单（API key、> More options：Key variable、Base URL�
 |---|---|---|
 | 会话 | Chat | Session、Conversation、Thread |
 | 新建草稿 | New / New chat | New session |
-| 项目归属 | Project | Workspace、Folder |
-| 无项目分组 | No project | Default、Ungrouped |
-| 打开项目目录 | Open folder… | Open project、Add workspace |
-| 换项目 | Move to project… | Change workspace |
-| 移出项目 | Remove from project | Detach、Ungroup |
+| 工作区 | Workspace | Project、Folder |
+| 无工作区会话列表 | Recents（草稿选择器里为 No workspace） | No project、Default、Ungrouped |
+| 打开工作区目录 | Open folder… | Open workspace、Add workspace |
+| 换工作区 | Move to workspace… | Change workspace |
+| 移出工作区 | Remove from workspace | Detach、Ungroup |
 | 归档 | Archive | Delete |
 | 执行目录 | Working directory（顶栏只显示路径，不写这个词） | cwd、Scope |
 | MCP 进程的启动目录 | Start in | Working directory、cwd |
@@ -387,7 +387,7 @@ Web search 是一页表单（API key、> More options：Key variable、Base URL�
 
 ### 6.3 写法
 
-- 错误写“原因 + 下一步”：`Couldn't load this chat. Its folder no longer exists — move it to another project to continue.`
+- 错误写“原因 + 下一步”：`Couldn't load this chat. Its folder no longer exists — move it to another workspace to continue.`
 - 按钮用动词：`Save`、`Open folder`、`Retry`。
 - 空态一句话，写为什么空、可以做什么。比如搜索无结果：`No chats match "foo".`
 - 不加感叹号，不用 emoji，去掉 “Ask Lychee anything…” 这类轮播占位。

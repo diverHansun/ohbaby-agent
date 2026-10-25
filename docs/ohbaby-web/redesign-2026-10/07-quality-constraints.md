@@ -38,7 +38,7 @@
 - MCP 的配置和状态只读，Environment / Headers 只显示名字，URL 和失败原因使用服务端已脱敏的文字。Web 不提交 MCP 配置，也不提供凭据输入框。
 - 搜索关键词和会话内容不写进 URL；hash 里只有会话 ID 和执行目录（设置是弹窗，不进 hash）。
 - 消息内容继续经 `marked` + `dompurify` 渲染（沿用现有做法）；搜索片段里的高亮由前端按关键词包裹，片段本身按纯文本处理，不当作 HTML 插入。
-- 浏览器存储里只有草稿文字和所选项目（sessionStorage）、置顶、侧栏折叠和上次的设置分区（localStorage），不存 token 和凭据。
+- 浏览器存储里只有草稿文字和所选工作区（sessionStorage）、置顶、侧栏折叠和上次的设置分区（localStorage），不存 token 和凭据。
 
 ## 5. 可观测性
 
