@@ -16,11 +16,16 @@ import { Menu, type MenuAnchor } from "../shared/Menu.js";
 export type SessionExportFormat = "html" | "jsonl";
 export type SessionMenuAnchor = MenuAnchor;
 
+/** Why Archive is unavailable while a chat runs or waits for approval (D3). */
+export const ARCHIVE_BUSY_HINT = "Stop the chat before archiving";
+
 /** Session row actions. Export switches the menu to a format list in place. */
 export function SessionMenu(props: {
   readonly anchor: SessionMenuAnchor;
   readonly pinned: boolean;
   readonly title: string;
+  /** The chat is running or awaiting approval, so it cannot be archived. */
+  readonly busy: boolean;
   readonly workspaceDirectory: string | null;
   readonly workspaces: readonly SidebarWorkspace[];
   readonly onMove: (directory: string | null) => void;
@@ -211,10 +216,13 @@ export function SessionMenu(props: {
         role="menuitem"
         type="button"
         data-menu-shortcut="a"
+        disabled={props.busy}
+        title={props.busy ? ARCHIVE_BUSY_HINT : undefined}
         onClick={props.onArchive}
       >
         <Archive aria-hidden="true" size={13} />
         <span>Archive</span>
+        {props.busy ? <small>Running</small> : null}
       </button>
     </Menu>
   );

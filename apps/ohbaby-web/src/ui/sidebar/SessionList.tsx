@@ -184,6 +184,7 @@ export function SessionList(props: SessionListProps): ReactElement {
           anchor={menu.anchor}
           pinned={menuSession.pinned}
           title={menuSession.title}
+          busy={menuSession.activity !== "idle"}
           workspaces={props.workspaces}
           workspaceDirectory={menuSession.workspaceDirectory}
           onMove={(directory) => {

@@ -427,6 +427,42 @@ it("ends rows with a relative time, a spinner or an amber dot", () => {
   ).not.toBeNull();
 });
 
+it("keeps Archive unavailable while a chat runs or awaits approval", () => {
+  render({
+    activity: new Map<string, SessionActivity>([
+      ["A", "running"],
+      ["B", "awaiting"],
+    ]),
+  });
+  for (const id of ["A", "B"]) {
+    const hover = button(`Archive Chat ${id}`);
+    expect(hover.disabled).toBe(true);
+    expect(hover.title).toBe("Stop the chat before archiving");
+    click(`Actions for Chat ${id}`);
+    const item = button("ArchiveRunning");
+    expect(item.disabled).toBe(true);
+    expect(item.title).toBe("Stop the chat before archiving");
+    act(() => {
+      document
+        .querySelector(".ohb-session-menu")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "a", bubbles: true }),
+        );
+    });
+    expect(archive).not.toHaveBeenCalled();
+    act(() => {
+      document
+        .querySelector(".ohb-session-menu")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+  }
+  const idle = button("Archive Chat C");
+  expect(idle.disabled).toBe(false);
+  expect(idle.title).toBe("Archive Chat C");
+});
+
 it("shows an error with Retry only while there is no data", () => {
   const retry = vi.fn();
   render({ catalog: catalog([], { status: "error" }), onRetry: retry });

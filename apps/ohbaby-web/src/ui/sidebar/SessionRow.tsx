@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
 import { Spinner } from "../shared/Spinner.js";
 import { relativeTime } from "./relative-time.js";
-import type { SessionMenuAnchor } from "./SessionMenu.js";
+import { ARCHIVE_BUSY_HINT, type SessionMenuAnchor } from "./SessionMenu.js";
 
 /**
  * One sidebar session (05 SessionRow): the open button, then a trailing
@@ -29,6 +29,8 @@ export function SessionRow(props: {
   ) => void;
 }): ReactElement {
   const title = props.session.title.trim() || "Untitled session";
+  // A run or approval keeps the chat busy; the server refuses to archive it (D3).
+  const busy = props.session.activity !== "idle";
   const mainRef = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLElement>(null);
@@ -192,8 +194,8 @@ export function SessionRow(props: {
         <button
           className="ohb-session-archive"
           aria-label={`Archive ${title}`}
-          title={`Archive ${title}`}
-          disabled={props.disabled || props.moving}
+          title={busy ? ARCHIVE_BUSY_HINT : `Archive ${title}`}
+          disabled={props.disabled || props.moving || busy}
           onClick={(event) => {
             props.onArchive(event.currentTarget);
           }}
