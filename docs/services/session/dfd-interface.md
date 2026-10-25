@@ -2,6 +2,17 @@
 
 本文档描述 `services/session` 的数据流与对外接口。session 元数据持久化在 `services/database` 的 `session` 表中。
 
+会话的目录字段分工如下：
+
+| 字段 | 数据库列 | 含义 |
+|---|---|---|
+| `workspaceDirectory?` | `workspace_directory` | 会话归属的工作区，未设置时为无工作区会话 |
+| `workingDirectory` | `working_directory` | 当前或最近一轮的实际执行目录 |
+| `pendingWorkingDirectory?` | `pending_working_directory` | 移动工作区后，下一轮待切换的目录 |
+| `projectId` | `project_id` | Git 仓库身份，与侧栏工作区归属分开 |
+
+`listByWorkingDirectory` 同时匹配当前和待切换目录。`recordWorkingDirectory` 在新一轮开始时记录运行目录，只清除已经应用的待切换值。移出工作区保留当前运行目录，并取消尚未开始的切换。对外全局会话接口把缺省的 `workspaceDirectory` 表示为 `null`。
+
 ---
 
 ## 一、Context & Scope（上下文与范围）
@@ -36,9 +47,9 @@ SessionManager
 ### 2.1 创建会话
 
 ```
-调用方 create(projectDirectory, options)
+调用方 create(directory, options)
   → SessionManager
-  → Project.fromDirectory(projectDirectory)
+  → Project.fromDirectory(directory)
   → 生成 sessionId 和 Session 元数据
   → SessionStore.insert(session)
        → db.insert(schema.session)
@@ -62,7 +73,7 @@ get(sessionId)
 
 不再遍历文件目录；`id` 是主键，按 sessionId 查询应是直接索引查询。
 
-### 2.3 列出项目会话
+### 2.3 按 Git 项目身份列出会话
 
 ```
 listByProject(projectId, options)
@@ -131,9 +142,11 @@ remove(sessionId)
 
 ```typescript
 interface SessionManager {
-  create(projectDirectory: string, options?: CreateSessionOptions): Promise<Session>
+  create(directory: string, options?: CreateSessionOptions): Promise<Session>
   get(sessionId: string): Promise<Session | null>
   listByProject(projectId: string, options?: ListSessionOptions): Promise<Session[]>
+  listByWorkingDirectory(directory: string, options?: ListSessionOptions): Promise<Session[]>
+  recordWorkingDirectory(sessionId: string, workingDirectory: string): Promise<Session>
   getRecent(limit?: number): Promise<Session[]>
   update(sessionId: string, patch: UpdateSessionPatch): Promise<Session>
   incrementStats(sessionId: string, delta: SessionStatsDelta): Promise<Session>
@@ -163,7 +176,7 @@ SessionStore 使用 `getDatabase()` 和 `schema.session`，但这些细节不暴
 | 数据 | 创建者 | 持久化位置 | 说明 |
 |------|--------|------------|------|
 | Session 元数据 | session 模块 | database `session` 表 | title/status/agent/project_id/stats |
-| projectId/rootPath | Project 模块 | session 行中的 project_id/data | session 只消费结果 |
+| projectId/rootPath | Project 模块 | session 行中的 project_id/working_directory | session 只消费解析结果；工作区归属另存 workspace_directory |
 | Message/Part | message 模块 | database `message` / `part` 表 | session 不读取消息内容 |
 | 会话事件 | session 模块 | Bus | 创建/状态变化时发布 |
 
