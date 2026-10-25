@@ -425,12 +425,22 @@ export function ConversationStream(props: {
     const onTouchMove = (event: TouchEvent): void => {
       const y = event.touches.item(0)?.clientY;
       // A finger moving down scrolls the content up.
-      if (touchY !== undefined && y !== undefined && y > touchY) leaveBottom();
+      if (
+        touchY !== undefined &&
+        y !== undefined &&
+        y > touchY &&
+        !scrollsNested(event.target, element)
+      )
+        leaveBottom();
       else markUserScroll();
       touchY = y;
     };
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (["ArrowUp", "PageUp", "Home"].includes(event.key)) leaveBottom();
+      if (
+        ["ArrowUp", "PageUp", "Home"].includes(event.key) &&
+        !scrollsNested(event.target, element)
+      )
+        leaveBottom();
       else markUserScroll();
     };
     const onScroll = (): void => {

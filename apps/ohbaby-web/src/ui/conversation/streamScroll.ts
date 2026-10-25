@@ -18,7 +18,7 @@ export function scrollToBottom(
 }
 
 /**
- * True when an upward wheel over `target` will scroll an inner region (tool
+ * True when an upward gesture over `target` will scroll an inner region (tool
  * output, a long code block) rather than the stream itself.
  */
 export function scrollsNested(

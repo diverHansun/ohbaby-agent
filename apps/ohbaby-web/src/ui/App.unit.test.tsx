@@ -359,6 +359,133 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(770);
   });
 
+  it.each(["wheel", "touch", "ArrowUp", "PageUp", "Home"])(
+    "keeps following while %s scrolls a tool output, then stops at its upper edge",
+    async (input) => {
+      const base = snapshotWithStatus({ kind: "running", runId: "run_1" });
+      const initial: UiSnapshot = {
+        ...base,
+        sessions: base.sessions.map((session) => ({
+          ...session,
+          messages: [
+            ...session.messages.map((message) => ({
+              ...message,
+              id: "user_message",
+            })),
+            {
+              id: "message_tool",
+              createdAt: timestamp,
+              role: "assistant",
+              parts: [
+                {
+                  type: "tool-call",
+                  call: {
+                    id: "call_read",
+                    name: "read",
+                    input: { path: "long.txt" },
+                    status: "completed",
+                  },
+                },
+                {
+                  type: "tool-result",
+                  result: {
+                    callId: "call_read",
+                    output: "Long tool output\n".repeat(80),
+                  },
+                },
+              ],
+            },
+            {
+              id: "message_1",
+              createdAt: timestamp,
+              role: "assistant",
+              parts: [{ type: "text", text: "hello" }],
+            },
+          ],
+        })),
+      };
+      const fake = createFakeRuntime({ snapshot: initial });
+      const app = mountApp(fake.runtime);
+      act(() =>
+        app.container
+          .querySelector<HTMLButtonElement>(".ohb-tool-panel button")
+          ?.click(),
+      );
+      const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+      const output = app.container.querySelector<HTMLElement>(
+        ".ohb-tool-output pre",
+      );
+      if (!stream || !output)
+        throw new Error("expected stream and expanded output");
+      // JSDOM has no layout or imported CSS; supply the tool output's real
+      // scrolling geometry while keeping the application event handlers.
+      output.style.overflowY = "auto";
+      setScrollMetrics(output, {
+        clientHeight: 200,
+        scrollHeight: 1_000,
+        scrollTop: 100,
+      });
+      setScrollMetrics(stream, {
+        clientHeight: 400,
+        scrollHeight: 1_000,
+        scrollTop: 0,
+      });
+      await waitFor(() => stream.scrollTop === 1_000);
+      const scrollUp = (): void => {
+        if (input === "wheel") {
+          output.dispatchEvent(
+            new WheelEvent("wheel", { bubbles: true, deltaY: -20 }),
+          );
+        } else if (input === "touch") {
+          for (const [type, y] of [
+            ["touchstart", 100],
+            ["touchmove", 120],
+          ] as const) {
+            const event = new Event(type, { bubbles: true });
+            Object.defineProperty(event, "touches", {
+              value: { item: () => ({ clientY: y }) },
+            });
+            output.dispatchEvent(event);
+          }
+        } else {
+          output.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, key: input }),
+          );
+        }
+      };
+      setScrollMetrics(stream, {
+        clientHeight: 400,
+        scrollHeight: 1_200,
+        scrollTop: 600,
+      });
+      act(() => {
+        scrollUp();
+        fake.store.replaceSnapshot(
+          snapshotWithMessageText(initial, "more content"),
+          2,
+        );
+      });
+      await flushTimers();
+      expect(stream.scrollTop).toBe(1_200);
+
+      output.scrollTop = 0;
+      setScrollMetrics(stream, {
+        clientHeight: 400,
+        scrollHeight: 1_400,
+        scrollTop: 800,
+      });
+      act(() => {
+        scrollUp();
+        fake.store.replaceSnapshot(
+          snapshotWithMessageText(initial, "more content again"),
+          3,
+        );
+      });
+      await flushTimers();
+      expect(stream.scrollTop).toBe(800);
+    },
+  );
+
   it("keeps the scroll anchor after scrolling up while a pending prompt is still visible", async () => {
     const admission =
       deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
