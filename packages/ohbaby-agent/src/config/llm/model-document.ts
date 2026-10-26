@@ -3,6 +3,8 @@ import { inferConnectModelInterfaceProvider } from "ohbaby-sdk";
 import {
   activeModelBudgetProfiles,
   capabilitiesFor,
+  compatibleReasoningPreference,
+  type ReasoningConfig,
   ConfigError,
   validateModelJson,
   type InterfaceProviderKind,
@@ -19,13 +21,11 @@ export interface ModelEntry extends ModelJsonModelProfile {
   apiKeyEnv?: string;
   promptCache?: PromptCachePolicy;
   needsConfiguration?: boolean;
+  reasoning?: ReasoningConfig;
+  temperature?: number;
 }
 export interface ModelDocument {
   activeProfileId?: string;
-  provider?: string;
-  defaultModel?: string;
-  apiConfig?: ModelJsonConfig["apiConfig"];
-  llmParams: ModelJsonConfig["llmParams"];
   models: ModelEntry[];
 }
 export function configurationComplete(
@@ -39,38 +39,12 @@ export function configurationComplete(
     Boolean(entry.baseUrl && entry.interfaceProvider)
   );
 }
-export function synchronizeModelSnapshot(
-  document: ModelDocument,
-): ModelDocument {
-  const active = document.models.find(
-    (entry) => entry.id === document.activeProfileId,
-  );
-  if (!active || !configurationComplete(active)) {
-    delete document.activeProfileId;
-    delete document.provider;
-    delete document.defaultModel;
-    delete document.apiConfig;
-    delete document.llmParams.contextWindowTokens;
-    return document;
-  }
-  document.provider = active.provider;
-  document.defaultModel = active.model;
-  document.apiConfig = {
-    baseUrl: active.baseUrl,
-    interfaceProvider: active.interfaceProvider,
-    ...(active.apiKeyEnv === undefined ? {} : { apiKeyEnv: active.apiKeyEnv }),
-    ...(active.promptCache === undefined
-      ? {}
-      : { promptCache: active.promptCache }),
-  };
-  document.llmParams.contextWindowTokens = active.contextWindowTokens;
-  return document;
-}
 export function projectModelDocument(
   document: ModelDocument,
+  entryId?: string,
 ): ModelJsonConfig | null {
   const active = document.models.find(
-    (entry) => entry.id === document.activeProfileId,
+    (entry) => entry.id === (entryId ?? document.activeProfileId),
   );
   if (!active || !configurationComplete(active)) return null;
   const {
@@ -93,7 +67,13 @@ export function projectModelDocument(
         : { promptCache: active.promptCache }),
     },
     llmParams: {
-      ...document.llmParams,
+      maxTokens: active.maxOutputTokens ?? 8192,
+      ...(active.temperature === undefined
+        ? {}
+        : { temperature: active.temperature }),
+      ...(active.reasoning === undefined
+        ? {}
+        : { reasoning: active.reasoning }),
       contextWindowTokens: active.contextWindowTokens,
     },
     models: [profile],
@@ -108,10 +88,16 @@ export function normalizeModelDocument(raw: unknown): ModelDocument {
   const source = structuredClone(raw) as Partial<
     Omit<ModelDocument, "models">
   > & {
+    provider?: string;
+    defaultModel?: string;
+    apiConfig?: ModelJsonConfig["apiConfig"];
+    llmParams?: ModelJsonConfig["llmParams"];
     models?: (ModelJsonModelProfile & {
       apiKeyEnv?: string;
       promptCache?: PromptCachePolicy;
       needsConfiguration?: boolean;
+      reasoning?: ReasoningConfig;
+      temperature?: number;
     })[];
   };
   if (
@@ -176,11 +162,9 @@ export function normalizeModelDocument(raw: unknown): ModelDocument {
     return entry;
   });
   const document: ModelDocument = {
-    ...source,
-    llmParams: {
-      ...source.llmParams,
-      maxTokens: source.llmParams?.maxTokens ?? 8192,
-    },
+    ...(source.activeProfileId === undefined
+      ? {}
+      : { activeProfileId: source.activeProfileId }),
     models,
   };
   if (legacy) {
@@ -201,7 +185,7 @@ export function normalizeModelDocument(raw: unknown): ModelDocument {
       interfaceProvider:
         api.interfaceProvider ??
         inferConnectModelInterfaceProvider(api.baseUrl),
-      maxTokens: document.llmParams.maxTokens,
+      maxTokens: source.llmParams?.maxTokens ?? 8192,
       modelProfiles: [
         ...(source.llmParams?.contextWindowTokens === undefined
           ? []
@@ -264,14 +248,42 @@ export function normalizeModelDocument(raw: unknown): ModelDocument {
     }
     document.activeProfileId = active.id;
   }
-  for (const entry of models) validateEntry(entry);
+  for (const entry of models) {
+    if (
+      entry.maxOutputTokens === undefined &&
+      source.llmParams?.maxTokens !== undefined
+    )
+      entry.maxOutputTokens = source.llmParams.maxTokens;
+    if (entry.id === document.activeProfileId) {
+      entry.temperature ??= source.llmParams?.temperature;
+      if (
+        entry.reasoning === undefined &&
+        source.llmParams?.reasoning !== undefined
+      ) {
+        const capability = capabilitiesFor({
+          ...entry,
+          baseUrl: entry.baseUrl ?? "",
+          interfaceProvider: entry.interfaceProvider ?? "openai-compatible",
+          maxTokens: entry.maxOutputTokens ?? 8192,
+          modelProfiles: [entry],
+        }).capability;
+        if (
+          compatibleReasoningPreference(source.llmParams.reasoning, capability)
+        )
+          entry.reasoning = source.llmParams.reasoning;
+      }
+    }
+    validateEntry(entry);
+  }
   validateModelJson({
     provider: "document-validation",
     defaultModel: "document-validation",
     apiConfig: { baseUrl: "http://localhost" },
-    llmParams: document.llmParams,
+    llmParams: {
+      ...source.llmParams,
+      maxTokens: source.llmParams?.maxTokens ?? 8192,
+    },
   });
-  synchronizeModelSnapshot(document);
   projectModelDocument(document);
   return document;
 }
@@ -296,7 +308,11 @@ function validateEntry(entry: ModelEntry): void {
       interfaceProvider: entry.interfaceProvider,
       promptCache: entry.promptCache,
     },
-    llmParams: { maxTokens: 8192 },
+    llmParams: {
+      maxTokens: entry.maxOutputTokens ?? 8192,
+      temperature: entry.temperature,
+      reasoning: entry.reasoning,
+    },
     models: [entry],
   });
 }
@@ -307,15 +323,58 @@ export async function readModelDocument(
     return normalizeModelDocument(await loadModelJson(options));
   } catch (error) {
     if (error instanceof ConfigError && error.code === "FILE_NOT_FOUND")
-      return { llmParams: { maxTokens: 8192 }, models: [] };
+      return { models: [] };
     throw error;
   }
 }
 export async function loadProjectedModelJson(
   options: { modelJsonPath?: string } = {},
+  entryId?: string,
 ): Promise<ModelJsonConfig> {
-  const projected = projectModelDocument(await readModelDocument(options));
+  const projected = projectModelDocument(
+    await readModelDocument(options),
+    entryId,
+  );
   if (!projected)
     throw new ConfigError("No active model configured", "FILE_NOT_FOUND");
   return projected;
+}
+
+export class ModelSettingsError extends Error {
+  constructor(readonly code: "MODEL_NOT_FOUND" | "MODEL_CONFIG_INCOMPLETE") {
+    super(
+      code === "MODEL_NOT_FOUND"
+        ? "Model entry not found"
+        : "Model configuration incomplete",
+    );
+  }
+}
+
+/** Missing explicit entries fall back, but incomplete entries must be repaired. */
+export function resolveModelEntry(
+  document: ModelDocument,
+  modelEntryId?: string,
+): {
+  entry: ModelEntry;
+  source: "explicit" | "default";
+  removedEntryId?: string;
+} {
+  const explicit =
+    modelEntryId === undefined
+      ? undefined
+      : document.models.find((entry) => entry.id === modelEntryId);
+  const entry =
+    explicit ??
+    document.models.find((entry) => entry.id === document.activeProfileId);
+  if (!entry)
+    throw new ConfigError("No active model configured", "FILE_NOT_FOUND");
+  if (!configurationComplete(entry))
+    throw new ModelSettingsError("MODEL_CONFIG_INCOMPLETE");
+  return {
+    entry,
+    source: explicit ? "explicit" : "default",
+    ...(modelEntryId !== undefined && !explicit
+      ? { removedEntryId: modelEntryId }
+      : {}),
+  };
 }

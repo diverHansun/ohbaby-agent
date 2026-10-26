@@ -93,3 +93,5 @@ export function isLLMConfigCached(): boolean {
 // Export for testing purposes only
 export { LLMConfigManager as _LLMConfigManager } from "./manager.js";
 export type { LLMConfigLoadOptions } from "./manager.js";
+
+export { loadModelEntryConfig } from "./manager.js";

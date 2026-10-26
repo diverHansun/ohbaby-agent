@@ -304,7 +304,7 @@ export function resolveRequestReasoning(
         capability.mode !== "none")
     )
       fail(
-        "Explicit temperature is unsupported for this reasoning configuration; remove temperature from llmParams or disable reasoning when supported",
+        "Explicit temperature is unsupported for this reasoning configuration; remove temperature from the model entry or disable reasoning when supported",
       );
   }
   if (!intent.enabled) {

@@ -1,3 +1,4 @@
+import { parseProjectedDocument } from "./model-document.test-support.js";
 import {
   createServer,
   type IncomingMessage,
@@ -234,7 +235,9 @@ describe("connectModel keyless local endpoint integration", () => {
       });
       expect(result).not.toHaveProperty("apiKeyEnv");
 
-      const modelJson = JSON.parse(await readFile(modelJsonPath, "utf8")) as {
+      const modelJson = parseProjectedDocument(
+        await readFile(modelJsonPath, "utf8"),
+      ) as {
         readonly apiConfig: {
           readonly apiKeyEnv?: string;
           readonly baseUrl: string;

@@ -47,16 +47,17 @@ const provider = createServer((request, response) => {
 await new Promise((done) => provider.listen(0, "127.0.0.1", done));
 const modelPath = join(profile, "model.json");
 const model = JSON.parse(await readFile(modelPath, "utf8"));
-await writeFile(
-  modelPath,
-  JSON.stringify({
-    ...model,
-    apiConfig: {
-      ...model.apiConfig,
-      baseUrl: `http://127.0.0.1:${provider.address().port}/v1`,
-    },
-  }),
-);
+const targetUrl = `http://127.0.0.1:${provider.address().port}/v1`;
+if (Array.isArray(model.models)) {
+  const active = model.models.find(
+    (entry) => entry.id === model.activeProfileId,
+  );
+  if (!active) throw new Error("No active model entry in fixture");
+  active.baseUrl = targetUrl;
+} else {
+  model.apiConfig.baseUrl = targetUrl;
+}
+await writeFile(modelPath, JSON.stringify(model));
 const daemon = spawn(
   process.execPath,
   [cli, "serve", "--port", "0", "--no-open"],

@@ -99,7 +99,7 @@ async function add(key: string): Promise<import("ohbaby-sdk").UiSettingsModel> {
 it("returns saved before metadata, discovers candidates independently without POST or changing selection/params", async () => {
   const a = await add("a");
   const b = await add("b");
-  expect((await readModelSettings(opts)).active).toBeNull();
+  expect((await readModelSettings(opts)).active?.id).toBe(a.id);
   await vi.waitFor(() => {
     expect(requests).toHaveLength(2);
   });
@@ -125,8 +125,10 @@ it("returns saved before metadata, discovers candidates independently without PO
     ["low"],
     ["high"],
   ]);
-  expect(document.activeProfileId).toBeUndefined();
-  expect(document.llmParams).toEqual({ maxTokens: 8192 });
+  expect(document.activeProfileId).toBe(a.id);
+  expect(
+    document.models.every((entry) => entry.maxOutputTokens === undefined),
+  ).toBe(true);
   expect(requests.map((r) => r.method)).toEqual(["GET", "GET"]);
 });
 it("same-reference key replacement invalidates late old key metadata and clears old auto capability", async () => {
@@ -181,7 +183,10 @@ it("late results cannot resurrect deletion or override a later active selection"
   const document = await readModelDocument(opts);
   expect(document.models.map((e) => e.id)).toEqual([b.id]);
   expect(document.activeProfileId).toBe(b.id);
-  expect(document.llmParams.contextWindowTokens).toBe(22222);
+  expect(
+    document.models.find((entry) => entry.id === document.activeProfileId)
+      ?.contextWindowTokens,
+  ).toBe(22222);
 });
 it("metadata failures preserve saved candidates, unknown has no guessed efforts or active probes", async () => {
   await add("a");
@@ -313,8 +318,14 @@ it("concurrent legacy saves discover their atomically saved entries without reta
     [b.id, 22222],
   ]);
   expect(document.activeProfileId).toBe(b.id);
-  expect(document.apiConfig?.baseUrl).toBe(`${endpoint}/b/v1`);
-  expect(document.llmParams.contextWindowTokens).toBe(22222);
+  expect(
+    document.models.find((entry) => entry.id === document.activeProfileId)
+      ?.baseUrl,
+  ).toBe(`${endpoint}/b/v1`);
+  expect(
+    document.models.find((entry) => entry.id === document.activeProfileId)
+      ?.contextWindowTokens,
+  ).toBe(22222);
 });
 
 it("contains discovery preparation failure after a successful save without losing the saved entry", async () => {

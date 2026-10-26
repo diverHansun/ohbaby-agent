@@ -131,7 +131,7 @@ it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
       efforts: ["medium", "high"],
     });
     const document = await readModelDocument();
-    expect(document.activeProfileId).toBeUndefined();
+    expect(document.activeProfileId).toBe(target.id);
     expect(document.models[0].reasoningCapabilities?.efforts).toEqual([
       "medium",
       "high",

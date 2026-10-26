@@ -50,6 +50,7 @@ describe("config/llm integration", () => {
       const config = await getLLMConfig();
 
       expect(config).toEqual({
+        temperature: 0.7,
         provider: "openai",
         model: "gpt-4",
         apiKey: "sk-test-integration-key",
@@ -205,11 +206,11 @@ describe("config/llm integration", () => {
 
       const config1 = await getLLMConfig();
       expect(config1.model).toBe("gpt-4");
-      expect(config1.temperature).toBeUndefined();
+      expect(config1.temperature).toBe(0.7);
 
       const config2 = await reloadLLMConfig();
       expect(config2.model).toBe("gpt-4-turbo");
-      expect(config2.temperature).toBeUndefined();
+      expect(config2.temperature).toBe(1.0);
     });
 
     it("should update cache after reload", async () => {

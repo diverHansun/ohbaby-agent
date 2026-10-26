@@ -77,6 +77,7 @@ describe("LLMConfigManager", () => {
       const config = await manager.load();
 
       expect(config).toEqual({
+        temperature: 0.7,
         provider: "openai",
         model: "gpt-4",
         apiKey: "sk-test-key-123",

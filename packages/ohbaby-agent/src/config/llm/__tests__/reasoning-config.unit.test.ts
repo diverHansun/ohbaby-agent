@@ -1,3 +1,4 @@
+import { parseProjectedDocument } from "./model-document.test-support.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,7 +76,8 @@ describe("reasoning configuration", () => {
       modelJsonPath: path,
     });
     expect(
-      (JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig).llmParams,
+      (parseProjectedDocument(await readFile(path, "utf8")) as ModelJsonConfig)
+        .llmParams,
     ).not.toHaveProperty("temperature");
     await writeFile(
       path,
@@ -89,8 +91,8 @@ describe("reasoning configuration", () => {
       reasoning: { effort: "low" },
     });
     expect(
-      (JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig).llmParams
-        .reasoning,
+      (parseProjectedDocument(await readFile(path, "utf8")) as ModelJsonConfig)
+        .llmParams.reasoning,
     ).toEqual({ enabled: false, effort: "low" });
   });
   it("rejects a strength capability whose wire can only carry a switch", () => {
@@ -139,7 +141,9 @@ describe("reasoning configuration", () => {
       updateActiveModelProfile: true,
       contextWindowTokens: 20000,
     });
-    const written = JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig;
+    const written = parseProjectedDocument(
+      await readFile(path, "utf8"),
+    ) as ModelJsonConfig;
     expect(written.models).toHaveLength(2);
     expect(written.models?.[0]).toMatchObject({
       provider: "openai",
@@ -198,8 +202,8 @@ describe("Stage C capability defaults and explicit clearing", () => {
       clearReasoning: true,
     });
     expect(
-      (JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig).llmParams
-        .reasoning,
+      (parseProjectedDocument(await readFile(path, "utf8")) as ModelJsonConfig)
+        .llmParams.reasoning,
     ).toBeUndefined();
   });
   it.each([

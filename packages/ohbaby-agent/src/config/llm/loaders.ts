@@ -42,11 +42,7 @@ export async function loadModelJson(
   options: LoadModelJsonOptions = {},
 ): Promise<unknown> {
   return coordinateModelConfig(options.modelJsonPath, async () => {
-    const configPath =
-      options.modelJsonPath ??
-      (await resolveReadPathWithLegacy(getModelJsonPath(), [
-        getLegacyModelJsonPath(),
-      ]));
+    const configPath = await resolveModelJsonReadPath(options);
 
     let content: string;
     try {
@@ -76,6 +72,15 @@ export async function loadModelJson(
       );
     }
   });
+}
+
+/** The effective source path can differ from the publication target during home migration. */
+export function resolveModelJsonReadPath(
+  options: LoadModelJsonOptions = {},
+): Promise<string> {
+  return options.modelJsonPath === undefined
+    ? resolveReadPathWithLegacy(getModelJsonPath(), [getLegacyModelJsonPath()])
+    : Promise.resolve(options.modelJsonPath);
 }
 
 /**

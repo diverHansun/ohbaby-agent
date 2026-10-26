@@ -37,8 +37,8 @@ export interface ReasoningCapabilities {
 }
 
 /**
- * Raw configuration structure from model.json file.
- * This represents the user-editable configuration format.
+ * Single-entry projection supplied by the host configuration layer.
+ * The host owns the on-disk model library and migration.
  */
 export interface ModelJsonConfig {
   /** LLM provider identifier (e.g., 'openai', 'zhipu') */

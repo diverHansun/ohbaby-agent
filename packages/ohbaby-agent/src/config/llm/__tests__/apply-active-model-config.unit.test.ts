@@ -1,3 +1,4 @@
+import { parseProjectedDocument } from "./model-document.test-support.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -89,7 +90,9 @@ describe("applyActiveModelConfig", () => {
       expect(result.warning).toContain(
         "Configuration saved, but reload failed",
       );
-      const saved = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
+      const saved = parseProjectedDocument(
+        await fs.readFile(modelJsonPath, "utf8"),
+      ) as {
         defaultModel: string;
       };
       expect(saved.defaultModel).toBe("saved-model");
@@ -149,12 +152,14 @@ describe("applyActiveModelConfig", () => {
         modelJsonPath,
         envPath,
       });
-      const saved = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
+      const saved = parseProjectedDocument(
+        await fs.readFile(modelJsonPath, "utf8"),
+      ) as {
         llmParams: { maxTokens: number };
         models: { maxOutputTokens?: number }[];
       };
       expect(saved.llmParams.maxTokens).toBe(8192);
-      expect(saved.models[0].maxOutputTokens).toBeUndefined();
+      expect(saved.models[0].maxOutputTokens).toBe(8192);
     },
   );
 
@@ -190,7 +195,9 @@ describe("applyActiveModelConfig", () => {
       provider: "zenmux",
     });
 
-    const modelJson = JSON.parse(await fs.readFile(modelJsonPath, "utf-8")) as {
+    const modelJson = parseProjectedDocument(
+      await fs.readFile(modelJsonPath, "utf-8"),
+    ) as {
       readonly provider: string;
       readonly defaultModel: string;
       readonly apiConfig: {
@@ -390,7 +397,9 @@ describe("applyActiveModelConfig", () => {
       provider: "lmstudio",
     } as unknown as Parameters<typeof applyActiveModelConfig>[0]);
 
-    const modelJson = JSON.parse(await fs.readFile(modelJsonPath, "utf-8")) as {
+    const modelJson = parseProjectedDocument(
+      await fs.readFile(modelJsonPath, "utf-8"),
+    ) as {
       readonly apiConfig: {
         readonly apiKeyEnv?: string;
         readonly baseUrl: string;
@@ -470,7 +479,9 @@ describe("applyActiveModelConfig", () => {
     expect(result.contextWindowSource).toBe("detected");
     expect(JSON.stringify(result)).not.toContain("sk-test-secret");
 
-    const modelJson = JSON.parse(await fs.readFile(modelJsonPath, "utf-8")) as {
+    const modelJson = parseProjectedDocument(
+      await fs.readFile(modelJsonPath, "utf-8"),
+    ) as {
       readonly llmParams: {
         readonly contextWindowTokens?: number;
       };
@@ -552,10 +563,9 @@ describe("applyActiveModelConfig", () => {
       });
       await discoveryFinished;
 
-      const saved = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
-        llmParams: { temperature?: number };
-        models: (typeof target)[];
-      };
+      const saved = parseProjectedDocument(
+        await fs.readFile(modelJsonPath, "utf8"),
+      );
       expect(saved.llmParams).not.toHaveProperty("temperature");
       expect(saved.models).toHaveLength(2);
       expect(
@@ -634,10 +644,10 @@ describe("applyActiveModelConfig", () => {
         ([, init]) => init?.method === "POST",
       ),
     ).toHaveLength(7);
-    const retained = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
-      models: { reasoningCapabilities: { efforts: string[] } }[];
-    };
-    expect(retained.models[0].reasoningCapabilities.efforts).toEqual([
+    const retained = parseProjectedDocument(
+      await fs.readFile(modelJsonPath, "utf8"),
+    );
+    expect(retained.models[0].reasoningCapabilities?.efforts).toEqual([
       "low",
       "medium",
     ]);
@@ -740,7 +750,9 @@ describe("applyActiveModelConfig", () => {
     expect(result.contextWindowSource).toBe("default");
     expect(result.warning).toMatch(/context window/i);
 
-    const modelJson = JSON.parse(await fs.readFile(modelJsonPath, "utf-8")) as {
+    const modelJson = parseProjectedDocument(
+      await fs.readFile(modelJsonPath, "utf-8"),
+    ) as {
       readonly llmParams: {
         readonly contextWindowTokens?: number;
       };

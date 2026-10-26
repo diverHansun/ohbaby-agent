@@ -1,3 +1,4 @@
+import { parseProjectedDocument } from "./model-document.test-support.js";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import * as fs from "node:fs/promises";
 import { setActiveLLMConfig } from "../index.js";
@@ -46,7 +47,11 @@ function findWriteCall(
 ): readonly unknown[] | undefined {
   return vi
     .mocked(fs.writeFile)
-    .mock.calls.find(([file]) => predicate(callPathToString(file)));
+    .mock.calls.find(
+      ([file]) =>
+        !callPathToString(file).includes("/backups/") &&
+        predicate(callPathToString(file)),
+    );
 }
 
 function parseModelJsonWrite(
@@ -55,7 +60,9 @@ function parseModelJsonWrite(
   if (!call) {
     throw new Error("Expected model.json write call.");
   }
-  return JSON.parse(callContentToString(call[1])) as WrittenModelJson;
+  return parseProjectedDocument(
+    callContentToString(call[1]),
+  ) as WrittenModelJson;
 }
 
 describe("setActiveLLMConfig", () => {
@@ -153,7 +160,7 @@ describe("setActiveLLMConfig", () => {
     });
   });
 
-  it("should preserve existing llmParams and model profiles unless overridden", async () => {
+  it("keeps migrated parameters on the original entry when connecting a new model", async () => {
     const existingModelJson = {
       provider: "openai",
       defaultModel: "gpt-4",
@@ -197,7 +204,14 @@ describe("setActiveLLMConfig", () => {
     const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
-    expect(modelJson.llmParams).toEqual(existingModelJson.llmParams);
+    expect(modelJson.llmParams).toEqual({
+      maxTokens: 8192,
+      contextWindowTokens: 128000,
+    });
+    expect(modelJson.models?.[1]).toMatchObject({
+      temperature: 0.1,
+      maxOutputTokens: 1234,
+    });
     expect(modelJson.models).toHaveLength(3);
     expect(modelJson.models?.[0]).toMatchObject({
       ...existingModelJson.models[0],
@@ -234,7 +248,7 @@ describe("setActiveLLMConfig", () => {
       findWriteCall((file) => file.includes("model.json")),
     );
     expect(written.llmParams).toEqual({
-      maxTokens: 4096,
+      maxTokens: 8192,
       contextWindowTokens: 128000,
     });
   });
@@ -323,7 +337,6 @@ describe("setActiveLLMConfig", () => {
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
     expect(modelJson.llmParams).toEqual({
-      temperature: 0,
       maxTokens: 8192,
       contextWindowTokens: 200_000,
     });
@@ -391,8 +404,7 @@ describe("setActiveLLMConfig", () => {
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
     expect(modelJson.llmParams).toEqual({
-      temperature: 0.1,
-      maxTokens: 32_768,
+      maxTokens: 8192,
       contextWindowTokens: 128000,
     });
     expect(modelJson.models).toHaveLength(4);

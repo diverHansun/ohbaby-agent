@@ -144,6 +144,7 @@ export interface UiSettingsAboutResponse {
 }
 
 export interface UiSettingsModelCreate {
+  readonly reasoning?: import("./connect-model.js").UiReasoningConfig;
   readonly provider: string;
   readonly model: string;
   readonly baseUrl: string;
@@ -159,12 +160,16 @@ export interface UiSettingsModelCreate {
   readonly maxOutputTokens?: number;
 }
 export type UiSettingsModelPatch = Partial<
-  Omit<UiSettingsModelCreate, "label">
-> & { readonly label?: string | null };
+  Omit<UiSettingsModelCreate, "label" | "reasoning">
+> & {
+  readonly label?: string | null;
+  readonly reasoning?: import("./connect-model.js").UiReasoningConfig | null;
+};
 export interface UiSettingsModelSelect {
   readonly id: string;
 }
 export interface UiSettingsModel {
+  readonly reasoningDefault?: import("./connect-model.js").UiReasoningConfig;
   readonly id: string;
   readonly provider: string;
   readonly model: string;
@@ -185,15 +190,6 @@ export interface UiSettingsModels {
     readonly provider: string;
     readonly model: string;
   } | null;
-  readonly params: {
-    readonly maxTokens: number;
-    readonly temperature?: number;
-    readonly contextWindowTokens?: number;
-    readonly reasoning?: {
-      readonly enabled?: boolean;
-      readonly effort?: string;
-    };
-  };
   readonly models: readonly UiSettingsModel[];
 }
 export interface UiSettingsModelsResponse extends UiSettingsModels {

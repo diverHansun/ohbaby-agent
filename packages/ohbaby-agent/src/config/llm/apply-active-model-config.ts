@@ -492,18 +492,17 @@ function discoveryKey(id: string, options: ModelSettingsOptions): string {
 export async function currentDiscoveryState(
   modelPath?: string,
   _envPath?: string,
+  entryId?: string,
 ): Promise<
   | { status: "detecting" | "identified" | "unknown"; reason?: string }
   | undefined
 > {
   const document = await readModelDocument({ modelJsonPath: modelPath });
-  if (!document.activeProfileId) return undefined;
+  const id = entryId ?? document.activeProfileId;
+  if (!id) return undefined;
   const options = { modelJsonPath: modelPath };
-  const state = activeDiscoveries.get(
-    discoveryKey(document.activeProfileId, options),
-  );
-  return state?.generation ===
-    modelEntryGeneration(document.activeProfileId, options)
+  const state = activeDiscoveries.get(discoveryKey(id, options));
+  return state?.generation === modelEntryGeneration(id, options)
     ? {
         status: state.status,
         ...(state.reason ? { reason: state.reason } : {}),
@@ -538,7 +537,7 @@ export async function startModelEntryDiscovery(
         key,
         state,
         apiKey: credential.value,
-        maxTokens: document.llmParams.maxTokens,
+        maxTokens: entry.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         routeKey: modelProfileRouteKey(entry, entry.provider),
       };
     },

@@ -208,11 +208,16 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
       );
       const persisted = JSON.parse(
         await readFile(model.modelJsonPath, "utf8"),
-      ) as { apiConfig: { interfaceProvider: string } };
+      ) as {
+        activeProfileId: string;
+        models: { id: string; interfaceProvider: string }[];
+      };
       saved = {
         saved: model.saved,
         protocol: model.interfaceProvider,
-        persistedProtocol: persisted.apiConfig.interfaceProvider,
+        persistedProtocol: persisted.models.find(
+          (entry) => entry.id === persisted.activeProfileId,
+        )?.interfaceProvider,
         contextWindowTokens: model.contextWindowTokens,
         contextWindowSource: model.contextWindowSource,
       };

@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { runtimeEnvValue } from "../../utils/managed-runtime-env.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import {
@@ -80,6 +81,26 @@ class LLMConfigManager {
     );
   }
 
+  /** Fresh per-entry loads never read or replace the default-model cache. */
+  async loadEntry(
+    options: LLMConfigLoadOptions,
+    entryId?: string,
+  ): Promise<LLMConfig> {
+    return coordinateModelConfig(options.modelJsonPath, () => {
+      assertModelConfigConsistent(options.modelJsonPath);
+      return this.performLoad(
+        this.resolveOptions({
+          ...options,
+          envPath:
+            options.envPath ??
+            join(options.projectDirectory ?? process.cwd(), ".env"),
+        }),
+        entryId,
+        false,
+      );
+    });
+  }
+
   private async loadCoordinated(
     options: LLMConfigLoadOptions,
   ): Promise<LLMConfig> {
@@ -160,13 +181,18 @@ class LLMConfigManager {
   private async performLoad(
     options: Required<Pick<LLMConfigLoadOptions, "projectDirectory" | "env">> &
       Pick<LLMConfigLoadOptions, "modelJsonPath" | "envPath">,
+    entryId?: string,
+    cache = true,
   ): Promise<LLMConfig> {
     try {
-      const modelJson = await loadProjectedModelJson({
-        ...(options.modelJsonPath === undefined
-          ? {}
-          : { modelJsonPath: options.modelJsonPath }),
-      });
+      const modelJson = await loadProjectedModelJson(
+        {
+          ...(options.modelJsonPath === undefined
+            ? {}
+            : { modelJsonPath: options.modelJsonPath }),
+        },
+        entryId,
+      );
 
       // Load API key from environment when configured.
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;
@@ -199,6 +225,9 @@ class LLMConfigManager {
           modelJson.apiConfig.interfaceProvider ??
           inferConnectModelInterfaceProvider(modelJson.apiConfig.baseUrl),
         promptCache: modelJson.apiConfig.promptCache ?? "auto",
+        ...(modelJson.llmParams.temperature === undefined
+          ? {}
+          : { temperature: modelJson.llmParams.temperature }),
         ...(modelJson.llmParams.reasoning === undefined
           ? {}
           : { reasoning: { ...modelJson.llmParams.reasoning } }),
@@ -212,15 +241,18 @@ class LLMConfigManager {
       };
 
       // Cache and return
-      this.cachedConfig = {
-        config,
-        projectDirectory: options.projectDirectory,
-        ...(options.modelJsonPath === undefined
-          ? {}
-          : { modelJsonPath: options.modelJsonPath }),
-        ...(options.envPath === undefined ? {} : { envPath: options.envPath }),
-        env: options.env,
-      };
+      if (cache)
+        this.cachedConfig = {
+          config,
+          projectDirectory: options.projectDirectory,
+          ...(options.modelJsonPath === undefined
+            ? {}
+            : { modelJsonPath: options.modelJsonPath }),
+          ...(options.envPath === undefined
+            ? {}
+            : { envPath: options.envPath }),
+          env: options.env,
+        };
       this.lastError = null;
       return config;
     } catch (error) {
@@ -257,3 +289,10 @@ function loadConfiguredApiKey(
 }
 
 export { LLMConfigManager };
+
+export function loadModelEntryConfig(
+  options: LLMConfigLoadOptions = {},
+  entryId?: string,
+): Promise<LLMConfig> {
+  return LLMConfigManager.getInstance().loadEntry(options, entryId);
+}

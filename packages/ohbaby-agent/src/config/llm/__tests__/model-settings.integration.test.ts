@@ -40,12 +40,12 @@ async function add(fields = {}): Promise<import("ohbaby-sdk").UiSettingsModel> {
   return entry;
 }
 describe("independent model settings", () => {
-  it("appends identical routes without deduplication or implicit selection and persists defaults", async () => {
+  it("appends identical routes without deduplication and keeps the first default and persists defaults", async () => {
     const a = await add({ apiKey: "secret-a", label: "Work" });
     const b = await add({ apiKey: "secret-b" });
     expect(a.id).not.toBe(b.id);
     expect(a.apiKeyEnv).not.toBe(b.apiKeyEnv);
-    expect((await readModelSettings(opts)).active).toBeNull();
+    expect((await readModelSettings(opts)).active?.id).toBe(a.id);
     expect((await disk()).models.map((e) => e.id)).toEqual([a.id, b.id]);
     expect(a.contextWindowTokens).toBe(128000);
     expect(JSON.stringify(await readModelSettings(opts))).not.toMatch(
@@ -74,9 +74,9 @@ describe("independent model settings", () => {
     const b = await add({ label: "B" });
     await selectModelEntry(a.id, opts);
     const before = await disk();
-    before.llmParams.temperature = 0.3;
-    before.llmParams.maxTokens = 1234;
-    before.llmParams.reasoning = { enabled: true, effort: "high" };
+    before.models[0].temperature = 0.3;
+    before.models[0].maxOutputTokens = 1234;
+    before.models[0].reasoning = { enabled: true, effort: "high" };
     await writeFile(opts.modelJsonPath, JSON.stringify(before));
     await updateModelEntry(
       b.id,
@@ -91,14 +91,16 @@ describe("independent model settings", () => {
     );
     const next = await disk();
     expect(next.activeProfileId).toBe(a.id);
-    expect(next.llmParams).toEqual(before.llmParams);
+    expect(next.models[0]).toEqual(before.models[0]);
     expect(next.models[0]).toEqual(before.models[0]);
     expect(next.models.map((e) => e.id)).toEqual([a.id, b.id]);
     expect(next.models[1].label).toBeUndefined();
     await selectModelEntry(b.id, opts);
-    expect((await disk()).apiConfig?.interfaceProvider).toBe("anthropic");
-    expect((await disk()).llmParams.reasoning).toEqual(
-      before.llmParams.reasoning,
+    expect(
+      projectModelDocument(await disk())?.apiConfig.interfaceProvider,
+    ).toBe("anthropic");
+    expect((await disk()).models[0].reasoning).toEqual(
+      before.models[0].reasoning,
     );
   });
   it("isolates replacement from shared model and legacy search references and detaches on clear", async () => {
@@ -152,8 +154,7 @@ describe("independent model settings", () => {
     await deleteModelEntry(b.id, opts);
     const empty = await disk();
     expect(projectModelDocument(empty)).toBeNull();
-    expect(empty.apiConfig).toBeUndefined();
-    expect(empty.llmParams.contextWindowTokens).toBeUndefined();
+    expect(projectModelDocument(empty)).toBeNull();
     expect(await readFile(opts.envPath, "utf8")).toBe(env);
     await expect(deleteModelEntry(a.id, opts)).rejects.toMatchObject({
       code: "MODEL_NOT_FOUND",
@@ -208,7 +209,7 @@ describe("independent model settings", () => {
   });
 });
 
-it("does not let cached manager loads reuse a deleted model and leaves new candidates inactive", async () => {
+it("does not let cached manager loads reuse a deleted model and selects a new first complete entry", async () => {
   const { LLMConfigManager } = await import("../manager.js");
   LLMConfigManager.resetInstance();
   const a = await add();
@@ -220,9 +221,7 @@ it("does not let cached manager loads reuse a deleted model and leaves new candi
     code: "FILE_NOT_FOUND",
   });
   await add();
-  await expect(manager.load(opts)).rejects.toMatchObject({
-    code: "FILE_NOT_FOUND",
-  });
+  expect((await manager.load(opts)).model).toBe(route.model);
 });
 it("default first write migrates the effective legacy file, explicit missing paths remain isolated", async () => {
   const { mkdir } = await import("node:fs/promises");
@@ -245,14 +244,14 @@ it("default first write migrates the effective legacy file, explicit missing pat
   const after = await readModelSettings();
   expect(after.active).toEqual(before.active);
   expect(after.models.map((e) => e.model)).toEqual(["old", route.model]);
-  expect(after.params.maxTokens).toBe(4321);
+  expect(after.models[0].maxOutputTokens).toBe(4321);
   const explicit = {
     modelJsonPath: join(dir, "isolated", "model.json"),
     envPath: join(dir, "isolated", ".env"),
   };
   await createModelEntry(route, explicit);
   const isolated = await readModelSettings(explicit);
-  expect(isolated.active).toBeNull();
+  expect(isolated.active?.id).toBe(isolated.models[0].id);
   expect(isolated.models).toHaveLength(1);
 });
 it("deleting the active model skips incomplete history, wraps and preserves global preferences", async () => {
@@ -266,7 +265,7 @@ it("deleting the active model skips incomplete history, wraps and preserves glob
     contextWindowTokens: 20000,
     needsConfiguration: true,
   });
-  document.llmParams.temperature = 0.4;
+  document.models[0].temperature = 0.4;
   await writeFile(opts.modelJsonPath, JSON.stringify(document));
   await selectModelEntry(a.id, opts);
   await deleteModelEntry(a.id, opts);
@@ -275,7 +274,7 @@ it("deleting the active model skips incomplete history, wraps and preserves glob
   const last = await disk();
   expect(last.activeProfileId).toBeUndefined();
   expect(last.models.map((e) => e.id)).toEqual(["incomplete"]);
-  expect(last.llmParams).toEqual({ maxTokens: 8192, temperature: 0.4 });
+  expect(last.models[0].temperature).toBeUndefined();
 });
 
 it("a failed model secret write rolls back before a queued search save, preserving that successful save", async () => {
@@ -372,7 +371,7 @@ it("legacy connect preserves query/fragment endpoint identity instead of trimmin
   const document = await disk();
   expect(document.models).toHaveLength(1);
   expect(document.activeProfileId).toBe(a.id);
-  expect(document.apiConfig?.baseUrl).toBe(endpoint);
+  expect(projectModelDocument(document)?.apiConfig.baseUrl).toBe(endpoint);
 });
 it("validates inactive document parameters and active-id shape instead of silently accepting malformed files", async () => {
   await writeFile(
@@ -452,7 +451,9 @@ it.each([
     const config = await reloadLLMConfig({ ...opts, projectDirectory: dir });
     expect(config.model).toBe("b");
     expect(resolveRequestReasoning(config).mode).toBe(mode);
-    expect((await disk()).llmParams.reasoning).toBeUndefined();
+    expect(
+      (await disk()).models.find((entry) => entry.id === "b")?.reasoning,
+    ).toBeUndefined();
   },
 );
 
@@ -493,7 +494,7 @@ it("patching the current official model immediately clears an incompatible effor
       reloadLLMConfig({ ...opts, projectDirectory: dir });
     expect(resolveRequestReasoning(await load()).effort).toBe("high");
     await updateModelEntry("candidate", { model: "gpt-4o" }, opts);
-    expect((await disk()).llmParams.reasoning).toEqual({
+    expect((await disk()).models[0].reasoning).toEqual({
       enabled: true,
       effort: "high",
     });
@@ -502,7 +503,7 @@ it("patching the current official model immediately clears an incompatible effor
     const config = await load();
     expect(config.model).toBe("gpt-4o");
     expect(resolveRequestReasoning(config).mode).toBe("none");
-    expect((await disk()).llmParams.reasoning).toBeUndefined();
+    expect((await disk()).models[0].reasoning).toBeUndefined();
   } finally {
     await vi.waitFor(() => {
       expect(metadataRequests).toBe(2);

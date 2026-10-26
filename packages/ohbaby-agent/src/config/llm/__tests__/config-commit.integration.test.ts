@@ -1,3 +1,4 @@
+import { parseProjectedDocument } from "./model-document.test-support.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -56,7 +57,7 @@ describe("model configuration commit", () => {
     );
     expect(
       (
-        JSON.parse(await readFile(input.modelJsonPath, "utf8")) as {
+        parseProjectedDocument(await readFile(input.modelJsonPath, "utf8")) as {
           defaultModel: string;
         }
       ).defaultModel,
@@ -106,7 +107,9 @@ describe("model configuration commit", () => {
         }),
       ),
     );
-    const saved = JSON.parse(await readFile(input.modelJsonPath, "utf8")) as {
+    const saved = parseProjectedDocument(
+      await readFile(input.modelJsonPath, "utf8"),
+    ) as {
       defaultModel: string;
       models: { model: string }[];
     };
@@ -182,5 +185,5 @@ it("direct model readers wait for publication rollback instead of observing an u
     release();
     await save;
   }
-  expect(await read).toMatchObject({ defaultModel: "A" });
+  expect(await read).toMatchObject({ models: [{ model: "A" }] });
 });

@@ -1,3 +1,4 @@
+import { parseProjectedDocument } from "./model-document.test-support.js";
 /* eslint-disable @typescript-eslint/require-await -- Fetch fixtures implement the asynchronous fetch contract. */
 import type { ModelJsonConfig } from "ohbaby-llm";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -57,7 +58,7 @@ it("discovers reasoning strengths in the background when model metadata only say
   });
   expect(saved.saved).toBe(true);
   await done;
-  const config = JSON.parse(
+  const config = parseProjectedDocument(
     await readFile(join(root, "model.json"), "utf8"),
   ) as ModelJsonConfig;
   expect(
@@ -148,7 +149,7 @@ it("reports saved without waiting and retains independent previous-entry results
     }),
   );
   await new Promise((resolve) => setTimeout(resolve, 10));
-  const config = JSON.parse(
+  const config = parseProjectedDocument(
     await readFile(common.modelJsonPath, "utf8"),
   ) as ModelJsonConfig;
   expect(config.defaultModel).toBe("b");
@@ -200,7 +201,7 @@ it("clears an incompatible persisted global intent after confirmed capability di
   await detected;
   expect(
     (
-      JSON.parse(
+      parseProjectedDocument(
         await readFile(common.modelJsonPath, "utf8"),
       ) as ModelJsonConfig
     ).llmParams.reasoning,

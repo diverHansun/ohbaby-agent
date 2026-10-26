@@ -49,12 +49,22 @@ export async function retainFailedLoopWorkspace(
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
       : {};
+  const selected = Array.isArray(config.models)
+    ? (config.models.find(
+        (entry: unknown) =>
+          entry !== null &&
+          typeof entry === "object" &&
+          "id" in entry &&
+          entry.id === config.activeProfileId,
+      ) as Record<string, unknown> | undefined)
+    : undefined;
   const api =
-    config.apiConfig &&
+    selected ??
+    (config.apiConfig &&
     typeof config.apiConfig === "object" &&
     !Array.isArray(config.apiConfig)
       ? (config.apiConfig as Record<string, unknown>)
-      : {};
+      : {});
   if (containsInlineCredential(config) || api.apiKeyEnv !== "ZENMUX_API_KEY") {
     throw new Error("UNSAFE_INLINE_CREDENTIAL_CONFIG");
   }
