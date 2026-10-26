@@ -188,6 +188,12 @@ export class SettingsLayer {
     return this.enqueueWrite("models", () => this.api.deleteProvider(provider));
   }
 
+  /** Detects reasoning again, then rereads the list that now holds the result. */
+  async probeModel(id: string): Promise<void> {
+    await this.api.probeModel(id);
+    await this.load("models", { force: true });
+  }
+
   updateSearch(patch: UiSettingsSearchUpdate): Promise<UiSettingsSearch> {
     return this.enqueueWrite("search", () => this.api.updateSearch(patch));
   }

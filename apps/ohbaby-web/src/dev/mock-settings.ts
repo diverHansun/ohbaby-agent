@@ -20,6 +20,15 @@ const reasoning: UiReasoningCapabilityView = {
   reason: "Not probed in the mock",
 };
 
+/** What a successful detection reports; the mock's thinking models use it. */
+const effortReasoning: UiReasoningCapabilityView = {
+  status: "identified",
+  mode: "effort",
+  efforts: ["low", "medium", "high"],
+  supportsDisabled: true,
+  default: { enabled: true, effort: "medium" },
+};
+
 function entry(
   id: string,
   provider: string,
@@ -66,7 +75,10 @@ function fullState(): MockSettingsState {
   return {
     models: [
       entry("m1", "deepseek", "deepseek-v4.1-flash", { label: "Work" }),
-      entry("m2", "deepseek", "deepseek-v4.1-pro"),
+      entry("m2", "deepseek", "deepseek-v4.1-pro", {
+        reasoning: effortReasoning,
+        reasoningDefault: { enabled: true, effort: "high" },
+      }),
       entry("m3", "openai", "gpt-5.2", {
         interfaceProvider: "openai-responses",
         maxOutputTokens: 32_000,
@@ -82,6 +94,7 @@ function fullState(): MockSettingsState {
         interfaceProvider: "anthropic",
         label: "Personal",
         promptCache: "auto",
+        reasoning: effortReasoning,
       }),
       entry("m6", "anthropic", "claude-haiku-5-5", {
         interfaceProvider: "anthropic",
@@ -197,6 +210,24 @@ function fullState(): MockSettingsState {
   };
 }
 
+/** Enough providers and models that the composer menu scrolls (04 T19c). */
+function manyState(): MockSettingsState {
+  const providers = ["deepseek", "openai", "anthropic", "zenmux", "moonshot"];
+  return {
+    ...fullState(),
+    models: providers.flatMap((provider, p) =>
+      ["mini", "standard", "pro", "max"].map((size, i) =>
+        entry(
+          `${provider}-${size}`,
+          provider,
+          `${provider}-${size}-${String(p + i)}`,
+        ),
+      ),
+    ),
+    activeId: "anthropic-pro",
+  };
+}
+
 /** An old history entry with a URL and protocol but no key reference, and no default. */
 function legacyState(): MockSettingsState {
   return {
@@ -262,7 +293,9 @@ export function createMockSettingsApi(
         ? legacyState()
         : scenario === "no-model"
           ? { ...fullState(), activeId: null, models: [] }
-          : fullState();
+          : scenario === "models-many"
+            ? manyState()
+            : fullState();
   const failing = scenario === "settings-errors";
   let nextId = 100;
   const models = (): UiSettingsModels => ({
@@ -319,6 +352,7 @@ export function createMockSettingsApi(
             reasoningDefault,
           }),
         ];
+        nextDefault();
         return models();
       }),
     updateModel: (id, patch) =>
@@ -365,7 +399,17 @@ export function createMockSettingsApi(
                 : { ...next, label }
             : model,
         );
+        nextDefault();
         return models();
+      }),
+    probeModel: (id) =>
+      after(() => {
+        // As if the provider answered: the mock settles on effort levels.
+        find(id);
+        state.models = state.models.map((model) =>
+          model.id === id ? { ...model, reasoning: effortReasoning } : model,
+        );
+        return effortReasoning;
       }),
     selectModel: (id) =>
       after(() => {

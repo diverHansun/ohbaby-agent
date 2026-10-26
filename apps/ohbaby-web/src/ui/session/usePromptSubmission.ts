@@ -44,6 +44,8 @@ export function usePromptSubmission(input: {
     text: string,
     clientRequestId?: string,
     reasoning?: UiReasoningConfig,
+    /** A draft's model choice, saved on the session its first prompt opens. */
+    modelEntryId?: string,
   ) => Promise<boolean>;
 } {
   const {
@@ -166,6 +168,7 @@ export function usePromptSubmission(input: {
       text: string,
       clientRequestId?: string,
       reasoning?: UiReasoningConfig,
+      modelEntryId?: string,
     ): Promise<boolean> => {
       if (text.startsWith("/")) {
         return submitSlashCommand(text, clientRequestId);
@@ -209,6 +212,9 @@ export function usePromptSubmission(input: {
         ]);
         const receipt = await runtime.submitPrompt(text, {
           ...(reasoning === undefined ? {} : { reasoning }),
+          ...(modelEntryId === undefined || submittedSessionId !== undefined
+            ? {}
+            : { modelEntryId }),
           clientRequestId: requestId,
           ...(submittedSessionId === undefined
             ? {}

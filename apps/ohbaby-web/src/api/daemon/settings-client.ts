@@ -4,6 +4,7 @@ import type {
   UiSettingsMcpServer,
   UiSettingsModelCreate,
   UiSettingsModelPatch,
+  UiSettingsModelProbeResponse,
   UiSettingsModels,
   UiSettingsSearch,
   UiSettingsSearchUpdate,
@@ -29,6 +30,8 @@ export interface SettingsApi {
   selectModel(id: string): Promise<UiSettingsModels>;
   deleteModel(id: string): Promise<UiSettingsModels>;
   deleteProvider(provider: string): Promise<UiSettingsModels>;
+  /** Detects the entry's reasoning again; the result is also saved on the entry. */
+  probeModel(id: string): Promise<UiSettingsModelProbeResponse["reasoning"]>;
   getSearch(signal?: AbortSignal): Promise<UiSettingsSearch>;
   updateSearch(patch: UiSettingsSearchUpdate): Promise<UiSettingsSearch>;
   getMcpServers(
@@ -107,6 +110,16 @@ export class SettingsClient implements SettingsApi {
       `/v1/settings/models/providers/${encodeURIComponent(provider)}`,
       "DELETE",
     );
+  }
+
+  async probeModel(
+    id: string,
+  ): Promise<UiSettingsModelProbeResponse["reasoning"]> {
+    const response = await this.global.request<UiSettingsModelProbeResponse>(
+      "/v1/settings/models/probe",
+      { body: { id }, includeDirectory: false, method: "POST" },
+    );
+    return response.reasoning;
   }
 
   async getSearch(signal?: AbortSignal): Promise<UiSettingsSearch> {

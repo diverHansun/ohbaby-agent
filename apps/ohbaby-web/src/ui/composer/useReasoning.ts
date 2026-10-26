@@ -3,6 +3,7 @@ import type {
   UiReasoningCapabilityView,
   UiReasoningConfig,
   UiSession,
+  UiSettingsModel,
 } from "ohbaby-sdk";
 import { useEffect, useRef, useState } from "react";
 
@@ -28,19 +29,25 @@ export type ReasoningState =
     };
 
 /**
- * The model's reasoning capability (from `GET /v1/model`, reread on
- * `model.invalidated`) and the session's preference, saved per session.
+ * The chat's model's reasoning capability (from `GET /v1/model?sessionId`,
+ * reread on `model.invalidated`) and the session's preference, saved per
+ * session. `entry` is the settings entry the chat resolves to: a draft reads
+ * its capability there, and its `reasoningDefault` is what an unset
+ * preference falls back to (session-model 02 P11).
  */
 export function useReasoning(
   client: ReasoningClient,
   session: UiSession | null,
   onChange: (reasoning: UiReasoningConfig | undefined) => void,
+  entry?: UiSettingsModel,
 ): ReasoningState {
   const [modelView, setView] = useState<{
     client: ReasoningClient;
     view: UiReasoningCapabilityView | undefined;
   }>();
-  const view = modelView?.client === client ? modelView.view : undefined;
+  const fetched = modelView?.client === client ? modelView.view : undefined;
+  // A draft has no session to ask about, so its choice speaks for itself.
+  const view = session === null && entry ? entry.reasoning : fetched;
   const localPreference = useRef<
     | {
         client: ReasoningClient;
@@ -85,13 +92,17 @@ export function useReasoning(
     localPreference.current = undefined;
     setPreference(session?.reasoning);
   }, [client, session?.id, session?.reasoning]);
+  const sessionId = session?.id;
+  // A chat rereads when it switches entry, or when the list reloads that
+  // entry's capability (after Detect again, which sends no model event).
+  const entryReasoning = session ? entry?.reasoning : undefined;
   useEffect(() => {
     let closed = false;
     let generation = 0;
     const refresh = (): void => {
       const request = ++generation;
       void client
-        .getCurrentModel()
+        .getCurrentModel(sessionId === undefined ? undefined : { sessionId })
         .then((model) => {
           if (!closed && request === generation)
             setView(
@@ -118,7 +129,7 @@ export function useReasoning(
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [client]);
+  }, [client, sessionId, entryReasoning]);
   const update = (reasoning: UiReasoningConfig): void => {
     const local = { client, sessionId: session?.id, reasoning };
     localPreference.current = local;
@@ -165,7 +176,8 @@ export function useReasoning(
     (preference.enabled !== false || view.supportsDisabled) &&
     (preference.effort === undefined ||
       view.efforts.includes(preference.effort));
-  const effective = compatible ? preference : view.default;
+  const fallback = entry?.reasoningDefault ?? view.default;
+  const effective = compatible ? preference : fallback;
   const options = [
     ...(view.supportsDisabled ? [{ value: "off", label: "Off" }] : []),
     ...(view.mode === "binary"
@@ -179,7 +191,7 @@ export function useReasoning(
         ? "off"
         : view.mode === "binary"
           ? "on"
-          : (effective?.effort ?? view.default?.effort ?? ""),
+          : (effective?.effort ?? fallback?.effort ?? ""),
     options,
     ...(error === undefined ? {} : { error }),
     select: (value): void => {

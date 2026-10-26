@@ -6,6 +6,7 @@ import type {
   UiPromptSubmission,
   UiReasoningConfig,
   UiSession,
+  UiSettingsModel,
   UiUnconsumedSteer,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
@@ -94,6 +95,8 @@ export function Composer(props: {
   readonly model: ComposerModel;
   /** The model menu in the control row (D15). */
   readonly modelControl?: ReactNode;
+  /** The settings entry the next turn uses; feeds the thinking control. */
+  readonly modelEntry?: UiSettingsModel;
   readonly activeGoal?: UiGoal | null;
   readonly onExecuteGoalCommand?: ExecuteGoalCommand;
   readonly onOpenGoalPanel?: (intent?: GoalPanelIntent) => void;
@@ -450,6 +453,7 @@ export function Composer(props: {
                 onSet: props.onSetPermission,
               }}
               modelControl={props.modelControl}
+              modelEntry={props.modelEntry}
               onReasoningChange={(reasoning) => {
                 selectedReasoning.current = reasoning;
               }}

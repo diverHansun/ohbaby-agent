@@ -1,10 +1,14 @@
 import { getUnconsumedSteers, type UiBackendClient } from "ohbaby-sdk";
 import type { ReactElement, ReactNode } from "react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { CommandNoticeList } from "../commands/CommandResultModal.js";
 import { StructuredCommandOverlay } from "../commands/StructuredCommandOverlay.js";
 import { Composer } from "../composer/Composer.js";
+import {
+  resolveModelEntry,
+  useSettingsModels,
+} from "../composer/model-choice.js";
 import { ModelMenu } from "../composer/ModelMenu.js";
 import { TodoDock } from "../conversation/TodoDock.js";
 import { ApprovalPanel } from "../permissions/ApprovalPanel.js";
@@ -132,17 +136,50 @@ export function SessionScreen({
     storeSnapshot.currentModelLoaded && storeSnapshot.currentModel === null;
   const { prefillComposer } = overlays;
   const inDraft = view.composer.activeSessionId === undefined;
+  // A chat keeps its model on the session (session-model 00 D17); a draft
+  // holds the choice here until its first prompt saves it on the new session.
+  const models = useSettingsModels(runtime.settings);
+  const [draftModel, setDraftModel] = useState<string>();
+  // Every draft shares one scope, so the choice ends with the draft it was
+  // made in: the next draft starts on the default again.
+  useEffect(() => {
+    if (!inDraft) setDraftModel(undefined);
+  }, [inDraft]);
+  const selectedEntryId = inDraft
+    ? draftModel
+    : view.activeSession?.modelEntryId;
+  const modelEntry = resolveModelEntry(models, selectedEntryId);
+  const activeSessionId = view.composer.activeSessionId;
+  const selectModel = useCallback(
+    async (id: string): Promise<void> => {
+      if (activeSessionId === undefined) {
+        setDraftModel(id);
+        return;
+      }
+      await client.updateSessionModel({
+        sessionId: activeSessionId,
+        modelEntryId: id,
+      });
+    },
+    [activeSessionId, client],
+  );
+  // A choice deleted since it was made falls back to the default, so the
+  // draft sends nothing and the server picks the default as well.
+  const draftEntryId =
+    inDraft && modelEntry?.id === selectedEntryId ? selectedEntryId : undefined;
   const submit = useCallback(
     async (
-      ...args: Parameters<typeof submitText>
+      text: string,
+      clientRequestId?: string,
+      reasoning?: Parameters<typeof submitText>[2],
     ): ReturnType<typeof submitText> => {
-      if (modelMissing && !args[0].startsWith("/")) {
+      if (modelMissing && !text.startsWith("/")) {
         onOpenModelSettings(inDraft);
         return false;
       }
-      return submitText(...args);
+      return submitText(text, clientRequestId, reasoning, draftEntryId);
     },
-    [modelMissing, onOpenModelSettings, inDraft, submitText],
+    [modelMissing, onOpenModelSettings, inDraft, submitText, draftEntryId],
   );
 
   // Stable identity: the slash palette refetches its catalog when this changes.
@@ -276,7 +313,11 @@ export function SessionScreen({
           }}
           modelControl={
             <ModelMenu
+              key={activeSessionId ?? "draft"}
               settings={runtime.settings}
+              models={models}
+              selectedEntryId={selectedEntryId}
+              onSelect={selectModel}
               fallbackLabel={view.header.modelLabel}
               missing={modelMissing}
               disabled={viewingSubagent || approvalDialogVisible}
@@ -286,6 +327,7 @@ export function SessionScreen({
               onError={onError}
             />
           }
+          modelEntry={modelEntry}
           activeGoal={view.activeGoal}
           onExecuteGoalCommand={(input) => runtime.executeSlashCommand(input)}
           onOpenGoalPanel={overlays.openGoalPanel}

@@ -542,6 +542,13 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     model,
     sessions: [...typicalSessions(), ...archivedSessions()],
   }),
+  // Twenty models, so the composer's model menu scrolls (04 T19c).
+  "models-many": () => ({
+    snapshot: { ...base, activeSessionId: null, sessions: history },
+    workspace,
+    model,
+    sessions: typicalSessions(),
+  }),
   "no-model": () => ({
     snapshot: { ...base, activeSessionId: null, sessions: history },
     workspace,

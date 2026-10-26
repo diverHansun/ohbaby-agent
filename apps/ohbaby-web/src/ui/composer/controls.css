@@ -134,9 +134,35 @@
   }
 }
 
-.ohb-model-menu {
+.ohb-menu.ohb-model-menu:not(.is-sheet) {
   max-width: 320px;
   min-width: 220px;
+}
+
+.ohb-model-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* A long list scrolls on its own; Manage models stays in reach (D19). The
+   phone sheet already scrolls as a whole, so only the popup is capped. */
+.ohb-menu:not(.is-sheet) .ohb-model-menu-list {
+  margin: -4px -4px 0;
+  max-height: min(340px, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 4px 0;
+  scroll-padding-block: 28px 4px;
+  scrollbar-width: thin;
+}
+
+/* The default model's quiet marker (D17): read, never shouted. */
+.ohb-model-default-tag {
+  color: var(--text-dim);
+  flex: none;
+  font-size: 11px;
+  letter-spacing: 0.02em;
 }
 
 /* The More menu exists for phones only (D29). */

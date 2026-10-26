@@ -3,6 +3,7 @@ import type {
   UiPermissionLevel,
   UiReasoningConfig,
   UiSession,
+  UiSettingsModel,
 } from "ohbaby-sdk";
 import type { ReactElement, ReactNode } from "react";
 import { ComposerMoreMenu } from "./ComposerMoreMenu.js";
@@ -18,6 +19,8 @@ import { useReasoning, type ReasoningClient } from "./useReasoning.js";
 export function ComposerControls(props: {
   readonly client: ReasoningClient;
   readonly session: UiSession | null;
+  /** The settings entry this chat's next turn uses, once the list loads. */
+  readonly modelEntry?: UiSettingsModel;
   readonly permissionControl: ReactNode;
   readonly permission: {
     readonly level: UiPermissionLevel;
@@ -42,6 +45,7 @@ export function ComposerControls(props: {
     props.client,
     props.session,
     props.onReasoningChange,
+    props.modelEntry,
   );
   return (
     <div className="ohb-composer-bar">

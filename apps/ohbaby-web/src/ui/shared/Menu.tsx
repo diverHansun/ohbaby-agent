@@ -229,7 +229,12 @@ export function Menu(props: {
           ? items.length - 1
           : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) %
             items.length;
-    items[next]?.focus({ preventScroll: true });
+    const item = items.at(next);
+    if (!item) return;
+    item.focus({ preventScroll: true });
+    // Bring a row of a scrolling list into view (jsdom has no scrollIntoView).
+    if (typeof item.scrollIntoView === "function")
+      item.scrollIntoView({ block: "nearest" });
   };
 
   const body = (
