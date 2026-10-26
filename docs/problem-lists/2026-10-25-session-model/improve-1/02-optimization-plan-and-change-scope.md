@@ -130,6 +130,7 @@ flowchart LR
 - `SubmitPromptOptions.modelEntryId?: string`，语义同 reasoning：只作用于这一条提交；如果是新会话的第一条，同时写到会话上。
 - `UiBackendClient.updateSessionModel({ sessionId, modelEntryId: string | null }): Promise<UiSession>`；HTTP `PATCH /v1/sessions/:id/model`，请求体 `{ modelEntryId: string | null }`；JSON-RPC 方法 `updateSessionModel`。错误码复用 `MODEL_NOT_FOUND`、`MODEL_CONFIG_INCOMPLETE`，会话不存在和跨工作区与 reasoning 接口一致。
 - `getCurrentModel({ sessionId? })`；HTTP `GET /v1/model?sessionId=`。返回值 `UiCurrentModelConfig` 增加 `id`（条目 id）和 `source: "explicit" | "default"`。不传 `sessionId` 时返回全局默认。
+  - 实施时追加（TUI 草稿用）：可选的 `modelEntryId`。传了 `sessionId` 就按会话解析，`modelEntryId` 不起作用；只有没传 `sessionId` 时才按这个条目解析，都没有就用默认。见 05“TUI 实施与验收”。
 - 设置接口：`UiSettingsModel` 增加 `reasoningDefault?: UiReasoningConfig`；`UiSettingsModelCreate`、`UiSettingsModelPatch` 增加 `reasoning?`（修改时允许 `null`）；`UiSettingsModels` 删除 `params`。`openapi.ts` 同步。
 - `ui-persistent.ts`、`host/ui-command-gateway.ts`、`host/command-record.ts` 等实现 `UiBackendClient` 的地方补齐新方法。
 

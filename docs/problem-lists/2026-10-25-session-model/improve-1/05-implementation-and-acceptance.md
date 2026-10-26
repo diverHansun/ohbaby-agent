@@ -1,6 +1,6 @@
 # 实施与验收
 
-状态：后端 Stage 1、2 和 Web Stage 3 完成，待用户审查；TUI（Stage 4）未开始；尚未合并 main。
+状态：后端 Stage 1、2，Web Stage 3，TUI Stage 4 均已完成，待用户审查；尚未合并 main。
 
 日期：2026-10-26。实施分支：`codex/session-model`，基线：`18eb1f04`。
 
@@ -8,7 +8,7 @@
 
 按本次会话更新：agent 完成 Stage 1、2 的后端、测试、子代理审查；用户检查后端并实施 Web/TUI。全部完成后再合并 main。本次不合并、不推送。
 
-后端阶段的 Web 只同步了 SDK 要求的传输方法、开发 mock 和测试夹具。用户检查后端后，Web 的聊天菜单、Settings 和 reasoning 控件改由 agent 在同一分支实施，见文末“Web 前端实施与验收”。TUI 交互仍待后续实施。
+后端阶段的 Web 只同步了 SDK 要求的传输方法、开发 mock 和测试夹具。用户检查后端后，Web 的聊天菜单、Settings 和 reasoning 控件改由 agent 在同一分支实施，见“Web 前端实施与验收”。TUI 同样由 agent 实施，见文末“TUI 实施与验收”。
 
 ## 实施记录
 
@@ -153,3 +153,68 @@
 ### 改动面评估
 
 新增的只有 `model-choice.ts` 里的一个读取 hook 和一个解析函数，菜单、会话页面和 reasoning 控件共用。草稿的选择就是会话页面里的一个 state，没有为它另做 store。主要的复杂度在 `useReasoning`：它要同时处理草稿、已有会话和切换中的竞态，后续改动要保留现有的竞态测试。
+
+## 命名约定
+
+用户确认：界面上写 **Thinking**，代码和接口字段保持 `reasoning`（`reasoning`、`reasoningDefault`、`updateSessionReasoning`），不跟着改名。Web 已经这样做（输入框控件、编辑器的 Thinking 行）；TUI 的 `/effort` 面板目前仍显示 Reasoning Effort，没在这次改。
+
+## TUI 实施与验收
+
+日期：2026-10-26，分支 `codex/session-model`，接在 Web 提交之后。
+
+### 做了什么
+
+- **`/models` 可以选了**（T25、T25b）：面板列出所有配置完整的条目，不完整的不显示。↑↓ 移动光标，Enter 给当前会话换模型（`updateSessionModel`），成功后关闭面板；`d` 把光标所在条目设为默认（`selectDefaultModel`），面板不关，`default` 标记跟着移动。勾选的是这个会话下一轮要用的模型。底部提示：`↑↓ move · enter use in this chat · d set default · esc close`。
+- **草稿**：还没有会话时，Enter 只在本地记住选择（和 `pendingReasoning` 一样），第一条消息带上 `modelEntryId`。会话建好后这个选择就清掉，下一个新会话从默认开始。
+- **底栏和 `/effort`**（T26）：都按会话读模型；草稿读所选条目。会话有更新（`session.updated`）时底栏重新读取模型，所以换模型后会跟着变。草稿换了条目时，之前给别的模型选的 `/effort` 档位一并清掉。
+- **后端**：`listModels` 返回全部完整条目，带 `id`，并标出默认和当前会话的条目；删掉没有任何实现的可选接口 `switchModel`，以及输出里的 `switching` 字段。`/models` 的目录说明改成“Choose this chat's model or the default”。
+- **`/connect`**（T27）：代码没动。
+
+### 与规划的出入
+
+| 规划 | 实际 | 原因 |
+| --- | --- | --- |
+| 02 要求按 EffortPanel 的方式做成交互面板 | 仍是展示类面板，数据走原来的命令输出；`ModelsPanel` 自己处理按键，Esc 仍归面板管理器 | 复用现有数据通道，不新开一套交互协议 |
+| 02 的 `getCurrentModel` 只有 `sessionId` | 增加可选的 `modelEntryId`（SDK、进程内适配器、JSON-RPC 校验） | 草稿的底栏、`/effort` 和首条消息的档位校验都要按所选条目读能力。传了 `sessionId` 就按会话解析（会话没选就用默认），`modelEntryId` 不起作用；只有没传 `sessionId` 时才按 `modelEntryId` 解析 |
+| 02 把 `dialogs/model-dialog.tsx` 列为可删 | 保留 | 它渲染 SDK 交互协议里 `subject: "model"` 的通用 `select-one`，有合约测试。生产代码目前不发这种交互，属于休眠代码，留给以后和协议一起清理 |
+| 02 设计了单独的“当前模型”区块 | 改成一行摘要（This chat / Next chat + 模型 · 服务商 · 协议 · 上下文用量） | 让列表在终端里放得下 |
+| 04 T25 写“超过 8 个条目时滚动” | 列表一页最多 6 行（Skills 面板的页高减 4），超出就滚动 | 终端够高时，面板总高度和 Skills 面板一致，摘要、标题、提示占掉 4 行；终端很矮时最少显示 3 行 |
+| — | 跟随默认的会话在 ✓ 那行按 Enter，也会把会话固定到这个条目 | 和 Web 一致（P14）。TUI 区分不出“跟随默认”和“已固定”，多发一次 `session.updated`，结果无害 |
+
+### 子代理审查
+
+一名没有参与实现的子代理（opus）对照 02/04 的 Stage 4 审查了 TUI 改动，没有发现高危问题。处理如下：
+
+| 发现 | 处理 |
+| --- | --- |
+| 忙碌标记在下一次渲染才生效，两次按键赶在渲染前到达，会发出两个请求 | 改成同步的 ref；新增测试，去掉保护后这个测试确实会失败（调用 2 次） |
+| Enter 的请求还没返回时按 Esc 关掉面板，返回后 `onClose()` 可能关掉用户新开的面板 | 面板卸载后不再调用 `onClose` 和 setState |
+| 注入客户端（磁盘上没有条目）时列表那一项没有 `default` 标记 | 标为默认 |
+| 草稿换条目后，之前的 `/effort` 档位在提交时被静默丢掉 | 换到别的模型时立刻清掉 |
+| 缺失败路径和 RPC 校验的测试 | 补了保存失败时面板不关并显示原因的测试；补了 `getCurrentModel` 的 `modelEntryId` 透传和空值拒绝 |
+| 底栏在会话每次更新时都重新读模型 | 暂不改。读的是本机文件，开销小；只在模型字段变化时刷新需要另存上一次的值，留到确有性能问题时再做 |
+| 文档没有 `activeProfileId`、只有一个条目时，面板不显示默认 | 不改。后端对这种文档本来就报错，不是这次引入的 |
+| `pendingModelEntryId` 和 `draftModelEntryId` 两个名字 | 不改。TUI 里沿用已有的 `pendingReasoning` 叫法，组件内部的 `draft…` 指同一件事 |
+
+### 验证记录
+
+- 全量：`pnpm typecheck` 通过；lint 0 个错误（警告都是改动前已有的）；unit 378 个文件 / 4706 个测试、contract 37 / 575、integration 202 / 1902 全部通过；Web 68 / 798 通过。
+- 新增或改写的测试：`/models` 可选面板、会话里 Enter 换模型和 `d` 移默认（T25/T25b）、草稿选择随第一条消息发出、12 个条目时滚动到最后一个、保存失败与重复按键、后端列出完整条目并标出会话模型和默认、RPC 透传与校验。
+- 真实 TUI 走查（tmux，独立的 `OHBABY_HOME`，复制了用户的一个真实条目，加 10 个指向 127.0.0.1:9 的假条目和 1 个不完整条目，用户自己的 `~/.ohbaby/model.json` 没碰）：
+  - 不完整的条目不显示；能滚到第 11 个条目。
+  - 草稿选的模型显示在底栏；`d` 移动默认后，磁盘上的 `activeProfileId` 变了，面板没关。
+  - 用所选的真实模型发第一条消息，provider 返回 403（用户那个 key 的权限问题，与本改动无关），说明消息确实带着草稿选的模型发出去了。
+  - 会话里按 `d` 不改变已固定的 ✓；Enter 换模型后底栏随之更新；`/effort` 显示 deepseek 的档位；`/new` 的会话跟随新的默认。
+  - `/connect`（T27）代码没动，没有手动走查。
+
+### 改动面评估
+
+新增的只有 `models-panel.tsx` 一个组件，按键、滚动窗口都在里面，复用 Skills 面板的翻页方式。草稿的选择是 `app.tsx` 里和 `pendingReasoning` 并列的一个 state，没有新建 store。后端只是把 `listModels` 从“当前一个”扩到“全部完整条目”，并给 `getCurrentModel` 加了一个可选参数。
+
+## 同分支的 Web 小改动
+
+用户在 TUI 实施期间提的两处，和会话模型无关，单独提交：
+
+- **Settings › Archived 删除和恢复时有移除动效**：行先原地淡出，再收起高度，约 320 ms 后从列表移除，期间这一行不能再点。开启“减少动态效果”或环境不支持动画时直接移除；页面在后台、动画暂停时，有个兜底定时器照样把行移走。真实浏览器里逐帧采样确认了高度从 60px 收到 0；新增单元测试确认动画结束前行还在且不可交互。
+- **模型编辑器 Label 一栏加提示**：`optional, shown after the model name`。Label 是可选的显示名，同一个模型配了两个条目时用来区分。
+
