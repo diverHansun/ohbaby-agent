@@ -2671,12 +2671,13 @@ export function createInProcessUiBackendClient(
 
   async function currentConnectModelFromOptions(
     sessionId?: string,
+    draftEntryId?: string,
   ): Promise<UiCurrentModelConfig | null> {
     try {
       if (sessionId) await requireOwnedSession(sessionId);
       const selected = sessionId
         ? await sessionModelEntryId(sessionId)
-        : undefined;
+        : draftEntryId;
       const { config, entry, source } = await modelClients.read(
         await resolveProjectRoot(),
         selected,
@@ -2856,11 +2857,31 @@ export function createInProcessUiBackendClient(
     return updated;
   }
 
-  async function listModelsFromOptions(): Promise<
-    readonly CommandModelSummary[]
-  > {
-    const current = await currentModelFromOptions();
-    return current ? [current] : [];
+  /** Complete entries, marking the session's model and the default (D20). */
+  async function listModelsFromOptions(
+    sessionId?: string,
+  ): Promise<readonly CommandModelSummary[]> {
+    const current = await currentModelFromOptions(sessionId);
+    const complete = (await readModelDocument()).models.filter(
+      configurationComplete,
+    );
+    // An injected client has no entries on disk; show what runs.
+    if (complete.length === 0)
+      return current ? [{ ...current, default: true }] : [];
+    const defaultId = sessionId
+      ? (await currentConnectModelFromOptions())?.id
+      : current?.id;
+    return complete.map((entry) => ({
+      id: entry.id,
+      label: entry.label ?? entry.model,
+      provider: entry.provider,
+      model: entry.model,
+      interfaceProvider: entry.interfaceProvider,
+      baseUrl: entry.baseUrl,
+      ...(entry.apiKeyEnv === undefined ? {} : { apiKeyEnv: entry.apiKeyEnv }),
+      active: entry.id === current?.id,
+      default: entry.id === defaultId,
+    }));
   }
 
   async function resolveCoreSessionDisplayTitle(
@@ -5060,7 +5081,10 @@ export function createInProcessUiBackendClient(
     },
 
     getCurrentModel(input): Promise<UiCurrentModelConfig | null> {
-      return currentConnectModelFromOptions(input?.sessionId);
+      return currentConnectModelFromOptions(
+        input?.sessionId,
+        input?.modelEntryId,
+      );
     },
 
     executeCommand(

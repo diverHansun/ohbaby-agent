@@ -579,19 +579,24 @@ export async function callDaemonBackend(input: {
     case "getCurrentModel": {
       const value = request.params[0];
       if (value === undefined) return backend.getCurrentModel();
+      const nonEmpty = (field: unknown): boolean =>
+        field === undefined || (typeof field === "string" && !!field.trim());
       if (
         !isRecord(value) ||
-        (value.sessionId !== undefined &&
-          (typeof value.sessionId !== "string" || !value.sessionId.trim()))
+        !nonEmpty(value.sessionId) ||
+        !nonEmpty(value.modelEntryId)
       )
-        throw Object.assign(new Error("Invalid session id"), {
+        throw Object.assign(new Error("Invalid session or model entry id"), {
           code: "VALIDATION_FAILED",
         });
-      return backend.getCurrentModel(
-        typeof value.sessionId === "string"
+      return backend.getCurrentModel({
+        ...(typeof value.sessionId === "string"
           ? { sessionId: value.sessionId }
-          : {},
-      );
+          : {}),
+        ...(typeof value.modelEntryId === "string"
+          ? { modelEntryId: value.modelEntryId }
+          : {}),
+      });
     }
     case "probeModelContextWindow":
       return backend.probeModelContextWindow(

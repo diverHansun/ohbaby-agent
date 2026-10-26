@@ -151,8 +151,14 @@ export interface UiQueryClient
     promptId: string,
     options?: UiWaitForPromptOptions,
   ): Promise<UiPromptCompletion>;
+  /**
+   * The model the next turn uses. With `sessionId`, the session's choice or
+   * the default (`modelEntryId` is ignored); otherwise this entry or the default.
+   */
   getCurrentModel(input?: {
     readonly sessionId?: string;
+    /** A draft's choice before it has a session (TUI `/models`). */
+    readonly modelEntryId?: string;
   }): Promise<UiCurrentModelConfig | null>;
   probeModelContextWindow(
     input: UiProbeModelContextWindowInput,

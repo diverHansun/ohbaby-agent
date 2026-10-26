@@ -1482,10 +1482,6 @@ describe("CommandService", () => {
               provider: "openai",
             },
           ],
-          switching: {
-            available: false,
-            mode: "single-active-config",
-          },
         },
         kind: "data",
         subject: "models.current",
@@ -1494,52 +1490,24 @@ describe("CommandService", () => {
     });
   });
 
-  it("marks model switching available when a provider exposes switchModel", async () => {
-    const switchModel = vi.fn();
+  it("passes the invocation session to the model provider", async () => {
+    const currentModel = vi.fn(() => null);
+    const listModels = vi.fn(() => [
+      { default: true, id: "a", label: "A", provider: "p" },
+    ]);
     const { events, service } = createServiceHarness({
-      models: {
-        currentModel() {
-          return {
-            apiKeyEnv: "OPENAI_API_KEY",
-            baseUrl: "https://api.openai.com/v1",
-            id: "openai:gpt-5.5",
-            interfaceProvider: "openai-compatible",
-            label: "GPT-5.5",
-            model: "gpt-5.5",
-            provider: "openai",
-          };
-        },
-        listModels() {
-          return [
-            {
-              apiKeyEnv: "OPENAI_API_KEY",
-              baseUrl: "https://api.openai.com/v1",
-              id: "openai:gpt-5.5",
-              interfaceProvider: "openai-compatible",
-              label: "GPT-5.5",
-              model: "gpt-5.5",
-              provider: "openai",
-            },
-          ];
-        },
-        switchModel,
-      },
+      models: { currentModel, listModels },
     });
 
-    await service.executeCommand(makeInvocation("models", ["models"]));
+    await service.executeCommand({
+      ...makeInvocation("models", ["models"]),
+      sessionId: "session_1",
+    });
 
+    expect(currentModel).toHaveBeenCalledWith("session_1");
+    expect(listModels).toHaveBeenCalledWith("session_1");
     expect(events.at(-1)).toMatchObject({
-      output: {
-        data: {
-          switching: {
-            available: true,
-            mode: "single-active-config",
-          },
-        },
-        kind: "data",
-        subject: "models.current",
-      },
-      type: "result",
+      output: { data: { models: [{ default: true, id: "a" }] } },
     });
   });
 

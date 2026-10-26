@@ -2964,7 +2964,10 @@ it("does not send unchanged binding hellos for repeated REST prompts or another 
 
 it("transports session model choices, scoped queries and default selection over RPC", async () => {
   const backend = new FakeBackend();
-  const queried: ({ readonly sessionId?: string } | undefined)[] = [];
+  const queried: (
+    | { readonly sessionId?: string; readonly modelEntryId?: string }
+    | undefined
+  )[] = [];
   backend.getCurrentModel = (input?: {
     readonly sessionId?: string;
   }): ReturnType<UiBackendClient["getCurrentModel"]> => {
@@ -3009,6 +3012,13 @@ it("transports session model choices, scoped queries and default selection over 
       result: { id: "a", source: "explicit" },
     });
     expect(queried.at(-1)).toEqual({ sessionId: "s" });
+    await rpc("getCurrentModel", [{ modelEntryId: "a" }]);
+    expect(queried.at(-1)).toEqual({ modelEntryId: "a" });
+    for (const input of [{ modelEntryId: " " }, { sessionId: "" }, "s"]) {
+      expect(
+        await (await rpc("getCurrentModel", [input])).json(),
+      ).toMatchObject({ ok: false, error: { code: "VALIDATION_FAILED" } });
+    }
     expect(await (await rpc("selectDefaultModel", ["a"])).json()).toMatchObject(
       { ok: true },
     );

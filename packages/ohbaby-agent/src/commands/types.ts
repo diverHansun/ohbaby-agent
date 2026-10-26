@@ -64,15 +64,10 @@ export interface CommandModelSummary {
   readonly interfaceProvider?: InterfaceProviderKind;
   readonly baseUrl?: string;
   readonly apiKeyEnv?: string;
+  /** The entry this session's next turn uses. */
   readonly active?: boolean;
-}
-
-export interface CommandModelSwitchInput {
-  readonly provider: string;
-  readonly model: string;
-  readonly baseUrl: string;
-  readonly apiKeyEnv?: string;
-  readonly apiKey?: string;
+  /** The entry new chats, and chats that never picked one, use. */
+  readonly default?: boolean;
 }
 
 export interface CommandSessionSummary {
@@ -96,15 +91,13 @@ export interface CommandMcpProvider {
 }
 
 export interface CommandModelProvider {
-  listModels():
-    | Promise<readonly CommandModelSummary[]>
-    | readonly CommandModelSummary[];
+  /** Complete entries only; choosing one goes through `updateSessionModel`. */
+  listModels(
+    sessionId?: string,
+  ): Promise<readonly CommandModelSummary[]> | readonly CommandModelSummary[];
   currentModel(
     sessionId?: string,
   ): Promise<CommandModelSummary | null> | CommandModelSummary | null;
-  switchModel?(
-    input: CommandModelSwitchInput,
-  ): Promise<CommandModelSummary> | CommandModelSummary;
 }
 
 export interface CommandSessionProvider {

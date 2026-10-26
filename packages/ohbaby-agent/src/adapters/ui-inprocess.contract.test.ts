@@ -8959,10 +8959,6 @@ describe("createInProcessUiBackendClient", () => {
             provider: "fake",
           },
         ],
-        switching: {
-          available: false,
-          mode: "single-active-config",
-        },
       },
       kind: "data",
       subject: "models.current",

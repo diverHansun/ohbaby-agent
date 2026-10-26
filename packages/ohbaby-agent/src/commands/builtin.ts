@@ -56,8 +56,9 @@ const HELP_COMMAND_ORDER = [
 
 async function listModels(
   options: CommandServiceOptions,
+  sessionId?: string,
 ): Promise<readonly CommandModelSummary[]> {
-  const models = await (options.models?.listModels() ?? []);
+  const models = await (options.models?.listModels(sessionId) ?? []);
   return models
     .map(sanitizeModelSummary)
     .filter((model): model is CommandModelSummary => model !== null);
@@ -139,6 +140,7 @@ function sanitizeModelSummary(
     ...(model.baseUrl === undefined ? {} : { baseUrl: model.baseUrl }),
     ...(model.apiKeyEnv === undefined ? {} : { apiKeyEnv: model.apiKeyEnv }),
     ...(model.active === undefined ? {} : { active: model.active }),
+    ...(model.default === undefined ? {} : { default: model.default }),
   };
 }
 
@@ -347,16 +349,12 @@ async function handleSkills(
 async function handleModels(
   options: CommandServiceOptions,
   context: CommandRunContext,
+  sessionId?: string,
 ): Promise<void> {
-  const models = await listModels(options);
   context.emitOutput(
     dataOutput("models.current", {
-      current: await currentModel(options),
-      models,
-      switching: {
-        available: typeof options.models?.switchModel === "function",
-        mode: "single-active-config",
-      },
+      current: await currentModel(options, sessionId),
+      models: await listModels(options, sessionId),
     }),
   );
 }
@@ -684,8 +682,8 @@ export function createBuiltinHandlers(
     createGoalCommandHandler(options),
     {
       id: "models",
-      execute(_invocation, context): Promise<void> {
-        return handleModels(options, context);
+      execute(invocation, context): Promise<void> {
+        return handleModels(options, context, invocation.sessionId);
       },
     },
     {

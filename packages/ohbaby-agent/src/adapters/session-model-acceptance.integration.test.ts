@@ -439,3 +439,63 @@ it("T13b filters a frozen effort against the default selected at queued executio
     release.resolve();
   }
 });
+
+it("T25 lists complete entries for /models, marking the chat's model and the default", async () => {
+  await writeModels([
+    entry("a"),
+    entry("b"),
+    entry("c", { needsConfiguration: true }),
+  ]);
+  const client = createClient();
+  const result = await client.submitPromptAndWait("Use B", {
+    modelEntryId: "b",
+  });
+  const sessionId = result.prompt.sessionId;
+  const events: UiEvent[] = [];
+  client.subscribeEvents((event) => {
+    events.push(event);
+  });
+  const run = async (id: string, session?: string): Promise<unknown> => {
+    events.length = 0;
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: id,
+      commandId: "models",
+      path: ["models"],
+      raw: "/models",
+      rawArgs: "",
+      ...(session ? { sessionId: session } : {}),
+      surface: "tui",
+    });
+    const delivered = events.find(
+      (event) => event.type === "command.result.delivered",
+    );
+    return delivered?.type === "command.result.delivered"
+      ? delivered.output
+      : undefined;
+  };
+  const marks = (output: unknown): unknown =>
+    (
+      (output as { data: { models: { id: string }[] } }).data.models as {
+        id: string;
+        active?: boolean;
+        default?: boolean;
+      }[]
+    ).map(({ id, active, default: isDefault }) => ({
+      id,
+      active,
+      default: isDefault,
+    }));
+  expect(marks(await run("inv_session", sessionId))).toEqual([
+    { id: "a", active: false, default: true },
+    { id: "b", active: true, default: false },
+  ]);
+  expect(marks(await run("inv_draft"))).toEqual([
+    { id: "a", active: true, default: true },
+    { id: "b", active: false, default: false },
+  ]);
+  // A draft's choice resolves before it has a session.
+  await expect(
+    client.getCurrentModel({ modelEntryId: "b" }),
+  ).resolves.toMatchObject({ id: "b", model: "model-b" });
+});

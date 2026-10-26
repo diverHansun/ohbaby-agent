@@ -104,7 +104,7 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     aliases: [],
     argumentMode: "argv",
     category: "model",
-    description: "Show and switch the active model",
+    description: "Choose this chat's model or the default",
     parentBehavior: "interaction",
     source: "builtin",
     surfaces: COMMON_SURFACES,

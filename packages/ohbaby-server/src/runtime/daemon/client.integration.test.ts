@@ -467,8 +467,13 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
-    this.calls.push({ args: [], method: "getCurrentModel" });
+  getCurrentModel(
+    input?: Parameters<UiBackendClient["getCurrentModel"]>[0],
+  ): ReturnType<UiBackendClient["getCurrentModel"]> {
+    this.calls.push({
+      args: input === undefined ? [] : [input],
+      method: "getCurrentModel",
+    });
     return Promise.resolve(null);
   }
 
@@ -827,6 +832,7 @@ describe("createRemoteUiBackendClient", () => {
       await client.submitPromptAndWait("hello", { sessionId: "session_1" });
       await client.compactSession(compactOptions);
       await client.getCurrentModel();
+      await client.getCurrentModel({ modelEntryId: "entry_b" });
       await client.probeModelContextWindow(probeInput);
       await client.connectModel(connectInput);
       await client.setSearchApiKey(searchInput);
@@ -858,6 +864,7 @@ describe("createRemoteUiBackendClient", () => {
         method: "compactSession",
       },
       { args: [], method: "getCurrentModel" },
+      { args: [{ modelEntryId: "entry_b" }], method: "getCurrentModel" },
       { args: [probeInput], method: "probeModelContextWindow" },
       { args: [connectInput], method: "connectModel" },
       { args: [searchInput], method: "setSearchApiKey" },
