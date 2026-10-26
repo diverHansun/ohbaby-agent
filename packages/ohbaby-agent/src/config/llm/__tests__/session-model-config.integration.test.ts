@@ -83,6 +83,37 @@ it("drops legacy reasoning incompatible with the original default", () => {
   });
   expect(document.models[0]).not.toHaveProperty("reasoning");
 });
+it.each([4096, 8192])(
+  "checks migrated reasoning against the preserved entry output ceiling %i",
+  (maxOutputTokens) => {
+    const capability = {
+      mode: "effort" as const,
+      wire: "anthropic-budget" as const,
+      efforts: ["low", "high"],
+      defaultEffort: "low",
+      budgets: { low: 1024, high: 4096 },
+      supportsDisabled: true,
+    };
+    const document = normalizeModelDocument({
+      activeProfileId: "a",
+      llmParams: { maxTokens: 8192, reasoning: { effort: "high" } },
+      models: [
+        {
+          ...route,
+          id: "a",
+          interfaceProvider: "anthropic",
+          maxOutputTokens,
+          reasoningCapabilities: capability,
+        },
+      ],
+    });
+    expect(document.models[0].maxOutputTokens).toBe(maxOutputTokens);
+    expect(document.models[0].reasoningCapabilities).toEqual(capability);
+    expect(document.models[0].reasoning).toEqual(
+      maxOutputTokens === 4096 ? undefined : { effort: "high" },
+    );
+  },
+);
 it("backs up the original bytes only on the first migration write", async () => {
   const original = JSON.stringify(
     {

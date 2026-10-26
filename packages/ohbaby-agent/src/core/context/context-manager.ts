@@ -320,9 +320,14 @@ export function createContextManager(
   ): ContextManager {
     const key = scopedSessionKey({ sessionId, contextScopeId });
     const scope = scopeState(key);
-    if (scope[mode] !== undefined && scope[mode] !== runModel) {
+    if (
+      scope[mode] !== undefined &&
+      scope[mode] !== runModel &&
+      (mode === "executionModel" || scope.executionModel !== runModel)
+    ) {
       // Reset only the newly selected model. The old execution may still
       // receive provider feedback or finish a summary while it is in flight.
+      // Inspecting that execution again must preserve its calibration and floor.
       scope.models.set(runModel, {});
     }
     scope[mode] = runModel;

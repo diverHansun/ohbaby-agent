@@ -3490,16 +3490,18 @@ export function createInProcessUiBackendClient(
       return null;
     }
 
+    let runModel: RunModel | undefined;
     if (coreSession || uiSession) {
       const selected = await resolveSessionModel(input.sessionId);
       observeSessionModel(input.sessionId, selected.entry.id, selected.client);
+      runModel = createRunModel(selected.entry.id, selected.client);
     }
     const cached = contextWindowUsage.get(input.sessionId);
     if (cached) {
       return cached;
     }
 
-    if (!coreSession && !uiSession) {
+    if (!runModel) {
       return null;
     }
     const projectRoot =
@@ -3509,9 +3511,13 @@ export function createInProcessUiBackendClient(
 
     const runtime = await runtimeController.getRuntime();
     const usage = await runtime.getContextUsage({
+      runModel,
       projectRoot,
       sessionId: input.sessionId,
     });
+    // A model switch can finish while the history query is still pending.
+    if (!matchesSelectedModel(input.sessionId, runModel))
+      return contextWindowUsage.get(input.sessionId) ?? null;
     // A live preparation or compact may have published newer context while
     // this static read was awaiting assembly. Keep that committed value.
     const newer = contextWindowUsage.get(input.sessionId);

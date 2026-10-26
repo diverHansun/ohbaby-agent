@@ -185,6 +185,23 @@ it("preserves the active model calibration while inspecting another selected mod
   expect((await prepare(a)).usage.currentTokens).toBe(
     calibrated.usage.currentTokens,
   );
+  // Returning the usage view to A must not reset the still-running A turn.
+  const activeContext = await manager.assemble("session", "/tmp", {
+    isSubagent: false,
+    toolNames: [],
+    runModel: a,
+  });
+  expect(
+    manager.getUsage({
+      context: activeContext,
+      modelId: "same-name",
+      tools: [],
+      runModel: a,
+    }).currentTokens,
+  ).toBe(calibrated.usage.currentTokens);
+  expect((await prepare(a)).usage.currentTokens).toBe(
+    calibrated.usage.currentTokens,
+  );
   manager.updateCalibrationFactor("session", 300, 100, undefined, a);
   expect(
     manager.getUsage({ context, modelId: "same-name", tools: [], runModel: b })

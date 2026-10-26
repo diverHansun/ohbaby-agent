@@ -201,3 +201,111 @@ async function cacheUsage(
     unsubscribe();
   }
 }
+
+it("does not cache a stale static window query after switching models", async () => {
+  const { createBus } = await import("../bus/index.js");
+  const { createMessageManager, createInMemoryMessageStore } =
+    await import("../core/message/index.js");
+  const directory = await mkdtemp(join(tmpdir(), "static-model-usage-race-"));
+  vi.stubEnv("OHBABY_HOME", directory);
+  await writeFile(
+    join(directory, "model.json"),
+    JSON.stringify({
+      activeProfileId: "a",
+      models: ["a", "b"].map((id) => ({
+        id,
+        provider: "test",
+        model: id,
+        baseUrl: `https://${id}.invalid/v1`,
+        interfaceProvider: "openai-compatible",
+        contextWindowTokens: id === "a" ? 128000 : 32000,
+        maxOutputTokens: 512,
+      })),
+    }),
+  );
+  const bus = createBus();
+  const messages = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+  });
+  const client = createInProcessUiBackendClient({
+    bus,
+    messageManager: messages,
+    workdir: directory,
+    initialSnapshot: {
+      activeSessionId: "s",
+      sessions: [
+        {
+          id: "s",
+          title: "test",
+          createdAt: "2026-10-26",
+          updatedAt: "2026-10-26",
+          messages: [],
+        },
+      ],
+      runs: [],
+      permissions: [],
+      status: { kind: "idle" },
+    },
+    createLLMClient: (config) =>
+      Promise.resolve({
+        config,
+        provider: {
+          id: config.provider,
+          kind: config.interfaceProvider,
+          client: {},
+          isAbortError: () => false,
+          streamResponse: () => {
+            throw new Error("Unexpected provider call");
+          },
+        },
+      }),
+  });
+  const enteredA = deferred();
+  const enteredB = deferred();
+  const releaseA = deferred();
+  const releaseB = deferred();
+  let readA: ReturnType<typeof client.getContextWindowUsage> | undefined;
+  let switchB: ReturnType<typeof client.updateSessionModel> | undefined;
+  try {
+    await client.initialize();
+    const list = messages.listBySession.bind(messages);
+    let calls = 0;
+    vi.spyOn(messages, "listBySession").mockImplementation(async (...args) => {
+      const call = ++calls;
+      if (call === 1) {
+        enteredA.resolve();
+        await releaseA.promise;
+      }
+      if (call === 2) {
+        enteredB.resolve();
+        await releaseB.promise;
+      }
+      return list(...args);
+    });
+    readA = client.getContextWindowUsage({ sessionId: "s" });
+    await enteredA.promise;
+    switchB = client.updateSessionModel({ sessionId: "s", modelEntryId: "b" });
+    await enteredB.promise;
+    releaseA.resolve();
+    await readA;
+    releaseB.resolve();
+    await switchB;
+    expect(
+      await client.getContextWindowUsage({ sessionId: "s" }),
+    ).toMatchObject({ contextWindowTokens: 32000 });
+    expect(
+      (await client.getSnapshot()).contextWindowUsages?.find(
+        (usage) => usage.sessionId === "s",
+      ),
+    ).toMatchObject({ contextWindowTokens: 32000 });
+  } finally {
+    releaseA.resolve();
+    releaseB.resolve();
+    await Promise.allSettled([readA, switchB]);
+    await client.dispose();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

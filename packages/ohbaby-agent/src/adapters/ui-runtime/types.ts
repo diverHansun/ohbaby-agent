@@ -62,6 +62,7 @@ export interface UiRuntimeComposition {
     readonly sessionId: string;
   }): Promise<CompactResult>;
   getContextUsage(input: {
+    readonly runModel?: import("../../core/run-model.js").RunModel;
     readonly projectRoot: string;
     readonly sessionId: string;
   }): Promise<

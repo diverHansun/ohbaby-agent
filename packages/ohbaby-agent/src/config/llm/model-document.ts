@@ -3,7 +3,7 @@ import { inferConnectModelInterfaceProvider } from "ohbaby-sdk";
 import {
   activeModelBudgetProfiles,
   capabilitiesFor,
-  compatibleReasoningPreference,
+  resolveRequestReasoning,
   type ReasoningConfig,
   ConfigError,
   validateModelJson,
@@ -260,17 +260,23 @@ export function normalizeModelDocument(raw: unknown): ModelDocument {
         entry.reasoning === undefined &&
         source.llmParams?.reasoning !== undefined
       ) {
-        const capability = capabilitiesFor({
+        const config = {
           ...entry,
           baseUrl: entry.baseUrl ?? "",
-          interfaceProvider: entry.interfaceProvider ?? "openai-compatible",
+          interfaceProvider:
+            entry.interfaceProvider ?? ("openai-compatible" as const),
           maxTokens: entry.maxOutputTokens ?? 8192,
           modelProfiles: [entry],
-        }).capability;
-        if (
-          compatibleReasoningPreference(source.llmParams.reasoning, capability)
-        )
+          reasoning: source.llmParams.reasoning,
+        };
+        try {
+          // Existing entry limits win over the legacy global output ceiling.
+          // Validate the migrated preference against that effective budget.
+          resolveRequestReasoning(config);
           entry.reasoning = source.llmParams.reasoning;
+        } catch (error) {
+          if (!(error instanceof ConfigError)) throw error;
+        }
       }
     }
     validateEntry(entry);

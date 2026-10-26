@@ -1298,9 +1298,11 @@ export async function createUiRuntimeComposition(
     ): Promise<
       ContextUsage & { readonly composition?: ContextOccupancyComposition }
     > {
-      const runModel = await options.resolveRunModel({
-        sessionId: input.sessionId,
-      });
+      const runModel =
+        input.runModel ??
+        (await options.resolveRunModel({
+          sessionId: input.sessionId,
+        }));
       const resolved = await resolvePrimaryContextTools({
         operation: "inspect context usage",
         sessionId: input.sessionId,
