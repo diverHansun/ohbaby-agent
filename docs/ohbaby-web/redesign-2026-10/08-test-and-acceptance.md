@@ -67,7 +67,7 @@
 - [ ] 现有测试全部通过（流式、工具卡、插话、排队、停止、斜杠命令、子代理、上下文用量）。改了 DOM 结构的测试同步修改，不删除场景。
 - [ ] 审批出现在消息区内，不盖住整页；可以折叠；侧栏对应行显示琥珀点。
 - [ ] 模型、思考强度、权限模式都能在输入框卡片底部的控制行里找到并操作。
-- [ ] 第二批：模型菜单按 provider 列出配置完整的模型，选中后成为全局默认，菜单里没有说明文字，最后一项 `Manage models…` 打开设置 › Models；Web 输入 `/connect`、`/connect-search` 不再有对应命令。
+- [ ] 第二批：模型菜单按 provider 列出配置完整的模型，最后一项 `Manage models…` 打开设置 › Models；Web 输入 `/connect`、`/connect-search` 不再有对应命令。2026-10-26 起：选中只改当前会话（草稿则随第一条消息保存），全局默认不变；默认模型旁有 `default` 标记；模型多时列表滚动（会话级模型 04 T18–T19c）。
 - [ ] 上下文用量在顶栏右侧，超过 70% 和 90% 时颜色变化。
 
 ### UC-PROJECT-03 打开新工作区
@@ -85,7 +85,7 @@
 
 - [ ] 列表按 provider 分组，顺序与服务端一致；默认模型行尾写 `Default`；Needs setup 的条目没有 Set as default。
 - [ ] 新增保存后回到列表，新模型排在末尾：已有默认时默认不变；没有默认时新模型成为默认，从草稿跳来的回到草稿且文字还在。编辑后 id 和位置不变。
-- [ ] 表单字段与接口对应：常用字段平铺，Key variable、Context window、Max output、Prompt cache 在 More options 里；页面不显示推理能力。
+- [ ] 表单字段与接口对应：常用字段平铺，Key variable、Context window、Max output、Prompt cache 在 More options 里；2026-10-26 起编辑页显示推理能力（Thinking 一行），可以 Detect again，并可设默认思考强度。
 - [ ] API key：Replace 后保存生效；Clear 后显示 Not set；Not set 时可以 Add key；表单里从不出现已保存的 key。
 - [ ] Needs setup 条目：缺 Base URL 或 Protocol 时 Save 不可点；补齐后无需其他改动即可保存，保存后不再显示 Needs setup；没有默认时自动成为默认。
 - [ ] 删除普通模型不确认；删除默认模型和删除 provider 弹确认框，确认后列表与服务端返回一致（默认已顺延或为空）。
@@ -136,9 +136,9 @@
 | 模型表单提交只带改过的字段，密钥三态映射正确 | 06 §2.2、UC-SETTINGS-02 | unit |
 | 设置写入后用返回值替换缓存；`settings.changed` 让对应分区重新读取 | 06 §3.7 | integration |
 | MCP 全局列表与实例状态按名字合并，不在全局列表里的名字不显示；`off` / `not-connected` / `—` 判定正确 | 06 §2.2、UC-SETTINGS-03 | unit |
-| D20：没有默认时新增或补齐模型后自动设为默认；第二步失败时模型保留、行下显示原因、不回到草稿；从草稿点发送打开设置时，设为默认成功后关闭弹窗回到草稿（06 §3.7） | 06 §1.3、§3.7 | integration |
-| ModelMenu 选择成功后默认改变；失败时恢复原选择并出现通知 | 05 ModelMenu | integration |
-| 删除确认只出现在删除默认模型和删除 provider 时（D17） | 04 §2.6 | unit |
+| D20：没有默认时新增或补齐模型后由后端自动设为默认；从草稿点发送打开设置时，默认模型出现后关闭弹窗回到草稿（06 §3.7） | 06 §1.3、§3.7 | integration |
+| ModelMenu 选择只改当前会话或草稿，全局默认不变；失败时恢复原选择并出现通知 | 05 ModelMenu | integration |
+| 删除任何模型和删除 provider 都先确认，文案说明会话会改用默认模型（D17，2026-10-26 改） | 04 §2.6 | integration |
 | `SESSION_MOVED` 自动换目录重发，界面无感知 | 06 §4 | integration |
 | 搜到未加载的旧会话，快速输入只显示最后结果 | UC-SEARCH-01、T22、`many` | integration |
 | 刷新、重连后列表同步，已展开页不丢 | UC-SIDEBAR-02、T24 | integration |

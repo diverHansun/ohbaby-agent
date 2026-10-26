@@ -129,10 +129,10 @@
 
 ### ModelMenu（第二批）
 
-- **Purpose**：在输入框卡片底部的控制行里直接选择全局默认模型（D22）。
-- **Anatomy**：触发按钮显示当前默认模型名（没有默认时显示 `Choose model`）；菜单按 provider 分组，每项是“模型名 + 备注”，当前项有勾；最后一项 `Manage models…`。不加说明文字（D15）。
-- **API**：`models: SettingsModelOption[]`（06 §2.2，只含配置完整的条目）、`activeId: string | null`、`onSelect(id)`、`onManage()`。
-- **States**：default / open / selecting（触发按钮转圈）/ error（右上角通知，菜单恢复原选择）。
+- **Purpose**：在输入框卡片底部的控制行里给当前会话选模型（D15，2026-10-26 改为会话级）。不改全局默认。
+- **Anatomy**：触发按钮显示这个会话下一轮要用的模型：会话选过且条目仍完整时是它，否则是默认模型；都没有时显示 `Choose model`。菜单按 provider 分组，每项是“模型名 + 备注”，勾打在下一轮要用的那一项上，默认模型旁有一个不显眼的 `default` 标记；最后一项 `Manage models…`。不加说明文字。桌面弹出菜单的模型列表限高滚动，`Manage models…` 固定在列表下方；手机底部面板整体滚动。打开时把打勾的一项滚到中间。
+- **API**：`settings`（读共享的模型列表缓存，只列配置完整的条目）、`selectedEntryId?`（会话或草稿自己的选择，跟随默认时为空）、`onSelect(id)`、`onManage()`、`onError(error)`。已打开的会话里 `onSelect` 调 `updateSessionModel`；草稿里只记在内存，第一条消息带上 `modelEntryId`。
+- **States**：default / open / selecting（触发按钮转圈）/ error（右上角通知，按钮恢复原来的模型）。跟随默认的会话点默认模型也会把它固定到这个会话上。
 
 ### SecretField
 

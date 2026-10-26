@@ -39,12 +39,15 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 
 | 接口 | 谁用 | 怎么用 |
 |---|---|---|
-| `GET /v1/settings/models` | ModelsSection、ModelMenu、草稿“没有模型”判断 | 进入 Models 或打开模型菜单时读取；`active === null` 即没有默认模型 |
-| `POST /v1/settings/models/profiles` | ModelEditor（新增） | 成功返回完整列表，直接替换缓存；返回的 `active` 为 `null` 时，紧接着对新条目调用 `POST /v1/settings/models/active`（D20）。按当前 `createModelEntry` 在同一写锁内追加并返回快照的契约，取本次 POST 响应的末项 ID；不能对提交前的旧缓存做差集后取第一项，其他窗口可能已经新增过模型。第二步失败时模型已保存，按设为默认失败处理（04 §2.6） |
-| `PATCH /v1/settings/models/profiles/:id` | ModelEditor（编辑） | 只提交改过的字段（见 §2.2 的映射）；Needs setup 条目保存后变为完整，此时如果 `active` 为 `null`，同样紧接着设为默认（D20） |
+| `GET /v1/settings/models` | ModelsSection、ModelMenu、思考强度、草稿“没有模型”判断 | 进入 Models、显示输入框或打开模型菜单时读取；`active === null` 即没有默认模型。思考强度从条目的 `reasoning` 读草稿的能力，从 `reasoningDefault` 读未选档位时的默认值 |
+| `POST /v1/settings/models/profiles` | ModelEditor（新增） | 成功返回完整列表，直接替换缓存；没有默认时由后端把第一个配置完整的模型设为默认（D20，2026-10-26 改），前端不再补发 `POST /v1/settings/models/active` |
+| `PATCH /v1/settings/models/profiles/:id` | ModelEditor（编辑） | 只提交改过的字段（见 §2.2 的映射），默认思考强度改动时带 `reasoning`（清空传 `null`）；Needs setup 条目补齐后的自动设为默认同样由后端完成 |
 | `DELETE /v1/settings/models/profiles/:id` | 行菜单、ModelEditor | 返回的列表里已经按顺延规则换好默认 |
 | `DELETE /v1/settings/models/providers/:providerId` | provider 组菜单 | provider 名做 URL 编码 |
-| `POST /v1/settings/models/active` | 行菜单 Set as default、ModelMenu | `{ id }`；返回完整列表 |
+| `POST /v1/settings/models/active` | 行菜单 Set as default | `{ id }`；返回完整列表。ModelMenu 不再调用（D15，2026-10-26 改） |
+| `POST /v1/settings/models/probe` | ModelEditor 的 Detect again | `{ id }`；返回 `{ ok, reasoning }`，随后重读模型列表 |
+| `PATCH /v1/sessions/:id/model` | ModelMenu（已打开的会话） | `{ modelEntryId }`；返回会话，`session.updated` 事件同步到其他窗口。草稿的选择随第一条 `POST /v1/prompts` 的 `modelEntryId` 提交 |
+| `GET /v1/model?sessionId=` | 思考强度 | 读这个会话下一轮要用的模型及其推理能力 |
 | `GET /v1/settings/search`、`PUT /v1/settings/search` | SearchSection | PUT 只提交改过的字段 |
 | `GET /v1/settings/mcp/servers` | McpSection、McpDetails | 只读全局配置；env 和 header 只有名字，URL 使用服务端脱敏结果；进入 MCP 或 Refresh 时读取 |
 | `GET /v1/settings/about` | AboutSection | 进入时读取一次 |
@@ -56,7 +59,7 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 | `GET /v1/settings/mcp/status` | McpSection 的状态列、McpDetails | 进入 MCP 或 Refresh 时读取；按名字和全局列表合并，不看 `origin`（全局服务器被项目同名覆盖时，显示的是实际连接的状态）；全局列表里没有的名字不显示 |
 | `GET /v1/settings/skills` | SkillsSection | 只显示 `scope === "user"` 的条目（D13）。已知限制：全局 Skill 被项目里同名 Skill 覆盖时，列表里看不到它 |
 
-不使用：`POST /v1/settings/models/probe`（推理能力由后端在设为默认时自动探测，设置页不显示，D14）、`GET /v1/settings/agents`（没有 Agents 分区，D12）。
+不使用：`GET /v1/settings/agents`（没有 Agents 分区，D12）。
 
 MCP 只读（D25）：Web 不调用 MCP 配置 PUT / DELETE 或 `POST /v1/settings/mcp/reconnect`。这些现有服务端接口保留，不为本次改版下线；前端不实现配置补丁、清空字段或重连流程。
 
