@@ -51,6 +51,7 @@ type SubmitPrompt = (
     readonly sessionId: string | null;
     readonly creationGeneration: number;
   },
+  modelEntryId?: string,
 ) => Promise<import("ohbaby-sdk").UiPromptReceipt>;
 export interface PromptProps {
   readonly canSubmit?: boolean;
@@ -63,6 +64,8 @@ export interface PromptProps {
   readonly activeSessionId: string | null;
   readonly activeRunId?: string;
   readonly pendingReasoning?: PendingReasoningSelection | null;
+  /** The draft's `/models` choice, sent with its first prompt. */
+  readonly pendingModelEntryId?: string | null;
   readonly catalog: TuiCommandCatalog | null;
   readonly client: CoreAPI;
   readonly executeCommand?: CoreAPI["executeCommand"];
@@ -99,6 +102,7 @@ export function Prompt({
   submitPrompt,
   onLoadHistory,
   pendingReasoning,
+  pendingModelEntryId = null,
   catalog,
   client,
   executeCommand,
@@ -785,6 +789,10 @@ export function Prompt({
         const selection = selectedIndexRef.current;
         const capturedReasoning =
           sourceSession === null ? pendingReasoning : null;
+        const capturedModelEntryId =
+          sourceSession === null
+            ? (pendingModelEntryId ?? undefined)
+            : undefined;
         const ownsContext = (): boolean =>
           sourceGeneration === draftGeneration.current;
         const notice = (message: string | null): void => {
@@ -854,6 +862,7 @@ export function Prompt({
             preserveUnsent,
             { sessionId: sourceSession, creationGeneration },
             executeCommand,
+            capturedModelEntryId,
           );
           prepareCount(-1);
         };
@@ -1207,6 +1216,7 @@ async function submitInput(
     readonly creationGeneration: number;
   },
   executeCommand?: CoreAPI["executeCommand"],
+  modelEntryId?: string,
 ): Promise<void> {
   const text = input.trim();
 
@@ -1220,7 +1230,10 @@ async function submitInput(
     let reasoning: UiReasoningConfig | undefined;
     if (pendingReasoning) {
       try {
-        const current = await client.getCurrentModel();
+        // The draft's chosen entry decides which levels are valid.
+        const current = await client.getCurrentModel(
+          modelEntryId ? { modelEntryId } : undefined,
+        );
         const original = pendingReasoning.model;
         const choice = pendingReasoning.reasoning;
         const capability = current?.reasoning;
@@ -1250,10 +1263,11 @@ async function submitInput(
     }
     try {
       const receipt = await (submitPrompt
-        ? submitPrompt(text, reasoning, source)
+        ? submitPrompt(text, reasoning, source, modelEntryId)
         : client.submitPromptAccepted(text, {
             clientRequestId: randomUUID(),
             reasoning,
+            ...(modelEntryId ? { modelEntryId } : {}),
             sessionId: activeSessionId ?? undefined,
           }));
       onAccepted?.(receipt.sessionId);

@@ -22,6 +22,7 @@ import type {
 import { ConnectPanel } from "./connect-panel.js";
 import { ConnectSearchPanel } from "./connect-search-panel.js";
 import { EffortPanel } from "./effort-panel.js";
+import { ModelsPanel } from "./models-panel.js";
 import { OverlayCard } from "./overlay-card.js";
 
 const SKILLS_PANEL_MAX_VISIBLE_LINES = 10;
@@ -31,6 +32,8 @@ const SKILLS_PANEL_MIN_VISIBLE_LINES = 3;
 // shorter than the terminal avoids Ink's clearTerminal-per-frame fallback
 // (see layout/metrics.ts).
 const SKILLS_PANEL_RESERVED_ROWS = 14;
+// The models panel's summary line and key hint, beyond what skills reserve.
+const MODELS_PANEL_EXTRA_ROWS = 4;
 
 export function resolveSkillsPanelVisibleLines(rows: number): number {
   const available =
@@ -55,6 +58,9 @@ export interface CommandPanelManagerProps {
   readonly onClose: () => void;
   readonly onEffortSelect: (reasoning: UiReasoningConfig) => Promise<void>;
   readonly pendingReasoning: UiReasoningConfig | null;
+  /** The draft's `/models` choice, before it has a session. */
+  readonly pendingModelEntryId?: string | null;
+  readonly onDraftModelSelect?: (entryId: string) => void;
   readonly sessionReasoning?: UiReasoningConfig | null;
   readonly panel: CommandPanelState | null;
   readonly runtime: UiRunStatus;
@@ -68,6 +74,8 @@ export function CommandPanelManager({
   onClose,
   onEffortSelect,
   pendingReasoning,
+  pendingModelEntryId = null,
+  onDraftModelSelect = (): void => undefined,
   sessionReasoning,
   panel,
   runtime,
@@ -158,6 +166,7 @@ export function CommandPanelManager({
         <EffortPanel
           client={client}
           sessionId={panel.sessionId}
+          draftModelEntryId={pendingModelEntryId}
           pendingReasoning={pendingReasoning}
           sessionReasoning={sessionReasoning}
           onSelect={onEffortSelect}
@@ -188,7 +197,8 @@ export function CommandPanelManager({
       title={panelTitle(panel.kind)}
       compact={fullscreen && layout.rows < 20}
       bodyRows={overlayBodyRows}
-      scrollable={panel.kind !== "skills"}
+      // Skills and models window their own lists.
+      scrollable={panel.kind !== "skills" && panel.kind !== "models"}
     >
       {panel.status === "loading" ? (
         <Text dimColor>Loading...</Text>
@@ -196,10 +206,24 @@ export function CommandPanelManager({
         <Text color={theme.status.error}>
           {panel.error ?? "Command failed"}
         </Text>
+      ) : panel.kind === "models" ? (
+        <ModelsPanel
+          key={panel.clientInvocationId}
+          client={client}
+          contextWindowUsage={contextWindowUsage}
+          data={panel.output?.kind === "data" ? panel.output.data : {}}
+          sessionId={panel.sessionId}
+          pendingModelEntryId={pendingModelEntryId}
+          onDraftSelect={onDraftModelSelect}
+          onClose={onClose}
+          visibleLines={Math.max(
+            SKILLS_PANEL_MIN_VISIBLE_LINES,
+            skillsVisibleLines - MODELS_PANEL_EXTRA_ROWS,
+          )}
+        />
       ) : (
         <CommandPanelBody
           catalog={catalog}
-          contextWindowUsage={contextWindowUsage}
           panel={panel}
           skills={skills}
           skillsSelectedIndex={skillsSelectedIndex}
@@ -212,14 +236,12 @@ export function CommandPanelManager({
 
 function CommandPanelBody({
   catalog,
-  contextWindowUsage,
   panel,
   skills,
   skillsSelectedIndex,
   skillsVisibleLines,
 }: {
   readonly catalog: UiCommandCatalog | null;
-  readonly contextWindowUsage: UiContextWindowUsage | null;
   readonly panel: DisplayCommandPanelState;
   readonly skills: readonly Record<string, unknown>[];
   readonly skillsSelectedIndex: number;
@@ -235,9 +257,8 @@ function CommandPanelBody({
     case "mcps":
       return <McpsPanel data={data} />;
     case "models":
-      return (
-        <ModelsPanel contextWindowUsage={contextWindowUsage} data={data} />
-      );
+      // Rendered interactively by the manager.
+      return <></>;
     case "skills":
       return (
         <SkillsPanel
@@ -413,62 +434,6 @@ function SkillsPanel({
           </Text>
         </Box>
       ) : null}
-    </Box>
-  );
-}
-
-function ModelsPanel({
-  contextWindowUsage,
-  data,
-}: {
-  readonly contextWindowUsage: UiContextWindowUsage | null;
-  readonly data: Record<string, unknown>;
-}): ReactElement {
-  const theme = useTheme();
-  const current = getRecord(data, "current");
-  const models = Array.isArray(data.models) ? data.models : [];
-
-  return (
-    <Box flexDirection="column">
-      <Text color={theme.text.heading}>Models (current)</Text>
-      <Box flexDirection="column" marginTop={1}>
-        <PanelRow label="Model" value={getString(current ?? {}, "model")} />
-        <PanelRow
-          label="Provider"
-          value={getString(current ?? {}, "provider")}
-        />
-        <PanelRow
-          label="Interface"
-          value={getString(current ?? {}, "interfaceProvider")}
-        />
-        <PanelRow
-          label="Context"
-          value={formatUsageOrUnavailable(contextWindowUsage)}
-        />
-      </Box>
-      <Box flexDirection="column" marginTop={1}>
-        <Text color={theme.text.heading}>Models (switch)</Text>
-        {models.length === 0 ? (
-          <Text dimColor>No models</Text>
-        ) : (
-          models.slice(0, 8).map((model, index) =>
-            isRecord(model) ? (
-              <Text key={String(index)}>
-                <Text
-                  color={isActiveModel(model) ? theme.status.accent : undefined}
-                >
-                  {isActiveModel(model) ? "> " : "  "}
-                  {formatModelLabel(model) ?? "Unnamed model"}
-                </Text>
-                <Text dimColor>
-                  {" "}
-                  {getString(model, "provider") ?? "Unavailable"}
-                </Text>
-              </Text>
-            ) : null,
-          )
-        )}
-      </Box>
     </Box>
   );
 }
@@ -650,10 +615,6 @@ function toContextWindowUsage(
   };
 }
 
-function isActiveModel(model: Record<string, unknown>): boolean {
-  return getBoolean(model, "active") === true;
-}
-
 function formatCount(value: number | undefined): string {
   return String(Math.max(0, Math.round(value ?? 0)));
 }
@@ -680,14 +641,6 @@ function getNumber(
 ): number | undefined {
   const value = record[key];
   return typeof value === "number" ? value : undefined;
-}
-
-function getBoolean(
-  record: Record<string, unknown>,
-  key: string,
-): boolean | undefined {
-  const value = record[key];
-  return typeof value === "boolean" ? value : undefined;
 }
 
 function getStringArray(

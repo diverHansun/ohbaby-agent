@@ -16,6 +16,8 @@ interface EffortChoice {
 export interface EffortPanelProps {
   readonly client: CoreAPI;
   readonly sessionId: string | null;
+  /** A draft's `/models` choice; its levels apply until the chat exists. */
+  readonly draftModelEntryId?: string | null;
   readonly pendingReasoning: UiReasoningConfig | null;
   readonly sessionReasoning?: UiReasoningConfig | null;
   readonly onSelect: (reasoning: UiReasoningConfig) => Promise<void>;
@@ -39,6 +41,7 @@ function choicesFor(view: UiReasoningCapabilityView): readonly EffortChoice[] {
 export function EffortPanel({
   client,
   sessionId,
+  draftModelEntryId = null,
   pendingReasoning,
   sessionReasoning,
   onSelect,
@@ -62,7 +65,13 @@ export function EffortPanel({
     const refresh = (): void => {
       const request = ++generation;
       void client
-        .getCurrentModel()
+        .getCurrentModel(
+          sessionId
+            ? { sessionId }
+            : draftModelEntryId
+              ? { modelEntryId: draftModelEntryId }
+              : undefined,
+        )
         .then((model) => {
           if (cancelled || request !== generation) return;
           const capability = model?.reasoning ?? {
@@ -102,7 +111,13 @@ export function EffortPanel({
       generation++;
       if (refreshTimer) clearTimeout(refreshTimer);
     };
-  }, [client, sessionId, pendingReasoning, sessionReasoning]);
+  }, [
+    client,
+    sessionId,
+    draftModelEntryId,
+    pendingReasoning,
+    sessionReasoning,
+  ]);
 
   useInput((_value, key) => {
     if (key.shift && (key.pageUp || key.pageDown || key.home || key.end))

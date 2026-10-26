@@ -140,6 +140,10 @@ export function OhbabyTerminalApp({
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [pendingReasoning, setPendingReasoning] =
     useState<PendingReasoningSelection | null>(null);
+  // A draft's `/models` choice, sent with its first prompt (session-model D20).
+  const [pendingModelEntryId, setPendingModelEntryId] = useState<string | null>(
+    null,
+  );
   const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(
     null,
   );
@@ -243,12 +247,19 @@ export function OhbabyTerminalApp({
     },
     [client, runExportCommand],
   );
-  const footerModel = useFooterModel(client, activeSessionId, subscribeEvents);
+  const footerModel = useFooterModel(
+    client,
+    activeSessionId,
+    subscribeEvents,
+    pendingModelEntryId,
+  );
   const activeSession = useTuiStoreSelector(store, (state) =>
     state.sessions.find((session) => session.id === state.activeSessionId),
   );
   useEffect(() => {
-    if (activeSessionId !== null) setPendingReasoning(null);
+    if (activeSessionId === null) return;
+    setPendingReasoning(null);
+    setPendingModelEntryId(null);
   }, [activeSessionId]);
   const toolsExpanded =
     toolView.sessionId === activeSessionId && toolView.expanded;
@@ -576,6 +587,7 @@ export function OhbabyTerminalApp({
       text: string,
       reasoning?: PendingReasoningSelection["reasoning"],
       source?: { sessionId: string | null; creationGeneration: number },
+      modelEntryId?: string,
     ) => {
       if (!recoveryRef.current)
         return Promise.reject(new Error("Session recovery unavailable"));
@@ -588,7 +600,7 @@ export function OhbabyTerminalApp({
         return Promise.reject(
           new Error("Submission cancelled because the session changed"),
         );
-      return recoveryRef.current.submit(text, reasoning);
+      return recoveryRef.current.submit(text, reasoning, modelEntryId);
     },
     [],
   );
@@ -1164,7 +1176,11 @@ export function OhbabyTerminalApp({
               onClose={closeCommandPanel}
               onEffortSelect={async (reasoning) => {
                 if (activeSessionId === null) {
-                  const model = await client.getCurrentModel();
+                  const model = await client.getCurrentModel(
+                    pendingModelEntryId === null
+                      ? undefined
+                      : { modelEntryId: pendingModelEntryId },
+                  );
                   if (!model) throw new Error("No model is connected");
                   setPendingReasoning({ reasoning, model });
                 } else {
@@ -1175,6 +1191,13 @@ export function OhbabyTerminalApp({
                 }
               }}
               pendingReasoning={pendingReasoning?.reasoning ?? null}
+              pendingModelEntryId={pendingModelEntryId}
+              onDraftModelSelect={(entryId) => {
+                // A /effort choice belongs to the model it was made for.
+                if (pendingReasoning && pendingReasoning.model.id !== entryId)
+                  setPendingReasoning(null);
+                setPendingModelEntryId(entryId);
+              }}
               sessionReasoning={recoveryState.sync.view?.session.reasoning}
               panel={hasBackendDialog ? null : commandPanel}
               runtime={runtime}
@@ -1202,6 +1225,7 @@ export function OhbabyTerminalApp({
             activeSessionId={activeSessionId}
             activeRunId={recoveryState.control?.runId ?? undefined}
             pendingReasoning={pendingReasoning}
+            pendingModelEntryId={pendingModelEntryId}
             catalog={catalog}
             client={client}
             disabled={hasDialog || subagentBrowserOpen}
@@ -1417,9 +1441,6 @@ function sanitizeCommandPanelOutput(output: UiCommandOutput): UiCommandOutput {
             getRecordValue(output.data, "current"),
           ),
           models: sanitizePublicModelList(output.data.models),
-          switching: sanitizeSwitchingRecord(
-            getRecordValue(output.data, "switching"),
-          ),
         },
       };
     case "status":
@@ -1503,24 +1524,10 @@ function sanitizePublicModelRecord(
   if (typeof record.active === "boolean") {
     result.active = record.active;
   }
-
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-
-function sanitizeSwitchingRecord(
-  record: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  if (!record) {
-    return undefined;
+  if (typeof record.default === "boolean") {
+    result.default = record.default;
   }
 
-  const result: Record<string, unknown> = {};
-  if (typeof record.available === "boolean") {
-    result.available = record.available;
-  }
-  if (typeof record.mode === "string" && record.mode.trim() !== "") {
-    result.mode = record.mode;
-  }
   return Object.keys(result).length > 0 ? result : undefined;
 }
 

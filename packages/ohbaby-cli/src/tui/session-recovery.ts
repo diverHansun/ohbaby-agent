@@ -70,7 +70,11 @@ export interface TuiSessionRecovery {
   loadHistory(): Promise<void>;
   stop(expectedRunId: string): Promise<void>;
   discardPending(clientRequestIds: readonly string[]): void;
-  submit(text: string, reasoning?: UiReasoningConfig): Promise<UiPromptReceipt>;
+  submit(
+    text: string,
+    reasoning?: UiReasoningConfig,
+    modelEntryId?: string,
+  ): Promise<UiPromptReceipt>;
   dispose(): void;
 }
 export function createTuiSessionRecovery(options: {
@@ -718,6 +722,7 @@ export function createTuiSessionRecovery(options: {
     async submit(
       text: string,
       reasoning?: UiReasoningConfig,
+      modelEntryId?: string,
     ): Promise<UiPromptReceipt> {
       if (
         state.pending.some((item) =>
@@ -750,6 +755,7 @@ export function createTuiSessionRecovery(options: {
           clientRequestId: pending.clientRequestId,
           sessionId: pending.sessionId,
           reasoning,
+          ...(modelEntryId ? { modelEntryId } : {}),
         });
         submissionsInFlight.delete(pending.clientRequestId);
         submissionSelections.delete(pending.clientRequestId);

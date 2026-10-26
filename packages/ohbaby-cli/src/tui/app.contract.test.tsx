@@ -4658,7 +4658,7 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
-  it("routes /models into a read-only selector-ready panel without leaking connection secrets", async () => {
+  it("routes /models into a selectable panel without leaking connection secrets", async () => {
     const usage = contextWindowUsage("session_1", 51_600);
     const client = createFakeClient(
       {
@@ -4680,6 +4680,7 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     const invocation = firstExecutedCommand(client);
+    expect(invocation.sessionId).toBe("session_1");
     client.emit({
       clientInvocationId: invocation.clientInvocationId,
       commandRunId: "command_models",
@@ -4698,6 +4699,8 @@ describe("OhbabyTerminalApp", () => {
           models: [
             {
               active: true,
+              default: true,
+              baseUrl: "https://proxy.example/v1?api_key=do-not-print",
               id: "glm-5.1",
               interfaceProvider: "openai-compatible",
               label: "GLM 5.1",
@@ -4705,10 +4708,6 @@ describe("OhbabyTerminalApp", () => {
               provider: "zenmux",
             },
           ],
-          switching: {
-            available: true,
-            mode: "single-active-config",
-          },
         },
         kind: "data",
         subject: "models.current",
@@ -4720,21 +4719,144 @@ describe("OhbabyTerminalApp", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("Models") &&
-        nextFrame.includes("GLM 5.1") &&
+        nextFrame.includes("GLM 5.1 ✓") &&
         nextFrame.includes("zenmux") &&
         nextFrame.includes("openai-compatible"),
     );
-    expect(frame).toContain("Models (current)");
-    expect(frame).toContain("Models (switch)");
+    expect(frame).toContain("This chat");
+    expect(frame).toContain("· default");
     expect(frame).toContain("51.6K / 1M (5%)");
-    expect(frame).not.toContain("Switching");
-    expect(frame).not.toContain("single-active-config");
+    expect(frame).toContain("enter use in this chat · d set default");
     expect(frame).not.toContain("do-not-print");
     expect(frame).not.toContain("ZENMUX_API_KEY");
 
     app.stdin.write("\u001B");
     await waitForFrame(app, (nextFrame) => !nextFrame.includes("GLM 5.1"));
+  });
+
+  it("T25/T25b picks a model for this chat and moves the default with d", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    client.updateSessionModel.mockResolvedValue(snapshot().sessions[0]);
+    client.selectDefaultModel.mockResolvedValue({
+      ok: true,
+      active: { id: "m2", provider: "p", model: "model-2" },
+      models: [],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await openModels(app, client, 3);
+    app.stdin.write("\u001B[B");
+    await waitForFrame(app, (frame) => frame.includes("> Model 2"));
+    app.stdin.write("d");
+    await waitForFrame(app, (frame) =>
+      /Model 2 ✓? ?\s*p · default/u.test(frame),
+    );
+    expect(client.selectDefaultModel).toHaveBeenCalledWith("m2");
+    // The panel stays open after d.
+    expect(app.lastFrame()).toContain("d set default");
+    app.stdin.write("\u001B[B");
+    await waitForFrame(app, (frame) => frame.includes("> Model 3"));
+    app.stdin.write("\r");
+    await vi.waitFor(() => {
+      expect(client.updateSessionModel).toHaveBeenCalledWith({
+        sessionId: "session_1",
+        modelEntryId: "m3",
+      });
+    });
+    await waitForFrame(app, (frame) => !frame.includes("d set default"));
+    app.unmount();
+  });
+
+  it("T25 keeps the panel open with the reason when a save fails, and ignores a repeated d", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    let release!: () => void;
+    client.selectDefaultModel.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        release = (): void => {
+          reject(new Error("Model entry not found"));
+        };
+      }),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await openModels(app, client, 3);
+    // Both keys reach the panel before it re-renders as busy.
+    app.stdin.write("d");
+    app.stdin.write("d");
+    await flush();
+    expect(client.selectDefaultModel).toHaveBeenCalledOnce();
+    release();
+    const frame = await waitForFrame(app, (next) =>
+      next.includes("Model entry not found"),
+    );
+    expect(frame).toContain("d set default");
+    app.unmount();
+  });
+
+  it("T25 keeps a draft's model choice and sends it with the first prompt", async () => {
+    const initial = { ...snapshot(), activeSessionId: null, sessions: [] };
+    const client = createFakeClient(initial, displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await openModels(app, client, 3);
+    expect(firstExecutedCommand(client).sessionId).toBeUndefined();
+    app.stdin.write("\u001B[B");
+    await flush();
+    app.stdin.write("\u001B[B");
+    await waitForFrame(app, (frame) => frame.includes("> Model 3"));
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => !frame.includes("d set default"));
+    expect(client.updateSessionModel).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(client.getCurrentModel).toHaveBeenCalledWith({
+        modelEntryId: "m3",
+      });
+    });
+    app.stdin.write("hello");
+    app.stdin.write("\r");
+    await vi.waitFor(() => {
+      expect(client.submitPromptAccepted).toHaveBeenCalledWith(
+        "hello",
+        expect.objectContaining({ modelEntryId: "m3" }),
+      );
+    });
+    app.unmount();
+  });
+
+  it("T25 scrolls past eight models to the last one", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await openModels(app, client, 12);
+    for (let index = 0; index < 11; index++) {
+      app.stdin.write("\u001B[B");
+      await flush();
+    }
+    const frame = await waitForFrame(app, (next) =>
+      next.includes("> Model 12"),
+    );
+    expect(frame).toContain("of 12");
+    app.unmount();
   });
 
   it("shows slash candidates and executes a selected catalog command", async () => {
@@ -6270,6 +6392,40 @@ async function saveEffortAndFlushEffects(app: {
   } finally {
     environment.IS_REACT_ACT_ENVIRONMENT = previous;
   }
+}
+
+/** Opens `/models` and answers it with `count` complete entries; m1 is the chat's and the default. */
+async function openModels(
+  app: ReturnType<typeof render>,
+  client: ReturnType<typeof createFakeClient>,
+  count: number,
+): Promise<void> {
+  app.stdin.write("/models");
+  app.stdin.write("\r");
+  await flush();
+  const invocation = firstExecutedCommand(client);
+  client.emit({
+    clientInvocationId: invocation.clientInvocationId,
+    commandRunId: "command_models",
+    output: {
+      data: {
+        models: Array.from({ length: count }, (_, index) => ({
+          id: `m${String(index + 1)}`,
+          label: `Model ${String(index + 1)}`,
+          model: `model-${String(index + 1)}`,
+          provider: "p",
+          active: index === 0,
+          default: index === 0,
+        })),
+      },
+      kind: "data",
+      subject: "models.current",
+    },
+    timestamp: 1,
+    type: "command.result.delivered",
+  });
+  await waitForFrame(app, (frame) => frame.includes("> Model 1 ✓"));
+  await settleConnectInput();
 }
 
 async function settleConnectInput(): Promise<void> {
