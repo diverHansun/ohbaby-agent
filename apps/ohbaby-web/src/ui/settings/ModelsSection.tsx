@@ -10,7 +10,7 @@ import { anchorBelow, Menu, type MenuAnchor } from "../shared/Menu.js";
 import { SettingsRow } from "../shared/SettingsRow.js";
 import { Spinner } from "../shared/Spinner.js";
 import { ModelEditor } from "./ModelEditor.js";
-import { groupModels } from "./model-form.js";
+import { groupModels, modelDeleteDescription } from "./model-form.js";
 import { SectionHeader, SectionStatus } from "./SectionFrame.js";
 import { errorText, useSettingsResource } from "./useSettingsResource.js";
 
@@ -36,15 +36,15 @@ type Confirm =
   | { readonly kind: "provider"; readonly provider: string };
 
 interface RowState {
-  readonly busy?: "select" | "delete";
+  readonly busy?: "select";
   readonly error?: string;
 }
 
 /**
  * Models: provider groups in server order, the default marked `Default`,
  * incomplete entries `Needs setup` (04 §2.6). Rows open the editor; row and
- * provider menus set the default or delete. Only deleting the default model
- * or a whole provider asks first (D17).
+ * provider menus set the default or delete. Every delete asks first, since
+ * chats that chose the model switch to the default (session-model D13).
  */
 export function ModelsSection(props: {
   readonly settings: SettingsLayer;
@@ -122,21 +122,6 @@ export function ModelsSection(props: {
     }
   };
 
-  const remove = async (model: UiSettingsModel): Promise<void> => {
-    setRow(model.id, { busy: "delete" });
-    try {
-      await settings.deleteModel(model.id);
-      setRow(model.id, null);
-    } catch (error) {
-      if (isDaemonRequestError(error) && error.code === "MODEL_NOT_FOUND") {
-        setRow(model.id, null);
-        void resource.reload();
-        return;
-      }
-      setRow(model.id, { error: `Couldn't delete. ${errorText(error)}` });
-    }
-  };
-
   const confirmAction = async (): Promise<void> => {
     if (!confirm) return;
     setConfirmBusy(true);
@@ -164,13 +149,7 @@ export function ModelsSection(props: {
         {...(editing ? { entry: editing } : {})}
         models={models}
         onBack={toList}
-        onSaved={(outcome) => {
-          if (outcome.defaultError)
-            setRow(outcome.defaultError.id, {
-              error: `Saved, but couldn't set as default. ${outcome.defaultError.message}`,
-            });
-          toList();
-        }}
+        onSaved={toList}
         onMissing={() => {
           toList();
           void resource.reload();
@@ -201,6 +180,12 @@ export function ModelsSection(props: {
           </button>
         }
       />
+      {models && models.models.length > 0 ? (
+        <p className="ohb-settings-lede">
+          New chats and chats that haven&apos;t picked a model use the default.
+          Pick one for a chat from the menu next to the message box.
+        </p>
+      ) : null}
       <SectionStatus
         resource={resource}
         empty={models?.models.length === 0 ? "No models yet." : undefined}
@@ -247,14 +232,7 @@ export function ModelsSection(props: {
                   }
                   value={
                     row?.busy ? (
-                      <Spinner
-                        size={12}
-                        label={
-                          row.busy === "select"
-                            ? "Setting as default"
-                            : "Deleting"
-                        }
-                      />
+                      <Spinner size={12} label="Setting as default" />
                     ) : !model.configurationComplete ? (
                       "Needs setup"
                     ) : isDefault ? (
@@ -326,10 +304,8 @@ export function ModelsSection(props: {
                 onClick={() => {
                   const model = menu.model;
                   setMenu(null);
-                  if (model.id === activeId) {
-                    setConfirmError(null);
-                    setConfirm({ kind: "model", model });
-                  } else void remove(model);
+                  setConfirmError(null);
+                  setConfirm({ kind: "model", model });
                 }}
               >
                 Delete
@@ -376,17 +352,15 @@ function confirmText(
   confirm: Confirm,
   models: UiSettingsModels,
 ): { title: string; description: string } {
-  if (confirm.kind === "model") {
-    const others = models.models.some(
-      (model) => model.id !== confirm.model.id && model.configurationComplete,
-    );
+  if (confirm.kind === "model")
     return {
       title: `Delete ${confirm.model.model}?`,
-      description: others
-        ? "The next available model becomes the default."
-        : "No model will be the default.",
+      description: modelDeleteDescription(
+        confirm.model,
+        models.models,
+        models.active?.id,
+      ),
     };
-  }
   const entries = models.models.filter(
     (model) => model.provider === confirm.provider,
   );
@@ -396,6 +370,8 @@ function confirmText(
   );
   return {
     title: `Delete ${confirm.provider} and its ${String(count)} ${count === 1 ? "model" : "models"}?`,
-    description: changesDefault ? "The default model will change." : "",
+    description: changesDefault
+      ? "The default model will change. Chats using these models will switch to the default model."
+      : "Chats using these models will switch to the default model.",
   };
 }

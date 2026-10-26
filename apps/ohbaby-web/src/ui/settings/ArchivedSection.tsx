@@ -249,7 +249,7 @@ export function ArchivedSection(props: {
       tabIndex={-1}
     >
       <SectionHeader title="Archived" />
-      <p className="ohb-archived-lede">
+      <p className="ohb-settings-lede">
         Archived chats are hidden from the sidebar. Restore one to pick it up
         where you left off, or delete it for good.
       </p>

@@ -1,7 +1,6 @@
 import type { UiSettingsModel, UiSettingsSearch } from "ohbaby-sdk";
 import { describe, expect, it } from "vitest";
 import {
-  createdModelId,
   EMPTY_MODEL_FORM,
   fieldErrorsFrom,
   groupModels,
@@ -194,18 +193,6 @@ describe("model form", () => {
     expect(fieldErrorsFrom(undefined, "fallback")).toEqual({
       form: "fallback",
     });
-  });
-
-  it("picks the new entry from this POST's own response for D20", () => {
-    const other = { ...saved, id: "from-another-window" };
-    const created = { ...saved, id: "mine" };
-    expect(
-      createdModelId({
-        active: null,
-
-        models: [saved, other, created],
-      }),
-    ).toBe("mine");
   });
 
   it("groups by first appearance and keeps the server order", () => {

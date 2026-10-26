@@ -393,7 +393,7 @@ describe("settings dialog", () => {
     expect((field("Max output") as HTMLInputElement).value).toBe("32000");
   });
 
-  it("asks before deleting the default model but not another one", async () => {
+  it("asks before every model delete and says what happens to its chats", async () => {
     const runtime = createMockRuntime("settings");
     const container = mount(runtime);
     await openSettings(container);
@@ -401,13 +401,21 @@ describe("settings dialog", () => {
       () => dialog().textContent.includes("deepseek-v4.1-pro"),
       "the model list",
     );
+    expect(dialog().textContent).toContain(
+      "New chats and chats that haven't picked a model use the default.",
+    );
     await click(button(dialog(), "deepseek-v4.1-pro actions"));
     await click(button(document.body, "Delete"));
+    const first = document.querySelector<HTMLElement>(".ohb-confirm-dialog");
+    expect(first?.textContent).toContain(
+      "Chats using this model will switch to the default model.",
+    );
+    expect(first?.textContent).not.toContain("becomes the default");
+    await click(button(first ?? document.body, "Delete"));
     await until(
       () => !dialog().textContent.includes("deepseek-v4.1-pro"),
       "the deleted row",
     );
-    expect(document.querySelector(".ohb-confirm-dialog")).toBeNull();
 
     await click(button(dialog(), "deepseek-v4.1-flash actions"));
     await click(button(document.body, "Delete"));
@@ -421,6 +429,39 @@ describe("settings dialog", () => {
     if (confirm) await key(confirm, "Escape");
     expect(document.querySelector(".ohb-confirm-dialog")).toBeNull();
     expect(dialogOpen()).toBe(true);
+  });
+
+  it("shows a model's thinking, detects it again and saves its default level", async () => {
+    const runtime = createMockRuntime("settings");
+    const update = vi.spyOn(runtime.settings, "updateModel");
+    const probe = vi.spyOn(runtime.settings, "probeModel");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("gpt-5.2"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit gpt-5.2"));
+    expect(dialog().textContent).toContain("Not probed in the mock");
+    await click(button(dialog(), "Detect again"));
+    await until(
+      () => dialog().querySelector("select option[value='high']") !== null,
+      "the detected levels",
+    );
+    expect(probe).toHaveBeenCalledWith("m3");
+    const level = field("Thinking");
+    expect(level.value).toBe("");
+    expect(level.textContent).toContain("Model default (medium)");
+    await act(async () => {
+      level.value = "high";
+      level.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await click(button(dialog(), "Save"));
+    await until(() => update.mock.calls.length > 0, "the save");
+    expect(update).toHaveBeenCalledWith("m3", {
+      reasoning: { enabled: true, effort: "high" },
+    });
   });
 
   it("finishes a keyless Needs setup entry on Save and makes it the default", async () => {
@@ -685,7 +726,7 @@ describe("settings dialog", () => {
 });
 
 describe("composer controls", () => {
-  it("switches the global default from the model menu", async () => {
+  it("chooses a draft's model without touching the default", async () => {
     const runtime = createMockRuntime("settings");
     const select = vi.spyOn(runtime.settings, "selectModel");
     const container = mount(runtime);
@@ -695,9 +736,13 @@ describe("composer controls", () => {
       if (!element) throw new Error("model button not found");
       return element;
     };
+    // The connected model shows first; wait for the list behind the menu.
     await until(
-      () => trigger().textContent === "deepseek-v4.1-flash",
-      "the label",
+      () =>
+        trigger().textContent === "deepseek-v4.1-flash" &&
+        selectSettings(runtime.settings.cache.getSnapshot(), "models").data !==
+          undefined,
+      "the label and the list",
     );
     await click(trigger());
     const menu = document.querySelector<HTMLElement>(".ohb-model-menu");
@@ -705,31 +750,40 @@ describe("composer controls", () => {
     const items = [...menu.querySelectorAll("[role='menuitem']")].map(
       (item) => item.textContent,
     );
-    // Only complete models, and Manage models… last.
+    // Only complete models, the default tagged quietly, Manage models… last.
     expect(items).not.toContain("gpt-4.1");
+    expect(items).toContain("deepseek-v4.1-flash · Workdefault");
     expect(items.at(-1)).toBe("Manage models…");
     await click(button(menu, "claude-sonnet-5-5 · Personal"));
     await until(
       () =>
         trigger().textContent === "claude-sonnet-5-5" && !trigger().disabled,
-      "the new default",
+      "the draft's model",
     );
-    expect(select).toHaveBeenCalledWith("m5");
+    expect(select).not.toHaveBeenCalled();
     expect(container.textContent).not.toMatch(/next turn|default model/iu);
 
-    select.mockRejectedValueOnce(new Error("offline"));
-    await click(trigger());
-    const again = document.querySelector<HTMLElement>(".ohb-model-menu");
-    if (!again) throw new Error("model menu not found");
-    await click(button(again, "gpt-5.2"));
+    // The first prompt carries the pick, so the new chat keeps it (T20).
+    const submit = vi.spyOn(runtime, "submitPrompt");
+    const composer = container.querySelector("textarea");
+    if (!composer) throw new Error("composer not found");
+    await type(composer, "hello");
+    await click(button(container, "Send message"));
+    await until(() => submit.mock.calls.length === 1, "the first prompt");
+    expect(submit.mock.calls[0]?.[1]).toMatchObject({ modelEntryId: "m5" });
+
+    // A pick deleted meanwhile falls back to the default and is not sent.
+    await act(async () => {
+      await runtime.settings.deleteModel("m5");
+    });
     await until(
-      () =>
-        document.body.textContent.includes(
-          "Couldn't switch the model. offline",
-        ),
-      "the failure notice",
+      () => trigger().textContent === "deepseek-v4.1-flash",
+      "the default again",
     );
-    expect(trigger().textContent).toBe("claude-sonnet-5-5");
+    await type(composer, "again");
+    await click(button(container, "Send message"));
+    await until(() => submit.mock.calls.length === 2, "the second prompt");
+    expect(submit.mock.calls[1]?.[1]).not.toHaveProperty("modelEntryId");
   });
 
   it("puts thinking and full access in the phone More menu", async () => {

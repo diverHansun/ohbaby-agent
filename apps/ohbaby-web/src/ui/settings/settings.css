@@ -670,7 +670,7 @@
   outline: none;
 }
 
-.ohb-archived-lede {
+.ohb-settings-lede {
   color: var(--text-dim);
   font-size: 13px;
   line-height: 1.5;
@@ -809,4 +809,27 @@
   .ohb-archived-restore {
     padding: 0 10px;
   }
+}
+
+/* Thinking in the model editor: a level, or what detection found (D13). */
+.ohb-thinking-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  max-width: 400px;
+  min-height: 32px;
+}
+
+.ohb-thinking-row .ohb-settings-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.ohb-thinking-status {
+  color: var(--text-dim);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+  min-width: 0;
 }

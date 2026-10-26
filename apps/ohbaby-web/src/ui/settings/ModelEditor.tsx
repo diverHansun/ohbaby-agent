@@ -1,5 +1,9 @@
 import { ArrowLeft } from "lucide-react";
-import type { UiSettingsModel, UiSettingsModels } from "ohbaby-sdk";
+import type {
+  UiReasoningConfig,
+  UiSettingsModel,
+  UiSettingsModels,
+} from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useId, useMemo, useState } from "react";
 import { isDaemonRequestError } from "../../api/daemon/http.js";
@@ -8,12 +12,12 @@ import { ConfirmDialog } from "../shared/ConfirmDialog.js";
 import { IconButton } from "../shared/IconButton.js";
 import { FieldRow, fieldErrorId, MoreOptions } from "./FieldRow.js";
 import {
-  createdModelId,
   EMPTY_MODEL_FORM,
   fieldErrorsFrom,
   modelCreateRequest,
   modelFormFrom,
   modelFormSavable,
+  modelDeleteDescription,
   modelPatchRequest,
   PROTOCOLS,
   validateModelForm,
@@ -37,17 +41,40 @@ function isUnclearable(field: ModelField): field is UnclearableField {
 }
 import { errorText } from "./useSettingsResource.js";
 
-/** What happened to the default after a save, for the list to show. */
-export interface ModelSaveOutcome {
-  /** D20 tried to make this entry the default and failed (04 §2.6). */
-  readonly defaultError?: { readonly id: string; readonly message: string };
+/** `""` keeps the model's own default; the rest map to a saved preference. */
+function reasoningValue(reasoning: UiReasoningConfig | undefined): string {
+  if (!reasoning) return "";
+  if (reasoning.enabled === false) return "off";
+  return reasoning.effort ?? "on";
+}
+
+/** The levels a capability offers, or `null` while there is nothing to pick. */
+function thinkingOptions(
+  view: UiSettingsModel["reasoning"],
+): readonly { readonly value: string; readonly label: string }[] | null {
+  if (view.status !== "identified" || view.mode === "none") return null;
+  return [
+    ...(view.supportsDisabled ? [{ value: "off", label: "Off" }] : []),
+    ...(view.mode === "binary"
+      ? [{ value: "on", label: "On" }]
+      : view.efforts.map((effort) => ({ value: effort, label: effort }))),
+  ];
+}
+
+function reasoningFrom(value: string): UiReasoningConfig | null {
+  if (value === "") return null;
+  if (value === "off") return { enabled: false };
+  if (value === "on") return { enabled: true };
+  return { enabled: true, effort: value };
 }
 
 /**
  * The add and edit sub-page of Models (03 §4.7). Common fields are listed;
  * Key variable, Context window, Max output and Prompt cache sit under More
- * options. Only changed fields are sent; without a default model the saved
- * entry becomes the default right after (D20).
+ * options. Only changed fields are sent. The server makes the first complete
+ * entry the default when there is none (session-model 02 P16). Editing a
+ * complete entry also shows what thinking it supports, with Detect again and
+ * the thinking level its chats start from (D13).
  */
 export function ModelEditor(props: {
   readonly settings: SettingsLayer;
@@ -55,7 +82,7 @@ export function ModelEditor(props: {
   readonly entry?: UiSettingsModel;
   readonly models: UiSettingsModels;
   readonly onBack: () => void;
-  readonly onSaved: (outcome: ModelSaveOutcome) => void;
+  readonly onSaved: () => void;
   /** The entry was deleted elsewhere (`MODEL_NOT_FOUND`). */
   readonly onMissing: () => void;
 }): ReactElement {
@@ -74,11 +101,25 @@ export function ModelEditor(props: {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [baselineReasoning] = useState(() =>
+    reasoningValue(entry?.reasoningDefault),
+  );
+  const [picked, setReasoning] = useState(baselineReasoning);
+  // Detect again can drop a level; one no longer offered reads as the model
+  // default, and saving then clears it.
+  const offered = entry ? thinkingOptions(entry.reasoning) : null;
+  const reasoning =
+    offered && !offered.some((option) => option.value === picked) ? "" : picked;
+  const [probing, setProbing] = useState(false);
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const reasoningChanged = reasoning !== baselineReasoning;
   const needsSetup = entry?.configurationComplete === false;
-  const isDefault = entry !== undefined && props.models.active?.id === entry.id;
   const busy = saving || deleting;
   const localErrors = validateModelForm(form, baseline);
-  const savable = !busy && modelFormSavable(form, baseline, needsSetup);
+  const savable =
+    !busy &&
+    (modelFormSavable(form, baseline, needsSetup) ||
+      (reasoningChanged && Object.keys(localErrors).length === 0));
   const providers = useMemo(
     () => [...new Set(props.models.models.map((model) => model.provider))],
     [props.models.models],
@@ -126,36 +167,20 @@ export function ModelEditor(props: {
     setSaving(true);
     setServerErrors({});
     try {
-      let result: UiSettingsModels;
-      let id: string | undefined;
       if (!entry || !baseline) {
-        result = await settings.createModel(modelCreateRequest(form));
-        id = createdModelId(result);
+        await settings.createModel(modelCreateRequest(form));
       } else {
-        result = await settings.updateModel(
-          entry.id,
-          modelPatchRequest(
+        await settings.updateModel(entry.id, {
+          ...modelPatchRequest(
             form,
             baseline,
             // A refresh may have supplied a key reference during this edit.
             needsSetup && entry.apiKeyEnv === undefined,
           ),
-        );
-        // A Needs setup entry that is now complete may become the default.
-        id = needsSetup ? entry.id : undefined;
+          ...(reasoningChanged ? { reasoning: reasoningFrom(reasoning) } : {}),
+        });
       }
-      const target = result.models.find((model) => model.id === id);
-      if (result.active === null && target?.configurationComplete) {
-        try {
-          await settings.selectModel(target.id);
-        } catch (error) {
-          props.onSaved({
-            defaultError: { id: target.id, message: errorText(error) },
-          });
-          return;
-        }
-      }
-      props.onSaved({});
+      props.onSaved();
     } catch (error) {
       setSaving(false);
       if (isDaemonRequestError(error) && error.code === "MODEL_NOT_FOUND") {
@@ -176,7 +201,7 @@ export function ModelEditor(props: {
     setDeleteError(null);
     try {
       await settings.deleteModel(entry.id);
-      props.onSaved({});
+      props.onSaved();
     } catch (error) {
       setDeleting(false);
       if (isDaemonRequestError(error) && error.code === "MODEL_NOT_FOUND") {
@@ -213,6 +238,18 @@ export function ModelEditor(props: {
         }}
       />
     );
+  };
+  const probe = async (): Promise<void> => {
+    if (!entry) return;
+    setProbing(true);
+    setProbeError(null);
+    try {
+      await settings.probeModel(entry.id);
+    } catch (error) {
+      setProbeError(errorText(error));
+    } finally {
+      setProbing(false);
+    }
   };
   const id = (field: ModelField): string => `${baseId}-${field}`;
   const title = entry ? entry.model : "Add model";
@@ -321,6 +358,19 @@ export function ModelEditor(props: {
           <FieldRow id={id("label")} label="Label" error={errorFor("label")}>
             {input("label")}
           </FieldRow>
+          {entry?.configurationComplete ? (
+            <ThinkingRow
+              id={`${baseId}-reasoning`}
+              entry={entry}
+              value={reasoning}
+              onChange={setReasoning}
+              probing={probing}
+              error={probeError}
+              onProbe={() => {
+                void probe();
+              }}
+            />
+          ) : null}
           <MoreOptions
             // It opens by itself while one of its fields has an error.
             open={
@@ -351,7 +401,7 @@ export function ModelEditor(props: {
             <FieldRow
               id={id("maxOutputTokens")}
               label="Max output"
-              hint="tokens"
+              hint="tokens per request"
               error={errorFor("maxOutputTokens")}
               errorAction={restore("maxOutputTokens")}
             >
@@ -389,8 +439,7 @@ export function ModelEditor(props: {
                 className="ohb-text-button is-danger"
                 disabled={saving || deleting}
                 onClick={() => {
-                  if (isDefault) setConfirmDelete(true);
-                  else void remove();
+                  setConfirmDelete(true);
                 }}
               >
                 Delete
@@ -413,13 +462,11 @@ export function ModelEditor(props: {
       {confirmDelete && entry ? (
         <ConfirmDialog
           title={`Delete ${entry.model}?`}
-          description={
-            props.models.models.some(
-              (model) => model.id !== entry.id && model.configurationComplete,
-            )
-              ? "The next available model becomes the default."
-              : "No model will be the default."
-          }
+          description={modelDeleteDescription(
+            entry,
+            props.models.models,
+            props.models.active?.id,
+          )}
           confirmLabel="Delete"
           danger
           busy={deleting}
@@ -434,5 +481,72 @@ export function ModelEditor(props: {
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Thinking for a complete entry: what detection found, Detect again, and,
+ * once levels are known, the level its chats start from.
+ */
+function ThinkingRow(props: {
+  readonly id: string;
+  readonly entry: UiSettingsModel;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly probing: boolean;
+  readonly error: string | null;
+  readonly onProbe: () => void;
+}): ReactElement {
+  const view = props.entry.reasoning;
+  const detecting = props.probing || view.status === "detecting";
+  const options = thinkingOptions(view);
+  const modelDefault =
+    view.status === "identified" ? reasoningValue(view.default) : "";
+  const status = detecting
+    ? "Detecting…"
+    : view.status === "identified"
+      ? view.mode === "none"
+        ? "This model doesn't think."
+        : null
+      : (view.reason ?? "Not detected yet.");
+  return (
+    <FieldRow id={props.id} label="Thinking" error={props.error ?? undefined}>
+      <div className="ohb-thinking-row">
+        {options ? (
+          <select
+            id={props.id}
+            className="ohb-settings-select"
+            aria-describedby={props.error ? fieldErrorId(props.id) : undefined}
+            value={props.value}
+            onChange={(event) => {
+              props.onChange(event.target.value);
+            }}
+          >
+            <option value="">
+              {modelDefault
+                ? `Model default (${modelDefault})`
+                : "Model default"}
+            </option>
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span id={props.id} className="ohb-thinking-status" role="status">
+            {status}
+          </span>
+        )}
+        <button
+          type="button"
+          className="ohb-text-button"
+          disabled={detecting}
+          onClick={props.onProbe}
+        >
+          Detect again
+        </button>
+      </div>
+    </FieldRow>
   );
 }

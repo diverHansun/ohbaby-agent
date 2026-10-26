@@ -3,7 +3,6 @@ import type {
   UiSettingsModel,
   UiSettingsModelCreate,
   UiSettingsModelPatch,
-  UiSettingsModels,
 } from "ohbaby-sdk";
 import { secretChanged, secretPatch, type SecretChange } from "./secret.js";
 
@@ -233,9 +232,19 @@ export function fieldErrorsFrom(
   return errors;
 }
 
-/** The entry D20 makes default: the last one in this POST's own response. */
-export function createdModelId(models: UiSettingsModels): string | undefined {
-  return models.models.at(-1)?.id;
+/** What deleting `entry` changes, said before it happens (session-model D13). */
+export function modelDeleteDescription(
+  entry: UiSettingsModel,
+  models: readonly UiSettingsModel[],
+  defaultId: string | undefined,
+): string {
+  const chats = "Chats using this model will switch to the default model.";
+  if (entry.id !== defaultId) return chats;
+  return models.some(
+    (model) => model.id !== entry.id && model.configurationComplete,
+  )
+    ? `The next available model becomes the default. ${chats}`
+    : "No model will be the default, so chats can't send until you add one.";
 }
 
 export interface SettingsModelGroup {
