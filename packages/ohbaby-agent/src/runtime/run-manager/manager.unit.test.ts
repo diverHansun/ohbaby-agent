@@ -1,3 +1,4 @@
+import { TestRunManager as RunManager } from "../../core/testing/runtime-model-fixtures.js";
 import { describe, expect, it } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { createPermissionManager } from "../../permission/index.js";
@@ -32,7 +33,6 @@ import {
 } from "../../services/database/write-budget.js";
 import {
   ConcurrencyRejectedError,
-  RunManager,
   RunManagerNotFoundError,
   type HookExecutor,
   type RunDefaultsPolicy,

@@ -1,14 +1,18 @@
+import {
+  TestLifecycle as Lifecycle,
+  type TestContextManager as ContextManager,
+} from "../testing/model-fixtures.js";
 import { messageToUiMessage } from "../../adapters/ui-state/persistent-store.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
-import { Lifecycle } from "./lifecycle.js";
+
 import type { LifecycleEvent, LifecycleResult } from "./types.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
   readTokenUsageMetadata,
 } from "../message/index.js";
-import type { ContextManager } from "../context/index.js";
+
 import type { LLMClientInstance } from "ohbaby-llm";
 import type { ToolSchedulerInstance } from "../tool-scheduler/index.js";
 import type { InterfaceProviderStreamEvent } from "ohbaby-llm";

@@ -16,10 +16,12 @@ import {
   createPersistentUiBackendClient,
   closePersistentUiBackendDatabase,
 } from "../../packages/ohbaby-agent/src/adapters/ui-persistent.js";
-import { createLLMClient } from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
-import { type TokenUsage, type LLMClientInstance } from "ohbaby-llm";
+import {
+  createLLMClientFromConfig,
+  type TokenUsage,
+  type LLMClientInstance,
+} from "ohbaby-llm";
 import { loadEnvFile } from "../../packages/ohbaby-agent/src/config/llm/loaders.js";
-import { reloadLLMConfig } from "../../packages/ohbaby-agent/src/config/llm/index.js";
 import { probeActiveModelContextWindow } from "../../packages/ohbaby-agent/src/config/llm/apply-active-model-config.js";
 import { getDatabase } from "../../packages/ohbaby-agent/src/services/database/index.js";
 import { readTokenUsageMetadata } from "../../packages/ohbaby-agent/src/core/message/index.js";
@@ -326,11 +328,7 @@ export async function createFormalCacheSession(
         workdir,
         projectDirectory: workdir,
         createLLMClient: async (clientOptions): Promise<LLMClientInstance> => {
-          const client = await createLLMClient({
-            ...clientOptions,
-            modelJsonPath: configPath,
-            env: { ...environment, ...process.env },
-          });
+          const client = createLLMClientFromConfig(clientOptions);
           const stream = client.provider.streamResponse.bind(client.provider);
           client.provider.streamResponse = async (
             request,
@@ -684,28 +682,12 @@ export async function createFormalCacheSession(
       async changeEffort(
         effort: string,
       ): ReturnType<FormalCacheSession["changeEffort"]> {
-        if (profile.protocol === "openai-responses")
-          throw new Error(
-            "Public connectModel cannot select Responses; no private runtime reset used",
-          );
         if (!profile.capabilities.efforts?.includes(effort))
           throw new Error("Unverified effort");
         const before = await status();
-        config.llmParams.reasoning.effort = effort;
-        await writeFile(configPath, JSON.stringify(config, null, 2));
-        await reloadLLMConfig({
-          modelJsonPath: configPath,
-          env: { ...environment, ...process.env },
-          projectDirectory: workdir,
-        });
-        await backend.connectModel({
-          provider,
-          model: profile.model,
-          interfaceProvider: profile.protocol,
-          baseUrl: profile.baseUrl,
-          apiKeyEnv,
-          contextWindowTokens: contextWindow.tokens,
-          maxOutputTokens: 4096,
+        await backend.updateSessionReasoning({
+          sessionId: before.sessionId,
+          reasoning: { enabled: options.reasoningEnabled ?? true, effort },
         });
         return { before, checkpoint: await checkpoint(`effort-${effort}`) };
       },

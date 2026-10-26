@@ -65,8 +65,11 @@ async function listModels(
 
 async function currentModel(
   options: CommandServiceOptions,
+  sessionId?: string,
 ): Promise<CommandModelSummary | null> {
-  return sanitizeModelSummary((await options.models?.currentModel()) ?? null);
+  return sanitizeModelSummary(
+    (await options.models?.currentModel(sessionId)) ?? null,
+  );
 }
 
 async function listSessions(
@@ -272,7 +275,7 @@ async function handleStatus(
     projectRoot,
   ] = await Promise.all([
     listModels(options),
-    currentModel(options),
+    currentModel(options, invocation.sessionId),
     options.tools?.listTools() ?? [],
     listSkills(options),
     listMcpServers(options),

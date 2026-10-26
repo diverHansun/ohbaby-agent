@@ -1,3 +1,7 @@
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
@@ -5,12 +9,10 @@ import type { UiPromptCacheUsage } from "ohbaby-sdk";
 import { createPromptCacheUsageTracker } from "../../../packages/ohbaby-agent/src/adapters/ui-inprocess/prompt-cache-usage.js";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import {
-  createContextManager,
   type ContextLLMClient,
   type PreparedTurn,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import {
-  Lifecycle,
   type LifecycleResult,
   type StepUsageObservation,
 } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";

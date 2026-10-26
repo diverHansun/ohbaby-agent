@@ -1,3 +1,4 @@
+import { createTestUiRuntimeComposition as createUiRuntimeComposition } from "../../core/testing/runtime-model-fixtures.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,7 +14,7 @@ import type { ToolExecutionOwner } from "../../core/tool-scheduler/types.js";
 import { createPermissionState } from "../../permission/index.js";
 import { createInMemorySessionManager } from "../../services/session/index.js";
 import { SkillRegistry } from "../../skill/index.js";
-import { createUiRuntimeComposition } from "./composition.js";
+
 import { createHostLocalSandboxManager } from "./host-local-environment.js";
 
 function unusedLlmClient(): LLMClientInstance {

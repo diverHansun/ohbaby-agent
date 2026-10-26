@@ -1,3 +1,4 @@
+import { createRunModel } from "../../packages/ohbaby-agent/src/adapters/ui-runtime/run-model.js";
 import type { ReasoningCapabilities } from "ohbaby-llm";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -9,10 +10,7 @@ import { createBus } from "../../packages/ohbaby-agent/src/bus/index.js";
 import { toModelTools } from "../../packages/ohbaby-agent/src/core/agents/index.js";
 import {
   createContextManager,
-  type ContextLLMClient,
-  type MemoryReader,
   type SystemPromptProvider,
-  type TokenCounter,
 } from "../../packages/ohbaby-agent/src/core/context/index.js";
 import { Lifecycle } from "../../packages/ohbaby-agent/src/core/lifecycle/index.js";
 import type {
@@ -257,38 +255,12 @@ function createEnvironment(workdir: string): ToolExecutionEnvironment {
   };
 }
 
-function createTokenCounter(): TokenCounter {
-  return {
-    estimateTokens(content: string): number {
-      return Math.ceil(content.length / 4);
-    },
-    getLimit(): number {
-      return 200_000;
-    },
-  };
-}
-
 function createSystemPromptProvider(): SystemPromptProvider {
   return {
     build: () => Promise.resolve(STABLE_SYSTEM_PROMPT),
     buildRuntimeContext: (input) =>
       Promise.resolve(
         `<environment_context><cwd>${input.directory}</cwd><cache_smoke>true</cache_smoke></environment_context>`,
-      ),
-  };
-}
-
-function createEmptyMemory(): MemoryReader {
-  return {
-    load: () => Promise.resolve({ global: "", merged: "", project: "" }),
-  };
-}
-
-function createSummaryClient(): ContextLLMClient {
-  return {
-    generateSummary: () =>
-      Promise.resolve(
-        "<state_snapshot>real cache smoke summary</state_snapshot>",
       ),
   };
 }
@@ -638,17 +610,14 @@ export async function createRealCacheHarness(
         scopeKey(request.sessionId ?? "", request.contextScopeId),
       ) ?? 0,
   );
+  const runModel = createRunModel("cache-smoke", llmClient);
   const contextManager = createContextManager({
     bus,
-    llmClient: createSummaryClient(),
-    memory: createEmptyMemory(),
     messageManager,
     systemPromptProvider: createSystemPromptProvider(),
-    tokenCounter: createTokenCounter(),
   });
   const lifecycle = new Lifecycle({
     contextManager,
-    llmClient,
     messageManager,
     resolveTools: async ({ contextScopeId, sessionId }) => {
       const definitions = await scheduler.getAvailableTools();
@@ -750,6 +719,7 @@ export async function createRealCacheHarness(
       });
       const events: LifecycleEvent[] = [];
       const loop = lifecycle.run({
+        runModel,
         agent: input.isSubagent === true ? "explore" : "build",
         ...(input.contextScopeId === undefined
           ? {}

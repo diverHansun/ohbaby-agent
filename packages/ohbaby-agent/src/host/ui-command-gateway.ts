@@ -39,6 +39,8 @@ const RECORDED_METHODS = new Set<UiCommandMethod>([
   "compactSession",
   "archiveSession",
   "updateSessionReasoning",
+  "updateSessionModel",
+  "selectDefaultModel",
   "connectModel",
   "setSearchApiKey",
   "setPermission",
@@ -112,6 +114,7 @@ function inputCorrelation(
     case "compactSession":
     case "archiveSession":
     case "updateSessionReasoning":
+    case "updateSessionModel":
       return {
         ...(stringField(input, "sessionId") === undefined
           ? {}
@@ -136,6 +139,7 @@ function inputCorrelation(
       return typeof args[0] === "string" ? { interactionId: args[0] } : {};
     case "abortRun":
       return typeof args[0] === "string" ? { runId: args[0] } : {};
+    case "selectDefaultModel":
     case "connectModel":
     case "setPermission":
     case "setSearchApiKey":

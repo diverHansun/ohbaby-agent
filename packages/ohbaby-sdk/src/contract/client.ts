@@ -63,6 +63,7 @@ import type {
 export interface SubmitPromptOptions {
   readonly namingSource?: import("./prompt.js").UiPromptNamingSource;
   readonly reasoning?: UiReasoningConfig;
+  readonly modelEntryId?: string;
   readonly clientRequestId?: string;
   readonly sessionId?: string;
 }
@@ -150,7 +151,9 @@ export interface UiQueryClient
     promptId: string,
     options?: UiWaitForPromptOptions,
   ): Promise<UiPromptCompletion>;
-  getCurrentModel(): Promise<UiCurrentModelConfig | null>;
+  getCurrentModel(input?: {
+    readonly sessionId?: string;
+  }): Promise<UiCurrentModelConfig | null>;
   probeModelContextWindow(
     input: UiProbeModelContextWindowInput,
   ): Promise<UiProbeModelContextWindowResult>;
@@ -209,6 +212,13 @@ export interface UiCommandClient
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
   archiveSession(input: UiArchiveSessionInput): Promise<void>;
+  updateSessionModel(input: {
+    readonly sessionId: string;
+    readonly modelEntryId: string | null;
+  }): Promise<UiSession>;
+  selectDefaultModel(
+    entryId: string,
+  ): Promise<import("./settings.js").UiSettingsModelsResponse>;
   updateSessionReasoning(input: {
     readonly sessionId: string;
     readonly reasoning: UiReasoningConfig | null;

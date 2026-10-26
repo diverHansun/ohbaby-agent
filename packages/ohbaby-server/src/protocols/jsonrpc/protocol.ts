@@ -33,6 +33,8 @@ export const DAEMON_RPC_METHODS = [
   "compactSession",
   "archiveSession",
   "updateSessionReasoning",
+  "updateSessionModel",
+  "selectDefaultModel",
   "getCurrentModel",
   "probeModelContextWindow",
   "connectModel",

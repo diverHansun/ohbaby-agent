@@ -338,6 +338,18 @@ export class DaemonHttpClient {
     );
   }
 
+  updateSessionModel(
+    input: Parameters<UiBackendClient["updateSessionModel"]>[0],
+  ): Promise<{
+    ok: true;
+    session: Awaited<ReturnType<UiBackendClient["updateSessionModel"]>>;
+  }> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/model`,
+      { method: "PATCH", body: { modelEntryId: input.modelEntryId } },
+    );
+  }
+
   updateSessionReasoning(
     input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
   ): Promise<{
@@ -508,9 +520,16 @@ export class DaemonHttpClient {
   }
 
   getCurrentModel(
-    options: { readonly signal?: AbortSignal } = {},
+    options: {
+      readonly signal?: AbortSignal;
+      readonly sessionId?: string;
+    } = {},
   ): Promise<CurrentModelResponse> {
-    return this.request("/v1/model", { signal: options.signal });
+    const query =
+      options.sessionId === undefined
+        ? ""
+        : `?${new URLSearchParams({ sessionId: options.sessionId })}`;
+    return this.request(`/v1/model${query}`, { signal: options.signal });
   }
 
   getContextWindowUsage(

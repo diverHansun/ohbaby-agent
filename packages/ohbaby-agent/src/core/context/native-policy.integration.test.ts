@@ -1,3 +1,7 @@
+import {
+  type TestContextManager as ContextManager,
+  createTestContextManager as createContextManager,
+} from "../testing/model-fixtures.js";
 import { describe, expect, it } from "vitest";
 import { createBus } from "../../bus/index.js";
 import type { ModelOrigin, ModelState } from "ohbaby-llm";
@@ -7,8 +11,6 @@ import {
   type MessageWithParts,
   type MessageStore,
 } from "../message/index.js";
-import type { ContextManager } from "./types.js";
-import { createContextManager } from "./context-manager.js";
 
 const origin: ModelOrigin = {
   provider: "openai",

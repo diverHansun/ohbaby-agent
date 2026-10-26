@@ -1,3 +1,4 @@
+import { createTestUiRuntimeComposition as createUiRuntimeComposition } from "../../core/testing/runtime-model-fixtures.js";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,7 +16,7 @@ import { createAnthropicProvider } from "ohbaby-llm";
 import { createOpenAICompatibleProvider } from "ohbaby-llm";
 import { createOpenAIResponsesProvider } from "ohbaby-llm";
 import { SkillRegistry } from "../../skill/index.js";
-import { createUiRuntimeComposition } from "./composition.js";
+
 import { createHostLocalSandboxManager } from "./host-local-environment.js";
 
 const protocols = [

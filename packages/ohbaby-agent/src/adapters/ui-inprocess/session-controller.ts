@@ -45,6 +45,7 @@ export function sessionMetadataToUiSession(session: CoreSession): UiSession {
     id: session.id,
     messages: [],
     reasoning: session.reasoning,
+    modelEntryId: session.modelEntryId,
     workingDirectory: session.workingDirectory,
     title: session.title,
     updatedAt: new Date(session.updatedAt).toISOString(),

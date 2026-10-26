@@ -1,3 +1,4 @@
+import { testRunModel } from "../testing/model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentInstanceFactory } from "./instance.js";
 import type { AgentRunDeps, AgentRunner, AgentRunResult } from "./types.js";
@@ -47,8 +48,16 @@ describe("AgentInstance", () => {
       type: "sub",
     });
 
-    await instance.turn({ prompt: "first", waitMode: "waitForCompletion" });
-    await instance.turn({ prompt: "second", waitMode: "waitForCompletion" });
+    await instance.turn({
+      runModel: testRunModel("fake-model"),
+      prompt: "first",
+      waitMode: "waitForCompletion",
+    });
+    await instance.turn({
+      runModel: testRunModel("fake-model"),
+      prompt: "second",
+      waitMode: "waitForCompletion",
+    });
 
     expect(runner).toHaveBeenCalledTimes(2);
     expect(runner.mock.calls.map((call) => call[1])).toEqual([
@@ -88,6 +97,7 @@ describe("AgentInstance", () => {
     });
 
     await instance.turn({
+      runModel: testRunModel("fake-model"),
       initialUserMessageId: "message_reserved",
       prompt: "hello",
       runId: "run_primary",

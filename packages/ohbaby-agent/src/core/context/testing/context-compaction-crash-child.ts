@@ -1,6 +1,7 @@
+import { createTestContextManager as createContextManager } from "../../testing/model-fixtures.js";
 import { writeFileSync } from "node:fs";
 import { createBus } from "../../../bus/index.js";
-import { createContextManager } from "../index.js";
+
 import {
   createDatabaseMessageStore,
   createMessageManager,

@@ -181,6 +181,8 @@ describe("daemon protocol", () => {
       "compactSession",
       "archiveSession",
       "updateSessionReasoning",
+      "updateSessionModel",
+      "selectDefaultModel",
       "getCurrentModel",
       "probeModelContextWindow",
       "connectModel",

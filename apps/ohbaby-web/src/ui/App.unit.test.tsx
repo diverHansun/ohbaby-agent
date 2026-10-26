@@ -4693,6 +4693,8 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     act(() => {
       fake.store.setCurrentModel({
+        id: "test-model",
+        source: "default",
         provider: "zhipu",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
         interfaceProvider: "openai-compatible",
@@ -4955,6 +4957,8 @@ function createFakeRuntime(input: {
   const client: UiBackendClient = {
     abortRun: vi.fn(() => Promise.resolve()),
     acquirePromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
+    updateSessionModel: vi.fn(() => Promise.reject(new Error("unused"))),
+    selectDefaultModel: vi.fn(() => Promise.reject(new Error("unused"))),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
@@ -5696,6 +5700,8 @@ it("shows raw reasoning labels inside the input and persists session preference"
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
   vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+    id: "test-model",
+    source: "default",
     provider: "p",
     model: "m",
     baseUrl: "https://p",
@@ -5746,6 +5752,8 @@ it("unknown capability keeps send available and labels the control unknown witho
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
   vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+    id: "test-model",
+    source: "default",
     provider: "p",
     model: "m",
     baseUrl: "https://p",
@@ -5773,6 +5781,8 @@ it("shows only a spinning brain while reasoning capability is detecting", async 
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
   vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+    id: "test-model",
+    source: "default",
     provider: "p",
     model: "m",
     baseUrl: "https://p",
@@ -5795,6 +5805,8 @@ it("keeps the reasoning selector for an identified model that cannot disable rea
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
   vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+    id: "test-model",
+    source: "default",
     provider: "p",
     model: "m",
     baseUrl: "https://p",
@@ -5823,6 +5835,8 @@ it("clears old workspace reasoning while the new client metadata is pending", as
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
   vi.mocked(first.client.getCurrentModel).mockResolvedValue({
+    id: "test-model",
+    source: "default",
     provider: "old",
     model: "old",
     baseUrl: "https://old.test",
@@ -5875,6 +5889,8 @@ it.each(["pending", "acknowledged"])(
     const snapshot = snapshotWithStatus({ kind: "idle" });
     const fake = createFakeRuntime({ snapshot });
     vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+      id: "test-model",
+      source: "default",
       provider: "p",
       model: "m",
       baseUrl: "https://p",

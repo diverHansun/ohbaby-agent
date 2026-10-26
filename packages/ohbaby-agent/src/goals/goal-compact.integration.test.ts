@@ -1,14 +1,14 @@
+import {
+  createTestContextManager as createContextManager,
+  type TestContextManager as ContextManager,
+} from "../core/testing/model-fixtures.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBus } from "../bus/index.js";
-import { createContextManager } from "../core/context/index.js";
-import type {
-  CompactResult,
-  ContextManager,
-  TokenCounter,
-} from "../core/context/index.js";
+
+import type { CompactResult, TokenCounter } from "../core/context/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,

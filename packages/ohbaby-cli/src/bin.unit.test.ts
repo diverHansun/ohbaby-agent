@@ -1298,6 +1298,8 @@ function createCore(): {
   readonly subscribePermissionEvents: ReturnType<typeof vi.fn>;
   readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly abortRun: ReturnType<typeof vi.fn>;
+  readonly updateSessionModel: ReturnType<typeof vi.fn>;
+  readonly selectDefaultModel: ReturnType<typeof vi.fn>;
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
   readonly exportSession: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
@@ -1341,6 +1343,10 @@ function createCore(): {
       }),
     ),
     abortRun: vi.fn(() => Promise.resolve()),
+    updateSessionModel: vi.fn(() => Promise.reject(new Error("unused"))),
+    selectDefaultModel: vi.fn(() =>
+      Promise.resolve({ ok: true as const, active: null, models: [] }),
+    ),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),

@@ -1,7 +1,8 @@
+import { createTestContextManager as createContextManager } from "../testing/model-fixtures.js";
 import OpenAI from "openai";
 import { createBus } from "../../bus/index.js";
 import { createContextSummaryClient } from "../../adapters/ui-runtime/prompt-context.js";
-import { createContextManager } from "../context/context-manager.js";
+
 import {
   createInMemoryMessageStore,
   createMessageManager,

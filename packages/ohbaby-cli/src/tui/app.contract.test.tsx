@@ -5669,6 +5669,8 @@ function createFakeClient(
   readonly emit: (event: UiEvent) => void;
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
+  readonly updateSessionModel: ReturnType<typeof vi.fn>;
+  readonly selectDefaultModel: ReturnType<typeof vi.fn>;
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
@@ -5860,6 +5862,10 @@ function createFakeClient(
           })
         : Promise.reject(new Error("prompt not found"));
     }),
+    updateSessionModel: vi.fn(() => Promise.reject(new Error("unused"))),
+    selectDefaultModel: vi.fn(() =>
+      Promise.resolve({ ok: true as const, active: null, models: [] }),
+    ),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),

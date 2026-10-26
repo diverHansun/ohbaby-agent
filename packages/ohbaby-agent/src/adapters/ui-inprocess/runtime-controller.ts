@@ -66,7 +66,9 @@ export class InProcessRuntimeController {
     version: SettingsConfigVersions | undefined,
   ): SettingsDomain[] {
     return (Object.keys(version ?? {}) as SettingsDomain[]).filter(
-      (domain) => this.runtimeVersion?.[domain] !== version?.[domain],
+      (domain) =>
+        domain !== "model" &&
+        this.runtimeVersion?.[domain] !== version?.[domain],
     );
   }
 

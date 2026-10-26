@@ -1,3 +1,8 @@
+import {
+  TestLifecycle as Lifecycle,
+  type TestContextManager as ContextManager,
+  type TestLifecycleSessionParams as LifecycleSessionParams,
+} from "../testing/model-fixtures.js";
 import { RuntimeInputSnapshotChangedError } from "./runtime-input-error.js";
 import { createPromptCacheUsageTracker } from "../../adapters/ui-inprocess/prompt-cache-usage.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
@@ -14,11 +19,7 @@ import {
   readTokenUsageMetadata,
 } from "../message/index.js";
 import type { MessageIdGenerator } from "../message/index.js";
-import {
-  DEFAULT_MAX_STEPS,
-  DisplayReasoningOwner,
-  Lifecycle,
-} from "./index.js";
+import { DEFAULT_MAX_STEPS, DisplayReasoningOwner } from "./index.js";
 import {
   ProviderStreamInterruptedError,
   type LLMClientInstance,
@@ -30,16 +31,11 @@ import type {
   ToolSchedulerInstance,
 } from "../tool-scheduler/index.js";
 import type {
-  ContextManager,
   ContextUsage,
   PreparedModelRequest,
   PreparedTurn,
 } from "../context/index.js";
-import type {
-  LifecycleEvent,
-  LifecycleResult,
-  LifecycleSessionParams,
-} from "./index.js";
+import type { LifecycleEvent, LifecycleResult } from "./index.js";
 
 async function deliverFixtureResults(
   batch: BatchToolCallRequest,
@@ -5276,8 +5272,8 @@ describe("same-run durable input continuation", () => {
 it.each([false, true])(
   "persists one anchored reminder for HTTP retries and sends nothing on save failure (saveFailure=%s)",
   async (saveFailure) => {
-    const { createContextManager } =
-      await import("../context/context-manager.js");
+    const { createTestContextManager: createContextManager } =
+      await import("../testing/model-fixtures.js");
     const { createReminderCollector } =
       await import("../../services/reminder/index.js");
     const messageManager = createMessageManager({

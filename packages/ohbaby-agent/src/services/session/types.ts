@@ -10,6 +10,7 @@ export interface SessionStats {
 
 export interface Session {
   readonly reasoning?: ReasoningConfig;
+  readonly modelEntryId?: string;
   readonly id: string;
   readonly projectId: string;
   /** Execution directory used by the current or most recent turn. */
@@ -56,6 +57,7 @@ export interface ListSessionOptions {
 
 export interface UpdateSessionPatch {
   readonly reasoning?: ReasoningConfig;
+  readonly modelEntryId?: string;
   readonly title?: string;
   readonly status?: SessionStatus;
   readonly agentName?: string;
@@ -105,7 +107,10 @@ export interface SessionManager {
   update(
     sessionId: string,
     patch: UpdateSessionPatch,
-    condition?: { readonly expectedTitle: string },
+    condition?: {
+      readonly expectedTitle?: string;
+      readonly expectedModelEntryId?: string;
+    },
   ): Promise<Session>;
   incrementStats(sessionId: string, delta: SessionStatsDelta): Promise<Session>;
   /**
@@ -139,7 +144,10 @@ export interface SessionStore {
   update(
     sessionId: string,
     patch: Partial<Session>,
-    condition?: { readonly expectedTitle: string },
+    condition?: {
+      readonly expectedTitle?: string;
+      readonly expectedModelEntryId?: string;
+    },
   ): Promise<Session>;
   recordWorkingDirectory(
     sessionId: string,

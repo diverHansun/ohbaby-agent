@@ -1,8 +1,9 @@
+import { createTestContextManager as createContextManager } from "../../core/testing/model-fixtures.js";
 import { resolvePreparedRequestSettings } from "ohbaby-llm";
 import type { RawMessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
-import { createContextManager } from "../../core/context/context-manager.js";
+
 import {
   createInMemoryMessageStore,
   createMessageManager,

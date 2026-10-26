@@ -1,3 +1,11 @@
+import { createRunModel } from "../../adapters/ui-runtime/run-model.js";
+import { testRunModel } from "../testing/model-fixtures.js";
+import {
+  createTestContextManager as createContextManager,
+  type TestContextManager as ContextManager,
+  TestLifecycle as Lifecycle,
+  type TestLifecycleSessionParams as LifecycleSessionParams,
+} from "../testing/model-fixtures.js";
 import { createReminderCollector } from "../../services/reminder/index.js";
 import { createEnvironmentReminderProvider } from "../../services/reminder/environment.js";
 import { describe, expect, it, vi } from "vitest";
@@ -6,7 +14,7 @@ import type {
   InterfaceProviderStreamEvent,
 } from "ohbaby-llm";
 import { createBus } from "../../bus/index.js";
-import { createContextManager, type ContextManager } from "../context/index.js";
+
 import type { PreparedTurn, TokenCounter } from "../context/index.js";
 import type { LLMClientInstance } from "ohbaby-llm";
 import {
@@ -19,12 +27,8 @@ import type {
   ToolDefinition,
   ToolSchedulerInstance,
 } from "../tool-scheduler/index.js";
-import { Lifecycle } from "../lifecycle/index.js";
-import type {
-  LifecycleEvent,
-  LifecycleResult,
-  LifecycleSessionParams,
-} from "../lifecycle/index.js";
+
+import type { LifecycleEvent, LifecycleResult } from "../lifecycle/index.js";
 import { createAgentInstanceFactory } from "./instance.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import { RunManager } from "../../runtime/run-manager/index.js";
@@ -453,11 +457,13 @@ describe("AgentInstance long task integration", () => {
     });
 
     await primary.turn({
+      runModel: testRunModel("fake-model"),
       initialUserMessageId: "user_primary_identity",
       prompt: "primary turn",
       waitMode: "waitForCompletion",
     });
     await subagent.turn({
+      runModel: testRunModel("fake-model"),
       initialUserMessageId: "user_subagent_identity",
       prompt: "subagent turn",
       waitMode: "waitForCompletion",
@@ -559,6 +565,7 @@ describe("AgentInstance long task integration", () => {
     });
 
     const result = await instance.turn({
+      runModel: createRunModel("fixture", llmClient),
       prompt: "Run a long bounded subagent job.",
       waitMode: "waitForCompletion",
     });

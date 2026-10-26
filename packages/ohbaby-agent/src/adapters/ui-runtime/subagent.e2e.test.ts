@@ -1,3 +1,7 @@
+import {
+  createTestUiRuntimeComposition as createUiRuntimeCompositionImpl,
+  type TestUiRuntimeCompositionOptions as UiRuntimeCompositionOptions,
+} from "../../core/testing/runtime-model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
@@ -18,10 +22,7 @@ import type {
 } from "ohbaby-llm";
 import { createInMemorySessionManager } from "../../services/session/index.js";
 import { SkillRegistry } from "../../skill/index.js";
-import {
-  createUiRuntimeComposition as createUiRuntimeCompositionImpl,
-  type UiRuntimeCompositionOptions,
-} from "./composition.js";
+
 import {
   createHostLocalSandboxManager,
   type HostLocalSandboxManager,

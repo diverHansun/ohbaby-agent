@@ -1,3 +1,4 @@
+import type { DaemonRpcMethod } from "../../protocols/jsonrpc/protocol.js";
 import {
   request as httpRequest,
   createServer as createHttpServer,
@@ -589,6 +590,22 @@ class FakeBackend implements UiBackendClient {
 
   compactSession(): ReturnType<UiBackendClient["compactSession"]> {
     return Promise.resolve(compactResult());
+  }
+
+  updateSessionModel(
+    input: Parameters<UiBackendClient["updateSessionModel"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionModel"]> {
+    return Promise.resolve({
+      id: input.sessionId,
+      modelEntryId: input.modelEntryId ?? undefined,
+      title: "test",
+      messages: [],
+      createdAt: "now",
+      updatedAt: "now",
+    });
+  }
+  selectDefaultModel(): ReturnType<UiBackendClient["selectDefaultModel"]> {
+    return Promise.resolve({ ok: true, active: null, models: [] });
   }
 
   updateSessionReasoning(
@@ -2943,4 +2960,75 @@ it("does not send unchanged binding hellos for repeated REST prompts or another 
     );
     await observer.cancel();
   });
+});
+
+it("transports session model choices, scoped queries and default selection over RPC", async () => {
+  const backend = new FakeBackend();
+  const queried: ({ readonly sessionId?: string } | undefined)[] = [];
+  backend.getCurrentModel = (input?: {
+    readonly sessionId?: string;
+  }): ReturnType<UiBackendClient["getCurrentModel"]> => {
+    queried.push(input);
+    return Promise.resolve({
+      id: "a",
+      source: "explicit",
+      provider: "test",
+      model: "one",
+      baseUrl: "http://localhost",
+      interfaceProvider: "openai-compatible",
+    });
+  };
+  const server = createDaemonHttpServer({
+    authToken,
+    backend,
+    host: "127.0.0.1",
+    port: 0,
+  });
+  await server.start();
+  const rpc = (method: DaemonRpcMethod, params: unknown[]): Promise<Response> =>
+    postRpc(server.url, {
+      clientId: "model-client",
+      id: "request",
+      method,
+      params,
+    });
+  try {
+    await rpc("initializeClient", [{ startupSessionMode: { type: "fresh" } }]);
+    for (const modelEntryId of ["a", null]) {
+      const response = await rpc("updateSessionModel", [
+        { sessionId: "s", modelEntryId },
+      ]);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        result: { id: "s" },
+      });
+    }
+    const current = await rpc("getCurrentModel", [{ sessionId: "s" }]);
+    expect(await current.json()).toMatchObject({
+      ok: true,
+      result: { id: "a", source: "explicit" },
+    });
+    expect(queried.at(-1)).toEqual({ sessionId: "s" });
+    expect(await (await rpc("selectDefaultModel", ["a"])).json()).toMatchObject(
+      { ok: true },
+    );
+    for (const modelEntryId of [undefined, "", 42, {}]) {
+      expect(
+        await (
+          await rpc("updateSessionModel", [{ sessionId: "s", modelEntryId }])
+        ).json(),
+      ).toMatchObject({ ok: false, error: { code: "VALIDATION_FAILED" } });
+    }
+    await rpc("submitPromptAccepted", ["hello", { modelEntryId: "a" }]);
+    expect(backend.submitted.at(-1)?.options?.modelEntryId).toBe("a");
+    for (const modelEntryId of [null, "", 42]) {
+      expect(
+        await (
+          await rpc("submitPromptAccepted", ["invalid", { modelEntryId }])
+        ).json(),
+      ).toMatchObject({ ok: false, error: { code: "VALIDATION_FAILED" } });
+    }
+  } finally {
+    await server.stop();
+  }
 });

@@ -150,6 +150,14 @@ describe("context window UI contract", () => {
           },
         });
       },
+      updateSessionModel(): Promise<import("./snapshot.js").UiSession> {
+        throw new Error("unused");
+      },
+      selectDefaultModel(): Promise<
+        import("./settings.js").UiSettingsModelsResponse
+      > {
+        throw new Error("unused");
+      },
       updateSessionReasoning(): ReturnType<CoreAPI["updateSessionReasoning"]> {
         return Promise.reject(new Error("Unused reasoning test stub"));
       },

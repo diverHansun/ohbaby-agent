@@ -654,4 +654,8 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       ALTER TABLE session RENAME COLUMN pending_project_root TO pending_working_directory;
     `,
   },
+  {
+    version: "027_prompt_submission_model_entry",
+    sql: `ALTER TABLE prompt_submission ADD COLUMN model_entry_id TEXT;`,
+  },
 ];

@@ -1,3 +1,4 @@
+import type { RunModel } from "../../core/run-model.js";
 import { loadAgentConfigWithOrigins } from "../../config/agents/loaders.js";
 import { createSkillUsageReminderProvider } from "../../services/reminder/skill-usage.js";
 import type { Logger } from "../../observability/logger.js";
@@ -22,7 +23,6 @@ import { createModeReminderProvider } from "../../services/reminder/mode.js";
 import { createTodoReminderProvider } from "../../services/reminder/todo.js";
 import { PermissionEvent } from "../../permission/events.js";
 import { randomUUID } from "node:crypto";
-import { activeModelBudgetProfiles } from "ohbaby-llm";
 import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
 import type { UiNotice } from "ohbaby-sdk";
 import type { BusInstance } from "../../bus/index.js";
@@ -46,10 +46,7 @@ import {
   type DisplayReasoningOwner,
 } from "../../core/lifecycle/index.js";
 import type { ResolvedStepTools } from "../../core/lifecycle/index.js";
-import {
-  resolvePreparedRequestSettings,
-  type LLMClientInstance,
-} from "ohbaby-llm";
+import { resolvePreparedRequestSettings } from "ohbaby-llm";
 import type { MessageManager } from "../../core/message/index.js";
 import {
   createToolScheduler,
@@ -62,7 +59,6 @@ import type {
   PermissionStateStore,
 } from "../../permission/index.js";
 import { Shell } from "../../shell/index.js";
-import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import {
   createInMemorySessionManager,
   SessionEvent,
@@ -149,7 +145,6 @@ import {
   type HostLocalSandboxManager,
 } from "./host-local-environment.js";
 import {
-  createContextSummaryClient,
   noticeFromCompactResult,
   noticeFromPromptSecurityFinding,
 } from "./prompt-context.js";
@@ -176,7 +171,10 @@ export interface UiRuntimeCompositionOptions {
   readonly bus: BusInstance;
   readonly contextManager?: ContextManager;
   readonly createRunId?: () => string;
-  readonly llmClient: LLMClientInstance;
+  readonly resolveRunModel: (input: {
+    sessionId: string;
+    modelEntryId?: string;
+  }) => Promise<RunModel>;
   readonly messageManager: MessageManager;
   readonly now?: () => number;
   readonly onNotice?: (
@@ -363,7 +361,7 @@ export async function createUiRuntimeComposition(
               if (info.rootSessionId === identity.sessionId) wake();
             }),
           ];
-          return () => {
+          return (): void => {
             for (const unsubscribe of unsubs) unsubscribe();
           };
         },
@@ -670,7 +668,6 @@ export async function createUiRuntimeComposition(
         options.currentRunInputStore,
       ),
       bus: options.bus,
-      llmClient: createContextSummaryClient(options.llmClient),
       logger: options.logger,
       messageManager: options.messageManager,
       now: options.now,
@@ -685,17 +682,10 @@ export async function createUiRuntimeComposition(
         });
       },
       systemPromptProvider,
-      tokenCounter: createHeuristicTokenCounter({
-        defaultLimit: options.llmClient.config.contextWindowTokens,
-        defaultMaxOutputTokens: options.llmClient.config.maxTokens,
-        profiles: activeModelBudgetProfiles(options.llmClient.config),
-        provider: options.llmClient.config.provider,
-      }),
     });
   const lifecycle = new Lifecycle({
     displayReasoning: options.displayReasoning,
     contextManager,
-    llmClient: options.llmClient,
     messageManager: options.messageManager,
     resolveTools: async (input): Promise<ResolvedStepTools> => {
       const definitions = await resolvePromptTools({
@@ -712,8 +702,8 @@ export async function createUiRuntimeComposition(
     toolScheduler,
   });
 
-  const runManager = new RunManager({
-    async beforeFinalize(runId, outcome) {
+  const runManager: RunManager = new RunManager({
+    async beforeFinalize(runId, outcome): Promise<void> {
       const run = await runLedger.get(runId);
       if (!run) throw new Error(`Missing execution record for ${runId}`);
       // Only the primary waits for descendants. A child finalizer must never wait
@@ -741,7 +731,7 @@ export async function createUiRuntimeComposition(
       }
     },
     currentRunInputs: {
-      close(runId, reason) {
+      close(runId, reason): Promise<void> {
         // Both owners seal synchronously before either durable write is awaited.
         if (reason === "succeeded" || reason === "completed")
           shellJobRegistry.sealRootRun(runId);
@@ -783,11 +773,8 @@ export async function createUiRuntimeComposition(
     },
   });
   const agentService = new AgentService({
-    getReasoning: (): LLMClientInstance["config"]["reasoning"] =>
-      options.llmClient.config.reasoning,
     agentManager,
     instanceFactory: agentInstanceFactory,
-    modelId: options.llmClient.config.model,
     sessionManager,
   });
   const pendingLifecycleCleanups = new Set<Promise<void>>();
@@ -842,13 +829,16 @@ export async function createUiRuntimeComposition(
     }
   };
 
-  const subagentHost = new SessionSubagentHost({
+  const subagentHost: SessionSubagentHost = new SessionSubagentHost({
     collectExecutionFacts: factsFor,
-    ensureResultArtifact: async (execution) => {
+    ensureResultArtifact: async (execution): Promise<void> => {
       await resultArtifacts.prepare(execution, { forceFile: true });
     },
     onTerminal: (record) => continuation?.notify(record.rootRunId),
-    isApprovalBlocked: async (executionId, parentSessionId) => {
+    isApprovalBlocked: async (
+      executionId,
+      parentSessionId,
+    ): Promise<boolean> => {
       const execution = await subagentExecutionStore.get({
         executionId,
         parentSessionId,
@@ -884,14 +874,21 @@ export async function createUiRuntimeComposition(
         title: "Subagent result persistence failed",
       });
     },
-    getParentReasoning: (sessionId, contextScopeId): ReasoningIntent =>
-      runManager.getActiveReasoning(sessionId, contextScopeId) ??
-      mergeReasoningIntent(options.llmClient.config.reasoning),
+    getParentReasoning: (
+      sessionId,
+      contextScopeId,
+    ): ReasoningIntent | undefined =>
+      runManager.getActiveReasoning(sessionId, contextScopeId),
+    getParentRunModel: (
+      sessionId,
+      contextScopeId,
+    ): RunModel | Promise<RunModel> =>
+      runManager.getActiveRunModel(sessionId, contextScopeId) ??
+      options.resolveRunModel({ sessionId }),
     agentManager,
     createSubagentId: options.createSubagentId,
     createRunId: options.createRunId,
     instanceFactory: agentInstanceFactory,
-    modelId: options.llmClient.config.model,
     ownerId: options.subagentOwnerId,
     ownerPid: options.subagentOwnerPid,
     onClosed(input): void {
@@ -1254,10 +1251,13 @@ export async function createUiRuntimeComposition(
     async compactSession(input): Promise<CompactResult> {
       return runManager.withIdleSession(input, async () => {
         input.signal?.throwIfAborted();
+        const runModel = await options.resolveRunModel({
+          sessionId: input.sessionId,
+        });
         const reasoning =
           runManager.getActiveReasoning(input.sessionId) ??
           mergeReasoningIntent(
-            options.llmClient.config.reasoning,
+            runModel.client.config.reasoning,
             input.reasoning,
           );
         const resolved = await resolvePrimaryContextTools({
@@ -1265,22 +1265,23 @@ export async function createUiRuntimeComposition(
           sessionId: input.sessionId,
         });
         const result = await contextManager.compact(input.sessionId, {
+          runModel,
           signal: input.signal,
-          requestSettings: resolvePreparedRequestSettings(options.llmClient, {
+          requestSettings: resolvePreparedRequestSettings(runModel.client, {
             reasoning,
           }),
           modelOrigin: {
-            provider: options.llmClient.config.provider,
-            model: options.llmClient.config.model,
-            protocol: options.llmClient.config.interfaceProvider,
-            endpoint: options.llmClient.config.baseUrl,
+            provider: runModel.client.config.provider,
+            model: runModel.client.config.model,
+            protocol: runModel.client.config.interfaceProvider,
+            endpoint: runModel.client.config.baseUrl,
           },
           reasoning,
           agentName: resolved.agentName,
           directory: input.projectRoot,
           force: input.force ?? true,
           isSubagent: false,
-          modelId: options.llmClient.config.model,
+          modelId: runModel.client.config.model,
           toolNames: resolved.toolNames,
           tools: resolved.tools,
         });
@@ -1297,6 +1298,9 @@ export async function createUiRuntimeComposition(
     ): Promise<
       ContextUsage & { readonly composition?: ContextOccupancyComposition }
     > {
+      const runModel = await options.resolveRunModel({
+        sessionId: input.sessionId,
+      });
       const resolved = await resolvePrimaryContextTools({
         operation: "inspect context usage",
         sessionId: input.sessionId,
@@ -1305,11 +1309,12 @@ export async function createUiRuntimeComposition(
         input.sessionId,
         input.projectRoot,
         {
+          runModel,
           modelOrigin: {
-            provider: options.llmClient.config.provider,
-            model: options.llmClient.config.model,
-            protocol: options.llmClient.config.interfaceProvider,
-            endpoint: options.llmClient.config.baseUrl,
+            provider: runModel.client.config.provider,
+            model: runModel.client.config.model,
+            protocol: runModel.client.config.interfaceProvider,
+            endpoint: runModel.client.config.baseUrl,
           },
           agentName: resolved.agentName,
           isSubagent: false,
@@ -1317,8 +1322,9 @@ export async function createUiRuntimeComposition(
         },
       );
       return contextManager.getUsage({
+        runModel,
         context: assembled,
-        modelId: options.llmClient.config.model,
+        modelId: runModel.client.config.model,
         tools: resolved.tools,
         toolDefinitions: resolved.toolDefinitions,
       });

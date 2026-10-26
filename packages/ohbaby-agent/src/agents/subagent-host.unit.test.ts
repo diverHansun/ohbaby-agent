@@ -1,3 +1,4 @@
+import { TestSessionSubagentHost as SessionSubagentHost } from "../core/testing/runtime-model-fixtures.js";
 import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -16,7 +17,7 @@ import type {
   SubagentRunResult,
 } from "./subagents/types.js";
 import { InMemorySubagentExecutionStore } from "./subagents/execution-store.js";
-import { SessionSubagentHost } from "./subagent-host.js";
+
 import { createSubagentTools } from "../tools/subagent.js";
 import { formatToolResultContentForModel } from "../core/context/tool-metadata-projection.js";
 

@@ -33,25 +33,19 @@ const audit = vi.hoisted(
     injected: false,
   }),
 );
-vi.mock(
-  "../../packages/ohbaby-agent/src/core/llm-client/index.js",
-  async (importOriginal) => {
-    const original =
-      await importOriginal<
-        typeof import("../../packages/ohbaby-agent/src/core/llm-client/index.js")
-      >();
-    return {
-      ...original,
-      createLLMClient: async (
-        ...args: Parameters<typeof original.createLLMClient>
-      ) => {
-        const client = await original.createLLMClient(...args);
-        observeClient(client, audit);
-        return client;
-      },
-    };
-  },
-);
+vi.mock("ohbaby-llm", async (importOriginal) => {
+  const original = await importOriginal<typeof import("ohbaby-llm")>();
+  return {
+    ...original,
+    createLLMClientFromConfig: (
+      ...args: Parameters<typeof original.createLLMClientFromConfig>
+    ) => {
+      const client = original.createLLMClientFromConfig(...args);
+      observeClient(client, audit);
+      return client;
+    },
+  };
+});
 
 vi.mock(
   "../../packages/ohbaby-agent/src/core/context/index.js",

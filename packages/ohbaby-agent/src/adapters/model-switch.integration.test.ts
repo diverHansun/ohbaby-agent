@@ -1,6 +1,5 @@
 import * as composition from "./ui-runtime/composition.js";
-import { RuntimeSwitchPendingError } from "./ui-inprocess/runtime-controller.js";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +24,7 @@ afterEach(() => {
 });
 
 describe("shared model configuration admission", () => {
-  it("keeps both workspaces' old two-tool loops on A, queues new work, and selects latest C independently", async () => {
+  it("keeps active loops on A while new sessions immediately use B and then C", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-model-switch-"));
     vi.stubEnv("HOME", directory);
     vi.stubEnv("USERPROFILE", directory);
@@ -58,12 +57,9 @@ describe("shared model configuration admission", () => {
         clients.push(
           createInProcessUiBackendClient({
             workdir,
-            createLLMClient: async (): Promise<LLMClientInstance> => {
-              const model = (
-                JSON.parse(await readFile(modelPath, "utf8")) as {
-                  defaultModel: string;
-                }
-              ).defaultModel;
+            createLLMClient: async (config): Promise<LLMClientInstance> => {
+              await Promise.resolve();
+              const model = config.model;
               let turn = 0;
               return {
                 config: {
@@ -154,34 +150,31 @@ describe("shared model configuration admission", () => {
         "Use the saved model",
         { sessionId: "new", clientRequestId: "new-work" },
       );
-      const cancelled = await clients[1].submitPromptAccepted(
-        "Cancel while waiting",
-        { sessionId: "cancel", clientRequestId: "cancel-work" },
-      );
-      await vi.waitFor(async () => {
-        expect(
-          (await clients[0].getSnapshot()).prompts?.some(
-            (p) => p.promptId === waiting.promptId,
-          ),
-        ).toBe(true);
-      });
-      await clients[1].cancelQueuedPrompt({ promptId: cancelled.promptId });
+      expect(
+        (await clients[0].waitForPrompt(waiting.promptId)).prompt.status,
+      ).toBe("succeeded");
+      expect(calls).toEqual([["A", "B"], ["A"]]);
       await clients[1].connectModel({ ...input, model: "C" });
-      expect(calls).toEqual([["A"], ["A"]]);
+      const latest = await clients[1].submitPromptAndWait(
+        "Use C while A runs",
+        { sessionId: "new" },
+      );
+      expect(latest.prompt.status).toBe("succeeded");
+      expect(calls[1]).toEqual(["A", "C"]);
       gates[0].resolve();
       await old[0];
       await clients[0].waitForPrompt(waiting.promptId);
       await vi.waitFor(() => {
-        expect(calls[0]).toEqual(["A", "A", "A", "C"]);
+        expect(calls[0]).toEqual(["A", "B", "A", "A"]);
       });
-      expect(calls[1]).toEqual(["A"]);
+      expect(calls[1]).toEqual(["A", "C"]);
       gates[1].resolve();
       await old[1];
       const next = await clients[1].submitPromptAndWait("Now use latest", {
         sessionId: "next",
       });
       expect(next.prompt.status).toBe("succeeded");
-      expect(calls[1]).toEqual(["A", "A", "A", "C"]);
+      expect(calls[1]).toEqual(["A", "C", "A", "A", "C"]);
     } finally {
       gates.forEach((gate) => {
         gate.resolve();
@@ -190,7 +183,7 @@ describe("shared model configuration admission", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
-  it("rejects manual summary while a background shell blocks model switching, then preserves the retried summary model", async () => {
+  it("compacts with a new model during background work and preserves the running summary model", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-summary-switch-"));
     vi.stubEnv("HOME", directory);
     vi.stubEnv("USERPROFILE", directory);
@@ -222,30 +215,25 @@ describe("shared model configuration admission", () => {
       .spyOn(composition, "createUiRuntimeComposition")
       .mockImplementation(async (options) => {
         const runtime = await makeComposition(options);
-        const model = options.llmClient.config.model;
         activities.push(() => runtime.getActivityReasons());
         return {
           ...runtime,
           dispose: async (): Promise<void> => {
-            disposed.push(model);
+            disposed.push("runtime");
             await runtime.dispose();
           },
           compactSession: async (
             compactInput,
           ): ReturnType<typeof runtime.compactSession> => {
-            summaryModels.push(model);
             return runtime.compactSession(compactInput);
           },
         };
       });
     const client = createInProcessUiBackendClient({
       workdir,
-      createLLMClient: async (): Promise<LLMClientInstance> => {
-        const model = (
-          JSON.parse(await readFile(modelPath, "utf8")) as {
-            defaultModel: string;
-          }
-        ).defaultModel;
+      createLLMClient: async (config): Promise<LLMClientInstance> => {
+        await Promise.resolve();
+        const model = config.model;
         let turn = 0;
         return {
           config: {
@@ -304,6 +292,7 @@ describe("shared model configuration admission", () => {
                       finishReason: "tool_calls",
                     };
                   } else if (model === "B") {
+                    summaryModels.push(model);
                     summaryStarted.resolve();
                     await releaseSummary.promise;
                     yield {
@@ -358,43 +347,27 @@ describe("shared model configuration admission", () => {
       expect((await client.getSnapshot()).status.kind).toBe("idle");
       expect(activities[0]()).toEqual(["background shell jobs"]);
       await client.connectModel({ ...input, model: "B" });
-      await expect(
-        client.compactSession({ sessionId: "session", force: true }),
-      ).rejects.toBeInstanceOf(RuntimeSwitchPendingError);
-      await vi.waitFor(() => {
-        expect(
-          waitingNotices.some((notice) =>
-            notice.includes("background shell jobs"),
-          ),
-        ).toBe(true);
-      });
-      expect(summaryModels).toEqual([]);
-      expect(disposed).toEqual([]);
-      await writeFile(join(workdir, ".release-background"), "release");
-      await vi.waitFor(() => {
-        expect(activities[0]()).toEqual([]);
-      });
       summary = client.compactSession({ sessionId: "session", force: true });
       await summaryStarted.promise;
       expect(summaryModels).toEqual(["B"]);
-      expect(disposed).toEqual(["A"]);
+      expect(waitingNotices).toEqual([]);
+      expect(disposed).toEqual([]);
       await client.connectModel({ ...input, model: "C" });
       const next = await client.submitPromptAccepted(
         "Continue after the summary",
         { sessionId: "next" },
       );
-      await vi.waitFor(() => {
-        expect(
-          waitingNotices.some((notice) => notice.includes("context summaries")),
-        ).toBe(true);
-      });
-      expect(disposed).toEqual(["A"]);
+      expect((await client.waitForPrompt(next.promptId)).prompt.status).toBe(
+        "succeeded",
+      );
+      expect(disposed).toEqual([]);
+      expect(waitingNotices).toEqual([]);
       releaseSummary.resolve();
       expect((await summary).status).toBe("compacted");
       expect((await client.waitForPrompt(next.promptId)).prompt.status).toBe(
         "succeeded",
       );
-      expect(disposed).toEqual(["A", "B"]);
+      expect(disposed).toEqual([]);
     } finally {
       await writeFile(join(workdir, ".release-background"), "release");
       releaseSummary.resolve();

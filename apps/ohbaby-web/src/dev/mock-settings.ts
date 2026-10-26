@@ -272,7 +272,7 @@ export function createMockSettingsApi(
         ? { id: active.id, provider: active.provider, model: active.model }
         : null;
     })(),
-    params: { maxTokens: 8192 },
+
     models: state.models,
   });
   const find = (id: string): UiSettingsModel => {
@@ -300,7 +300,12 @@ export function createMockSettingsApi(
       after(() => {
         if (failing || input.model.includes(" "))
           throw validationError(["model"], "Has an invalid format");
-        const { apiKey, apiKeyEnv, ...fields } = input;
+        const {
+          apiKey,
+          apiKeyEnv,
+          reasoning: reasoningDefault,
+          ...fields
+        } = input;
         state.models = [
           ...state.models,
           complete({
@@ -311,6 +316,7 @@ export function createMockSettingsApi(
             configurationComplete: true,
             contextWindowTokens: input.contextWindowTokens ?? 128_000,
             reasoning,
+            reasoningDefault,
           }),
         ];
         return models();
@@ -320,10 +326,19 @@ export function createMockSettingsApi(
         if (failing)
           throw validationError(["baseUrl"], "Must be an http or https URL");
         const current = find(id);
-        const { apiKey, label, apiKeyEnv, ...fields } = patch;
+        const {
+          apiKey,
+          label,
+          apiKeyEnv,
+          reasoning: reasoningDefault,
+          ...fields
+        } = patch;
         const merged: UiSettingsModel = {
           ...current,
           ...fields,
+          ...(reasoningDefault === undefined
+            ? {}
+            : { reasoningDefault: reasoningDefault ?? undefined }),
           ...(apiKeyEnv ? { apiKeyEnv } : {}),
           apiKeyConfigured:
             apiKey === undefined ? current.apiKeyConfigured : apiKey !== "",

@@ -158,6 +158,8 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     store.setCurrentModel(
       active
         ? {
+            id: active.id,
+            source: "default",
             provider: active.provider,
             model: active.model,
             baseUrl: active.baseUrl ?? "",
@@ -172,6 +174,84 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     {
       get(_target, key): unknown {
         if (key === "then") return undefined;
+        if (key === "selectDefaultModel")
+          return async (
+            entryId: string,
+          ): ReturnType<UiBackendClient["selectDefaultModel"]> => ({
+            ok: true,
+            ...(await settings.selectModel(entryId)),
+          });
+        if (key === "updateSessionModel")
+          return async (
+            input: Parameters<UiBackendClient["updateSessionModel"]>[0],
+          ): ReturnType<UiBackendClient["updateSessionModel"]> => {
+            await settings.load("models");
+            const models = selectSettings(
+              settings.cache.getSnapshot(),
+              "models",
+            ).data;
+            if (
+              input.modelEntryId !== null &&
+              !models?.models.some(
+                (entry) =>
+                  entry.id === input.modelEntryId &&
+                  entry.configurationComplete,
+              )
+            )
+              throw new Error("Model entry is unavailable");
+            const snapshot = store.getSnapshot().view.snapshot;
+            const current = snapshot?.sessions.find(
+              (entry) => entry.id === input.sessionId,
+            );
+            if (!snapshot || !current) throw new Error("Session not found");
+            const session = {
+              ...current,
+              modelEntryId: input.modelEntryId ?? undefined,
+            };
+            installSnapshot(store, {
+              ...snapshot,
+              sessions: snapshot.sessions.map((entry) =>
+                entry.id === session.id ? session : entry,
+              ),
+            });
+            return session;
+          };
+        if (key === "getCurrentModel")
+          return async (
+            input?: Parameters<UiBackendClient["getCurrentModel"]>[0],
+          ): ReturnType<UiBackendClient["getCurrentModel"]> => {
+            if (!input?.sessionId) return store.getSnapshot().currentModel;
+            await settings.load("models");
+            const models = selectSettings(
+              settings.cache.getSnapshot(),
+              "models",
+            ).data;
+            const session = store
+              .getSnapshot()
+              .view.snapshot?.sessions.find(
+                (entry) => entry.id === input.sessionId,
+              );
+            const explicit = models?.models.find(
+              (entry) => entry.id === session?.modelEntryId,
+            );
+            const entry =
+              explicit ??
+              models?.models.find((entry) => entry.id === models.active?.id);
+            return entry
+              ? {
+                  id: entry.id,
+                  source: explicit ? "explicit" : "default",
+                  provider: entry.provider,
+                  model: entry.model,
+                  baseUrl: entry.baseUrl ?? "",
+                  interfaceProvider:
+                    entry.interfaceProvider ?? "openai-compatible",
+                  contextWindowTokens: entry.contextWindowTokens,
+                  maxOutputTokens: entry.maxOutputTokens,
+                  reasoning: entry.reasoning,
+                }
+              : null;
+          };
         if (key === "listCommands")
           return (): Promise<unknown> => Promise.resolve(MOCK_COMMANDS);
         if (key === "respondPermission" || key === "abortRun") return resolved;

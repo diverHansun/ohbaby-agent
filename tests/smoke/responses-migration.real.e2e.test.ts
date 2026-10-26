@@ -1,3 +1,4 @@
+import { createRunModel } from "../../packages/ohbaby-agent/src/adapters/ui-runtime/run-model.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -11,12 +12,9 @@ import { createBus } from "../../packages/ohbaby-agent/src/bus/index.js";
 import { toModelTools } from "../../packages/ohbaby-agent/src/core/agents/index.js";
 import {
   createContextManager,
-  type ContextLLMClient,
   type ContextManager,
-  type MemoryReader,
   type PreparedTurn,
   type SystemPromptProvider,
-  type TokenCounter,
 } from "../../packages/ohbaby-agent/src/core/context/index.js";
 import {
   Lifecycle,
@@ -282,12 +280,6 @@ function createEnvironment(workdir: string): ToolExecutionEnvironment {
   };
 }
 
-function createMemory(): MemoryReader {
-  return {
-    load: () => Promise.resolve({ global: "", merged: "", project: "" }),
-  };
-}
-
 function createSystemPrompt(): SystemPromptProvider {
   return {
     build: () =>
@@ -301,24 +293,6 @@ function createSystemPrompt(): SystemPromptProvider {
           ),
         ].join("\n"),
       ),
-  };
-}
-
-function createTokenCounter(): TokenCounter {
-  return {
-    estimateTokens: (content) => Math.ceil(content.length / 4),
-    getLimit: () => 100_000,
-  };
-}
-
-function createSummaryClient(): ContextLLMClient {
-  return {
-    generateSummary: (input) =>
-      Promise.resolve({
-        text: "<state_snapshot>unused smoke summary</state_snapshot>",
-        summaryMessageId: input.summaryMessageId,
-        requests: [],
-      }),
   };
 }
 
@@ -735,13 +709,11 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             },
           },
         };
+        const runModel = createRunModel("responses-smoke", llmClient);
         const baseContextManager = createContextManager({
           bus,
-          llmClient: createSummaryClient(),
-          memory: createMemory(),
           messageManager,
           systemPromptProvider: createSystemPrompt(),
-          tokenCounter: createTokenCounter(),
         });
         const prepareTurn =
           baseContextManager.prepareTurn.bind(baseContextManager);
@@ -759,6 +731,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             actualInputTokens,
             sentHeuristic,
             contextScopeId,
+            model,
           ) {
             calibrations.push({
               actualInputTokens,
@@ -770,12 +743,12 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
               actualInputTokens,
               sentHeuristic,
               contextScopeId,
+              model,
             );
           },
         };
         const lifecycle = new Lifecycle({
           contextManager,
-          llmClient,
           messageManager,
           toolScheduler: scheduler,
         });
@@ -795,6 +768,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             type: "text",
           });
           const text = await safelyConsume(lifecycle, {
+            runModel,
             agent: "build",
             directory: workdir,
             initiatingUserMessageId: textMessage.id,
@@ -823,6 +797,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             type: "text",
           });
           const tool = await safelyConsume(lifecycle, {
+            runModel,
             agent: "build",
             directory: workdir,
             environment: createEnvironment(workdir),
@@ -982,6 +957,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             text: "Reply with exactly CACHE_FOLLOWUP_OK. Do not call tools.",
           });
           const followup = await safelyConsume(lifecycle, {
+            runModel,
             agent: "build",
             directory: workdir,
             initiatingUserMessageId: followupMessage.id,

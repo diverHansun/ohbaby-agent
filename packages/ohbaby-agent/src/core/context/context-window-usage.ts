@@ -10,6 +10,7 @@ export interface ContextWindowUsageInput {
 
 export interface ContextWindowUsageTracker {
   clear(): void;
+  clearSession(sessionId: string): void;
   get(sessionId: string): UiContextWindowUsage | null;
   list(): readonly UiContextWindowUsage[];
   updateFromContextUsage(
@@ -54,6 +55,10 @@ export function createContextWindowUsageTracker(
   return {
     clear(): void {
       usages.clear();
+    },
+
+    clearSession(sessionId: string): void {
+      usages.delete(sessionId);
     },
 
     get(sessionId: string): UiContextWindowUsage | null {

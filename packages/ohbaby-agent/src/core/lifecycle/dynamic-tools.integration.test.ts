@@ -1,6 +1,10 @@
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../testing/model-fixtures.js";
 import { expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
-import { createContextManager, type PreparedTurn } from "../context/index.js";
+import { type PreparedTurn } from "../context/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -12,7 +16,7 @@ import type {
   InterfaceProviderStreamEvent,
 } from "ohbaby-llm";
 import type { LLMClientInstance } from "ohbaby-llm";
-import { Lifecycle } from "./lifecycle.js";
+
 import type { LifecycleEvent, ResolvedStepTools } from "./types.js";
 
 it("measures and sends each changed toolset with ordered mixed tool results and permitted failure history", async () => {

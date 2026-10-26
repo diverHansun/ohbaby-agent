@@ -19,6 +19,8 @@ export interface PromptSubmissionRecord {
   readonly titleExpected?: string;
   readonly steerReceipt?: import("./current-run-inputs.js").SteerQueuedPromptReceipt;
   readonly reasoning?: ReasoningConfig;
+  /** Absent means resolve the global default when execution starts. */
+  readonly modelEntryId?: string;
   readonly promptId: string;
   readonly clientRequestId: string;
   readonly scopeKey: string;
@@ -48,6 +50,12 @@ export interface AcceptPromptSubmissionInput {
   /** Admission-created temporary title; preserved when the queued text changes. */
   readonly titleExpected?: string;
   readonly reasoning?: ReasoningConfig;
+  /** False for inherited reasoning; omitted keeps strict direct-store retry comparison. */
+  readonly reasoningExplicit?: boolean;
+  /** Absent means resolve the global default when execution starts. */
+  readonly modelEntryId?: string;
+  /** False for a derived snapshot; omitted keeps strict direct-store retry comparison. */
+  readonly modelEntryIdExplicit?: boolean;
   readonly promptId: string;
   readonly clientRequestId: string;
   readonly scopeKey: string;

@@ -148,7 +148,11 @@ export class ClientCommands {
     }
   }
 
-  async getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
+  async getCurrentModel(
+    input?: Parameters<UiBackendClient["getCurrentModel"]>[0],
+  ): ReturnType<UiBackendClient["getCurrentModel"]> {
+    if (input?.sessionId !== undefined)
+      return (await this.sync.http.getCurrentModel(input)).model;
     return this.sync.getCurrentModel();
   }
 
@@ -193,6 +197,22 @@ export class ClientCommands {
       { signal: options.signal },
     );
     return response.compact;
+  }
+
+  async updateSessionModel(
+    input: Parameters<UiBackendClient["updateSessionModel"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionModel"]> {
+    return (await this.sync.http.updateSessionModel(input)).session;
+  }
+
+  selectDefaultModel(
+    entryId: string,
+  ): ReturnType<UiBackendClient["selectDefaultModel"]> {
+    return this.sync.http.request("/v1/settings/models/active", {
+      method: "POST",
+      body: { id: entryId },
+      includeDirectory: false,
+    });
   }
 
   async updateSessionReasoning(

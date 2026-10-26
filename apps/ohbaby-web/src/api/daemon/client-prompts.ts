@@ -195,6 +195,9 @@ export class ClientPrompts {
           ...(options?.namingSource === undefined
             ? {}
             : { namingSource: options.namingSource }),
+          ...(options?.modelEntryId === undefined
+            ? {}
+            : { modelEntryId: options.modelEntryId }),
           ...(options?.reasoning === undefined
             ? {}
             : { reasoning: options.reasoning }),

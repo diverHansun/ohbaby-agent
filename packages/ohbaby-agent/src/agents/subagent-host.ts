@@ -1,3 +1,4 @@
+import type { RunModel } from "../core/run-model.js";
 import { SubagentExecutionConflictError } from "./subagents/execution-store.js";
 import { createHash } from "node:crypto";
 import type {
@@ -50,6 +51,7 @@ interface ActiveSubagentState {
 }
 
 interface ActiveQueuedSubagentInput extends QueuedSubagentInput {
+  readonly runModel?: RunModel;
   readonly reasoning?: ReasoningIntent;
   readonly completion?: DeferredCompletion;
   readonly environment?: ToolExecutionEnvironment;
@@ -106,7 +108,10 @@ export interface SessionSubagentHostOptions {
   ) => ReasoningIntent | undefined;
   readonly agentManager: Pick<AgentManager, "getRuntimeAgent">;
   readonly instanceFactory: AgentInstanceFactory;
-  readonly modelId: string;
+  readonly getParentRunModel: (
+    sessionId: string,
+    contextScopeId?: string,
+  ) => RunModel | Promise<RunModel>;
   readonly sessionManager: Pick<SessionManager, "create" | "get">;
   readonly store: SubagentInstanceStore;
   readonly createSubagentId?: () => string;
@@ -360,6 +365,12 @@ export class SessionSubagentHost {
           input.parentSessionId,
           input.parentContextScopeId,
         );
+        const inheritedModel = this.options.getParentRunModel(
+          input.parentSessionId,
+          input.parentContextScopeId,
+        );
+        // Admission can wait behind another child; observe resolution failures immediately.
+        void Promise.resolve(inheritedModel).catch(() => undefined);
         const job = Promise.resolve().then(async () => {
           await previousAdmission;
           try {
@@ -400,6 +411,7 @@ export class SessionSubagentHost {
                 : mergeReasoningIntent(inherited),
               execution,
               releaseAdmission,
+              await inheritedModel,
             );
           } catch (error) {
             releaseAdmission();
@@ -814,7 +826,7 @@ export class SessionSubagentHost {
   dispose(): Promise<void> {
     this.closeAdmission();
     if (this.disposal) return this.disposal;
-    this.disposal = (async () => {
+    this.disposal = (async (): Promise<void> => {
       const operations = [
         ...[...this.rootByExecution.values()].map((rootRunId) =>
           this.interruptByRootRun(rootRunId, "service-shutdown"),
@@ -1044,6 +1056,7 @@ export class SessionSubagentHost {
     reasoning?: ReasoningIntent,
     execution?: SubagentExecutionRecord,
     onAdmitted?: () => void,
+    runModel?: RunModel,
   ): Promise<EntryOutcome> {
     if (this.disposed) {
       await this.markOwnedInterrupted(record.parentSessionId);
@@ -1053,6 +1066,7 @@ export class SessionSubagentHost {
       ? this.createDeferredCompletion()
       : undefined;
     const entry: ActiveQueuedSubagentInput = {
+      runModel,
       ...(execution
         ? {
             executionId: execution.executionId,
@@ -1466,7 +1480,7 @@ export class SessionSubagentHost {
                 record.sessionId,
                 runId,
                 wake,
-              ) ?? (() => undefined),
+              ) ?? ((): void => undefined),
             onFailure: (error) => {
               if (input.rootRunId)
                 this.options.onFatal?.(error, input.rootRunId);
@@ -1551,12 +1565,20 @@ export class SessionSubagentHost {
         record.sessionId,
         record.parentSessionId,
       );
+      const runModel =
+        input.runModel ??
+        (await this.options.getParentRunModel(
+          record.parentSessionId,
+          input.requesterScopeId === PRIMARY_SUBAGENT_REQUESTER_SCOPE
+            ? undefined
+            : input.requesterScopeId,
+        ));
       const instance = this.options.instanceFactory.create({
         agentName: record.role,
         contextScopeId: record.contextScopeId,
         instanceId: record.subagentId,
         maxSteps: runtimeAgent.config.maxSteps,
-        modelId: this.options.modelId,
+        modelId: runModel.client.config.model,
         parentSessionId: record.parentSessionId,
         projectRoot: session.workingDirectory,
         sessionId: record.sessionId,
@@ -1574,6 +1596,7 @@ export class SessionSubagentHost {
       let turnPromise: Promise<AgentRunResult>;
       try {
         turnPromise = instance.turn({
+          runModel,
           ...(input.reasoning === undefined
             ? {}
             : { reasoning: input.reasoning }),
@@ -1842,6 +1865,7 @@ export class SessionSubagentHost {
     input: ActiveQueuedSubagentInput,
   ): QueuedSubagentInput {
     const {
+      runModel: _runModel,
       reasoning: _reasoning,
       completion: _completion,
       environment,

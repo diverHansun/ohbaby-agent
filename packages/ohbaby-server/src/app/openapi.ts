@@ -70,6 +70,7 @@ export function createOpenApiDocument(
     apiKey,
     contextWindowTokens: positiveInteger,
     maxOutputTokens: positiveInteger,
+    reasoning: ref("ReasoningConfig"),
   };
   const searchDefaults = {
     searchDepth: { enum: ["basic", "advanced"] },
@@ -123,6 +124,7 @@ export function createOpenApiDocument(
       additionalProperties: false,
       properties: {
         ...modelFields,
+        reasoning: { anyOf: [ref("ReasoningConfig"), { type: "null" }] },
         label: {
           type: ["string", "null"],
           description: "null clears the label; omission preserves it.",
@@ -162,11 +164,12 @@ export function createOpenApiDocument(
         contextWindowTokens: positiveInteger,
         maxOutputTokens: positiveInteger,
         reasoning: ref("ReasoningCapabilityView"),
+        reasoningDefault: ref("ReasoningConfig"),
       },
     },
     SettingsModelsResponse: {
       type: "object",
-      required: ["ok", "active", "params", "models"],
+      required: ["ok", "active", "models"],
       properties: {
         ok: { const: true },
         active: {
@@ -178,16 +181,6 @@ export function createOpenApiDocument(
               properties: { id: string, provider: string, model: string },
             },
           ],
-        },
-        params: {
-          type: "object",
-          required: ["maxTokens"],
-          properties: {
-            maxTokens: positiveInteger,
-            temperature: { type: "number" },
-            contextWindowTokens: positiveInteger,
-            reasoning: ref("ReasoningConfig"),
-          },
         },
         models: { type: "array", items: ref("SettingsModel") },
       },
@@ -792,6 +785,40 @@ export function createOpenApiDocument(
         },
       },
 
+      "/v1/sessions/{id}/model": {
+        patch: {
+          summary: "Select the session model; null follows the global default",
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string", minLength: 1 },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["modelEntryId"],
+                  properties: {
+                    modelEntryId: { type: ["string", "null"], minLength: 1 },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Updated session" },
+            "400": {
+              description:
+                "Invalid selection, MODEL_NOT_FOUND or MODEL_CONFIG_INCOMPLETE",
+            },
+          },
+        },
+      },
       "/v1/sessions/{id}/reasoning": {
         patch: {
           summary: "Save session reasoning preference",
@@ -871,9 +898,17 @@ export function createOpenApiDocument(
       },
       "/v1/model": {
         get: {
+          parameters: [
+            {
+              name: "sessionId",
+              in: "query",
+              schema: { type: "string", minLength: 1 },
+            },
+          ],
           responses: {
             "200": {
-              description: "Current model config without secret values",
+              description:
+                "Resolved model config without secret values, including entry id and source (explicit or default)",
             },
           },
           summary: "Get current model config",
@@ -941,6 +976,29 @@ export function createOpenApiDocument(
       },
       "/v1/prompts": {
         post: {
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["text", "clientRequestId"],
+                  properties: {
+                    text: { type: "string", minLength: 1 },
+                    clientRequestId: { type: "string", minLength: 1 },
+                    sessionId: { type: "string", minLength: 1 },
+                    modelEntryId: {
+                      type: "string",
+                      minLength: 1,
+                      description:
+                        "Overrides this submission; a new session also saves it as its model.",
+                    },
+                    reasoning: ref("ReasoningConfig"),
+                  },
+                },
+              },
+            },
+          },
           responses: {
             "202": {
               description: "Prompt accepted for asynchronous execution",

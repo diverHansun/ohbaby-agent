@@ -107,3 +107,12 @@ describe("context window usage mapping", () => {
     expect(tracker.get("session_1")?.currentTokens).toBe(40_000);
   });
 });
+
+it("clears only the selected session usage", () => {
+  const tracker = createContextWindowUsageTracker();
+  tracker.updateFromContextUsage("a", BASE_USAGE);
+  tracker.updateFromContextUsage("b", BASE_USAGE);
+  tracker.clearSession("a");
+  expect(tracker.get("a")).toBeNull();
+  expect(tracker.get("b")?.modelId).toBe(BASE_USAGE.modelId);
+});

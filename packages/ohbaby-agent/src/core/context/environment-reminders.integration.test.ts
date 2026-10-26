@@ -1,3 +1,4 @@
+import { createTestContextManager as createContextManager } from "../testing/model-fixtures.js";
 import { describe, expect, it } from "vitest";
 import { createBus } from "../../bus/index.js";
 import {
@@ -12,7 +13,7 @@ import {
   type ReminderDraft,
 } from "../../services/reminder/index.js";
 import { createEnvironmentReminderProvider } from "../../services/reminder/environment.js";
-import { createContextManager } from "./context-manager.js";
+
 import type {
   AgentRunPromptSnapshot,
   PreparedModelRequest,

@@ -1,5 +1,6 @@
+import { TestAgentService as AgentService } from "../core/testing/runtime-model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
-import { AgentService } from "./service.js";
+
 import { AgentManager } from "./manager.js";
 import { AgentRegistry } from "./registry.js";
 import type { AgentsConfig } from "./types.js";

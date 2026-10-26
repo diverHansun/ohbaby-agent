@@ -101,6 +101,41 @@ export function registerSessionMutationRoutes(
   app: Hono,
   ctx: DaemonRouteContext,
 ): void {
+  app.patch("/v1/sessions/:id/model", async (context) => {
+    if (!ctx.isAuthorized(context.req.header("authorization")))
+      return context.json(webErrorBody("Unauthorized"), 401);
+    const clientId = ctx.clientIdFromRequest(context);
+    if (!clientId)
+      return context.json(webErrorBody("clientId is required"), 400);
+    if (!ctx.isRegisteredWebClient(clientId))
+      return context.json(webErrorBody("client is not registered"), 409);
+    const parsed = await readJsonWithLimit(context.req.raw);
+    if (!parsed.ok)
+      return context.json(
+        webErrorBody(parsed.message),
+        parsed.status as 400 | 413,
+      );
+    const body = isRecord(parsed.value) ? parsed.value : {};
+    if (
+      body.modelEntryId !== null &&
+      (typeof body.modelEntryId !== "string" || !body.modelEntryId.trim())
+    )
+      return context.json(webErrorBody("Invalid model entry id"), 400);
+    try {
+      const session = await ctx
+        .commandBackend("server-rest", { clientId })
+        .updateSessionModel({
+          sessionId: context.req.param("id"),
+          modelEntryId: body.modelEntryId,
+        });
+      return context.json({ ok: true, session });
+    } catch (error) {
+      const failure = createDaemonRpcFailure("http", error);
+      if (failure.ok) throw new Error("Expected model selection failure");
+      return context.json({ ok: false, error: failure.error }, 400);
+    }
+  });
+
   app.patch("/v1/sessions/:id/reasoning", async (context) => {
     if (!ctx.isAuthorized(context.req.header("authorization")))
       return context.json(webErrorBody("Unauthorized"), 401);

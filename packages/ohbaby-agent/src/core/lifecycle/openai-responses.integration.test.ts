@@ -1,13 +1,13 @@
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../testing/model-fixtures.js";
 import type OpenAI from "openai";
 import { describe, expect, it, vi, type Mock, type MockInstance } from "vitest";
 import { createOpenAIResponsesProvider } from "ohbaby-llm";
 import { createBus } from "../../bus/index.js";
-import { createContextManager } from "../context/index.js";
-import {
-  Lifecycle,
-  type LifecycleEvent,
-  type LifecycleResult,
-} from "./index.js";
+
+import { type LifecycleEvent, type LifecycleResult } from "./index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,

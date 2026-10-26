@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { UiSnapshot } from "ohbaby-sdk";
 import { createBus } from "../bus/index.js";
 import {
@@ -26,6 +29,32 @@ const snapshot: UiSnapshot = {
 };
 
 describe("backend explicit initialization", () => {
+  let directory: string;
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), "ohbaby-initialization-model-"));
+    vi.stubEnv("OHBABY_HOME", directory);
+    await writeFile(
+      join(directory, "model.json"),
+      JSON.stringify({
+        activeProfileId: "fixture",
+        models: [
+          {
+            id: "fixture",
+            provider: "openai",
+            model: "fixture",
+            baseUrl: "https://example.invalid",
+            interfaceProvider: "openai-compatible",
+            contextWindowTokens: 128_000,
+            maxOutputTokens: 128,
+          },
+        ],
+      }),
+    );
+  });
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  });
   it("keeps latest unopened in-memory metadata for its eventual explicit seed", async () => {
     const bus = createBus();
     const messages = createMessageManager({

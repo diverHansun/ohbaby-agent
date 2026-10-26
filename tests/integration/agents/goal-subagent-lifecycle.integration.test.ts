@@ -11,6 +11,7 @@ import {
 } from "../../../packages/ohbaby-agent/src/agents/index.js";
 import { InMemorySubagentExecutionStore } from "../../../packages/ohbaby-agent/src/agents/subagents/execution-store.js";
 import type { RuntimeAgent } from "../../../packages/ohbaby-agent/src/agents/index.js";
+import { testRunModel } from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
 import {
   GoalService,
   InMemoryGoalPersistence,
@@ -93,7 +94,7 @@ function createFixture(options: { readonly safetyCapTurns?: number } = {}) {
       return () => `subagent_${String(next++)}`;
     })(),
     instanceFactory,
-    modelId: "fake-model",
+    getParentRunModel: () => testRunModel("fake-model"),
     ownerId: "owner_current",
     ownerPid: 101,
     sessionManager: {

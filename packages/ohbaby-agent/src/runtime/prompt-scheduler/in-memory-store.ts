@@ -125,7 +125,10 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
         existing.sessionId !== input.sessionId ||
         existing.text !== input.text ||
         existing.resendOfPromptId !== input.resendOfPromptId ||
-        !sameReasoning(existing.reasoning, input.reasoning)
+        (input.modelEntryIdExplicit !== false &&
+          existing.modelEntryId !== input.modelEntryId) ||
+        (input.reasoningExplicit !== false &&
+          !sameReasoning(existing.reasoning, input.reasoning))
       ) {
         throw new PromptIdempotencyConflictError(input.clientRequestId);
       }
@@ -164,6 +167,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       titleExpected: input.titleExpected,
       namingSource: input.namingSource ? { ...input.namingSource } : undefined,
       reasoning: input.reasoning ? { ...input.reasoning } : undefined,
+      modelEntryId: input.modelEntryId,
       status: "queued",
       ownerId: this.ownerId,
       ownerPid: this.ownerPid,

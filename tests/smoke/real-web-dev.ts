@@ -14,7 +14,7 @@ import {
 } from "../../packages/ohbaby-agent/src/adapters/ui-persistent.js";
 import { createWorkspaceRegistryStore } from "../../packages/ohbaby-agent/src/services/workspace-registry/index.js";
 import { loadEnvFile } from "../../packages/ohbaby-agent/src/config/llm/loaders.js";
-import { createLLMClient } from "../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import { createLLMClientFromConfig } from "ohbaby-llm";
 import { installFormalCacheObserver } from "./formal-cache-observer.js";
 
 if (!process.argv.includes("--run"))
@@ -140,7 +140,7 @@ const backend = createPersistentUiBackendClient({
   workdir,
   projectDirectory: workdir,
   createLLMClient: async (options) => {
-    const client = await createLLMClient(options);
+    const client = createLLMClientFromConfig(options);
     const stream = client.provider.streamResponse.bind(client.provider);
     client.provider.streamResponse = async (request) => {
       const row = {

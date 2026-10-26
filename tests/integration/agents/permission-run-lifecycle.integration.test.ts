@@ -14,6 +14,7 @@ import {
   type PermissionInfo,
 } from "../../../packages/ohbaby-agent/src/permission/index.js";
 import { createUiRuntimeComposition } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/composition.js";
+import { createRunModel } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/run-model.js";
 import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 import { SkillRegistry } from "../../../packages/ohbaby-agent/src/skill/index.js";
 import { ToolSchedulerEvent } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/events.js";
@@ -101,10 +102,11 @@ async function fixture(delegate: boolean, childTimeoutMs?: number) {
       },
     },
   };
+  const runModel = createRunModel("permission-fixture", llmClient);
   const composition = await createUiRuntimeComposition({
     agentManager: new AgentManager(),
     bus,
-    llmClient,
+    resolveRunModel: () => Promise.resolve(runModel),
     messageManager,
     sessionManager,
     permissionManager: permission,
@@ -120,7 +122,7 @@ async function fixture(delegate: boolean, childTimeoutMs?: number) {
     }),
     workdir: process.cwd(),
   });
-  return { bus, composition, permission, messageManager };
+  return { bus, composition, permission, messageManager, runModel };
 }
 
 describe("permission actual run lifecycle", () => {
@@ -135,6 +137,7 @@ describe("permission actual run lifecycle", () => {
       });
       try {
         const run = await f.composition.startSession({
+          runModel: f.runModel,
           agentName: "build",
           projectRoot: process.cwd(),
           sessionId: "root",
@@ -172,6 +175,7 @@ describe("permission actual run lifecycle", () => {
     f.bus.subscribe(PermissionEvent.Updated, ({ info }) => received(info));
     try {
       const run = await f.composition.startSession({
+        runModel: f.runModel,
         agentName: "build",
         projectRoot: process.cwd(),
         sessionId: "root",
@@ -201,6 +205,7 @@ it("pauses a real child quota during pure approval waiting but still obeys root 
   f.bus.subscribe(PermissionEvent.Updated, ({ info }) => receive(info));
   try {
     const run = await f.composition.startSession({
+      runModel: f.runModel,
       agentName: "build",
       projectRoot: process.cwd(),
       sessionId: "root",
@@ -251,6 +256,7 @@ it("cancels and revokes the actual run when the coordinator returns an unexpecte
   try {
     await expect(
       f.composition.startSession({
+        runModel: f.runModel,
         agentName: "build",
         projectRoot: process.cwd(),
         sessionId: "root",
@@ -303,6 +309,7 @@ it("closes a foreground child wait before approval or execution when child run o
   );
   try {
     const parent = await f.composition.startSession({
+      runModel: f.runModel,
       agentName: "build",
       projectRoot: process.cwd(),
       sessionId: "root",

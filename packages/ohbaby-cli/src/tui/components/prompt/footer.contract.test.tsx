@@ -20,6 +20,8 @@ describe("prompt two-line footer", () => {
             disabled={false}
             workingDirectory="/workspace/❤️/中文项目"
             model={{
+              id: "test",
+              source: "default",
               provider: "test",
               baseUrl: "https://example.test",
               interfaceProvider: "anthropic",

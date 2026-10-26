@@ -1,3 +1,4 @@
+import type { RunModel } from "../../core/run-model.js";
 import type { ReasoningConfig } from "ohbaby-llm";
 import type { ReasoningIntent } from "ohbaby-llm";
 import type {
@@ -30,6 +31,7 @@ export interface RunDefaultsPolicy {
 }
 
 export interface CreateRunOptions {
+  readonly runModel: RunModel;
   readonly preparationSignal?: AbortSignal;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly runId?: string;
@@ -89,6 +91,7 @@ export type { SandboxLease };
 export type SandboxManager = SandboxManagerPort;
 
 export interface RunContext {
+  readonly runModel: RunModel;
   readonly reasoning?: ReasoningIntent;
   readonly runId: string;
   readonly sessionId: string;

@@ -1,15 +1,18 @@
+import {
+  type TestContextManager as ContextManager,
+  TestLifecycle as Lifecycle,
+} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import {
-  type ContextManager,
   type ContextUsage,
   type PreparedModelRequest,
   type PreparedTurn,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
-import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
+
 import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createDatabaseMessageStore,

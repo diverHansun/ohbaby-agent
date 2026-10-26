@@ -294,6 +294,8 @@ describe("ohbaby-web ui selectors", () => {
     const snapshot = { ...baseSnapshot(), contextWindowUsages: [] };
     const view = selectViewModel(
       store(snapshot, {
+        id: "test-model",
+        source: "default",
         baseUrl: "https://zenmux.ai/api/anthropic",
         interfaceProvider: "anthropic",
         model: "deepseek-v4-pro",

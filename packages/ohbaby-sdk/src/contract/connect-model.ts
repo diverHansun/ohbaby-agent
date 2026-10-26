@@ -41,6 +41,8 @@ export interface UiConnectModelResult {
 }
 
 export interface UiCurrentModelConfig {
+  readonly id: string;
+  readonly source: "explicit" | "default";
   readonly reasoning?: UiReasoningCapabilityView;
   readonly provider: string;
   readonly baseUrl: string;

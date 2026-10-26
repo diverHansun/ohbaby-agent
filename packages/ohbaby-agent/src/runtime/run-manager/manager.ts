@@ -1,3 +1,4 @@
+import type { RunModel } from "../../core/run-model.js";
 import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
 import {
   SessionRunBusyError,
@@ -331,6 +332,16 @@ export class RunManager {
     }
   }
 
+  getActiveRunModel(
+    sessionId: string,
+    contextScopeId?: string,
+  ): RunModel | undefined {
+    const runId = this.activeRunIds({ sessionId, contextScopeId }).at(0);
+    return runId === undefined
+      ? undefined
+      : this.recordsById.get(runId)?.options.runModel;
+  }
+
   getActiveReasoning(
     sessionId: string,
     contextScopeId?: string,
@@ -411,6 +422,7 @@ export class RunManager {
         initiatingUserMessageId: record.options.initiatingUserMessageId,
         maxSteps: record.options.maxSteps,
         modelId: record.options.modelId,
+        runModel: record.options.runModel,
         ...(record.options.reasoning === undefined
           ? {}
           : { reasoning: mergeReasoningIntent(record.options.reasoning) }),

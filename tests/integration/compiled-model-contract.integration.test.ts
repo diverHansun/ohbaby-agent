@@ -395,7 +395,7 @@ async function listen(server: Server): Promise<void> {
 }
 
 function expectedRequests(protocol: Protocol): unknown[] {
-  const common = { model: "synthetic-model", stream: true };
+  const common = { model: "synthetic-model", stream: true, temperature: 0.2 };
   const firstUser = {
     role: "user",
     content: "Return the synthetic text marker.",

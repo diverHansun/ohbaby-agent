@@ -1,3 +1,7 @@
+import {
+  createTestContextManager as createContextManager,
+  type TestContextManager as ContextManager,
+} from "../testing/model-fixtures.js";
 import { resolvePreparedRequestSettings } from "ohbaby-llm";
 import { createContextSummaryClient } from "../../adapters/ui-runtime/prompt-context.js";
 import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
@@ -29,10 +33,10 @@ import type {
   MessageManager,
   MessageWithParts,
 } from "../message/index.js";
-import { createContextManager } from "./context-manager.js";
+
 import { ContextEvent } from "./events.js";
 import { serializeForLlm } from "./serializer.js";
-import type { ContextLLMClient, ContextManager } from "./types.js";
+import type { ContextLLMClient } from "./types.js";
 
 const cleanupPaths: string[] = [];
 

@@ -271,6 +271,7 @@ export class RunWorker {
         : { projectRoot: this.context.projectRoot }),
       runId: this.context.runId,
       modelId: this.context.modelId,
+      runModel: this.context.runModel,
       ...(this.context.reasoning === undefined
         ? {}
         : { reasoning: this.context.reasoning }),

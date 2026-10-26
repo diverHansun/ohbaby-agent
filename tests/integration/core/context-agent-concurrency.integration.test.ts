@@ -1,12 +1,14 @@
+import {
+  createTestContextManager as createContextManager,
+  type TestContextManager as ContextManager,
+} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import type { BusInstance } from "../../../packages/ohbaby-agent/src/bus/types.js";
 import {
   ContextEvent,
-  createContextManager,
   type ContextLLMClient,
-  type ContextManager,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import {
   createInMemoryMessageStore,

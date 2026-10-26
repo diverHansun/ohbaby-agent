@@ -83,6 +83,11 @@ export function registerPromptMutationRoutes(
       );
     }
     const body = isRecord(parsed.value) ? parsed.value : {};
+    if (
+      body.modelEntryId !== undefined &&
+      (typeof body.modelEntryId !== "string" || !body.modelEntryId.trim())
+    )
+      return context.json(promptRejectionBody("Invalid model entry id"), 400);
     if (body.reasoning !== undefined && !isUiReasoningConfig(body.reasoning))
       return context.json(
         promptRejectionBody("Invalid reasoning preference"),
@@ -128,6 +133,9 @@ export function registerPromptMutationRoutes(
           ...(body.namingSource === undefined
             ? {}
             : { namingSource: body.namingSource }),
+          ...(typeof body.modelEntryId === "string"
+            ? { modelEntryId: body.modelEntryId }
+            : {}),
           ...(body.reasoning === undefined
             ? {}
             : { reasoning: body.reasoning }),

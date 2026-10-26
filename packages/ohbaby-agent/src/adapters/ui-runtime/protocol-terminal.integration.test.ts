@@ -1,7 +1,11 @@
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../../core/testing/model-fixtures.js";
+import { TestRunManager as RunManager } from "../../core/testing/runtime-model-fixtures.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
-import { createContextManager } from "../../core/context/index.js";
-import { Lifecycle } from "../../core/lifecycle/index.js";
+
 import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
@@ -13,7 +17,7 @@ import { createAnthropicProvider } from "ohbaby-llm";
 import { createOpenAICompatibleProvider } from "ohbaby-llm";
 import { createOpenAIResponsesProvider } from "ohbaby-llm";
 import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
-import { RunManager } from "../../runtime/run-manager/index.js";
+
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import {
   createInMemoryStreamBridge,

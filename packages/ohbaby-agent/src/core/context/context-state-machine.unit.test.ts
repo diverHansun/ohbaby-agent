@@ -1,3 +1,7 @@
+import {
+  createTestContextManager as createContextManager,
+  type TestContextManager as ContextManager,
+} from "../testing/model-fixtures.js";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { createBus } from "../../bus/index.js";
@@ -13,7 +17,7 @@ import type {
   MessageWithParts,
   ToolPart,
 } from "../message/index.js";
-import { createContextManager } from "./context-manager.js";
+
 import { serializeForLlm } from "./serializer.js";
 import {
   abortReferenceTools,
@@ -32,7 +36,7 @@ import type {
   ReferenceContextState,
   ReferenceToolTerminalStatus,
 } from "./testing/context-reference-model.js";
-import type { ContextManager, PreparedModelRequest } from "./types.js";
+import type { PreparedModelRequest } from "./types.js";
 import type { ModelMessage } from "ohbaby-llm";
 
 const SESSION_ID = "reference-session";

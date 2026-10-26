@@ -202,7 +202,7 @@ describe("model form", () => {
     expect(
       createdModelId({
         active: null,
-        params: { maxTokens: 1 },
+
         models: [saved, other, created],
       }),
     ).toBe("mine");

@@ -1,5 +1,4 @@
-import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
-import type { ReasoningConfig } from "ohbaby-llm";
+import { mergeReasoningIntent } from "ohbaby-llm";
 import type { AgentInstanceFactory } from "../core/agents/index.js";
 import {
   sessionTargetWorkingDirectory,
@@ -14,10 +13,8 @@ import {
 } from "./types.js";
 
 export interface AgentServiceOptions {
-  readonly getReasoning?: () => ReasoningConfig | ReasoningIntent | undefined;
   readonly agentManager: AgentManager;
   readonly instanceFactory: AgentInstanceFactory;
-  readonly modelId: string;
   readonly sessionManager: Pick<SessionManager, "create" | "get">;
 }
 
@@ -29,7 +26,7 @@ export class AgentService {
   ): Promise<AgentSessionStartResult> {
     params.preparationSignal?.throwIfAborted();
     const reasoning = mergeReasoningIntent(
-      this.options.getReasoning?.(),
+      params.runModel.client.config.reasoning,
       params.reasoning,
     );
     const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
@@ -49,13 +46,14 @@ export class AgentService {
       agentName: params.agentName,
       instanceId: session.id,
       maxSteps: params.maxSteps ?? runtimeAgent.config.maxSteps,
-      modelId: this.options.modelId,
+      modelId: params.runModel.client.config.model,
       // A pending project change takes effect with this turn.
       projectRoot: sessionTargetWorkingDirectory(session),
       sessionId: session.id,
       type: "primary",
     });
     const result = await instance.turn({
+      runModel: params.runModel,
       reasoning,
       environment: params.environment,
       initialUserMessageId: params.initialUserMessageId,

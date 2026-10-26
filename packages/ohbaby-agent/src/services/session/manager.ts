@@ -220,7 +220,10 @@ export function createSessionManager(
     async update(
       sessionId: string,
       patch: UpdateSessionPatch,
-      condition?: { readonly expectedTitle: string },
+      condition?: {
+        readonly expectedTitle?: string;
+        readonly expectedModelEntryId?: string;
+      },
     ): Promise<Session> {
       await getExistingSession(sessionId, options);
       const session = await options.store.update(

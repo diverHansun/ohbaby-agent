@@ -29,6 +29,8 @@ const iso = (minutesAgo: number): string =>
   new Date(now - minutesAgo * 60_000).toISOString();
 
 const model: UiCurrentModelConfig = {
+  id: "m1",
+  source: "default",
   provider: "deepseek",
   baseUrl: "https://api.deepseek.com/v1",
   interfaceProvider: "openai-compatible",

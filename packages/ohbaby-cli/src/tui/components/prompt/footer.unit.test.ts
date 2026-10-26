@@ -4,6 +4,8 @@ import { footerEffort, formatFooterRows } from "./footer.js";
 import { visibleWidth } from "../../render/wrap.js";
 
 const model: UiCurrentModelConfig = {
+  id: "test",
+  source: "default",
   provider: "test",
   baseUrl: "https://example.test",
   interfaceProvider: "anthropic",

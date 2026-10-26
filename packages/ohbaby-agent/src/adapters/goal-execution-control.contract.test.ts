@@ -68,7 +68,8 @@ it.each([
 ] as const)(
   "G28 isolates actual descendant state for %s while a user tree is active",
   async (scenario) => {
-    const { SessionSubagentHost } = await import("../agents/subagent-host.js");
+    const { TestSessionSubagentHost: SessionSubagentHost } =
+      await import("../core/testing/runtime-model-fixtures.js");
     const { InMemorySubagentInstanceStore, InMemorySubagentExecutionStore } =
       await import("../agents/index.js");
     const parent: import("../services/session/index.js").Session = {

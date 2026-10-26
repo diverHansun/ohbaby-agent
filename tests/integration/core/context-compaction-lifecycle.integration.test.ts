@@ -1,10 +1,11 @@
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
-import { createContextManager } from "../../../packages/ohbaby-agent/src/core/context/index.js";
-import {
-  Lifecycle,
-  type LifecycleEvent,
-} from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
+
+import { type LifecycleEvent } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,

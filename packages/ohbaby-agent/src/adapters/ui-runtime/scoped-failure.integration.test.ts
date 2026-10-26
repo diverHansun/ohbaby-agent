@@ -1,8 +1,12 @@
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../../core/testing/model-fixtures.js";
+import { TestRunManager as RunManager } from "../../core/testing/runtime-model-fixtures.js";
 import { APIUserAbortError } from "openai";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
-import { createContextManager } from "../../core/context/index.js";
-import { Lifecycle } from "../../core/lifecycle/index.js";
+
 import type { LLMClientInstance } from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
@@ -13,10 +17,7 @@ import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
 } from "ohbaby-llm";
-import {
-  RunManager,
-  type RunStepUsageObserver,
-} from "../../runtime/run-manager/index.js";
+import { type RunStepUsageObserver } from "../../runtime/run-manager/index.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import {
   createInMemoryStreamBridge,

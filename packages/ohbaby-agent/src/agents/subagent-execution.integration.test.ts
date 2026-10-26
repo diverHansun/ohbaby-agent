@@ -1,8 +1,9 @@
+import { TestSessionSubagentHost as SessionSubagentHost } from "../core/testing/runtime-model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import type { RuntimeAgent } from "./types.js";
 import type { AgentInstance } from "../core/agents/index.js";
 import type { Session } from "../services/session/index.js";
-import { SessionSubagentHost } from "./subagent-host.js";
+
 import { InMemorySubagentInstanceStore } from "./subagents/in-memory-store.js";
 import { InMemorySubagentExecutionStore } from "./subagents/execution-store.js";
 import type { SubagentRunInput } from "./subagents/types.js";

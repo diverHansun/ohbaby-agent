@@ -299,6 +299,7 @@ function sessionToUiSession(input: {
       .filter((message): message is UiMessage => message !== undefined),
     workingDirectory: input.session.workingDirectory,
     reasoning: input.session.reasoning,
+    modelEntryId: input.session.modelEntryId,
     title: resolveSessionDisplayTitle({
       messages: input.messages,
       title: input.session.title,

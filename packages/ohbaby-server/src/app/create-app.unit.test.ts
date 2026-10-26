@@ -99,6 +99,8 @@ function connectModelResult(): UiConnectModelResult {
 
 function currentModelConfig(): UiCurrentModelConfig {
   return {
+    id: "fake",
+    source: "default",
     apiKeyEnv: "FAKE_API_KEY",
     baseUrl: "https://example.invalid/v1",
     contextWindowTokens: 100,
@@ -629,6 +631,22 @@ class FakeBackend implements UiBackendClient {
   abortRun(runId: string): Promise<void> {
     this.abortedRunIds.push(runId);
     return Promise.resolve();
+  }
+
+  updateSessionModel(
+    input: Parameters<UiBackendClient["updateSessionModel"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionModel"]> {
+    return Promise.resolve({
+      id: input.sessionId,
+      modelEntryId: input.modelEntryId ?? undefined,
+      title: "test",
+      messages: [],
+      createdAt: "now",
+      updatedAt: "now",
+    });
+  }
+  selectDefaultModel(): ReturnType<UiBackendClient["selectDefaultModel"]> {
+    return Promise.resolve({ ok: true, active: null, models: [] });
   }
 
   updateSessionReasoning(
@@ -5205,4 +5223,105 @@ describe("session export transports", () => {
       });
     });
   });
+});
+
+it("saves session model selections and exposes the requested session model through REST", async () => {
+  const session = {
+    id: "s",
+    messages: [],
+    title: "test",
+    createdAt: "now",
+    updatedAt: "now",
+  };
+  const selected: (string | null)[] = [];
+  const queries: ({ readonly sessionId?: string } | undefined)[] = [];
+  const backend = Object.assign(new FakeBackend(), {
+    updateSessionModel: (input: {
+      sessionId: string;
+      modelEntryId: string | null;
+    }) => {
+      if (input.modelEntryId === "missing")
+        throw Object.assign(new Error("Model not found"), {
+          code: "MODEL_NOT_FOUND",
+        });
+      selected.push(input.modelEntryId);
+      return Promise.resolve({
+        ...session,
+        modelEntryId: input.modelEntryId ?? undefined,
+      });
+    },
+    getCurrentModel: (input?: { readonly sessionId?: string }) => {
+      queries.push(input);
+      return Promise.resolve({
+        id: "model-a",
+        source: "explicit" as const,
+        provider: "test",
+        model: "one",
+        baseUrl: "http://localhost",
+        interfaceProvider: "openai-compatible" as const,
+      });
+    },
+  });
+  const handle = createApp(backend);
+  await handle.start();
+  const headers = {
+    ...authHeaders(),
+    "content-type": "application/json",
+    "x-ohbaby-client-id": "model-client",
+  };
+  try {
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ clientId: "model-client" }),
+    });
+    for (const modelEntryId of ["model-a", null]) {
+      const response = await handle.app.request("/v1/sessions/s/model", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ modelEntryId }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        session: { id: "s" },
+      });
+    }
+    for (const body of [
+      {},
+      { modelEntryId: "" },
+      { modelEntryId: 5 },
+      { modelEntryId: " " },
+    ]) {
+      expect(
+        (
+          await handle.app.request("/v1/sessions/s/model", {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify(body),
+          })
+        ).status,
+      ).toBe(400);
+    }
+    const missing = await handle.app.request("/v1/sessions/s/model", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ modelEntryId: "missing" }),
+    });
+    expect(await missing.json()).toMatchObject({
+      ok: false,
+      error: { code: "MODEL_NOT_FOUND" },
+    });
+    const current = await handle.app.request("/v1/model?sessionId=s", {
+      headers,
+    });
+    expect(await current.json()).toMatchObject({
+      ok: true,
+      model: { id: "model-a", source: "explicit" },
+    });
+    expect(queries.at(-1)).toEqual({ sessionId: "s" });
+    expect(selected).toEqual(["model-a", null]);
+  } finally {
+    await handle.dispose();
+  }
 });

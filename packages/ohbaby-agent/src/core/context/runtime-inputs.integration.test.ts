@@ -1,3 +1,4 @@
+import { createTestContextManager as createContextManager } from "../testing/model-fixtures.js";
 import { describe, expect, it } from "vitest";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import { InMemoryPromptSubmissionStore } from "../../runtime/prompt-scheduler/in-memory-store.js";
@@ -8,7 +9,7 @@ import {
   createMessageManager,
   type MessageWithParts,
 } from "../message/index.js";
-import { createContextManager } from "./context-manager.js";
+
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 
 async function setup(

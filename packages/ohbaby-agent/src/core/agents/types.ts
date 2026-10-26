@@ -1,3 +1,4 @@
+import type { RunModel } from "../run-model.js";
 import type { SlashSkillUsage } from "../../skill/usage.js";
 import type { ReasoningConfig } from "ohbaby-llm";
 import type { ReasoningIntent } from "ohbaby-llm";
@@ -27,6 +28,7 @@ export interface AgentToolCallSummary {
 }
 
 export interface AgentRunInput {
+  readonly runModel: RunModel;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly sessionId: string;
   readonly contextScope?: AgentContextScope;
@@ -85,6 +87,7 @@ export interface AgentRunEventSource {
 }
 
 export interface AgentRunCreateOptions {
+  readonly runModel: RunModel;
   readonly preparationSignal?: AbortSignal;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly runId?: string;
@@ -174,6 +177,7 @@ export interface AgentContextScope {
 }
 
 export interface AgentTurnInput {
+  readonly runModel: RunModel;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly initialUserMessageId?: string;
   /** Original user text when model input includes execution-only context. */

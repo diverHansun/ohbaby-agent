@@ -1,3 +1,4 @@
+import { createRunModel } from "../../packages/ohbaby-agent/src/adapters/ui-runtime/run-model.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -905,6 +906,7 @@ export async function runNativeProfile(
           ],
         },
       };
+      const runModel = createRunModel("native-smoke", client);
       const build = (): {
         messages: ReturnType<typeof createMessageManager>;
         scheduler: ReturnType<typeof createToolScheduler>;
@@ -942,23 +944,11 @@ export async function runNativeProfile(
         const context = createContextManager({
           bus,
           messageManager: messages,
-          memory: {
-            load: () =>
-              Promise.resolve({ global: "", project: "", merged: "" }),
-          },
           systemPromptProvider: {
             build: () =>
               Promise.resolve(
                 "Follow the synthetic verification request. Use only the explicitly requested tool, once. Preserve the exact tool result for the final answer.",
               ),
-          },
-          tokenCounter: {
-            estimateTokens: (content) => Math.ceil(content.length / 4),
-            getLimit: () => 100000,
-          },
-          llmClient: {
-            generateSummary: () =>
-              Promise.reject(new Error("UNEXPECTED_COMPACTION_REQUEST")),
           },
         });
         return {
@@ -968,7 +958,6 @@ export async function runNativeProfile(
             messageManager: messages,
             contextManager: context,
             toolScheduler: scheduler,
-            llmClient: client,
           }),
         };
       };
@@ -996,6 +985,7 @@ export async function runNativeProfile(
         });
         const loop = runtime.lifecycle.run(
           {
+            runModel,
             agent: "build",
             directory: workdir,
             environment,

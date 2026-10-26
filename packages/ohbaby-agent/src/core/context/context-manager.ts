@@ -1,3 +1,4 @@
+import type { ContextModel } from "../run-model.js";
 import { formatEnvironmentDate } from "../system-prompt/layers/environment.js";
 import { setTimeout as sleep } from "node:timers/promises";
 import { emitDiagnostic, NOOP_LOGGER } from "../../observability/logger.js";
@@ -275,60 +276,202 @@ export function createContextManager(
       : { summary: options.compressionThreshold }),
   };
   const summaryAgentName = options.summaryAgentName ?? SUMMARY_AGENT_NAME;
-  const calibrationFactors = new Map<string, number>();
-  const compactionFloors = new Map<string, CompactionFloor>();
   const mutationLane = createScopedExclusiveLane();
+  const scopes = new Map<
+    string,
+    {
+      readonly models: WeakMap<
+        ContextModel,
+        { calibrationFactor?: number; compactionFloor?: CompactionFloor }
+      >;
+      executionModel?: ContextModel;
+      inspectionModel?: ContextModel;
+    }
+  >();
+  const boundManagers = new WeakMap<ContextModel, ContextManager>();
 
-  function getCalibrationFactor(
+  function scopeState(key: string): NonNullable<ReturnType<typeof scopes.get>> {
+    let scope = scopes.get(key);
+    if (!scope) {
+      scope = { models: new WeakMap() };
+      scopes.set(key, scope);
+    }
+    return scope;
+  }
+
+  function modelState(
+    key: string,
+    model: ContextModel,
+  ): { calibrationFactor?: number; compactionFloor?: CompactionFloor } {
+    const scope = scopeState(key);
+    let state = scope.models.get(model);
+    if (!state) {
+      state = {};
+      scope.models.set(model, state);
+    }
+    return state;
+  }
+
+  function forModel(
+    runModel: ContextModel,
     sessionId: string,
-    contextScopeId?: string,
-  ): number {
-    return (
-      calibrationFactors.get(scopedSessionKey({ sessionId, contextScopeId })) ??
-      1.0
-    );
+    contextScopeId: string | undefined,
+    mode: "executionModel" | "inspectionModel",
+  ): ContextManager {
+    const key = scopedSessionKey({ sessionId, contextScopeId });
+    const scope = scopeState(key);
+    if (scope[mode] !== undefined && scope[mode] !== runModel) {
+      // Reset only the newly selected model. The old execution may still
+      // receive provider feedback or finish a summary while it is in flight.
+      scope.models.set(runModel, {});
+    }
+    scope[mode] = runModel;
+    let manager = boundManagers.get(runModel);
+    if (!manager) {
+      manager = bindModel(options, runModel, {
+        now,
+        compactionThresholds,
+        summaryAgentName,
+        mutationLane,
+        getCalibrationFactor: (id, scopeId): number =>
+          modelState(
+            scopedSessionKey({ sessionId: id, contextScopeId: scopeId }),
+            runModel,
+          ).calibrationFactor ?? 1,
+        getCompactionFloor: (key): CompactionFloor | undefined =>
+          modelState(key, runModel).compactionFloor,
+        setCompactionFloor: (key, floor): void => {
+          modelState(key, runModel).compactionFloor = floor;
+        },
+        updateCalibrationFactor,
+        disposeScope,
+        disposeSession,
+      });
+      boundManagers.set(runModel, manager);
+    }
+    return manager;
   }
 
   function updateCalibrationFactor(
     sessionId: string,
     actualInputTokens: number,
     sentHeuristic: number,
-    contextScopeId?: string,
+    contextScopeId: string | undefined,
+    runModel: ContextModel,
   ): void {
     if (
       sentHeuristic <= 0 ||
       !Number.isFinite(sentHeuristic) ||
       !Number.isFinite(actualInputTokens)
-    ) {
+    )
       return;
-    }
-    const observed = actualInputTokens / sentHeuristic;
     const clamped = Math.min(
       CALIBRATION_FACTOR_MAX,
-      Math.max(CALIBRATION_FACTOR_MIN, observed),
+      Math.max(CALIBRATION_FACTOR_MIN, actualInputTokens / sentHeuristic),
     );
-    const key = scopedSessionKey({ sessionId, contextScopeId });
-    const previous = getCalibrationFactor(sessionId, contextScopeId);
-    calibrationFactors.set(
-      key,
-      CALIBRATION_EMA_ALPHA * clamped + (1 - CALIBRATION_EMA_ALPHA) * previous,
+    const state = modelState(
+      scopedSessionKey({ sessionId, contextScopeId }),
+      runModel,
     );
+    state.calibrationFactor =
+      CALIBRATION_EMA_ALPHA * clamped +
+      (1 - CALIBRATION_EMA_ALPHA) * (state.calibrationFactor ?? 1);
   }
 
   function disposeSession(sessionId: string): void {
-    for (const map of [calibrationFactors, compactionFloors]) {
-      for (const key of map.keys()) {
-        if (isScopedSessionKeyForSession(key, sessionId)) map.delete(key);
-      }
+    for (const key of scopes.keys()) {
+      if (isScopedSessionKeyForSession(key, sessionId)) scopes.delete(key);
     }
   }
 
   function disposeScope(sessionId: string, contextScopeId: string): void {
-    const key = scopedSessionKey({ sessionId, contextScopeId });
-    calibrationFactors.delete(key);
-    compactionFloors.delete(key);
+    scopes.delete(scopedSessionKey({ sessionId, contextScopeId }));
   }
 
+  return {
+    assemble(
+      sessionId,
+      directory,
+      input,
+    ): ReturnType<ContextManager["assemble"]> {
+      return forModel(
+        input.runModel,
+        sessionId,
+        input.contextScopeId,
+        "inspectionModel",
+      ).assemble(sessionId, directory, input);
+    },
+    createRunPromptSnapshot(
+      input,
+    ): ReturnType<ContextManager["createRunPromptSnapshot"]> {
+      return forModel(
+        input.runModel,
+        input.sessionId,
+        input.contextScopeId,
+        "executionModel",
+      ).createRunPromptSnapshot(input);
+    },
+    getUsage(input): ReturnType<ContextManager["getUsage"]> {
+      return forModel(
+        input.runModel,
+        input.context.sessionId,
+        input.context.contextScopeId,
+        "inspectionModel",
+      ).getUsage(input);
+    },
+    compact(sessionId, input): ReturnType<ContextManager["compact"]> {
+      return forModel(
+        input.runModel,
+        sessionId,
+        input.contextScopeId,
+        "executionModel",
+      ).compact(sessionId, input);
+    },
+    prepareTurn(input): ReturnType<ContextManager["prepareTurn"]> {
+      return forModel(
+        input.runModel,
+        input.sessionId,
+        input.contextScopeId,
+        "executionModel",
+      ).prepareTurn(input);
+    },
+    updateCalibrationFactor,
+    disposeScope,
+    disposeSession,
+  };
+}
+
+function bindModel(
+  options: ContextManagerOptions,
+  runModel: ContextModel,
+  state: {
+    now: () => number;
+    compactionThresholds: CompactionThresholds;
+    summaryAgentName: string;
+    getCompactionFloor: (key: string) => CompactionFloor | undefined;
+    setCompactionFloor: (key: string, floor: CompactionFloor) => void;
+    mutationLane: ReturnType<typeof createScopedExclusiveLane>;
+    getCalibrationFactor: (
+      sessionId: string,
+      contextScopeId?: string,
+    ) => number;
+    updateCalibrationFactor: ContextManager["updateCalibrationFactor"];
+    disposeScope: ContextManager["disposeScope"];
+    disposeSession: ContextManager["disposeSession"];
+  },
+): ContextManager {
+  const {
+    now,
+    compactionThresholds,
+    summaryAgentName,
+    getCompactionFloor,
+    setCompactionFloor,
+    mutationLane,
+    getCalibrationFactor,
+    updateCalibrationFactor,
+    disposeScope,
+    disposeSession,
+  } = state;
   function assembleModelRequest(input: {
     readonly requestSettings?: PreparedRequestSettings;
     readonly inputIds?: readonly string[];
@@ -368,7 +511,7 @@ export function createContextManager(
   ): { readonly sentHeuristic: number; readonly usage: ContextUsage } {
     const sentHeuristic = estimatePreparedRequestHeuristic(
       request,
-      options.tokenCounter,
+      runModel.tokenCounter,
     );
     const currentTokens = Math.round(
       sentHeuristic *
@@ -379,7 +522,7 @@ export function createContextManager(
       usage: getContextUsage(
         currentTokens,
         input.modelId,
-        options.tokenCounter,
+        runModel.tokenCounter,
         request.settings?.maxTokens,
       ),
     };
@@ -552,13 +695,13 @@ export function createContextManager(
     },
   ): ContextUsage {
     const currentTokens = Math.round(
-      estimatePreparedRequestHeuristic(request, options.tokenCounter) *
+      estimatePreparedRequestHeuristic(request, runModel.tokenCounter) *
         getCalibrationFactor(identity.sessionId, identity.contextScopeId),
     );
     return getContextUsage(
       currentTokens,
       identity.modelId,
-      options.tokenCounter,
+      runModel.tokenCounter,
       request.settings?.maxTokens ?? SUMMARY_BODY_TOKENS,
     );
   }
@@ -621,11 +764,11 @@ export function createContextManager(
     );
     const originalTokens = estimateHistoryForCompaction(
       historyToCompress,
-      options.tokenCounter,
+      runModel.tokenCounter,
       candidate.modelOrigin,
       candidate.activeReasoningByMessageId,
     );
-    const newTokens = tokenCount(options.tokenCounter, snapshot);
+    const newTokens = tokenCount(runModel.tokenCounter, snapshot);
     return {
       ...candidate,
       historyToCompress,
@@ -671,7 +814,7 @@ export function createContextManager(
       keepRecentTokens: KEEP_RECENT_TOKENS,
       modelOrigin: req.assembled.modelOrigin,
       activeReasoningByMessageId: req.activeReasoningByMessageId,
-      tokenCounter: options.tokenCounter,
+      tokenCounter: runModel.tokenCounter,
     });
     if (cut.firstKeptIndex === 0 && summaries.length < 2)
       return {
@@ -732,7 +875,7 @@ export function createContextManager(
       keepRecentTokens: 0,
       modelOrigin: req.assembled.modelOrigin,
       activeReasoningByMessageId: req.activeReasoningByMessageId,
-      tokenCounter: options.tokenCounter,
+      tokenCounter: runModel.tokenCounter,
     }).keptMessages.map((message) => message.info.id);
     const fail = (error: string): CompressionResult => {
       logUnusedSummaryRequests(requests, "failed");
@@ -754,7 +897,7 @@ export function createContextManager(
       // Mode B can retire more of the tail, so reserve its possible file-operation suffix now.
       const hostText = reviseCandidate(candidate, minimumKeptIds).snapshot;
       const bodyTokens =
-        SUMMARY_BODY_TOKENS - tokenCount(options.tokenCounter, hostText);
+        SUMMARY_BODY_TOKENS - tokenCount(runModel.tokenCounter, hostText);
       if (bodyTokens <= 0) return false;
       // Preserve the ordinary prepared bytes when no history was removed.
       const preparedRequest =
@@ -801,7 +944,7 @@ export function createContextManager(
         removedTokens +=
           estimateHistoryForCompaction(
             group,
-            options.tokenCounter,
+            runModel.tokenCounter,
             req.assembled.modelOrigin,
             req.activeReasoningByMessageId,
           ) * getCalibrationFactor(req.sessionId, req.contextScopeId);
@@ -842,13 +985,13 @@ export function createContextManager(
         attempt,
         estimatedHistoryTokens: estimateHistoryForCompaction(
           readHistory,
-          options.tokenCounter,
+          runModel.tokenCounter,
           req.assembled.modelOrigin,
           req.activeReasoningByMessageId,
         ),
       });
       try {
-        const result = await options.llmClient.generateSummary({
+        const result = await runModel.summaryClient.generateSummary({
           ...scopedEventIdentity(req.sessionId, req.contextScopeId),
           request: candidate.preparedRequest,
           summaryMessageId: candidate.summaryMessageId,
@@ -1165,7 +1308,7 @@ export function createContextManager(
       req.usageBefore.safetyMarginTokens ?? 0,
       preparedSummary.settings?.maxTokens,
     ]);
-    const floor = compactionFloors.get(key);
+    const floor = getCompactionFloor(key);
     const floorApplies =
       !req.force &&
       floor?.capacity === capacity &&
@@ -1272,7 +1415,7 @@ export function createContextManager(
         ),
         modelOrigin: req.assembled.modelOrigin,
         activeReasoningByMessageId: req.activeReasoningByMessageId,
-        tokenCounter: options.tokenCounter,
+        tokenCounter: runModel.tokenCounter,
       });
       candidate = reviseCandidate(
         candidate,
@@ -1367,7 +1510,7 @@ export function createContextManager(
       candidate.requests.filter((record) => record.outcome !== "success"),
       "failed",
     );
-    compactionFloors.set(key, {
+    setCompactionFloor(key, {
       tokens: projectedUsage.currentTokens,
       capacity,
     });
@@ -1422,6 +1565,7 @@ export function createContextManager(
   ): Promise<CompactResult> {
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(sessionId, input.directory, {
+      runModel,
       agentName: input.agentName,
       modelOrigin: input.modelOrigin,
       contextScopeId: input.contextScopeId,
@@ -1558,6 +1702,7 @@ export function createContextManager(
     const date = formatEnvironmentDate(new Date(startedAt));
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(input.sessionId, input.directory, {
+      runModel,
       agentName: input.agentName,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       modelOrigin: input.modelOrigin,
@@ -1649,7 +1794,7 @@ export function createContextManager(
         tailDirectives,
         toolDefinitions: input.toolDefinitions,
       },
-      options.tokenCounter,
+      runModel.tokenCounter,
     );
     if (
       input.protectedInputs !== undefined &&
@@ -1789,7 +1934,7 @@ export function createContextManager(
           request: measurement.request,
           toolDefinitions: input.toolDefinitions,
         },
-        options.tokenCounter,
+        runModel.tokenCounter,
       );
       return {
         ...measurement.usage,

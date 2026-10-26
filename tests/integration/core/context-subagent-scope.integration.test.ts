@@ -1,7 +1,7 @@
+import { createTestContextManager as createContextManager } from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import {
-  createContextManager,
   type ContextLLMClient,
   type MemoryReader,
   type SystemPromptProvider,

@@ -1718,3 +1718,43 @@ it("preserves a claimed B when its waiting goal owner fails, without adopting A'
     scheduler.close();
   }
 });
+
+it("freezes a lazy session model on admission and only compares explicit replay models", async () => {
+  const scheduler = new WorkspacePromptScheduler({
+    scopeKey: "model-scope",
+    store: new InMemoryPromptSubmissionStore(),
+    execute: (): Promise<{ status: "succeeded" }> =>
+      Promise.resolve({ status: "succeeded" }),
+  });
+  let modelEntryId: string | undefined = "model-a";
+  const input = {
+    clientRequestId: "model-req",
+    sessionId: "s",
+    text: "hello",
+    modelEntryId: (): Promise<string | undefined> =>
+      Promise.resolve(modelEntryId),
+  };
+  try {
+    const { record: first } = await scheduler.accept(input);
+    modelEntryId = "model-b";
+    const { record: replay } = await scheduler.accept(input);
+    expect(replay.promptId).toBe(first.promptId);
+    expect(replay.modelEntryId).toBe("model-a");
+    await expect(
+      scheduler.accept({ ...input, modelEntryId: "model-b" }),
+    ).rejects.toThrow(/conflict|different/i);
+    modelEntryId = undefined;
+    const { record: following } = await scheduler.accept({
+      ...input,
+      clientRequestId: "default-req",
+    });
+    modelEntryId = "model-c";
+    expect(
+      (await scheduler.accept({ ...input, clientRequestId: "default-req" }))
+        .record.modelEntryId,
+    ).toBeUndefined();
+    expect(following.modelEntryId).toBeUndefined();
+  } finally {
+    scheduler.close();
+  }
+});

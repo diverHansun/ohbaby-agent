@@ -109,6 +109,9 @@ export interface AcceptedWorkspacePrompt {
 }
 
 export interface AcceptWorkspacePromptInput {
+  readonly modelEntryId?:
+    | string
+    | ((sessionId: string) => Promise<string | undefined>);
   readonly resendOfPromptId?: string;
   readonly titleExpected?: (sessionId: string) => string | undefined;
   readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
@@ -265,6 +268,8 @@ export class WorkspacePromptScheduler {
         if (
           existing.text !== input.text ||
           existing.resendOfPromptId !== input.resendOfPromptId ||
+          (typeof input.modelEntryId === "string" &&
+            existing.modelEntryId !== input.modelEntryId) ||
           (typeof input.reasoning !== "function" &&
             input.reasoning !== undefined &&
             !sameReasoning(existing.reasoning, input.reasoning)) ||
@@ -291,6 +296,10 @@ export class WorkspacePromptScheduler {
       release();
       await this.recoverSession(sessionId);
       this.assertOpen();
+      const modelEntryId =
+        typeof input.modelEntryId === "function"
+          ? await input.modelEntryId(sessionId)
+          : input.modelEntryId;
       const reasoning =
         typeof input.reasoning === "function"
           ? await input.reasoning(sessionId)
@@ -313,6 +322,11 @@ export class WorkspacePromptScheduler {
           namingSource: input.namingSource,
           titleExpected: input.titleExpected?.(sessionId),
           reasoning,
+          reasoningExplicit:
+            input.reasoning !== undefined &&
+            typeof input.reasoning !== "function",
+          modelEntryId,
+          modelEntryIdExplicit: typeof input.modelEntryId === "string",
           userMessageId:
             input.userMessageId ??
             this.options.createUserMessageId?.() ??

@@ -72,6 +72,8 @@ it("refreshes thinking on focus and tab visibility when there was no event", asy
   await render(<Control />);
   expect(document.body.textContent).toBe("hidden");
   model = {
+    id: "test-model",
+    source: "default",
     provider: "local",
     baseUrl: "http://127.0.0.1:9/v1",
     interfaceProvider: "openai-compatible",

@@ -1,3 +1,7 @@
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../testing/model-fixtures.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,10 +22,10 @@ import {
   type MessageIdGenerator,
 } from "../message/index.js";
 import { createFallbackSessionTitleFromMessages } from "../../services/session/title-fallback.js";
-import { createContextManager } from "./context-manager.js";
+
 import { serializeHistory } from "./serialization.js";
 import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
-import { Lifecycle } from "../lifecycle/lifecycle.js";
+
 import { createToolScheduler } from "../tool-scheduler/index.js";
 import { createPermissionState } from "../../permission/index.js";
 import { adaptMcpTool } from "../../mcp/integration/tool-adapter.js";

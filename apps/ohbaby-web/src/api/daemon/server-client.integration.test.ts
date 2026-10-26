@@ -503,6 +503,22 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(compactResult());
   }
 
+  updateSessionModel(
+    input: Parameters<UiBackendClient["updateSessionModel"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionModel"]> {
+    return Promise.resolve({
+      id: input.sessionId,
+      modelEntryId: input.modelEntryId ?? undefined,
+      title: "test",
+      messages: [],
+      createdAt: "now",
+      updatedAt: "now",
+    });
+  }
+  selectDefaultModel(): ReturnType<UiBackendClient["selectDefaultModel"]> {
+    return Promise.resolve({ ok: true, active: null, models: [] });
+  }
+
   updateSessionReasoning(
     input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
   ): ReturnType<UiBackendClient["updateSessionReasoning"]> {

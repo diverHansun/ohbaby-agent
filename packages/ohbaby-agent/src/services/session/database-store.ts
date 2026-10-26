@@ -40,6 +40,7 @@ export interface SessionRow {
 
 interface SessionData {
   readonly reasoning?: Session["reasoning"];
+  readonly modelEntryId?: string;
   readonly childrenIds?: readonly string[];
   readonly isSubagent?: boolean;
 }
@@ -175,6 +176,7 @@ function normalizeLimit(limit: number | undefined): number | undefined {
 function encodeData(session: Session): string {
   const data: SessionData = {
     reasoning: session.reasoning,
+    modelEntryId: session.modelEntryId,
     childrenIds: session.childrenIds,
     isSubagent: session.isSubagent,
   };
@@ -208,6 +210,7 @@ export function rowToSession(row: SessionRow): Session {
     },
     parentId: row.parent_id ?? undefined,
     reasoning: data.reasoning,
+    modelEntryId: data.modelEntryId,
     childrenIds: data.childrenIds ?? [],
     isSubagent: data.isSubagent ?? row.parent_id !== null,
   };
@@ -603,7 +606,10 @@ export function createDatabaseSessionStore(
       update(
         sessionId: string,
         patch: Partial<Session>,
-        condition?: { readonly expectedTitle: string },
+        condition?: {
+          readonly expectedTitle?: string;
+          readonly expectedModelEntryId?: string;
+        },
       ): Promise<Session> {
         return withWriteBoundary(() => {
           const existing = transaction
@@ -614,8 +620,11 @@ export function createDatabaseSessionStore(
           }
           if (
             condition &&
-            (existing.title !== condition.expectedTitle ||
-              existing.status !== "active")
+            ((condition.expectedTitle !== undefined &&
+              (existing.title !== condition.expectedTitle ||
+                existing.status !== "active")) ||
+              (Object.hasOwn(condition, "expectedModelEntryId") &&
+                existing.modelEntryId !== condition.expectedModelEntryId))
           ) {
             return cloneSession(existing);
           }

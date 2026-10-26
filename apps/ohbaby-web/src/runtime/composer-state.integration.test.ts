@@ -140,6 +140,8 @@ it("shares an invalidation read with model subscribers and refreshes on focus wi
       });
   });
   model = {
+    id: "test-model",
+    source: "default",
     provider: "local",
     baseUrl: "http://127.0.0.1:9/v1",
     interfaceProvider: "openai-compatible",

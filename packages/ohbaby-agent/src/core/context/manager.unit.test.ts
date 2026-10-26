@@ -1,3 +1,9 @@
+import {
+  createTestContextManager as createContextManager,
+  type TestContextManager as ContextManager,
+  type TestPrepareTurnInput as PrepareTurnInput,
+  type TestCompactOptions as CompactOptions,
+} from "../testing/model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import {
@@ -14,17 +20,13 @@ import type {
 import {
   COMPRESSION_THRESHOLD,
   ContextEvent,
-  createContextManager,
   decideCompactionRung,
   findCutPoint,
   getContextUsage,
 } from "./index.js";
 import type {
-  CompactOptions,
-  ContextManager,
   ContextLLMClient,
   PreparedModelRequest,
-  PrepareTurnInput,
   SystemPromptProvider,
   TokenCounter,
 } from "./types.js";

@@ -501,6 +501,18 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("compactSession", [compactOptions], { signal });
   }
 
+  updateSessionModel(
+    input: Parameters<UiBackendClient["updateSessionModel"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionModel"]> {
+    return this.rpc("updateSessionModel", [input]);
+  }
+
+  selectDefaultModel(
+    entryId: string,
+  ): ReturnType<UiBackendClient["selectDefaultModel"]> {
+    return this.rpc("selectDefaultModel", [entryId]);
+  }
+
   updateSessionReasoning(
     input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
   ): ReturnType<UiBackendClient["updateSessionReasoning"]> {
@@ -519,8 +531,10 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("archiveSession", [input]);
   }
 
-  getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
-    return this.rpc("getCurrentModel", []);
+  getCurrentModel(
+    input?: Parameters<UiBackendClient["getCurrentModel"]>[0],
+  ): ReturnType<UiBackendClient["getCurrentModel"]> {
+    return this.rpc("getCurrentModel", input === undefined ? [] : [input]);
   }
 
   probeModelContextWindow(

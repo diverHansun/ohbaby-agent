@@ -1,3 +1,5 @@
+import type { RunModel } from "../run-model.js";
+import { testRunModel } from "../testing/model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { runAgent } from "./runner.js";
 import type {
@@ -250,6 +252,7 @@ function createRunCoordinator(
 
 function baseInput(patch: Partial<AgentRunInput> = {}): AgentRunInput {
   return {
+    runModel: testRunModel("fake-model"),
     agentName: "build",
     initialUserPrompt: "hello",
     maxSteps: 5,
@@ -344,6 +347,7 @@ describe("runAgent", () => {
       type: "text",
     });
     expect(runCoordinator.create).toHaveBeenCalledWith({
+      runModel: expect.objectContaining({ entryId: "fixture" }) as RunModel,
       agent: "build",
       directory: "D:/repo",
       projectRoot: "D:/repo",

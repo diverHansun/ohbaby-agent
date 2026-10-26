@@ -526,6 +526,18 @@ function withStartupRecovery(
       await ready();
       return client.updateSessionReasoning(input);
     },
+    async updateSessionModel(
+      input,
+    ): ReturnType<UiBackendClient["updateSessionModel"]> {
+      await ready();
+      return client.updateSessionModel(input);
+    },
+    async selectDefaultModel(
+      entryId,
+    ): ReturnType<UiBackendClient["selectDefaultModel"]> {
+      await ready();
+      return client.selectDefaultModel(entryId);
+    },
     async archiveSession(input): ReturnType<UiBackendClient["archiveSession"]> {
       await ready();
       return client.archiveSession(input);
@@ -554,9 +566,11 @@ function withStartupRecovery(
       await ready();
       return client.setPermission(input);
     },
-    async getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
+    async getCurrentModel(
+      input,
+    ): ReturnType<UiBackendClient["getCurrentModel"]> {
       await ready();
-      return client.getCurrentModel();
+      return client.getCurrentModel(input);
     },
     async executeCommand(
       invocation,

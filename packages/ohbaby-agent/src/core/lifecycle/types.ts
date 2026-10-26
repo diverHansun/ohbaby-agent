@@ -1,3 +1,4 @@
+import type { RunModel } from "../run-model.js";
 import type { AgentStepRequestRecord } from "../message/types.js";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type {
@@ -10,7 +11,6 @@ import type {
   ModelResponseSnapshot,
   ModelFinishReason,
   ModelToolDefinition,
-  LLMClientInstance,
   ParsedToolCall,
   ProviderRetryEvent,
   TokenUsage,
@@ -32,7 +32,6 @@ import type {
 
 export interface LifecycleDeps {
   readonly displayReasoning?: DisplayReasoningOwner;
-  readonly llmClient: LLMClientInstance;
   readonly messageManager: MessageManager;
   readonly toolScheduler: ToolSchedulerInstance;
   readonly contextManager: ContextManager;
@@ -61,6 +60,7 @@ export interface StepUsageObservation {
 }
 
 export interface LifecycleSessionParams {
+  readonly runModel: RunModel;
   readonly currentRunInputs?: LifecycleRunInputPort;
   readonly runId?: string;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;

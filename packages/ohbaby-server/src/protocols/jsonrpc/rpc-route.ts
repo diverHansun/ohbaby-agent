@@ -114,6 +114,13 @@ function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
     error.code = "INVALID_CLIENT_REQUEST_ID";
     throw error;
   }
+  if (
+    value.modelEntryId !== undefined &&
+    (typeof value.modelEntryId !== "string" || !value.modelEntryId.trim())
+  )
+    throw Object.assign(new Error("Invalid model entry id"), {
+      code: "VALIDATION_FAILED",
+    });
   if (value.reasoning !== undefined && !isUiReasoningConfig(value.reasoning)) {
     const error = new Error("Invalid reasoning preference") as Error & {
       code: string;
@@ -131,6 +138,9 @@ function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
   return {
     ...(value.namingSource !== undefined
       ? { namingSource: value.namingSource }
+      : {}),
+    ...(typeof value.modelEntryId === "string"
+      ? { modelEntryId: value.modelEntryId }
       : {}),
     ...(value.reasoning !== undefined ? { reasoning: value.reasoning } : {}),
     ...(typeof value.clientRequestId === "string"
@@ -530,6 +540,32 @@ export async function callDaemonBackend(input: {
         >[0]),
         signal: input.signal,
       });
+    case "updateSessionModel": {
+      const value = request.params[0];
+      if (
+        !isRecord(value) ||
+        typeof value.sessionId !== "string" ||
+        !value.sessionId.trim() ||
+        (value.modelEntryId !== null &&
+          (typeof value.modelEntryId !== "string" ||
+            !value.modelEntryId.trim()))
+      )
+        throw Object.assign(new Error("Invalid session model selection"), {
+          code: "VALIDATION_FAILED",
+        });
+      return backend.updateSessionModel({
+        sessionId: value.sessionId,
+        modelEntryId: value.modelEntryId,
+      });
+    }
+    case "selectDefaultModel": {
+      const entryId = request.params[0];
+      if (typeof entryId !== "string" || !entryId.trim())
+        throw Object.assign(new Error("Invalid model entry id"), {
+          code: "VALIDATION_FAILED",
+        });
+      return backend.selectDefaultModel(entryId);
+    }
     case "updateSessionReasoning":
       return backend.updateSessionReasoning(
         request.params[0] as Parameters<
@@ -540,8 +576,23 @@ export async function callDaemonBackend(input: {
       return backend.archiveSession(
         request.params[0] as Parameters<UiBackendClient["archiveSession"]>[0],
       );
-    case "getCurrentModel":
-      return backend.getCurrentModel();
+    case "getCurrentModel": {
+      const value = request.params[0];
+      if (value === undefined) return backend.getCurrentModel();
+      if (
+        !isRecord(value) ||
+        (value.sessionId !== undefined &&
+          (typeof value.sessionId !== "string" || !value.sessionId.trim()))
+      )
+        throw Object.assign(new Error("Invalid session id"), {
+          code: "VALIDATION_FAILED",
+        });
+      return backend.getCurrentModel(
+        typeof value.sessionId === "string"
+          ? { sessionId: value.sessionId }
+          : {},
+      );
+    }
     case "probeModelContextWindow":
       return backend.probeModelContextWindow(
         request.params[0] as Parameters<

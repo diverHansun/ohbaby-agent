@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { useFooterModel } from "./use-footer-model.js";
 
 const model = (name: string): UiCurrentModelConfig => ({
+  id: name,
+  source: "default",
   provider: "test",
   baseUrl: "https://example.test",
   interfaceProvider: "anthropic",

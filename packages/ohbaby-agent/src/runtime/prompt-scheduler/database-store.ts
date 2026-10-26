@@ -45,6 +45,7 @@ export interface PromptSubmissionRow {
   readonly user_message_id: string;
   readonly text: string;
   readonly reasoning_data: string | null;
+  readonly model_entry_id: string | null;
   readonly naming_source: string | null;
   readonly title_expected: string | null;
   readonly status: PromptSubmissionStatus;
@@ -135,6 +136,7 @@ export function promptSubmissionRowToRecord(
           row.naming_source,
         ) as PromptSubmissionRecord["namingSource"])
       : undefined,
+    modelEntryId: row.model_entry_id ?? undefined,
     reasoning: row.reasoning_data
       ? (JSON.parse(row.reasoning_data) as PromptSubmissionRecord["reasoning"])
       : undefined,
@@ -207,7 +209,10 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
           existing.sessionId !== input.sessionId ||
           existing.text !== input.text ||
           existing.resendOfPromptId !== input.resendOfPromptId ||
-          !sameReasoning(existing.reasoning, input.reasoning)
+          (input.modelEntryIdExplicit !== false &&
+            existing.modelEntryId !== input.modelEntryId) ||
+          (input.reasoningExplicit !== false &&
+            !sameReasoning(existing.reasoning, input.reasoning))
         ) {
           throw new PromptIdempotencyConflictError(input.clientRequestId);
         }
@@ -244,9 +249,9 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       db.prepare(
         `INSERT INTO ${this.tableName}
           (prompt_id, client_request_id, scope_key, session_id,
-           user_message_id, text, reasoning_data, naming_source, title_expected, resend_of_prompt_id, status,
+           user_message_id, text, reasoning_data, model_entry_id, naming_source, title_expected, resend_of_prompt_id, status,
            created_at, updated_at, owner_id, owner_pid, accepted_at, admission_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
       ).run(
         input.promptId,
         input.clientRequestId,
@@ -255,6 +260,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         input.userMessageId,
         input.text,
         input.reasoning ? JSON.stringify(input.reasoning) : null,
+        input.modelEntryId ?? null,
         input.namingSource ? JSON.stringify(input.namingSource) : null,
         input.titleExpected ?? null,
         input.resendOfPromptId ?? null,

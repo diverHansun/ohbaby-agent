@@ -1,3 +1,4 @@
+import type { ContextModel } from "../run-model.js";
 import type { PreparedRequestSettings } from "ohbaby-llm";
 import type { SummaryRequestRecord } from "../message/types.js";
 import type { ReasoningIntent } from "ohbaby-llm";
@@ -85,6 +86,7 @@ export interface AssembledContext {
 }
 
 export interface ContextAssemblyOptions {
+  readonly runModel: ContextModel;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly modelOrigin?: ModelOrigin;
   readonly agentName?: string;
@@ -102,6 +104,7 @@ export interface AgentRunPromptSnapshot {
 }
 
 export interface CreateRunPromptSnapshotInput extends SystemPromptProviderInput {
+  readonly runModel: ContextModel;
   /** The initiating input, when this run starts from a new user message. */
   readonly initiatingUserMessageId?: string;
 }
@@ -168,6 +171,7 @@ export type CompressionResult =
 export type CompactStatus = "not-needed" | "compacted" | "failed" | "inflated";
 
 export interface CompactOptions {
+  readonly runModel: ContextModel;
   readonly signal?: AbortSignal;
   readonly requestSettings?: PreparedRequestSettings;
   readonly reasoning?: ReasoningIntent;
@@ -194,6 +198,7 @@ export interface CompactResult {
 }
 
 export interface PrepareTurnInput {
+  readonly runModel: ContextModel;
   readonly requestSettings?: PreparedRequestSettings;
   readonly runId?: string;
   /** Durable first-delivery inputs, excluded from compressible history. */
@@ -243,6 +248,7 @@ export interface ContextManager {
     options: ContextAssemblyOptions,
   ): Promise<AssembledContext>;
   getUsage(input: {
+    readonly runModel: ContextModel;
     readonly context: AssembledContext;
     readonly modelId: string;
     readonly tools: readonly ModelToolDefinition[] | undefined;
@@ -255,7 +261,8 @@ export interface ContextManager {
     sessionId: string,
     actualInputTokens: number,
     sentHeuristic: number,
-    contextScopeId?: string,
+    contextScopeId: string | undefined,
+    runModel: ContextModel,
   ): void;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
@@ -274,8 +281,6 @@ export interface ContextManagerOptions {
   readonly systemPromptProvider: SystemPromptProvider;
   /** Collects host reminders for requests that carry a reminder anchor. */
   readonly collectReminders?: ReminderCollector;
-  readonly tokenCounter: TokenCounter;
-  readonly llmClient: ContextLLMClient;
   readonly now?: () => number;
   readonly compactionThresholds?: Partial<CompactionThresholds>;
   readonly compressionThreshold?: number;

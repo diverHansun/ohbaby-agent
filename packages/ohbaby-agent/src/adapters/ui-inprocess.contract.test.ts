@@ -1,3 +1,4 @@
+import type { RunModel } from "../core/run-model.js";
 import type { UiCommandRecord } from "../host/command-record.js";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -2400,19 +2401,20 @@ describe("createInProcessUiBackendClient", () => {
       const modelJson = JSON.parse(
         await readFile(modelJsonPath, "utf-8"),
       ) as Record<string, unknown>;
-      expect(modelJson).toMatchObject({
-        apiConfig: {
-          apiKeyEnv: "ZENMUX_API_KEY",
-          baseUrl: "https://zenmux.example/v1",
-          interfaceProvider: "openai-compatible",
-        },
-        defaultModel: "anthropic/claude-sonnet-4.6",
-        llmParams: {
-          contextWindowTokens: 128_000,
-          maxTokens: 8192,
-        },
+      expect(
+        (modelJson.models as Record<string, unknown>[]).find(
+          (entry) => entry.id === modelJson.activeProfileId,
+        ),
+      ).toMatchObject({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.example/v1",
+        interfaceProvider: "openai-compatible",
+        model: "anthropic/claude-sonnet-4.6",
+        contextWindowTokens: 128_000,
+        maxOutputTokens: 8192,
         provider: "zenmux",
       });
+      expect(modelJson).not.toHaveProperty("llmParams");
       expect(modelJson).not.toHaveProperty("apiKey");
       expect((modelJson.models as Record<string, unknown>[])[0]).toMatchObject({
         model: "old-model",
@@ -2454,7 +2456,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("keeps session cache usage across a model-triggered runtime reset", async () => {
+  it("resets model-specific context and cache statistics after switching the default", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-cache-reset-"));
     const homeDir = await mkdtemp(join(tmpdir(), "ohbaby-cache-reset-home-"));
     const previousHome = process.env.HOME;
@@ -2471,6 +2473,7 @@ describe("createInProcessUiBackendClient", () => {
       manager: ContextManager;
       forced: boolean;
       result: PreparedTurn;
+      runModel: RunModel;
     }[] = [];
     const createContext = contextModule.createContextManager;
     const contextFactory = vi
@@ -2481,7 +2484,12 @@ describe("createInProcessUiBackendClient", () => {
         const prepare = manager.prepareTurn.bind(manager);
         vi.spyOn(manager, "prepareTurn").mockImplementation(async (input) => {
           const result = await prepare(input);
-          preparations.push({ manager, forced: input.force === true, result });
+          preparations.push({
+            manager,
+            forced: input.force === true,
+            result,
+            runModel: input.runModel as RunModel,
+          });
           return result;
         });
         const calibration = vi.spyOn(manager, "updateCalibrationFactor");
@@ -2552,12 +2560,10 @@ describe("createInProcessUiBackendClient", () => {
           return oldStream(request);
         },
       );
-      const createClient = vi.fn(async () => {
-        const saved = JSON.parse(
-          await readFile(join(homeDir, ".ohbaby", "model.json"), "utf8"),
-        ) as { defaultModel: string };
-        return saved.defaultModel === "new-model" ? newClient : oldClient;
-      });
+      const createClient = vi.fn(
+        (config: LLMClientInstance["config"]): Promise<LLMClientInstance> =>
+          Promise.resolve(config.model === "new-model" ? newClient : oldClient),
+      );
       const bus = createBus();
       const messageManager = createMessageManager({
         bus,
@@ -2605,23 +2611,35 @@ describe("createInProcessUiBackendClient", () => {
         "session_1",
         1_000,
         preparations.at(-1)?.result.sentHeuristic,
+        undefined,
+        preparations.at(-1)?.runModel,
       ]);
       // Seed a distinct calibration through the public API so reset checks cannot
       // accidentally pass because the first provider sample matched the estimate.
       const oldPrepared = preparations.at(-1)?.result;
       expect(oldPrepared).toBeDefined();
       if (!oldPrepared) throw new Error("Missing old model preparation");
+      const runModel = preparations.at(-1)?.runModel;
+      if (!runModel) throw new Error("Missing old run model");
       const oldAssembled = await oldContext.assemble("session_1", projectRoot, {
+        runModel,
         isSubagent: false,
         toolNames: [],
       });
       const measurement = {
+        runModel,
         context: oldAssembled,
         modelId: "old-model",
         tools: oldPrepared.request.tools,
       };
       const beforeCalibration = oldContext.getUsage(measurement);
-      oldContext.updateCalibrationFactor("session_1", 300, 100);
+      oldContext.updateCalibrationFactor(
+        "session_1",
+        300,
+        100,
+        undefined,
+        runModel,
+      );
       const oldMeasured = oldContext.getUsage(measurement);
       expect(oldMeasured.currentTokens).toBeGreaterThan(
         beforeCalibration.currentTokens,
@@ -2638,7 +2656,6 @@ describe("createInProcessUiBackendClient", () => {
         "inv_cache_before_model_reset",
       );
       await client.connectModel({
-        apiKey: "cache-reset-contract-key",
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://new.example/v1",
         interfaceProvider: "openai-compatible",
@@ -2659,21 +2676,17 @@ describe("createInProcessUiBackendClient", () => {
         cacheReadTokens: 500,
         sessionId: "session_1",
       });
-      expect(afterReset.promptCacheUsage).toEqual(beforeReset.promptCacheUsage);
+      expect(afterReset.promptCacheUsage).toMatchObject({
+        accountedInputTokens: 0,
+        cacheReadTokens: 0,
+      });
       const resumed = await client.submitPromptAndWait(
         "Measure after model switch",
         {
           sessionId: "session_1",
         },
       );
-      expect(contexts).toHaveLength(2);
-      const newContext = contexts[1];
-      expect(newContext).not.toBe(oldContext);
-      expect(calibrationCalls.get(newContext)?.()).not.toContainEqual([
-        "session_1",
-        300,
-        100,
-      ]);
+      expect(contexts).toHaveLength(1);
       expect(
         await client.getContextWindowUsage({ sessionId: "session_1" }),
       ).toMatchObject({
@@ -2682,7 +2695,7 @@ describe("createInProcessUiBackendClient", () => {
       });
       expect(resumed.prompt.status).toBe("succeeded");
       const newPreparations = preparations.filter(
-        (item) => item.manager === newContext,
+        (item) => item.runModel.client === newClient,
       );
       expect(newPreparations).toHaveLength(1);
       expect(newPreparations[0].forced).toBe(false);
@@ -2697,9 +2710,9 @@ describe("createInProcessUiBackendClient", () => {
         "inv_cache_after_new_model_run",
       );
       expect(afterResume.promptCacheUsage).toEqual({
-        accountedInputTokens: 2_000,
+        accountedInputTokens: 1_000,
         cacheReadShare: 0.5,
-        cacheReadTokens: 1_000,
+        cacheReadTokens: 500,
         sessionId: "session_1",
       });
     } finally {
@@ -2884,6 +2897,16 @@ describe("createInProcessUiBackendClient", () => {
 
   it("surfaces context runtime startup failures for existing sessions", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-context-fail-"));
+    vi.stubEnv("OHBABY_HOME", directory);
+    await writeFile(
+      join(directory, "model.json"),
+      JSON.stringify({
+        provider: "test",
+        defaultModel: "model",
+        apiConfig: { baseUrl: "https://example.invalid" },
+        llmParams: { maxTokens: 128 },
+      }),
+    );
     const initialSnapshot: UiSnapshot = {
       activeSessionId: "session_1",
       permissions: [],
@@ -2912,6 +2935,8 @@ describe("createInProcessUiBackendClient", () => {
         client.getContextWindowUsage({ sessionId: "session_1" }),
       ).rejects.toThrow("token estimator unavailable");
     } finally {
+      await client.dispose();
+      vi.unstubAllEnvs();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -2945,9 +2970,9 @@ describe("createInProcessUiBackendClient", () => {
       updatedAt: 1,
     };
     let currentCoreSession = primarySession;
-    const createClient = vi.fn(() => Promise.resolve(createFakeLLMClient([])));
+    const modelClient = createFakeLLMClient([]);
     const client = createInProcessUiBackendClient({
-      createLLMClient: createClient,
+      llmClient: modelClient,
       initialSnapshot: {
         activeSessionId: "session_child",
         permissions: [],
@@ -2984,7 +3009,7 @@ describe("createInProcessUiBackendClient", () => {
     await expect(
       client.getContextWindowUsage({ sessionId: "session_child" }),
     ).resolves.toBeNull();
-    expect(createClient).toHaveBeenCalledOnce();
+
     await expect(
       executeStatusData(client, "session_child", "inv_child_cache_status"),
     ).resolves.toMatchObject({ promptCacheUsage: null });
@@ -5859,10 +5884,10 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("publishes a visible runtime error when provider configuration fails", async () => {
+  it("publishes a visible runtime error when no default model is configured", async () => {
     const client = createInProcessUiBackendClient({
       createLLMClient: () =>
-        Promise.reject(new Error("OPENAI_API_KEY is not configured")),
+        Promise.reject(new Error("No active model configured")),
     });
     const events: UiEvent[] = [];
     client.subscribeEvents((event) => {
@@ -5875,7 +5900,7 @@ describe("createInProcessUiBackendClient", () => {
       prompt: {
         error: {
           code: "RUNTIME_ERROR",
-          message: "OPENAI_API_KEY is not configured",
+          message: "No active model configured",
           source: "runtime",
         },
         status: "failed",
@@ -5890,7 +5915,7 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(noticeEvent?.notice).toMatchObject({
       level: "error",
-      message: "OPENAI_API_KEY is not configured",
+      message: "No active model configured",
       title: "Runtime error",
     });
   });
@@ -8793,7 +8818,7 @@ describe("createInProcessUiBackendClient", () => {
         data: {
           model: {
             active: true,
-            id: "fake:fake-model",
+            id: "injected",
             label: "fake-model",
             model: "fake-model",
             provider: "fake",
@@ -8918,7 +8943,7 @@ describe("createInProcessUiBackendClient", () => {
       data: {
         current: {
           active: true,
-          id: "fake:fake-model",
+          id: "injected",
           interfaceProvider: "openai-compatible",
           label: "fake-model",
           model: "fake-model",
@@ -8927,7 +8952,7 @@ describe("createInProcessUiBackendClient", () => {
         models: [
           {
             active: true,
-            id: "fake:fake-model",
+            id: "injected",
             interfaceProvider: "openai-compatible",
             label: "fake-model",
             model: "fake-model",
@@ -11080,7 +11105,7 @@ it("captures session reasoning per submission and keeps sessions independent", a
     await client.dispose();
   }
 });
-it("terminates an incompatible immutable submission and advances the compatible queue", async () => {
+it("falls back for an incompatible immutable submission and advances the queue", async () => {
   const store = new InMemoryPromptSubmissionStore();
   const common = {
     scopeKey: "/work",
@@ -11109,7 +11134,10 @@ it("terminates an incompatible immutable submission and advances the compatible 
     promptSubmissionStore: store,
     initialSnapshot: createInitialSnapshotWithTwoSessions(),
     llmClient: createSequentialFakeLLMClient(
-      [[{ textDelta: "ok", finishReason: "stop" }]],
+      [
+        [{ textDelta: "ok", finishReason: "stop" }],
+        [{ textDelta: "ok", finishReason: "stop" }],
+      ],
       requests,
       {
         modelProfiles: [
@@ -11129,12 +11157,12 @@ it("terminates an incompatible immutable submission and advances the compatible 
   try {
     await client.getSnapshot();
     const { prompt: failed } = await client.waitForPrompt("high");
-    expect(failed.status).toBe("failed");
-    expect(failed.error?.message).toMatch(/binary|on\/off/);
+    expect(failed.status).toBe("succeeded");
+    expect(failed.error).toBeUndefined();
     expect((await client.waitForPrompt("default")).prompt.status).toBe(
       "succeeded",
     );
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(2);
     expect(requests[0].reasoning?.mode).toBe("binary");
   } finally {
     await client.dispose();

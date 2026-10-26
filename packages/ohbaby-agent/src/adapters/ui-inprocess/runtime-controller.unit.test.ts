@@ -224,3 +224,39 @@ describe("InProcessRuntimeController", () => {
     expect(createCount).toBe(2);
   });
 });
+
+it("admits another session after model-only edits without rebuilding an active runtime", async () => {
+  let model = "before";
+  let creations = 0;
+  const controller = new InProcessRuntimeController({
+    clearPendingPermissionsForRun: (): Promise<void> => Promise.resolve(),
+    getConfigVersion: (): Promise<
+      import("../../config/llm/config-coordination.js").SettingsConfigVersions
+    > =>
+      Promise.resolve({
+        model,
+        env: "same",
+        search: "same",
+        mcp: "same",
+        agents: "same",
+        skills: "same",
+      }),
+    createRuntime: (): Promise<UiRuntimeComposition> => {
+      creations++;
+      return Promise.resolve(runtime());
+    },
+    publishNotice: (): void => undefined,
+    updateStatus: (): Promise<void> => Promise.resolve(),
+  });
+  const first = await controller.acquireRuntime();
+  model = "after";
+  try {
+    const second = await controller.acquireRuntime();
+    expect(second.runtime).toBe(first.runtime);
+    expect(creations).toBe(1);
+    second.release();
+  } finally {
+    first.release();
+    await controller.resetRuntime();
+  }
+});

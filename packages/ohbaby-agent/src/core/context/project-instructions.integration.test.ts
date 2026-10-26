@@ -1,3 +1,7 @@
+import {
+  createTestContextManager as createContextManager,
+  type TestContextManager as ContextManager,
+} from "../testing/model-fixtures.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,8 +15,8 @@ import {
   createMessageManager,
 } from "../message/index.js";
 import { createSystemPromptProvider } from "../system-prompt/index.js";
-import { createContextManager } from "./context-manager.js";
-import type { ContextManager, PreparedModelRequest } from "./types.js";
+
+import type { PreparedModelRequest } from "./types.js";
 
 const PROJECT_MARKER = "PROJECT_RULE_MARKER";
 const GLOBAL_MARKER = "GLOBAL_RULE_MARKER";

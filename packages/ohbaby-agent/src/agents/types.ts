@@ -1,3 +1,4 @@
+import type { RunModel } from "../core/run-model.js";
 import type { SlashSkillUsage } from "../skill/usage.js";
 import type { ReasoningConfig } from "ohbaby-llm";
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
@@ -68,6 +69,7 @@ export interface RuntimeAgent {
 }
 
 export interface StartSessionParams {
+  readonly runModel: RunModel;
   readonly reasoning?: ReasoningConfig;
   readonly agentName: string;
   readonly initialUserMessageId?: string;

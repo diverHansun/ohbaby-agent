@@ -314,8 +314,10 @@ export class BrowserDaemonClient implements UiBackendClient {
     return this.commands.listWebCommands();
   }
 
-  getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
-    return this.commands.getCurrentModel();
+  getCurrentModel(
+    input?: Parameters<UiBackendClient["getCurrentModel"]>[0],
+  ): ReturnType<UiBackendClient["getCurrentModel"]> {
+    return this.commands.getCurrentModel(input);
   }
 
   probeModelContextWindow(): ReturnType<
@@ -342,6 +344,18 @@ export class BrowserDaemonClient implements UiBackendClient {
     options?: Parameters<UiBackendClient["compactSession"]>[0],
   ): ReturnType<UiBackendClient["compactSession"]> {
     return this.commands.compactSession(options);
+  }
+
+  updateSessionModel(
+    input: Parameters<UiBackendClient["updateSessionModel"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionModel"]> {
+    return this.commands.updateSessionModel(input);
+  }
+
+  selectDefaultModel(
+    entryId: string,
+  ): ReturnType<UiBackendClient["selectDefaultModel"]> {
+    return this.commands.selectDefaultModel(entryId);
   }
 
   updateSessionReasoning(

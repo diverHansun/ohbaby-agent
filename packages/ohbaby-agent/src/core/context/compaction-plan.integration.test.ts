@@ -1,3 +1,7 @@
+import {
+  createTestContextManager as createContextManager,
+  type TestPrepareTurnInput as PrepareTurnInput,
+} from "../testing/model-fixtures.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/tokenCounting.js";
@@ -9,13 +13,12 @@ import {
   type MessageManager,
   type MessageWithParts,
 } from "../message/index.js";
-import { createContextManager } from "./context-manager.js";
+
 import { ContextEvent } from "./events.js";
 import type {
   CompactResult,
   ContextLLMClient,
   PreparedModelRequest,
-  PrepareTurnInput,
 } from "./types.js";
 
 const input = {

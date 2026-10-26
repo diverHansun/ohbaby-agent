@@ -1,3 +1,10 @@
+import type { RunModel } from "../../core/run-model.js";
+import { SessionSubagentHost } from "../../agents/subagent-host.js";
+import { type TestContextManager as ContextManager } from "../../core/testing/model-fixtures.js";
+import {
+  createTestUiRuntimeComposition as createUiRuntimeCompositionImpl,
+  type TestUiRuntimeCompositionOptions as UiRuntimeCompositionOptions,
+} from "../../core/testing/runtime-model-fixtures.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -5,11 +12,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AgentManager,
   InMemorySubagentInstanceStore,
-  SessionSubagentHost,
   type SubagentInstanceRecord,
 } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
-import type { ContextManager } from "../../core/context/index.js";
+
 import type { LLMClientInstance } from "ohbaby-llm";
 import type { MessageManager, Part } from "../../core/message/index.js";
 import type {
@@ -40,10 +46,7 @@ import type {
   SkillResourceContent,
   SkillSearchDirectory,
 } from "../../skill/index.js";
-import {
-  createUiRuntimeComposition as createUiRuntimeCompositionImpl,
-  type UiRuntimeCompositionOptions,
-} from "./composition.js";
+
 import { createHostLocalSandboxManager } from "./host-local-environment.js";
 
 interface FakeSdkClient {
@@ -710,6 +713,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(toolNames.length).toBeGreaterThan(0);
 
     expect(assemble).toHaveBeenCalledWith("session_1", "D:/repo", {
+      runModel: expect.objectContaining({ entryId: "fixture" }) as RunModel,
       modelOrigin: {
         provider: "fake",
         model: "fake-model",
@@ -721,12 +725,14 @@ describe("createUiRuntimeComposition skill tools", () => {
       toolNames,
     });
     expect(getUsage).toHaveBeenCalledWith({
+      runModel: expect.objectContaining({ entryId: "fixture" }) as RunModel,
       context: assembledContext,
       modelId: "fake-model",
       tools,
       toolDefinitions: definitions,
     });
     expect(compact).toHaveBeenCalledWith("session_1", {
+      runModel: expect.objectContaining({ entryId: "fixture" }) as RunModel,
       requestSettings: {
         model: "fake-model",
         maxTokens: 128,

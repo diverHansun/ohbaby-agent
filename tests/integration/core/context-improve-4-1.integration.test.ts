@@ -1,9 +1,12 @@
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import type { UiEvent, UiSnapshot } from "ohbaby-sdk";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import {
   createContextWindowUsageTracker,
-  createContextManager,
   type ContextLLMClient,
   type ContextOccupancyComposition,
   type PreparedModelRequest,
@@ -13,7 +16,7 @@ import {
   type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { estimatePreparedRequestHeuristic } from "../../../packages/ohbaby-agent/src/core/context/token-estimation.js";
-import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
+
 import type {
   LLMClientInstance,
   ProviderRequest,

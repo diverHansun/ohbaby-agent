@@ -1,6 +1,6 @@
+import { type TestPrepareTurnInput as PrepareTurnInput } from "../testing/model-fixtures.js";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import type { PrepareTurnInput } from "./index.js";
 
 function compileLegacyPrepareInput(): PrepareTurnInput {
   return {

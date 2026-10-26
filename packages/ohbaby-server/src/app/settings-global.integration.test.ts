@@ -638,7 +638,7 @@ it("global model CRUD preserves independent ids and publishes candidate metadata
     expect(created.status).toBe(200);
     const first =
       (await created.json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
-    expect(first.active).toBeNull();
+    expect(first.active?.id).toBe(first.models[0].id);
     expect(first.models).toHaveLength(1);
     expect(JSON.stringify(first)).not.toContain("model-secret-sentinel");
     const second = (await (
@@ -824,7 +824,7 @@ it("global target probes and active selection refresh through HTTP, emitting bot
           await request("models")
         ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse
       ).active,
-    ).toBeNull();
+    ).toMatchObject({ id });
     await vi.waitFor(() => {
       expect(events().slice(offset)).toContain('"type":"settings.changed"');
       expect(events().slice(offset)).toContain('"domains":["model"]');
@@ -959,7 +959,7 @@ it("returns stable codes and value-free field errors on every global settings fa
   });
 });
 
-it("finishes a keyless legacy entry when the patch confirms no key reference", async () => {
+it("finishes an otherwise complete legacy entry without requiring a key", async () => {
   await json(join(home, "model.json"), {
     provider: "zenmux",
     defaultModel: "missing",
@@ -982,13 +982,13 @@ it("finishes a keyless legacy entry when the patch confirms no key reference", a
   const legacy = before.models.find((model) => model.model === "history");
   expect(legacy?.configurationComplete).toBe(false);
   const id = legacy?.id ?? "";
-  // An empty patch leaves it unfinished; apiKeyEnv: null is the explicit choice.
+  // Saving an otherwise complete entry requires no key choice.
   const empty = (await (
     await request(`models/profiles/${id}`, "PATCH", {})
   ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
   expect(
     empty.models.find((model) => model.id === id)?.configurationComplete,
-  ).toBe(false);
+  ).toBe(true);
   const done = (await (
     await request(`models/profiles/${id}`, "PATCH", { apiKeyEnv: null })
   ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;

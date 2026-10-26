@@ -416,8 +416,8 @@ describe("CLI prompt process smoke", () => {
         model: "fake-model",
         stream: true,
         stream_options: { include_usage: true },
+        temperature: 0,
       });
-      expect(mainRequest.body).not.toHaveProperty("temperature");
       const messages = mainRequest.body.messages;
       expect(messages).toEqual([
         expect.objectContaining({ role: "system" }),
@@ -442,15 +442,15 @@ describe("CLI prompt process smoke", () => {
         '"source":"system-reminder"',
       );
 
-      // Title generation uses a small request-level output cap and does not
-      // inherit the stale temperature stored in model.json.
+      // Title generation keeps the migrated model temperature while using
+      // its own small request-level output cap.
       const titleRequest = titleRequests[0];
       expect(titleRequest.body).toMatchObject({
         max_tokens: 200,
         model: "fake-model",
         stream: true,
+        temperature: 0,
       });
-      expect(titleRequest.body).not.toHaveProperty("temperature");
     } finally {
       await server.close();
     }

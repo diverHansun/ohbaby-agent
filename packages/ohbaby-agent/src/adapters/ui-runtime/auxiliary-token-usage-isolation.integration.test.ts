@@ -1,8 +1,11 @@
+import {
+  type TestContextManager as ContextManager,
+  TestLifecycle as Lifecycle,
+} from "../../core/testing/model-fixtures.js";
 import { resolvePreparedRequestSettings } from "ohbaby-llm";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
-import type { ContextManager } from "../../core/context/index.js";
-import { Lifecycle } from "../../core/lifecycle/index.js";
+
 import type {
   LifecycleEvent,
   LifecycleResult,

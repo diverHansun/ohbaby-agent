@@ -16,7 +16,7 @@ function models(
 ): UiSettingsModels {
   return {
     active: active ? { id: active, provider: "p", model: active } : null,
-    params: { maxTokens: 1024 },
+
     models: ids.map((id) => ({
       id,
       provider: "p",

@@ -1,3 +1,5 @@
+import type { TestContextManagerOptions as ContextManagerOptions } from "../testing/model-fixtures.js";
+import { createTestContextManager as createContextManager } from "../testing/model-fixtures.js";
 import {
   encodeDiagnosticEvent,
   type Logger,
@@ -12,8 +14,8 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../message/index.js";
-import { createContextManager } from "./context-manager.js";
-import type { ContextLLMClient, ContextManagerOptions } from "./types.js";
+
+import type { ContextLLMClient } from "./types.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/tokenCounting.js";
 
 const fixtureInput = {

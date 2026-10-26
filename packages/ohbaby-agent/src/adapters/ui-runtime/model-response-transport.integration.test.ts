@@ -1,8 +1,12 @@
+import { createRunModel } from "./run-model.js";
+import {
+  createTestContextManager as createContextManager,
+  TestLifecycle as Lifecycle,
+} from "../../core/testing/model-fixtures.js";
 import { describe, expect, it } from "vitest";
 import { createBus } from "../../bus/index.js";
-import { createContextManager } from "../../core/context/index.js";
+
 import {
-  Lifecycle,
   type LifecycleEvent,
   type LifecycleResult,
 } from "../../core/lifecycle/index.js";
@@ -171,6 +175,7 @@ async function runThroughTransport(
     }
   })();
   const context: RunContext = {
+    runModel: createRunModel("fixture", llmClient),
     abortSignal: abortController.signal,
     contextScopeId: "subagent_1",
     directory: "/workspace",

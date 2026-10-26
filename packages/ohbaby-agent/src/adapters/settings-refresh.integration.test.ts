@@ -770,7 +770,7 @@ describe("settings propagation through the shared production backend", () => {
         .map((event) => event.tool),
     ).toEqual(["old_echo"]);
     await json(join(globalRoot, "model.json"), {
-      injectedClient: "retains its model",
+      models: [],
     });
     expect(
       (
@@ -860,7 +860,7 @@ describe("settings propagation through the shared production backend", () => {
     expect(connected).toEqual(["old", "new"]);
     expect(disconnected).toEqual(["old"]);
     await json(join(globalRoot, "model.json"), {
-      arbitrary: "injected clients must keep their configuration",
+      models: [],
     });
     await client.submitPromptAndWait("Third", { sessionId: "mcp" });
     expect(connected).toEqual(["old", "new"]);
@@ -882,7 +882,7 @@ describe("settings propagation through the shared production backend", () => {
       "replacement-skill: Changed configured directory",
     );
     expect(new Set(sharedRegistries).size).toBe(1);
-    expect(sharedRegistries).toHaveLength(4);
+    expect(sharedRegistries).toHaveLength(3);
     expect(activeMcpSubscriptions).toBe(1);
     expect(activeSkillSubscriptions).toBe(1);
     await client.dispose();

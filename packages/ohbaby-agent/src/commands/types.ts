@@ -99,10 +99,9 @@ export interface CommandModelProvider {
   listModels():
     | Promise<readonly CommandModelSummary[]>
     | readonly CommandModelSummary[];
-  currentModel():
-    | Promise<CommandModelSummary | null>
-    | CommandModelSummary
-    | null;
+  currentModel(
+    sessionId?: string,
+  ): Promise<CommandModelSummary | null> | CommandModelSummary | null;
   switchModel?(
     input: CommandModelSwitchInput,
   ): Promise<CommandModelSummary> | CommandModelSummary;

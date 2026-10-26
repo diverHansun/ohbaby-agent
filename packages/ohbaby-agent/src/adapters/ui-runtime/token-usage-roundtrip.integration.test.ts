@@ -1,8 +1,9 @@
+import { testRunModel } from "../../core/testing/model-fixtures.js";
+import { type TestLifecycleSessionParams as LifecycleSessionParams } from "../../core/testing/model-fixtures.js";
 import { describe, expect, it } from "vitest";
 import type {
   LifecycleEvent,
   LifecycleResult,
-  LifecycleSessionParams,
 } from "../../core/lifecycle/index.js";
 import { RunWorker } from "../../runtime/run-manager/worker.js";
 import type {
@@ -55,6 +56,7 @@ describe("token usage event transport", () => {
     const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
     const abortController = new AbortController();
     const context: RunContext = {
+      runModel: testRunModel("fake-model"),
       abortSignal: abortController.signal,
       contextScopeId: "subagent_1",
       directory: "/workspace",

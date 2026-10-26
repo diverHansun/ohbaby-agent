@@ -87,6 +87,7 @@ interface StepResult {
 }
 
 interface ModelStepParams {
+  readonly runModel: LifecycleSessionParams["runModel"];
   readonly currentRunInputs?: LifecycleSessionParams["currentRunInputs"];
   readonly runId?: string;
   readonly modelId: string;
@@ -523,7 +524,7 @@ export class Lifecycle {
         params.reasoning && "explicit" in params.reasoning
           ? mergeReasoningIntent(params.reasoning)
           : mergeReasoningIntent(
-              this.deps.llmClient.config.reasoning,
+              params.runModel.client.config.reasoning,
               params.reasoning,
             ),
     };
@@ -579,6 +580,7 @@ export class Lifecycle {
       const resolvedTools = resolvedStepTools?.requestTools;
       const toolNames = toolNamesFromSchemas(resolvedTools);
       promptSnapshot ??= await contextManager.createRunPromptSnapshot({
+        runModel: params.runModel,
         ...(params.contextScopeId === undefined
           ? {}
           : { contextScopeId: params.contextScopeId }),
@@ -601,6 +603,7 @@ export class Lifecycle {
         : undefined;
       let assistantMessageId = randomUUID();
       let prepared = yield* this.prepareTurnWithProgress({
+        runModel: params.runModel,
         reminderAnchorId: assistantMessageId,
         runId: params.runId,
         protectedInputs,
@@ -668,6 +671,7 @@ export class Lifecycle {
       }
 
       const runParams: ModelStepParams = {
+        runModel: params.runModel,
         currentRunInputs: params.currentRunInputs,
         runId: params.runId,
         modelId: params.modelId,
@@ -743,6 +747,7 @@ export class Lifecycle {
 
         assistantMessageId = randomUUID();
         prepared = yield* this.prepareTurnWithProgress({
+          runModel: params.runModel,
           reminderAnchorId: assistantMessageId,
           runId: params.runId,
           protectedInputs,
@@ -937,20 +942,13 @@ export class Lifecycle {
       }
       if (finalEvent.tokenUsage !== undefined) {
         // Pair actual input with the request sent, including an overflow re-prepare.
-        if (params.contextScopeId === undefined) {
-          contextManager.updateCalibrationFactor(
-            params.sessionId,
-            finalEvent.tokenUsage.inputTokens,
-            prepared.sentHeuristic,
-          );
-        } else {
-          contextManager.updateCalibrationFactor(
-            params.sessionId,
-            finalEvent.tokenUsage.inputTokens,
-            prepared.sentHeuristic,
-            params.contextScopeId,
-          );
-        }
+        contextManager.updateCalibrationFactor(
+          params.sessionId,
+          finalEvent.tokenUsage.inputTokens,
+          prepared.sentHeuristic,
+          params.contextScopeId,
+          params.runModel,
+        );
       }
       if (
         stepResult.modelState === undefined &&
@@ -1390,8 +1388,8 @@ export class Lifecycle {
     const { params, step } = input;
     const currentRunInputs = params.currentRunInputs;
     const requestClient = {
-      ...this.deps.llmClient,
-      config: { ...this.deps.llmClient.config, model: params.modelId },
+      ...params.runModel.client,
+      config: { ...params.runModel.client.config, model: params.modelId },
     };
     // Model-produced completions always carry a snapshot; only the public
     // observation projection may lack the response body.
@@ -1419,7 +1417,7 @@ export class Lifecycle {
       runId: params.runId,
       agent: params.agent ?? "default",
       parentId: input.parentMessageId,
-      providerId: this.deps.llmClient.config.provider,
+      providerId: params.runModel.client.config.provider,
       modelId: params.modelId,
     });
 
@@ -1800,7 +1798,10 @@ export class Lifecycle {
   }
 
   private async *prepareTurnWithProgress(
-    input: PrepareTurnInput & { readonly step: number },
+    input: PrepareTurnInput & {
+      readonly step: number;
+      readonly runModel: LifecycleSessionParams["runModel"];
+    },
   ): AsyncGenerator<LifecycleEvent, PreparedTurn, void> {
     const { step, ...prepareInput } = input;
     let notifyCompactionStarted: () => void = () => undefined;
@@ -1809,15 +1810,15 @@ export class Lifecycle {
     });
     const prepared = this.deps.contextManager.prepareTurn({
       ...prepareInput,
-      requestSettings: resolvePreparedRequestSettings(this.deps.llmClient, {
+      requestSettings: resolvePreparedRequestSettings(input.runModel.client, {
         modelId: input.modelId,
         reasoning: input.reasoning,
       }),
       modelOrigin: {
-        provider: this.deps.llmClient.config.provider,
+        provider: input.runModel.client.config.provider,
         model: input.modelId,
-        protocol: this.deps.llmClient.config.interfaceProvider,
-        endpoint: this.deps.llmClient.config.baseUrl,
+        protocol: input.runModel.client.config.interfaceProvider,
+        endpoint: input.runModel.client.config.baseUrl,
       },
       onCompactionStarted: notifyCompactionStarted,
     });

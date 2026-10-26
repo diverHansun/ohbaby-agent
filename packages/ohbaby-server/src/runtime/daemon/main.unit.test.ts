@@ -39,6 +39,18 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
       }),
     subscribePermissionEvents: () => () => undefined,
     abortRun: vi.fn(() => Promise.resolve()),
+    updateSessionModel: vi.fn(() =>
+      Promise.resolve({
+        id: "s",
+        title: "test",
+        messages: [],
+        createdAt: "now",
+        updatedAt: "now",
+      }),
+    ),
+    selectDefaultModel: vi.fn(() =>
+      Promise.resolve({ ok: true as const, active: null, models: [] }),
+    ),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),

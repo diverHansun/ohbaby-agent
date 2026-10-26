@@ -25,7 +25,12 @@ export function registerModelRoutes(app: Hono, ctx: DaemonRouteContext): void {
       return context.json(webErrorBody("client is not registered"), 409);
     }
 
-    const model = await ctx.options.backend.getCurrentModel();
+    const sessionId = context.req.query("sessionId");
+    if (sessionId !== undefined && !sessionId.trim())
+      return context.json(webErrorBody("Invalid session id"), 400);
+    const model = await ctx.options.backend.getCurrentModel(
+      sessionId === undefined ? undefined : { sessionId },
+    );
     return context.json({ model, ok: true });
   });
 

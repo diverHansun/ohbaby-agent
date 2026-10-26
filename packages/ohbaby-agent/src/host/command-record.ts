@@ -11,6 +11,8 @@ export type UiCommandMethod =
   | "compactSession"
   | "archiveSession"
   | "updateSessionReasoning"
+  | "updateSessionModel"
+  | "selectDefaultModel"
   | "connectModel"
   | "setSearchApiKey"
   | "setPermission"
@@ -195,6 +197,8 @@ export function buildUiCommandDetails(
     case "acquirePromptEditLease":
     case "archiveSession":
     case "updateSessionReasoning":
+    case "updateSessionModel":
+    case "selectDefaultModel":
     case "steerQueuedPrompt":
     case "resendSteerInput":
     case "cancelQueuedPrompt":

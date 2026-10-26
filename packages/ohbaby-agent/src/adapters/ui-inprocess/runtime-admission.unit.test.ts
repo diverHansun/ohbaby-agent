@@ -7,10 +7,10 @@ import {
 } from "./runtime-controller.js";
 import type { UiRuntimeComposition } from "../ui-runtime/types.js";
 
-function versions(model: string): SettingsConfigVersions {
+function versions(env: string): SettingsConfigVersions {
   return {
-    model,
-    env: "env",
+    model: "model",
+    env,
     search: "search",
     mcp: "mcp",
     agents: "agents",
@@ -61,7 +61,7 @@ function fixture(): {
   };
 }
 
-describe("runtime model admission", () => {
+describe("runtime environment admission", () => {
   it("keeps the entire admitted work on A, and admits only latest C after release", async () => {
     const f = fixture();
     const old = await f.controller.acquireRuntime();
@@ -122,17 +122,17 @@ describe("runtime model admission", () => {
         Promise.resolve(versions(version)),
       createRuntime: (): Promise<UiRuntimeComposition> => {
         if (version === "B")
-          return Promise.reject(new Error("Saved model B unavailable"));
+          return Promise.reject(new Error("Saved environment B unavailable"));
         return Promise.resolve(old);
       },
     });
     (await controller.acquireRuntime()).release();
     version = "B";
     await expect(controller.acquireRuntime()).rejects.toThrow(
-      "Saved model B unavailable",
+      "Saved environment B unavailable",
     );
     await expect(controller.acquireRuntime()).rejects.toThrow(
-      "Saved model B unavailable",
+      "Saved environment B unavailable",
     );
     expect(dispose).toHaveBeenCalledTimes(1);
   });
@@ -254,10 +254,10 @@ it("holds reconnect through tool refresh, rejects leases/background activity, an
   await reconnect;
   (await next).release();
   expect(created).toEqual([undefined]);
-  current = { ...current, model: "B", mcp: "newer" };
+  current = { ...current, env: "B", mcp: "newer" };
   await controller.reconnectMcp(() => Promise.resolve("newer"));
   (await controller.acquireRuntime()).release();
-  expect(created).toEqual([undefined, ["model"]]);
+  expect(created).toEqual([undefined, ["env"]]);
 });
 it("does not acknowledge failed or newer unapplied MCP versions and releases admission after failure", async () => {
   let current = versions("A");
