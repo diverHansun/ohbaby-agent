@@ -6,7 +6,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-10-25 | 首轮 | 会话级模型的后端、Web、TUI 适配，每模型生成参数，Settings 模型管理优化 | 后端实施中（Stage 1、2） |
+| [improve-1](improve-1/00-discussion.md) | 2026-10-25 | 首轮 | 会话级模型的后端、Web、TUI 适配，每模型生成参数，Settings 模型管理优化 | 后端完成，待用户检查与前端实施 |
 
 ## 本轮文档地图
 
@@ -17,7 +17,7 @@
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 决策表 P1 至 P16、Stage 1 至 5、接口与迁移、风险、关键改动清单 |
 | [03 参考项目](improve-1/03-reference-projects.md) | opencode、pi、kimi-code、ZCode 的会话级模型做法与取舍 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | T1 至 T27、回归清单、发布门、对抗性审查 |
-| 05 实施与验收 | 本轮实施完成后由验收模式写入 |
+| [05 后端实施与验收](improve-1/05-implementation-and-acceptance.md) | 提交批次、审查修复、测试证据与前端交接 |
 
 ## 实施契约
 
