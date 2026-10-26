@@ -355,7 +355,12 @@ export function ModelEditor(props: {
               }}
             />
           </FieldRow>
-          <FieldRow id={id("label")} label="Label" error={errorFor("label")}>
+          <FieldRow
+            id={id("label")}
+            label="Label"
+            hint="optional, shown after the model name"
+            error={errorFor("label")}
+          >
             {input("label")}
           </FieldRow>
           {entry?.configurationComplete ? (

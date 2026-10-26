@@ -188,6 +188,40 @@ describe("ArchivedSection", () => {
     );
   });
 
+  it("lets a restored row fade away before it leaves the list", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const animate = vi.fn(() => ({ finished }));
+    Object.assign(HTMLElement.prototype, { animate });
+    Object.assign(window, {
+      matchMedia: () => ({ matches: false }),
+    });
+    try {
+      const container = await mount(api([{ sessions: [first, second] }]));
+      await click(button("Restore “Refactor the sidebar”"));
+      expect(animate).toHaveBeenCalledOnce();
+      const leaving = container.querySelector<HTMLElement>(
+        "[data-session-id='a']",
+      );
+      expect(leaving?.inert).toBe(true);
+      expect(rowTitles(container)).toEqual([
+        "Refactor the sidebar",
+        "Weekend plan",
+      ]);
+      await act(async () => {
+        finish();
+        await finished;
+      });
+      await settle();
+      expect(rowTitles(container)).toEqual(["Weekend plan"]);
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "animate");
+      Reflect.deleteProperty(window, "matchMedia");
+    }
+  });
+
   it("keeps the row and shows why when Restore fails", async () => {
     const container = await mount(
       api([{ sessions: [first] }], {

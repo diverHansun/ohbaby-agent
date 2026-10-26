@@ -33,6 +33,9 @@ export type ArchivedSessionsApi = Pick<
 /** Reads answered within this time show no loading line (04 §2.6). */
 const LOADING_DELAY_MS = 300;
 
+/** How long a restored or deleted row takes to leave the list. */
+const LEAVE_MS = 320;
+
 const ABSOLUTE_TIME = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
@@ -63,6 +66,15 @@ const INITIAL: ListState = {
 
 function titleOf(session: UiGlobalSession): string {
   return session.title.trim() || "Untitled session";
+}
+
+function rowElement(
+  section: HTMLElement | null,
+  id: string,
+): HTMLElement | undefined {
+  return [
+    ...(section?.querySelectorAll<HTMLElement>("[data-session-id]") ?? []),
+  ].find((row) => row.dataset.sessionId === id);
 }
 
 /** The row is gone on the server already: restored or deleted elsewhere. */
@@ -176,12 +188,48 @@ export function ArchivedSection(props: {
     const neighbour =
       list.rows.at(index + 1) ??
       (index > 0 ? list.rows.at(index - 1) : undefined);
-    focusNext.current = neighbour?.id ?? null;
-    setRow(id, null);
-    setList((current) => ({
-      ...current,
-      rows: current.rows.filter((row) => row.id !== id),
-    }));
+    let removed = false;
+    const remove = (): void => {
+      if (removed) return;
+      removed = true;
+      focusNext.current = neighbour?.id ?? null;
+      setRow(id, null);
+      setList((current) => ({
+        ...current,
+        rows: current.rows.filter((row) => row.id !== id),
+      }));
+    };
+    // The row leaves visibly, so it is clear which one went.
+    const element = rowElement(sectionRef.current, id);
+    if (
+      !element ||
+      typeof element.animate !== "function" ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      remove();
+      return;
+    }
+    // A frozen timeline (a hidden page) must not keep the row forever.
+    setTimeout(remove, LEAVE_MS + 200);
+    element.inert = true;
+    element.style.overflow = "hidden";
+    const height = `${String(element.offsetHeight)}px`;
+    // First it fades in place, then the gap closes.
+    element
+      .animate(
+        [
+          { height, opacity: 1, easing: "ease-out" },
+          {
+            height,
+            opacity: 0,
+            offset: 0.45,
+            easing: "cubic-bezier(0.2, 0, 0, 1)",
+          },
+          { height: "0px", opacity: 0 },
+        ],
+        { duration: LEAVE_MS },
+      )
+      .finished.then(remove, remove);
   };
 
   useLayoutEffect(() => {
@@ -193,12 +241,9 @@ export function ArchivedSection(props: {
     const restore =
       target === null
         ? null
-        : [
-            ...(section?.querySelectorAll<HTMLElement>("[data-session-id]") ??
-              []),
-          ]
-            .find((row) => row.dataset.sessionId === target)
-            ?.querySelector<HTMLElement>(".ohb-archived-restore");
+        : rowElement(section, target)?.querySelector<HTMLElement>(
+            ".ohb-archived-restore",
+          );
     (restore ?? section)?.focus({ preventScroll: true });
   }, [list.rows, visible, confirm]);
 
