@@ -105,7 +105,9 @@ export function ModelsPanel({
             ? -visibleLines
             : 0;
     if (delta !== 0) {
-      setSelectedIndex(Math.max(0, Math.min(last, index + delta)));
+      const next = Math.max(0, Math.min(last, index + delta));
+      latest.current = { rows: current, selectedIndex: next };
+      setSelectedIndex(next);
       return;
     }
     const row = current.at(Math.min(index, last));

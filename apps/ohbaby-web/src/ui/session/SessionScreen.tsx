@@ -150,16 +150,31 @@ export function SessionScreen({
     : view.activeSession?.modelEntryId;
   const modelEntry = resolveModelEntry(models, selectedEntryId);
   const activeSessionId = view.composer.activeSessionId;
+  const modelSave = useRef<{
+    client: UiBackendClient;
+    sessionId: string;
+    result: ReturnType<UiBackendClient["updateSessionModel"]>;
+  } | null>(null);
   const selectModel = useCallback(
     async (id: string): Promise<void> => {
       if (activeSessionId === undefined) {
         setDraftModel(id);
         return;
       }
-      await client.updateSessionModel({
+      const saving = {
+        client,
         sessionId: activeSessionId,
-        modelEntryId: id,
-      });
+        result: client.updateSessionModel({
+          sessionId: activeSessionId,
+          modelEntryId: id,
+        }),
+      };
+      modelSave.current = saving;
+      try {
+        await saving.result;
+      } finally {
+        if (modelSave.current === saving) modelSave.current = null;
+      }
     },
     [activeSessionId, client],
   );
@@ -177,9 +192,37 @@ export function SessionScreen({
         onOpenModelSettings(inDraft);
         return false;
       }
+      const saving = modelSave.current;
+      if (
+        !text.startsWith("/") &&
+        saving?.client === client &&
+        saving.sessionId === activeSessionId
+      ) {
+        const selection = runtime.getSelectionGeneration();
+        try {
+          await saving.result;
+        } catch {
+          // The menu reports the save error; returning false restores the draft.
+          return false;
+        }
+        if (
+          runtime.client !== client ||
+          runtime.getSelectionGeneration() !== selection
+        )
+          return false;
+      }
       return submitText(text, clientRequestId, reasoning, draftEntryId);
     },
-    [modelMissing, onOpenModelSettings, inDraft, submitText, draftEntryId],
+    [
+      modelMissing,
+      onOpenModelSettings,
+      inDraft,
+      submitText,
+      draftEntryId,
+      client,
+      activeSessionId,
+      runtime,
+    ],
   );
 
   // Stable identity: the slash palette refetches its catalog when this changes.

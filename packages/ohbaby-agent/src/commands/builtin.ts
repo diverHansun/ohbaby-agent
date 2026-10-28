@@ -276,7 +276,7 @@ async function handleStatus(
     promptCacheUsage,
     projectRoot,
   ] = await Promise.all([
-    listModels(options),
+    listModels(options, invocation.sessionId),
     currentModel(options, invocation.sessionId),
     options.tools?.listTools() ?? [],
     listSkills(options),

@@ -76,8 +76,13 @@ export function useReasoning(
         (preference.enabled !== false &&
           preference.effort !== undefined &&
           !view.efforts.includes(preference.effort)))
-    )
+    ) {
+      // Clear the displayed preference as well as the submitted value. A
+      // later switch back must not revive a level the previous model reset.
+      localPreference.current = undefined;
+      setPreference(undefined);
       onChange(undefined);
+    }
   }, [view, preference, onChange]);
   const pending = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {

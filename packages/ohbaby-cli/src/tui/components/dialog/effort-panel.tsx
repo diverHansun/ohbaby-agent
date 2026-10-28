@@ -81,16 +81,13 @@ export function EffortPanel({
           const preference = sessionId
             ? (sessionReasoning ?? null)
             : pendingReasoning;
-          const active =
-            preference?.enabled !== false && preference?.effort === undefined
-              ? (capability.default ?? preference)
-              : preference;
+          const active = { ...capability.default, ...preference };
           const options = choicesFor(capability);
           const index = options.findIndex((option) =>
-            active?.enabled === false
+            active.enabled === false
               ? option.reasoning.enabled === false
               : option.reasoning.enabled !== false &&
-                option.reasoning.effort === active?.effort,
+                option.reasoning.effort === active.effort,
           );
           setView(capability);
           setCurrent(preference);

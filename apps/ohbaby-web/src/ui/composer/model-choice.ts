@@ -26,19 +26,16 @@ export function useSettingsModels(
 }
 
 /**
- * The entry a chat's next turn uses: its own choice while that entry is
- * still complete, otherwise the default (00 D1, D10). `undefined` until the
- * list loads or when no model is usable.
+ * The entry a chat's next turn uses: its own choice while it exists,
+ * otherwise the default (00 D1, D10). Incomplete entries stay selected so
+ * their configuration error does not silently change the chat's model.
  */
 export function resolveModelEntry(
   models: UiSettingsModels | undefined,
   selectedId: string | undefined,
 ): UiSettingsModel | undefined {
-  const complete = models?.models.filter(
-    (model) => model.configurationComplete,
-  );
   return (
-    complete?.find((model) => model.id === selectedId) ??
-    complete?.find((model) => model.id === models?.active?.id)
+    models?.models.find((model) => model.id === selectedId) ??
+    models?.models.find((model) => model.id === models.active?.id)
   );
 }

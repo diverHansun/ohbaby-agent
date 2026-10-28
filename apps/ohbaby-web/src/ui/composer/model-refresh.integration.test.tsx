@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import type { UiCurrentModelConfig } from "ohbaby-sdk";
+import type { UiCurrentModelConfig, UiSettingsModel } from "ohbaby-sdk";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { createMockSettingsApi } from "../../dev/mock-settings.js";
 import { SettingsLayer } from "../../runtime/settings-layer.js";
-import { useSettingsModels } from "./model-choice.js";
+import { resolveModelEntry, useSettingsModels } from "./model-choice.js";
 import { ModelMenu } from "./ModelMenu.js";
 import { useReasoning, type ReasoningClient } from "./useReasoning.js";
 
@@ -302,3 +302,127 @@ it("switches back to the chat's model while the first switch awaits its echo", a
     "deepseek-v4.1-pro",
   );
 });
+
+it("keeps an incomplete selected entry visible without offering it or falling back", async () => {
+  const api = createMockSettingsApi("settings", () => Promise.resolve());
+  const settings = new SettingsLayer(api, () => "/test");
+  const models = await api.getModels();
+  const chosen = models.models.find((model) => model.id === "m3");
+  if (!chosen) throw new Error("Expected another configured model");
+  const incomplete = {
+    ...chosen,
+    baseUrl: "",
+    configurationComplete: false,
+  };
+  const changed = {
+    ...models,
+    models: models.models.map((model) =>
+      model.id === chosen.id ? incomplete : model,
+    ),
+  };
+  await render(
+    <ModelMenu
+      settings={settings}
+      models={changed}
+      selectedEntryId={chosen.id}
+      onSelect={() => Promise.resolve()}
+      fallbackLabel=""
+      missing={false}
+      onManage={() => undefined}
+      onError={() => undefined}
+    />,
+  );
+  expect(document.querySelector(".ohb-model-button")?.textContent).toContain(
+    chosen.model,
+  );
+  openMenu();
+  expect(
+    document.querySelector(".ohb-model-menu-list")?.textContent,
+  ).not.toContain(chosen.model);
+  // Draft submission must retain this id and let the server report its
+  // configuration error, instead of silently submitting with the default.
+  expect(resolveModelEntry(changed, chosen.id)?.id).toBe(chosen.id);
+  expect(resolveModelEntry(changed, "deleted-entry")?.id).toBe(
+    models.active?.id,
+  );
+});
+
+it.each(["identified", "unknown"] as const)(
+  "only clears a draft's thinking when the next model is known incompatible (%s)",
+  async (status) => {
+    const client: ReasoningClient = {
+      getCurrentModel: () => Promise.resolve(null),
+      subscribeEvents: () => () => undefined,
+      updateSessionReasoning: vi.fn(),
+    };
+    const first = (
+      await createMockSettingsApi("settings", () =>
+        Promise.resolve(),
+      ).getModels()
+    ).models.at(0);
+    if (!first) throw new Error("Expected a model");
+    const original: UiSettingsModel = {
+      ...first,
+      reasoning: {
+        status: "identified",
+        mode: "effort",
+        efforts: ["low", "medium", "high"],
+        supportsDisabled: true,
+        default: { enabled: true, effort: "medium" },
+      },
+      reasoningDefault: { enabled: true, effort: "medium" },
+    };
+    const other: UiSettingsModel = {
+      ...original,
+      id: "other-model",
+      reasoning: {
+        ...original.reasoning,
+        status,
+        efforts: status === "identified" ? ["low"] : [],
+        default: { enabled: true, effort: "low" },
+      },
+      reasoningDefault: { enabled: true, effort: "low" },
+    };
+    const onChange = vi.fn();
+    function Control({
+      entry,
+    }: {
+      readonly entry: UiSettingsModel;
+    }): ReactElement {
+      const state = useReasoning(client, null, onChange, entry);
+      return (
+        <>
+          <output>{state.kind === "choice" ? state.value : state.kind}</output>
+          <button
+            onClick={() => {
+              if (state.kind === "choice") state.select("high");
+            }}
+          >
+            High
+          </button>
+        </>
+      );
+    }
+    await render(<Control entry={original} />);
+    act(() => document.querySelector<HTMLButtonElement>("button")?.click());
+    expect(document.querySelector("output")?.textContent).toBe("high");
+    await act(async () => {
+      root?.render(<Control entry={other} />);
+      await Promise.resolve();
+    });
+    expect(document.querySelector("output")?.textContent).toBe(
+      status === "identified" ? "low" : "unknown",
+    );
+    await act(async () => {
+      root?.render(<Control entry={original} />);
+      await Promise.resolve();
+    });
+    expect(document.querySelector("output")?.textContent).toBe(
+      status === "identified" ? "medium" : "high",
+    );
+    expect(onChange).toHaveBeenLastCalledWith(
+      status === "identified" ? undefined : { enabled: true, effort: "high" },
+    );
+    expect(client.updateSessionReasoning).not.toHaveBeenCalled();
+  },
+);

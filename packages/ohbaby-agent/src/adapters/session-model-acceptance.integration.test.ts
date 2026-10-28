@@ -214,6 +214,16 @@ it("T13/T14 applies entry defaults and clears an incompatible session effort whe
     entry("b", { reasoningCapabilities: effort }),
   ]);
   const client = createClient();
+  await expect(client.getCurrentModel()).resolves.toMatchObject({
+    id: "a",
+    reasoning: { default: { enabled: true, effort: "high" } },
+  });
+  await expect(
+    client.getCurrentModel({ modelEntryId: "b" }),
+  ).resolves.toMatchObject({
+    id: "b",
+    reasoning: { default: { enabled: true, effort: "medium" } },
+  });
   expect(
     (
       await client.submitPromptAndWait("Use entry A default", {
@@ -234,6 +244,12 @@ it("T13/T14 applies entry defaults and clears an incompatible session effort whe
     "high",
     "medium",
   ]);
+  await expect(
+    client.getCurrentModel({ sessionId: "reasoning-a" }),
+  ).resolves.toMatchObject({
+    id: "a",
+    reasoning: { default: { enabled: true, effort: "high" } },
+  });
   await client.updateSessionReasoning({
     sessionId: "reasoning-a",
     reasoning: { effort: "xhigh" },
@@ -252,6 +268,26 @@ it("T13/T14 applies entry defaults and clears an incompatible session effort whe
     ).prompt.status,
   ).toBe("succeeded");
   expect(agentCalls().at(-1)?.request.reasoning?.effort).toBe("medium");
+});
+
+it("T14 keeps disabled entry defaults and does not invent unknown capabilities", async () => {
+  await writeModels([
+    entry("a", {
+      reasoning: { enabled: false, effort: "high" },
+      reasoningCapabilities: effort,
+    }),
+    entry("b", {
+      reasoning: { effort: "high" },
+      reasoningCapabilities: undefined,
+    }),
+  ]);
+  const client = createClient();
+  await expect(client.getCurrentModel()).resolves.toMatchObject({
+    reasoning: { default: { enabled: false, effort: "high" } },
+  });
+  const unknown = await client.getCurrentModel({ modelEntryId: "b" });
+  expect(unknown?.reasoning).toMatchObject({ status: "unknown", efforts: [] });
+  expect(unknown?.reasoning?.default).toBeUndefined();
 });
 
 it("T13 preserves a session effort when the target entry capability is still unknown", async () => {

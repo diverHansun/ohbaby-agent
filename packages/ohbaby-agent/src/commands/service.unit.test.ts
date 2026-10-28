@@ -1509,6 +1509,14 @@ describe("CommandService", () => {
     expect(events.at(-1)).toMatchObject({
       output: { data: { models: [{ default: true, id: "a" }] } },
     });
+
+    // /status marks the chat's model too, not the default.
+    listModels.mockClear();
+    await service.executeCommand({
+      ...makeInvocation("status", ["status"]),
+      sessionId: "session_1",
+    });
+    expect(listModels).toHaveBeenCalledWith("session_1");
   });
 
   it("redacts unexpected api keys from model command outputs", async () => {

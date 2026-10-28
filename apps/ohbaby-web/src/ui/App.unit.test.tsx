@@ -7153,3 +7153,53 @@ it.each(["user-stop", "service-shutdown"])(
     expect(app.container.querySelector('[role="alert"]')).toBeNull();
   },
 );
+
+it.each(["success", "failure", "session-change"])(
+  "waits for an in-flight model choice before sending (%s)",
+  async (outcome) => {
+    const snapshot = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot });
+    const saved =
+      deferred<Awaited<ReturnType<UiBackendClient["updateSessionModel"]>>>();
+    vi.mocked(fake.client.updateSessionModel).mockReturnValue(saved.promise);
+    const app = mountApp(fake.runtime);
+    await flushTimers();
+    const trigger =
+      app.container.querySelector<HTMLButtonElement>(".ohb-model-button");
+    if (!trigger) throw new Error("Expected model button");
+    await act(async () => {
+      trigger.click();
+      await Promise.resolve();
+    });
+    const choice = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".ohb-model-menu-list [role='menuitem']",
+      ),
+    ].find((row) => row.getAttribute("aria-current") !== "true");
+    if (!choice) throw new Error("Expected alternate model");
+    await act(async () => {
+      choice.click();
+      await Promise.resolve();
+    });
+    await setTextareaValue(app.container, "use the newly selected model");
+    await pressTextareaKey(app.container, "Enter");
+    expect.soft(fake.submitPromptAccepted).not.toHaveBeenCalled();
+    if (outcome === "session-change")
+      await act(async () => fake.runtime.openDraft());
+    await act(async () => {
+      if (outcome === "failure") saved.reject(new Error("model save failed"));
+      else
+        saved.resolve({
+          ...snapshot.sessions[0],
+          modelEntryId: "m3",
+        });
+      await Promise.resolve();
+    });
+    await flushTimers();
+    if (outcome === "success")
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    else expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
+    if (outcome === "failure")
+      expect(textareaValue(app.container)).toBe("use the newly selected model");
+  },
+);

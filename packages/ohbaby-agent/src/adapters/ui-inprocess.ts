@@ -2682,6 +2682,10 @@ export function createInProcessUiBackendClient(
         await resolveProjectRoot(),
         selected,
       );
+      const reasoning = reasoningCapabilityView(
+        config,
+        await currentDiscoveryState(undefined, undefined, entry.id),
+      );
       return {
         id: entry.id,
         source,
@@ -2692,10 +2696,15 @@ export function createInProcessUiBackendClient(
         maxOutputTokens: config.maxTokens,
         model: config.model,
         provider: config.provider,
-        reasoning: reasoningCapabilityView(
-          config,
-          await currentDiscoveryState(undefined, undefined, entry.id),
-        ),
+        // This query describes the next turn's configuration. Settings keeps
+        // the capability default separate from the entry's saved preference.
+        reasoning:
+          reasoning.status === "identified" && config.reasoning
+            ? {
+                ...reasoning,
+                default: { ...reasoning.default, ...config.reasoning },
+              }
+            : reasoning,
       };
     } catch (error) {
       if (error instanceof ConfigError && error.code === "FILE_NOT_FOUND")

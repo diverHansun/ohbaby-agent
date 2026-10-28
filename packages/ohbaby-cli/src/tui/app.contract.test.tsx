@@ -3958,6 +3958,75 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
+  it.each([
+    {
+      name: "the entry's high default",
+      entryDefault: { enabled: true, effort: "high" },
+      preference: undefined,
+      expected: { enabled: true, effort: "high" },
+    },
+    {
+      name: "the entry's disabled default",
+      entryDefault: { enabled: false, effort: "high" },
+      preference: undefined,
+      expected: { enabled: false },
+    },
+    {
+      name: "the session's enabled override of the disabled entry",
+      entryDefault: { enabled: false, effort: "high" },
+      preference: { enabled: true },
+      expected: { enabled: true, effort: "high" },
+    },
+  ])(
+    "/effort starts at $name",
+    async ({ entryDefault, preference, expected }) => {
+      const base = snapshot();
+      const initial = {
+        ...base,
+        sessions: base.sessions.map((session) => ({
+          ...session,
+          reasoning: preference,
+        })),
+      };
+      const client = createFakeClient(initial, effortCommandCatalog);
+      client.getCurrentModel.mockResolvedValue({
+        id: "entry-a",
+        source: "explicit",
+        provider: "p",
+        baseUrl: "https://example.test",
+        interfaceProvider: "openai-compatible",
+        model: "reasoning-model",
+        reasoning: {
+          status: "identified",
+          mode: "effort",
+          supportsDisabled: true,
+          efforts: ["low", "medium", "high"],
+          default: entryDefault,
+        },
+      });
+      client.updateSessionReasoning.mockResolvedValue(initial.sessions[0]);
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      app.stdin.write("/effort");
+      app.stdin.write("\r");
+      await waitForFrame(app, (frame) => frame.includes("Enter save"));
+      await settleConnectInput();
+      app.stdin.write("\r");
+      await vi.waitFor(() => {
+        expect(client.updateSessionReasoning).toHaveBeenCalledWith({
+          sessionId: "session_1",
+          reasoning: expected,
+        });
+      });
+      app.unmount();
+    },
+  );
+
   it("does not send a pending effort chosen for a different model", async () => {
     const initial = { ...snapshot(), activeSessionId: null, sessions: [] };
     const client = createFakeClient(initial, effortCommandCatalog);
@@ -4771,6 +4840,38 @@ describe("OhbabyTerminalApp", () => {
     await waitForFrame(app, (frame) => !frame.includes("d set default"));
     app.unmount();
   });
+
+  it.each(["\r", "d"])(
+    "T25 uses the moved row when navigation and %j arrive together",
+    async (action) => {
+      const client = createFakeClient(snapshot(), displayCommandCatalog);
+      client.updateSessionModel.mockResolvedValue(snapshot().sessions[0]);
+      client.selectDefaultModel.mockResolvedValue({
+        ok: true,
+        active: { id: "m2", provider: "p", model: "model-2" },
+        models: [],
+      });
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      await openModels(app, client, 3);
+      app.stdin.write(`\u001B[B${action}`);
+      await vi.waitFor(() => {
+        if (action === "d")
+          expect(client.selectDefaultModel).toHaveBeenCalledWith("m2");
+        else
+          expect(client.updateSessionModel).toHaveBeenCalledWith({
+            sessionId: "session_1",
+            modelEntryId: "m2",
+          });
+      });
+      app.unmount();
+    },
+  );
 
   it("T25 keeps the panel open with the reason when a save fails, and ignores a repeated d", async () => {
     const client = createFakeClient(snapshot(), displayCommandCatalog);
