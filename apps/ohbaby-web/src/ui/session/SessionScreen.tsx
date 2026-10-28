@@ -132,8 +132,6 @@ export function SessionScreen({
     });
   // Without a configured model, sending opens Settings › Models instead of
   // failing (D16). A failed read of the model is not "missing".
-  const modelMissing =
-    storeSnapshot.currentModelLoaded && storeSnapshot.currentModel === null;
   const { prefillComposer } = overlays;
   const inDraft = view.composer.activeSessionId === undefined;
   // A chat keeps its model on the session (session-model 00 D17); a draft
@@ -149,6 +147,11 @@ export function SessionScreen({
     ? draftModel
     : view.activeSession?.modelEntryId;
   const modelEntry = resolveModelEntry(models, selectedEntryId);
+  const modelMissing =
+    storeSnapshot.currentModelLoaded &&
+    storeSnapshot.currentModel === null &&
+    !(selectedEntryId === modelEntry?.id && modelEntry?.configurationComplete);
+
   const activeSessionId = view.composer.activeSessionId;
   const modelSave = useRef<{
     client: UiBackendClient;

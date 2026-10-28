@@ -7203,3 +7203,50 @@ it.each(["success", "failure", "session-change"])(
       expect(textareaValue(app.container)).toBe("use the newly selected model");
   },
 );
+
+it.each([false, true])(
+  "submits a valid explicit model without a global default (draft=%s)",
+  async (draft) => {
+    const original = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...original,
+        activeSessionId: draft ? null : original.activeSessionId,
+        sessions: original.sessions.map((session) => ({
+          ...session,
+          modelEntryId: "m3",
+        })),
+      },
+    });
+    fake.store.setCurrentModel(null);
+    const app = mountApp(fake.runtime);
+    await flushTimers();
+    if (draft) {
+      const trigger =
+        app.container.querySelector<HTMLButtonElement>(".ohb-model-button");
+      if (!trigger) throw new Error("Expected model button");
+      await act(async () => {
+        trigger.click();
+        await Promise.resolve();
+      });
+      const choice = [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".ohb-model-menu-list [role='menuitem']",
+        ),
+      ].find((row) => row.textContent.includes("gpt-5.2"));
+      if (!choice) throw new Error("Expected explicit model choice");
+      await act(async () => {
+        choice.click();
+        await Promise.resolve();
+      });
+    }
+    await setTextareaValue(app.container, "use my explicit model");
+    await pressTextareaKey(app.container, "Enter");
+    await flushTimers();
+    expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    if (draft)
+      expect(fake.submitPromptAccepted.mock.calls[0]?.[1]).toMatchObject({
+        modelEntryId: "m3",
+      });
+  },
+);
