@@ -57,12 +57,18 @@ function formatToolName(name: string): string {
 }
 
 function formatPrimaryInput(call: UiToolCall): string {
-  if (call.name === "subagent_status") return "";
+  if (
+    call.name === "subagent_status" ||
+    (call.name === "agent" &&
+      (call.input.action === "list" || call.input.action === "monitor"))
+  )
+    return "";
   const input = call.input;
   // Subagent prompts are runtime instructions, not user-facing task titles.
-  const keys = call.name.startsWith("subagent_")
-    ? ["name", "subagent_id"]
-    : ["command", "file_path", "path", "query", "prompt"];
+  const keys =
+    call.name === "agent" || call.name.startsWith("subagent_")
+      ? ["name", "agent_id", "subagent_id"]
+      : ["command", "file_path", "path", "query", "prompt"];
   for (const key of keys) {
     const value = input[key];
     if (typeof value === "string" && value.trim() !== "") {

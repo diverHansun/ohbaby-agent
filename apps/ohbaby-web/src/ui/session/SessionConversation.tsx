@@ -13,7 +13,11 @@ import {
   type PromptProjectionModel,
 } from "../conversation/ConversationStream.js";
 import { DurationSampleContext } from "../conversation/use-execution-duration.js";
-import { DelegationRow, delegationExecution } from "./DelegationRow.js";
+import {
+  DelegationRow,
+  delegationExecution,
+  isDelegationCall,
+} from "./DelegationRow.js";
 import type { ViewModel } from "./selectors.js";
 import type { useSessionInteractions } from "./useSessionInteractions.js";
 
@@ -52,20 +56,22 @@ export function SessionConversation(props: {
       <DurationSampleContext.Provider value={storeSnapshot.durationSample}>
         <ConversationPresentation.Provider
           value={{
-            renderTool: (message, call, result) =>
-              call.name === "subagent_run" ? (
+            renderTool: (message, call, result) => {
+              const execution = delegationExecution(
+                message,
+                call,
+                interactions.subagentState.list?.executions ?? [],
+                sessionId ?? "",
+              );
+              return isDelegationCall(call, execution) ? (
                 <DelegationRow
                   call={call}
                   result={result}
-                  execution={delegationExecution(
-                    message,
-                    call,
-                    interactions.subagentState.list?.executions ?? [],
-                    sessionId ?? "",
-                  )}
+                  execution={execution}
                   onOpen={interactions.openChild}
                 />
-              ) : undefined,
+              ) : undefined;
+            },
           }}
         >
           <ConversationStream
