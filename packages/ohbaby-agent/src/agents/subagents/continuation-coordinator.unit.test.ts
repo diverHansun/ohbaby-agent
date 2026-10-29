@@ -94,6 +94,24 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("subagent continuation", () => {
+  it("leaves excluded Goal results pending for a later explicit user run", async () => {
+    const s = await setup();
+    await s.executions.finish(s.execution, {
+      status: "completed",
+      output: "Goal result",
+      completedAt: 10,
+    });
+    const automatic = s.coordinator.createPort({
+      runId: "root",
+      sessionId: "parent",
+      excludedSubagentRootRunIds: ["root"],
+    });
+    expect(await automatic.beforeStep()).toEqual([]);
+    expect((await s.executions.get(s.execution))?.delivery.state).toBe(
+      "pending",
+    );
+    expect(await s.port.beforeStep()).toHaveLength(1);
+  });
   it("withdraws an unsent supervision snapshot when a real result arrives", async () => {
     const s = await setup();
     await s.inputs.acceptRuntimeInput({

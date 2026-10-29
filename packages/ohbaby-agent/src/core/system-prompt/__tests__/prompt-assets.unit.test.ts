@@ -79,6 +79,41 @@ describe("system prompt template assets", () => {
     );
   });
 
+  it("preserves D41 lifecycle, D43 ownership, D47 delegation and D48 snapshot guidance", () => {
+    for (const rule of [
+      "Keep completed instances for related follow-ups",
+      "the new task is unrelated, or accumulated context is unsuitable",
+      "Do not close merely to finish this turn",
+      "concurrently running write scopes must not overlap",
+      "Stop it first or wait for its result before changing those files",
+      "include the objective, relevant facts you already know, the files or directories it owns or may only read, and the expected result",
+      "one specific question usually needs one agent",
+      "Do not default to filling all six execution slots",
+      "do not retry immediately: wait for useful results",
+      "immediately returns a snapshot of saved execution records; it does not wait",
+      "not repeated polling for completion",
+    ])
+      expect(PRIMARY_BASE_PROMPT).toContain(rule);
+    expect(SUBAGENT_BASE_PROMPT).toContain(
+      "Edit only the files or directories assigned to you",
+    );
+    expect(SUBAGENT_BASE_PROMPT).toContain(
+      "Keep your report to about 1–2k tokens",
+    );
+    expect(SUBAGENT_BASE_PROMPT).toContain(
+      "Write full logs or lengthy analysis to a file and return its path",
+    );
+    for (const prompt of [
+      PRIMARY_BASE_PROMPT,
+      SUBAGENT_BASE_PROMPT,
+      SUBAGENT_ROLES_GUIDANCE_PROMPT,
+    ]) {
+      expect(prompt).not.toMatch(
+        /subagent_(?:run|status|close)|(?:60|120)[ -]seconds?|close after \d+ (?:turns|rounds)/iu,
+      );
+    }
+  });
+
   it("keeps subagent safety guidance distinct from the primary prompt", () => {
     expect(SUBAGENT_BASE_PROMPT).toContain("# MCP safety");
     expect(SUBAGENT_BASE_PROMPT).toContain(

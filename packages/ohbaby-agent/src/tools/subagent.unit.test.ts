@@ -252,6 +252,20 @@ describe("agent builtin tool", () => {
       execution: { executionId: "execution_1" },
     });
   });
+  it("includes file ownership guidance when send starts a background execution", async () => {
+    const host = createHost();
+    host.send.mockResolvedValueOnce({
+      started: true,
+      execution: { ...execution, mode: "background", status: "running" },
+    });
+    const result = await tool(host).execute(
+      { action: "send", agent_id: "subagent_1", message: "continue" },
+      context,
+    );
+    expect(result.output).toContain(
+      "do not edit the files assigned to it concurrently",
+    );
+  });
   it("lists within the caller session and passes independent monitor cursors", async () => {
     const host = createHost();
     const agent = tool(host);

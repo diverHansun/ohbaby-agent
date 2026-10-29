@@ -1,3 +1,7 @@
+import type {
+  RunCleanupSnapshot,
+  ToolCleanupState,
+} from "../core/tool-scheduler/run-cleanup.js";
 import {
   probeProcessTree,
   type KillTreeResult,
@@ -41,9 +45,7 @@ export interface ShellJobStartInput {
   readonly owner?: ToolExecutionOwner;
   readonly release?: () => void | Promise<void>;
   readonly reportCleanupError?: (error: unknown) => void;
-  readonly reportCleanup?: (
-    state: "in-progress" | "unconfirmed" | "confirmed",
-  ) => void;
+  readonly reportCleanup?: (state: ToolCleanupState) => void;
   readonly captureMode?: "head" | "tail";
   readonly contextScopeId?: string;
   readonly sessionId: string;
@@ -61,11 +63,7 @@ export interface ShellJobSnapshot {
   readonly metadata: Readonly<Record<string, unknown>>;
 }
 
-export interface ShellCleanupResult {
-  readonly confirmed: boolean;
-  /** Resolves only on process-exit evidence, including evidence arriving late. */
-  readonly settled?: Promise<void>;
-}
+export type ShellCleanupResult = RunCleanupSnapshot;
 
 export interface ShellJobRegistryOptions {
   // Legacy custom shells may return void; absence of proof is never confirmation.
@@ -91,7 +89,7 @@ interface ShellJob {
   readonly release?: () => void | Promise<void>;
   readonly reportCleanup?: ShellJobStartInput["reportCleanup"];
   readonly reportCleanupError?: ShellJobStartInput["reportCleanupError"];
-  cleanup?: "in-progress" | "unconfirmed" | "confirmed";
+  cleanup?: ToolCleanupState;
   sourceCleanup?: ReturnType<typeof beginSourceCleanup>;
   cleanupTask?: Promise<void>;
   resolveCleanup?: () => void;
@@ -659,7 +657,8 @@ export class ShellJobRegistry {
         .then(job.release)
         .then(released)
         .catch((error: unknown) => {
-          // Environment disposal failure is not evidence that the process is alive.
+          // Process exit is confirmed, but the retained sandbox resource is not.
+          // Keep releaseComplete false: a failed one-shot release cannot safely be retried.
           try {
             job.reportCleanupError?.(error);
           } catch {

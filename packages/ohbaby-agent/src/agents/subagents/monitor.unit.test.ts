@@ -106,6 +106,59 @@ function fixture(): Fixture {
 }
 
 describe("subagent monitor", () => {
+  it("shows unprocessed message text and close reasons within the shared output budget", async () => {
+    const f = fixture();
+    await f.agent();
+    await f.message("saved");
+    const readExecutionInputs = vi.fn(() =>
+      Promise.resolve([
+        {
+          inputId: "stopped-input",
+          text: "Please check the failing test",
+          reason: "stopped",
+        },
+      ]),
+    );
+    const monitor = createSubagentMonitor({ ...f, readExecutionInputs });
+    const result = await monitor({
+      parentSessionId: "root",
+      subagentIds: ["a", "foreign"],
+    });
+    expect(result.targets[0]).toMatchObject({
+      unprocessedMessageCount: 1,
+      unprocessedMessages: [
+        {
+          executionId: "a-execution",
+          inputId: "stopped-input",
+          text: "Please check the failing test",
+          reason: "stopped",
+          truncated: false,
+        },
+      ],
+    });
+    expect(readExecutionInputs).toHaveBeenCalledTimes(1);
+    readExecutionInputs.mockResolvedValue(
+      Array.from({ length: 30 }, (_, index) => ({
+        inputId: String(index),
+        text: '中文\\"'.repeat(10000),
+        reason: "timed_out",
+      })),
+    );
+    const bounded = await monitor({
+      parentSessionId: "root",
+      subagentIds: ["a"],
+    });
+    expect(Buffer.byteLength(JSON.stringify(bounded))).toBeLessThanOrEqual(
+      16384,
+    );
+    expect(bounded.targets[0].unprocessedMessageCount).toBe(30);
+    expect(bounded.targets[0].unprocessedMessages[0]).toMatchObject({
+      reason: "timed_out",
+      truncated: true,
+    });
+    expect(bounded.targets[0].truncated).toBe(true);
+    expect(bounded.targets[0].records[0].messageId).toBe("saved");
+  });
   it("reads closed saved history without mutating execution or instance facts", async () => {
     const f = fixture();
     const execution = await f.agent();

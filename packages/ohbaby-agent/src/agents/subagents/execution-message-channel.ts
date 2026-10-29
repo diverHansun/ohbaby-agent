@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import type {
-  MessageManager,
-  MessageWithParts,
+import {
+  buildRuntimeInputMessage,
+  type MessageManager,
 } from "../../core/message/index.js";
 import {
   CurrentRunInputConflictError,
@@ -34,9 +34,9 @@ export interface ExecutionMessageChannel {
     readonly execution: SubagentExecutionRecord;
     readonly reason: string;
   }): Promise<readonly UnprocessedExecutionMessage[]>;
-  readExecutionInputs(input: {
+  readonly readExecutionInputs: (input: {
     readonly execution: SubagentExecutionRecord;
-  }): Promise<readonly UnprocessedExecutionMessage[]>;
+  }) => Promise<readonly UnprocessedExecutionMessage[]>;
 }
 export function createExecutionMessageChannel(options: {
   readonly inputs: CurrentRunInputStore;
@@ -150,28 +150,20 @@ export function createExecutionMessageChannel(options: {
       if (!saved.childSessionId || !saved.childScopeId || !saved.childRunId)
         throw new CurrentRunInputConflictError("Execution input is not ready");
       const messageId = `subagent-message:${createHash("sha256").update(inputId).digest("hex")}`;
-      const message: MessageWithParts = {
-        info: {
-          id: messageId,
-          sessionId: saved.childSessionId,
-          contextScopeId: saved.childScopeId,
-          runId: saved.childRunId,
-          role: "user",
-          agent: "subagent",
-          time: { created: now() },
+      const message = buildRuntimeInputMessage({
+        messageId,
+        sessionId: saved.childSessionId,
+        contextScopeId: saved.childScopeId,
+        agent: "subagent",
+        createdAt: now(),
+        origin: {
+          kind: "subagent-message",
+          inputId,
+          targetRunId: saved.childRunId,
+          sourceId: inputId,
         },
-        parts: [
-          {
-            id: `${messageId}:text`,
-            messageId,
-            sessionId: saved.childSessionId,
-            contextScopeId: saved.childScopeId,
-            orderIndex: 0,
-            type: "text",
-            text,
-          },
-        ],
-      };
+        text,
+      });
       try {
         await options.inputs.acceptRuntimeInput({
           inputId,

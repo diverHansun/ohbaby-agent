@@ -9,6 +9,7 @@ import {
 import type { SubagentRole } from "../roles.js";
 import {
   assertSubagentInstanceUpdate,
+  closeLegacySubagentInputs,
   recoveryExecutionInputsUpdate,
   type QueuedSubagentInput,
   type MarkSubagentsInterruptedInput,
@@ -178,8 +179,35 @@ function updateColumns(update: SubagentInstanceUpdate): {
 }
 
 export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
+  private readonly listeners = new Set<
+    (record: SubagentInstanceRecord) => void
+  >();
+  subscribe(listener: (record: SubagentInstanceRecord) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  private publish(record: SubagentInstanceRecord): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(structuredClone(record));
+      } catch {
+        /* Observers cannot undo committed writes. */
+      }
+    }
+  }
   private readonly db: DatabaseConnection;
   private readonly isOwnerAlive: (pid: number) => boolean;
+
+  private async write<T>(
+    operation: (changed: SubagentInstanceRecord[]) => T,
+  ): Promise<T> {
+    const changed: SubagentInstanceRecord[] = [];
+    const result = await runWriteTransaction(this.db, () => operation(changed));
+    for (const record of changed) this.publish(record);
+    return result;
+  }
 
   constructor(options: DatabaseSubagentInstanceStoreOptions = {}) {
     this.db = options.db ?? getDatabase();
@@ -189,7 +217,7 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
   async recoverExecutionInputs(
     input: RecoverSubagentExecutionInputsInput,
   ): Promise<SubagentInstanceRecord> {
-    return runWriteTransaction(this.db, () => {
+    return this.write((changed) => {
       const current = this.getById(input.subagentId);
       const update = recoveryExecutionInputsUpdate(current, input);
       if (!update) return current;
@@ -213,36 +241,14 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
         throw new Error(
           `Subagent recovery ownership conflict: ${input.subagentId}`,
         );
-      return rowToRecord(row);
-    });
-  }
-
-  async appendPendingQueue(
-    subagentId: string,
-    input: QueuedSubagentInput,
-    updatedAt: number,
-  ): Promise<SubagentInstanceRecord | null> {
-    return runWriteTransaction(this.db, () => {
-      const table = schema.subagentInstance;
-      const columns = table.columns;
-      const row = this.db
-        .prepare<SubagentInstanceRow>(
-          `UPDATE ${table.tableName}
-         SET ${columns.pendingQueue} = json_insert(
-               ${columns.pendingQueue}, '$[#]', json(?)
-             ),
-             ${columns.updatedAt} = ?
-         WHERE ${columns.subagentId} = ?
-           AND ${columns.closedAt} IS NULL
-         RETURNING *`,
-        )
-        .get(JSON.stringify(input), updatedAt, subagentId);
-      return row ? rowToRecord(row) : null;
+      const record = rowToRecord(row);
+      changed.push(record);
+      return record;
     });
   }
 
   async create(record: SubagentInstanceRecord): Promise<void> {
-    return runWriteTransaction(this.db, () => {
+    return this.write((changed) => {
       const table = schema.subagentInstance;
       this.db
         .prepare(
@@ -282,6 +288,7 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
           record.interruptedAt ?? null,
           record.closedAt ?? null,
         );
+      changed.push(record);
     });
   }
 
@@ -302,7 +309,7 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
     subagentId: string,
     update: SubagentInstanceUpdate,
   ): Promise<SubagentInstanceRecord | null> {
-    return runWriteTransaction(this.db, () => {
+    return this.write((changed) => {
       const { assignments, values } = updateColumns(update);
       if (assignments.length === 0) {
         throw new Error("Subagent claim requires an update");
@@ -317,7 +324,10 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
          RETURNING *`,
         )
         .get(...values, subagentId);
-      return row ? rowToRecord(row) : null;
+      if (!row) return null;
+      const record = rowToRecord(row);
+      changed.push(record);
+      return record;
     });
   }
 
@@ -326,7 +336,7 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
     currentRunId: string,
     update: SubagentInstanceUpdate,
   ): Promise<SubagentInstanceRecord> {
-    return runWriteTransaction(this.db, () => {
+    return this.write((changed) => {
       const { assignments, values } = updateColumns(update);
       if (assignments.length === 0) {
         throw new Error("Subagent run finish requires an update");
@@ -341,7 +351,10 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
          RETURNING *`,
         )
         .get(...values, subagentId, currentRunId);
-      return row ? rowToRecord(row) : this.getById(subagentId);
+      if (!row) return this.getById(subagentId);
+      const record = rowToRecord(row);
+      changed.push(record);
+      return record;
     });
   }
 
@@ -349,7 +362,7 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
     subagentId: string,
     update: SubagentInstanceUpdate,
   ): Promise<SubagentInstanceRecord> {
-    return runWriteTransaction(this.db, () => {
+    return this.write((changed) => {
       const { assignments, values } = updateColumns(update);
       if (assignments.length > 0) {
         this.db
@@ -360,7 +373,9 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
           )
           .run(...values, subagentId);
       }
-      return this.getById(subagentId);
+      const record = this.getById(subagentId);
+      if (assignments.length > 0) changed.push(record);
+      return record;
     });
   }
 
@@ -394,7 +409,7 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
   async markInterrupted(
     input: MarkSubagentsInterruptedInput = {},
   ): Promise<readonly SubagentInstanceRecord[]> {
-    return runWriteTransaction(this.db, () => {
+    return this.write((changed) => {
       const interruptedAt = input.interruptedAt ?? Date.now();
       const where =
         input.parentSessionId === undefined
@@ -418,6 +433,7 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
           .prepare(
             `UPDATE ${schema.subagentInstance.tableName}
            SET status = 'interrupted',
+               pending_queue = ?,
                interrupted_at = ?,
                updated_at = ?,
                completed_at = CASE
@@ -433,6 +449,13 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
              AND current_run_id IS ?`,
           )
           .run(
+            encodeQueue(
+              closeLegacySubagentInputs(
+                decodeQueue(row.pending_queue),
+                "runtime interrupted",
+                interruptedAt,
+              ),
+            ),
             interruptedAt,
             interruptedAt,
             interruptedAt,
@@ -445,18 +468,27 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
           interruptedRows.push(row);
         }
       }
-      return interruptedRows.map((row) =>
+      const records = interruptedRows.map((row) =>
         rowToRecord({
           ...row,
           completed_at:
             row.current_run_id === null ? row.completed_at : interruptedAt,
           current_run_id: null,
+          pending_queue: encodeQueue(
+            closeLegacySubagentInputs(
+              decodeQueue(row.pending_queue),
+              "runtime interrupted",
+              interruptedAt,
+            ),
+          ),
           interrupted_at: interruptedAt,
           last_run_id: row.current_run_id ?? row.last_run_id,
           status: "interrupted",
           updated_at: interruptedAt,
         }),
       );
+      changed.push(...records);
+      return records;
     });
   }
 }

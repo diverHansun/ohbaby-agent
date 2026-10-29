@@ -1,3 +1,5 @@
+export const SUBAGENT_RESULT_SOURCE_PREFIX = "subagent-result:";
+
 import {
   getDatabase,
   runWriteTransaction,
@@ -224,7 +226,7 @@ function finishRecord(
           ? { state: "none" }
           : {
               state: "pending",
-              notificationId: `subagent-result:${r.executionId}`,
+              notificationId: `${SUBAGENT_RESULT_SOURCE_PREFIX}${r.executionId}`,
             },
   };
 }

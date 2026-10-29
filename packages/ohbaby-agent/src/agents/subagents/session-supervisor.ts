@@ -37,6 +37,7 @@ const FIRST_REVIEW_MS = 120_000;
 const LATER_REVIEW_MS = 300_000;
 const RECONCILE_MS = 5_000;
 const MAX_UNCHANGED_REVIEWS = 3;
+const MAX_ERROR_RETRIES = 3;
 
 interface SessionState {
   readonly sessionId: string;
@@ -47,7 +48,10 @@ interface SessionState {
   unchangedReviews: number;
   resetVersion: number;
   executionFacts?: Map<string, string>;
-  readonly approvals: Set<string>;
+  approvals: Set<string>;
+  hasRunningBackground: boolean;
+  errorRetries: number;
+  retryAt?: number;
   acknowledgedApproval?: string;
   timer?: ReturnType<typeof setTimeout>;
   timerAt?: number;
@@ -70,6 +74,8 @@ export function createSessionSubagentSupervisor(
   function invalidate(state: SessionState): void {
     state.controller.abort();
     state.controller = new AbortController();
+    state.errorRetries = 0;
+    state.retryAt = undefined;
     clearTimer(state);
   }
   function resetReviews(state: SessionState): void {
@@ -88,6 +94,8 @@ export function createSessionSubagentSupervisor(
       unchangedReviews: 0,
       resetVersion: 0,
       approvals: new Set(),
+      hasRunningBackground: false,
+      errorRetries: 0,
       checking: false,
       dirty: false,
       pendingActivation: false,
@@ -138,23 +146,19 @@ export function createSessionSubagentSupervisor(
           previous.get(record.executionId) !== next.get(record.executionId),
       );
     state.executionFacts = next;
+    const nextApprovals = new Set<string>();
     let newApproval = false;
     for (const fact of facts)
       for (const permissionId of fact.approval.permissionIds) {
         const key = JSON.stringify([fact.executionId, permissionId]);
-        if (!state.approvals.has(key)) {
-          state.approvals.add(key);
-          newApproval = true;
-        }
+        nextApprovals.add(key);
+        if (!state.approvals.has(key)) newApproval = true;
       }
+    state.approvals = nextApprovals;
     if (changed || newApproval) {
       const exhausted = state.unchangedReviews >= MAX_UNCHANGED_REVIEWS;
       resetReviews(state);
-      if (
-        newlyStarted ||
-        exhausted ||
-        (newApproval && state.acknowledgedApproval)
-      ) {
+      if (newlyStarted || exhausted || newApproval) {
         state.delay = FIRST_REVIEW_MS;
         if (state.idleAt !== undefined) state.idleAt = now();
         clearTimer(state);
@@ -174,6 +178,7 @@ export function createSessionSubagentSupervisor(
     const running = executions.filter(
       (record) => record.status === "running" || record.status === "queued",
     );
+    state.hasRunningBackground = running.length > 0;
     const facts = await Promise.all(running.map(options.collectFacts));
     if (!valid(state, signal)) return;
     observeFacts(state, executions, facts);
@@ -193,14 +198,15 @@ export function createSessionSubagentSupervisor(
         record.delivery.wakeupAttemptedAt === undefined,
     );
     if (results.length > 0) {
-      if (
-        (await options.wake(state.sessionId, "result", snapshot)) &&
-        valid(state, signal)
-      ) {
-        state.pendingActivation = true;
-        clearTimer(state);
+      if (await options.wake(state.sessionId, "result", snapshot)) {
+        if (valid(state, signal)) {
+          state.pendingActivation = true;
+          clearTimer(state);
+        }
+        return;
       }
-      return;
+      if (!valid(state, signal) || !options.isIdle(state.sessionId)) return;
+      // Ineligible Goal results must not prevent supervision of ordinary work.
     }
     if (
       state.suppressed ||
@@ -252,21 +258,45 @@ export function createSessionSubagentSupervisor(
     }
   }
   function needsCheck(state: SessionState): boolean {
-    return state.dirty && !disposed && sessions.get(state.sessionId) === state;
+    return (
+      state.dirty &&
+      !disposed &&
+      sessions.get(state.sessionId) === state &&
+      (state.retryAt === undefined || state.retryAt <= now())
+    );
   }
   function notify(sessionId: string): void {
     const state = sessions.get(sessionId);
     if (disposed || !state) return;
     state.dirty = true;
+    if (state.retryAt !== undefined && state.retryAt > now()) {
+      arm(state, state.retryAt);
+      return;
+    }
     if (state.checking) return;
     state.checking = true;
     void (async (): Promise<void> => {
       try {
         while (needsCheck(state)) {
           state.dirty = false;
+          state.retryAt = undefined;
+          const signal = state.controller.signal;
           try {
             await check(state);
+            state.errorRetries = 0;
           } catch (error) {
+            if (valid(state, signal)) {
+              if (state.errorRetries < MAX_ERROR_RETRIES) {
+                // Re-read durable delivery before retrying: a claimed result is never
+                // eligible again. Notify during gate release must obey this backoff.
+                state.retryAt = now() + RECONCILE_MS * 2 ** state.errorRetries;
+                state.errorRetries++;
+                arm(state, state.retryAt);
+              } else {
+                state.dirty = false;
+                clearTimer(state);
+              }
+            }
             options.onError?.(error);
           }
         }
@@ -279,7 +309,8 @@ export function createSessionSubagentSupervisor(
     notify(record.rootSessionId);
   });
   const reconcile = setInterval(() => {
-    for (const sessionId of sessions.keys()) notify(sessionId);
+    for (const state of sessions.values())
+      if (state.hasRunningBackground) notify(state.sessionId);
   }, RECONCILE_MS);
   reconcile.unref();
   return {

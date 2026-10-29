@@ -12,6 +12,9 @@ export type SubagentInstanceStatus =
   | "cancelled";
 
 export interface QueuedSubagentInput {
+  /** Legacy audit only: closed entries are never admitted again. */
+  readonly closedAt?: number;
+  readonly closeReason?: string;
   /** Absent only on legacy instance projections; never infer task ownership. */
   readonly executionId?: string;
   readonly rootRunId?: string;
@@ -20,6 +23,20 @@ export interface QueuedSubagentInput {
   readonly prompt: string;
   readonly timeoutMs?: number;
   readonly workdir?: string;
+}
+
+export function closeLegacySubagentInputs(
+  queue: readonly QueuedSubagentInput[],
+  reason: string,
+  at: number,
+  matches: (entry: QueuedSubagentInput) => boolean = () => true,
+): readonly QueuedSubagentInput[] {
+  if (!queue.some((entry) => entry.closedAt === undefined && matches(entry)))
+    return queue;
+  return queue.map((entry) => {
+    if (entry.closedAt !== undefined || !matches(entry)) return entry;
+    return { ...entry, closedAt: at, closeReason: reason };
+  });
 }
 
 export interface SubagentInstanceRecord {
@@ -233,8 +250,13 @@ export function recoveryExecutionInputsUpdate(
       `Subagent recovery ownership conflict: ${input.subagentId}`,
     );
   }
-  const pendingQueue = record.pendingQueue.filter((entry) => !belongs(entry));
-  if (!interruptCurrent && pendingQueue.length === record.pendingQueue.length)
+  const pendingQueue = closeLegacySubagentInputs(
+    record.pendingQueue,
+    "runtime interrupted",
+    input.at,
+    belongs,
+  );
+  if (!interruptCurrent && pendingQueue === record.pendingQueue)
     return undefined;
   return {
     pendingQueue,
@@ -253,18 +275,10 @@ export function recoveryExecutionInputsUpdate(
 }
 
 export interface SubagentInstanceStore {
+  subscribe(listener: (record: SubagentInstanceRecord) => void): () => void;
   recoverExecutionInputs(
     input: RecoverSubagentExecutionInputsInput,
   ): Promise<SubagentInstanceRecord>;
-  /**
-   * Append one recoverable input without replacing the current durable queue.
-   * Returns null when the instance has reached its terminal close state.
-   */
-  appendPendingQueue(
-    subagentId: string,
-    input: QueuedSubagentInput,
-    updatedAt: number,
-  ): Promise<SubagentInstanceRecord | null>;
   create(record: SubagentInstanceRecord): Promise<void>;
   claim(
     subagentId: string,

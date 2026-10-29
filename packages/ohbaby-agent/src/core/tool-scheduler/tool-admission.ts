@@ -19,6 +19,8 @@ export interface ToolAdmission {
     context: ToolExecutionContext,
   ) => Promise<BashPreparation>;
   readonly cleanupOwner?: "tool";
+  /** The registered owner retains detached work beyond natural run completion. */
+  readonly detachedCleanup?: (params: Record<string, unknown>) => boolean;
   /** After cancellation, local request settlement cannot prove remote work stopped. */
   readonly settlementConfirmsCleanup?: false;
   readonly capacity?:

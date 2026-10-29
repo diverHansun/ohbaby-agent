@@ -327,6 +327,10 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
         }
       },
     },
-    { cleanupOwner: "tool", prepareShell },
+    {
+      cleanupOwner: "tool",
+      detachedCleanup: (params) => params.run_in_background === true,
+      prepareShell,
+    },
   );
 }

@@ -48,7 +48,10 @@ import {
 } from "../../core/lifecycle/index.js";
 import type { ResolvedStepTools } from "../../core/lifecycle/index.js";
 import { resolvePreparedRequestSettings } from "ohbaby-llm";
-import type { MessageManager } from "../../core/message/index.js";
+import {
+  buildRuntimeInputMessage,
+  type MessageManager,
+} from "../../core/message/index.js";
 import {
   createToolScheduler,
   type PermissionPort,
@@ -167,6 +170,7 @@ const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
 };
 
 export interface UiRuntimeCompositionOptions {
+  readonly onSubagentStateChanged?: (parentSessionId: string) => void;
   readonly logger?: Logger;
   readonly agentManager?: AgentManager;
   readonly createSubagentId?: () => string;
@@ -352,6 +356,8 @@ export async function createUiRuntimeComposition(
         now: options.now,
       })
     : undefined;
+  // A pending automatic wake constraint is consumed once by its input port.
+  const excludedSubagentRoots = new Map<string, readonly string[]>();
   const resultArtifacts = createSubagentResultArtifacts({
     async readDeliveryContext(execution) {
       const instance = await subagentInstanceStore.get(execution);
@@ -755,6 +761,7 @@ export async function createUiRuntimeComposition(
     },
     currentRunInputs: {
       async close(runId, reason): Promise<void> {
+        excludedSubagentRoots.delete(runId);
         shellJobRegistry.sealRootRun(runId);
         // Observe both operations immediately: lookup/cancellation can fail while
         // the already sealed input store is still persisting its closure.
@@ -784,7 +791,20 @@ export async function createUiRuntimeComposition(
           throw new AggregateError(errors, "Run input closure failed");
       },
     },
-    createCurrentRunInputPort: continuation?.createPort,
+    createCurrentRunInputPort: continuation
+      ? (
+          identity,
+        ): ReturnType<NonNullable<typeof continuation>["createPort"]> => {
+          const excludedSubagentRootRunIds = excludedSubagentRoots.get(
+            identity.runId,
+          );
+          excludedSubagentRoots.delete(identity.runId);
+          return continuation.createPort({
+            ...identity,
+            excludedSubagentRootRunIds,
+          });
+        }
+      : undefined,
     revokePermissionsForRun: (runId, reason): void => {
       options.permissionManager?.revokeByRun(runId, reason);
     },
@@ -882,13 +902,15 @@ export async function createUiRuntimeComposition(
   };
 
   const subagentHost: SessionSubagentHost = new SessionSubagentHost({
+    onStateChanged: options.onSubagentStateChanged,
     ...messageChannel,
     readHistory: createSubagentMonitor({
       instances: subagentInstanceStore,
       executions: subagentExecutionStore,
       messages: options.messageManager,
+      readExecutionInputs: messageChannel?.readExecutionInputs,
     }),
-    async cleanupExecution({ execution, reason }) {
+    async cleanupExecution({ execution, reason }): Promise<RunCleanupSnapshot> {
       if (!execution.childRunId) return { confirmed: true };
       shellJobRegistry.sealRootRun(execution.childRunId);
       let shell: import("../../tools/shell-job-registry.js").ShellCleanupResult =
@@ -909,9 +931,6 @@ export async function createUiRuntimeComposition(
       ]);
     },
     collectExecutionFacts: factsFor,
-    ensureResultArtifact: async (execution): Promise<void> => {
-      await resultArtifacts.prepare(execution, { forceFile: true });
-    },
     isApprovalBlocked: async (
       executionId,
       parentSessionId,
@@ -1257,6 +1276,9 @@ export async function createUiRuntimeComposition(
       waiting: false,
       approvalBlocked: false,
     }),
+    listSubagentState: (parentSessionId) =>
+      subagentHost.list({ parentSessionId }),
+    stopSubagent: (input) => subagentHost.stop(input),
     getSubagentExecutionBudget: (executionId) =>
       subagentHost.getExecutionBudget(executionId),
     agentManager,
@@ -1280,50 +1302,52 @@ export async function createUiRuntimeComposition(
         return Promise.reject(
           new Error("Runtime wake-up input store is unavailable"),
         );
-      return agentService.startSession({
-        ...input,
-        ...(runtimeInput && inputStore
-          ? {
-              prompt: "",
-              onInputReady: async (): Promise<void> => {
-                const inputId = `${runtimeInput.sourceId}:${runId}`;
-                const messageId =
-                  input.initialUserMessageId ?? `runtime:${inputId}`;
-                await inputStore.acceptRuntimeInput({
-                  inputId,
-                  runId,
-                  sessionId: input.sessionId,
-                  source: runtimeInput.kind,
-                  sourceId: runtimeInput.sourceId,
-                  message: {
-                    info: {
-                      id: messageId,
+      if (runtimeInput?.excludedSubagentRootRunIds?.length)
+        excludedSubagentRoots.set(runId, [
+          ...runtimeInput.excludedSubagentRootRunIds,
+        ]);
+      return agentService
+        .startSession({
+          ...input,
+          ...(runtimeInput && inputStore
+            ? {
+                prompt: "",
+                onInputReady: async (): Promise<void> => {
+                  const inputId = `${runtimeInput.sourceId}:${runId}`;
+                  const messageId =
+                    input.initialUserMessageId ?? `runtime:${inputId}`;
+                  await inputStore.acceptRuntimeInput({
+                    inputId,
+                    runId,
+                    sessionId: input.sessionId,
+                    source: runtimeInput.kind,
+                    sourceId: runtimeInput.sourceId,
+                    message: buildRuntimeInputMessage({
+                      messageId,
                       sessionId: input.sessionId,
-                      runId,
-                      role: "user",
                       agent: input.agentName,
-                      time: { created: options.now?.() ?? Date.now() },
-                    },
-                    parts: [
-                      {
-                        id: `${messageId}:text`,
-                        messageId,
-                        sessionId: input.sessionId,
-                        orderIndex: 0,
-                        type: "text",
-                        text: runtimeInput.body,
+                      createdAt: options.now?.() ?? Date.now(),
+                      origin: {
+                        kind: runtimeInput.kind,
+                        inputId,
+                        targetRunId: runId,
+                        sourceId: runtimeInput.sourceId,
                       },
-                    ],
-                  },
-                });
-                await input.onInputReady?.();
-              },
-            }
-          : {}),
-        environment:
-          input.environment ?? createHostLocalEnvironment(input.projectRoot),
-        runId,
-      });
+                      text: runtimeInput.body,
+                    }),
+                  });
+                  await input.onInputReady?.();
+                },
+              }
+            : {}),
+          environment:
+            input.environment ?? createHostLocalEnvironment(input.projectRoot),
+          runId,
+        })
+        .catch((error: unknown) => {
+          excludedSubagentRoots.delete(runId);
+          throw error;
+        });
     },
 
     setSessionWorkdir(sessionId, workdir): Promise<void> {

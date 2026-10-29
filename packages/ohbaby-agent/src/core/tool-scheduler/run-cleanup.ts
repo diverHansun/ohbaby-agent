@@ -1,3 +1,5 @@
+export type ToolCleanupState = "in-progress" | "unconfirmed" | "confirmed";
+
 export interface RunCleanupSnapshot {
   readonly confirmed: boolean;
   readonly settled?: Promise<void>;
@@ -8,7 +10,7 @@ export class RunCleanupTracker {
   private readonly pending = new Map<string, Set<Promise<void>>>();
 
   begin(runId: string | undefined): {
-    report(state: "in-progress" | "unconfirmed" | "confirmed"): void;
+    report(state: ToolCleanupState): void;
     settle(release?: () => void | Promise<void>): void;
   } {
     const key = runId ?? "";
@@ -18,7 +20,7 @@ export class RunCleanupTracker {
     });
     let rawSettled = false;
     let released = false;
-    let cleanup: "in-progress" | "unconfirmed" | "confirmed" | undefined;
+    let cleanup: ToolCleanupState | undefined;
     {
       const entries = this.pending.get(key) ?? new Set();
       entries.add(completion);

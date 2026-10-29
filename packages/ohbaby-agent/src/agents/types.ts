@@ -75,6 +75,8 @@ export interface StartSessionParams {
     readonly kind: "subagent-status";
     readonly sourceId: string;
     readonly body: string;
+    /** Roots whose results cannot authorize this automatic wake-up turn. */
+    readonly excludedSubagentRootRunIds?: readonly string[];
   };
   readonly runModel: RunModel;
   readonly reasoning?: ReasoningConfig;

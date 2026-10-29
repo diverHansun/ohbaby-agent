@@ -1,5 +1,6 @@
+import { SUBAGENT_RESULT_SOURCE_PREFIX } from "./execution-store.js";
 import type { LifecycleRunInputPort } from "../../core/lifecycle/types.js";
-import type { MessageWithParts } from "../../core/message/index.js";
+import { buildRuntimeInputMessage } from "../../core/message/index.js";
 import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import type {
   SubagentExecutionStore,
@@ -16,6 +17,10 @@ interface RunIdentity {
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly isSubagent?: boolean;
+  readonly excludedSubagentRootRunIds?: readonly string[];
+}
+export interface SubagentContinuationCoordinator {
+  createPort(identity: RunIdentity): LifecycleRunInputPort;
 }
 
 /** Page the durable session ledger; the history API's default 50 is not a lifecycle boundary. */
@@ -47,9 +52,10 @@ export function createSubagentContinuationCoordinator(options: {
     signal?: AbortSignal,
   ) => Promise<PreparedSubagentResult>;
   readonly now?: () => number;
-}) {
+}): SubagentContinuationCoordinator {
   const now = options.now ?? Date.now;
   function createPort(identity: RunIdentity): LifecycleRunInputPort {
+    const excludedRoots = new Set(identity.excludedSubagentRootRunIds);
     async function reconcile(signal?: AbortSignal): Promise<void> {
       signal?.throwIfAborted();
       if (identity.isSubagent) return;
@@ -58,7 +64,8 @@ export function createSubagentContinuationCoordinator(options: {
       ).filter(
         (record) =>
           record.parentSessionId === identity.sessionId &&
-          record.requesterScopeId === (identity.contextScopeId ?? "primary"),
+          record.requesterScopeId === (identity.contextScopeId ?? "primary") &&
+          !excludedRoots.has(record.rootRunId),
       );
       const executions = sessionExecutions.filter(
         (record) =>
@@ -102,34 +109,20 @@ export function createSubagentContinuationCoordinator(options: {
           signal?.throwIfAborted();
           const at = now();
           const messageId = `runtime:${inputId}`;
-          const message: MessageWithParts = {
-            info: {
-              id: messageId,
-              sessionId: identity.sessionId,
-              contextScopeId: identity.contextScopeId,
-              runId: identity.runId,
-              role: "user",
-              agent: "default",
-              time: { created: at, updated: at },
-              runtimeInput: {
-                kind: "subagent-result",
-                inputId,
-                targetRunId: identity.runId,
-                sourceId,
-              },
+          const message = buildRuntimeInputMessage({
+            messageId,
+            sessionId: identity.sessionId,
+            contextScopeId: identity.contextScopeId,
+            agent: "default",
+            createdAt: at,
+            origin: {
+              kind: "subagent-result",
+              inputId,
+              targetRunId: identity.runId,
+              sourceId,
             },
-            parts: [
-              {
-                id: `${messageId}:text`,
-                messageId,
-                sessionId: identity.sessionId,
-                contextScopeId: identity.contextScopeId,
-                orderIndex: 0,
-                type: "text",
-                text: result.body,
-              },
-            ],
-          };
+            text: result.body,
+          });
           await options.inputs.acceptRuntimeInput({
             inputId,
             sourceId,
@@ -151,12 +144,17 @@ export function createSubagentContinuationCoordinator(options: {
       }
     }
     return {
-      async beforeStep(signal, finalStep) {
+      async beforeStep(
+        signal,
+        finalStep,
+      ): ReturnType<LifecycleRunInputPort["beforeStep"]> {
         await reconcile(signal);
         if (finalStep) await options.inputs.sealSteer(identity.runId);
         return options.inputs.getMessages(identity.runId);
       },
-      async beforeFinish(signal) {
+      async beforeFinish(
+        signal,
+      ): ReturnType<LifecycleRunInputPort["beforeFinish"]> {
         await reconcile(signal);
         signal?.throwIfAborted();
         return (await options.inputs.tryCloseForCompletion(identity.runId))
@@ -165,12 +163,14 @@ export function createSubagentContinuationCoordinator(options: {
       },
       admitRequestAttempt: (request, signal) =>
         options.inputs.admitRequestAttempt(request, signal),
-      async confirmRequestSuccess(requestId) {
+      async confirmRequestSuccess(requestId): Promise<void> {
         const ids = await options.inputs.confirmRequestSuccess(requestId);
         for (const inputId of ids) {
           const input = await options.inputs.getInput(inputId);
           if (input?.source !== "subagent-result") continue;
-          const executionId = input.sourceId.slice("subagent-result:".length);
+          const executionId = input.sourceId.slice(
+            SUBAGENT_RESULT_SOURCE_PREFIX.length,
+          );
           const execution = await options.executions.getForRoot(
             executionId,
             identity.sessionId,

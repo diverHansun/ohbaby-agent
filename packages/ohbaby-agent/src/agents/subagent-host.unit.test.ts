@@ -185,7 +185,7 @@ async function runAndObserve(
   });
   if (result.item) return { ...result, item: result.item };
   for (let i = 0; i < 100; i++) {
-    const status = await host.status({
+    const status = await host.list({
       parentSessionId: input.parentSessionId,
       subagentId: result.execution.subagentId,
     });
@@ -221,7 +221,7 @@ async function runAndObserve(
     await Promise.resolve();
   }
   const item = (
-    await host.status({
+    await host.list({
       parentSessionId: input.parentSessionId,
       subagentId: result.execution.subagentId,
     })
@@ -700,7 +700,7 @@ describe("SessionSubagentHost", () => {
   });
 
   it("keeps a running subagent cancelled when close wins the race", async () => {
-    const { host, turn } = createHostFixture();
+    const { host, turn, store } = createHostFixture();
     let resolveTurn!: () => void;
     turn.mockImplementationOnce(
       () =>
@@ -723,7 +723,7 @@ describe("SessionSubagentHost", () => {
       role: "explore",
     });
     await flushMicrotasks();
-    const status = await host.status({ parentSessionId: "parent_1" });
+    const status = await host.list({ parentSessionId: "parent_1" });
     const subagentId = status.items[0]?.subagentId;
     if (!subagentId) {
       throw new Error("Expected running subagent");
@@ -758,10 +758,8 @@ describe("SessionSubagentHost", () => {
     expect(result.item.error).toBe("subagent closed");
     expect(result.output).toBe("subagent closed");
     await expect(
-      host.status({ parentSessionId: "parent_1", subagentId }),
-    ).resolves.toMatchObject({
-      items: [expect.objectContaining({ status: "cancelled" })],
-    });
+      store.get({ parentSessionId: "parent_1", subagentId }),
+    ).resolves.toMatchObject({ status: "cancelled" });
   });
 
   it("records currentRunId while running and lastRunId after completion", async () => {
@@ -788,12 +786,12 @@ describe("SessionSubagentHost", () => {
       role: "explore",
     });
     await vi.waitUntil(async () => {
-      const status = await host.status({ parentSessionId: "parent_1" });
+      const status = await host.list({ parentSessionId: "parent_1" });
       return status.items[0]?.status === "running";
     });
 
     await expect(
-      host.status({ parentSessionId: "parent_1" }),
+      host.list({ parentSessionId: "parent_1" }),
     ).resolves.toMatchObject({
       items: [
         expect.objectContaining({
@@ -855,14 +853,14 @@ describe("SessionSubagentHost", () => {
       timeoutMs: 5_000,
     });
     await vi.waitUntil(async () => {
-      const status = await host.status({
+      const status = await host.list({
         parentSessionId: "parent_1",
         subagentId: first.item.subagentId,
       });
       return status.items[0]?.status === "running";
     });
     await expect(
-      host.status({
+      host.list({
         parentSessionId: "parent_1",
         subagentId: first.item.subagentId,
       }),
@@ -887,7 +885,7 @@ describe("SessionSubagentHost", () => {
   });
 
   it("keeps a scheduled background subagent cancelled when close happens before active registration", async () => {
-    const { getRuntimeAgent, host, turn } = createHostFixture();
+    const { getRuntimeAgent, host, turn, store } = createHostFixture();
     let resolveRuntimeAgent!: () => void;
     getRuntimeAgent
       .mockResolvedValueOnce({
@@ -935,15 +933,15 @@ describe("SessionSubagentHost", () => {
     resolveRuntimeAgent();
     await flushMicrotasks();
 
-    const status = await host.status({
+    const saved = await store.get({
       parentSessionId: "parent_1",
       subagentId: created.item.subagentId,
     });
-    expect(status.items[0]).toMatchObject({
+    expect(saved).toMatchObject({
       status: "cancelled",
     });
-    expect(typeof status.items[0]?.closedAt).toBe("number");
-    expect(status.items[0]?.output).not.toBe("late success");
+    expect(typeof saved?.closedAt).toBe("number");
+    expect(saved?.output).not.toBe("late success");
     expect(turn).not.toHaveBeenCalled();
   });
 
@@ -1112,51 +1110,11 @@ describe("SessionSubagentHost", () => {
     ).rejects.toThrow("must not exceed 1800000ms");
   });
 
-  it("lists status as items and marks restarted active subagents interrupted without auto-running", async () => {
-    const { host, store, turn } = createHostFixture();
-    await store.create({
-      contextScopeId: "subagent_a",
-      createdAt: 1,
-      initialPrompt: "a",
-      parentSessionId: "parent_1",
-      pendingQueue: [],
-      role: "explore",
-      sessionId: "child_1",
-      status: "running",
-      subagentId: "subagent_a",
-      updatedAt: 1,
-    });
-    await store.create({
-      contextScopeId: "subagent_b",
-      createdAt: 2,
-      initialPrompt: "b",
-      parentSessionId: "parent_1",
-      pendingQueue: [],
-      role: "research",
-      sessionId: "child_1",
-      status: "pending",
-      subagentId: "subagent_b",
-      updatedAt: 2,
-    });
-
-    const interrupted = await host.recoverInterrupted({
-      parentSessionId: "parent_1",
-      recoverUnknownOwner: true,
-    });
-
-    expect(interrupted.map((item) => item.status)).toEqual([
-      "interrupted",
-      "interrupted",
-    ]);
-    const status = await host.status({ parentSessionId: "parent_1" });
-    expect(status.items.map((item) => item.subagentId)).toEqual(
-      expect.arrayContaining(["subagent_a", "subagent_b"]),
-    );
-    expect(turn).not.toHaveBeenCalled();
-  });
-
   it("retains interrupted execution without creating an instance when disposal wins admission", async () => {
-    const { getRuntimeAgent, host, store } = createHostFixture();
+    const executionStore = new InMemorySubagentExecutionStore();
+    const { getRuntimeAgent, host, store } = createHostFixture({
+      executionStore,
+    });
     let releaseAgent!: (agent: RuntimeAgent) => void;
     getRuntimeAgent.mockImplementationOnce(
       () =>
@@ -1183,11 +1141,11 @@ describe("SessionSubagentHost", () => {
     await flushMicrotasks();
     expect(
       (
-        await host.status({
+        await executionStore.get({
           parentSessionId: "parent_1",
           executionId: accepted.execution.executionId,
         })
-      ).executions[0].status,
+      )?.status,
     ).toBe("interrupted");
     expect(await store.listByParent("parent_1")).toEqual([]);
   });
@@ -1257,7 +1215,7 @@ describe("SessionSubagentHost", () => {
     expect(first.item.sessionId).toBe("child_1");
     expect(second.item.sessionId).toBe("child_1");
     expect(first.item.subagentId).not.toBe(second.item.subagentId);
-    const status = await host.status({ parentSessionId: "parent_1" });
+    const status = await host.list({ parentSessionId: "parent_1" });
     expect(status.items.map((item) => item.subagentId)).toEqual(
       expect.arrayContaining([first.item.subagentId, second.item.subagentId]),
     );

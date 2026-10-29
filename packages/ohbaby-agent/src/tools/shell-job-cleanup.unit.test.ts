@@ -1,3 +1,8 @@
+import {
+  AdapterRegistry,
+  SandboxManager,
+  type SandboxAdapter,
+} from "../sandbox/index.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -27,8 +32,8 @@ describe("shell job cleanup ownership", () => {
   it("keeps naturally completed foreground descendants and resource release in the lease, excluding detached jobs", async () => {
     let stopped = false;
     const registry = new ShellJobRegistry({
-      killTree: () => ({ status: "unconfirmed" }),
-      probeTree: () => (stopped ? "stopped" : "running"),
+      killTree: (): { status: "unconfirmed" } => ({ status: "unconfirmed" }),
+      probeTree: (): "stopped" | "running" => (stopped ? "stopped" : "running"),
     });
     const owner = {
       rootRunId: "run",
@@ -64,8 +69,8 @@ describe("shell job cleanup ownership", () => {
   it("keeps execution cleanup unconfirmed until late process evidence arrives", async () => {
     let stopped = false;
     const registry = new ShellJobRegistry({
-      killTree: () => ({ status: "unconfirmed" }),
-      probeTree: () => (stopped ? "stopped" : "running"),
+      killTree: (): { status: "unconfirmed" } => ({ status: "unconfirmed" }),
+      probeTree: (): "stopped" | "running" => (stopped ? "stopped" : "running"),
     });
     const child = new Child();
     const sibling = new Child();
@@ -243,6 +248,70 @@ describe("shell job cleanup ownership", () => {
     child.emit("exit", 0, null);
     await Promise.resolve();
     expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains unconfirmed resource ownership after real sandbox destruction fails, despite confirmed process exit", async () => {
+    const failure = new Error("sandbox adapter still owns physical resources");
+    const destroy = vi.fn(() => Promise.reject(failure));
+    const adapter: SandboxAdapter = {
+      id: "release-failure",
+      getCapabilities: () => ({
+        canExecCommands: true,
+        isolation: "none",
+        readOnly: false,
+        supportsGit: false,
+      }),
+      create: (input) => Promise.resolve({ workdir: input.workdir }),
+      destroy,
+    };
+    const adapters = new AdapterRegistry();
+    adapters.register(adapter);
+    const manager = new SandboxManager({
+      adapterRegistry: adapters,
+      drainTimeoutMs: 1,
+    });
+    await manager.createContext("cleanup-test", {
+      adapterId: adapter.id,
+      workdir: "/repo",
+    });
+    const environment = await manager.acquire("cleanup-test");
+    if (!environment.retain) throw new Error("missing sandbox retention");
+    const release = environment.retain();
+    await environment.release();
+    await manager.destroyContext("cleanup-test");
+    const reportCleanupError = vi.fn();
+    const registry = new ShellJobRegistry({
+      killTree: (): { status: "confirmed" } => ({ status: "confirmed" }),
+      probeTree: (): "stopped" => "stopped",
+    });
+    const child = new Child();
+    const job = start(registry, child, {
+      owner: {
+        rootRunId: "root",
+        sessionId: "cleanup-test",
+        messageId: "message",
+        callId: "call",
+      },
+      release,
+      reportCleanupError,
+    });
+    child.emit("close", 0, null);
+    await vi.waitFor(() => {
+      expect(reportCleanupError).toHaveBeenCalledWith(failure);
+    });
+    expect(registry.get(job.jobId, "cleanup-test").metadata.cleanup).toBe(
+      "confirmed",
+    );
+    const cleanup = await registry.cleanupRootRun("root");
+    expect(cleanup.confirmed).toBe(false);
+    expect(registry.hasActiveWork("root")).toBe(true);
+    await expect(registry.dispose()).rejects.toThrow("unconfirmed");
+    // Both APIs are idempotent; neither retries the rejected physical destroy.
+    await release();
+    await manager.destroyContext("cleanup-test");
+    await manager.dispose();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect((await registry.cleanupRootRun("root")).confirmed).toBe(false);
   });
 
   it("reports environment disposal failure without retracting confirmed process cleanup", async () => {

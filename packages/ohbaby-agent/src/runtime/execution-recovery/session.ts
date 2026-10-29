@@ -163,6 +163,7 @@ export function createSessionExecutionRecovery(
       );
       const belongs = (entry: typeof instance.currentInput): boolean =>
         !!entry &&
+        entry.closedAt === undefined &&
         ((entry.rootRunId !== undefined && roots.has(entry.rootRunId)) ||
           (entry.executionId !== undefined && ids.has(entry.executionId)));
       const current = belongs(instance.currentInput);

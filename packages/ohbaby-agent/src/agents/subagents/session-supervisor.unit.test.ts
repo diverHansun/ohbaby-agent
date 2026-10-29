@@ -25,10 +25,18 @@ interface Fixture {
   setWakeBarrier(value?: Promise<void>): void;
   setAfterActivation(value?: Promise<void>): void;
   setAcceptWake(value: boolean): void;
+  setExecutionEvents(value: boolean): void;
 }
 function fixture(): Fixture {
   const executions = new InMemorySubagentExecutionStore();
   const wakes: { reason: string; at: number }[] = [];
+  let emitEvents = true;
+  const subscribe = executions.subscribe.bind(executions);
+  vi.spyOn(executions, "subscribe").mockImplementation((listener) =>
+    subscribe((record) => {
+      if (emitEvents) listener(record);
+    }),
+  );
   let idle = false;
   let acceptWake = true;
   let permissions: string[] = [];
@@ -140,11 +148,68 @@ function fixture(): Fixture {
     setAfterActivation(value?: Promise<void>): void {
       afterActivation = value;
     },
+    setExecutionEvents(value): void {
+      emitEvents = value;
+    },
     setAcceptWake(value: boolean): void {
       acceptWake = value;
     },
   };
 }
+async function retryFixture(
+  failures: number,
+  claimBeforeError = false,
+  notifyBeforeError = false,
+): Promise<{
+  supervisor: SessionSubagentSupervisor;
+  executions: InMemorySubagentExecutionStore;
+  record: SubagentExecutionRecord;
+  attempts: number[];
+  errors: ReturnType<typeof vi.fn>;
+}> {
+  const executions = new InMemorySubagentExecutionStore();
+  const { record } = await executions.accept({
+    executionId: "last-child",
+    requestId: "last-call",
+    parentSessionId: "parent",
+    rootSessionId: "parent",
+    requesterScopeId: "primary",
+    requesterRunId: "main",
+    rootRunId: "main",
+    subagentId: "child",
+    mode: "background",
+    prompt: "task",
+    createdAt: Date.now(),
+  });
+  await executions.finish(record, {
+    status: "completed",
+    output: "saved result",
+    completedAt: Date.now(),
+  });
+  const attempts: number[] = [];
+  const errors = vi.fn();
+  const supervisor = createSessionSubagentSupervisor({
+    executions,
+    isIdle: () => true,
+    collectFacts: () =>
+      Promise.reject(new Error("No running executions should be inspected")),
+    wake: async () => {
+      attempts.push(Date.now());
+      if (attempts.length <= failures) {
+        if (claimBeforeError) await executions.claimWakeup(record, Date.now());
+        if (notifyBeforeError) supervisor.notify("parent");
+        throw new Error("transient pre-admission read failure");
+      }
+      await executions.claimWakeup(record, Date.now());
+      return true;
+    },
+    onError: errors,
+  });
+  supervisor.observe("parent");
+  await vi.advanceTimersByTimeAsync(0);
+  return { supervisor, executions, record, attempts, errors };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(0);
@@ -154,6 +219,64 @@ afterEach(() => {
 });
 
 describe("session subagent supervision", () => {
+  it("retries an unclaimed final result after a transient pre-admission failure without scanning idle history forever", async () => {
+    const f = await retryFixture(1);
+    try {
+      expect(f.attempts).toHaveLength(1);
+      expect(
+        (await f.executions.get(f.record))?.delivery.wakeupAttemptedAt,
+      ).toBeUndefined();
+      f.supervisor.notify("parent");
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(f.attempts).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(f.attempts).toHaveLength(2);
+      expect(
+        (await f.executions.get(f.record))?.delivery.wakeupAttemptedAt,
+      ).toBeDefined();
+      expect(f.errors).toHaveBeenCalledTimes(1);
+      const reads = vi.spyOn(f.executions, "list");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(f.attempts).toHaveLength(2);
+      expect(reads).not.toHaveBeenCalled();
+    } finally {
+      f.supervisor.dispose();
+    }
+  });
+
+  it.each([false, true])(
+    "backs off and stops after three failed retries, including synchronous gate notifications (%s)",
+    async (notifyBeforeError) => {
+      const f = await retryFixture(Infinity, false, notifyBeforeError);
+      try {
+        const start = f.attempts[0];
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(f.attempts.map((at) => at - start)).toEqual([
+          0, 5_000, 15_000, 35_000,
+        ]);
+        const reads = vi.spyOn(f.executions, "list");
+        await vi.advanceTimersByTimeAsync(10 * MINUTE);
+        expect(reads).not.toHaveBeenCalled();
+        expect(f.errors).toHaveBeenCalledTimes(4);
+      } finally {
+        f.supervisor.dispose();
+      }
+    },
+  );
+
+  it("does not launch another model round for a result already claimed before an error", async () => {
+    const f = await retryFixture(1, true);
+    try {
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(f.attempts).toHaveLength(1);
+      expect(
+        (await f.executions.get(f.record))?.delivery.wakeupAttemptedAt,
+      ).toBeDefined();
+    } finally {
+      f.supervisor.dispose();
+    }
+  });
+
   it("starts its first deadline at real idle and uses five minutes after supervision", async () => {
     const f = fixture();
     try {
@@ -406,6 +529,69 @@ describe("session subagent supervision", () => {
       });
       await vi.advanceTimersByTimeAsync(20 * MINUTE);
       expect(f.wakes).toEqual([]);
+    } finally {
+      f.supervisor.dispose();
+    }
+  });
+  it("reconciles only sessions with live background work and stops after termination", async () => {
+    const f = fixture();
+    const reads = vi.spyOn(f.executions, "list");
+    try {
+      f.becomeIdle();
+      await vi.advanceTimersByTimeAsync(0);
+      const idleReads = reads.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(reads).toHaveBeenCalledTimes(idleReads);
+      const record = await f.start();
+      const activeReads = reads.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(reads.mock.calls.length).toBeGreaterThan(activeReads);
+      await f.executions.finish(record, {
+        status: "interrupted",
+        completedAt: Date.now(),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const endedReads = reads.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(reads).toHaveBeenCalledTimes(endedReads);
+    } finally {
+      f.supervisor.dispose();
+    }
+  });
+  it("reconciles a missing terminal notification while work was last known active", async () => {
+    const f = fixture();
+    try {
+      const record = await f.start();
+      f.becomeIdle();
+      await vi.advanceTimersByTimeAsync(0);
+      f.setExecutionEvents(false);
+      await f.executions.finish(record, {
+        status: "completed",
+        output: "saved result",
+        completedAt: Date.now(),
+      });
+      expect(f.wakes).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(f.wakes).toMatchObject([{ reason: "result" }]);
+    } finally {
+      f.supervisor.dispose();
+    }
+  });
+
+  it("forgets resolved approval identities instead of retaining every historical request", async () => {
+    const f = fixture();
+    try {
+      await f.start();
+      f.becomeIdle();
+      f.setPermissions(["approval"]);
+      await vi.advanceTimersByTimeAsync(2 * MINUTE);
+      expect(f.wakes).toHaveLength(1);
+      f.becomeIdle();
+      f.setPermissions([]);
+      await vi.advanceTimersByTimeAsync(0);
+      f.setPermissions(["approval"]);
+      await vi.advanceTimersByTimeAsync(2 * MINUTE);
+      expect(f.wakes).toHaveLength(2);
     } finally {
       f.supervisor.dispose();
     }

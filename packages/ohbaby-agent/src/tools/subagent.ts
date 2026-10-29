@@ -1,3 +1,7 @@
+import {
+  MAX_SUBAGENT_EXECUTIONS,
+  MAX_SUBAGENT_TIMEOUT_MS,
+} from "../agents/subagents/limits.js";
 import { renderExecutionFacts } from "../agents/subagents/execution-facts.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
@@ -55,7 +59,7 @@ function timeoutParam(params: Record<string, unknown>): number | undefined {
     typeof value !== "number" ||
     !Number.isInteger(value) ||
     value < 1 ||
-    value > 1_800_000
+    value > MAX_SUBAGENT_TIMEOUT_MS
   )
     throw new ToolParameterError(
       'Expected parameter "timeout_ms" to be an integer between 1 and 1800000.',
@@ -77,7 +81,7 @@ function monitorParams(params: Record<string, unknown>): {
   if (
     !Array.isArray(params.agent_ids) ||
     params.agent_ids.length === 0 ||
-    params.agent_ids.length > 6
+    params.agent_ids.length > MAX_SUBAGENT_EXECUTIONS
   )
     throw new ToolParameterError(
       'Expected parameter "agent_ids" to contain 1 to 6 non-empty IDs.',
@@ -252,13 +256,17 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
           default: "background",
           enum: ["foreground", "background"],
         },
-        timeout_ms: { type: "integer", minimum: 1, maximum: 1_800_000 },
+        timeout_ms: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_SUBAGENT_TIMEOUT_MS,
+        },
         agent_id: { type: "string" },
         message: { type: "string" },
         agent_ids: {
           type: "array",
           minItems: 1,
-          maxItems: 6,
+          maxItems: MAX_SUBAGENT_EXECUTIONS,
           uniqueItems: true,
           items: { type: "string" },
         },

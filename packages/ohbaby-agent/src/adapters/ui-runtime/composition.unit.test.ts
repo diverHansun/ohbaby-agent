@@ -604,6 +604,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       promptStore: new InMemoryPromptSubmissionStore(),
       messageManager,
     });
+    const acceptInput = vi.spyOn(currentRunInputStore, "acceptRuntimeInput");
     const executions = new InMemorySubagentExecutionStore();
     await executions.accept({
       executionId: "live-child",
@@ -647,6 +648,12 @@ describe("createUiRuntimeComposition skill tools", () => {
         (await composition.runManager.waitForCompletion(run.runId)).status,
       ).toBe("succeeded");
       expect(requests).toHaveLength(1);
+      expect(acceptInput.mock.calls[0][0].message.info.runtimeInput).toEqual({
+        kind: "subagent-status",
+        inputId: `review:${run.runId}`,
+        targetRunId: run.runId,
+        sourceId: "review",
+      });
       expect(JSON.stringify(requests[0].messages)).toContain(
         "Inspect the saved background execution state.",
       );

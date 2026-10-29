@@ -158,7 +158,7 @@ export class GoalService {
     return (
       snapshot !== undefined &&
       snapshot !== null &&
-      (snapshot.budget.overBudget || snapshot.turnsUsed >= this.safetyCapTurns)
+      this.budgetExhausted(snapshot)
     );
   }
 
@@ -181,17 +181,23 @@ export class GoalService {
     const before = store?.getSnapshot();
     if (store === undefined || before === undefined || before === null)
       return null;
-    if (before.budget.overBudget || before.turnsUsed >= this.safetyCapTurns) {
+    if (this.budgetExhausted(before)) {
       const reason = before.budget.overBudget
         ? "A configured budget was reached"
         : "Safety cap reached: too many continuation turns without completion";
       const ticket = this.currentTicket(sessionId, goalId);
       await store.block(reason, "runtime");
       this.invalidate(sessionId);
-      if (ticket !== undefined || this.getOwnedRunIds(goalId).length > 0) {
+      if (this.hasOwnedExecution(goalId, ticket)) {
         // The caller owns the session lock: begin cleanup without joining it here.
         this.deferInterrupt(
-          this.interruptInput(sessionId, reason, true, ticket, goalId),
+          this.interruptInput({
+            sessionId,
+            reason,
+            includePrimary: true,
+            ticket,
+            goalId,
+          }),
         );
       }
       return null;
@@ -359,16 +365,14 @@ export class GoalService {
       return {
         snapshot: result,
         interrupt:
-          previous !== null &&
-          (ticket !== undefined ||
-            this.getOwnedRunIds(previous.goalId).length > 0)
-            ? this.interruptInput(
+          previous !== null && this.hasOwnedExecution(previous.goalId, ticket)
+            ? this.interruptInput({
                 sessionId,
-                "goal replaced",
-                false,
+                reason: "goal replaced",
+                includePrimary: false,
                 ticket,
-                previous.goalId,
-              )
+                goalId: previous.goalId,
+              })
             : undefined,
       };
     });
@@ -408,7 +412,11 @@ export class GoalService {
     sessionId: string,
     reason = "Paused by user",
   ): Promise<GoalSnapshot> {
-    const snapshot = await this.pauseActiveGoal(sessionId, reason, "user");
+    const snapshot = await this.pauseActiveGoal({
+      sessionId,
+      reason,
+      actor: "user",
+    });
     if (snapshot === null)
       throw new GoalError("no_goal", "No goal is currently set.");
     return snapshot;
@@ -424,13 +432,13 @@ export class GoalService {
       return current &&
         (current.status === "active" ||
           this.getOwnedRunIds(current.goalId).length > 0)
-        ? this.interruptInput(
+        ? this.interruptInput({
             sessionId,
-            "goal cancelled",
-            true,
+            reason: "goal cancelled",
+            includePrimary: true,
             ticket,
-            current.goalId,
-          )
+            goalId: current.goalId,
+          })
         : undefined;
     });
     if (interrupt !== undefined) {
@@ -519,13 +527,13 @@ export class GoalService {
         await store.markComplete("model");
         this.invalidate(sessionId);
         if (ticket === undefined) await store.clearCompleted(current.goalId);
-        interrupt = this.interruptInput(
+        interrupt = this.interruptInput({
           sessionId,
-          "goal completed",
-          false,
+          reason: "goal completed",
+          includePrimary: false,
           ticket,
-          current.goalId,
-        );
+          goalId: current.goalId,
+        });
         return { note: "Goal completed.", snapshot: null };
       }
       const reportingTicket =
@@ -555,12 +563,12 @@ export class GoalService {
         async () => {
           await store.block(blocker, "model");
           this.invalidate(sessionId);
-          interrupt = this.interruptInput(
+          interrupt = this.interruptInput({
             sessionId,
-            blocker,
-            false,
-            reportingTicket,
-          );
+            reason: blocker,
+            includePrimary: false,
+            ticket: reportingTicket,
+          });
         },
       );
       return {
@@ -586,22 +594,28 @@ export class GoalService {
     reason: string,
     actor: GoalActor = "runtime",
   ): Promise<GoalSnapshot | null> {
-    return this.pauseActiveGoal(
+    return this.pauseActiveGoal({
       sessionId,
       reason,
       actor,
-      { goalId, epoch },
-      actor === "user",
-    );
+      expected: { goalId, epoch },
+      preserveBackground: actor === "user",
+    });
   }
 
-  private async pauseActiveGoal(
-    sessionId: string,
-    reason: string,
-    actor: GoalActor,
-    expected?: { goalId: string; epoch: number },
+  private async pauseActiveGoal({
+    sessionId,
+    reason,
+    actor,
+    expected,
     preserveBackground = false,
-  ): Promise<GoalSnapshot | null> {
+  }: {
+    readonly sessionId: string;
+    readonly reason: string;
+    readonly actor: GoalActor;
+    readonly expected?: { readonly goalId: string; readonly epoch: number };
+    readonly preserveBackground?: boolean;
+  }): Promise<GoalSnapshot | null> {
     const store = await this.storeFor(sessionId);
     let interrupt: ReturnType<GoalService["interruptInput"]> | undefined;
     const snapshot = await this.mutate(sessionId, async () => {
@@ -615,14 +629,14 @@ export class GoalService {
       const result = await store.pause(reason, actor);
       if (current?.status === "active") {
         this.invalidate(sessionId);
-        interrupt = this.interruptInput(
+        interrupt = this.interruptInput({
           sessionId,
           reason,
-          true,
+          includePrimary: true,
           ticket,
-          current.goalId,
+          goalId: current.goalId,
           preserveBackground,
-        );
+        });
       }
       return result;
     });
@@ -644,9 +658,15 @@ export class GoalService {
       const ticket = this.currentTicket(sessionId, goalId);
       await store.block(reason, actor);
       this.invalidate(sessionId);
-      return ticket === undefined && this.getOwnedRunIds(goalId).length === 0
+      return !this.hasOwnedExecution(goalId, ticket)
         ? undefined
-        : this.interruptInput(sessionId, reason, true, ticket, goalId);
+        : this.interruptInput({
+            sessionId,
+            reason,
+            includePrimary: true,
+            ticket,
+            goalId,
+          });
     });
     if (interrupt)
       await this.deps.executionControl.interruptGoalExecution(interrupt);
@@ -721,17 +741,28 @@ export class GoalService {
         // Failed persistence must not let the captured execution run past its limit.
         // Keep the epoch unchanged: the existing cancelled outcome owns pausing,
         // and a changed epoch here could restart an active driver after failure.
-        const interrupt =
-          ticket === undefined && this.getOwnedRunIds(goalId).length === 0
-            ? undefined
-            : this.interruptInput(sessionId, reason, true, ticket, goalId);
+        const interrupt = !this.hasOwnedExecution(goalId, ticket)
+          ? undefined
+          : this.interruptInput({
+              sessionId,
+              reason,
+              includePrimary: true,
+              ticket,
+              goalId,
+            });
         ticket?.controller.abort();
         return { error, interrupt };
       }
       this.invalidate(sessionId);
-      return ticket === undefined && this.getOwnedRunIds(goalId).length === 0
+      return !this.hasOwnedExecution(goalId, ticket)
         ? undefined
-        : this.interruptInput(sessionId, reason, true, ticket, goalId);
+        : this.interruptInput({
+            sessionId,
+            reason,
+            includePrimary: true,
+            ticket,
+            goalId,
+          });
     });
     if (action === "rearm") this.armDeadline(sessionId);
     else if (action !== undefined && "error" in action) {
@@ -760,6 +791,19 @@ export class GoalService {
       ticket.controller.abort();
   }
 
+  private budgetExhausted(snapshot: GoalSnapshot): boolean {
+    return (
+      snapshot.budget.overBudget || snapshot.turnsUsed >= this.safetyCapTurns
+    );
+  }
+
+  private hasOwnedExecution(
+    goalId: string,
+    ticket: GoalTurnTicket | undefined,
+  ): boolean {
+    return ticket !== undefined || (this.ownedRuns.get(goalId)?.size ?? 0) > 0;
+  }
+
   private currentTicket(
     sessionId: string,
     goalId: string | undefined,
@@ -769,23 +813,29 @@ export class GoalService {
     );
   }
 
-  private interruptInput(
-    sessionId: string,
-    reason: string,
-    includePrimary: boolean,
-    ticket?: GoalTurnTicket,
+  private interruptInput({
+    sessionId,
+    reason,
+    includePrimary,
+    ticket,
     goalId = ticket?.goalId ?? this.peekSnapshot(sessionId)?.goalId,
     preserveBackground = false,
-  ): GoalExecutionInterruptInput {
+  }: {
+    readonly sessionId: string;
+    readonly reason: string;
+    readonly includePrimary: boolean;
+    readonly ticket?: GoalTurnTicket;
+    readonly goalId?: string;
+    readonly preserveBackground?: boolean;
+  }): GoalExecutionInterruptInput {
     if (ticket !== undefined) ticket.stopIntent = { reason, includePrimary };
+    const rootRunIds = goalId === undefined ? [] : this.getOwnedRunIds(goalId);
     return {
       sessionId,
       reason,
       includePrimary,
       ...(goalId === undefined ? {} : { goalId }),
-      ...(goalId === undefined || this.getOwnedRunIds(goalId).length === 0
-        ? {}
-        : { rootRunIds: this.getOwnedRunIds(goalId) }),
+      ...(rootRunIds.length === 0 ? {} : { rootRunIds }),
       ...(preserveBackground ? { preserveBackground: true } : {}),
       ...(ticket === undefined ? {} : { ticket }),
       ...(ticket?.runId === undefined ? {} : { expectedRunId: ticket.runId }),

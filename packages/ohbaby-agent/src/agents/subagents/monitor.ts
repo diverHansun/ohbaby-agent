@@ -13,6 +13,10 @@ import type {
   SubagentExecutionStore,
 } from "./execution-store.js";
 import type { SubagentInstanceRecord, SubagentInstanceStore } from "./types.js";
+import type {
+  ExecutionMessageChannel,
+  UnprocessedExecutionMessage,
+} from "./execution-message-channel.js";
 
 export interface SubagentMonitorInput {
   readonly parentSessionId: string;
@@ -51,6 +55,12 @@ export interface SubagentMonitorTarget {
   readonly item?: SubagentMonitorInstance;
   readonly executions: readonly SubagentMonitorExecution[];
   readonly records: readonly SubagentMonitorRecord[];
+  readonly unprocessedMessageCount: number;
+  /** Saved closed inputs for the current/recent execution; long text may be clipped. */
+  readonly unprocessedMessages: readonly (UnprocessedExecutionMessage & {
+    readonly executionId: string;
+    readonly truncated: boolean;
+  })[];
   /** Resume toward older saved messages, scoped to this target and caller. */
   readonly cursor?: string;
   readonly truncated: boolean;
@@ -91,6 +101,8 @@ function failure(
     subagentId,
     executions: [],
     records: [],
+    unprocessedMessageCount: 0,
+    unprocessedMessages: [],
     truncated: false,
     error: { code, message },
   };
@@ -170,6 +182,7 @@ export function createSubagentMonitor(options: {
   readonly instances: SubagentInstanceStore;
   readonly executions: SubagentExecutionStore;
   readonly messages: MessageManager;
+  readonly readExecutionInputs?: ExecutionMessageChannel["readExecutionInputs"];
 }): (input: SubagentMonitorInput) => Promise<SubagentMonitorResult> {
   async function readTarget(
     input: SubagentMonitorInput,
@@ -223,6 +236,15 @@ export function createSubagentMonitor(options: {
       });
       if (current?.subagentId === subagentId) executionRecords.unshift(current);
     }
+    const unprocessed = (
+      await Promise.all(
+        executionRecords.map(async (execution) =>
+          ((await options.readExecutionInputs?.({ execution })) ?? []).map(
+            (message) => ({ ...message, executionId: execution.executionId }),
+          ),
+        ),
+      )
+    ).flat();
     const clipping = { count: 0 };
     const short = (value: string | undefined): string | undefined => {
       if (value === undefined) return undefined;
@@ -278,6 +300,8 @@ export function createSubagentMonitor(options: {
       item: projectedItem,
       executions,
       records: [],
+      unprocessedMessageCount: unprocessed.length,
+      unprocessedMessages: [],
       truncated: clipping.count > 0 || page.hasMore,
     };
     if (bytes(target) > budget)
@@ -286,6 +310,38 @@ export function createSubagentMonitor(options: {
         "MONITOR_OUTPUT_LIMIT",
         "Saved identity or output reference exceeds the monitor budget",
       );
+
+    // Reserve half of the remaining bytes for paged history. The count remains
+    // exact when long/old unprocessed inputs need to be read from that history.
+    const inputBudget =
+      bytes(target) + Math.floor((budget - bytes(target)) / 2);
+    for (const message of unprocessed.slice(0, RECORDS_PER_TARGET)) {
+      const reason = excerpt(message.reason, 256);
+      const base = { ...message, reason, text: "", truncated: true };
+      const available =
+        inputBudget -
+        bytes({
+          ...target,
+          unprocessedMessages: [...target.unprocessedMessages, base],
+        });
+      if (available < 2) break;
+      const text = excerpt(message.text, Math.min(available, MAX_RECORD_BYTES));
+      target = {
+        ...target,
+        unprocessedMessages: [
+          ...target.unprocessedMessages,
+          {
+            ...base,
+            text,
+            truncated: text !== message.text || reason !== message.reason,
+          },
+        ],
+      };
+    }
+    const inputsTruncated =
+      target.unprocessedMessages.length < unprocessed.length ||
+      target.unprocessedMessages.some((message) => message.truncated);
+    target = { ...target, truncated: target.truncated || inputsTruncated };
 
     // Keep the newest records first when the byte budget is tighter than the page limit.
     // The continuation starts before the oldest record actually returned, never before an omitted one.
@@ -317,6 +373,7 @@ export function createSubagentMonitor(options: {
         cursor,
         truncated:
           clipping.count > 0 ||
+          inputsTruncated ||
           target.records.some((saved) => saved.truncated) ||
           value.truncated ||
           page.hasMore ||

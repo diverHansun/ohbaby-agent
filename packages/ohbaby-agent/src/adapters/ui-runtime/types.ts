@@ -28,6 +28,12 @@ import type { StreamBridge } from "../../runtime/stream-bridge/index.js";
 export type PublishUiEvent = (event: UiEvent) => void;
 
 export interface UiRuntimeComposition {
+  listSubagentState(
+    parentSessionId: string,
+  ): Promise<import("../../agents/subagents/types.js").SubagentStatusResult>;
+  stopSubagent(
+    input: import("../../agents/subagents/types.js").SubagentStopInput,
+  ): Promise<import("../../agents/subagents/types.js").SubagentStopResult>;
   getSubagentWaitState(rootRunId: string): {
     readonly waiting: boolean;
     readonly approvalBlocked: boolean;

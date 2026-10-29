@@ -1,5 +1,5 @@
 import { CallDelivery, ToolDeliveryError } from "./delivery.js";
-import { RunCleanupTracker } from "./run-cleanup.js";
+import { RunCleanupTracker, type ToolCleanupState } from "./run-cleanup.js";
 import {
   getSourceCleanupState,
   SourceCleanupUnavailableError,
@@ -869,16 +869,15 @@ export function createToolScheduler(
     let observation: NodeJS.Timeout | undefined;
     let cleaning = false;
     let startPublished = false;
-    const earlyCleanup: ("in-progress" | "unconfirmed" | "confirmed")[] = [];
+    const earlyCleanup: ToolCleanupState[] = [];
     let rejectAbort!: (reason: unknown) => void;
     const abortPromise = new Promise<never>((_resolve, reject) => {
       rejectAbort = reject;
     });
     const toolOwnsCleanup = trustedToolAdmission(tool)?.cleanupOwner === "tool";
-    const detachedShell =
+    const detachedCleanup =
       toolOwnsCleanup &&
-      tool.name === "bash" &&
-      params.run_in_background === true;
+      trustedToolAdmission(tool)?.detachedCleanup?.(params) === true;
     const onAbort = (): void => {
       if (!settled && !cleaning && !toolOwnsCleanup) {
         cleaning = true;
@@ -937,7 +936,7 @@ export function createToolScheduler(
             : undefined,
           reportCleanup: toolOwnsCleanup
             ? (state): void => {
-                if (!detachedShell) cleanup.report(state);
+                if (!detachedCleanup) cleanup.report(state);
                 if (startPublished)
                   publish({ phase: "cleanup", cleanup: state });
                 else earlyCleanup.push(state);

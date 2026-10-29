@@ -16,6 +16,9 @@ import {
 import { DatabaseSubagentInstanceStore } from "./database-store.js";
 import { DatabaseSubagentExecutionStore } from "./execution-store.js";
 import { createSubagentMonitor } from "./monitor.js";
+import { createExecutionMessageChannel } from "./execution-message-channel.js";
+import { DatabaseCurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
+import { createDatabaseRunLedger } from "../../runtime/run-ledger/index.js";
 
 describe("persisted subagent monitor", () => {
   it("reads running, terminal and closed records after reopen on a read-only SQLite connection", async () => {
@@ -49,7 +52,22 @@ describe("persisted subagent monitor", () => {
         db: getDatabase(),
       });
       const store = createDatabaseMessageStore();
-      const ids = ["running", "completed", "interrupted", "closed"] as const;
+      const inputs = new DatabaseCurrentRunInputStore();
+      const ledger = createDatabaseRunLedger();
+      const channel = createExecutionMessageChannel({
+        inputs,
+        executions,
+        messages: createMessageManager({ bus: createBus(), store }),
+        runLedger: ledger,
+      });
+      const ids = [
+        "running",
+        "completed",
+        "interrupted",
+        "failed",
+        "timed_out",
+        "closed",
+      ] as const;
       for (const id of ids) {
         const status = id === "closed" ? "interrupted" : id;
         await instances.create({
@@ -84,7 +102,25 @@ describe("persisted subagent monitor", () => {
           { sessionId: "shared", contextScopeId: id },
           2,
         );
-        await executions.start(record, `${id}-run`, 2);
+        const execution = await executions.start(record, `${id}-run`, 2);
+        await ledger.createPending({
+          runId: `${id}-run`,
+          sessionId: "shared",
+          contextScopeId: id,
+          triggerSource: "user",
+        });
+        await ledger.markRunning(`${id}-run`);
+        if (status !== "running" && status !== "completed") {
+          await channel.acceptExecutionMessage({
+            execution,
+            inputId: `${id}-input`,
+            message: `Unprocessed instruction ${id}`,
+          });
+          await channel.closeExecutionInputs({
+            execution,
+            reason: id === "interrupted" ? "ui-stop" : id,
+          });
+        }
         if (status !== "running")
           await executions.finish(record, {
             status,
@@ -126,6 +162,12 @@ describe("persisted subagent monitor", () => {
         bus: createBus(),
         store: createDatabaseMessageStore(),
       });
+      const restoredInputs = new DatabaseCurrentRunInputStore();
+      const restoredChannel = createExecutionMessageChannel({
+        inputs: restoredInputs,
+        executions: restoredExecutions,
+        messages,
+      });
       const before = {
         instances: await restoredInstances.listByParent("root"),
         executions: await restoredExecutions.list({ parentSessionId: "root" }),
@@ -136,6 +178,7 @@ describe("persisted subagent monitor", () => {
         instances: restoredInstances,
         executions: restoredExecutions,
         messages,
+        readExecutionInputs: restoredChannel.readExecutionInputs,
       });
       const result = await monitor({
         parentSessionId: "root",
@@ -146,18 +189,43 @@ describe("persisted subagent monitor", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
+        undefined,
       ]);
       expect(
         result.targets.map((target) => target.executions[0].status),
-      ).toEqual(["running", "completed", "interrupted", "interrupted"]);
-      expect(result.targets[3].item?.closedAt).toBe(4);
+      ).toEqual([
+        "running",
+        "completed",
+        "interrupted",
+        "failed",
+        "timed_out",
+        "interrupted",
+      ]);
+      expect(result.targets[5].item?.closedAt).toBe(4);
       for (const target of result.targets) {
-        expect(target.records[0].content).toContain(
-          `Answer ${target.subagentId}`,
+        const savedAnswer = target.records.find(
+          (record) => record.role === "assistant",
         );
-        expect(target.records[0].content).toContain(
+        expect(savedAnswer?.content).toContain(`Answer ${target.subagentId}`);
+        expect(savedAnswer?.content).toContain(
           `Saved reasoning ${target.subagentId}`,
         );
+        if (!["running", "completed"].includes(target.subagentId)) {
+          expect(target.unprocessedMessageCount).toBe(1);
+          expect(target.unprocessedMessages).toEqual([
+            {
+              executionId: `${target.subagentId}-execution`,
+              inputId: `${target.subagentId}-input`,
+              text: `Unprocessed instruction ${target.subagentId}`,
+              reason:
+                target.subagentId === "interrupted"
+                  ? "ui-stop"
+                  : target.subagentId,
+              truncated: false,
+            },
+          ]);
+        }
       }
       expect({
         instances: await restoredInstances.listByParent("root"),
