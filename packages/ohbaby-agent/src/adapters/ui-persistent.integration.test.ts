@@ -492,16 +492,25 @@ function createProviderSubagentRunEvent(input: {
     finishReason: "tool_calls",
     toolCallDeltas: [
       {
-        argumentsDelta: JSON.stringify({
-          description: "Persistent child",
-          mode: input.mode,
-          prompt: input.prompt,
-          role: "explore",
-          subagent_id: input.subagentId,
-        }),
+        argumentsDelta: JSON.stringify(
+          input.subagentId === undefined
+            ? {
+                action: "spawn",
+                description: "Persistent child",
+                mode: input.mode,
+                prompt: input.prompt,
+                role: "explore",
+              }
+            : {
+                action: "send",
+                agent_id: input.subagentId,
+                message: input.prompt,
+                mode: input.mode,
+              },
+        ),
         id: input.callId,
         index: 0,
-        name: "subagent_run",
+        name: "agent",
       },
     ],
   };
@@ -510,16 +519,19 @@ function createProviderSubagentRunEvent(input: {
 function createProviderSubagentControlEvent(input: {
   readonly arguments: Record<string, unknown>;
   readonly callId: string;
-  readonly name: "subagent_run" | "subagent_status";
+  readonly action: "spawn" | "list";
 }): InterfaceProviderStreamEvent {
   return {
     finishReason: "tool_calls",
     toolCallDeltas: [
       {
-        argumentsDelta: JSON.stringify(input.arguments),
+        argumentsDelta: JSON.stringify({
+          action: input.action,
+          ...input.arguments,
+        }),
         id: input.callId,
         index: 0,
-        name: input.name,
+        name: "agent",
       },
     ],
   };
@@ -618,7 +630,7 @@ function createPersistentBackgroundSubagentLLMClient(
                   role: "explore",
                 },
                 callId: "call_subagent_background",
-                name: "subagent_run",
+                action: "spawn",
               }),
             ]),
           );

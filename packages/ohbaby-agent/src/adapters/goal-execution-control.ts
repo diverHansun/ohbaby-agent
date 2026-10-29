@@ -2,7 +2,7 @@ import type { GoalExecutionInterruptInput } from "../goals/index.js";
 
 export interface GoalExecutionInterruptDeps {
   readonly activeRunId: () => string | undefined;
-  readonly promptOwner: () => "goal" | "user" | undefined;
+  readonly promptOwner: () => "goal" | "user" | "subagent" | undefined;
   readonly promptSessionId: () => string | undefined;
   abortPromptRun(runId: string): Promise<boolean>;
   interruptSubagentsByRootRun(runId: string, reason: string): Promise<void>;
@@ -31,6 +31,13 @@ export async function executeGoalExecutionInterrupt(
     ) {
       interruptedWithPrimary = await deps.abortPromptRun(runId);
     }
+  }
+  if (input.preserveBackground) return;
+  if (input.rootRunIds !== undefined) {
+    for (const runId of new Set(input.rootRunIds)) {
+      await deps.interruptSubagentsByRootRun(runId, input.reason);
+    }
+    return;
   }
   const rootRunId = input.expectedRunId ?? input.ticket?.runId;
   if (!interruptedWithPrimary && rootRunId !== undefined) {

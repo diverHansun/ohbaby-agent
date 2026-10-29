@@ -33,7 +33,7 @@ export interface SubagentResultArtifacts {
   deleteSession(sessionId: string): Promise<void>;
 }
 function identity(record: SubagentExecutionRecord): string {
-  return `Runtime subagent result\nnotificationId: ${record.delivery.notificationId ?? "foreground"}\nrootRunId: ${record.rootRunId}\nrequester: ${record.parentSessionId}/${record.requesterScopeId}\nsubagentId: ${record.subagentId}\nexecutionId: ${record.executionId}\nchild: ${record.childSessionId ?? "not created"}/${record.childScopeId ?? "not created"}\nchildRunId: ${record.childRunId ?? "not started"}\nstatus: ${record.status}${record.reason ? `\nreason: ${record.reason}` : ""}${record.error ? `\nerror: ${record.error}` : ""}`;
+  return `Runtime subagent result\nnotificationId: ${record.delivery.notificationId ?? "foreground"}\nrootRunId: ${record.rootRunId}\nrequester: ${record.parentSessionId}/${record.requesterScopeId}\nsubagentId: ${record.subagentId}\nexecutionId: ${record.executionId}\ntask: ${JSON.stringify(record.prompt.slice(0, 600))}\nchild: ${record.childSessionId ?? "not created"}/${record.childScopeId ?? "not created"}\nchildRunId: ${record.childRunId ?? "not started"}\nstatus: ${record.status}${record.reason ? `\nreason: ${record.reason}` : ""}${record.error ? `\nerror: ${record.error}` : ""}`;
 }
 export function createSubagentResultArtifacts(options: {
   readonly store: SubagentExecutionStore;
@@ -41,10 +41,22 @@ export function createSubagentResultArtifacts(options: {
   readonly rootDir?: string;
   readonly sessionExists: (sessionId: string) => Promise<boolean>;
   readonly now?: () => number;
+  readonly readDeliveryContext?: (
+    execution: SubagentExecutionRecord,
+  ) => Promise<{
+    readonly name?: string;
+    readonly unprocessedMessageCount?: number;
+  }>;
 }): SubagentResultArtifacts {
   const resolver = new PathResolver(options.rootDir);
   const now = options.now ?? Date.now;
   const pending = new Map<string, Promise<PreparedSubagentResult>>();
+  async function deliveryIdentity(
+    record: SubagentExecutionRecord,
+  ): Promise<string> {
+    const context = await options.readDeliveryContext?.(record);
+    return `${identity(record)}\nname: ${JSON.stringify((context?.name ?? record.subagentId).slice(0, 200))}${context?.unprocessedMessageCount === undefined ? "" : `\nunprocessed_messages: ${String(context.unprocessedMessageCount)}${context.unprocessedMessageCount > 0 ? " (not consumed; original messages and close reasons remain saved)" : ""}`}`;
+  }
   const keyFor = (record: SubagentExecutionRecord): StorageKey => [
     "subagent-results",
     record.parentSessionId,
@@ -104,7 +116,7 @@ export function createSubagentResultArtifacts(options: {
     let record = await options.store.get(input);
     if (!record)
       throw new Error("Result execution not found in requester scope");
-    const prefix = identity(record);
+    const prefix = await deliveryIdentity(record);
     const key = keyFor(record);
     const path = resolver.resolve(key);
     if (!(await alive(record))) {
@@ -219,7 +231,7 @@ export function createSubagentResultArtifacts(options: {
           INLINE_SUBAGENT_RESULT_BYTES
       )
         return {
-          body: `${identity(record)}\n\n${record.output ?? "No final report body was produced."}`,
+          body: `${await deliveryIdentity(record)}\n\n${record.output ?? "No final report body was produced."}`,
         };
       const existing = pending.get(record.executionId);
       if (existing) return existing;

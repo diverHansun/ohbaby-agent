@@ -37,7 +37,11 @@ export interface PartTime {
 }
 
 export interface RuntimeInputOrigin {
-  readonly kind: "user-steer" | "subagent-result" | "subagent-status";
+  readonly kind:
+    | "user-steer"
+    | "subagent-result"
+    | "subagent-status"
+    | "subagent-message";
   readonly inputId: string;
   readonly targetRunId: string;
   readonly sourceId: string;

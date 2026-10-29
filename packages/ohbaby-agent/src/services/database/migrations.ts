@@ -658,4 +658,23 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
     version: "027_prompt_submission_model_entry",
     sql: `ALTER TABLE prompt_submission ADD COLUMN model_entry_id TEXT;`,
   },
+  {
+    version: "028_subagent_message_input",
+    sql: `
+      CREATE TABLE current_run_input_next (
+        input_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES run_ledger(run_id),
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        source TEXT NOT NULL CHECK(source IN ('user-steer','subagent-result','subagent-status','subagent-message')),
+        source_id TEXT NOT NULL, message_id TEXT NOT NULL UNIQUE REFERENCES message(id) ON DELETE CASCADE,
+        accepted_at INTEGER NOT NULL, data TEXT NOT NULL,
+        UNIQUE(run_id,source,source_id)
+      );
+      INSERT INTO current_run_input_next(input_id,run_id,session_id,source,source_id,message_id,accepted_at,data)
+      SELECT input_id,run_id,session_id,source,source_id,message_id,accepted_at,data FROM current_run_input;
+      DROP TABLE current_run_input;
+      ALTER TABLE current_run_input_next RENAME TO current_run_input;
+      CREATE INDEX idx_current_run_input_run ON current_run_input(run_id,accepted_at,input_id);
+    `,
+  },
 ];

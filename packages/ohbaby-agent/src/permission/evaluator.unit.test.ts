@@ -60,7 +60,12 @@ describe("permission evaluator", () => {
     ["plan", "default", call("bash", { command: "ls" }), "ask"],
     ["plan", "full-access", call("bash", { command: "mkdir tmp" }), "allow"],
     ["plan", "default", call("todo_write", { todos: [] }), "allow"],
-    ["plan", "default", call("subagent_run"), "allow"],
+    [
+      "plan",
+      "default",
+      call("agent", { action: "spawn", prompt: "inspect" }),
+      "allow",
+    ],
     ["plan", "default", call("skill", { name: "review" }), "ask"],
     ["plan", "full-access", call("skill", { name: "review" }), "allow"],
     ["auto", "default", call("read", { file_path: "src/a.ts" }), "allow"],
@@ -73,7 +78,12 @@ describe("permission evaluator", () => {
     ["auto", "full-access", call("sensitive_path"), "allow"],
     ["auto", "full-access", call("external_directory"), "allow"],
     ["auto", "default", call("todo_write", { todos: [] }), "allow"],
-    ["auto", "default", call("subagent_run"), "allow"],
+    [
+      "auto",
+      "default",
+      call("agent", { action: "spawn", prompt: "inspect" }),
+      "allow",
+    ],
     ["auto", "default", call("skill", { name: "review" }), "ask"],
     ["auto", "full-access", call("skill", { name: "review" }), "allow"],
   ] as const)(

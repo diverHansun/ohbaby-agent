@@ -24,6 +24,82 @@ const start = (
   });
 afterEach(() => vi.useRealTimers());
 describe("shell job cleanup ownership", () => {
+  it("keeps naturally completed foreground descendants and resource release in the lease, excluding detached jobs", async () => {
+    let stopped = false;
+    const registry = new ShellJobRegistry({
+      killTree: () => ({ status: "unconfirmed" }),
+      probeTree: () => (stopped ? "stopped" : "running"),
+    });
+    const owner = {
+      rootRunId: "run",
+      sessionId: "cleanup-test",
+      messageId: "message",
+      callId: "foreground",
+    };
+    let release!: () => void;
+    const released = new Promise<void>((done) => {
+      release = done;
+    });
+    const child = new Child();
+    const detached = new Child();
+    start(registry, child, { owner, release: () => released });
+    start(registry, detached, { owner, background: true });
+    child.emit("close", 0, null);
+    const cleanup = await registry.observeExecutionCleanup("run");
+    expect(cleanup.confirmed).toBe(false);
+    stopped = true;
+    child.emit("exit", 0, null);
+    expect((await registry.observeExecutionCleanup("run")).confirmed).toBe(
+      false,
+    );
+    release();
+    await cleanup.settled;
+    expect((await registry.observeExecutionCleanup("run")).confirmed).toBe(
+      true,
+    );
+    expect(registry.hasActiveWork("run")).toBe(true);
+    detached.emit("close", 0, null);
+    await registry.dispose();
+  });
+  it("keeps execution cleanup unconfirmed until late process evidence arrives", async () => {
+    let stopped = false;
+    const registry = new ShellJobRegistry({
+      killTree: () => ({ status: "unconfirmed" }),
+      probeTree: () => (stopped ? "stopped" : "running"),
+    });
+    const child = new Child();
+    const sibling = new Child();
+    const owner = {
+      rootRunId: "child-run",
+      sessionId: "cleanup-test",
+      runId: "child-run",
+      rootSessionId: "parent",
+      runtimeGeneration: "runtime",
+      workspaceKey: "workspace",
+      messageId: "message",
+      callId: "call",
+    };
+    start(registry, child, { owner });
+    const other = start(registry, sibling, {
+      owner: { ...owner, rootRunId: "sibling-run" },
+    });
+    const cleanup = await registry.cleanupRootRun("child-run");
+    expect(cleanup.confirmed).toBe(false);
+    let confirmed = false;
+    void cleanup.settled?.then(() => {
+      confirmed = true;
+    });
+    await Promise.resolve();
+    expect(confirmed).toBe(false);
+    expect(registry.get(other.jobId, "cleanup-test").status).toBe("running");
+    stopped = true;
+    child.emit("close", null, "SIGKILL");
+    await cleanup.settled;
+    expect(confirmed).toBe(true);
+    expect((await registry.cleanupRootRun("child-run")).confirmed).toBe(true);
+    sibling.emit("close", 0, null);
+    await registry.dispose();
+  });
   it("returns the logical cancellation before cleanup and accepts late evidence without changing the outcome", async () => {
     vi.useFakeTimers();
     let state: "running" | "stopped" = "running";

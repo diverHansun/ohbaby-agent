@@ -3,6 +3,7 @@ import type { CapacityKind } from "./concurrency.js";
 import { withResources, type ResourceAccess } from "./resources.js";
 import type {
   Tool,
+  ToolCategory,
   ToolExecutionContext,
   ToolExecutionResult,
 } from "./types.js";
@@ -20,7 +21,10 @@ export interface ToolAdmission {
   readonly cleanupOwner?: "tool";
   /** After cancellation, local request settlement cannot prove remote work stopped. */
   readonly settlementConfirmsCleanup?: false;
-  readonly capacity?: CapacityKind;
+  readonly capacity?:
+    | CapacityKind
+    | ((params: Record<string, unknown>) => CapacityKind);
+  readonly category?: (params: Record<string, unknown>) => ToolCategory;
   /** No existence, permission or content checks here: predecessors have not run. */
   readonly plan?: (
     params: Record<string, unknown>,

@@ -246,6 +246,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             shellPath,
           });
           snapshot = registry.start({
+            background: runInBackground,
             owner: context.owner ?? {
               sessionId: context.sessionId,
               rootSessionId: context.sessionId,

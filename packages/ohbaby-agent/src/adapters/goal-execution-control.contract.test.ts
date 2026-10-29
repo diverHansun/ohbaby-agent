@@ -5,6 +5,56 @@ import type { Session } from "../services/session/index.js";
 import { executeGoalExecutionInterrupt } from "./goal-execution-control.js";
 
 describe("goal execution control adapter contract", () => {
+  it("cleans every captured goal root even when the current primary was stopped", async () => {
+    const interrupted: string[] = [];
+    await executeGoalExecutionInterrupt(
+      {
+        sessionId: "session_goal",
+        goalId: "goal",
+        rootRunIds: ["old-root", "current-root"],
+        expectedRunId: "current-root",
+        reason: "budget reached",
+        includePrimary: true,
+      },
+      {
+        activeRunId: () => "current-root",
+        promptOwner: () => "goal",
+        promptSessionId: () => "session_goal",
+        abortPromptRun: () => Promise.resolve(true),
+        waitForPromptRunReadyOrIdle: () => Promise.resolve(),
+        interruptSubagentsByRootRun: (runId): Promise<void> => {
+          interrupted.push(runId);
+          return Promise.resolve();
+        },
+      },
+    );
+    expect(interrupted).toEqual(["old-root", "current-root"]);
+  });
+  it("preserves all goal background roots after an ordinary primary Stop", async () => {
+    const interrupted: string[] = [];
+    await executeGoalExecutionInterrupt(
+      {
+        sessionId: "session_goal",
+        rootRunIds: ["old-root", "current-root"],
+        expectedRunId: "current-root",
+        preserveBackground: true,
+        reason: "interrupted",
+        includePrimary: true,
+      },
+      {
+        activeRunId: () => "current-root",
+        promptOwner: () => "goal",
+        promptSessionId: () => "session_goal",
+        abortPromptRun: () => Promise.resolve(true),
+        waitForPromptRunReadyOrIdle: () => Promise.resolve(),
+        interruptSubagentsByRootRun: (runId): Promise<void> => {
+          interrupted.push(runId);
+          return Promise.resolve();
+        },
+      },
+    );
+    expect(interrupted).toEqual([]);
+  });
   it("T-8 interrupts only-background work when there is no primary run", async () => {
     const abortPromptRun = vi.fn(() => Promise.resolve(false));
     const interruptSubagentsByRootRun = vi.fn(() => Promise.resolve());

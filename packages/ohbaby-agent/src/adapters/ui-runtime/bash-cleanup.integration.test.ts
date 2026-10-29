@@ -74,7 +74,7 @@ class Child extends EventEmitter {
 }
 
 describe("composition Bash cleanup ownership", () => {
-  it("passes exact root and execution ownership to foreground and background Bash on a reused instance", async () => {
+  it("isolates actual child execution ownership from the original primary run on a reused instance", async () => {
     const root = await fs.realpath(
       await fs.mkdtemp(path.join(os.tmpdir(), "root-job-ownership-")),
     );
@@ -206,8 +206,8 @@ describe("composition Bash cleanup ownership", () => {
       });
       await expect.poll(() => owners.length).toBe(3);
       expect(owners).toMatchObject([
-        { runId: "child-A", rootRunId: "root-A", executionId: "execution-A" },
-        { runId: "child-B", rootRunId: "root-B", executionId: "execution-B" },
+        { runId: "child-A", rootRunId: "child-A", executionId: "execution-A" },
+        { runId: "child-B", rootRunId: "child-B", executionId: "execution-B" },
         { runId: "root-A", rootRunId: "root-A" },
       ]);
       expect(owners[2].executionId).toBeUndefined();
@@ -220,22 +220,30 @@ describe("composition Bash cleanup ownership", () => {
       }
       expect(children).toHaveLength(3);
       registry.cancelByRootRun("root-A");
-      expect(killTree).toHaveBeenCalledTimes(2);
+      expect(killTree).toHaveBeenCalledTimes(1);
       expect(await foreground).toMatchObject({
         executionOutcome: "cancelled",
         metadata: { status: "cancelled" },
       });
       expect(
+        registry.get(String(a.metadata?.jobId), "child", "reused-instance")
+          .status,
+      ).toBe("running");
+      expect(
         registry.get(String(b.metadata?.jobId), "child", "reused-instance")
           .status,
       ).toBe("running");
       registry.cancelByRootRun("root-A");
+      expect(killTree).toHaveBeenCalledTimes(1);
+      registry.cancelByRootRun("child-A");
       expect(killTree).toHaveBeenCalledTimes(2);
       expect(registry.hasActiveWork("root-A")).toBe(true);
       children[0].finish();
       children[2].finish();
-      expect(registry.hasActiveWork("root-A")).toBe(false);
-      expect(registry.hasActiveWork("root-B")).toBe(true);
+      await vi.waitFor(() => {
+        expect(registry.hasActiveWork("root-A")).toBe(false);
+      });
+      expect(registry.hasActiveWork("child-B")).toBe(true);
     } finally {
       children.forEach((child) => {
         child.finish();
@@ -404,7 +412,7 @@ describe("composition Bash cleanup ownership", () => {
           sessionId: childSession.id,
           rootSessionId: primary.id,
           runId: "old-run",
-          rootRunId: "root-old-run",
+          rootRunId: "old-run",
           executionId: "child-old-run",
           contextScopeId: "child-scope",
           scopeKey: lease.scopeKey,

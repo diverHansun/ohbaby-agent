@@ -64,7 +64,7 @@ export interface UiSessionControl {
   readonly rootSessionId: string;
   readonly bindingGeneration?: number;
   readonly runId: string | null;
-  readonly driver: "user" | "goal" | null;
+  readonly driver: "user" | "goal" | "subagent" | null;
 }
 export interface UiPromptReceiptQuery {
   readonly clientRequestId: string;

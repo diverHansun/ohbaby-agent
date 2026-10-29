@@ -93,6 +93,8 @@ export interface ExecutionDelivery {
   readonly deliveredAt?: number;
   readonly processedRequestId?: string;
   readonly processedAt?: number;
+  /** A result gets one automatic activation; failed consumption waits for a new trigger. */
+  readonly wakeupAttemptedAt?: number;
 }
 export interface SubagentExecutionRecord extends AcceptSubagentExecution {
   /** Reserved on acceptance; absent only for legacy persisted executions. */
@@ -154,7 +156,9 @@ export interface SubagentExecutionStore {
     input: ExecutionLookup,
     inputId: string,
     at: number,
+    previousInputId?: string,
   ): Promise<SubagentExecutionRecord>;
+  claimWakeup(input: ExecutionLookup, at: number): Promise<boolean>;
   markProcessed(
     input: ExecutionLookup,
     requestId: string,
@@ -216,10 +220,12 @@ function finishRecord(
     delivery:
       r.mode === "foreground"
         ? { state: "foreground" }
-        : {
-            state: "pending",
-            notificationId: `subagent-result:${r.executionId}`,
-          },
+        : result.status === "interrupted" || result.status === "cancelled"
+          ? { state: "none" }
+          : {
+              state: "pending",
+              notificationId: `subagent-result:${r.executionId}`,
+            },
   };
 }
 /** Shared transitions run synchronously inside each backend's write transaction. */
@@ -521,6 +527,7 @@ abstract class ExecutionStore implements SubagentExecutionStore {
     input: ExecutionLookup,
     inputId: string,
     at: number,
+    previousInputId?: string,
   ): Promise<SubagentExecutionRecord> {
     required(inputId);
     return this.mutate(input, (r) => {
@@ -529,9 +536,12 @@ abstract class ExecutionStore implements SubagentExecutionStore {
           "No background delivery intent",
         );
       if (r.delivery.inputId) {
-        if (r.delivery.inputId !== inputId)
+        if (r.delivery.inputId === inputId) return r;
+        if (
+          r.delivery.inputId !== previousInputId ||
+          r.delivery.processedRequestId
+        )
           throw new SubagentExecutionConflictError("Delivered input conflict");
-        return r;
       }
       return {
         ...r,
@@ -544,6 +554,22 @@ abstract class ExecutionStore implements SubagentExecutionStore {
         },
       };
     });
+  }
+  async claimWakeup(input: ExecutionLookup, at: number): Promise<boolean> {
+    let claimed = false;
+    await this.mutate(input, (r) => {
+      if (
+        !terminal(r) ||
+        r.mode !== "background" ||
+        r.delivery.state === "none" ||
+        r.delivery.state === "processed" ||
+        r.delivery.wakeupAttemptedAt !== undefined
+      )
+        return r;
+      claimed = true;
+      return { ...r, delivery: { ...r.delivery, wakeupAttemptedAt: at } };
+    });
+    return claimed;
   }
   markProcessed(
     input: ExecutionLookup,

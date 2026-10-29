@@ -53,6 +53,7 @@ export class AgentService {
       type: "primary",
     });
     const result = await instance.turn({
+      onInputReady: params.onInputReady,
       runModel: params.runModel,
       reasoning,
       environment: params.environment,

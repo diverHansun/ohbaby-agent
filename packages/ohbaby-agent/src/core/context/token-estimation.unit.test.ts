@@ -551,7 +551,7 @@ describe("estimateContextOccupancyComposition", () => {
     }
   });
 
-  it.each(["subagent_run", "subagent_status", "subagent_close"])(
+  it.each(["agent", "subagent_run", "subagent_status", "subagent_close"])(
     "classifies %s exchanges without relying on another subagent tool name",
     (toolName) => {
       const context = assembledContext([

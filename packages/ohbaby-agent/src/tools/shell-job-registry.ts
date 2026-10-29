@@ -36,6 +36,7 @@ export type ShellJobStatus =
 type TerminationReason = "cancelled" | "timed_out";
 
 export interface ShellJobStartInput {
+  readonly background?: boolean;
   readonly child: ChildProcess | (() => ChildProcess);
   readonly owner?: ToolExecutionOwner;
   readonly release?: () => void | Promise<void>;
@@ -60,6 +61,12 @@ export interface ShellJobSnapshot {
   readonly metadata: Readonly<Record<string, unknown>>;
 }
 
+export interface ShellCleanupResult {
+  readonly confirmed: boolean;
+  /** Resolves only on process-exit evidence, including evidence arriving late. */
+  readonly settled?: Promise<void>;
+}
+
 export interface ShellJobRegistryOptions {
   // Legacy custom shells may return void; absence of proof is never confirmation.
 
@@ -77,6 +84,9 @@ export interface ShellJobRegistryOptions {
 }
 
 interface ShellJob {
+  readonly background: boolean;
+  releaseComplete: boolean;
+  releaseTask?: Promise<void>;
   readonly owner?: ToolExecutionOwner;
   readonly release?: () => void | Promise<void>;
   readonly reportCleanup?: ShellJobStartInput["reportCleanup"];
@@ -85,6 +95,7 @@ interface ShellJob {
   sourceCleanup?: ReturnType<typeof beginSourceCleanup>;
   cleanupTask?: Promise<void>;
   resolveCleanup?: () => void;
+  confirmationWaiters?: Set<() => void>;
   observation?: ReturnType<typeof setTimeout>;
   outputDrain?: ReturnType<typeof setTimeout>;
   closed: boolean;
@@ -221,6 +232,8 @@ export class ShellJobRegistry {
     });
     const job: ShellJob = {
       child,
+      background: input.background ?? false,
+      releaseComplete: false,
       owner: input.owner,
       release: input.release,
       reportCleanup: input.reportCleanup,
@@ -321,7 +334,9 @@ export class ShellJobRegistry {
     return [...this.jobs.values()].some(
       (job) =>
         (rootRunId === undefined || job.owner?.rootRunId === rootRunId) &&
-        (job.status === "running" || job.cleanup !== "confirmed"),
+        (job.status === "running" ||
+          job.cleanup !== "confirmed" ||
+          !job.releaseComplete),
     );
   }
 
@@ -338,6 +353,59 @@ export class ShellJobRegistry {
     for (const job of jobs)
       if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
     return jobs.map((job) => this.snapshot(job));
+  }
+
+  async cleanupRootRun(rootRunId: string): Promise<ShellCleanupResult> {
+    this.cancelByRootRun(rootRunId);
+    return this.confirmCleanup(
+      [...this.jobs.values()].filter(
+        (job) => job.owner?.rootRunId === rootRunId,
+      ),
+    );
+  }
+
+  /** Natural completion exempts only explicitly detached shell jobs. */
+  observeExecutionCleanup(rootRunId: string): Promise<ShellCleanupResult> {
+    return this.confirmCleanup(
+      [...this.jobs.values()].filter(
+        (job) => job.owner?.rootRunId === rootRunId && !job.background,
+      ),
+    );
+  }
+
+  async cleanupScope(
+    sessionId: string,
+    contextScopeId: string,
+  ): Promise<ShellCleanupResult> {
+    const jobs = [...this.jobs.values()].filter(
+      (job) =>
+        job.sessionId === sessionId && job.contextScopeId === contextScopeId,
+    );
+    await this.disposeJobs(jobs);
+    return this.confirmCleanup(jobs);
+  }
+
+  private async confirmCleanup(
+    jobs: readonly ShellJob[],
+  ): Promise<ShellCleanupResult> {
+    await Promise.all(
+      jobs.flatMap((job) => (job.cleanupTask ? [job.cleanupTask] : [])),
+    );
+    const pending = jobs.filter(
+      (job) => job.cleanup !== "confirmed" || !job.releaseComplete,
+    );
+    if (pending.length === 0) return { confirmed: true };
+    return {
+      confirmed: false,
+      settled: Promise.all(
+        pending.map(
+          (job) =>
+            new Promise<void>((resolve) => {
+              (job.confirmationWaiters ??= new Set()).add(resolve);
+            }),
+        ),
+      ).then(() => undefined),
+    };
   }
 
   async waitForTerminal(
@@ -430,7 +498,9 @@ export class ShellJobRegistry {
       ownedJobs.map(async (job) => {
         if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
         await job.cleanupTask;
-        if (job.cleanup === "confirmed") this.jobs.delete(job.jobId);
+        await job.releaseTask;
+        if (job.cleanup === "confirmed" && job.releaseComplete)
+          this.jobs.delete(job.jobId);
       }),
     );
     for (let index = this.terminalJobIds.length - 1; index >= 0; index -= 1) {
@@ -451,9 +521,14 @@ export class ShellJobRegistry {
       [...this.jobs.values()].map(async (job) => {
         if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
         await job.cleanupTask;
+        await job.releaseTask;
       }),
     );
-    if ([...this.jobs.values()].some((job) => job.cleanup !== "confirmed"))
+    if (
+      [...this.jobs.values()].some(
+        (job) => job.cleanup !== "confirmed" || !job.releaseComplete,
+      )
+    )
       throw new Error("Shell process cleanup is unconfirmed");
   }
 
@@ -538,7 +613,9 @@ export class ShellJobRegistry {
   private pruneTerminalJobs(): void {
     while (this.jobs.size > MAX_RETAINED_SHELL_JOBS) {
       const index = this.terminalJobIds.findIndex(
-        (id) => this.jobs.get(id)?.cleanup === "confirmed",
+        (id) =>
+          this.jobs.get(id)?.cleanup === "confirmed" &&
+          this.jobs.get(id)?.releaseComplete,
       );
       if (index < 0) return;
       const [id] = this.terminalJobIds.splice(index, 1);
@@ -572,9 +649,15 @@ export class ShellJobRegistry {
     job.resolveCleanup?.();
     job.sourceCleanup?.confirm();
     if (job.terminationStarted) job.reportCleanup?.("confirmed");
+    const released = (): void => {
+      job.releaseComplete = true;
+      for (const resolve of job.confirmationWaiters ?? []) resolve();
+      job.confirmationWaiters?.clear();
+    };
     if (job.release)
-      void Promise.resolve()
+      job.releaseTask = Promise.resolve()
         .then(job.release)
+        .then(released)
         .catch((error: unknown) => {
           // Environment disposal failure is not evidence that the process is alive.
           try {
@@ -583,6 +666,7 @@ export class ShellJobRegistry {
             /* Observers do not own cleanup. */
           }
         });
+    else released();
     if (job.closed)
       this.finishFromChild(job, job.exitCode ?? null, job.signal ?? null);
     else {

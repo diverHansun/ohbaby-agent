@@ -328,6 +328,8 @@ export interface ToolScheduler {
   cancelAll(): void;
   getStatus(callId: string): ToolCallStatus | null;
   getPendingCalls(): ToolCall[];
+  /** Includes raw operations that already returned a logical cancelled result. */
+  getRunCleanup(runId?: string): import("./run-cleanup.js").RunCleanupSnapshot;
 }
 
 export interface ToolExecutionOwner {

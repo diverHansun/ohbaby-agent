@@ -84,6 +84,48 @@ export interface SubagentRunResult {
   readonly success?: boolean;
 }
 
+export type SubagentSpawnInput = Omit<
+  SubagentRunInput,
+  "subagentId" | "interrupt"
+>;
+export type SubagentSendInput = SubagentSpawnInput & {
+  readonly subagentId: string;
+};
+export type SubagentStartResult =
+  | {
+      readonly started: false;
+      readonly reason: string;
+      readonly accepted?: false;
+      readonly execution?: undefined;
+    }
+  | (SubagentRunResult & {
+      readonly started: boolean;
+      readonly accepted?: true;
+      readonly inputId?: string;
+    });
+
+export interface SubagentUnprocessedMessage {
+  readonly inputId: string;
+  readonly text: string;
+  readonly reason: string;
+}
+export interface SubagentCleanupResult {
+  readonly confirmed: boolean;
+  /** Resolves only once a previously unconfirmed cleanup has physical exit evidence. */
+  readonly settled?: Promise<void>;
+}
+export interface SubagentStopInput extends SubagentLookupInput {
+  readonly expectedExecutionId?: string;
+}
+export interface SubagentStopResult {
+  readonly subagentId: string;
+  readonly stopped: boolean;
+  readonly execution?: SubagentExecutionRecord;
+  readonly reason?: string;
+  readonly cleanup: "confirmed" | "unconfirmed";
+  readonly unprocessedMessages: readonly SubagentUnprocessedMessage[];
+}
+
 export interface SubagentStatusInput {
   readonly parentSessionId: string;
   readonly subagentId?: string;
@@ -95,6 +137,12 @@ export interface SubagentStatusResult {
   readonly facts?: readonly import("./execution-facts.js").ExecutionFactView[];
   readonly items: readonly SubagentInstanceRecord[];
   readonly executions: readonly SubagentExecutionRecord[];
+  readonly runtime?: readonly {
+    readonly subagentId: string;
+    readonly executionId?: string;
+    readonly settling: boolean;
+    readonly unprocessedMessages: readonly SubagentUnprocessedMessage[];
+  }[];
 }
 
 export interface SubagentCloseResult {
@@ -102,6 +150,8 @@ export interface SubagentCloseResult {
   readonly reason?: string;
   readonly item?: SubagentInstanceRecord;
   readonly previousStatus: SubagentInstanceStatus;
+  readonly cleanup: "confirmed" | "unconfirmed";
+  readonly unprocessedMessages: readonly SubagentUnprocessedMessage[];
 }
 
 type RequiredMutableSubagentFields = Pick<

@@ -160,6 +160,51 @@ export function projectToolMetadataForModel(
         "failedCount",
         "truncated",
       ]);
+    case "agent": {
+      const subagent = nestedMetadata(metadata, "subagent");
+      if (subagent)
+        return {
+          ...projectToolMetadataForModel("subagent_run", metadata),
+          ...copyMetadataFields(subagent, [
+            "action",
+            "started",
+            "accepted",
+            "inputId",
+            "agentId",
+            "executionId",
+            "mode",
+            "reason",
+          ]),
+        };
+      if (nestedMetadata(metadata, "subagentStatus"))
+        return projectToolMetadataForModel("subagent_status", metadata);
+      // Monitor already budgets its complete model-visible JSON, including cursors.
+      if (nestedMetadata(metadata, "agentMonitor")) return {};
+      const control =
+        nestedMetadata(metadata, "subagentStop") ??
+        nestedMetadata(metadata, "subagentClose");
+      return control
+        ? {
+            ...copyMetadataFields(control, [
+              "subagentId",
+              "stopped",
+              "previousStatus",
+              "cleanup",
+              "reason",
+            ]),
+            unprocessedMessages: Array.isArray(control.unprocessedMessages)
+              ? control.unprocessedMessages.map((message) =>
+                  typeof message === "object" && message !== null
+                    ? copyMetadataFields(message as ToolMetadata, [
+                        "inputId",
+                        "reason",
+                      ])
+                    : {},
+                )
+              : [],
+          }
+        : {};
+    }
     case "subagent_run": {
       const subagent = nestedMetadata(metadata, "subagent");
       const execution = subagent && nestedMetadata(subagent, "execution");

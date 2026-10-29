@@ -36,6 +36,183 @@ const settle = (ms = 20): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("GoalService", () => {
+  it("captures all owned roots after tickets settle and preserves background work on an ordinary Stop", async () => {
+    const interruptions: GoalExecutionInterruptInput[] = [];
+    const service = new GoalService({
+      persistence: new InMemoryGoalPersistence(),
+      executionControl: {
+        interruptGoalExecution: (input): Promise<void> => {
+          interruptions.push(input);
+          return Promise.resolve();
+        },
+      },
+    });
+    const goal = await service.createGoal("s1", {
+      actor: "user",
+      objective: "delegated work",
+    });
+    const epoch = service.currentExecutionEpoch("s1");
+    for (const runId of ["goal-root-1", "goal-root-2"]) {
+      const ticket = await service.admitTurnInBoundary(
+        "s1",
+        goal.goalId,
+        epoch,
+      );
+      if (!ticket) throw new Error("Expected admission");
+      service.bindTicketRun(ticket, runId);
+      await service.settleTurn("s1", ticket, { status: "succeeded" });
+    }
+    expect(service.getOwnedRunIds(goal.goalId)).toEqual([
+      "goal-root-1",
+      "goal-root-2",
+    ]);
+    await service.pauseExecution(
+      "s1",
+      goal.goalId,
+      epoch,
+      "interrupted",
+      "user",
+    );
+    expect(interruptions.at(-1)).toMatchObject({
+      preserveBackground: true,
+      goalId: goal.goalId,
+    });
+    await service.cancelGoal("s1");
+    expect(interruptions.at(-1)).toMatchObject({
+      rootRunIds: ["goal-root-1", "goal-root-2"],
+      reason: "goal cancelled",
+    });
+    expect(interruptions.at(-1)?.preserveBackground).not.toBe(true);
+    expect(service.getOwnedRunIds(goal.goalId)).toEqual([]);
+  });
+  it("does not lose a background wake while the previous driver is settling", async () => {
+    let turns = 0;
+    let wake = true;
+    const service = new GoalService({
+      persistence: new InMemoryGoalPersistence(),
+      executionControl: noOpExecutionControl,
+    });
+    service.attachTurnRunner({
+      runTurn: () =>
+        Promise.resolve({ status: ++turns === 1 ? "succeeded" : "cancelled" }),
+      shouldWaitForSubagents: () => {
+        if (wake) {
+          wake = false;
+          service.notifyWorkAvailable("s1");
+        }
+        return Promise.resolve(true);
+      },
+    });
+    await service.createGoal("s1", {
+      actor: "user",
+      objective: "wait for children",
+    });
+    await service.whenIdle();
+    expect(turns).toBe(2);
+    expect(service.peekSnapshot("s1")?.status).toBe("paused");
+  });
+
+  it("cleans only the replaced Goal's settled roots before starting its successor", async () => {
+    const interruptions: GoalExecutionInterruptInput[] = [];
+    const service = new GoalService({
+      persistence: new InMemoryGoalPersistence(),
+      executionControl: {
+        interruptGoalExecution: (input): Promise<void> => {
+          interruptions.push(input);
+          return Promise.resolve();
+        },
+      },
+    });
+    const goal = await service.createGoal("s1", {
+      actor: "user",
+      objective: "old",
+    });
+    const ticket = await service.admitTurnInBoundary(
+      "s1",
+      goal.goalId,
+      service.currentExecutionEpoch("s1"),
+    );
+    if (!ticket) throw new Error("Expected admission");
+    service.bindTicketRun(ticket, "old-root");
+    await service.settleTurn("s1", ticket, { status: "succeeded" });
+    const next = await service.createGoal("s1", {
+      actor: "user",
+      objective: "new",
+      replace: true,
+    });
+    expect(interruptions).toMatchObject([
+      { goalId: goal.goalId, rootRunIds: ["old-root"] },
+    ]);
+    expect(service.getOwnedRunIds(goal.goalId)).toEqual([]);
+    expect(service.getOwnedRunIds(next.goalId)).toEqual([]);
+  });
+
+  it.each(["turn-budget", "safety-cap", "time-budget"])(
+    "keeps automatic wakes sealed after %s refuses an admission",
+    async (limit) => {
+      let now = 0;
+      const service = new GoalService({
+        persistence: new InMemoryGoalPersistence(),
+        executionControl: noOpExecutionControl,
+        safetyCapTurns: limit === "safety-cap" ? 1 : 10,
+        now: (): number => now,
+      });
+      const goal = await service.createGoal("s1", {
+        actor: "user",
+        objective: "bounded",
+        budgetLimits:
+          limit === "turn-budget"
+            ? { turnBudget: 1 }
+            : limit === "time-budget"
+              ? { wallClockBudgetMs: 100 }
+              : {},
+      });
+      expect(service.isAutomaticRunBudgetExhausted("s1")).toBe(false);
+      const epoch = service.currentExecutionEpoch("s1");
+      const ticket = await service.admitTurnInBoundary(
+        "s1",
+        goal.goalId,
+        epoch,
+      );
+      if (!ticket) throw new Error("Expected admission");
+      await service.settleTurn("s1", ticket, { status: "succeeded" });
+      if (limit === "time-budget") now = 100;
+      expect(
+        await service.admitTurnInBoundary("s1", goal.goalId, epoch),
+      ).toBeNull();
+      expect(service.peekSnapshot("s1")?.status).toBe("blocked");
+      service.notifyWorkAvailable("s1");
+      expect(service.isAutomaticRunBudgetExhausted("s1")).toBe(true);
+      expect(service.isAutomaticRunBudgetExhausted("other")).toBe(false);
+      service.dispose();
+    },
+  );
+
+  it("preserves budget exhaustion facts while a user Stop leaves the Goal paused", async () => {
+    const service = new GoalService({
+      persistence: new InMemoryGoalPersistence(),
+      executionControl: noOpExecutionControl,
+      safetyCapTurns: 1,
+    });
+    const goal = await service.createGoal("s1", {
+      actor: "user",
+      objective: "bounded",
+    });
+    const epoch = service.currentExecutionEpoch("s1");
+    const ticket = await service.admitTurnInBoundary("s1", goal.goalId, epoch);
+    if (!ticket) throw new Error("Expected admission");
+    await service.settleTurn("s1", ticket, { status: "cancelled" });
+    await service.pauseExecution(
+      "s1",
+      goal.goalId,
+      epoch,
+      "interrupted",
+      "user",
+    );
+    expect(service.peekSnapshot("s1")?.status).toBe("paused");
+    expect(service.isAutomaticRunBudgetExhausted("s1")).toBe(true);
+  });
+
   it("only normalizes on explicit initialization and reads live initialized state without replay", async () => {
     const persistence = new InMemoryGoalPersistence();
     const original = new GoalService({
@@ -74,7 +251,7 @@ describe("GoalService", () => {
 
     await service.pauseGoal("s1", "stop now");
 
-    expect(interruptions).toEqual([
+    expect(interruptions).toMatchObject([
       { includePrimary: true, reason: "stop now", sessionId: "s1" },
     ]);
   });
@@ -95,7 +272,7 @@ describe("GoalService", () => {
     await service.pauseGoal("s1", "interrupted");
     await service.pauseGoal("s1", "Paused by user");
 
-    expect(interruptions).toEqual([
+    expect(interruptions).toMatchObject([
       { includePrimary: true, reason: "interrupted", sessionId: "s1" },
     ]);
     expect(await service.getSnapshot("s1")).toMatchObject({
@@ -139,7 +316,7 @@ describe("GoalService", () => {
 
     await service.updateGoalFromModel("s1", "complete");
 
-    expect(interruptions).toEqual([
+    expect(interruptions).toMatchObject([
       {
         includePrimary: false,
         reason: "goal completed",

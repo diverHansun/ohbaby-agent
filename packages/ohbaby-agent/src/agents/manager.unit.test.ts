@@ -55,9 +55,7 @@ describe("AgentManager", () => {
       "*": false,
       grep: true,
       read: true,
-      subagent_close: false,
-      subagent_run: false,
-      subagent_status: false,
+      agent: false,
     });
   });
 
@@ -81,9 +79,7 @@ describe("AgentManager", () => {
       select_tools: true,
       skill: true,
       skill_resource: true,
-      subagent_close: false,
-      subagent_run: false,
-      subagent_status: false,
+      agent: false,
       task_kill: true,
       task_output: true,
       todo_read: true,

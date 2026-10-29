@@ -29,21 +29,13 @@ const BUILTIN_CATEGORIES: Partial<Record<string, PermissionToolCategory>> = {
   list: "readonly",
   read: "readonly",
   skill: "skill",
-  subagent_close: "subagent",
-  subagent_run: "subagent",
-  subagent_status: "subagent",
+  agent: "subagent",
   todo_read: "readonly",
   todo_write: "write",
   web_fetch: "network",
   web_search: "network",
   write: "write",
 };
-
-const SUBAGENT_TOOLS = new Set([
-  "subagent_run",
-  "subagent_status",
-  "subagent_close",
-]);
 
 function canonicalToolName(toolName: string): string {
   return toolName.trim().toLowerCase();
@@ -76,7 +68,12 @@ export function classifyPermissionCall(
   if (toolName === "todo_write") {
     return { category: "write", kind: "memory-write" };
   }
-  if (SUBAGENT_TOOLS.has(toolName) || call.category === "subagent") {
+  if (toolName === "agent") {
+    return call.params.action === "list" || call.params.action === "monitor"
+      ? { category: "readonly", kind: "readonly" }
+      : { category: "subagent", kind: "subagent" };
+  }
+  if (call.category === "subagent") {
     return { category: "subagent", kind: "subagent" };
   }
   if (toolName === "sensitive_path") {

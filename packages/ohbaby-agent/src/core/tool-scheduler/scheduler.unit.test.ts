@@ -246,6 +246,39 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
+  it("retains a cancelled run's cleanup until the original tool operation settles", async () => {
+    const { scheduler } = createScheduler();
+    const operation = deferred<ToolExecutionResult>();
+    const started = deferred<undefined>();
+    scheduler.register(
+      createTool({
+        name: "read",
+        execute: () => {
+          started.resolve(undefined);
+          return operation.promise;
+        },
+      }),
+    );
+    const controller = new AbortController();
+    const result = scheduler.execute({
+      callId: "slow",
+      sessionId: "parent",
+      runId: "child-run",
+      messageId: "message",
+      toolName: "read",
+      params: {},
+      signal: controller.signal,
+    });
+    await started.promise;
+    controller.abort();
+    expect((await result).status).toBe("cancelled");
+    const cleanup = scheduler.getRunCleanup("child-run");
+    expect(cleanup.confirmed).toBe(false);
+    expect(scheduler.getRunCleanup("sibling").confirmed).toBe(true);
+    operation.resolve({ output: "late" });
+    await cleanup.settled;
+    expect(scheduler.getRunCleanup("child-run").confirmed).toBe(true);
+  });
   it.each([
     {
       name: "record with forged source",
@@ -523,9 +556,7 @@ describe("ToolScheduler", () => {
               ? {
                   edit: true,
                   read: true,
-                  subagent_close: true,
-                  subagent_run: true,
-                  subagent_status: true,
+                  agent: true,
                   todo_read: true,
                 }
               : undefined,
@@ -535,9 +566,7 @@ describe("ToolScheduler", () => {
     for (const tool of [
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
-      { name: "subagent_run", category: "subagent" },
-      { name: "subagent_status", category: "subagent-control" },
-      { name: "subagent_close", category: "subagent-control" },
+      { name: "agent", category: "subagent" },
       { name: "todo_read", category: "memory" },
     ] as const) {
       scheduler.register(createTool(tool));
@@ -1913,6 +1942,62 @@ describe("ToolScheduler", () => {
     await expect(subagent1).resolves.toMatchObject({ status: "success" });
     await expect(subagent2).resolves.toMatchObject({ status: "success" });
     await expect(write).resolves.toMatchObject({ status: "success" });
+  });
+
+  it("admits control actions while the same tool holds the dispatch slot", async () => {
+    const blocker = deferred<{ readonly output: string }>();
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxSubagentConcurrency: 1 } },
+    });
+    scheduler.register(
+      createTool({
+        name: "agent",
+        category: "subagent",
+        admission: {
+          capacity: (params) =>
+            params.action === "spawn" ? "dispatch" : "control",
+          category: (params) =>
+            params.action === "list" || params.action === "monitor"
+              ? "readonly"
+              : "subagent",
+          plan: () => [],
+        },
+        execute: (params) =>
+          params.action === "spawn"
+            ? blocker.promise
+            : Promise.resolve({ output: String(params.action) }),
+      }),
+    );
+    const request = {
+      runId: "test_run",
+      messageId: "m",
+      sessionId: "s",
+      toolName: "agent",
+    };
+    const running = scheduler.execute({
+      ...request,
+      callId: "spawn",
+      params: { action: "spawn" },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(scheduler.getStatus("spawn")).toBe("executing");
+      });
+      for (const action of ["stop", "list", "monitor", "close"]) {
+        const result = scheduler.execute({
+          ...request,
+          callId: action,
+          params: { action },
+        });
+        await expect(result).resolves.toMatchObject({
+          output: action,
+          status: "success",
+        });
+      }
+    } finally {
+      blocker.resolve({ output: "done" });
+      await running;
+    }
   });
 
   it("lets subagent control tools bypass the long-running subagent pool", async () => {

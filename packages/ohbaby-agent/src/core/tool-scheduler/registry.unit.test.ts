@@ -75,9 +75,7 @@ describe("ToolRegistry", () => {
       "edit",
       "web_search",
       "goal_update",
-      "subagent_run",
-      "subagent_status",
-      "subagent_close",
+      "agent",
       "todo_read",
       "todo_write",
     ]) {
@@ -99,9 +97,7 @@ describe("ToolRegistry", () => {
       "read",
       "edit",
       "goal_update",
-      "subagent_run",
-      "subagent_status",
-      "subagent_close",
+      "agent",
       "todo_read",
       "todo_write",
     ]);

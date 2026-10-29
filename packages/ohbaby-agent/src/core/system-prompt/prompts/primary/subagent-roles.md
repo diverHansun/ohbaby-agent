@@ -1,5 +1,5 @@
 <subagent_roles>
-Subagent roles for subagent_run:
+Subagent roles for agent spawn:
 {{ROLES}}
 
 Omit role to use generic.

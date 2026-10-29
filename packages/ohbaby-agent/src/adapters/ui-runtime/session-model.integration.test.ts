@@ -64,8 +64,9 @@ function fakeLlmClient(
                   {
                     id: "call-child",
                     index: 0,
-                    name: "subagent_run",
+                    name: "agent",
                     argumentsDelta: JSON.stringify({
+                      action: "spawn",
                       description: "child",
                       role: "explore",
                       prompt: "Inspect this task",

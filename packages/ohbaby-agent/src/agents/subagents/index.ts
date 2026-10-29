@@ -14,6 +14,13 @@ export type {
   SubagentRunResult,
   SubagentStatusInput,
   SubagentStatusResult,
+  SubagentSpawnInput,
+  SubagentSendInput,
+  SubagentStartResult,
+  SubagentStopInput,
+  SubagentStopResult,
+  SubagentUnprocessedMessage,
+  SubagentCleanupResult,
 } from "./types.js";
 
 export {

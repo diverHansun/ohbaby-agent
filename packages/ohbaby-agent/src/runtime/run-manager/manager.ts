@@ -450,6 +450,8 @@ export class RunManager {
           // Handoff is synchronous after the final preparation await. Later
           // preparation cancellation must not stop an already started worker.
           releasePreparation();
+          await record.options.onInputReady?.();
+          record.abortController.signal.throwIfAborted();
         },
       });
       if (record.abortController.signal.aborted) {

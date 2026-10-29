@@ -209,6 +209,7 @@ export async function runAgent(
   try {
     input.preparationSignal?.throwIfAborted();
     record = await deps.runCoordinator.create({
+      ...(input.onInputReady ? { onInputReady: input.onInputReady } : {}),
       runModel: input.runModel,
       preparationSignal: input.preparationSignal,
       ...(reasoning === undefined ? {} : { reasoning }),

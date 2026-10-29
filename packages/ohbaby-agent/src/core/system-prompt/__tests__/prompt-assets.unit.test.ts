@@ -70,15 +70,12 @@ describe("system prompt template assets", () => {
     expect(SUBAGENT_ROLES_GUIDANCE_PROMPT).toContain("{{ROLES}}");
   });
 
-  it("requires delegated execution to settle before any main final answer", () => {
+  it("requires independent Goal work before yielding to background completion", () => {
     expect(PRIMARY_BASE_PROMPT).toContain(
-      "Before any user-facing final answer, make sure every subagent execution",
+      "Complete the work you can advance independently before ending a Goal turn",
     );
     expect(PRIMARY_BASE_PROMPT).toContain(
-      "Before calling `UpdateGoal(complete)`",
-    );
-    expect(PRIMARY_BASE_PROMPT).toContain(
-      "After the tool result, give the user the final answer and end the run",
+      "a normally finished main turn with active Goal background executions yields until a result or scheduled supervision wakes it",
     );
   });
 

@@ -90,7 +90,9 @@ function toolResultPart(part: ToolPart): UiMessagePart | undefined {
   const output = part.state.output ?? "";
   // Tool result metadata is stored on state, separately from scheduler metadata.
   const subagent =
-    part.tool === "subagent_run" ? part.state.metadata?.subagent : undefined;
+    part.tool === "agent" || part.tool === "subagent_run"
+      ? part.state.metadata?.subagent
+      : undefined;
   const execution =
     typeof subagent === "object" && subagent !== null && "execution" in subagent
       ? subagent.execution

@@ -3,6 +3,41 @@ import { GoalService } from "./service.js";
 import { InMemoryGoalPersistence } from "./persistence.js";
 
 describe("goal admission identity", () => {
+  it("reclaims settled Goal roots when a budget is exhausted at the admission boundary", async () => {
+    const interruptions: import("./types.js").GoalExecutionInterruptInput[] =
+      [];
+    const service = new GoalService({
+      persistence: new InMemoryGoalPersistence(),
+      executionControl: {
+        interruptGoalExecution: (input): Promise<void> => {
+          interruptions.push(input);
+          return Promise.resolve();
+        },
+      },
+    });
+    const goal = await service.createGoal("s", {
+      actor: "user",
+      objective: "work",
+      budgetLimits: { turnBudget: 1 },
+    });
+    const epoch = service.currentExecutionEpoch("s");
+    const ticket = await service.admitTurnInBoundary("s", goal.goalId, epoch);
+    if (!ticket) throw new Error("Expected admission");
+    service.bindTicketRun(ticket, "settled-root");
+    await service.settleTurn("s", ticket, {
+      status: "succeeded",
+      usage: { totalTokens: 1, usageComplete: true },
+    });
+    expect(
+      await service.admitTurnInBoundary("s", goal.goalId, epoch),
+    ).toBeNull();
+    await service.whenIdle();
+    expect(interruptions).toMatchObject([
+      { goalId: goal.goalId, rootRunIds: ["settled-root"] },
+    ]);
+    expect(service.peekSnapshot("s")?.status).toBe("blocked");
+  });
+
   it("counts only admitted turns and renders the committed snapshot", async () => {
     const service: GoalService = new GoalService({
       persistence: new InMemoryGoalPersistence(),

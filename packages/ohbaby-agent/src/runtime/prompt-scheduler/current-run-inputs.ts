@@ -101,6 +101,8 @@ export interface CurrentRunInputStore {
   acceptRuntimeInput(input: AcceptRuntimeInput): Promise<CurrentRunInputRecord>;
   steerQueued(input: SteerQueuedPromptInput): Promise<SteerQueuedPromptOutcome>;
   getInput(inputId: string): Promise<CurrentRunInputRecord | undefined>;
+  /** Saved input facts, including processed and closed records; never reopens a run. */
+  listByRun(runId: string): Promise<readonly CurrentRunInputRecord[]>;
   listPending(runId: string): Promise<readonly CurrentRunInputRecord[]>;
   getMessages(runId: string): Promise<readonly MessageWithParts[]>;
   filterModelHistory(
@@ -119,7 +121,10 @@ export interface CurrentRunInputStore {
 }
 export class CurrentRunInputConflictError extends Error {
   readonly code = "CURRENT_RUN_INPUT_CONFLICT";
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly reason?: "target-closed",
+  ) {
     super(message);
     this.name = "CurrentRunInputConflictError";
   }
@@ -216,10 +221,17 @@ abstract class CurrentInputs implements CurrentRunInputStore {
   ): RunLedgerRecord {
     const run = this.run(runId);
     if (
-      run?.status !== "running" ||
-      run.inputsClosedAt !== undefined ||
-      this.locallyClosed.has(runId)
+      run?.inputsClosedAt !== undefined ||
+      this.locallyClosed.has(runId) ||
+      (run !== undefined &&
+        run.status !== "pending" &&
+        run.status !== "running")
     )
+      throw new CurrentRunInputConflictError(
+        "Target run is closed or not active",
+        "target-closed",
+      );
+    if (run?.status !== "running")
       conflict("Target run is closed or not active");
     if (
       sessionId !== undefined &&
@@ -482,6 +494,9 @@ abstract class CurrentInputs implements CurrentRunInputStore {
   async getInput(inputId: string): Promise<CurrentRunInputRecord | undefined> {
     return this.readInput(inputId);
   }
+  async listByRun(runId: string): Promise<readonly CurrentRunInputRecord[]> {
+    return this.inputs(runId);
+  }
   async listUnconsumedSteers(
     sessionId: string,
   ): Promise<readonly CurrentRunInputRecord[]> {
@@ -514,7 +529,9 @@ abstract class CurrentInputs implements CurrentRunInputStore {
         return false;
       return (
         input.processedRequestId !== undefined ||
-        (input.closedAt !== undefined &&
+        (input.source !== "subagent-result" &&
+          input.source !== "subagent-message" &&
+          input.closedAt !== undefined &&
           input.firstAttemptRequestId !== undefined)
       );
     });

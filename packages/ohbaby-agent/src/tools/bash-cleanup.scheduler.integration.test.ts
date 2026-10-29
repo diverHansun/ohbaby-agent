@@ -386,7 +386,9 @@ describe("Bash cleanup through scheduler", () => {
       expect.soft(f.children).toHaveLength(0);
       expect.soft(release).toHaveBeenCalledTimes(retain.mock.calls.length);
       expect(f.killTree).not.toHaveBeenCalled();
-      expect(f.registry.hasActiveWork()).toBe(false);
+      await vi.waitFor(() => {
+        expect(f.registry.hasActiveWork()).toBe(false);
+      });
     } finally {
       await f.dispose();
     }
@@ -446,7 +448,9 @@ describe("Bash cleanup through scheduler", () => {
       f.children[0].finish();
       await Promise.resolve();
       expect(release).toHaveBeenCalledTimes(2);
-      expect(f.registry.hasActiveWork()).toBe(false);
+      await vi.waitFor(() => {
+        expect(f.registry.hasActiveWork()).toBe(false);
+      });
     } finally {
       await f.dispose();
     }

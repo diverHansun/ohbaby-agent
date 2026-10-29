@@ -21,6 +21,7 @@ import type {
 } from "./types.js";
 
 const SUBAGENT_TOOL_NAMES = new Set([
+  "agent",
   "subagent_run",
   "subagent_status",
   "subagent_close",
