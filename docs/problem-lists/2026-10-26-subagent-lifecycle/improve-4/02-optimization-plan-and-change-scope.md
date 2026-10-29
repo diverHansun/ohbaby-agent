@@ -37,7 +37,7 @@
 
 ## 2.5 分批实施
 
-本地分支 `subagent/improve-4-migration`，从合并了 improve-3 的 main 切出。
+按 D49 在 `subagent/frontend` 上实施，接在 improve-3 后面。
 
 | 批次 | 内容 | 完成标准 |
 | --- | --- | --- |

@@ -45,6 +45,10 @@
 | `ArchivedSection` | 功能区 | 已归档会话列表：自己分页，不进设置缓存；每行恢复或确认后永久删除（归档会话议题 D9） | `ui/settings/` | 新增 |
 | `ModelMenu` | 组合 | 输入框控制行的模型菜单（第二批） | `ui/composer/` | 新增 |
 | `ComposerMoreMenu` | 组合 | 手机（< 640px）控制行的“更多”：Thinking 二级列表和 Full access 开关，复用 `Menu`（improve-4 4b，D29） | `ui/composer/` | 新增 |
+| `SidePanel` | 组合 | 右侧栏：Tab 栏、添加页面菜单、改宽把手、入口页、窄屏覆盖（D33） | `ui/side-panel/` | 新增 |
+| `SubagentsPage` | 功能区 | Subagents 页：实例列表（Active/Done）和详情之间切换 | `ui/side-panel/subagents/` | 新增 |
+| `SubagentInstanceList` / `SubagentInstanceDetail` | 组合 | 实例列表；实例详情（标题、状态、停止、只读消息流） | `ui/side-panel/subagents/` | 新增，消息流复用 `SubagentConversationBody` |
+| `SubagentConversationBody` | 组合 | 子代理只读消息流和提示行，旧浮层和右侧栏共用 | `ui/session/` | 从 `SubagentView` 拆出 |
 | `ConnectOverlay` | — | — | `ui/commands/` | 第二批删除（D18） |
 | `ProjectRail` | — | — | `ui/workspace/` | 删除 |
 | `TypewriterPlaceholder` | — | — | `ui/composer/` | 删除，占位改为固定文字 |
@@ -147,6 +151,25 @@
 - **Anatomy**：在对应行下展开，配置按标签和值排成行，状态、失败原因和 Tools 独立展示；可选字段没有值时不显示。
 - **API**：接收只读配置 ViewModel 与当前实例的状态、工具列表，不接收保存、删除、启停或重连回调。
 - **约束**：Environment / Headers 只显示名字，URL 使用服务端脱敏结果；没有表单或开关。刷新由 `McpSection` 触发，只重读配置与状态。配置修改继续交给 ohbaby（D25）。
+
+### SidePanel
+
+- 输入：`useSidePanel` 给出的状态（`open`、`width`、`expanded`、`tabs`、`activeTabId`）和操作（打开、关闭、展开、改宽、开页面、切换、关闭 Tab、改页面状态）；每个 Tab 怎么渲染由调用方传入。
+- Tab 是 `{ id, kind, state }`，`state` 的类型由页面种类决定。`openPage(kind, state?)` 可以直接打开到某个状态，improve-4 从主会话点“xx 子代理启动”时就用它打开某个实例的详情。
+- **页面登记（为文件预览、终端、内置浏览器、Side chat 留位置，D34）：**
+  - 加一种页面只改三处：`side-pages.ts` 里的 `SidePageStates` 加这种页面的状态类型；`SIDE_PAGES` 里登记标题、图标、一句说明、初始状态，以及是否跟会话走（`sessionScoped`）；`SidePanelPage` 里加一个渲染分支。
+  - Tab 栏、添加菜单、入口页都从登记表生成，容器本身不用改。
+  - 跟会话走的页面（Subagents）在切换主会话时回到初始状态，终端、浏览器这类不受影响。页面要的外部依赖都通过 `SidePageContext` 传进去。
+- Tab 状态只在前端内存里（D46）。刷新页面后只恢复 `open` 和 `width`（localStorage，窄屏不记），不恢复 Tab，也不恢复展开。
+- 同一种页面可以开多个 Tab（D36）。收起时保留 Tab 状态（包括 Subagents 页选中的实例），但页面会卸载；关闭 Tab 也会卸载页面。页面卸载时只释放读取，不调用任何 agent 的 stop 或 close。
+
+### SubagentsPage
+
+- 输入：`client`、`rootSessionId`。会话变化时整页重建，旧会话的读取全部释放。
+- 列表用 SDK 的 `createSubagentInstanceReader`，只传 `rootSessionId`，绑定由 client 注入。收到失效事件、`session.resync-required`，或停止之后，都刷新一次。
+- 分组只在前端推导：Active 是 `pending`、`running`，或 `settling`、`approvalBlocked` 为真；其余是 Done。
+- 详情用 SDK 的 conversation reader。在 SDK 能按 `subagentId` 直接打开之前（improve-2 B4），先按实例的 `latestExecutionId` 取一次执行再打开。
+- 停止调用 `stopSubagent`，带上实例当前的 `currentExecutionId`。错误码 `SUBAGENT_SNAPSHOT_CHANGED`（HTTP 409）当成“已提交，结果不确定”，刷新列表后以列表为准；其他 409（比如跨会话）照常报错。
 
 ## 4. 组件与模式
 

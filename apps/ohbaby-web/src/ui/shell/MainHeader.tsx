@@ -1,4 +1,4 @@
-import { PanelLeft } from "lucide-react";
+import { PanelLeft, PanelRight } from "lucide-react";
 import type { ReactElement } from "react";
 import {
   type HeaderModel,
@@ -20,7 +20,8 @@ const CONNECTION_LABELS: Partial<
 
 /**
  * Top bar of the main area: sidebar toggle when the sidebar is closed,
- * the chat title, its working directory and context usage. Connection state is
+ * the chat title, its working directory, context usage and the right panel's
+ * toggle. Connection state is
  * shown only when a folder's instance exists and is not healthy (D6); with no
  * folder open there is nothing to connect to, so nothing is shown.
  */
@@ -33,6 +34,9 @@ export function MainHeader(props: {
   readonly hasClient: boolean;
   readonly sessionId: string | null;
   readonly onOpenContextUsage?: () => void;
+  /** The right panel's toggle; shown while the panel is closed, like the sidebar's. */
+  readonly sidePanelOpen?: boolean;
+  readonly onOpenSidePanel?: () => void;
 }): ReactElement {
   const abnormal =
     props.hasClient && isConnectionAbnormal(props.header.connectionKind);
@@ -76,6 +80,15 @@ export function MainHeader(props: {
             sessionId={props.sessionId}
             usage={props.header.contextWindowUsage}
           />
+        ) : null}
+        {props.onOpenSidePanel && !props.sidePanelOpen ? (
+          <IconButton
+            label="Open side panel"
+            data-side-panel-toggle=""
+            onClick={props.onOpenSidePanel}
+          >
+            <PanelRight aria-hidden="true" size={15} />
+          </IconButton>
         ) : null}
       </div>
     </header>

@@ -5,15 +5,16 @@ import {
   useEffect,
   useState,
 } from "react";
-import { isNarrowViewport } from "../shared/viewport.js";
+import { isNarrowViewport, useNarrowViewport } from "../shared/viewport.js";
 import {
   initialSidebarOpen,
   rememberSidebarOpen,
 } from "./sidebar-preference.js";
 
 /**
- * Two-column layout: sidebar and main area. Owns only the sidebar's open state;
- * on narrow windows the sidebar becomes a drawer over the main area.
+ * Sidebar, main area and the optional right panel. Owns only the sidebar's open
+ * state; on narrow windows the sidebar becomes a drawer over the main area and
+ * the right panel covers the main area (03 §4.9).
  */
 export function AppShell(props: {
   /**
@@ -29,10 +30,15 @@ export function AppShell(props: {
     openSidebar: () => void,
   ) => ReactNode;
   readonly main: ReactNode;
+  /** The right panel; undefined while it is closed. */
+  readonly aside?: ReactNode;
+  /** The right panel covers the main area, like a maximized pane. */
+  readonly asideExpanded?: boolean;
   readonly overlays?: ReactNode;
   readonly onSearch?: () => void;
 }): ReactElement {
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
+  const narrow = useNarrowViewport();
   const setOpen = useCallback((open: boolean): void => {
     setSidebarOpen(open);
     rememberSidebarOpen(open);
@@ -66,7 +72,9 @@ export function AppShell(props: {
     };
   }, [open, props.onSearch]);
   return (
-    <div className={`ohb-shell${sidebarOpen ? " is-sidebar-open" : ""}`}>
+    <div
+      className={`ohb-shell${sidebarOpen ? " is-sidebar-open" : ""}${props.aside !== undefined && props.asideExpanded ? " is-aside-expanded" : ""}`}
+    >
       <div className="ohb-shell-sidebar" inert={!sidebarOpen}>
         {props.renderSidebar(close, dismissDrawer)}
       </div>
@@ -77,10 +85,17 @@ export function AppShell(props: {
           onClick={dismissDrawer}
         />
       ) : null}
-      <main className="ohb-shell-main">
+      {/* Below 1024px or when expanded the right panel covers the chat; keep focus out of what is hidden. */}
+      <main
+        className="ohb-shell-main"
+        inert={
+          props.aside !== undefined && (narrow || props.asideExpanded === true)
+        }
+      >
         {props.renderHeader(sidebarOpen, open)}
         {props.main}
       </main>
+      {props.aside}
       {props.overlays}
     </div>
   );

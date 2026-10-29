@@ -18,7 +18,11 @@ import {
   type UiSubagentConversationView,
   type UiSubagentExecutionList,
   type UiSubagentExecutionView,
+  type UiSubagentInstanceQuery,
+  type UiSubagentInstanceSnapshot,
   type UiSubagentQuery,
+  type UiSubagentStopInput,
+  type UiSubagentStopResult,
   type UiUnsubscribe,
   type UiWebCommandCatalog,
 } from "ohbaby-sdk";
@@ -168,6 +172,32 @@ export class BrowserDaemonClient implements UiBackendClient {
       runtimeEpoch: input.runtimeEpoch ?? binding?.permissionEpoch,
       bindingGeneration: input.bindingGeneration ?? binding?.bindingGeneration,
     });
+  }
+  async listSubagentInstances(
+    input: UiSubagentInstanceQuery,
+  ): Promise<UiSubagentInstanceSnapshot> {
+    const binding = this.sync.permissionSync.getState().binding;
+    const result = await this.http.listSubagentInstances({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.sync.permissionSync.getState().binding)
+      throw new Error("Session binding changed during instance query");
+    return result.result;
+  }
+  /** A stop may already have happened when the binding moves on; the receipt stands. */
+  async stopSubagent(
+    input: UiSubagentStopInput,
+  ): Promise<UiSubagentStopResult> {
+    const binding = this.sync.permissionSync.getState().binding;
+    return (
+      await this.http.stopSubagent({
+        ...input,
+        runtimeEpoch: binding?.permissionEpoch,
+        bindingGeneration: binding?.bindingGeneration,
+      })
+    ).result;
   }
   async getSessionView(input: UiSessionScope): Promise<UiSessionView> {
     return (await this.http.getSessionView(input)).view;

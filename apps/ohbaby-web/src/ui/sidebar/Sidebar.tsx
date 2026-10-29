@@ -16,7 +16,6 @@ import {
   type ReactElement,
   type ReactNode,
   useCallback,
-  useEffect,
   useMemo,
   useLayoutEffect,
   useRef,
@@ -37,6 +36,7 @@ import {
 import { SidebarSearch } from "../search/SidebarSearch.js";
 import { IconButton } from "../shared/IconButton.js";
 import { useDelayed } from "../shared/use-delayed.js";
+import { useMinuteClock } from "../shared/use-minute-clock.js";
 import { Wordmark } from "../shared/Wordmark.js";
 import {
   readCollapsedGroups,
@@ -416,18 +416,4 @@ function SidebarSection(props: {
       {props.expanded ? props.children : null}
     </section>
   );
-}
-
-/** Re-renders once a minute so relative times stay current. */
-function useMinuteClock(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNow(Date.now());
-    }, 60_000);
-    return (): void => {
-      clearInterval(timer);
-    };
-  }, []);
-  return now;
 }

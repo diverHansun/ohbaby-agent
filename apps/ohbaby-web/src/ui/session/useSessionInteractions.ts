@@ -15,7 +15,7 @@ import {
 } from "react";
 import type { ViewModel } from "./selectors.js";
 import { subagentSheetGeometry } from "./subagent-layout.js";
-import type { SubagentReadingCache } from "./SubagentView.js";
+import type { SubagentReadingCache } from "./SubagentConversationBody.js";
 
 /** The approval panel; its height reserves space at the bottom of the stream. */
 export const APPROVAL_PANEL_SELECTOR = ".ohb-approval-panel";
