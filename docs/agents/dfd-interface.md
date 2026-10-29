@@ -67,3 +67,21 @@ RunManager 在 durable ledger 已标记 running 后通知输入通道就绪。�
 | `ShellJobRegistry` | 实际执行 owner 的命令取消和物理退出证据 |
 
 owner 恢复以明确 owner 身份和存活证据为准，不能因为发起主 run 已 completed 就判定后台执行死亡。服务退出沿现有 cleanup 协议处理未确认资源。
+
+## Store 契约与恢复
+
+`claim` 和 `finishRun` 不是普通 update 的别名。`claim` 原子地检查实例尚未关闭、没有其他执行 owner，再写入本次执行；`finishRun(expectedCurrentRunId)` 使用 CAS，防止旧执行在 close、恢复或后续执行之后覆盖新状态。SQLite 在同一条条件写语句中用 `RETURNING` 取结果，不能拆成 update 后再 select。实例变更订阅只在成功提交后发布，失配和失败不会发布假变更。
+
+primary 历史仍按 `context_scope_id IS NULL` 读取。子代理按 `sessionId + contextScopeId` 读取，不能因为多个实例共享 child session 而混用历史。RunManager 的执行锁只覆盖当前 scope；一个 scope 等待取消或清理，不阻塞兄弟 scope。
+
+runtime 重置先经过 `resetRuntime` 串行屏障并关闭新准入，再发出 `RunManager.cancelAll`，由 `SandboxManager.dispose` 等待已有 lease 的清理。关闭阶段可以在同一 deadline 内并行等待各资源，但不能把超时或销毁失败写成已确认。重置不会重播旧排队任务；旧输入保留原文及 `closedAt/closeReason`。
+
+Goal 的显式整体停止与预算耗尽按该 Goal 实际持有的 root runs 回收后台执行；普通主 Stop 不走这条整体终止路径。Goal root 归属目前只存内存，重启时已有后台执行会被恢复为中断，因此无需依靠重启后的旧归属继续执行。耗尽 Goal 的结果不会自动冒用普通轮次绕过预算；同一会话的普通后台结果仍可独立唤醒，用户主动输入也可查看已保存的 Goal 结果。
+
+## UI 实例读取与停止
+
+SDK 的 `listSubagentInstances` 返回主会话全部未关闭实例的完整快照，带 `runtimeEpoch`、绑定信息和该主会话的 `revision`。同一绑定内仅接受更大 revision 的完整快照；读取失败、部分结果和旧响应都不能清空列表或复活已关闭实例。实例、执行、审批、未消费输入及清理确认变化复用现有 UI 事件通道发布失效通知。
+
+`stopSubagent` 必须带 `expectedExecutionId`，交由 Host 原子比对，不调用主会话 abort。回执区分 accepted、confirmed、not_running 和 execution_changed。UI 详情在 close 后返回 `SUBAGENT_CLOSED` 并释放 watch/projection；未知或跨 root 的实例返回 `SUBAGENT_NOT_FOUND`，失效的客户端会话绑定返回既有 `SESSION_SCOPE_CHANGED`。释放 watch 不停止执行。主模型 monitor 的授权历史读取和 CLI 的旧 execution reader 仍保留。
+
+HTTP 入口为 `GET /v1/sessions/:id/subagent-instances` 与 `POST /v1/sessions/:id/subagents/:subagentId/stop`；既有 conversation 路径继续负责详情、锚点和 watch。SDK 与 RPC 采用相同的方法及回执，读授权和控制授权分别检查所选主会话。

@@ -18,6 +18,6 @@ agent 工具 → SessionSubagentHost → AgentInstance
 
 子代理相关小模块各自拥有一项职责：`monitor` 读取历史，`execution-message-channel` 处理运行中输入，`continuation-coordinator` 对接请求确认，`session-supervisor` 检查会话状态并申请唤醒。最终准入仍由 adapter 的既有会话执行门负责。
 
-`core/agents` 不依赖 `agents`、adapters 或 runtime 具体实现；runtime 不依赖 agents。组合层通过端口装配消息通道、shell 清理、权限事实和运行服务。
+`core/agents` 不依赖 `agents`、adapters 或 runtime 具体实现；runtime 不依赖 `agents`，也不能反向依赖 `core/agents`。组合层通过端口装配消息通道、shell 清理、权限事实和运行服务。
 
 旧 `Task` 工具、`AgentTaskManager` 和 durable FIFO 自动续跑已经退出当前路径。历史表中的字段可为读取和恢复兼容保留，不构成新的执行入口。
