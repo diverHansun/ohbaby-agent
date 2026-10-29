@@ -11,7 +11,7 @@
 如果没有 `agents`：
 
 - 系统无法集中管理 build、plan、explore、research 等 agent 配置。
-- `subagent_run` 无法按名称解析目标 agent 并创建受控 child session。
+- `agent spawn` 无法按名称解析目标 agent 并创建受控 child session。
 - 长生命周期 subagent 缺少统一的状态机、关闭语义和 owner 恢复边界。
 - Policy、System-Prompt、ToolScheduler 无法围绕 agent 描述符形成一致约定。
 
@@ -29,7 +29,7 @@
 
 ### G3: 受控的 subagent envelope
 
-`SessionSubagentHost` 为 `subagent_run/status/close` 工具提供统一调用形态：
+`SessionSubagentHost` 为 `agent` 六个 action 工具提供统一调用形态：
 
 - 校验目标 agent 必须是 subagent role。
 - 复用 parent 下的 child session，但每个 subagent 持有自己的 `contextScopeId`。
@@ -39,7 +39,7 @@
 
 ### G4: 长生命周期 subagent 状态机
 
-`SessionSubagentHost` 负责 background/foreground、排队、interrupt、close 和 status。它只管理状态和排队，不重新实现 run 生命周期。
+`SessionSubagentHost` 负责 background/foreground、执行名额、send、stop、close 和纯读检查。它只管理编排状态，不重新实现 run 生命周期。
 
 ### G5: 分层清晰
 
@@ -57,7 +57,7 @@
 | D4 | 校验 subagent 可调用目标 | `SessionSubagentHost` / `AgentManager` |
 | D5 | 创建或复用 child session | `SessionSubagentHost` 通过 `SessionManager` |
 | D6 | 创建 `AgentInstance` 和 `contextScopeId` | `SessionSubagentHost` / `AgentInstanceFactory` |
-| D7 | 管理长生命周期 subagent 状态、队列、close、timeout、recover | `SessionSubagentHost` / `SubagentInstanceStore` |
+| D7 | 管理长生命周期 subagent 状态、名额、消息输入、close、timeout、recover | `SessionSubagentHost` / `SubagentInstanceStore` |
 | D8 | 删除旧 subagent runner/executor API | `agents/index.ts` / package root exports |
 
 ---
@@ -84,7 +84,7 @@
 2. `agents` 可以依赖 `core/agents`，但 `core/agents` 不得依赖 `agents`。
 3. `runtime` 不得依赖 `agents` 或 `core/agents`。
 4. improve-1 直接删除 `SubagentExecutor`、`SubagentExecutorOptions`、`createSubagentRunner` 等旧 API。
-5. primary 路径在 improve-1 不切换，任何文档和测试都应明确这一点。
+5. primary 和 subagent 都通过 AgentInstance 进入 core/agents；数据流以 dfd-interface.md 为准。
 
 ---
 
@@ -97,7 +97,7 @@
 | `core/message` | 依赖 | 读取 child session 输出 |
 | `core/tool-scheduler` | 依赖 | 获取可用于本 agent 的工具定义 |
 | `system-prompt` | 间接依赖 | 通过 `AgentManager` 组装 runtime prompt |
-| `tools/subagent` | 被依赖 | `subagent_run/status/close` 工具调用 `SessionSubagentHost` |
+| `tools/subagent` | 被依赖 | `agent` 六个 action 工具调用 `SessionSubagentHost` |
 | `runtime` | 通过端口间接协作 | 只通过 `AgentRunCoordinator` 端口进入 |
 
 ---
@@ -107,4 +107,4 @@
 - [x] 能用一句话说明 `agents` 的存在意义。
 - [x] 能区分 `agents` 和 `core/agents`。
 - [x] 能明确哪些旧职责已经移除。
-- [x] 能为 improve-2 的 primary 切换留下清晰边界。
+- [x] 能明确 primary 与 subagent 的运行和编排边界。

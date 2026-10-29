@@ -1,5 +1,11 @@
 # tool-scheduler 模块 architecture.md
 
+## 2026-10 子代理准入与清理边界
+
+内置 `agent` 使用按 action 解析的可信准入规则。`list/monitor` 是只读操作，`spawn/send/stop/close` 是子代理控制操作；它们不再通过 scheduler 的旧 subagent 容量队列限制实际执行。六个实际执行名额由 `SessionSubagentHost` 按主会话统一管理，前后台共用，满额直接拒绝。下文旧 subagent=3 并发矩阵只描述通用类别配置，不适用于内置 `agent`。
+
+工具向调用方返回 cancelled 不代表底层操作已退出。`getRunCleanup(runId)` 汇总真实操作、资源释放和可信 cleanup 报告；组合层用该证据决定子执行名额和关闭清理是否完成。`getRunCleanup()` 汇总整个 scheduler，服务退出不能忽略仍未确认的操作。`bash(run_in_background=true)` 的自然遗留进程由 ShellJobRegistry 独立管理，不继续占子执行名额；显式 stop/close 仍按实际 child run 或实例 scope 取消它。
+
 本文档描述 `tool-scheduler` 模块的内部架构与设计模式。所有设计基于 `goals-duty.md` 中定义的职责。
 
 ---
