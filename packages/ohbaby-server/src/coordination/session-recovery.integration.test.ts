@@ -8,6 +8,7 @@ import type {
   UiSessionRecoveryClient,
   UiSubagentConversationQuery,
   UiSubagentConversationUnwatchQuery,
+  UiSubagentStopInput,
 } from "ohbaby-sdk";
 import { createDaemonHttpServer } from "../runtime/daemon/server.js";
 import { createRemoteUiBackendClient } from "../protocols/jsonrpc/client.js";
@@ -696,6 +697,178 @@ describe("source session recovery HTTP/RPC/SSE", () => {
 });
 
 describe("readonly execution transports", () => {
+  it("routes complete instance snapshots and conditional stop over REST and RPC without aborting the parent", async () => {
+    const { request, backend, server } = await setup();
+    const item = {
+      rootSessionId: "root",
+      subagentId: "instance",
+      displayName: "Reviewer",
+      description: "Review",
+      createdAt: 1,
+      updatedAt: 2,
+      status: "running" as const,
+      currentExecutionId: "current",
+      latestExecutionId: "current",
+      mode: "background" as const,
+      approvalBlocked: true,
+      settling: false,
+      unprocessedMessageCount: 2,
+    };
+    backend.listSubagentInstances = vi.fn().mockResolvedValue({
+      rootSessionId: "root",
+      runtimeEpoch: epoch,
+      revision: 7,
+      complete: true,
+      instances: [item],
+    });
+    backend.stopSubagent = vi.fn((input: UiSubagentStopInput) =>
+      Promise.resolve({
+        rootSessionId: "root",
+        subagentId: "instance",
+        expectedExecutionId: input.expectedExecutionId,
+        outcome:
+          input.expectedExecutionId === "current"
+            ? ("accepted" as const)
+            : ("execution_changed" as const),
+        instance: {
+          ...item,
+          settling: input.expectedExecutionId === "current",
+        },
+      }),
+    );
+    const response = await request(
+      `/v1/sessions/root/subagent-instances?${query}`,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      result: {
+        revision: 7,
+        complete: true,
+        bindingGeneration: 1,
+        instances: [item],
+      },
+    });
+    const stopped = await request("/v1/sessions/root/subagents/instance/stop", {
+      method: "POST",
+      body: JSON.stringify({
+        runtimeEpoch: epoch,
+        bindingGeneration: 1,
+        expectedExecutionId: "current",
+      }),
+    });
+    expect(await stopped.json()).toMatchObject({
+      result: { outcome: "accepted", instance: { settling: true } },
+    });
+    const remote = createRemoteUiBackendClient({
+      authToken: "recovery-token",
+      clientId: "remote-instances",
+      port: server.port,
+      startupIntent: { resumeSessionId: "root" },
+    });
+    cleanups.push(async () => remote.dispose());
+    expect(
+      (await remote.listSubagentInstances({ rootSessionId: "root" })).instances,
+    ).toHaveLength(1);
+    expect(
+      await remote.stopSubagent({
+        rootSessionId: "root",
+        subagentId: "instance",
+        expectedExecutionId: "old",
+      }),
+    ).toMatchObject({
+      outcome: "execution_changed",
+      instance: { currentExecutionId: "current" },
+    });
+    expect(backend.abortRun).not.toHaveBeenCalled();
+    expect(
+      (await request(`/v1/sessions/other/subagent-instances?${query}`)).status,
+    ).toBe(409);
+    expect(
+      (
+        await request("/v1/sessions/other/subagents/instance/stop", {
+          method: "POST",
+          body: JSON.stringify({
+            runtimeEpoch: epoch,
+            bindingGeneration: 1,
+            expectedExecutionId: "current",
+          }),
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await request("/v1/sessions/root/subagents/instance/stop", {
+          method: "POST",
+          body: JSON.stringify({ runtimeEpoch: epoch, bindingGeneration: 1 }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(backend.stopSubagent).toHaveBeenCalledTimes(2);
+    backend.stopSubagent = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error("closed"), { code: "SUBAGENT_CLOSED" }),
+      );
+    expect(
+      (
+        await request("/v1/sessions/root/subagents/instance/stop", {
+          method: "POST",
+          body: JSON.stringify({
+            runtimeEpoch: epoch,
+            bindingGeneration: 1,
+            expectedExecutionId: "current",
+          }),
+        })
+      ).status,
+    ).toBe(410);
+    await expect(
+      remote.stopSubagent({
+        rootSessionId: "root",
+        subagentId: "instance",
+        expectedExecutionId: "current",
+      }),
+    ).rejects.toMatchObject({ code: "SUBAGENT_CLOSED" });
+  });
+
+  it("rejects a late complete snapshot after the client changes roots and refuses partial results", async () => {
+    const { request, backend } = await setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    backend.listSubagentInstances = vi.fn(async () => {
+      await gate;
+      return {
+        rootSessionId: "root",
+        runtimeEpoch: epoch,
+        revision: 2,
+        complete: true as const,
+        instances: [],
+      };
+    });
+    const reading = request(`/v1/sessions/root/subagent-instances?${query}`);
+    await vi.waitFor(() => {
+      expect(backend.listSubagentInstances).toHaveBeenCalledOnce();
+    });
+    await request("/v1/sessions/other/select", { method: "PATCH" });
+    release();
+    expect((await reading).status).toBe(409);
+    backend.listSubagentInstances = vi.fn().mockResolvedValue({
+      rootSessionId: "other",
+      runtimeEpoch: epoch,
+      revision: 3,
+      complete: false,
+      instances: [],
+    });
+    expect(
+      (
+        await request(
+          `/v1/sessions/other/subagent-instances?runtimeEpoch=${epoch}&bindingGeneration=2`,
+        )
+      ).status,
+    ).toBe(409);
+  });
+
   it("shares REST/RPC root-bound reads and rejects another selected root", async () => {
     const { request, backend } = await setup();
     const execution = {

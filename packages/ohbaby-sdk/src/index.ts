@@ -255,6 +255,7 @@ export type {
 
 export * from "./contract/execution.js";
 export * from "./contract/subagent-instance.js";
+export * from "./sync/subagent-instance-reader.js";
 export * from "./util/duration.js";
 
 export type {
@@ -278,7 +279,10 @@ export {
   compareSubagentMessages,
   createSubagentConversationReader,
 } from "./sync/subagent-conversation-reader.js";
-export type { UiSubagentConversationReaderState } from "./sync/subagent-conversation-reader.js";
+export type {
+  UiSubagentConversationReaderState,
+  UiSubagentConversationReader,
+} from "./sync/subagent-conversation-reader.js";
 
 export { getUnconsumedSteers } from "./contract/run-inputs.js";
 export { compareUiPromptQueueOrder } from "./contract/prompt-queue-order.js";

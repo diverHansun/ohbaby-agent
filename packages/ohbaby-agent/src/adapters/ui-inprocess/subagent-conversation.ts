@@ -10,6 +10,8 @@ import type {
   UiSubagentConversationView,
 } from "ohbaby-sdk";
 import type { MessageManager } from "../../core/message/index.js";
+import type { SubagentInstanceStore } from "../../agents/subagents/types.js";
+import { subagentAccessError } from "./subagent-instances.js";
 import type {
   SubagentExecutionRecord,
   SubagentExecutionStore,
@@ -35,6 +37,7 @@ interface ScopeView {
   readonly executions: Map<string, SubagentExecutionRecord>;
   readonly watches: Set<string>;
   pendingExecutions?: SubagentExecutionRecord[];
+  closed?: boolean;
   accessedAt: number;
 }
 
@@ -44,6 +47,7 @@ export class SubagentConversationProjection {
   private readonly history;
   private readonly unsubscribeSource: () => void;
   private readonly unsubscribeExecutions: () => void;
+  private readonly unsubscribeInstances?: () => void;
   private disposed = false;
 
   constructor(
@@ -51,13 +55,7 @@ export class SubagentConversationProjection {
       readonly runtimeEpoch: string;
       readonly source: SourceSessionProjection;
       readonly executions: SubagentExecutionStore;
-      readonly instances?: {
-        get(input: { parentSessionId: string; subagentId: string }): Promise<{
-          readonly parentSessionId: string;
-          readonly name?: string;
-          readonly description?: string;
-        } | null>;
-      };
+      readonly instances?: Pick<SubagentInstanceStore, "get" | "subscribe">;
       readonly messages: MessageManager;
       readonly validateRoot: (id: string) => Promise<void>;
       readonly runs: (
@@ -121,6 +119,62 @@ export class SubagentConversationProjection {
         this.trim(scope);
       });
     });
+    this.unsubscribeInstances = options.instances?.subscribe((record) => {
+      if (record.closedAt === undefined) return;
+      for (const scope of this.scopes.values())
+        if (
+          scope.parentSessionId === record.parentSessionId &&
+          scope.subagentId === record.subagentId
+        )
+          this.closeScope(scope);
+    });
+  }
+
+  private closeScope(scope: ScopeView): void {
+    if (this.scopes.get(this.key(scope)) !== scope) return;
+    scope.closed = true;
+    this.scopes.delete(this.key(scope));
+    scope.watches.clear();
+    scope.owner.dispose();
+    this.options.publish({
+      type: "subagent.conversation.unavailable",
+      rootSessionId: scope.rootSessionId,
+      subagentId: scope.subagentId,
+      code: "SUBAGENT_CLOSED",
+      unavailable: {
+        type: "session.unavailable",
+        runtimeEpoch: this.options.runtimeEpoch,
+        sessionId: scope.sessionId,
+        reason: "Subagent instance is closed",
+      },
+    });
+  }
+
+  private async openInstance(
+    parentSessionId: string,
+    subagentId: string,
+  ): ReturnType<SubagentInstanceStore["get"]> {
+    if (!this.options.instances) return null;
+    const instance = await this.options.instances.get({
+      parentSessionId,
+      subagentId,
+    });
+    if (instance?.parentSessionId !== parentSessionId)
+      throw subagentAccessError("SUBAGENT_NOT_FOUND");
+    if (instance.closedAt !== undefined) {
+      for (const scope of this.scopes.values())
+        if (
+          scope.parentSessionId === parentSessionId &&
+          scope.subagentId === subagentId
+        )
+          this.closeScope(scope);
+      throw subagentAccessError("SUBAGENT_CLOSED");
+    }
+    return instance;
+  }
+
+  private assertScopeOpen(scope: ScopeView): void {
+    if (scope.closed) throw subagentAccessError("SUBAGENT_CLOSED");
   }
 
   private key(value: { rootSessionId: string; subagentId: string }): string {
@@ -151,16 +205,16 @@ export class SubagentConversationProjection {
     });
     const record = records.at(0);
     if (
-      !record ||
-      record.rootSessionId !== input.rootSessionId ||
+      record?.rootSessionId !== input.rootSessionId ||
       record.subagentId !== input.subagentId
     )
-      throw new Error("Unknown subagent for this root");
+      throw subagentAccessError("SUBAGENT_NOT_FOUND");
     return record;
   }
 
   private async scope(input: UiSubagentConversationQuery): Promise<ScopeView> {
     const latest = await this.latest(input);
+    await this.openInstance(latest.parentSessionId, input.subagentId);
     const sessionId = latest.childSessionId ?? latest.rootSessionId;
     const key = this.key(input);
     let scope = this.scopes.get(key);
@@ -186,6 +240,7 @@ export class SubagentConversationProjection {
         for (const record of page.executions)
           executions.set(record.executionId, record);
         const metadata = await this.options.source.scopeMetadata(sessionId);
+        await this.openInstance(latest.parentSessionId, input.subagentId);
         return {
           session: { ...metadata, messages: page.messages },
           runs: latest.childSessionId
@@ -246,14 +301,21 @@ export class SubagentConversationProjection {
     if (input.runtimeEpoch && input.runtimeEpoch !== this.options.runtimeEpoch)
       throw new Error("Backend runtime changed");
     await this.options.validateRoot(input.rootSessionId);
+    await this.openInstance(input.rootSessionId, input.subagentId);
     const scope = await this.scope(input);
     return this.options.source.owner.run(scope.sessionId, async () => {
       input.signal?.throwIfAborted();
+      await this.openInstance(scope.parentSessionId, input.subagentId);
+      this.assertScopeOpen(scope);
       await scope.owner.initialize(scope.sessionId);
+      await this.openInstance(scope.parentSessionId, input.subagentId);
+      this.assertScopeOpen(scope);
       try {
         scope.owner.read(scope.sessionId);
       } catch {
         await scope.owner.rebuild(scope.sessionId);
+        await this.openInstance(scope.parentSessionId, input.subagentId);
+        this.assertScopeOpen(scope);
       }
       const page = await this.history.read(input);
       input.signal?.throwIfAborted();
@@ -268,10 +330,11 @@ export class SubagentConversationProjection {
         anchor && !anchor.childRunId && anchor.subagentId === input.subagentId
           ? anchor.output
           : undefined;
-      const instance = await this.options.instances?.get({
-        parentSessionId: scope.parentSessionId,
-        subagentId: input.subagentId,
-      });
+      const instance = await this.openInstance(
+        scope.parentSessionId,
+        input.subagentId,
+      );
+      this.assertScopeOpen(scope);
       const displayName =
         instance?.parentSessionId === scope.parentSessionId
           ? stableDisplayName(instance.name, instance.description)
@@ -296,6 +359,7 @@ export class SubagentConversationProjection {
     input: UiSubagentConversationQuery & { watchId: string },
   ): Promise<void> {
     await this.read(input);
+    await this.openInstance(input.rootSessionId, input.subagentId);
     this.scopes.get(this.key(input))?.watches.add(input.watchId);
   }
 
@@ -420,6 +484,7 @@ export class SubagentConversationProjection {
     this.disposed = true;
     this.unsubscribeSource();
     this.unsubscribeExecutions();
+    this.unsubscribeInstances?.();
     for (const scope of this.scopes.values()) scope.owner.dispose();
     this.scopes.clear();
   }

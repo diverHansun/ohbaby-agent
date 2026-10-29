@@ -22,6 +22,17 @@ export interface UiSubagentConversationReaderState {
   readonly reconnecting?: boolean;
   readonly error?: string;
 }
+export interface UiSubagentConversationReader {
+  readonly getSnapshot: () => UiSubagentConversationReaderState;
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly select: (execution: UiSubagentExecution) => Promise<void>;
+  readonly close: () => void;
+  readonly refresh: () => Promise<void>;
+  readonly loadEarlier: () => Promise<void>;
+  readonly loadLater: () => Promise<void>;
+  readonly jumpToLatest: () => Promise<void>;
+  readonly dispose: () => void;
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -220,12 +231,13 @@ function preserveReadingWindow(
 export function createSubagentConversationReader(
   client: Partial<UiBackendClient>,
   rootSessionId: string,
-) {
+): UiSubagentConversationReader {
   let state: UiSubagentConversationReaderState = {
     loading: false,
     locating: false,
   };
   let disposed = false;
+  let closedSubagentId: string | undefined;
   let ticket = 0;
   let controller: AbortController | undefined;
   let watch: UiSubagentConversationSelection | undefined;
@@ -259,6 +271,30 @@ export function createSubagentConversationReader(
     bufferedBytes = 0;
     readingBaseline = false;
     return ticket;
+  };
+  const markClosed = (reason: string): void => {
+    closedSubagentId = state.selected?.subagentId;
+    cancel();
+    release(watch);
+    watch = undefined;
+    publish({
+      conversation: undefined,
+      loading: false,
+      locating: false,
+      reconnecting: false,
+      error: reason,
+    });
+  };
+  const handleClosedError = (error: unknown): boolean => {
+    if (
+      typeof error !== "object" ||
+      error === null ||
+      !("code" in error) ||
+      error.code !== "SUBAGENT_CLOSED"
+    )
+      return false;
+    markClosed(errorText(error));
+    return true;
   };
   const isCurrent = (current: number, signal: AbortSignal): boolean =>
     current === ticket && !disposed && !signal.aborted;
@@ -374,6 +410,8 @@ export function createSubagentConversationReader(
     locate: boolean,
     preserveWindow = false,
   ): Promise<void> => {
+    if (closedSubagentId === selected.subagentId) return;
+    closedSubagentId = undefined;
     if (!client.watchSubagentConversation) {
       publish({
         loading: false,
@@ -443,7 +481,8 @@ export function createSubagentConversationReader(
       }
       if (acquired && watch !== acquired) release(acquired);
       if (current === ticket && !disposed && !active.signal.aborted) {
-        publish({ loading: false, locating: false, error: errorText(error) });
+        if (!handleClosedError(error))
+          publish({ loading: false, locating: false, error: errorText(error) });
       }
     } finally {
       if (current === ticket) readingBaseline = false;
@@ -452,7 +491,7 @@ export function createSubagentConversationReader(
   };
   const refresh = async (): Promise<void> => {
     const selected = state.selected;
-    if (!selected) return;
+    if (!selected || closedSubagentId === selected.subagentId) return;
     if (!watch) return startRead(selected, false);
     const current = cancel();
     const selection = watch;
@@ -469,7 +508,12 @@ export function createSubagentConversationReader(
       );
       publish({ conversation: next, loading: false, reconnecting: false });
     } catch (error) {
-      if (current === ticket && !disposed && !active.signal.aborted)
+      if (
+        current === ticket &&
+        !disposed &&
+        !active.signal.aborted &&
+        !handleClosedError(error)
+      )
         publish({
           loading: false,
           reconnecting: false,
@@ -481,7 +525,12 @@ export function createSubagentConversationReader(
     }
   };
   const onEvent = (event: UiEvent): void => {
-    if (disposed || !state.selected) return;
+    if (
+      disposed ||
+      !state.selected ||
+      closedSubagentId === state.selected.subagentId
+    )
+      return;
     if (event.type === "session.resync-required") {
       if (event.sessionId !== null && event.sessionId !== rootSessionId) return;
       publish({ reconnecting: true });
@@ -499,12 +548,18 @@ export function createSubagentConversationReader(
     )
       return;
     if (watch && event.watchId !== watch.watchId) return;
+    if (!watch && pendingWatch && event.watchId !== pendingWatch.watchId)
+      return;
     if (event.type === "subagent.conversation.unavailable") {
       if (
         watch &&
         event.unavailable.bindingGeneration !== watch.bindingGeneration
       )
         return;
+      if (event.code === "SUBAGENT_CLOSED") {
+        markClosed(event.unavailable.reason);
+        return;
+      }
       publish({ reconnecting: true });
       void refresh();
       return;
@@ -566,7 +621,7 @@ export function createSubagentConversationReader(
         loading: false,
       });
     } catch (error) {
-      if (current === ticket && !disposed)
+      if (current === ticket && !disposed && !handleClosedError(error))
         publish({ loading: false, error: errorText(error) });
     } finally {
       if (controller === active) controller = undefined;
@@ -581,6 +636,7 @@ export function createSubagentConversationReader(
     select: (execution: UiSubagentExecution): Promise<void> =>
       startRead(execution, true),
     close(): void {
+      closedSubagentId = undefined;
       cancel();
       release(watch);
       watch = undefined;
@@ -614,7 +670,7 @@ export function createSubagentConversationReader(
           locating: false,
         });
       } catch (error) {
-        if (current === ticket && !disposed)
+        if (current === ticket && !disposed && !handleClosedError(error))
           publish({ loading: false, error: errorText(error) });
       } finally {
         if (current === ticket) readingBaseline = false;

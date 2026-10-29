@@ -136,6 +136,84 @@ describe("createRemoteUiBackendClient", () => {
     },
   );
 
+  it.each([
+    ["listSubagentInstances", "headers"],
+    ["listSubagentInstances", "body"],
+    ["stopSubagent", "headers"],
+    ["stopSubagent", "body"],
+  ] as const)(
+    "preserves new subagent %s cancellation during %s",
+    async (method, phase) => {
+      let requestSignal: AbortSignal | null | undefined;
+      let rejectRequest!: (error: Error) => void;
+      let started!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let params: unknown;
+      const client = createRemoteUiBackendClient({
+        clientId: "instance-cancel",
+        port: 4096,
+        fetch: (_url, init): Promise<Response> => {
+          const request = JSON.parse(requireStringBody(init)) as {
+            id: string;
+            method: string;
+            params: unknown;
+          };
+          if (request.method === "initializeClient")
+            return Promise.resolve(Response.json({ id: request.id, ok: true }));
+          requestSignal = init?.signal;
+          params = request.params;
+          if (phase === "body")
+            return Promise.resolve(
+              new Response(
+                new ReadableStream({
+                  start(controller): void {
+                    rejectRequest = (error): void => {
+                      controller.error(error);
+                    };
+                    started();
+                  },
+                }),
+              ),
+            );
+          started();
+          return new Promise<Response>((_resolve, reject) => {
+            rejectRequest = reject;
+          });
+        },
+      });
+      const controller = new AbortController();
+      const input = { rootSessionId: "root", signal: controller.signal };
+      const request =
+        method === "stopSubagent"
+          ? client.stopSubagent({
+              ...input,
+              subagentId: "instance",
+              expectedExecutionId: "execution",
+            })
+          : client.listSubagentInstances(input);
+      try {
+        await ready;
+        controller.abort();
+        expect(requestSignal?.aborted).toBe(true);
+        expect(params).toEqual([
+          method === "stopSubagent"
+            ? {
+                rootSessionId: "root",
+                subagentId: "instance",
+                expectedExecutionId: "execution",
+              }
+            : { rootSessionId: "root" },
+        ]);
+        rejectRequest(new DOMException("Aborted", "AbortError"));
+        await expect(request).rejects.toMatchObject({ name: "AbortError" });
+      } finally {
+        await client.dispose();
+      }
+    },
+  );
+
   it("rejects an old daemon's empty command completion without retrying", async () => {
     const fetcher = vi.fn((_url: unknown, init?: RequestInit) => {
       const body = JSON.parse(requireStringBody(init)) as { id: string };

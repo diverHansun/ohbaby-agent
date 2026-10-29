@@ -12,7 +12,11 @@ import { createSessionExecutionRecovery } from "../runtime/execution-recovery/se
 import { randomUUID } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import type { UiBackendClient } from "ohbaby-sdk";
+import type {
+  UiBackendClient,
+  UiSubagentInstanceSnapshot,
+  UiSubagentStopResult,
+} from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
 import {
   DatabaseSubagentExecutionStore,
@@ -95,6 +99,8 @@ export interface PersistentUiBackendClient
   listSubagentExecutions: NonNullable<
     UiBackendClient["listSubagentExecutions"]
   >;
+  listSubagentInstances: NonNullable<UiBackendClient["listSubagentInstances"]>;
+  stopSubagent: NonNullable<UiBackendClient["stopSubagent"]>;
   getSubagentExecutionView: NonNullable<
     UiBackendClient["getSubagentExecutionView"]
   >;
@@ -262,6 +268,14 @@ function withStartupRecovery(
     getSettingsMcpStatus: () => client.getSettingsMcpStatus(),
     getSettingsSkills: () => client.getSettingsSkills(),
     getSettingsAgents: () => client.getSettingsAgents(),
+    async listSubagentInstances(input): Promise<UiSubagentInstanceSnapshot> {
+      await ready();
+      return client.listSubagentInstances(input);
+    },
+    async stopSubagent(input): Promise<UiSubagentStopResult> {
+      await ready();
+      return client.stopSubagent(input);
+    },
     async listSubagentExecutions(input) {
       await ready();
       return client.listSubagentExecutions(input);

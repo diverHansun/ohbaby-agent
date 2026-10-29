@@ -53,6 +53,8 @@ import {
   sessionRecoveryCapability,
   subagentConversationReadForClient,
   subagentReadForClient,
+  subagentInstancesForClient,
+  stopSubagentForClient,
   unwatchSubagentConversationForClient,
   watchSubagentConversationForClient,
 } from "../../coordination/session-access.js";
@@ -214,6 +216,27 @@ export async function callDaemonBackend(input: {
     input;
 
   switch (request.method) {
+    case "listSubagentInstances":
+    case "stopSubagent": {
+      const raw = request.params[0];
+      if (!isRecord(raw))
+        throw Object.assign(new Error("Invalid subagent query"), {
+          code: "INVALID_SESSION_QUERY",
+        });
+      const access = {
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: {
+          ...raw,
+          signal: input.signal,
+        } as unknown as import("ohbaby-sdk").UiSubagentStopInput,
+      };
+      return request.method === "stopSubagent"
+        ? stopSubagentForClient(access)
+        : subagentInstancesForClient(access);
+    }
     case "exportSession": {
       if (!clientViews.isRegistered(request.clientId)) {
         throw Object.assign(new Error("client is not registered"), {

@@ -1,4 +1,8 @@
 import type {
+  UiSubagentInstanceQuery,
+  UiSubagentInstanceSnapshot,
+  UiSubagentStopInput,
+  UiSubagentStopResult,
   UiSubagentQuery,
   UiSubagentExecutionList,
   UiSubagentExecutionView,
@@ -451,6 +455,87 @@ function validateConversationQuery(query: UiSubagentConversationQuery): void {
     throw Object.assign(new Error("Invalid subagent conversation query"), {
       code: "INVALID_SESSION_QUERY",
     });
+}
+
+async function authorizeSubagentInstance(
+  input: Access,
+  query: UiSubagentInstanceQuery,
+): Promise<UiPermissionBinding> {
+  parseSessionQuery({ ...query, sessionId: query.rootSessionId });
+  const binding = capture(input, query);
+  if (binding.rootSessionId !== query.rootSessionId)
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Subagent access requires the selected root session",
+    );
+  await validateRoot(input.backend, query.rootSessionId);
+  recheck(input, binding);
+  query.signal?.throwIfAborted();
+  return binding;
+}
+
+export async function subagentInstancesForClient(
+  input: Access & { readonly query: UiSubagentInstanceQuery },
+): Promise<UiSubagentInstanceSnapshot> {
+  const binding = await authorizeSubagentInstance(input, input.query);
+  if (!input.backend.listSubagentInstances)
+    throw Object.assign(new Error("Subagent instances are unavailable"), {
+      code: "SESSION_RECOVERY_UNSUPPORTED",
+    });
+  const result = await input.backend.listSubagentInstances(input.query);
+  recheck(input, binding);
+  await validateRoot(input.backend, input.query.rootSessionId);
+  recheck(input, binding);
+  if (
+    result.rootSessionId !== input.query.rootSessionId ||
+    result.runtimeEpoch !== input.epoch ||
+    (result.complete as unknown) !== true ||
+    !Number.isSafeInteger(result.revision) ||
+    result.revision < 1 ||
+    result.instances.some(
+      (item) => item.rootSessionId !== input.query.rootSessionId,
+    )
+  )
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Instance snapshot scope or version mismatch",
+    );
+  return { ...result, bindingGeneration: binding.bindingGeneration };
+}
+
+export async function stopSubagentForClient(
+  input: Access & { readonly query: UiSubagentStopInput },
+): Promise<UiSubagentStopResult> {
+  const { query } = input;
+  if (
+    typeof query.subagentId !== "string" ||
+    !query.subagentId.trim() ||
+    typeof query.expectedExecutionId !== "string" ||
+    !query.expectedExecutionId.trim()
+  )
+    throw Object.assign(
+      new Error("Subagent and expected execution identities are required"),
+      { code: "INVALID_SESSION_QUERY" },
+    );
+  const binding = await authorizeSubagentInstance(input, query);
+  if (!input.backend.stopSubagent)
+    throw Object.assign(new Error("Subagent controls are unavailable"), {
+      code: "SESSION_RECOVERY_UNSUPPORTED",
+    });
+  const result = await input.backend.stopSubagent(query);
+  recheck(input, binding);
+  if (
+    result.rootSessionId !== query.rootSessionId ||
+    result.subagentId !== query.subagentId ||
+    result.expectedExecutionId !== query.expectedExecutionId ||
+    result.instance.rootSessionId !== query.rootSessionId ||
+    result.instance.subagentId !== query.subagentId
+  )
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Subagent stop receipt scope mismatch",
+    );
+  return result;
 }
 
 export async function subagentConversationReadForClient(

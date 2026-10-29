@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import {
   subagentConversationReadForClient,
   subagentReadForClient,
+  subagentInstancesForClient,
+  stopSubagentForClient,
   unwatchSubagentConversationForClient,
   watchSubagentConversationForClient,
 } from "../../../coordination/session-access.js";
@@ -12,6 +14,44 @@ export function registerSubagentRoutes(
   app: Hono,
   ctx: DaemonRouteContext,
 ): void {
+  app.get("/v1/sessions/:id/subagent-instances", async (context) => {
+    const authorization = ctx.authorizePromptMutation(context);
+    if ("response" in authorization) return authorization.response;
+    const raw = context.req.query();
+    const result = await subagentInstancesForClient({
+      backend: ctx.options.backend,
+      views: ctx.clientViews,
+      clientId: authorization.clientId,
+      epoch: ctx.permissionEpoch,
+      query: {
+        rootSessionId: context.req.param("id"),
+        runtimeEpoch: raw.runtimeEpoch,
+        bindingGeneration: Number(raw.bindingGeneration),
+        signal: context.req.raw.signal,
+      },
+    });
+    return context.json({ ok: true, result });
+  });
+  app.post("/v1/sessions/:id/subagents/:subagentId/stop", async (context) => {
+    const authorization = ctx.authorizePromptMutation(context);
+    if ("response" in authorization) return authorization.response;
+    const raw: Record<string, unknown> = await context.req.json();
+    const result = await stopSubagentForClient({
+      backend: ctx.options.backend,
+      views: ctx.clientViews,
+      clientId: authorization.clientId,
+      epoch: ctx.permissionEpoch,
+      query: {
+        rootSessionId: context.req.param("id"),
+        subagentId: context.req.param("subagentId"),
+        expectedExecutionId: raw.expectedExecutionId as string,
+        runtimeEpoch: raw.runtimeEpoch as string,
+        bindingGeneration: raw.bindingGeneration as number,
+        signal: context.req.raw.signal,
+      },
+    });
+    return context.json({ ok: true, result });
+  });
   for (const route of [
     "/v1/sessions/:id/subagents",
     "/v1/sessions/:id/subagents/:executionId",

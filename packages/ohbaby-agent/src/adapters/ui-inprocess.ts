@@ -1,13 +1,12 @@
-import {
-  createSessionSubagentSupervisor,
-  type SessionSubagentSnapshot,
-} from "../agents/subagents/session-supervisor.js";
-import {
-  collectExecutionFacts,
-  renderExecutionFacts,
-} from "../agents/subagents/execution-facts.js";
+import { createSessionSubagentSupervisor } from "../agents/subagents/session-supervisor.js";
+import { collectExecutionFacts } from "../agents/subagents/execution-facts.js";
 import { listSessionExecutions } from "../agents/subagents/continuation-coordinator.js";
-import { reserveSubagentWakeup } from "./ui-inprocess/subagent-wakeup.js";
+import { createSubagentWakeup } from "./ui-inprocess/subagent-wakeup.js";
+import { SubagentInstanceProjection } from "./ui-inprocess/subagent-instances.js";
+import type {
+  SubagentStatusResult,
+  SubagentStopResult,
+} from "../agents/subagents/types.js";
 import { AgentRegistry } from "../agents/registry.js";
 import { loadAgentConfigWithOrigins } from "../config/agents/loaders.js";
 import {
@@ -295,6 +294,7 @@ type InternalSubmitPromptOptions = SubmitPromptOptions & {
     readonly kind: "subagent-status";
     readonly sourceId: string;
     readonly body: string;
+    readonly excludedSubagentRootRunIds?: readonly string[];
   };
   readonly goalId?: string;
   readonly goalTicket?: GoalTurnTicket;
@@ -396,6 +396,8 @@ export interface InProcessUiBackendClient
     UiSessionRecoveryClient,
     InstanceSettingsReader,
     InstanceSettingsControl {
+  listSubagentInstances: NonNullable<UiBackendClient["listSubagentInstances"]>;
+  stopSubagent: NonNullable<UiBackendClient["stopSubagent"]>;
   listSubagentExecutions: NonNullable<
     UiBackendClient["listSubagentExecutions"]
   >;
@@ -1140,6 +1142,9 @@ export function createInProcessUiBackendClient(
         streamBridge: options.streamBridge,
         subagentInstanceStore,
         subagentExecutionStore,
+        onSubagentStateChanged: (rootSessionId): void => {
+          subagentInstances.invalidate(rootSessionId);
+        },
         subagentOwnerId: options.subagentOwnerId,
         subagentOwnerPid: options.subagentOwnerPid,
         workdir: baseProjectRoot,
@@ -1218,7 +1223,10 @@ export function createInProcessUiBackendClient(
       });
     steerRecoveryRefreshes.set(sessionId, refresh);
   }
-  currentRunInputStore?.setStateChangeObserver(refreshSteerRecovery);
+  currentRunInputStore?.setStateChangeObserver((sessionId): void => {
+    refreshSteerRecovery(sessionId);
+    subagentInstances.invalidateSession(sessionId);
+  });
   const promptScopeKey =
     options.promptScopeKey ??
     options.workdir ??
@@ -1385,6 +1393,56 @@ export function createInProcessUiBackendClient(
       !compactingSessions.has(sessionId)
     );
   }
+  const wakeFromSubagent = createSubagentWakeup({
+    executions: subagentExecutionStore,
+    gate: sessionExecution,
+    now: () => now().getTime(),
+    withSessionControl: (id, operation) =>
+      sourceProjection.owner.runControl(id, operation),
+    goals: sharedGoalService,
+    submit: submitPromptInternal,
+    runGoalTurn: executeAdmittedGoalTurn,
+    finishGoalTurn,
+    goalHasRunningSubagents,
+    onReleased(sessionId): void {
+      promptScheduler.wake();
+      settleSubagentIdle(sessionId);
+    },
+    onError(sourceId, title, error): void {
+      publishNotice({
+        key: `subagent:wakeup:${sourceId}:${title}`,
+        level: "error",
+        title,
+        message: getErrorMessage(error),
+      });
+    },
+    prepareSession: async (sessionId) => {
+      if (
+        disposed ||
+        !currentRunInputStore ||
+        !isMainSessionIdle(sessionId) ||
+        promptScheduler.getRecoveryState(sessionId).status !== "ready" ||
+        (await movedSessionTarget(sessionId)) !== undefined
+      )
+        return undefined;
+      const session = await stateStore.getSession(sessionId);
+      if (
+        !session ||
+        (await options.sessionManager?.get(sessionId))?.status === "archived"
+      )
+        return undefined;
+      if (
+        (await promptSubmissionStore.listQueued(promptScopeKey)).some(
+          (prompt) => prompt.sessionId === sessionId,
+        )
+      )
+        return undefined;
+      return {
+        modelEntryId: session.modelEntryId,
+        reasoning: session.reasoning,
+      };
+    },
+  });
   const subagentSupervisor = createSessionSubagentSupervisor({
     executions: subagentExecutionStore,
     collectFacts: (execution) =>
@@ -1424,6 +1482,7 @@ export function createInProcessUiBackendClient(
     }
   }
   function removeSubagentSession(sessionId: string): void {
+    subagentInstances.remove(sessionId);
     subagentSupervisor.remove(sessionId);
     subagentSessionGateSubscriptions.get(sessionId)?.();
     subagentSessionGateSubscriptions.delete(sessionId);
@@ -1448,178 +1507,6 @@ export function createInProcessUiBackendClient(
         execution.mode === "background" &&
         (execution.status === "queued" || execution.status === "running"),
     );
-  }
-  async function wakeFromSubagent(
-    sessionId: string,
-    reason: "result" | "supervision",
-    snapshot: SessionSubagentSnapshot,
-  ): Promise<boolean> {
-    let modelEntryId: string | undefined;
-    let reasoning: ReasoningConfig | undefined;
-    let goalTicket: GoalTurnTicket | undefined;
-    let token: symbol | undefined;
-    try {
-      token = await reserveSubagentWakeup({
-        sessionId,
-        reason,
-        signal: snapshot.signal,
-        candidates: snapshot.executions,
-        executions: subagentExecutionStore,
-        gate: sessionExecution,
-        now: () => now().getTime(),
-        withSessionControl: (id, operation) =>
-          sourceProjection.owner.runControl(id, operation),
-        reserveToken: async () => {
-          const goal = sharedGoalService.peekSnapshot(sessionId);
-          if (goal?.status !== "active") return Symbol(`subagent ${reason}`);
-          const admitted = await sharedGoalService.admitTurnInBoundary(
-            sessionId,
-            goal.goalId,
-            sharedGoalService.currentExecutionEpoch(sessionId),
-          );
-          goalTicket = admitted ?? undefined;
-          return admitted?.token;
-        },
-        canStart: async () => {
-          if (
-            disposed ||
-            !currentRunInputStore ||
-            sharedGoalService.isAutomaticRunBudgetExhausted(sessionId) ||
-            !isMainSessionIdle(sessionId) ||
-            promptScheduler.getRecoveryState(sessionId).status !== "ready" ||
-            (await movedSessionTarget(sessionId)) !== undefined
-          )
-            return false;
-          const session = await stateStore.getSession(sessionId);
-          if (
-            !session ||
-            (await options.sessionManager?.get(sessionId))?.status ===
-              "archived"
-          )
-            return false;
-          if (
-            (await promptSubmissionStore.listQueued(promptScopeKey)).some(
-              (prompt) => prompt.sessionId === sessionId,
-            )
-          )
-            return false;
-          modelEntryId = session.modelEntryId;
-          reasoning = session.reasoning;
-          return true;
-        },
-      });
-    } finally {
-      if (!token && goalTicket)
-        await finishGoalTurn(sessionId, goalTicket, {
-          status: "not_admitted",
-          usage: { totalTokens: 0, usageComplete: true },
-        });
-    }
-    if (!token) return false;
-    const sourceId = `subagent-${reason}:${randomUUID()}`;
-    const body =
-      reason === "result"
-        ? "Runtime subagent result wake-up. Process the delivered child results for the existing task. This is a runtime observation, not a new user request."
-        : `Runtime subagent supervision. Review the existing task using these saved facts; use agent list/monitor only for missing details. Do not poll or repeat an unchanged approval request.\n${renderExecutionFacts(snapshot.facts)}`;
-    const wakeOptions: InternalSubmitPromptOptions = {
-      owner: "subagent",
-      subagentWakeReason: reason,
-      sessionId,
-      modelEntryId,
-      reasoning,
-      hasModelSnapshot: true,
-      runtimeInput: {
-        kind: "subagent-status",
-        sourceId,
-        body: goalTicket ? `${goalTicket.modelText}\n${body}` : body,
-      },
-    };
-    const admittedGoal = goalTicket;
-    let goalTurnSucceeded = false;
-    const completion = admittedGoal
-      ? executeAdmittedGoalTurn(sessionId, admittedGoal, wakeOptions).then(
-          async (outcome) => {
-            await finishGoalTurn(sessionId, admittedGoal, outcome);
-            goalTurnSucceeded = outcome.status === "succeeded";
-            if (outcome.status === "cancelled" || outcome.status === "failed") {
-              const stop = admittedGoal.stopIntent;
-              await sharedGoalService.pauseExecution(
-                sessionId,
-                admittedGoal.goalId,
-                admittedGoal.executionEpoch,
-                outcome.status === "cancelled"
-                  ? (stop?.reason ?? "interrupted")
-                  : `runtime error: ${outcome.error ?? "unknown"}`,
-                outcome.status === "cancelled" && !stop ? "user" : "runtime",
-              );
-            }
-          },
-        )
-      : submitPromptInternal(body, wakeOptions);
-    void completion
-      .catch(async (error: unknown) => {
-        publishNotice({
-          key: `subagent:wakeup:${sourceId}`,
-          level: "error",
-          title: "Subagent result processing failed",
-          message: getErrorMessage(error),
-        });
-        if (admittedGoal) {
-          await sharedGoalService
-            .pauseExecution(
-              sessionId,
-              admittedGoal.goalId,
-              admittedGoal.executionEpoch,
-              `runtime error: ${getErrorMessage(error)}`,
-              "runtime",
-            )
-            .catch((pauseError: unknown) => {
-              publishNotice({
-                key: `subagent:goal-pause:${sourceId}`,
-                level: "error",
-                title: "Goal pause failed",
-                message: getErrorMessage(pauseError),
-              });
-            });
-        }
-      })
-      .finally(() => {
-        sessionExecution.release(token);
-        promptScheduler.wake();
-        settleSubagentIdle(sessionId);
-        if (
-          admittedGoal &&
-          goalTurnSucceeded &&
-          !admittedGoal.recoveryPending &&
-          sharedGoalService.isExecutionCurrent(
-            sessionId,
-            admittedGoal.goalId,
-            admittedGoal.executionEpoch,
-          )
-        )
-          void goalHasRunningSubagents(sessionId, admittedGoal.goalId)
-            .then((running) => {
-              if (
-                (!running ||
-                  sharedGoalService.isAutomaticRunBudgetExhausted(sessionId)) &&
-                sharedGoalService.isExecutionCurrent(
-                  sessionId,
-                  admittedGoal.goalId,
-                  admittedGoal.executionEpoch,
-                )
-              )
-                sharedGoalService.notifyWorkAvailable(sessionId);
-            })
-            .catch((error: unknown) => {
-              publishNotice({
-                key: `subagent:goal-resume:${sourceId}`,
-                level: "error",
-                title: "Goal continuation failed",
-                message: getErrorMessage(error),
-              });
-            });
-      });
-    return true;
   }
 
   async function runGoalTurn(
@@ -4713,6 +4600,8 @@ export function createInProcessUiBackendClient(
     startPermissionEventProjection({ bus, currentPermissionState, publish }),
     permissionProjection.subscribe((event) => {
       publish(event);
+      if (event.rootSessionId)
+        subagentInstances.invalidate(event.rootSessionId);
       void reconcileRuntimeStatus().catch(() => {
         /* Chat status does not control approvals. */
       });
@@ -4750,12 +4639,42 @@ export function createInProcessUiBackendClient(
       budget: (id) => runtime?.getSubagentExecutionBudget(id),
     });
   }
+  const subagentInstances = new SubagentInstanceProjection({
+    runtimeEpoch: permissionProjection.permissionEpoch,
+    instances: subagentInstanceStore,
+    executions: subagentExecutionStore,
+    validateRoot: (input): Promise<void> =>
+      validateSessionRead({ ...input, sessionId: input.rootSessionId }),
+    runtime: async (rootSessionId): Promise<SubagentStatusResult | undefined> =>
+      (await runtimeController.getRuntimeIfStarted())?.listSubagentState(
+        rootSessionId,
+      ),
+    stop: async (input): Promise<SubagentStopResult> =>
+      (await runtimeController.getRuntime()).stopSubagent({
+        parentSessionId: input.rootSessionId,
+        subagentId: input.subagentId,
+        expectedExecutionId: input.expectedExecutionId,
+      }),
+    unprocessedCount: async (execution): Promise<number> => {
+      if (!currentRunInputStore || !execution.childRunId) return 0;
+      return (
+        await currentRunInputStore.listByRun(execution.childRunId)
+      ).filter(
+        (item) =>
+          item.source === "subagent-message" &&
+          item.closedAt !== undefined &&
+          !item.processedRequestId,
+      ).length;
+    },
+    publish,
+  });
   let closingRuntime: Promise<UiRuntimeComposition> | undefined;
   let disposed = false;
   let disposal: Promise<CleanupResult> | undefined;
   function closeAdmission(): void {
     if (disposed) return;
     disposed = true;
+    subagentInstances.dispose();
     subagentSupervisor.dispose();
     unsubscribeSubagentSessionRemoved();
     for (const unsubscribe of subagentSessionGateSubscriptions.values())
@@ -4857,6 +4776,8 @@ export function createInProcessUiBackendClient(
     },
     initialize: () => ready,
     initializeSession: (sessionId) => enterSession(sessionId, true),
+    listSubagentInstances: (input) => subagentInstances.list(input),
+    stopSubagent: (input) => subagentInstances.stop(input),
     getSubagentConversationView: (input) => subagentConversations.read(input),
     retainSubagentConversation: (input) => subagentConversations.retain(input),
     releaseSubagentConversation: (input) =>
