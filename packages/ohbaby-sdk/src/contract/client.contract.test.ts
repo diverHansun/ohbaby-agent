@@ -17,6 +17,15 @@ function assertAbortRunRequiresUiRunId(client: UiCommandClient): void {
 void assertAbortRunRequiresUiRunId;
 
 describe("UI client capability contract", () => {
+  it("keeps instance reads in query capabilities and conditional stops in commands", () => {
+    const boundaries: readonly [
+      HasKey<UiQueryClient, "listSubagentInstances">,
+      HasKey<UiQueryClient, "stopSubagent">,
+      HasKey<UiCommandClient, "stopSubagent">,
+      HasKey<UiCommandClient, "listSubagentInstances">,
+    ] = [true, false, true, false];
+    expect(boundaries).toEqual([true, false, true, false]);
+  });
   it("keeps prompt submission, waiting, and queue editing in distinct capabilities", () => {
     const boundaries: readonly [
       HasKey<UiQueryClient, "waitForPrompt">,

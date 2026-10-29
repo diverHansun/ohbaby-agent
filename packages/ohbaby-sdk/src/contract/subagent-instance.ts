@@ -1,6 +1,10 @@
 /** A complete primary-session snapshot. Failed reads never imply removal. */
 export interface UiSubagentInstanceSnapshot {
   readonly rootSessionId: string;
+  readonly runtimeEpoch: string;
+  readonly bindingGeneration?: number;
+  /** Monotonic per root and runtime. Within the same binding, replace only with a greater revision. */
+  readonly revision: number;
   readonly complete: true;
   readonly instances: readonly UiSubagentInstance[];
 }
@@ -12,6 +16,7 @@ export interface UiSubagentInstance {
   readonly description: string;
   readonly createdAt: number;
   readonly updatedAt: number;
+  /** pending: preparing accepted work; cancelled: cancellation/close; interrupted: stopped or recovered execution. */
   readonly status:
     | "pending"
     | "running"
@@ -47,6 +52,7 @@ export interface UiSubagentStopResult {
   readonly rootSessionId: string;
   readonly subagentId: string;
   readonly expectedExecutionId: string;
+  /** accepted only acknowledges interruption. Status follows actual termination; settling remains true until cleanup is confirmed. */
   readonly outcome:
     | "accepted"
     | "confirmed"
@@ -60,6 +66,8 @@ export interface UiSubagentStopResult {
 export interface UiSubagentInstancesInvalidatedEvent {
   readonly type: "subagent.instances.invalidated";
   readonly rootSessionId: string;
+  readonly runtimeEpoch: string;
+  readonly revision: number;
 }
 
 /** Terminal UI read/control error. Release the watch; do not reconnect it. */
@@ -68,7 +76,13 @@ export interface UiSubagentClosedError {
   readonly message: string;
 }
 
-/** Additive contract for B1/B2; existing execution-history clients remain valid. */
+/** Unknown or cross-root instance. A changed transport selection uses SESSION_SCOPE_CHANGED. */
+export interface UiSubagentNotFoundError {
+  readonly code: "SUBAGENT_NOT_FOUND";
+  readonly message: string;
+}
+
+/** Instance reads and controls. Closed instances reject with SUBAGENT_CLOSED; execution-history readers remain separate. */
 export interface UiSubagentInstanceClient {
   listSubagentInstances(
     input: UiSubagentInstanceQuery,
