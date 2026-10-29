@@ -7,7 +7,8 @@ import {
   type UiSubagentConversationReaderState,
   type UiSubagentExecution,
 } from "ohbaby-sdk";
-import { SubagentView, type SubagentReadingCache } from "./SubagentView.js";
+import type { SubagentReadingCache } from "./SubagentConversationBody.js";
+import { SubagentView } from "./SubagentView.js";
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;

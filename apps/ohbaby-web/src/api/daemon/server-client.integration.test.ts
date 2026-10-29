@@ -16,6 +16,11 @@ import type {
   UiSetSearchApiKeyInput,
   UiSlashCommandInvocation,
   UiSnapshot,
+  UiSubagentInstance,
+  UiSubagentInstanceQuery,
+  UiSubagentInstanceSnapshot,
+  UiSubagentStopInput,
+  UiSubagentStopResult,
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { createDaemonServerApp } from "ohbaby-server";
@@ -963,6 +968,130 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       }
     },
   );
+
+  it("reads subagent instances and stops one through the instance routes with the current binding", async () => {
+    const backend = new FakeBackend({
+      snapshot: {
+        ...emptySnapshot(),
+        activeSessionId: "session_1",
+        sessions: [
+          {
+            createdAt: timestamp,
+            id: "session_1",
+            messages: [],
+            title: "Session 1",
+            updatedAt: timestamp,
+          },
+        ],
+      },
+    });
+    const queries: UiSubagentInstanceQuery[] = [];
+    const stops: UiSubagentStopInput[] = [];
+    const instance: UiSubagentInstance = {
+      rootSessionId: "session_1",
+      subagentId: "reviewer",
+      displayName: "Reviewer",
+      description: "Review the diff",
+      createdAt: 1,
+      updatedAt: 2,
+      status: "running",
+      currentExecutionId: "exec_1",
+      latestExecutionId: "exec_1",
+      approvalBlocked: false,
+      settling: false,
+      unprocessedMessageCount: 0,
+    };
+    Object.assign(backend, {
+      listSubagentInstances(
+        query: UiSubagentInstanceQuery,
+      ): Promise<UiSubagentInstanceSnapshot> {
+        queries.push(query);
+        return Promise.resolve({
+          rootSessionId: query.rootSessionId,
+          runtimeEpoch: query.runtimeEpoch ?? "",
+          revision: 1,
+          complete: true,
+          instances: [instance],
+        });
+      },
+      stopSubagent(query: UiSubagentStopInput): Promise<UiSubagentStopResult> {
+        stops.push(query);
+        return Promise.resolve({
+          rootSessionId: query.rootSessionId,
+          subagentId: query.subagentId,
+          expectedExecutionId: query.expectedExecutionId,
+          outcome: "accepted",
+          instance,
+        });
+      },
+    });
+    const server = createDaemonServerApp({
+      authToken,
+      backend,
+      packageVersion: "0.1.7-test",
+    });
+    await server.start();
+    try {
+      const fetchImpl: typeof fetch = (input, init = {}) => {
+        const url = new URL(urlFromRequestInput(input));
+        return Promise.resolve(
+          server.app.request(`${url.pathname}${url.search}`, {
+            body: init.body,
+            headers: init.headers,
+            method: init.method,
+            signal: init.signal,
+          }),
+        );
+      };
+      const runtime = createOhbabyWebRuntime(
+        {
+          baseUrl: "http://127.0.0.1:4096",
+          clientId: "client_web",
+          directory: "/repo",
+          startupIntent: { resumeSessionId: "session_1" },
+          token: authToken,
+        },
+        { fetch: fetchImpl },
+      );
+      await runtime.ready;
+      const client = runtime.client;
+      if (!client?.listSubagentInstances || !client.stopSubagent)
+        throw new Error("instance client methods are missing");
+      await waitFor(
+        () =>
+          runtime.store.getSnapshot().view.snapshot?.activeSessionId ===
+          "session_1",
+        "session did not load",
+      );
+      const snapshot = await client.listSubagentInstances({
+        rootSessionId: "session_1",
+      });
+      expect(snapshot.instances.map((item) => item.subagentId)).toEqual([
+        "reviewer",
+      ]);
+      expect(typeof snapshot.bindingGeneration).toBe("number");
+      expect(queries[0]?.runtimeEpoch).toBe(snapshot.runtimeEpoch);
+      const receipt = await client.stopSubagent({
+        rootSessionId: "session_1",
+        subagentId: "reviewer",
+        expectedExecutionId: "exec_1",
+      });
+      expect(receipt.outcome).toBe("accepted");
+      expect(stops).toEqual([
+        expect.objectContaining({
+          rootSessionId: "session_1",
+          subagentId: "reviewer",
+          expectedExecutionId: "exec_1",
+          runtimeEpoch: snapshot.runtimeEpoch,
+          bindingGeneration: snapshot.bindingGeneration,
+        }),
+      ]);
+      expect(backend.abortedRunIds).toEqual([]);
+      await runtime.dispose();
+    } finally {
+      await server.dispose();
+    }
+  });
 
   it("routes structured web commands through REST and keeps overlay ids out of raw command execution", async () => {
     const backend = new FakeBackend();

@@ -6,6 +6,10 @@ import type {
   UiSubagentConversationView,
   UiSubagentConversationSelection,
   UiSubagentConversationUnwatchQuery,
+  UiSubagentInstanceQuery,
+  UiSubagentInstanceSnapshot,
+  UiSubagentStopInput,
+  UiSubagentStopResult,
 } from "ohbaby-sdk";
 import type {
   UiBackendClient,
@@ -200,6 +204,30 @@ export class DaemonHttpClient {
     return this.request(
       `${this.subagentConversationPath(input)}/watch?${query}`,
       { method: "DELETE", signal: input.signal },
+    );
+  }
+  listSubagentInstances(
+    input: UiSubagentInstanceQuery,
+  ): Promise<{ ok: true; result: UiSubagentInstanceSnapshot }> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.rootSessionId)}/subagent-instances?${scopeQuery(input)}`,
+      { signal: input.signal },
+    );
+  }
+  stopSubagent(
+    input: UiSubagentStopInput,
+  ): Promise<{ ok: true; result: UiSubagentStopResult }> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.rootSessionId)}/subagents/${encodeURIComponent(input.subagentId)}/stop`,
+      {
+        body: {
+          runtimeEpoch: input.runtimeEpoch,
+          bindingGeneration: input.bindingGeneration,
+          expectedExecutionId: input.expectedExecutionId,
+        },
+        method: "POST",
+        signal: input.signal,
+      },
     );
   }
   private subagentConversationPath(input: UiSubagentConversationQuery): string {
