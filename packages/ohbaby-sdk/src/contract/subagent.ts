@@ -121,6 +121,8 @@ export interface UiSubagentConversationUnavailableEvent {
   readonly rootSessionId: string;
   readonly subagentId: string;
   readonly watchId?: string;
+  /** A closed instance is terminal: release its watch instead of reconnecting. */
+  readonly code?: "SUBAGENT_CLOSED";
   readonly unavailable: UiSessionUnavailableEvent;
 }
 export type UiSubagentConversationEvent =

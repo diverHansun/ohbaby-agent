@@ -254,6 +254,7 @@ export type {
 } from "./sync/permission-sync.js";
 
 export * from "./contract/execution.js";
+export * from "./contract/subagent-instance.js";
 export * from "./util/duration.js";
 
 export type {
