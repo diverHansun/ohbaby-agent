@@ -31,6 +31,8 @@ export interface RunDefaultsPolicy {
 }
 
 export interface CreateRunOptions {
+  /** Called synchronously once input admission is durable and preparation passed. */
+  readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
   readonly preparationSignal?: AbortSignal;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;

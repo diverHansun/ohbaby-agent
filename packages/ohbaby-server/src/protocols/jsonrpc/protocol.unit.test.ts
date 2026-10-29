@@ -151,6 +151,8 @@ describe("daemon protocol", () => {
     expect(DAEMON_RPC_METHODS).toEqual([
       "getSnapshot",
       "listSubagentExecutions",
+      "listSubagentInstances",
+      "stopSubagent",
       "getSubagentExecutionView",
       "getSubagentConversationView",
       "watchSubagentConversation",

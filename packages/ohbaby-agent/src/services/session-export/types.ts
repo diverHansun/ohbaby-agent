@@ -57,7 +57,10 @@ export interface ExportMessage {
   readonly id: string;
   readonly role: "user" | "assistant" | "system";
   readonly kind?: "compaction-summary" | "abort" | "error" | "info";
-  readonly runtimeInput?: "subagent-result" | "subagent-status";
+  readonly runtimeInput?:
+    | "subagent-result"
+    | "subagent-status"
+    | "subagent-message";
   readonly time: { readonly created: string; readonly completed?: string };
   readonly model?: { readonly providerId?: string; readonly modelId?: string };
   readonly status?: "running" | "completed" | "error" | "aborted";

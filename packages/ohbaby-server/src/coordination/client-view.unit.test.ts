@@ -481,6 +481,31 @@ describe("DaemonClientViewCoordinator", () => {
     ).toBeUndefined();
   });
 
+  it("routes instance invalidations only to clients still viewing their root", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    const snapshot = snapshotWithSessions();
+    coordinator.initializeClient("first", snapshot, {
+      resumeSessionId: "session_1",
+    });
+    coordinator.initializeClient("second", snapshot, {
+      resumeSessionId: "session_2",
+    });
+    const event: UiEvent = {
+      type: "subagent.instances.invalidated",
+      rootSessionId: "session_1",
+      runtimeEpoch: "epoch",
+      revision: 3,
+    };
+    expect(coordinator.routeEventForClient(event, "first")).toEqual(event);
+    expect(coordinator.routeEventForClient(event, "second")).toBeUndefined();
+    coordinator.selectSession(
+      "first",
+      "session_2",
+      coordinator.binding("first", "epoch").bindingGeneration,
+    );
+    expect(coordinator.routeEventForClient(event, "first")).toBeUndefined();
+  });
+
   it("routes child changes only to the active watch and releases old tokens", () => {
     const coordinator = new DaemonClientViewCoordinator();
     const released: string[] = [];

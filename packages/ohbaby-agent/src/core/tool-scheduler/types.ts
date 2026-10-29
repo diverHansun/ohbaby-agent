@@ -1,3 +1,4 @@
+import type { ToolCleanupState } from "./run-cleanup.js";
 import type { ShellAnalysisResult } from "../../shell/analysis/types.js";
 import type { ShellExecutionBinding } from "../../shell/execution.js";
 import type { ResourceAccess, ResourceLease } from "./resources.js";
@@ -95,9 +96,7 @@ export interface ToolExecutionEnvironment {
 export interface ToolExecutionContext {
   readonly shellExecution?: ShellExecutionBinding;
   /** Trusted tool cleanup owner reports process lifetime independently of its result. */
-  readonly reportCleanup?: (
-    state: "in-progress" | "unconfirmed" | "confirmed",
-  ) => void;
+  readonly reportCleanup?: (state: ToolCleanupState) => void;
   /** Delivery/disposal errors do not change the process cleanup state. */
   readonly reportCleanupError?: (error: unknown) => void;
   readonly resourceLease?: ResourceLease;
@@ -187,7 +186,7 @@ export interface ToolExecutionObservation {
     | "rejected"
     | "cancelled"
     | "timed-out";
-  readonly cleanup?: "in-progress" | "confirmed" | "unconfirmed";
+  readonly cleanup?: ToolCleanupState;
 }
 
 export interface BatchToolCallObserver {
@@ -328,6 +327,8 @@ export interface ToolScheduler {
   cancelAll(): void;
   getStatus(callId: string): ToolCallStatus | null;
   getPendingCalls(): ToolCall[];
+  /** Includes raw operations that already returned a logical cancelled result. */
+  getRunCleanup(runId?: string): import("./run-cleanup.js").RunCleanupSnapshot;
 }
 
 export interface ToolExecutionOwner {
@@ -358,7 +359,7 @@ export interface ToolExecutionFact {
   readonly timestamp: number;
   readonly reason?: AdmissionWaitReason;
   readonly resources?: readonly ResourceAccess[];
-  readonly cleanup?: "in-progress" | "confirmed" | "unconfirmed";
+  readonly cleanup?: ToolCleanupState;
   readonly outcome?: ToolCallResult;
 }
 export interface ToolSchedulerOptions {

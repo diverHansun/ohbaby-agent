@@ -1,5 +1,10 @@
 import { isUiCommandCompletion } from "ohbaby-sdk";
-import type { UiSubagentReadClient } from "ohbaby-sdk";
+import type {
+  UiSubagentReadClient,
+  UiSubagentInstanceClient,
+} from "ohbaby-sdk";
+
+type SubagentClient = UiSubagentReadClient & UiSubagentInstanceClient;
 import { randomUUID } from "node:crypto";
 import {
   createShutdownOptions,
@@ -48,6 +53,7 @@ export interface RemoteDaemonClientOptions {
 }
 
 type RemoteUiBackendClient = UiBackendClient &
+  SubagentClient &
   UiSessionRecoveryClient & {
     closeAdmission(): void;
     dispose(): Promise<void>;
@@ -315,20 +321,21 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       });
     return result;
   }
-  private async subagentQuery<K extends keyof UiSubagentReadClient>(
+  private async subagentQuery<K extends keyof SubagentClient>(
     method: K,
-    input: Parameters<UiSubagentReadClient[K]>[0],
-  ): Promise<Awaited<ReturnType<UiSubagentReadClient[K]>>> {
+    input: Parameters<SubagentClient[K]>[0],
+  ): Promise<Awaited<ReturnType<SubagentClient[K]>>> {
     await this.ensureInitialized();
     const binding = this.permissionBinding;
-    const result = await this.rpc<Awaited<ReturnType<UiSubagentReadClient[K]>>>(
+    const result = await this.rpc<Awaited<ReturnType<SubagentClient[K]>>>(
       method,
       [
         {
           ...input,
           signal: undefined,
-          runtimeEpoch: binding?.permissionEpoch,
-          bindingGeneration: binding?.bindingGeneration,
+          runtimeEpoch: input.runtimeEpoch ?? binding?.permissionEpoch,
+          bindingGeneration:
+            input.bindingGeneration ?? binding?.bindingGeneration,
         },
       ],
       { signal: input.signal },
@@ -337,8 +344,21 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       binding?.permissionEpoch !== this.permissionBinding?.permissionEpoch ||
       binding?.bindingGeneration !== this.permissionBinding?.bindingGeneration
     )
-      throw new Error("Session binding changed during execution query");
+      throw Object.assign(
+        new Error("Session binding changed during subagent query"),
+        { code: "SESSION_SCOPE_CHANGED" },
+      );
     return result;
+  }
+  listSubagentInstances(
+    input: Parameters<UiSubagentInstanceClient["listSubagentInstances"]>[0],
+  ): ReturnType<UiSubagentInstanceClient["listSubagentInstances"]> {
+    return this.subagentQuery("listSubagentInstances", input);
+  }
+  stopSubagent(
+    input: Parameters<UiSubagentInstanceClient["stopSubagent"]>[0],
+  ): ReturnType<UiSubagentInstanceClient["stopSubagent"]> {
+    return this.subagentQuery("stopSubagent", input);
   }
   listSubagentExecutions(
     input: Parameters<UiSubagentReadClient["listSubagentExecutions"]>[0],
@@ -662,7 +682,10 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       });
     } catch (error) {
       if (
-        (method === "executeCommand" || method === "compactSession") &&
+        (method === "executeCommand" ||
+          method === "compactSession" ||
+          method === "listSubagentInstances" ||
+          method === "stopSubagent") &&
         options.signal?.aborted &&
         isAbortError(error)
       )
@@ -674,7 +697,10 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       responseJson = await response.json();
     } catch (error) {
       if (
-        (method === "executeCommand" || method === "compactSession") &&
+        (method === "executeCommand" ||
+          method === "compactSession" ||
+          method === "listSubagentInstances" ||
+          method === "stopSubagent") &&
         options.signal?.aborted &&
         isAbortError(error)
       )

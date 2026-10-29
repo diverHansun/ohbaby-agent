@@ -1,12 +1,16 @@
+import {
+  MAX_SUBAGENT_EXECUTIONS,
+  MAX_SUBAGENT_TIMEOUT_MS,
+} from "../agents/subagents/limits.js";
 import { renderExecutionFacts } from "../agents/subagents/execution-facts.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
   SessionSubagentHost,
-  SubagentCloseResult,
   SubagentRunMode,
   SubagentRunResult,
   SubagentStatusResult,
 } from "../agents/index.js";
+import type { SubagentStartResult } from "../agents/subagents/types.js";
 import { DEFAULT_SUBAGENT_ROLE, SUBAGENT_ROLES } from "../agents/roles.js";
 import type {
   Tool,
@@ -21,54 +25,99 @@ import { subagentRoleParam } from "./utils/subagent-role.js";
 
 export type SubagentToolHost = Pick<
   SessionSubagentHost,
-  "close" | "run" | "status"
+  "spawn" | "send" | "list" | "monitor" | "stop" | "close"
 >;
-
-function optionalBoolean(
-  params: Record<string, unknown>,
-  name: string,
-): boolean | undefined {
-  const value = params[name];
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "boolean") {
+const ACTIONS = ["spawn", "send", "list", "monitor", "stop", "close"] as const;
+type Action = (typeof ACTIONS)[number];
+const ACTION_FIELDS: Record<Action, readonly string[]> = {
+  spawn: ["prompt", "name", "description", "role", "mode", "timeout_ms"],
+  send: ["agent_id", "message", "mode"],
+  list: [],
+  monitor: ["agent_ids", "cursors"],
+  stop: ["agent_id"],
+  close: ["agent_id"],
+};
+function actionParam(params: Record<string, unknown>): Action {
+  const value = params.action;
+  if (typeof value !== "string" || !ACTIONS.includes(value as Action))
     throw new ToolParameterError(
-      `Expected parameter "${name}" to be a boolean when provided.`,
+      `Expected parameter "action" to be one of: ${ACTIONS.join(", ")}.`,
     );
+  const action = value as Action;
+  for (const field of Object.keys(params)) {
+    if (field !== "action" && !ACTION_FIELDS[action].includes(field))
+      throw new ToolParameterError(
+        `Parameter "${field}" is not supported for agent action "${action}".`,
+      );
   }
+  return action;
+}
+function timeoutParam(params: Record<string, unknown>): number | undefined {
+  const value = params.timeout_ms;
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > MAX_SUBAGENT_TIMEOUT_MS
+  )
+    throw new ToolParameterError(
+      'Expected parameter "timeout_ms" to be an integer between 1 and 1800000.',
+    );
   return value;
 }
-
-function optionalPositiveInteger(
-  params: Record<string, unknown>,
-  name: string,
-): number | undefined {
-  const value = params[name];
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
-    throw new ToolParameterError(
-      `Expected parameter "${name}" to be a positive integer when provided.`,
-    );
-  }
-  return value;
-}
-
 function runMode(params: Record<string, unknown>): SubagentRunMode {
-  const value = params.mode;
-  if (value === undefined) {
-    return "background";
-  }
-  if (value === "foreground" || value === "background") {
-    return value;
-  }
+  if (params.mode === undefined) return "background";
+  if (params.mode === "foreground" || params.mode === "background")
+    return params.mode;
   throw new ToolParameterError(
     'Expected parameter "mode" to be "foreground" or "background".',
   );
 }
-
+function monitorParams(params: Record<string, unknown>): {
+  subagentIds: string[];
+  cursors?: Record<string, string>;
+} {
+  if (
+    !Array.isArray(params.agent_ids) ||
+    params.agent_ids.length === 0 ||
+    params.agent_ids.length > MAX_SUBAGENT_EXECUTIONS
+  )
+    throw new ToolParameterError(
+      'Expected parameter "agent_ids" to contain 1 to 6 non-empty IDs.',
+    );
+  const subagentIds = params.agent_ids.map((value: unknown) => {
+    if (typeof value !== "string" || !value.trim())
+      throw new ToolParameterError(
+        'Expected each "agent_ids" entry to be a non-empty string.',
+      );
+    return value.trim();
+  });
+  if (new Set(subagentIds).size !== subagentIds.length)
+    throw new ToolParameterError('Expected unique IDs in "agent_ids".');
+  if (params.cursors === undefined) return { subagentIds };
+  if (
+    typeof params.cursors !== "object" ||
+    params.cursors === null ||
+    Array.isArray(params.cursors)
+  )
+    throw new ToolParameterError(
+      'Expected parameter "cursors" to be an object keyed by agent ID.',
+    );
+  const cursors: Record<string, string> = {};
+  for (const [id, cursor] of Object.entries(params.cursors)) {
+    if (
+      !subagentIds.includes(id) ||
+      typeof cursor !== "string" ||
+      !cursor.trim()
+    )
+      throw new ToolParameterError(
+        'Each "cursors" entry must contain a non-empty cursor for a requested agent ID.',
+      );
+    cursors[id] = cursor;
+  }
+  return { subagentIds, cursors };
+}
 function executionSummary(
   record: SubagentRunResult["execution"],
 ): Record<string, unknown> {
@@ -86,225 +135,237 @@ function executionSummary(
     sizeBytes: Buffer.byteLength(record.output ?? "", "utf8"),
   };
 }
-
-function renderRun(result: SubagentRunResult): string {
+function startResult(
+  action: "spawn" | "send",
+  result: SubagentStartResult,
+): ToolExecutionResult {
+  if (!result.execution)
+    return {
+      output: `started: false\nreason: ${result.reason}\nThis invocation did not start an execution. Do not retry immediately.`,
+      metadata: { subagent: { action, started: false, reason: result.reason } },
+    };
   const execution = result.execution;
-  if (execution.mode === "background")
-    return [
-      `execution_id: ${execution.executionId}`,
-      `subagent_id: ${execution.subagentId}`,
-      "accepted: true",
-      `status: ${execution.childRunId ? "running" : "queued"}`,
-    ].join("\n");
-  return [
+  const receipt = [
+    `agent_id: ${execution.subagentId}`,
     `execution_id: ${execution.executionId}`,
-    `subagent_id: ${execution.subagentId}`,
-    execution.childSessionId
-      ? `session_id: ${execution.childSessionId}`
-      : undefined,
-    execution.childScopeId
-      ? `context_scope_id: ${execution.childScopeId}`
-      : undefined,
-    `status: ${result.paused ? "paused" : execution.status}`,
-    result.item?.pendingQueue.length
-      ? `pending_inputs: ${String(result.item.pendingQueue.length)}`
-      : undefined,
-    execution.reason ? `terminal_reason: ${execution.reason}` : undefined,
-    result.paused
-      ? "program_note: Input remains queued and has not run."
-      : undefined,
-    result.success && result.output
-      ? `<subagent_output>\n${result.output}\n</subagent_output>`
-      : undefined,
-    result.success && !result.output ? "program_note: No output." : undefined,
-    !result.success && result.output
-      ? `<subagent_error>\n${result.output}\n</subagent_error>`
-      : undefined,
-  ]
-    .filter((part): part is string => part !== undefined)
-    .join("\n");
+    `started: ${String(result.started)}`,
+    `mode: ${execution.mode}`,
+    `status: ${execution.status}`,
+  ];
+  if (!result.started)
+    return {
+      output: [
+        ...receipt,
+        "accepted: true",
+        ...(result.inputId ? [`input_id: ${result.inputId}`] : []),
+      ].join("\n"),
+      metadata: {
+        subagent: {
+          action,
+          started: false,
+          accepted: true,
+          inputId: result.inputId,
+          agentId: execution.subagentId,
+          executionId: execution.executionId,
+          mode: execution.mode,
+        },
+      },
+    };
+  if (execution.mode === "background")
+    receipt.push(
+      "accepted: true",
+      "This agent is running in the background; do not edit the files assigned to it concurrently. Results arrive automatically.",
+    );
+  else {
+    if (execution.reason) receipt.push(`terminal_reason: ${execution.reason}`);
+    if (result.output)
+      receipt.push(
+        result.success
+          ? `<subagent_output>\n${result.output}\n</subagent_output>`
+          : `<subagent_error>\n${result.output}\n</subagent_error>`,
+      );
+    else if (result.success) receipt.push("program_note: No output.");
+  }
+  return {
+    output: receipt.join("\n"),
+    metadata: {
+      subagent: {
+        action,
+        started: true,
+        execution: executionSummary(execution),
+        success: result.success,
+        item: result.item
+          ? {
+              subagentId: result.item.subagentId,
+              sessionId: result.item.sessionId,
+              contextScopeId: result.item.contextScopeId,
+              role: result.item.role,
+              name: result.item.name,
+              description: result.item.description,
+            }
+          : undefined,
+      },
+    },
+  };
 }
-
 function statusSummary(result: SubagentStatusResult): Record<string, unknown> {
   return {
-    items: result.items.slice(0, 20).map((item) => ({
+    items: result.items.map((item) => ({
       subagentId: item.subagentId,
       sessionId: item.sessionId,
       contextScopeId: item.contextScopeId,
       role: item.role,
+      name: item.name,
+      description: item.description,
       status: item.status,
       currentRunId: item.currentRunId,
       lastRunId: item.lastRunId,
-      pendingInputs: item.pendingQueue.length,
     })),
     executions: result.executions.map(executionSummary),
-    omittedItems: Math.max(0, result.items.length - 20),
+    runtime: result.runtime,
   };
 }
-
-function renderStatus(result: SubagentStatusResult): string {
-  if (result.items.length === 0 && result.executions.length === 0)
-    return "No subagents found.";
-  return (
-    JSON.stringify(statusSummary(result)) +
-    (result.facts
-      ? `\nExecution facts: ${renderExecutionFacts(result.facts)}`
-      : "")
-  );
-}
-
-function renderClose(result: SubagentCloseResult): string {
-  return [
-    `previous_status: ${result.previousStatus}`,
-    `subagent_id: ${result.subagentId}`,
-    `status: ${result.item?.status ?? "cancelled"}`,
-    ...(result.reason
-      ? [`<subagent_error>\n${result.reason}\n</subagent_error>`]
-      : []),
-  ].join("\n");
-}
-
 export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
-  const run: Tool = {
+  const agent: Tool = {
     category: "subagent",
+    name: "agent",
+    source: "builtin",
+    timeoutOwner: "tool",
     description:
-      "Create or continue an independent subagent. Default background returns a durable execution receipt immediately; runtime automatically delivers its complete terminal result in this same task. Use foreground explicitly for a direct result. Use subagent_id with prompt to continue an existing instance. Do not poll status to wait; finish your progress response and runtime will wait up to 60 seconds, then 120 seconds on subsequent checks.",
-    name: "subagent_run",
+      "Manage independent agents: spawn creates an instance; send gives an existing instance a message; list lists open instances; monitor immediately reads saved records without waiting; stop interrupts work and preserves context; close permanently closes an instance. Spawn/send default to background; results arrive automatically, so finish this turn when no independent work remains. Sending to a running agent does not interrupt it or change its mode; use stop then send to interrupt and continue. Do not poll monitor to wait. Keep completed instances for related follow-ups; close only obsolete instances, not to finish a turn or release execution slots. Give each writing agent an explicit, disjoint file scope and do not edit its files concurrently.",
     parametersJsonSchema: {
+      type: "object",
       additionalProperties: false,
+      required: ["action"],
       properties: {
-        role: {
-          default: DEFAULT_SUBAGENT_ROLE,
-          enum: [...SUBAGENT_ROLES],
+        action: { type: "string", enum: [...ACTIONS] },
+        prompt: {
           type: "string",
+          description:
+            "Spawn only: objective, known facts, owned/read-only files, and expected result.",
         },
         name: { type: "string" },
         description: { type: "string" },
-        prompt: { type: "string" },
-        mode: {
-          default: "foreground",
-          enum: ["foreground", "background"],
+        role: {
           type: "string",
+          default: DEFAULT_SUBAGENT_ROLE,
+          enum: [...SUBAGENT_ROLES],
         },
-        subagent_id: { type: "string" },
-        interrupt: { type: "boolean" },
-        timeout_ms: { maximum: 1_800_000, minimum: 1, type: "integer" },
+        mode: {
+          type: "string",
+          default: "background",
+          enum: ["foreground", "background"],
+        },
+        timeout_ms: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_SUBAGENT_TIMEOUT_MS,
+        },
+        agent_id: { type: "string" },
+        message: { type: "string" },
+        agent_ids: {
+          type: "array",
+          minItems: 1,
+          maxItems: MAX_SUBAGENT_EXECUTIONS,
+          uniqueItems: true,
+          items: { type: "string" },
+        },
+        cursors: { type: "object", additionalProperties: { type: "string" } },
       },
-      required: ["prompt"],
-      type: "object",
     },
-    source: "builtin",
-    timeoutOwner: "tool",
     async execute(params, context): Promise<ToolExecutionResult> {
+      const action = actionParam(params);
+      const lookup = {
+        parentSessionId: context.sessionId,
+        parentContextScopeId: context.contextScopeId,
+      };
+      if (action === "list") {
+        const result = await host.list(lookup);
+        const summary = statusSummary(result);
+        return {
+          metadata: { subagentStatus: summary },
+          output:
+            JSON.stringify(summary) +
+            (result.facts
+              ? `\nExecution facts: ${renderExecutionFacts(result.facts)}`
+              : ""),
+        };
+      }
+      if (action === "monitor") {
+        const result = await host.monitor({
+          ...lookup,
+          ...monitorParams(params),
+        });
+        return {
+          metadata: { agentMonitor: result },
+          output: JSON.stringify(result),
+        };
+      }
+      if (action === "stop" || action === "close") {
+        const result = await host[action]({
+          parentSessionId: context.sessionId,
+          subagentId: getRequiredNonEmptyStringParam(params, "agent_id"),
+        });
+        return {
+          metadata: {
+            [action === "stop" ? "subagentStop" : "subagentClose"]: result,
+          },
+          output: JSON.stringify({
+            subagentId: result.subagentId,
+            ...("stopped" in result
+              ? { stopped: result.stopped }
+              : { previousStatus: result.previousStatus }),
+            cleanup: result.cleanup,
+            reason: result.reason,
+            unprocessedMessages: result.unprocessedMessages,
+          }),
+        };
+      }
       if (!context.runId?.trim())
         throw new ToolParameterError(
-          "subagent_run requires a real requester run identity.",
+          "agent spawn/send requires a real requester run identity.",
         );
-      const subagentId = getOptionalNonEmptyStringParam(params, "subagent_id");
-      const timeoutMs = optionalPositiveInteger(params, "timeout_ms");
-      if (timeoutMs !== undefined && timeoutMs > 1_800_000)
-        throw new ToolParameterError(
-          "subagent timeout_ms must not exceed 1800000ms",
-        );
-      const result = await host.run({
+      const input = {
+        ...lookup,
         requesterRunId: context.runId,
         requesterMessageId: context.messageId,
         requestId: context.callId,
-        description: getOptionalNonEmptyStringParam(params, "description"),
         environment: context.environment,
-        interrupt: optionalBoolean(params, "interrupt"),
-        mode: runMode(params),
-        name: getOptionalNonEmptyStringParam(params, "name"),
-        parentSessionId: context.sessionId,
-        ...(context.contextScopeId === undefined
-          ? {}
-          : { parentContextScopeId: context.contextScopeId }),
-        prompt: getRequiredNonEmptyStringParam(params, "prompt"),
-        role: subagentId === undefined ? subagentRoleParam(params) : undefined,
         signal: context.signal,
-        subagentId,
-        ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      });
-      return {
-        metadata: {
-          subagent: {
-            execution: executionSummary(result.execution),
-            item: result.item
-              ? {
-                  subagentId: result.item.subagentId,
-                  sessionId: result.item.sessionId,
-                  contextScopeId: result.item.contextScopeId,
-                  role: result.item.role,
-                  name: result.item.name,
-                  description: result.item.description,
-                }
-              : undefined,
-            paused: result.paused,
-            success: result.success,
-          },
-        },
-        output: renderRun(result),
+        mode: runMode(params),
       };
+      if (action === "send")
+        return startResult(
+          action,
+          await host.send({
+            ...input,
+            subagentId: getRequiredNonEmptyStringParam(params, "agent_id"),
+            prompt: getRequiredNonEmptyStringParam(params, "message"),
+          }),
+        );
+      return startResult(
+        action,
+        await host.spawn({
+          ...input,
+          prompt: getRequiredNonEmptyStringParam(params, "prompt"),
+          role: subagentRoleParam(params),
+          name: getOptionalNonEmptyStringParam(params, "name"),
+          description: getOptionalNonEmptyStringParam(params, "description"),
+          timeoutMs: timeoutParam(params),
+        }),
+      );
     },
   };
-
-  const status: Tool = {
-    annotations: { readOnlyHint: true },
-    category: "subagent-control",
-    description:
-      "List subagent statuses for this parent session, or inspect one subagent_id.",
-    name: "subagent_status",
-    parametersJsonSchema: {
-      additionalProperties: false,
-      properties: {
-        subagent_id: { type: "string" },
-        execution_id: { type: "string" },
-      },
-      type: "object",
-    },
-    source: "builtin",
-    async execute(params, context): Promise<ToolExecutionResult> {
-      const result = await host.status({
-        executionId: getOptionalNonEmptyStringParam(params, "execution_id"),
-        parentContextScopeId: context.contextScopeId,
-        parentSessionId: context.sessionId,
-        subagentId: getOptionalNonEmptyStringParam(params, "subagent_id"),
-      });
-      return {
-        metadata: { subagentStatus: statusSummary(result) },
-        output: renderStatus(result),
-      };
-    },
-  };
-
-  const close: Tool = {
-    category: "subagent-control",
-    description: "Close or cancel a subagent by subagent_id.",
-    name: "subagent_close",
-    parametersJsonSchema: {
-      additionalProperties: false,
-      properties: {
-        subagent_id: { type: "string" },
-      },
-      required: ["subagent_id"],
-      type: "object",
-    },
-    source: "builtin",
-    async execute(params, context): Promise<ToolExecutionResult> {
-      const result = await host.close({
-        parentSessionId: context.sessionId,
-        subagentId: getRequiredNonEmptyStringParam(params, "subagent_id"),
-      });
-      return {
-        metadata: { subagentClose: result },
-        output: renderClose(result),
-      };
-    },
-  };
-
   return [
-    withToolAdmission(run, { capacity: "dispatch", plan: () => [] }),
-    withToolAdmission(status, { capacity: "control", plan: () => [] }),
-    withToolAdmission(close, { capacity: "control", plan: () => [] }),
+    withToolAdmission(agent, {
+      // Host execution leases own the six-slot limit, including immediate refusal.
+      // A scheduler queue would delay running sends behind foreground calls.
+      capacity: "control",
+      category: (params) =>
+        params.action === "list" || params.action === "monitor"
+          ? "readonly"
+          : "subagent",
+      plan: () => [],
+    }),
   ];
 }

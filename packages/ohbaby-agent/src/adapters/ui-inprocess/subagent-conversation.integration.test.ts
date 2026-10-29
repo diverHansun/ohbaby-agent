@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { InMemorySubagentInstanceStore } from "../../agents/subagents/in-memory-store.js";
+import { createSubagentMonitor } from "../../agents/subagents/monitor.js";
+import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import {
   createInMemoryMessageStore,
@@ -20,6 +22,7 @@ function fixture() {
     store: createInMemoryMessageStore(),
   });
   const executions = new InMemorySubagentExecutionStore();
+  const instances = new InMemorySubagentInstanceStore();
   const events: UiEvent[] = [];
   const source = new SourceSessionProjection({
     runtimeEpoch: "epoch",
@@ -38,25 +41,7 @@ function fixture() {
   const conversations = new SubagentConversationProjection({
     runtimeEpoch: "epoch",
     executions,
-    instances: {
-      get: ({
-        subagentId,
-      }): Promise<{
-        parentSessionId: string;
-        name: string | undefined;
-        description: string | undefined;
-      }> =>
-        Promise.resolve({
-          parentSessionId: "root",
-          name:
-            subagentId === "a"
-              ? "Researcher\nalpha"
-              : subagentId === "long"
-                ? "Researcher ".repeat(20)
-                : undefined,
-          description: subagentId === "b" ? "First task B" : undefined,
-        }),
-    },
+    instances,
     messages,
     source,
     publish: (event) => {
@@ -69,7 +54,30 @@ function fixture() {
     },
     runs: () => Promise.resolve([]),
   });
+  async function createInstance(subagentId: string): Promise<void> {
+    if (await instances.get({ parentSessionId: "root", subagentId })) return;
+    await instances.create({
+      subagentId,
+      parentSessionId: "root",
+      sessionId: "shared-child",
+      contextScopeId: subagentId,
+      role: "explore",
+      initialPrompt: "Task",
+      status: "running",
+      pendingQueue: [],
+      createdAt: 1,
+      updatedAt: 1,
+      name:
+        subagentId === "a"
+          ? "Researcher\nalpha"
+          : subagentId === "long"
+            ? "Researcher ".repeat(20)
+            : undefined,
+      description: subagentId === "b" ? "First task B" : undefined,
+    });
+  }
   async function accept(id: string, subagentId = "a") {
+    await createInstance(subagentId);
     const { record } = await executions.accept({
       executionId: id,
       requestId: id,
@@ -90,10 +98,101 @@ function fixture() {
     );
     return record;
   }
-  return { messages, executions, events, source, conversations, accept };
+  return {
+    messages,
+    instances,
+    executions,
+    events,
+    source,
+    conversations,
+    accept,
+    createInstance,
+  };
 }
 
 describe("continuous subagent live projection", () => {
+  it.each(["running", "completed"] as const)(
+    "closes a %s instance without requiring another execution event and preserves monitor history",
+    async (status) => {
+      const f = fixture();
+      const execution = await f.accept("a1");
+      await f.executions.start(execution, "run-a", 2);
+      if (status === "completed")
+        await f.executions.finish(execution, {
+          status,
+          output: "Saved result",
+          completedAt: 3,
+        });
+      const input = { rootSessionId: "root", subagentId: "a" };
+      await f.conversations.retain({ ...input, watchId: "watch" });
+      f.events.length = 0;
+      await f.instances.update("a", { closedAt: 4, updatedAt: 4 });
+      expect(f.events).toMatchObject([
+        {
+          type: "subagent.conversation.unavailable",
+          code: "SUBAGENT_CLOSED",
+          subagentId: "a",
+        },
+      ]);
+      await expect(f.conversations.read(input)).rejects.toMatchObject({
+        code: "SUBAGENT_CLOSED",
+      });
+      await expect(
+        f.conversations.retain({ ...input, watchId: "later" }),
+      ).rejects.toMatchObject({ code: "SUBAGENT_CLOSED" });
+      const monitor = createSubagentMonitor({
+        instances: f.instances,
+        executions: f.executions,
+        messages: f.messages,
+      });
+      expect(
+        (await monitor({ parentSessionId: "root", subagentIds: ["a"] }))
+          .targets[0].error,
+      ).toBeUndefined();
+      f.events.length = 0;
+      await f.accept("a2");
+      await f.source.owner.runControl("shared-child", () => Promise.resolve());
+      expect(f.events).toEqual([]);
+      f.conversations.dispose();
+      f.source.reasoning.dispose();
+      f.source.owner.dispose();
+    },
+  );
+
+  it("rejects a close that arrives while an existing conversation read is awaiting history", async () => {
+    const f = fixture();
+    const execution = await f.accept("a1");
+    await f.executions.start(execution, "run-a", 2);
+    const input = { rootSessionId: "root", subagentId: "a" };
+    await f.conversations.read(input);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const original = f.messages.listPageByRun.bind(f.messages);
+    vi.spyOn(f.messages, "listPageByRun").mockImplementationOnce(
+      async (...args) => {
+        entered();
+        await gate;
+        return original(...args);
+      },
+    );
+    const reading = f.conversations.read(input);
+    const rejected = expect(reading).rejects.toMatchObject({
+      code: "SUBAGENT_CLOSED",
+    });
+    await started;
+    await f.instances.update("a", { closedAt: 4, updatedAt: 4 });
+    release();
+    await rejected;
+    f.conversations.dispose();
+    f.source.reasoning.dispose();
+    f.source.owner.dispose();
+  });
   it("uses stable instance names for different anchors sharing one physical session", async () => {
     const f = fixture();
     await f.accept("a1");
@@ -371,6 +470,7 @@ describe("continuous subagent live projection", () => {
   });
   it("never treats the root as a transcript source while a new child is unbound", async () => {
     const f = fixture();
+    await f.createInstance("new");
     await f.executions.accept({
       executionId: "unbound",
       requestId: "unbound",

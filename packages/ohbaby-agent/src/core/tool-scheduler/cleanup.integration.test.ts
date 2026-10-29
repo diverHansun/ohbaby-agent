@@ -34,6 +34,56 @@ const request = (callId: string, resource = "a"): ToolCallRequest => ({
   params: { resource },
 });
 describe("C2 logical completion and true resource cleanup", () => {
+  it.each([
+    { name: "renamed-background", detached: true },
+    { name: "bash", detached: false },
+  ])(
+    "uses trusted cleanup admission rather than the $name tool name",
+    async ({ name, detached }) => {
+      const bus = createBus();
+      const scheduler = createToolScheduler({
+        bus,
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+      });
+      let confirm!: () => void;
+      scheduler.register(
+        withToolAdmission(
+          {
+            name,
+            description: "A tool-owned cleanup fixture",
+            category: "readonly",
+            source: "builtin",
+            parametersJsonSchema: {},
+            execute(_params, context) {
+              context.reportCleanup?.("in-progress");
+              confirm = (): void => context.reportCleanup?.("confirmed");
+              return { output: "Logical result" };
+            },
+          },
+          { cleanupOwner: "tool", detachedCleanup: () => detached },
+        ),
+      );
+      try {
+        expect(
+          (
+            await scheduler.execute({
+              ...request(name),
+              toolName: name,
+              runId: "run",
+              params: { run_in_background: true },
+            })
+          ).status,
+        ).toBe("success");
+        expect(scheduler.getRunCleanup("run").confirmed).toBe(detached);
+      } finally {
+        confirm();
+        scheduler.cancelAll();
+      }
+    },
+  );
   it.each([false, true])(
     "returns capacity on timeout but keeps protection through late rejection=%s",
     async (reject) => {

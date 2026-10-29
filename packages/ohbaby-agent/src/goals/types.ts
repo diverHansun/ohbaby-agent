@@ -102,6 +102,8 @@ export interface GoalTurnOutcome {
 
 /** 适配层实现：把提醒文本作为 user 消息起一轮 Run 并等待完成。 */
 export interface GoalTurnRunner {
+  /** No independent primary work remains; results and supervision own the next wake. */
+  shouldWaitForSubagents?(sessionId: string, goalId: string): Promise<boolean>;
   finishTurn?(
     sessionId: string,
     ticket: GoalTurnTicket,
@@ -115,6 +117,10 @@ export interface GoalTurnRunner {
 }
 
 export interface GoalExecutionInterruptInput {
+  readonly goalId?: string;
+  readonly rootRunIds?: readonly string[];
+  /** An ordinary primary Stop pauses the goal without cancelling its background work. */
+  readonly preserveBackground?: boolean;
   readonly sessionId: string;
   readonly reason: string;
   /** Complete lets the current main run finish its final response. */

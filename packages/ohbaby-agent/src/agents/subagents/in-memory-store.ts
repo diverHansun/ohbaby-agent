@@ -1,6 +1,7 @@
 import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   assertSubagentInstanceUpdate,
+  closeLegacySubagentInputs,
   recoveryExecutionInputsUpdate,
   type MarkSubagentsInterruptedInput,
   type RecoverSubagentExecutionInputsInput,
@@ -45,6 +46,24 @@ function shouldInterruptActiveOwner(
 }
 
 export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
+  private readonly listeners = new Set<
+    (record: SubagentInstanceRecord) => void
+  >();
+  subscribe(listener: (record: SubagentInstanceRecord) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  private publish(record: SubagentInstanceRecord): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(structuredClone(record));
+      } catch {
+        /* Observers cannot undo committed writes. */
+      }
+    }
+  }
   private readonly records = new Map<string, SubagentInstanceRecord>();
   private readonly isOwnerAlive: (pid: number) => boolean;
 
@@ -62,28 +81,8 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     if (!update) return clone(existing);
     const recovered = { ...existing, ...update };
     this.records.set(input.subagentId, clone(recovered));
+    this.publish(recovered);
     return clone(recovered);
-  }
-
-  appendPendingQueue(
-    subagentId: string,
-    input: SubagentInstanceRecord["pendingQueue"][number],
-    updatedAt: number,
-  ): Promise<SubagentInstanceRecord | null> {
-    const existing = this.records.get(subagentId);
-    if (!existing) {
-      return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
-    }
-    if (existing.closedAt !== undefined) {
-      return Promise.resolve(null);
-    }
-    const updated: SubagentInstanceRecord = {
-      ...existing,
-      pendingQueue: [...existing.pendingQueue, clone(input)],
-      updatedAt,
-    };
-    this.records.set(subagentId, clone(updated));
-    return Promise.resolve(clone(updated));
   }
 
   create(record: SubagentInstanceRecord): Promise<void> {
@@ -105,6 +104,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
       }
     }
     this.records.set(record.subagentId, clone(record));
+    this.publish(record);
     return Promise.resolve();
   }
 
@@ -130,6 +130,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     }
     const claimed = { ...existing, ...update };
     this.records.set(subagentId, clone(claimed));
+    this.publish(claimed);
     return Promise.resolve(clone(claimed));
   }
 
@@ -151,6 +152,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     }
     const finished = { ...existing, ...update };
     this.records.set(subagentId, clone(finished));
+    this.publish(finished);
     return Promise.resolve(clone(finished));
   }
 
@@ -165,6 +167,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     }
     const updated = { ...existing, ...update };
     this.records.set(subagentId, clone(updated));
+    this.publish(updated);
     return Promise.resolve(clone(updated));
   }
 
@@ -202,6 +205,11 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
               ? record.completedAt
               : interruptedAt,
           currentRunId: undefined,
+          pendingQueue: closeLegacySubagentInputs(
+            record.pendingQueue,
+            "runtime interrupted",
+            interruptedAt,
+          ),
           interruptedAt,
           lastRunId: record.currentRunId ?? record.lastRunId,
           status: "interrupted",
@@ -211,6 +219,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
         changed.push(updated);
       }
     }
+    for (const record of changed) this.publish(record);
     return Promise.resolve(changed.map(clone));
   }
 }

@@ -1,4 +1,3 @@
-import { RuntimeInputSnapshotChangedError } from "../../core/lifecycle/runtime-input-error.js";
 import { createBus } from "../../bus/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSubagentContinuationCoordinator } from "./continuation-coordinator.js";
@@ -10,7 +9,6 @@ import {
   createMessageManager,
   createInMemoryMessageStore,
 } from "../../core/message/index.js";
-import type { ExecutionFactView } from "./execution-facts.js";
 
 async function setup() {
   const executions = new InMemorySubagentExecutionStore();
@@ -45,27 +43,10 @@ async function setup() {
       createdAt: Date.now(),
     })
   ).record;
-  let blocked = false;
-  let activity = 0;
   const coordinator = createSubagentContinuationCoordinator({
     executions,
     inputs,
     prepareResult: () => Promise.resolve({ body: "complete result" }),
-    collectFacts: (record) =>
-      Promise.resolve({
-        executionId: record.executionId,
-        subagentId: record.subagentId,
-        status: record.status,
-        phase: blocked ? "awaiting-approval" : "running",
-        collectedAt: Date.now(),
-        lastActivityAt: ++activity,
-        currentTools: [],
-        recentTools: [],
-        omittedTools: 0,
-        approval: blocked
-          ? { blocked: true, permissionIds: ["approval"], fingerprint: "v1" }
-          : { blocked: false, permissionIds: [] },
-      } satisfies ExecutionFactView),
   });
   const port = coordinator.createPort({ runId: "root", sessionId: "parent" });
   let requestNumber = 0;
@@ -99,6 +80,7 @@ async function setup() {
     await port.confirmRequestSuccess(requestId);
   }
   return {
+    runLedger,
     executions,
     execution,
     inputs,
@@ -106,174 +88,144 @@ async function setup() {
     coordinator,
     processPending,
     messages,
-    setBlocked: (value: boolean) => {
-      blocked = value;
-    },
   };
 }
 afterEach(() => {
   vi.useRealTimers();
 });
 describe("subagent continuation", () => {
-  it("waits 60 then 120 seconds; lost terminal wake is recovered by independent reconcile", async () => {
-    vi.useFakeTimers();
+  it("leaves excluded Goal results pending for a later explicit user run", async () => {
     const s = await setup();
-    let finished = false;
-    const first = s.port.beforeFinish().then((r) => {
-      finished = true;
-      return r;
-    });
-    await vi.advanceTimersByTimeAsync(59_999);
-    expect(finished).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(await first).toBe("continue");
-    const firstInputs = await s.inputs.listPending("root");
-    expect(firstInputs).toHaveLength(1);
-    expect(firstInputs[0].observation?.reason).toBe("deadline");
-    // A real terminal takes priority over an unsent deadline and needs no host signal.
     await s.executions.finish(s.execution, {
       status: "completed",
-      output: "complete result",
-      completedAt: Date.now(),
+      output: "Goal result",
+      completedAt: 10,
+    });
+    const automatic = s.coordinator.createPort({
+      runId: "root",
+      sessionId: "parent",
+      excludedSubagentRootRunIds: ["root"],
+    });
+    expect(await automatic.beforeStep()).toEqual([]);
+    expect((await s.executions.get(s.execution))?.delivery.state).toBe(
+      "pending",
+    );
+    expect(await s.port.beforeStep()).toHaveLength(1);
+  });
+  it("withdraws an unsent supervision snapshot when a real result arrives", async () => {
+    const s = await setup();
+    await s.inputs.acceptRuntimeInput({
+      inputId: "observation",
+      runId: "root",
+      sessionId: "parent",
+      source: "subagent-status",
+      sourceId: "review",
+      message: {
+        info: {
+          id: "review",
+          sessionId: "parent",
+          runId: "root",
+          role: "user",
+          agent: "default",
+          time: { created: 1 },
+        },
+        parts: [
+          {
+            id: "review:text",
+            messageId: "review",
+            sessionId: "parent",
+            orderIndex: 0,
+            type: "text",
+            text: "child is still running",
+          },
+        ],
+      },
+    });
+    await s.executions.finish(s.execution, {
+      status: "completed",
+      output: "done",
+      completedAt: 10,
     });
     const batch = await s.port.beforeStep();
-    expect(batch).toHaveLength(1);
-    expect(batch[0].info.runtimeInput?.kind).toBe("subagent-result");
-    expect(
-      (await s.inputs.getInput(firstInputs[0].inputId))?.closeReason,
-    ).toBeDefined();
+    expect(batch.map((message) => message.info.runtimeInput?.kind)).toEqual([
+      "subagent-result",
+    ]);
+    expect((await s.inputs.getInput("observation"))?.closedAt).toBeDefined();
   });
-  it("recovers a terminal without a signal, never finishes before successful result processing", async () => {
-    vi.useFakeTimers();
+  it("finishes the primary turn while its background execution continues", async () => {
     const s = await setup();
-    let finished = false;
-    const waiting = s.port.beforeFinish().then((r) => {
-      finished = true;
-      return r;
+    expect(await s.port.beforeFinish()).toBe("finish");
+    expect((await s.executions.get(s.execution))?.status).toBe("queued");
+    expect(await s.inputs.listPending("root")).toEqual([]);
+  });
+  it("delivers an earlier turn's result and confirms only a successful request", async () => {
+    const s = await setup();
+    await s.executions.finish(s.execution, {
+      status: "completed",
+      output: "report",
+      completedAt: 10,
     });
-    await vi.advanceTimersByTimeAsync(1);
+    await s.inputs.close("root", "user-stop");
+    await s.runLedger.createPending({
+      runId: "next",
+      sessionId: "parent",
+      triggerSource: "user",
+    });
+    await s.runLedger.markRunning("next");
+    const port = s.coordinator.createPort({
+      runId: "next",
+      sessionId: "parent",
+    });
+    const batch = await port.beforeStep();
+    expect(batch).toHaveLength(1);
+    expect(batch[0].info.runtimeInput).toMatchObject({
+      sourceId: "subagent-result:execution",
+      targetRunId: "next",
+    });
+    expect((await s.executions.get(s.execution))?.delivery.state).toBe(
+      "delivered",
+    );
+    expect(await port.beforeFinish()).toBe("continue");
+  });
+  it("reoffers a failed request in another turn without rewriting old request membership", async () => {
+    const s = await setup();
     await s.executions.finish(s.execution, {
       status: "failed",
       error: "broken",
-      completedAt: Date.now(),
+      completedAt: 10,
     });
-    await vi.advanceTimersByTimeAsync(4_999);
-    expect(await waiting).toBe("continue");
-    expect(finished).toBe(true);
-    expect(await s.port.beforeFinish()).toBe("continue");
-    expect((await s.inputs.listPending("root"))[0].source).toBe(
-      "subagent-result",
+    const first = await s.port.beforeStep();
+    const firstId = first[0].info.runtimeInput?.inputId;
+    if (!firstId) throw new Error("Missing original delivery input");
+    await s.inputs.close("root", "user-stop");
+    await s.runLedger.createPending({
+      runId: "next",
+      sessionId: "parent",
+      triggerSource: "user",
+    });
+    await s.runLedger.markRunning("next");
+    const port = s.coordinator.createPort({
+      runId: "next",
+      sessionId: "parent",
+    });
+    const second = await port.beforeStep();
+    expect(second).toHaveLength(1);
+    expect(second[0].info.runtimeInput?.inputId).not.toBe(firstId);
+    expect((await s.inputs.getInput(firstId))?.runId).toBe("root");
+    expect((await s.inputs.getInput(firstId))?.closedAt).toBeDefined();
+    expect(second[0].info.runtimeInput?.sourceId).toBe(
+      first[0].info.runtimeInput?.sourceId,
     );
-  });
-  it("cancels a held wait and removes its timers", async () => {
-    vi.useFakeTimers();
-    const s = await setup();
-    const controller = new AbortController();
-    const waiting = s.port.beforeFinish(controller.signal);
-    const rejected = expect(waiting).rejects.toThrow("stopped");
-    await vi.advanceTimersByTimeAsync(1);
-    controller.abort(new Error("stopped"));
-    await rejected;
-    await vi.advanceTimersByTimeAsync(120_000);
-    expect(await s.inputs.listPending("root")).toHaveLength(0);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-  it("uses 120 seconds only after a successful deadline request, without progress resets", async () => {
-    vi.useFakeTimers();
-    const s = await setup();
-    const first = s.port.beforeFinish();
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(await first).toBe("continue");
-    await s.processPending();
-    let finished = false;
-    const second = s.port.beforeFinish().then((value) => {
-      finished = true;
-      return value;
-    });
-    await vi.advanceTimersByTimeAsync(119_999);
-    expect(finished).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(await second).toBe("continue");
-    expect(
-      (await s.inputs.listPending("root"))[0].observation?.waitGeneration,
-    ).toBe(2);
-    await s.processPending();
-    finished = false;
-    const third = s.port.beforeFinish().then((value) => {
-      finished = true;
-      return value;
-    });
-    await vi.advanceTimersByTimeAsync(119_999);
-    expect(finished).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(await third).toBe("continue");
-    expect(
-      (await s.inputs.listPending("root"))[0].observation?.waitGeneration,
-    ).toBe(3);
-  });
-  it("pauses repeat model checks only after successful approval disclosure and still reconciles", async () => {
-    vi.useFakeTimers();
-    const s = await setup();
-    s.setBlocked(true);
-    expect(await s.port.beforeFinish()).toBe("continue");
-    await s.processPending();
-    let finished = false;
-    const waiting = s.port.beforeFinish().then((value) => {
-      finished = true;
-      return value;
-    });
-    await vi.advanceTimersByTimeAsync(600_000);
-    expect(finished).toBe(false);
-    expect(await s.inputs.listPending("root")).toHaveLength(0);
-    // Lost approval signal is discovered by the independent five-second check.
-    s.setBlocked(false);
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(await waiting).toBe("continue");
-    expect((await s.inputs.listPending("root"))[0].observation?.reason).toBe(
-      "approval-change",
+    expect((await port.beforeStep()).map((m) => m.info.id)).toEqual(
+      second.map((m) => m.info.id),
     );
-  });
-  it("invalidates an unsent approval snapshot at admission but keeps ordinary progress eligible", async () => {
-    vi.useFakeTimers();
-    const s = await setup();
-    s.setBlocked(true);
-    expect(await s.port.beforeFinish()).toBe("continue");
-    const old = (await s.inputs.listPending("root"))[0];
-    s.setBlocked(false);
-    await expect(
-      s.port.admitRequestAttempt({
-        requestId: "stale",
-        messageId: "stale",
-        runId: "root",
-        step: 1,
-        attempt: 1,
-        purpose: "agent-step",
-        startedAt: 0,
-        outcome: "running",
-        inputIds: [old.inputId],
-      }),
-    ).rejects.toBeInstanceOf(RuntimeInputSnapshotChangedError);
-    expect((await s.inputs.getInput(old.inputId))?.closedAt).toBeDefined();
-    await s.processPending();
-    expect(await s.inputs.listPending("root")).toHaveLength(0);
-    const controller = new AbortController();
-    let nextFinished = false;
-    const next = s.port.beforeFinish(controller.signal).then(() => {
-      nextFinished = true;
-    });
-    const cancelled = expect(next).rejects.toThrow("stop");
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(nextFinished).toBe(false);
-    expect(await s.inputs.listPending("root")).toHaveLength(0);
-    controller.abort(new Error("stop"));
-    await cancelled;
   });
   it("finishes only after the exact result request succeeded and marks delivery processed", async () => {
     const s = await setup();
     await s.executions.finish(s.execution, {
       status: "completed",
-      output: "result",
-      completedAt: Date.now(),
+      output: "report",
+      completedAt: 10,
     });
     expect(await s.port.beforeFinish()).toBe("continue");
     await s.processPending();
@@ -282,38 +234,13 @@ describe("subagent continuation", () => {
       "processed",
     );
   });
-
-  it("resets the next wait to 60 seconds only after processing a real terminal result", async () => {
-    vi.useFakeTimers();
+  it("ignores foreground and explicitly stopped work when reconciling results", async () => {
     const s = await setup();
-    await s.executions.accept({
-      ...s.execution,
-      executionId: "second",
-      requestId: "second",
-    });
-    const first = s.port.beforeFinish();
-    await vi.advanceTimersByTimeAsync(60_000);
-    await first;
-    await s.processPending();
     await s.executions.finish(s.execution, {
-      status: "completed",
-      output: "done",
-      completedAt: Date.now(),
+      status: "interrupted",
+      completedAt: 10,
     });
-    await s.processPending();
-    let done = false;
-    const next = s.port.beforeFinish().then((value) => {
-      done = true;
-      return value;
-    });
-    await vi.advanceTimersByTimeAsync(59_999);
-    expect(done).toBe(false);
-    expect(s.coordinator.getWaitState("root")).toEqual({
-      waiting: true,
-      approvalBlocked: false,
-    });
-    await vi.advanceTimersByTimeAsync(1);
-    expect(await next).toBe("continue");
-    expect(s.coordinator.getWaitState("root").waiting).toBe(false);
+    expect(await s.port.beforeStep()).toEqual([]);
+    expect(await s.port.beforeFinish()).toBe("finish");
   });
 });

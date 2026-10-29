@@ -28,6 +28,8 @@ export interface AgentToolCallSummary {
 }
 
 export interface AgentRunInput {
+  /** Called after the run ledger admits current-run inputs, before model work. */
+  readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly sessionId: string;
@@ -87,6 +89,7 @@ export interface AgentRunEventSource {
 }
 
 export interface AgentRunCreateOptions {
+  readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
   readonly preparationSignal?: AbortSignal;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
@@ -177,6 +180,8 @@ export interface AgentContextScope {
 }
 
 export interface AgentTurnInput {
+  /** Called after the run ledger admits current-run inputs, before model work. */
+  readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly initialUserMessageId?: string;

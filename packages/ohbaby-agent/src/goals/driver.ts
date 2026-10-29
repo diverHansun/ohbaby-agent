@@ -19,6 +19,7 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
   const { pause, runner, safetyCapTurns, sessionId, store } = deps;
   const goalId = deps.goalId ?? store.getSnapshot()?.goalId;
   const epoch = deps.executionEpoch ?? 0;
+  let completedTurn = false;
   for (;;) {
     const snapshot = store.getSnapshot();
     if (
@@ -39,6 +40,11 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
       );
       return;
     }
+    if (
+      completedTurn &&
+      (await runner.shouldWaitForSubagents?.(sessionId, snapshot.goalId))
+    )
+      return;
     const outcome = await runner.runTurn(sessionId, snapshot.goalId, epoch);
     // The adapter waits internally while admission is possible. A refusal ends
     // this generation, including shutdown with a still-active persisted goal.
@@ -70,6 +76,7 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
         await pause(`runtime error: ${outcome.error ?? "unknown"}`, "runtime");
         return;
       }
+      completedTurn = true;
     } finally {
       outcome.release?.();
     }

@@ -1,0 +1,2 @@
+export const MAX_SUBAGENT_EXECUTIONS = 6;
+export const MAX_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;

@@ -1,11 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import type {
-  SessionSubagentHost,
   SubagentInstanceRecord,
   SubagentExecutionRecord,
 } from "../agents/index.js";
-import type { Tool } from "../core/tool-scheduler/index.js";
 import { createBuiltinTools } from "./index.js";
+import { createBus } from "../bus/index.js";
+import { createPermissionState } from "../permission/index.js";
+import { createToolScheduler } from "../core/tool-scheduler/scheduler.js";
+import type { Tool } from "../core/tool-scheduler/index.js";
+import { SessionSubagentHost } from "../agents/subagent-host.js";
+import { InMemorySubagentInstanceStore } from "../agents/subagents/in-memory-store.js";
+import { InMemorySubagentExecutionStore } from "../agents/subagents/execution-store.js";
+import { createExecutionMessageChannel } from "../agents/subagents/execution-message-channel.js";
+import {
+  createInMemoryMessageStore,
+  createMessageManager,
+} from "../core/message/index.js";
+import { createInMemoryRunLedger } from "../runtime/run-ledger/index.js";
+import { InMemoryCurrentRunInputStore } from "../runtime/prompt-scheduler/current-run-inputs.js";
+import { InMemoryPromptSubmissionStore } from "../runtime/prompt-scheduler/in-memory-store.js";
+import { testRunModel } from "../core/testing/model-fixtures.js";
+import type { Session } from "../services/session/index.js";
+import type { AgentInstance, AgentRunResult } from "../core/agents/index.js";
+import type { RuntimeAgent } from "../agents/types.js";
+import type { SubagentToolHost } from "./subagent.js";
 
 const item: SubagentInstanceRecord = {
   contextScopeId: "subagent_1",
@@ -20,7 +38,6 @@ const item: SubagentInstanceRecord = {
   updatedAt: 2,
   output: "done",
 };
-
 const execution: SubagentExecutionRecord = {
   executionId: "execution_1",
   requestId: "call_1",
@@ -40,37 +57,58 @@ const execution: SubagentExecutionRecord = {
   artifact: { state: "none" },
   delivery: { state: "foreground" },
 };
-
 function createHost(): {
-  readonly close: ReturnType<typeof vi.fn>;
-  readonly host: Pick<SessionSubagentHost, "close" | "run" | "status">;
-  readonly run: ReturnType<typeof vi.fn>;
-  readonly status: ReturnType<typeof vi.fn>;
+  [K in keyof SubagentToolHost]: Mock<SubagentToolHost[K]>;
 } {
-  const run = vi.fn<SessionSubagentHost["run"]>(() =>
-    Promise.resolve({ execution, item, output: "done", success: true }),
-  );
-  const status = vi.fn<SessionSubagentHost["status"]>(() =>
-    Promise.resolve({ items: [item], executions: [execution] }),
-  );
-  const close = vi.fn<SessionSubagentHost["close"]>(() =>
-    Promise.resolve({
-      subagentId: item.subagentId,
-      item: { ...item, status: "cancelled" },
-      previousStatus: "completed",
-    }),
-  );
-  return { close, host: { close, run, status }, run, status };
+  const started = {
+    started: true,
+    execution,
+    item,
+    output: "done",
+    success: true,
+  };
+  const host = {
+    spawn: vi.fn<SubagentToolHost["spawn"]>(() => Promise.resolve(started)),
+    send: vi.fn<SubagentToolHost["send"]>(() => Promise.resolve(started)),
+    list: vi.fn<SubagentToolHost["list"]>(() =>
+      Promise.resolve({
+        items: [item],
+        executions: [execution],
+      }),
+    ),
+    monitor: vi.fn<SubagentToolHost["monitor"]>(() =>
+      Promise.resolve({
+        targets: [],
+        truncated: false,
+      }),
+    ),
+    stop: vi.fn<SubagentToolHost["stop"]>(() =>
+      Promise.resolve({
+        subagentId: item.subagentId,
+        stopped: false,
+        cleanup: "confirmed" as const,
+        unprocessedMessages: [],
+      }),
+    ),
+    close: vi.fn<SubagentToolHost["close"]>(() =>
+      Promise.resolve({
+        subagentId: item.subagentId,
+        item: { ...item, status: "cancelled" as const },
+        previousStatus: "completed" as const,
+        cleanup: "confirmed" as const,
+        unprocessedMessages: [],
+      }),
+    ),
+  };
+  return host;
 }
-
-function getTool(tools: readonly Tool[], name: string): Tool {
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (!tool) {
-    throw new Error(`missing tool: ${name}`);
-  }
-  return tool;
+function tool(host: SubagentToolHost = createHost()): Tool {
+  const agent = createBuiltinTools({
+    subagentHost: host,
+  }).find((candidate) => candidate.name === "agent");
+  if (!agent) throw new Error("missing tool: agent");
+  return agent;
 }
-
 const context = {
   runId: "run_1",
   callId: "call_1",
@@ -79,346 +117,480 @@ const context = {
   signal: new AbortController().signal,
 };
 
-describe("subagent builtin tools", () => {
-  it("defaults new dispatches to background acceptance", async () => {
-    const { host, run } = createHost();
-    run.mockResolvedValueOnce({
-      execution: {
-        ...execution,
-        mode: "background",
-        status: "queued",
-        output: undefined,
-        completedAt: undefined,
-        delivery: { state: "none" },
+describe("agent builtin tool", () => {
+  it("registers one plain object schema with six actions and a background default", () => {
+    const host = createHost();
+    const names = createBuiltinTools({
+      subagentHost: host,
+    }).map((entry) => entry.name);
+    expect(names).toContain("agent");
+    for (const old of ["subagent_run", "subagent_status", "subagent_close"])
+      expect(names).not.toContain(old);
+    expect(tool(host).parametersJsonSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["action"],
+      properties: {
+        action: { enum: ["spawn", "send", "list", "monitor", "stop", "close"] },
+        mode: { default: "background" },
       },
     });
-    const result = await getTool(
-      createBuiltinTools({ subagentHost: host }),
-      "subagent_run",
-    ).execute({ prompt: "inspect" }, context);
-    expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "background" }),
+    expect(tool(host).annotations?.readOnlyHint).not.toBe(true);
+  });
+  it("defaults spawn to background and returns the durable execution identity", async () => {
+    const host = createHost();
+    host.spawn.mockResolvedValueOnce({
+      started: true,
+      execution: { ...execution, mode: "background", status: "running" },
+      item,
+      output: "secret fast result",
+      success: true,
+    });
+    const result = await tool(host).execute(
+      { action: "spawn", prompt: "inspect", name: "Audit" },
+      context,
     );
-    expect(result.output).toContain("execution_1");
+    expect(host.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "background",
+        prompt: "inspect",
+        requesterRunId: "run_1",
+        parentSessionId: "parent_1",
+      }),
+    );
+    expect(result.output).toContain("agent_id: subagent_1");
+    expect(result.output).toContain("execution_id: execution_1");
+    expect(result.output).toContain("started: true");
+    expect(result.output).toContain("mode: background");
+    expect(result.output).toContain("do not edit");
+    expect(result.output).not.toContain("secret fast result");
+    expect(result.metadata?.subagent).toMatchObject({
+      started: true,
+      execution: { executionId: "execution_1" },
+    });
+  });
+  it("returns a direct foreground result or an explicit empty result note", async () => {
+    const host = createHost();
+    expect(
+      (
+        await tool(host).execute(
+          { action: "spawn", prompt: "inspect", mode: "foreground" },
+          context,
+        )
+      ).output,
+    ).toContain("<subagent_output>\ndone\n</subagent_output>");
+    host.spawn.mockResolvedValueOnce({
+      started: true,
+      execution: { ...execution, output: "" },
+      item,
+      output: "",
+      success: true,
+    });
+    expect(
+      (
+        await tool(host).execute(
+          { action: "spawn", prompt: "inspect", mode: "foreground" },
+          context,
+        )
+      ).output,
+    ).toContain("program_note: No output.");
+  });
+  it("reports capacity refusal without a fictitious execution", async () => {
+    const host = createHost();
+    host.spawn.mockResolvedValueOnce({
+      started: false,
+      reason: "All six execution slots are in use.",
+    });
+    const result = await tool(host).execute(
+      { action: "spawn", prompt: "inspect" },
+      context,
+    );
+    expect(result.output).toContain("started: false");
+    expect(result.output).toContain("All six");
+    expect(result.output).not.toContain("execution_id");
+    expect(result.metadata?.subagent).not.toHaveProperty("execution");
+  });
+  it("routes send to an existing instance and keeps actual running mode without a delegation receipt", async () => {
+    const host = createHost();
+    host.send.mockResolvedValueOnce({
+      started: false,
+      accepted: true,
+      inputId: "input_1",
+      execution,
+      item,
+    });
+    const result = await tool(host).execute(
+      { action: "send", agent_id: "subagent_1", message: "check errors" },
+      context,
+    );
+    expect(host.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subagentId: "subagent_1",
+        prompt: "check errors",
+        mode: "background",
+      }),
+    );
+    expect(result.output).toContain("mode: foreground");
+    expect(result.output).toContain("accepted: true");
+    expect(result.output).toContain("input_id: input_1");
+    expect(result.metadata?.subagent).not.toHaveProperty("execution");
     expect(result.output).not.toContain("<subagent_output>");
   });
-  it("registers only the new subagent tools when a subagent host is injected", () => {
-    const { host } = createHost();
-    const names = createBuiltinTools({ subagentHost: host }).map(
-      (tool) => tool.name,
-    );
-
-    expect(names).toEqual(
-      expect.arrayContaining([
-        "subagent_run",
-        "subagent_status",
-        "subagent_close",
-      ]),
-    );
-    expect(names).not.toEqual(
-      expect.arrayContaining(["task", "agent_open", "agent_eval"]),
-    );
-    expect(
-      createBuiltinTools({ subagentHost: host }).find(
-        (tool) => tool.name === "subagent_run",
-      )?.timeoutOwner,
-    ).toBe("tool");
-    expect(
-      getTool(createBuiltinTools({ subagentHost: host }), "subagent_status")
-        .category,
-    ).toBe("subagent-control");
-    expect(
-      getTool(createBuiltinTools({ subagentHost: host }), "subagent_close")
-        .category,
-    ).toBe("subagent-control");
-  });
-
-  it("runs, lists status items, and closes through SessionSubagentHost", async () => {
-    const { close, host, run, status } = createHost();
-    const tools = createBuiltinTools({ subagentHost: host });
-
-    const runResult = await getTool(tools, "subagent_run").execute(
+  it("preserves execution metadata when send starts a new execution", async () => {
+    const host = createHost();
+    const result = await tool(host).execute(
       {
+        action: "send",
+        agent_id: "subagent_1",
+        message: "continue",
         mode: "foreground",
-        prompt: "inspect",
-        role: "explore",
       },
       context,
     );
-    const statusResult = await getTool(tools, "subagent_status").execute(
-      {},
-      context,
-    );
-    await getTool(tools, "subagent_close").execute(
-      { subagent_id: "subagent_1" },
-      context,
-    );
-
-    expect(run).toHaveBeenCalledWith({
-      requesterRunId: "run_1",
-      requesterMessageId: "message_1",
-      requestId: "call_1",
-      description: undefined,
-      environment: undefined,
-      interrupt: undefined,
-      mode: "foreground",
-      name: undefined,
-      parentSessionId: "parent_1",
-      prompt: "inspect",
-      role: "explore",
-      signal: context.signal,
-      subagentId: undefined,
+    expect(result.metadata?.subagent).toMatchObject({
+      started: true,
+      execution: { executionId: "execution_1" },
     });
-    expect(status).toHaveBeenCalledWith({
-      executionId: undefined,
+  });
+  it("includes file ownership guidance when send starts a background execution", async () => {
+    const host = createHost();
+    host.send.mockResolvedValueOnce({
+      started: true,
+      execution: { ...execution, mode: "background", status: "running" },
+    });
+    const result = await tool(host).execute(
+      { action: "send", agent_id: "subagent_1", message: "continue" },
+      context,
+    );
+    expect(result.output).toContain(
+      "do not edit the files assigned to it concurrently",
+    );
+  });
+  it("lists within the caller session and passes independent monitor cursors", async () => {
+    const host = createHost();
+    const agent = tool(host);
+    const listed = await agent.execute({ action: "list" }, context);
+    expect(listed.output).toContain("subagent_1");
+    expect(host.list).toHaveBeenCalledWith({
+      parentSessionId: "parent_1",
       parentContextScopeId: undefined,
-      parentSessionId: "parent_1",
-      subagentId: undefined,
     });
-    expect(close).toHaveBeenCalledWith({
+    await agent.execute(
+      { action: "monitor", agent_ids: ["a", "b"], cursors: { a: "cursor-a" } },
+      context,
+    );
+    expect(host.monitor).toHaveBeenCalledWith({
+      parentSessionId: "parent_1",
+      parentContextScopeId: undefined,
+      subagentIds: ["a", "b"],
+      cursors: { a: "cursor-a" },
+    });
+  });
+  it("returns stop and close cleanup facts without discarding unprocessed messages", async () => {
+    const host = createHost();
+    host.stop.mockResolvedValueOnce({
+      subagentId: item.subagentId,
+      stopped: true,
+      cleanup: "unconfirmed",
+      unprocessedMessages: [
+        { inputId: "input_2", text: "not consumed", reason: "stopped" },
+      ],
+    });
+    const result = await tool(host).execute(
+      { action: "stop", agent_id: "subagent_1" },
+      context,
+    );
+    expect(result.output).toContain("unconfirmed");
+    expect(result.output).toContain("not consumed");
+    const closed = await tool(host).execute(
+      { action: "close", agent_id: "subagent_1" },
+      context,
+    );
+    expect(closed.output).toContain("confirmed");
+    expect(host.close).toHaveBeenCalledWith({
       parentSessionId: "parent_1",
       subagentId: "subagent_1",
     });
-    expect(runResult.metadata?.subagent).toMatchObject({
-      execution: { subagentId: "subagent_1", executionId: "execution_1" },
-    });
-    expect(JSON.stringify(statusResult.metadata)).not.toContain(
-      "initialPrompt",
-    );
-    expect(statusResult.output).not.toContain("<subagent_output>");
   });
-
-  it("passes timeout_ms through subagent_run when provided", async () => {
-    const { host, run } = createHost();
-    const tools = createBuiltinTools({ subagentHost: host });
-
-    await getTool(tools, "subagent_run").execute(
-      {
-        mode: "foreground",
-        prompt: "inspect",
-        role: "explore",
-        timeout_ms: 1_000,
+  it.each([
+    {},
+    { action: "wait" },
+    { action: "spawn" },
+    { action: "spawn", prompt: " " },
+    { action: "spawn", prompt: "ok", agent_id: "existing" },
+    { action: "spawn", prompt: "ok", interrupt: true },
+    { action: "spawn", prompt: "ok", mode: "queued" },
+    { action: "spawn", prompt: "ok", timeout_ms: 1800001 },
+    { action: "spawn", prompt: "ok", role: "build" },
+    { action: "send", agent_id: "a", prompt: "wrong" },
+    { action: "send", agent_id: "a", message: "ok", name: "new" },
+    { action: "send", agent_id: "a", message: "ok", timeout_ms: 1 },
+    { action: "list", agent_id: "a" },
+    { action: "monitor", agent_ids: [] },
+    { action: "monitor", agent_ids: [" "] },
+    { action: "monitor", agent_ids: "a" },
+    { action: "monitor", agent_ids: ["a"], cursors: { b: "cursor" } },
+    { action: "monitor", agent_ids: ["a"], cursors: { a: 1 } },
+    { action: "stop", agent_id: " " },
+    { action: "close", agent_id: "a", mode: "background" },
+  ])(
+    "rejects invalid action parameters before calling the host: %j",
+    async (params) => {
+      const host = createHost();
+      await expect(tool(host).execute(params, context)).rejects.toThrow();
+      for (const method of Object.values(host))
+        expect(method).not.toHaveBeenCalled();
+    },
+  );
+  it("delivers running messages and rejects the seventh execution immediately while six foreground calls remain open", async () => {
+    const bus = createBus();
+    const executions = new InMemorySubagentExecutionStore();
+    const messages = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const ledger = createInMemoryRunLedger();
+    const inputs = new InMemoryCurrentRunInputStore({
+      runLedger: ledger,
+      promptStore: new InMemoryPromptSubmissionStore(),
+      messageManager: messages,
+    });
+    const channel = createExecutionMessageChannel({
+      executions,
+      messages,
+      inputs,
+      runLedger: ledger,
+    });
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const turn = vi.fn<AgentInstance["turn"]>(
+      async (input): Promise<AgentRunResult> => {
+        if (!input.runId) throw new Error("Expected child run identity");
+        const execution = (await executions.listByRootRun("root")).find(
+          (record) => record.childRunId === input.runId,
+        );
+        if (!execution?.childScopeId)
+          throw new Error("Expected bound child scope");
+        await ledger.createPending({
+          runId: input.runId,
+          sessionId: "child",
+          contextScopeId: execution.childScopeId,
+          triggerSource: "user",
+        });
+        await ledger.markRunning(input.runId);
+        await input.onInputReady?.();
+        await gate;
+        return {
+          mode: "waitForCompletion",
+          sessionId: "child",
+          success: true,
+          finalOutput: "done",
+        };
       },
-      context,
     );
-
-    expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({
-        timeoutMs: 1_000,
+    let nextAgent = 0;
+    const parent = {
+      id: "parent",
+      workingDirectory: "/repo",
+      isSubagent: false,
+    } as Session;
+    const child = {
+      ...parent,
+      id: "child",
+      isSubagent: true,
+      parentId: "parent",
+    } as Session;
+    const host = new SessionSubagentHost({
+      ...channel,
+      agentManager: {
+        getRuntimeAgent: (): Promise<RuntimeAgent> =>
+          Promise.resolve({
+            config: { name: "explore", mode: "subagent", maxSteps: 5 },
+            isSubagent: true,
+            tools: {},
+          }),
+      },
+      instanceFactory: {
+        create: (identity): AgentInstance => ({
+          identity,
+          contextScope: {} as AgentInstance["contextScope"],
+          turn,
+        }),
+      },
+      sessionManager: {
+        create: (): Promise<Session> => Promise.resolve(child),
+        get: (id): Promise<Session> =>
+          Promise.resolve(id === "parent" ? parent : child),
+      },
+      store: new InMemorySubagentInstanceStore(),
+      executionStore: executions,
+      getParentRunModel: (): ReturnType<typeof testRunModel> =>
+        testRunModel("fixture"),
+      createSubagentId: (): string => `agent-${String(++nextAgent)}`,
+      resolveRequester: (): Promise<{
+        rootSessionId: string;
+        rootRunId: string;
+      }> => Promise.resolve({ rootSessionId: "parent", rootRunId: "root" }),
+    });
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      config: { concurrency: { maxSubagentConcurrency: 6 } },
+    });
+    scheduler.register(tool(host));
+    const request = {
+      runId: "root",
+      sessionId: "parent",
+      messageId: "message",
+      toolName: "agent",
+    };
+    const active = Array.from({ length: 6 }, (_, index) =>
+      scheduler.execute({
+        ...request,
+        callId: `spawn-${String(index)}`,
+        params: { action: "spawn", prompt: "work", mode: "foreground" },
       }),
     );
-  });
-
-  it("shows a separate program note for a completed subagent with no final body", async () => {
-    const { host, run, status } = createHost();
-    const emptyItem = { ...item, output: "" };
-    run.mockResolvedValueOnce({
-      execution: { ...execution, output: "" },
-      item: emptyItem,
-      output: "",
-      success: true,
+    await vi.waitFor(() => {
+      expect(turn).toHaveBeenCalledTimes(6);
     });
-    status.mockResolvedValueOnce({
-      items: [emptyItem],
-      executions: [{ ...execution, output: "" }],
-    });
-    const tools = createBuiltinTools({ subagentHost: host });
-
-    const runResult = await getTool(tools, "subagent_run").execute(
-      { prompt: "inspect" },
-      context,
-    );
-    const statusResult = await getTool(tools, "subagent_status").execute(
-      {},
-      context,
-    );
-
-    expect(runResult.output).toContain("program_note: No output.");
-    expect(statusResult.output).toContain("sizeBytes");
-    expect(runResult.output).not.toContain("<subagent_output>");
-    expect(statusResult.output).not.toContain("<subagent_output>");
-    expect(runResult.metadata?.subagent).toMatchObject({
-      execution: { sizeBytes: 0 },
-    });
-  });
-
-  it("does not show an empty-output note while running or after failure", async () => {
-    const { host, run, status } = createHost();
-    run.mockResolvedValueOnce({
-      execution: { ...execution, mode: "background", status: "running" },
-      item: { ...item, output: "", status: "running" },
-      output: "",
-      success: true,
-    });
-    status.mockResolvedValueOnce({
-      executions: [],
-      items: [{ ...item, output: "", status: "failed", error: "timeout" }],
-    });
-    const tools = createBuiltinTools({ subagentHost: host });
-
-    const runResult = await getTool(tools, "subagent_run").execute(
-      { prompt: "inspect", mode: "background" },
-      context,
-    );
-    const statusResult = await getTool(tools, "subagent_status").execute(
-      {},
-      context,
-    );
-
-    expect(runResult.output).not.toContain("program_note");
-    expect(statusResult.output).not.toContain("program_note");
-  });
-
-  it("does not present the previous result while a queued continuation is pending", async () => {
-    const { host, run, status } = createHost();
-    const pendingItem = {
-      ...item,
-      output: "",
-      pendingQueue: [{ prompt: "continue" }],
-    };
-    run.mockResolvedValueOnce({
-      execution: {
-        ...execution,
-        mode: "background",
-        status: "queued",
-        output: undefined,
-      },
-      item: pendingItem,
-    });
-    status.mockResolvedValueOnce({
-      executions: [],
-      items: [pendingItem],
-    });
-    const tools = createBuiltinTools({ subagentHost: host });
-
-    const runResult = await getTool(tools, "subagent_run").execute(
-      { prompt: "continue", mode: "background", subagent_id: "subagent_1" },
-      context,
-    );
-    const statusResult = await getTool(tools, "subagent_status").execute(
-      {},
-      context,
-    );
-
-    expect(runResult.output).not.toContain("program_note");
-    expect(statusResult.output).not.toContain("program_note");
-    expect(statusResult.output).not.toContain("<subagent_output>");
-  });
-
-  it("does not present a previous interrupted run's error as a queued continuation's result", async () => {
-    const { host, run } = createHost();
-    const pendingItem = {
-      ...item,
-      status: "interrupted" as const,
-      output: "previous run interrupted",
-      error: "previous run interrupted",
-      pendingQueue: [{ prompt: "continue" }],
-    };
-    run.mockResolvedValueOnce({
-      execution: {
-        ...execution,
-        mode: "background",
-        status: "queued",
-        output: undefined,
-      },
-      item: pendingItem,
-    });
-    const tools = createBuiltinTools({ subagentHost: host });
-
-    const result = await getTool(tools, "subagent_run").execute(
-      { prompt: "continue", mode: "background", subagent_id: "subagent_1" },
-      context,
-    );
-
-    expect(result.output).toContain("status: queued");
-    expect(result.output).toContain("accepted: true");
-    expect(result.output).not.toContain("<subagent_error>");
-    expect(result.output).not.toContain("previous run interrupted");
-  });
-
-  it("does not expose an immediately completed background result", async () => {
-    const { host, run } = createHost();
-    run.mockResolvedValueOnce({
-      execution: { ...execution, mode: "background" },
-      item: { ...item, output: "secret fast report" },
-    });
-    const tools = createBuiltinTools({ subagentHost: host });
-
-    const result = await getTool(tools, "subagent_run").execute(
-      { prompt: "inspect", mode: "background" },
-      context,
-    );
-
-    expect(result.output).toContain("accepted: true");
-    expect(result.output).not.toContain("secret fast report");
-    expect(result.output).not.toContain("<subagent_output>");
-  });
-
-  it("renders a failed run's reason as an error rather than a completed report", async () => {
-    const { host, run, status } = createHost();
-    const failedItem = {
-      ...item,
-      status: "failed" as const,
-      output: "provider disconnected",
-      error: "provider disconnected",
-    };
-    run.mockResolvedValueOnce({
-      execution: {
-        ...execution,
-        status: "failed",
-        output: undefined,
-        error: "provider disconnected",
-      },
-      item: failedItem,
-      output: "provider disconnected",
-      success: false,
-    });
-    status.mockResolvedValueOnce({
-      executions: [],
-      items: [failedItem],
-    });
-    const tools = createBuiltinTools({ subagentHost: host });
-
-    const runResult = await getTool(tools, "subagent_run").execute(
-      { prompt: "inspect" },
-      context,
-    );
-    const statusResult = await getTool(tools, "subagent_status").execute(
-      {},
-      context,
-    );
-
-    expect(runResult.output).toContain(
-      "<subagent_error>\nprovider disconnected\n</subagent_error>",
-    );
-    expect(statusResult.output).not.toContain("provider disconnected");
-    expect(runResult.output).not.toContain("<subagent_output>");
-    expect(statusResult.output).not.toContain("<subagent_output>");
-  });
-
-  it("renders durable in-flight and queued state for interrupted subagents", async () => {
-    const { host, status } = createHost();
-    status.mockResolvedValueOnce({
-      executions: [],
-      items: [
-        {
-          ...item,
-          currentInput: { prompt: "in-flight prompt" },
-          lastRunId: "run_1",
-          output: undefined,
-          pendingQueue: [{ prompt: "queued prompt" }],
-          status: "interrupted",
+    const running = (await executions.listByRootRun("root"))[0];
+    let sent = false;
+    let refused = false;
+    const send = scheduler
+      .execute({
+        ...request,
+        callId: "send",
+        params: {
+          action: "send",
+          agent_id: running.subagentId,
+          message: "Continue with this update",
         },
-      ],
-    });
-    const result = await getTool(
-      createBuiltinTools({ subagentHost: host }),
-      "subagent_status",
-    ).execute({}, context);
+      })
+      .then((result) => {
+        sent =
+          result.status === "success" &&
+          result.output?.includes("accepted: true") === true &&
+          result.output.includes("started: false");
+        return result;
+      });
+    const seventh = scheduler
+      .execute({
+        ...request,
+        callId: "seventh",
+        params: {
+          action: "spawn",
+          prompt: "must be refused",
+          mode: "background",
+        },
+      })
+      .then((result) => {
+        refused =
+          result.status === "success" &&
+          result.output?.includes("started: false") === true;
+        return result;
+      });
+    try {
+      await vi.waitFor(() => {
+        expect({ sent, refused }).toEqual({ sent: true, refused: true });
+      });
+      expect(await executions.listByRootRun("root")).toHaveLength(6);
+      if (!running.childRunId) throw new Error("Expected running child");
+      expect(await inputs.listPending(running.childRunId)).toHaveLength(1);
+      expect(turn).toHaveBeenCalledTimes(6);
+      for (let index = 0; index < 6; index++)
+        expect(scheduler.getStatus(`spawn-${String(index)}`)).toBe("executing");
+    } finally {
+      finish();
+      await Promise.all([...active, send, seventh]);
+      await vi.waitFor(() => {
+        expect(host.hasActiveWork()).toBe(false);
+      });
+      await host.dispose();
+    }
+  });
 
-    expect(result.output).toContain('"lastRunId":"run_1"');
-    expect(result.output).toContain('"pendingInputs":1');
-    expect(result.output).not.toContain("in-flight prompt");
-    expect(JSON.stringify(result.metadata)).not.toContain("queued prompt");
+  it("admits actual agent control actions while foreground spawn holds dispatch capacity", async () => {
+    const host = createHost();
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    host.spawn.mockImplementationOnce(async () => {
+      await pending;
+      return { started: true, execution, item, output: "done", success: true };
+    });
+    const bus = createBus();
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      config: { concurrency: { maxSubagentConcurrency: 1 } },
+    });
+    scheduler.register(tool(host));
+    const request = {
+      runId: "run_1",
+      sessionId: "parent_1",
+      messageId: "m",
+      toolName: "agent",
+    };
+    const spawned = scheduler.execute({
+      ...request,
+      callId: "spawn",
+      params: { action: "spawn", prompt: "inspect", mode: "foreground" },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(scheduler.getStatus("spawn")).toBe("executing");
+      });
+      for (const action of ["stop", "list", "monitor"]) {
+        const result = await scheduler.execute({
+          ...request,
+          callId: action,
+          params:
+            action === "stop"
+              ? { action, agent_id: "a" }
+              : action === "monitor"
+                ? { action, agent_ids: ["a"] }
+                : { action },
+        });
+        expect(result.status).toBe("success");
+      }
+      expect(scheduler.getStatus("spawn")).toBe("executing");
+    } finally {
+      finish();
+      await spawned;
+    }
+  });
+  it("does not copy a previous task failure into the close receipt", async () => {
+    const host = createHost();
+    host.close.mockResolvedValueOnce({
+      subagentId: item.subagentId,
+      previousStatus: "failed",
+      item: { ...item, error: "OLD FAILURE", output: "OLD FAILURE" },
+      cleanup: "confirmed",
+      unprocessedMessages: [],
+    });
+    const result = await tool(host).execute(
+      { action: "close", agent_id: item.subagentId },
+      context,
+    );
+    expect(result.output).not.toContain("OLD FAILURE");
+    expect(result.output).toContain("confirmed");
+  });
+  it("requires a real run identity for execution-creating actions", async () => {
+    await expect(
+      tool().execute(
+        { action: "spawn", prompt: "ok" },
+        { ...context, runId: undefined },
+      ),
+    ).rejects.toThrow("requester run");
   });
 });

@@ -123,6 +123,7 @@ function subagentRunEvent(): InterfaceProviderStreamEvent {
     toolCallDeltas: [
       {
         argumentsDelta: JSON.stringify({
+          action: "spawn",
           description: "Explore first e2e",
           mode: "foreground",
           prompt: "Find the first e2e target",
@@ -130,10 +131,11 @@ function subagentRunEvent(): InterfaceProviderStreamEvent {
         }),
         id: "call_subagent_run_1",
         index: 0,
-        name: "subagent_run",
+        name: "agent",
       },
       {
         argumentsDelta: JSON.stringify({
+          action: "spawn",
           description: "Explore second e2e",
           mode: "foreground",
           prompt: "Find the second e2e target",
@@ -141,7 +143,7 @@ function subagentRunEvent(): InterfaceProviderStreamEvent {
         }),
         id: "call_subagent_run_2",
         index: 1,
-        name: "subagent_run",
+        name: "agent",
       },
     ],
   };
@@ -318,8 +320,9 @@ function fakeLlmClient(
           return Promise.resolve(
             createProviderStream([
               toolCallEvent(
-                "subagent_run",
+                "agent",
                 {
+                  action: "spawn",
                   prompt: "Find the failing target",
                   role: "explore",
                   mode: "foreground",
@@ -333,8 +336,9 @@ function fakeLlmClient(
           return Promise.resolve(
             createProviderStream([
               toolCallEvent(
-                "subagent_run",
+                "agent",
                 {
+                  action: "spawn",
                   prompt: "Find the cancelled target",
                   role: "explore",
                   mode: "foreground",
@@ -351,8 +355,9 @@ function fakeLlmClient(
           return Promise.resolve(
             createProviderStream([
               toolCallEvent(
-                "subagent_run",
+                "agent",
                 {
+                  action: "spawn",
                   prompt: "Find the empty target",
                   role: "explore",
                   mode: "foreground",
@@ -448,11 +453,11 @@ describe("subagent runtime e2e", () => {
     const secondChildText = JSON.stringify(secondChildMessages);
     const parentText = JSON.stringify(parentMessages);
 
-    expect(parentText).toContain("subagent_id: subagent_e2e_1");
-    expect(parentText).toContain("subagent_id: subagent_e2e_2");
-    expect(parentText).toContain("session_id: session_child");
-    expect(parentText).toContain("context_scope_id: subagent_e2e_1");
-    expect(parentText).toContain("context_scope_id: subagent_e2e_2");
+    expect(parentText).toContain("agent_id: subagent_e2e_1");
+    expect(parentText).toContain("agent_id: subagent_e2e_2");
+    expect(parentText).toContain('"childSessionId":"session_child"');
+    expect(parentText).toContain('"childScopeId":"subagent_e2e_1"');
+    expect(parentText).toContain('"childScopeId":"subagent_e2e_2"');
     expect(parentText).toContain("parent final result");
     expect(parentText).toContain(
       "<subagent_output>\\nchild first result\\n</subagent_output>",
@@ -496,10 +501,10 @@ describe("subagent runtime e2e", () => {
     expect(new Set([parentKey, exploreKey, researchKey]).size).toBe(3);
     for (const request of [exploreRequests[0], researchRequests[0]]) {
       expect(JSON.stringify(request.messages)).toContain(
-        "<environment_context>",
+        "Current working directory:",
       );
       expect(
-        JSON.stringify(request.messages).split("<environment_context>"),
+        JSON.stringify(request.messages).split("Current working directory:"),
       ).toHaveLength(2);
     }
   });
@@ -851,7 +856,7 @@ describe("subagent runtime e2e", () => {
     expect(
       exploreRequests.every(
         (request) =>
-          JSON.stringify(request.messages).split("<environment_context>")
+          JSON.stringify(request.messages).split("Current working directory:")
             .length === 2,
       ),
     ).toBe(true);

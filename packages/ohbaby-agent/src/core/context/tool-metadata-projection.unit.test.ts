@@ -5,6 +5,109 @@ import {
 } from "./tool-metadata-projection.js";
 
 describe("tool metadata projection", () => {
+  it("projects new agent execution receipts while withholding raw task text", () => {
+    expect(
+      projectToolMetadataForModel("agent", {
+        subagent: {
+          action: "spawn",
+          started: true,
+          success: true,
+          item: { name: "Audit", initialPrompt: "private task" },
+          execution: {
+            executionId: "e1",
+            subagentId: "a1",
+            mode: "background",
+            status: "running",
+            output: "large output",
+          },
+        },
+      }),
+    ).toEqual({
+      action: "spawn",
+      started: true,
+      success: true,
+      name: "Audit",
+      executionId: "e1",
+      subagentId: "a1",
+      mode: "background",
+      status: "running",
+    });
+  });
+  it("keeps acceptance and capacity refusal facts when no new execution exists", () => {
+    expect(
+      projectToolMetadataForModel("agent", {
+        subagent: {
+          action: "send",
+          started: false,
+          accepted: true,
+          inputId: "i1",
+          agentId: "a1",
+          executionId: "e1",
+          mode: "foreground",
+        },
+      }),
+    ).toEqual({
+      action: "send",
+      started: false,
+      accepted: true,
+      inputId: "i1",
+      agentId: "a1",
+      executionId: "e1",
+      mode: "foreground",
+    });
+    expect(
+      projectToolMetadataForModel("agent", {
+        subagent: { action: "spawn", started: false, reason: "capacity" },
+      }),
+    ).toEqual({ action: "spawn", started: false, reason: "capacity" });
+  });
+  it("keeps the final monitor content within its budget without repeating metadata", () => {
+    const result = {
+      truncated: true,
+      targets: Array.from({ length: 6 }, (_, index) => ({
+        subagentId: `agent-${String(index)}`,
+        cursor: "c".repeat(300),
+        truncated: true,
+        records: [{ text: "" }],
+      })),
+    };
+    const byteLimit = 16 * 1024;
+    result.targets[0].records[0].text = "x".repeat(
+      byteLimit - Buffer.byteLength(JSON.stringify(result)),
+    );
+    const content = JSON.stringify(result);
+    const formatted = formatToolResultContentForModel({
+      tool: "agent",
+      content,
+      metadata: { agentMonitor: result },
+    });
+    expect(Buffer.byteLength(formatted)).toBeLessThanOrEqual(byteLimit);
+    expect(JSON.parse(formatted)).toEqual(result);
+    expect(
+      projectToolMetadataForModel("agent", { agentMonitor: result }),
+    ).toEqual({});
+  });
+  it("preserves stop cleanup facts without copying instance history", () => {
+    expect(
+      projectToolMetadataForModel("agent", {
+        subagentStop: {
+          subagentId: "a1",
+          stopped: true,
+          cleanup: "unconfirmed",
+          unprocessedMessages: [
+            { inputId: "i1", text: "large input", reason: "stopped" },
+          ],
+          item: { initialPrompt: "private" },
+        },
+      }),
+    ).toEqual({
+      subagentId: "a1",
+      stopped: true,
+      cleanup: "unconfirmed",
+      unprocessedMessages: [{ inputId: "i1", reason: "stopped" }],
+    });
+  });
+
   it("preserves read continuation without inventing an unknown total", () => {
     expect(
       projectToolMetadataForModel("read", {

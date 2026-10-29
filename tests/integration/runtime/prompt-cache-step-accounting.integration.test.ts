@@ -310,8 +310,9 @@ describe("final step cache accounting through the in-process runtime", () => {
           {
             id: "delegate",
             index: 0,
-            name: "subagent_run",
+            name: "agent",
             argumentsDelta: JSON.stringify({
+              action: "spawn",
               prompt: "Inspect directory",
               mode: "foreground",
               description: "Inspect",

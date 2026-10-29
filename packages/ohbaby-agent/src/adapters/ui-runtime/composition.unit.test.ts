@@ -35,6 +35,9 @@ import { createPermissionState } from "../../permission/index.js";
 import { McpToolMenu } from "../../mcp/integration/dynamic-tool-menu.js";
 import { ScopeToolSequence } from "../../mcp/integration/tool-sequence.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
+import { InMemoryCurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
+import { InMemoryPromptSubmissionStore } from "../../runtime/prompt-scheduler/in-memory-store.js";
+import { InMemorySubagentExecutionStore } from "../../agents/subagents/execution-store.js";
 import type { RunCompletion } from "../../runtime/run-manager/index.js";
 import type { Tool } from "../../core/tool-scheduler/index.js";
 import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
@@ -390,6 +393,285 @@ function mcpTool(
 }
 
 describe("createUiRuntimeComposition skill tools", () => {
+  it("settles input persistence after a concurrent run lookup failure and preserves both errors", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const runLedger = createInMemoryRunLedger();
+    const currentRunInputStore = new InMemoryCurrentRunInputStore({
+      runLedger,
+      promptStore: new InMemoryPromptSubmissionStore(),
+      messageManager,
+    });
+    const closing = deferred<undefined>();
+    const releaseClose = deferred<undefined>();
+    const writeFailure = new Error("Input closure write failed");
+    const lookupFailure = new Error("Run lookup failed during shutdown");
+    const inputClosure = releaseClose.promise.then(() => {
+      throw writeFailure;
+    });
+    // This test owns the injected rejection, including cleanup after a failed assertion.
+    void inputClosure.catch(() => undefined);
+    const close = vi
+      .spyOn(currentRunInputStore, "close")
+      .mockImplementation(() => {
+        vi.spyOn(runLedger, "get").mockRejectedValueOnce(lookupFailure);
+        closing.resolve(undefined);
+        return inputClosure;
+      });
+    const composition = await createUiRuntimeComposition({
+      bus,
+      messageManager,
+      runLedger,
+      currentRunInputStore,
+      llmClient: recordingFakeLlmClient({ requests: [] }),
+      permissionState: createPermissionState({ bus }),
+      workdir: await tempWorkdir(),
+      skillRegistry: createMutableSkillRegistry([]),
+    });
+    try {
+      const run = await composition.startSession({
+        agentName: "build",
+        projectRoot: process.cwd(),
+        sessionId: "closing-parent",
+        prompt: "Finish the task",
+      });
+      const completion = composition.runManager.waitForCompletion(run.runId);
+      let settled = false;
+      void completion.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      await closing.promise;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+      releaseClose.resolve(undefined);
+      await expect(completion).rejects.toMatchObject({
+        stage: "input-closure",
+        cause: { errors: [writeFailure, lookupFailure] },
+      });
+      close.mockRestore();
+      expect(
+        (await composition.runManager.retryFinalization(run.runId)).status,
+      ).toBe("succeeded");
+    } finally {
+      releaseClose.resolve(undefined);
+      close.mockRestore();
+      await composition.dispose();
+    }
+  });
+  it("retains a stopped child's slot and reports shutdown unconfirmed until its raw tool exits", async () => {
+    const bus = createBus();
+    const workdir = await tempWorkdir();
+    const operation = deferred<{ output: string }>();
+    const started = deferred<undefined>();
+    const executions = new InMemorySubagentExecutionStore();
+    let parentStep = 0;
+    const base = fakeLlmClient();
+    const client: LLMClientInstance<FakeSdkClient> = {
+      ...base,
+      provider: {
+        ...base.provider,
+        streamResponse(request) {
+          const isChild = JSON.stringify(request.messages).includes(
+            "Task: explore",
+          );
+          const events: InterfaceProviderStreamEvent[] = isChild
+            ? [
+                {
+                  finishReason: "tool_calls",
+                  toolCallDeltas: [
+                    {
+                      id: "read-slow",
+                      index: 0,
+                      name: "read",
+                      argumentsDelta: "{}",
+                    },
+                  ],
+                },
+              ]
+            : ++parentStep === 1
+              ? [
+                  {
+                    finishReason: "tool_calls",
+                    toolCallDeltas: [
+                      {
+                        id: "spawn-child",
+                        index: 0,
+                        name: "agent",
+                        argumentsDelta: JSON.stringify({
+                          action: "spawn",
+                          role: "explore",
+                          prompt: "Inspect",
+                          mode: "background",
+                        }),
+                      },
+                    ],
+                  },
+                ]
+              : [{ finishReason: "stop", textDelta: "delegated" }];
+          return Promise.resolve(createProviderStream(events));
+        },
+      },
+    };
+    const composition = await createUiRuntimeComposition({
+      bus,
+      workdir,
+      llmClient: client,
+      subagentExecutionStore: executions,
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      skillRegistry: createMutableSkillRegistry([]),
+    });
+    composition.toolScheduler.register({
+      name: "read",
+      description: "Controlled slow read",
+      category: "readonly",
+      parametersJsonSchema: { type: "object", properties: {} },
+      source: "builtin",
+      execute() {
+        started.resolve(undefined);
+        return operation.promise;
+      },
+    });
+    try {
+      const parent = await composition.startSession({
+        sessionId: "cleanup-parent",
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Delegate",
+      });
+      await started.promise;
+      expect(
+        (await composition.runManager.waitForCompletion(parent.runId)).status,
+      ).toBe("succeeded");
+      const [execution] = await executions.listByRootRun(parent.runId);
+      const tool = composition.toolScheduler.get("agent");
+      if (!tool) throw new Error("Missing agent tool");
+      const context = {
+        callId: "stop-child",
+        sessionId: "cleanup-parent",
+        messageId: "control",
+        signal: new AbortController().signal,
+      };
+      const stopped = await tool.execute(
+        { action: "stop", agent_id: execution.subagentId },
+        context,
+      );
+      expect(stopped.metadata?.subagentStop).toMatchObject({
+        cleanup: "unconfirmed",
+      });
+      const listed = await tool.execute({ action: "list" }, context);
+      expect(JSON.stringify(listed.metadata)).toContain('"settling":true');
+      const shutdown = await composition.dispose({
+        deadlineAt: Date.now() + 20,
+        signal: AbortSignal.timeout(20),
+      });
+      expect(shutdown).toMatchObject({ status: "unconfirmed" });
+      operation.resolve({ output: "finally exited" });
+      await vi.waitFor(() => {
+        expect(
+          composition.toolScheduler.getRunCleanup(execution.childRunId)
+            .confirmed,
+        ).toBe(true);
+      });
+    } finally {
+      operation.resolve({ output: "finally exited" });
+      await composition.dispose();
+    }
+  });
+  it("persists internal supervision before its first model request without creating user intent", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const runLedger = createInMemoryRunLedger();
+    const currentRunInputStore = new InMemoryCurrentRunInputStore({
+      runLedger,
+      promptStore: new InMemoryPromptSubmissionStore(),
+      messageManager,
+    });
+    const acceptInput = vi.spyOn(currentRunInputStore, "acceptRuntimeInput");
+    const executions = new InMemorySubagentExecutionStore();
+    await executions.accept({
+      executionId: "live-child",
+      requestId: "spawn",
+      rootSessionId: "parent",
+      parentSessionId: "parent",
+      rootRunId: "old",
+      requesterRunId: "old",
+      requesterScopeId: "primary",
+      subagentId: "child",
+      mode: "background",
+      prompt: "work",
+      createdAt: 1,
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const composition = await createUiRuntimeComposition({
+      bus,
+      messageManager,
+      runLedger,
+      currentRunInputStore,
+      subagentExecutionStore: executions,
+      llmClient: recordingFakeLlmClient({ requests }),
+      permissionState: createPermissionState({ bus }),
+      workdir: await tempWorkdir(),
+      skillRegistry: createMutableSkillRegistry([]),
+    });
+    try {
+      const run = await composition.startSession({
+        agentName: "build",
+        projectRoot: process.cwd(),
+        sessionId: "parent",
+        prompt: "must not be recorded as user intent",
+        initialUserMessageId: "internal-review",
+        runtimeInput: {
+          kind: "subagent-status",
+          sourceId: "review",
+          body: "Inspect the saved background execution state.",
+        },
+      });
+      expect(
+        (await composition.runManager.waitForCompletion(run.runId)).status,
+      ).toBe("succeeded");
+      expect(requests).toHaveLength(1);
+      expect(acceptInput.mock.calls[0][0].message.info.runtimeInput).toEqual({
+        kind: "subagent-status",
+        inputId: `review:${run.runId}`,
+        targetRunId: run.runId,
+        sourceId: "review",
+      });
+      expect(JSON.stringify(requests[0].messages)).toContain(
+        "Inspect the saved background execution state.",
+      );
+      expect(JSON.stringify(requests[0].messages)).not.toContain(
+        "must not be recorded as user intent",
+      );
+      const saved = await messageManager.listBySession("parent");
+      expect(
+        saved.find((message) => message.info.id === "internal-review")?.info
+          .runtimeInput,
+      ).toMatchObject({ kind: "subagent-status", targetRunId: run.runId });
+      expect(
+        (await currentRunInputStore.listByRun(run.runId))[0].processedRequestId,
+      ).toBeDefined();
+    } finally {
+      await composition.dispose();
+    }
+  });
   it("preserves MCP diagnostics and removes both change subscriptions on dispose", async () => {
     const bus = createBus();
     const mcpListeners = new Set<() => void | Promise<void>>();
@@ -456,13 +738,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       await composition.toolScheduler.getAvailableTools({ agentName: "build" })
     ).map((tool) => tool.name);
 
-    expect(toolNames).toEqual(
-      expect.arrayContaining([
-        "subagent_run",
-        "subagent_status",
-        "subagent_close",
-      ]),
-    );
+    expect(toolNames).toEqual(expect.arrayContaining(["agent"]));
     expect(toolNames).not.toContain("task");
     expect(toolNames).not.toContain("agent_open");
     expect(toolNames).not.toContain("agent_eval");
@@ -610,6 +886,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       expect(interruptByParent).toHaveBeenCalledWith(
         "session_1",
         "parent session removed",
+        { closeAdmission: true },
       );
     });
     const disposedBeforeSubagentsSettled =
@@ -827,11 +1104,11 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(contextManager.getUsage).not.toHaveBeenCalled();
   });
 
-  it("interrupts a parent subagent tree from durable run identity after manager eviction", async () => {
+  it("interrupts only foreground children from durable run identity after manager eviction", async () => {
     const bus = createBus();
     const runLedger = createInMemoryRunLedger();
     const interruptByRootRun = vi
-      .spyOn(SessionSubagentHost.prototype, "interruptByRootRun")
+      .spyOn(SessionSubagentHost.prototype, "interruptForegroundByRootRun")
       .mockResolvedValue([]);
     const composition = await createUiRuntimeComposition({
       agentManager: new AgentManager(),
@@ -882,7 +1159,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     const destroyContext = vi.spyOn(sandboxManager, "destroyContext");
     const disposeShellScope = vi.spyOn(
       ShellJobRegistry.prototype,
-      "disposeScope",
+      "cleanupScope",
     );
     const disposeMcpScope = vi.spyOn(McpToolMenu.prototype, "disposeScope");
     const disposeToolSequenceScope = vi.spyOn(
@@ -940,9 +1217,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     const waitForCompletion = vi
       .spyOn(composition.runManager, "waitForCompletion")
       .mockReturnValue(runCompletionGate.promise);
-    const closeTool = composition.toolScheduler.get("subagent_close");
+    const closeTool = composition.toolScheduler.get("agent");
     if (!closeTool) {
-      throw new Error("subagent_close tool missing");
+      throw new Error("agent tool missing");
     }
     composition.todos.write(
       "child_1",
@@ -955,8 +1232,8 @@ describe("createUiRuntimeComposition skill tools", () => {
       "subagent_2",
     );
 
-    await closeTool.execute(
-      { subagent_id: "subagent_1" },
+    const closing = closeTool.execute(
+      { action: "close", agent_id: "subagent_1" },
       {
         callId: "close_1",
         messageId: "message_1",
@@ -970,6 +1247,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     const disposedBeforeRunSettled = disposeShellScope.mock.calls.length > 0;
     runCompletionGate.resolve({ status: "cancelled" });
+    await closing;
     await vi.waitFor(() => {
       expect(disposeShellScope).toHaveBeenCalledWith("child_1", "subagent_1");
       expect(disposeMcpScope).toHaveBeenCalledWith("child_1", "subagent_1");
@@ -1854,7 +2132,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(system.role).toBe("system");
     expect(system.content).toContain("plan mode");
     expect(system.content).toContain("auto mode");
-    expect(system.content).toContain("Subagent roles for subagent_run");
+    expect(system.content).toContain("Subagent roles for agent spawn");
     expect(requests.map((request) => request.messages[0])).toEqual([
       system,
       system,

@@ -64,7 +64,10 @@ function createFixture(options: { readonly safetyCapTurns?: number } = {}) {
       return {
         contextScope: {} as AgentInstance["contextScope"],
         identity,
-        turn,
+        async turn(input) {
+          await input.onInputReady?.();
+          return turn(input);
+        },
       };
     },
   };
@@ -108,24 +111,39 @@ function createFixture(options: { readonly safetyCapTurns?: number } = {}) {
     },
     store,
   });
-  let rootSequence = 1;
+  let rootSequence = 0;
   let requestSequence = 0;
   const run = host.run.bind(host);
-  host.run = (input) =>
-    run({
-      requesterRunId: `goal-root-${rootSequence}`,
+  host.run = async (input) => {
+    const goal = goalService.peekSnapshot(parent.id);
+    const ticket =
+      goal?.status === "active"
+        ? await goalService.admitTurnInBoundary(
+            parent.id,
+            goal.goalId,
+            goalService.currentExecutionEpoch(parent.id),
+          )
+        : null;
+    const rootRunId = `${ticket ? "goal" : "ordinary"}-root-${++rootSequence}`;
+    if (ticket) goalService.bindTicketRun(ticket, rootRunId);
+    const result = await run({
+      requesterRunId: rootRunId,
       requesterMessageId: "goal-message",
       requestId: `request-${++requestSequence}`,
       ...input,
     });
+    if (ticket)
+      await goalService.settleTurn(parent.id, ticket, { status: "succeeded" });
+    return result;
+  };
   const goalService = new GoalService({
     executionControl: {
       async interruptGoalExecution(input): Promise<void> {
-        await host.interruptByRootRun(
-          `goal-root-${rootSequence}`,
-          input.reason,
-        );
-        rootSequence += 1;
+        for (const rootRunId of input.rootRunIds ?? []) {
+          if (input.preserveBackground)
+            await host.interruptForegroundByRootRun(rootRunId, input.reason);
+          else await host.interruptByRootRun(rootRunId, input.reason);
+        }
       },
     },
     persistence: new InMemoryGoalPersistence(),
@@ -164,12 +182,13 @@ describe("goal and subagent lifecycle integration", () => {
         role: "explore",
       });
       await waitUntilRunning(store, started.execution.subagentId);
-      await host.run({
+      const second = await host.run({
         mode: "background",
         parentSessionId: parent.id,
-        prompt: "queued follow-up",
-        subagentId: started.execution.subagentId,
+        prompt: "another owned background task",
+        role: "research",
       });
+      await waitUntilRunning(store, second.execution.subagentId);
 
       await goalService.pauseGoal(parent.id, "paused by user");
 
@@ -182,6 +201,12 @@ describe("goal and subagent lifecycle integration", () => {
         status: "interrupted",
       });
       expect(record?.closedAt).toBeUndefined();
+      await expect(
+        store.get({
+          parentSessionId: parent.id,
+          subagentId: second.execution.subagentId,
+        }),
+      ).resolves.toMatchObject({ status: "interrupted", pendingQueue: [] });
     } finally {
       await host.dispose();
     }
@@ -327,12 +352,6 @@ describe("goal and subagent lifecycle integration", () => {
         role: "explore",
       });
       await waitUntilRunning(store, started.execution.subagentId);
-      await host.run({
-        mode: "background",
-        parentSessionId: parent.id,
-        prompt: "queued after safety pause",
-        subagentId: started.execution.subagentId,
-      });
       goalService.attachTurnRunner({
         runTurn() {
           return Promise.resolve({ status: "succeeded" as const });
@@ -351,7 +370,7 @@ describe("goal and subagent lifecycle integration", () => {
         subagentId: started.execution.subagentId,
       });
       expect(record?.status).toBe("running");
-      expect(record?.pendingQueue).toHaveLength(1);
+      expect(record?.pendingQueue).toEqual([]);
       expect(record?.closedAt).toBeUndefined();
     } finally {
       await host.dispose();

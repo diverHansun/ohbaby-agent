@@ -10,6 +10,18 @@ import { ToolCard } from "../conversation/tool-card.js";
 import { useExecutionDuration } from "../conversation/use-execution-duration.js";
 import { Spinner } from "../shared/Spinner.js";
 
+export function isDelegationCall(
+  call: UiToolCall,
+  execution?: UiSubagentExecution,
+): boolean {
+  return (
+    call.name === "subagent_run" ||
+    (call.name === "agent" &&
+      (call.input.action === "spawn" ||
+        (call.input.action === "send" && execution !== undefined)))
+  );
+}
+
 export function subagentStatusLabel(
   status: UiSubagentExecution["status"],
 ): string {

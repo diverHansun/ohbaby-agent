@@ -1,3 +1,8 @@
+import { closeLegacySubagentInputs } from "./subagents/types.js";
+import {
+  MAX_SUBAGENT_EXECUTIONS,
+  MAX_SUBAGENT_TIMEOUT_MS,
+} from "./subagents/limits.js";
 import type { RunModel } from "../core/run-model.js";
 import { SubagentExecutionConflictError } from "./subagents/execution-store.js";
 import { createHash } from "node:crypto";
@@ -21,8 +26,11 @@ import type { AgentManager } from "./manager.js";
 import { assertNoStaticModelConfig } from "./types.js";
 import type { SubagentRole } from "./roles.js";
 import type {
+  SubagentMonitorInput,
+  SubagentMonitorResult,
+} from "./subagents/monitor.js";
+import type {
   QueuedSubagentInput,
-  MarkSubagentsInterruptedInput,
   SubagentCloseResult,
   SubagentInstanceRecord,
   SubagentInstanceStore,
@@ -31,49 +39,60 @@ import type {
   SubagentRunResult,
   SubagentStatusInput,
   SubagentStatusResult,
+  SubagentSpawnInput,
+  SubagentSendInput,
+  SubagentStartResult,
+  SubagentStopInput,
+  SubagentStopResult,
+  SubagentUnprocessedMessage,
+  SubagentCleanupResult,
 } from "./subagents/index.js";
+
+interface Admission {
+  readonly parentSessionId: string;
+  rootRunId: string;
+}
+
+interface ExecutionLease {
+  readonly executionId: string;
+  readonly subagentId: string;
+  readonly parentSessionId: string;
+  readonly controller: AbortController;
+  readonly ready: Promise<void>;
+  readonly resolveReady: () => void;
+  readonly cleaned: Promise<void>;
+  readonly resolveCleaned: () => void;
+  execution?: SubagentExecutionRecord;
+  stopReason?: string;
+  closing?: boolean;
+  cleaning?: Promise<void>;
+  scopeCleanup?: Promise<SubagentCleanupResult>;
+  unprocessedMessages: readonly SubagentUnprocessedMessage[];
+}
 
 interface ActiveSubagentState {
   abortController?: AbortController;
-  currentExecution?: ActiveQueuedSubagentInput;
-  claimCompletion?: DeferredClaim;
+  currentExecution?: ActiveExecutionInput;
   closed: boolean;
   drainPromise?: Promise<void>;
-  drainAfterInterrupt: boolean;
   lastRunSettled: boolean;
-  pendingSettlement?: Promise<void>;
   readonly parentSessionId: string;
   readonly pauseController: AbortController;
   pauseReason?: string;
-  queue: ActiveQueuedSubagentInput[];
   running: boolean;
   stopping: boolean;
 }
 
-interface ActiveQueuedSubagentInput extends QueuedSubagentInput {
+interface ActiveExecutionInput extends QueuedSubagentInput {
   readonly runModel?: RunModel;
   readonly reasoning?: ReasoningIntent;
-  readonly completion?: DeferredCompletion;
   readonly environment?: ToolExecutionEnvironment;
   readonly signal?: AbortSignal;
-  unbindQueueAbort?: () => void;
 }
 
 interface EntryOutcome {
   readonly item: SubagentInstanceRecord;
   readonly paused?: true;
-}
-
-interface DeferredCompletion {
-  readonly promise: Promise<EntryOutcome>;
-  reject(error: unknown): void;
-  resolve(outcome: EntryOutcome): void;
-}
-
-interface DeferredClaim {
-  readonly promise: Promise<void>;
-  reject(error: unknown): void;
-  resolve(): void;
 }
 
 export interface SessionSubagentHostOptions {
@@ -89,9 +108,6 @@ export interface SessionSubagentHostOptions {
   readonly collectExecutionFacts?: (
     execution: SubagentExecutionRecord,
   ) => Promise<import("./subagents/execution-facts.js").ExecutionFactView>;
-  readonly ensureResultArtifact?: (
-    execution: SubagentExecutionRecord,
-  ) => Promise<void>;
   readonly isApprovalBlocked?: (
     executionId: string,
     parentSessionId: string,
@@ -119,17 +135,53 @@ export interface SessionSubagentHostOptions {
   readonly ownerId?: string;
   readonly ownerPid?: number;
   readonly now?: () => number;
+  readonly cleanupWaitMs?: number;
+  readonly onStateChanged?: (parentSessionId: string) => void;
+  readonly acceptExecutionMessage?: (input: {
+    readonly execution: SubagentExecutionRecord;
+    readonly message: string;
+    readonly inputId: string;
+  }) => Promise<{ readonly accepted: boolean }>;
+  readonly getExecutionMessage?: (input: {
+    readonly parentSessionId: string;
+    readonly subagentId: string;
+    readonly inputId: string;
+  }) => Promise<{ readonly execution: SubagentExecutionRecord } | undefined>;
+  readonly closeExecutionInputs?: (input: {
+    readonly execution: SubagentExecutionRecord;
+    readonly reason: string;
+  }) => Promise<readonly SubagentUnprocessedMessage[]>;
+  readonly readExecutionInputs?: (input: {
+    readonly execution: SubagentExecutionRecord;
+  }) => Promise<readonly SubagentUnprocessedMessage[]>;
+  readonly cleanupExecution?: (input: {
+    readonly execution: SubagentExecutionRecord;
+    readonly reason: string;
+  }) => Promise<SubagentCleanupResult>;
+  readonly readHistory?: (
+    input: SubagentMonitorInput,
+  ) => Promise<SubagentMonitorResult>;
   readonly onClosed?: (input: {
     readonly contextScopeId: string;
     readonly runId?: string;
     readonly sessionId: string;
     readonly subagentId: string;
-  }) => void;
+  }) => SubagentCleanupResult | Promise<SubagentCleanupResult>;
 }
 
 export const PRIMARY_SUBAGENT_REQUESTER_SCOPE = "primary";
-const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;
-const MAX_SUBAGENT_TIMEOUT_MS = DEFAULT_SUBAGENT_TIMEOUT_MS;
+const DEFAULT_SUBAGENT_TIMEOUT_MS = MAX_SUBAGENT_TIMEOUT_MS;
+
+function assertRequesterIdentity(input: SubagentRunInput): void {
+  for (const identity of [
+    input.requesterRunId,
+    input.requesterMessageId,
+    input.requestId,
+  ]) {
+    if (typeof identity !== "string" || !identity.trim())
+      throw new Error("Subagent requester identity is required");
+  }
+}
 
 function defaultSubagentId(): string {
   return `subagent_${Date.now().toString(36)}_${Math.random()
@@ -215,28 +267,17 @@ async function waitForTurnOrAbort(
   }
 }
 
-async function waitForSettlementOrAbort(
-  settlement: Promise<void>,
-  signal: AbortSignal,
-): Promise<boolean> {
-  if (signal.aborted) {
-    return false;
-  }
-  let onAbort!: () => void;
-  const aborted = new Promise<false>((resolve) => {
-    onAbort = (): void => {
-      resolve(false);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([settlement.then(() => true as const), aborted]);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-  }
-}
-
 export class SessionSubagentHost {
+  private readonly leases = new Map<string, ExecutionLease>();
+  private readonly admissions = new Set<Admission>();
+  private readonly closeOperations = new Map<
+    string,
+    Promise<SubagentCloseResult>
+  >();
+  private readonly closingScopes = new Map<
+    string,
+    Promise<SubagentCleanupResult>
+  >();
   private readonly active = new Map<string, ActiveSubagentState>();
   private readonly parentSessionLocks = new Map<string, Promise<void>>();
   private readonly subagentLocks = new Map<string, Promise<void>>();
@@ -246,6 +287,7 @@ export class SessionSubagentHost {
   private readonly now: () => number;
   private disposed = false;
   private readonly sealedRoots = new Set<string>();
+  private readonly sealedParents = new Set<string>();
   private readonly closedSubagents = new Set<string>();
   private readonly invocationLocks = new Map<string, Promise<void>>();
   /** Orders acceptance through queue admission without waiting for child turns. */
@@ -268,18 +310,143 @@ export class SessionSubagentHost {
   }
 
   async run(input: SubagentRunInput): Promise<SubagentRunResult> {
+    const result =
+      input.subagentId === undefined
+        ? await this.spawn(input)
+        : await this.send({ ...input, subagentId: input.subagentId });
+    if (!result.execution) throw new Error(result.reason);
+    return result;
+  }
+
+  spawn(input: SubagentSpawnInput): Promise<SubagentStartResult> {
+    return this.launch(input);
+  }
+
+  send(input: SubagentSendInput): Promise<SubagentStartResult> {
+    return this.withAdmission(input, (admission) =>
+      this.sendMessage(input, admission),
+    );
+  }
+
+  private async sendMessage(
+    input: SubagentSendInput,
+    admission: Admission,
+  ): Promise<SubagentStartResult> {
+    if (this.sealedParents.has(input.parentSessionId))
+      throw new Error("Subagent parent session is closed");
     if (this.disposed) throw new Error("Subagent host is disposed");
-    for (const identity of [
-      input.requesterRunId,
-      input.requesterMessageId,
-      input.requestId,
-    ]) {
-      if (typeof identity !== "string" || !identity.trim())
-        throw new Error("Subagent requester identity is required");
+    assertRequesterIdentity(input);
+    admission.rootRunId = (
+      await this.options.resolveRequester(input)
+    ).rootRunId;
+    this.assertRootOpen(admission.rootRunId, input.parentSessionId);
+    const inputId = this.messageInputId(input);
+    const receipt = await this.options.getExecutionMessage?.({
+      parentSessionId: input.parentSessionId,
+      subagentId: input.subagentId,
+      inputId,
+    });
+    if (receipt) {
+      await this.getExisting(input);
+      if (!this.options.acceptExecutionMessage)
+        throw new Error("Execution message input is unavailable");
+      const replay = await this.options.acceptExecutionMessage({
+        execution: receipt.execution,
+        inputId,
+        message: input.prompt,
+      });
+      if (!replay.accepted)
+        throw new Error("Saved execution message could not be verified");
+      return {
+        started: false,
+        accepted: true,
+        inputId,
+        execution: receipt.execution,
+      };
     }
+    const lease = this.leaseFor(input.parentSessionId, input.subagentId);
+    if (lease) return this.deliverMessage(input, lease);
+    await this.getExisting(input);
+    return this.launch(input);
+  }
+
+  private launch(input: SubagentRunInput): Promise<SubagentStartResult> {
+    return this.withAdmission(input, (admission) =>
+      this.launchExecution(input, admission),
+    );
+  }
+
+  private async withAdmission(
+    input: SubagentRunInput,
+    operation: (admission: Admission) => Promise<SubagentStartResult>,
+  ): Promise<SubagentStartResult> {
+    const admission = {
+      parentSessionId: input.parentSessionId,
+      rootRunId: input.requesterRunId,
+    };
+    this.admissions.add(admission);
+    try {
+      return await operation(admission);
+    } finally {
+      this.admissions.delete(admission);
+      this.pruneSeals();
+    }
+  }
+
+  private pruneSeals(): void {
+    // These are in-flight cancellation barriers. New requests must pass the
+    // authoritative resolveRequester check for a live primary run and session.
+    for (const root of this.sealedRoots) {
+      if (
+        ![...this.admissions].some((entry) => entry.rootRunId === root) &&
+        ![...this.rootByExecution.values()].includes(root)
+      )
+        this.sealedRoots.delete(root);
+    }
+    for (const parent of this.sealedParents) {
+      if (
+        ![...this.admissions].some(
+          (entry) => entry.parentSessionId === parent,
+        ) &&
+        ![...this.leases.values()].some(
+          (entry) => entry.parentSessionId === parent,
+        )
+      )
+        this.sealedParents.delete(parent);
+    }
+  }
+
+  private stateChanged(parentSessionId: string): void {
+    try {
+      this.options.onStateChanged?.(parentSessionId);
+    } catch {
+      /* Observers cannot own execution cleanup. */
+    }
+  }
+
+  private async readUnprocessed(
+    input: SubagentLookupInput,
+  ): Promise<readonly SubagentUnprocessedMessage[]> {
+    if (!this.options.readExecutionInputs) return [];
+    const execution = (
+      await this.options.executionStore.list({
+        ...input,
+        limit: 1,
+      })
+    ).at(0);
+    return execution ? this.options.readExecutionInputs({ execution }) : [];
+  }
+
+  private async launchExecution(
+    input: SubagentRunInput,
+    admission: Admission,
+  ): Promise<SubagentStartResult> {
+    if (this.disposed) throw new Error("Subagent host is disposed");
+    assertRequesterIdentity(input);
     const requestedTimeout = normalizeTimeoutMs(input.timeoutMs);
     const root = await this.options.resolveRequester(input);
-    this.assertRootOpen(root.rootRunId);
+    admission.rootRunId = root.rootRunId;
+    this.assertRootOpen(root.rootRunId, input.parentSessionId);
     if (input.signal?.aborted)
       throw new Error("Subagent requester was stopped");
     const requestId = JSON.stringify([
@@ -304,8 +471,9 @@ export class SessionSubagentHost {
     this.invocationLocks.set(executionId, lock);
     await previous;
     let execution: SubagentExecutionRecord;
+    let lease: ExecutionLease | undefined;
     try {
-      this.assertRootOpen(root.rootRunId);
+      this.assertRootOpen(root.rootRunId, input.parentSessionId);
       const prior = await this.executionWrite(root.rootRunId, () =>
         this.options.executionStore.get(lookup),
       );
@@ -313,6 +481,17 @@ export class SessionSubagentHost {
         input.subagentId === undefined || prior !== null
           ? undefined
           : await this.getExisting(input);
+      if (!prior && input.subagentId) {
+        const activeLease = this.leaseFor(
+          input.parentSessionId,
+          input.subagentId,
+        );
+        if (activeLease)
+          return await this.deliverMessage(
+            { ...input, subagentId: input.subagentId },
+            activeLease,
+          );
+      }
       const timeoutMs =
         requestedTimeout ??
         Math.min(
@@ -321,15 +500,34 @@ export class SessionSubagentHost {
             DEFAULT_SUBAGENT_TIMEOUT_MS,
           MAX_SUBAGENT_TIMEOUT_MS,
         );
-      this.assertRootOpen(root.rootRunId);
+      this.assertRootOpen(root.rootRunId, input.parentSessionId);
+      if (!prior) {
+        const count = [...this.leases.values()].filter(
+          (entry) => entry.parentSessionId === input.parentSessionId,
+        ).length;
+        if (count >= MAX_SUBAGENT_EXECUTIONS)
+          return {
+            started: false,
+            reason:
+              "All six subagent execution slots are occupied; this execution was not started.",
+          };
+        lease = this.reserveExecution(
+          executionId,
+          input.subagentId ?? this.createSubagentId(),
+          input.parentSessionId,
+        );
+      }
+      const acceptedSubagentId =
+        input.subagentId ?? prior?.subagentId ?? lease?.subagentId;
+      if (!acceptedSubagentId)
+        throw new Error("Subagent execution reservation is missing");
       const accepted = await this.executionWrite(root.rootRunId, () =>
         this.options.executionStore.accept({
           ...lookup,
           ...root,
           requesterRunId: input.requesterRunId,
           requestId,
-          subagentId:
-            input.subagentId ?? prior?.subagentId ?? this.createSubagentId(),
+          subagentId: acceptedSubagentId,
           mode: input.mode,
           prompt: input.prompt,
           timeoutMs,
@@ -337,8 +535,14 @@ export class SessionSubagentHost {
         }),
       );
       execution = accepted.record;
-      this.rootByExecution.set(executionId, root.rootRunId);
-      if (this.sealedRoots.has(root.rootRunId)) {
+      if (lease) lease.execution = execution;
+      if (accepted.created)
+        this.rootByExecution.set(executionId, root.rootRunId);
+      if (
+        this.sealedRoots.has(root.rootRunId) ||
+        this.sealedParents.has(input.parentSessionId) ||
+        lease?.controller.signal.aborted
+      ) {
         await this.options.executionStore.interruptRoot(
           root.rootRunId,
           "parent run interrupted",
@@ -374,7 +578,7 @@ export class SessionSubagentHost {
         const job = Promise.resolve().then(async () => {
           await previousAdmission;
           try {
-            this.assertRootOpen(root.rootRunId);
+            this.assertRootOpen(root.rootRunId, input.parentSessionId);
             const record =
               existing ??
               (await this.withParentSessionLock(input.parentSessionId, () =>
@@ -383,7 +587,7 @@ export class SessionSubagentHost {
                   execution,
                 ),
               ));
-            this.assertRootOpen(root.rootRunId);
+            this.assertRootOpen(root.rootRunId, input.parentSessionId);
             if (this.closedSubagents.has(execution.subagentId))
               throw new Error("Subagent is closed");
             await this.executionWrite(root.rootRunId, () =>
@@ -396,23 +600,21 @@ export class SessionSubagentHost {
                 this.now(),
               ),
             );
-            this.assertRootOpen(root.rootRunId);
-            return await this.enqueueOrSchedule(
+            this.assertRootOpen(root.rootRunId, input.parentSessionId);
+            return await this.startExecution({
               record,
-              input.prompt,
-              input.environment,
-              input.interrupt === true,
+              prompt: input.prompt,
+              environment: input.environment,
               timeoutMs,
-              true,
-              input.mode === "foreground" ? input.signal : undefined,
-              existing === undefined,
-              inherited === undefined
-                ? undefined
-                : mergeReasoningIntent(inherited),
+              signal: lease?.controller.signal,
+              reasoning:
+                inherited === undefined
+                  ? undefined
+                  : mergeReasoningIntent(inherited),
               execution,
-              releaseAdmission,
-              await inheritedModel,
-            );
+              onAdmitted: releaseAdmission,
+              runModel: await inheritedModel,
+            });
           } catch (error) {
             releaseAdmission();
             if (
@@ -424,9 +626,11 @@ export class SessionSubagentHost {
               )
             ) {
               await this.finishExecution(execution, {
-                status: this.sealedRoots.has(root.rootRunId)
-                  ? "interrupted"
-                  : "failed",
+                status:
+                  this.sealedRoots.has(root.rootRunId) ||
+                  this.sealedParents.has(input.parentSessionId)
+                    ? "interrupted"
+                    : "failed",
                 error: errorMessage(error),
                 reason: errorMessage(error),
                 completedAt: this.now(),
@@ -438,13 +642,30 @@ export class SessionSubagentHost {
           }
         });
         this.executionJobs.set(executionId, job);
+        if (lease && input.mode === "foreground") {
+          const currentLease = lease;
+          const abort = (): void => {
+            currentLease.stopReason = "stopped";
+            this.stateChanged(currentLease.parentSessionId);
+            currentLease.controller.abort(input.signal?.reason);
+          };
+          if (input.signal?.aborted) abort();
+          else input.signal?.addEventListener("abort", abort, { once: true });
+          void job
+            .finally(() => input.signal?.removeEventListener("abort", abort))
+            .catch(() => undefined);
+        }
         void job
           .catch(() => undefined)
           .finally(() => {
             if (this.executionJobs.get(executionId) === job)
               this.executionJobs.delete(executionId);
+            if (lease) this.beginCleanup(lease);
           });
       }
+    } catch (error) {
+      if (lease) this.beginCleanup(lease);
+      throw error;
     } finally {
       release();
       if (this.invocationLocks.get(executionId) === lock)
@@ -458,7 +679,7 @@ export class SessionSubagentHost {
         lateResult: _lateResult,
         ...receipt
       } = execution;
-      return { execution: receipt };
+      return { started: true, execution: receipt };
     }
     const outcome = await this.executionJobs.get(executionId);
     const result = await this.withSubagentLock(execution.subagentId, () =>
@@ -475,12 +696,343 @@ export class SessionSubagentHost {
         subagentId: result.subagentId,
       }));
     return {
+      started: true,
       execution: result,
       ...(item ? { item } : {}),
       ...(outcome?.paused ? { paused: true } : {}),
       output: result.output ?? result.error,
       success: result.status === "completed",
     };
+  }
+
+  private leaseFor(
+    parentSessionId: string,
+    subagentId: string,
+  ): ExecutionLease | undefined {
+    return [...this.leases.values()].find(
+      (lease) =>
+        lease.parentSessionId === parentSessionId &&
+        lease.subagentId === subagentId,
+    );
+  }
+
+  private reserveExecution(
+    executionId: string,
+    subagentId: string,
+    parentSessionId: string,
+  ): ExecutionLease {
+    let resolveReady!: () => void;
+    let resolveCleaned!: () => void;
+    const lease: ExecutionLease = {
+      executionId,
+      subagentId,
+      parentSessionId,
+      controller: new AbortController(),
+      ready: new Promise<void>((resolve) => {
+        resolveReady = resolve;
+      }),
+      resolveReady: () => {
+        resolveReady();
+      },
+      cleaned: new Promise<void>((resolve) => {
+        resolveCleaned = resolve;
+      }),
+      resolveCleaned: () => {
+        resolveCleaned();
+      },
+      unprocessedMessages: [],
+    };
+    this.leases.set(executionId, lease);
+    this.stateChanged(parentSessionId);
+    return lease;
+  }
+
+  private async deliverMessage(
+    input: SubagentSendInput,
+    lease: ExecutionLease,
+  ): Promise<SubagentStartResult> {
+    if (lease.closing || this.closedSubagents.has(input.subagentId))
+      throw new Error(`Subagent is closed: ${input.subagentId}`);
+    if (lease.stopReason)
+      return {
+        started: false,
+        reason:
+          "The previous execution is still cleaning up; this message was not accepted.",
+      };
+    await lease.ready;
+    const execution = await this.options.executionStore.get({
+      executionId: lease.executionId,
+      parentSessionId: input.parentSessionId,
+    });
+    if (!execution) throw new Error("Accepted subagent execution disappeared");
+    if (
+      lease.controller.signal.aborted ||
+      this.closedSubagents.has(lease.subagentId)
+    )
+      return {
+        started: false,
+        reason:
+          "The execution was stopped before the message could be accepted.",
+      };
+    const inputId = this.messageInputId(input);
+    if (execution.status === "queued" || execution.status === "running") {
+      if (!this.options.acceptExecutionMessage)
+        throw new Error("Subagent message input channel is unavailable");
+      const receipt = await this.options.acceptExecutionMessage({
+        execution,
+        message: input.prompt,
+        inputId,
+      });
+      if (receipt.accepted)
+        return { started: false, accepted: true, inputId, execution };
+    }
+    // Completion won the input-store transaction. Wait for this same execution's
+    // ownership to settle before attempting a new one; never enqueue the message.
+    if (!(await this.waitForCleanup(lease.cleaned)))
+      return {
+        started: false,
+        reason:
+          "The previous execution is still cleaning up; this message was not accepted.",
+      };
+    return this.launch(input);
+  }
+
+  private messageInputId(input: SubagentSendInput): string {
+    return `subagent-send:${createHash("sha256")
+      .update(
+        JSON.stringify([
+          input.requesterRunId,
+          input.requesterMessageId,
+          input.requestId,
+        ]),
+      )
+      .digest("hex")}`;
+  }
+
+  private beginCleanup(lease: ExecutionLease): void {
+    if (lease.cleaning) return;
+    lease.resolveReady();
+    const settlement = this.settlingTurns.get(lease.subagentId);
+    const operation = (async (): Promise<void> => {
+      const execution = lease.execution
+        ? await this.options.executionStore.get({
+            executionId: lease.executionId,
+            parentSessionId: lease.parentSessionId,
+          })
+        : undefined;
+      if (execution) {
+        const reason = lease.closing
+          ? "closed"
+          : (lease.stopReason ?? execution.status);
+        if (execution.status !== "completed") {
+          lease.unprocessedMessages =
+            (await this.options.closeExecutionInputs?.({
+              execution,
+              reason,
+            })) ?? [];
+        }
+        const cleanup = await this.options.cleanupExecution?.({
+          execution,
+          reason,
+        });
+        if (cleanup && !cleanup.confirmed) {
+          if (!cleanup.settled) return;
+          await cleanup.settled;
+        }
+      }
+      await settlement;
+      if (lease.scopeCleanup) {
+        const cleanup = await lease.scopeCleanup;
+        if (!cleanup.confirmed) {
+          if (!cleanup.settled) return;
+          await cleanup.settled;
+        }
+      }
+      if (this.leases.get(lease.executionId) !== lease) return;
+      this.leases.delete(lease.executionId);
+      this.executionBudgets.delete(lease.executionId);
+      this.rootByExecution.delete(lease.executionId);
+      this.pruneSeals();
+      if (lease.closing) this.closedSubagents.delete(lease.subagentId);
+      lease.resolveCleaned();
+      this.stateChanged(lease.parentSessionId);
+    })();
+    lease.cleaning = operation;
+    this.stateChanged(lease.parentSessionId);
+    void operation.catch((error: unknown) => {
+      if (lease.execution)
+        this.options.onFatal?.(
+          new Error(`Subagent cleanup is unconfirmed: ${errorMessage(error)}`),
+          lease.execution.rootRunId,
+        );
+    });
+  }
+
+  private async waitForCleanup(cleaned: Promise<void>): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        cleaned.then(
+          () => true,
+          () => false,
+        ),
+        new Promise<false>((resolve) => {
+          timer = setTimeout(() => {
+            resolve(false);
+          }, this.options.cleanupWaitMs ?? 2000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async stop(input: SubagentStopInput): Promise<SubagentStopResult> {
+    const lease = this.leaseFor(input.parentSessionId, input.subagentId);
+    const mismatch =
+      input.expectedExecutionId !== undefined &&
+      lease?.executionId !== input.expectedExecutionId;
+    if (lease && !mismatch) {
+      lease.stopReason ??= "stopped";
+      this.stateChanged(lease.parentSessionId);
+      lease.controller.abort("subagent stopped");
+      this.active
+        .get(input.subagentId)
+        ?.abortController?.abort("subagent stopped");
+    }
+    const item = await this.options.store.get(input);
+    if (!item && !lease)
+      throw new Error(`Subagent not found: ${input.subagentId}`);
+    if (
+      item?.closedAt !== undefined ||
+      this.closedSubagents.has(input.subagentId)
+    )
+      throw new Error(`Subagent is closed: ${input.subagentId}`);
+    if (mismatch)
+      return {
+        subagentId: input.subagentId,
+        stopped: false,
+        reason: "The expected execution is no longer active.",
+        cleanup: "confirmed",
+        unprocessedMessages: [],
+      };
+    if (!lease) {
+      return {
+        subagentId: input.subagentId,
+        stopped: false,
+        reason: "No active execution.",
+        cleanup: "confirmed",
+        unprocessedMessages: await this.readUnprocessed(input),
+      };
+    }
+    if (lease.execution)
+      await this.finishExecution(lease.execution, {
+        status: "interrupted",
+        error: "subagent stopped",
+        reason: "stopped",
+        completedAt: this.now(),
+      });
+    const confirmed = await this.waitForCleanup(lease.cleaned);
+    const execution = await this.options.executionStore.get({
+      executionId: lease.executionId,
+      parentSessionId: input.parentSessionId,
+    });
+    return {
+      subagentId: input.subagentId,
+      stopped: true,
+      execution: execution ?? undefined,
+      cleanup: confirmed ? "confirmed" : "unconfirmed",
+      unprocessedMessages: lease.unprocessedMessages,
+    };
+  }
+
+  async interruptForegroundByRootRun(
+    rootRunId: string,
+    reason = "stopped",
+  ): Promise<readonly SubagentExecutionRecord[]> {
+    const targets = [...this.leases.values()].filter(
+      (lease) =>
+        lease.execution?.rootRunId === rootRunId &&
+        lease.execution.mode === "foreground",
+    );
+    for (const lease of targets) {
+      lease.stopReason = reason;
+      this.stateChanged(lease.parentSessionId);
+      lease.controller.abort(reason);
+      this.active.get(lease.subagentId)?.abortController?.abort(reason);
+    }
+    await Promise.all(
+      targets.map((lease) =>
+        this.stop({
+          parentSessionId: lease.parentSessionId,
+          subagentId: lease.subagentId,
+          expectedExecutionId: lease.executionId,
+        }),
+      ),
+    );
+    return (await this.options.executionStore.listByRootRun(rootRunId)).filter(
+      (execution) => execution.mode === "foreground",
+    );
+  }
+
+  async list(input: SubagentStatusInput): Promise<SubagentStatusResult> {
+    const items = (
+      await this.options.store.listByParent(input.parentSessionId)
+    ).filter(
+      (item) =>
+        item.closedAt === undefined &&
+        (!input.subagentId || item.subagentId === input.subagentId),
+    );
+    const executions = (
+      await Promise.all(
+        items.map((item) =>
+          this.options.executionStore.list({
+            parentSessionId: input.parentSessionId,
+            requesterScopeId:
+              input.parentContextScopeId ?? PRIMARY_SUBAGENT_REQUESTER_SCOPE,
+            subagentId: item.subagentId,
+            limit: 1,
+          }),
+        ),
+      )
+    ).flat();
+    const facts = this.options.collectExecutionFacts
+      ? await Promise.all(executions.map(this.options.collectExecutionFacts))
+      : undefined;
+    return {
+      items,
+      executions,
+      facts,
+      runtime: await Promise.all(
+        items.map(async (item) => {
+          const lease = this.leaseFor(input.parentSessionId, item.subagentId);
+          const execution = executions.find(
+            (record) => record.subagentId === item.subagentId,
+          );
+          const messages =
+            execution && this.options.readExecutionInputs
+              ? await this.options.readExecutionInputs({ execution })
+              : (lease?.unprocessedMessages ?? []);
+          return {
+            subagentId: item.subagentId,
+            executionId: lease?.executionId,
+            settling:
+              lease?.stopReason !== undefined ||
+              lease?.cleaning !== undefined ||
+              this.settlingTurns.has(item.subagentId),
+            unprocessedMessages: messages,
+          };
+        }),
+      ),
+    };
+  }
+
+  monitor(input: SubagentMonitorInput): Promise<SubagentMonitorResult> {
+    if (!this.options.readHistory)
+      return Promise.reject(
+        new Error("Subagent history reader is unavailable"),
+      );
+    return this.options.readHistory(input);
   }
 
   private async executionWrite<T>(
@@ -498,8 +1050,12 @@ export class SessionSubagentHost {
     }
   }
 
-  private assertRootOpen(rootRunId: string): void {
-    if (this.disposed || this.sealedRoots.has(rootRunId))
+  private assertRootOpen(rootRunId: string, parentSessionId: string): void {
+    if (
+      this.disposed ||
+      this.sealedRoots.has(rootRunId) ||
+      this.sealedParents.has(parentSessionId)
+    )
       throw new Error("Subagent root run is closed");
   }
 
@@ -531,6 +1087,12 @@ export class SessionSubagentHost {
   ): Promise<readonly SubagentExecutionRecord[]> {
     // This seal precedes every await and prevents a late creation callback starting work.
     this.sealedRoots.add(rootRunId);
+    for (const lease of this.leases.values()) {
+      if (lease.execution?.rootRunId !== rootRunId) continue;
+      lease.stopReason = reason;
+      this.stateChanged(lease.parentSessionId);
+      lease.controller.abort(reason);
+    }
     for (const active of this.active.values()) {
       if (active.currentExecution?.rootRunId === rootRunId)
         active.abortController?.abort(reason);
@@ -562,8 +1124,7 @@ export class SessionSubagentHost {
     for (const [subagentId, active] of this.active) {
       if (
         !targets.has(subagentId) &&
-        (active.currentExecution?.rootRunId === rootRunId ||
-          active.queue.some((entry) => entry.rootRunId === rootRunId))
+        active.currentExecution?.rootRunId === rootRunId
       )
         targets.set(subagentId, {
           parentSessionId: active.parentSessionId,
@@ -581,84 +1142,110 @@ export class SessionSubagentHost {
           entry.rootRunId === rootRunId ||
           (entry.executionId !== undefined &&
             target.executionIds.has(entry.executionId));
-        const pendingQueue = record.pendingQueue.filter(
-          (entry) => !belongsToRoot(entry),
+        const pendingQueue = closeLegacySubagentInputs(
+          record.pendingQueue,
+          reason,
+          this.now(),
+          belongsToRoot,
         );
-        const active = this.active.get(subagentId);
-        const removed = active?.queue.filter(belongsToRoot) ?? [];
         const item =
-          pendingQueue.length === record.pendingQueue.length
+          pendingQueue === record.pendingQueue
             ? record
             : await this.options.store.update(subagentId, {
                 pendingQueue,
                 updatedAt: this.now(),
               });
-        if (active)
-          active.queue = active.queue.filter((entry) => !belongsToRoot(entry));
-        this.resolveQueuedCompletions(removed, item);
+        void item;
       });
     }
     for (const record of interrupted) await this.options.onTerminal?.(record);
+    this.pruneSeals();
     return interrupted;
   }
 
-  async status(input: SubagentStatusInput): Promise<SubagentStatusResult> {
-    const items = input.subagentId
-      ? [
-          await this.options.store.get({
-            parentSessionId: input.parentSessionId,
-            subagentId: input.subagentId,
-          }),
-        ].filter((item): item is SubagentInstanceRecord => item !== null)
-      : await this.options.store.listByParent(input.parentSessionId);
-    const requesterScopeId =
-      input.parentContextScopeId ?? PRIMARY_SUBAGENT_REQUESTER_SCOPE;
-    const executions = input.executionId
-      ? [
-          await this.options.executionStore.get({
-            parentSessionId: input.parentSessionId,
-            requesterScopeId,
-            executionId: input.executionId,
-          }),
-        ].filter((record): record is SubagentExecutionRecord => record !== null)
-      : await this.options.executionStore.list({
-          parentSessionId: input.parentSessionId,
-          requesterScopeId,
-          subagentId: input.subagentId,
-          limit: 20,
-        });
-    const collectFacts = this.options.collectExecutionFacts;
-    const facts = collectFacts
-      ? await Promise.all(
-          executions.map((execution) => collectFacts(execution)),
-        )
-      : undefined;
-    if (input.executionId && this.options.ensureResultArtifact) {
-      for (const execution of executions) {
-        if (execution.status === "queued" || execution.status === "running")
-          continue;
-        await this.options.ensureResultArtifact(execution);
-      }
-      const refreshed = await Promise.all(
-        executions.map((execution) =>
-          this.options.executionStore.get(execution),
-        ),
-      );
-      return {
-        items,
-        facts,
-        executions: refreshed.filter(
-          (execution): execution is SubagentExecutionRecord =>
-            execution !== null,
-        ),
-      };
+  close(input: SubagentLookupInput): Promise<SubagentCloseResult> {
+    const key = JSON.stringify([input.parentSessionId, input.subagentId]);
+    const previous = this.closeOperations.get(key);
+    if (previous) return previous;
+    const lease = this.leaseFor(input.parentSessionId, input.subagentId);
+    let resolveScopeCleanup:
+      | ((cleanup: SubagentCleanupResult) => void)
+      | undefined;
+    if (lease) {
+      lease.scopeCleanup = new Promise<SubagentCleanupResult>((resolve) => {
+        resolveScopeCleanup = resolve;
+      });
+      lease.closing = true;
+      lease.stopReason = "closed";
+      this.stateChanged(lease.parentSessionId);
+      lease.controller.abort("subagent closed");
     }
-    return { items, executions, ...(facts ? { facts } : {}) };
+    const operation = (async (): Promise<SubagentCloseResult> => {
+      const result = await this.closeRecord(input);
+      const scopeCleanup: Promise<SubagentCleanupResult> =
+        this.closingScopes.get(key) ??
+        (result.item && result.reason !== "already closed"
+          ? Promise.resolve(
+              this.options.onClosed?.({
+                contextScopeId: result.item.contextScopeId,
+                sessionId: result.item.sessionId,
+                subagentId: result.item.subagentId,
+                runId: result.item.currentRunId ?? result.item.lastRunId,
+              }),
+            ).then((cleanup) => cleanup ?? { confirmed: true })
+          : Promise.resolve({ confirmed: true }));
+      this.closingScopes.set(key, scopeCleanup);
+      void scopeCleanup
+        .then((cleanup) => resolveScopeCleanup?.(cleanup))
+        .catch(() => undefined);
+      const scopeSettled = scopeCleanup.then(async (cleanup) => {
+        if (!cleanup.confirmed) {
+          if (!cleanup.settled) return new Promise<void>(() => undefined);
+          await cleanup.settled;
+        }
+      });
+      void scopeSettled
+        .then(() => {
+          this.closingScopes.delete(key);
+          if (!lease) this.closedSubagents.delete(input.subagentId);
+        })
+        .catch(() => undefined);
+      const confirmed = await this.waitForCleanup(
+        Promise.all([scopeSettled, lease?.cleaned]).then(() => undefined),
+      );
+      const unprocessedMessages =
+        lease?.unprocessedMessages ?? (await this.readUnprocessed(input));
+      if (confirmed) {
+        this.closedSubagents.delete(input.subagentId);
+      }
+      return {
+        ...result,
+        cleanup: confirmed ? "confirmed" : "unconfirmed",
+        unprocessedMessages,
+      };
+    })();
+    this.closeOperations.set(key, operation);
+    void operation
+      .finally(() => {
+        if (this.closeOperations.get(key) === operation)
+          this.closeOperations.delete(key);
+      })
+      .catch(() => undefined);
+    return operation;
   }
 
-  async close(input: SubagentLookupInput): Promise<SubagentCloseResult> {
+  private async closeRecord(
+    input: SubagentLookupInput,
+  ): Promise<Omit<SubagentCloseResult, "cleanup" | "unprocessedMessages">> {
     return this.withSubagentLock(input.subagentId, async () => {
       const item = await this.options.store.get(input);
+      if (item?.closedAt !== undefined)
+        return {
+          item,
+          subagentId: input.subagentId,
+          previousStatus: item.status,
+          reason: "already closed",
+        };
       if (!item) {
         const executions = await this.options.executionStore.list({
           parentSessionId: input.parentSessionId,
@@ -686,14 +1273,14 @@ export class SessionSubagentHost {
       this.closedSubagents.add(input.subagentId);
       const previousStatus = item.status;
       const active = this.active.get(input.subagentId);
-      const queued = active?.queue.splice(0) ?? [];
       if (active) {
         active.closed = true;
         active.pauseController.abort("subagent closed");
         active.abortController?.abort("subagent closed");
       }
       const reason =
-        item.currentRunId !== undefined || item.pendingQueue.length > 0
+        item.currentRunId !== undefined ||
+        item.pendingQueue.some((entry) => entry.closedAt === undefined)
           ? "subagent closed"
           : undefined;
       const closedAt = this.now();
@@ -726,18 +1313,13 @@ export class SessionSubagentHost {
         currentInput: undefined,
         currentRunId: undefined,
         lastRunId: item.currentRunId ?? item.lastRunId,
-        pendingQueue: [],
+        pendingQueue: closeLegacySubagentInputs(
+          item.pendingQueue,
+          "subagent closed",
+          closedAt,
+        ),
         status: "cancelled",
         updatedAt: closedAt,
-      });
-      this.resolveQueuedCompletions(queued, updated);
-      this.options.onClosed?.({
-        contextScopeId: item.contextScopeId,
-        sessionId: item.sessionId,
-        subagentId: item.subagentId,
-        ...(item.currentRunId === undefined
-          ? {}
-          : { runId: item.currentRunId }),
       });
       return {
         item: updated,
@@ -751,61 +1333,59 @@ export class SessionSubagentHost {
   async interruptByParent(
     parentSessionId: string,
     reason = "parent run interrupted",
+    options: { readonly closeAdmission?: boolean } = {},
   ): Promise<readonly SubagentInstanceRecord[]> {
+    // Parent removal closes admission before any pending accept/create/bind can resume.
+    if (options.closeAdmission) this.sealedParents.add(parentSessionId);
+    const leases = [...this.leases.values()].filter(
+      (lease) => lease.parentSessionId === parentSessionId,
+    );
+    const roots = new Set<string>();
+    for (const lease of leases) {
+      lease.stopReason = reason;
+      this.stateChanged(lease.parentSessionId);
+      lease.controller.abort(reason);
+      if (lease.execution) roots.add(lease.execution.rootRunId);
+    }
     const targets = [...this.active.entries()].filter(
       ([, active]) => active.parentSessionId === parentSessionId,
     );
-    const settlements = targets.map(([, active]) => {
-      const claim = active.claimCompletion?.promise;
-      return (
-        active.drainPromise ??
-        claim?.then(async () => {
-          await active.drainPromise;
-        })
-      );
-    });
     for (const [, active] of targets) {
-      active.drainAfterInterrupt = false;
       active.pauseReason = reason;
       active.pauseController.abort(reason);
       active.abortController?.abort(reason);
+      if (active.currentExecution?.rootRunId)
+        roots.add(active.currentExecution.rootRunId);
     }
     await Promise.all(
-      settlements.map(async (settlement) => {
-        await settlement?.catch(() => undefined);
+      [...roots].map((rootRunId) => this.interruptByRootRun(rootRunId, reason)),
+    );
+    await Promise.all(
+      targets.map(async ([, active]) => {
+        await active.drainPromise?.catch(() => undefined);
       }),
     );
+    const subagentIds = new Set([
+      ...leases.map((lease) => lease.subagentId),
+      ...targets.map(([subagentId]) => subagentId),
+    ]);
     const records = await Promise.all(
-      targets.map(([subagentId]) =>
+      [...subagentIds].map((subagentId) =>
         this.options.store.get({ parentSessionId, subagentId }),
       ),
     );
+    this.pruneSeals();
     return records.filter(
       (record): record is SubagentInstanceRecord => record !== null,
     );
   }
 
-  recoverInterrupted(
-    input: Omit<MarkSubagentsInterruptedInput, "interruptedAt"> = {},
-  ): Promise<readonly SubagentInstanceRecord[]> {
-    return this.options.store.markInterrupted({
-      ...input,
-      interruptedAt: this.now(),
-      ownerId: input.ownerId ?? this.options.ownerId,
-      ownerPid: input.ownerPid ?? this.options.ownerPid,
-    });
-  }
-
   hasActiveWork(): boolean {
     return (
+      this.leases.size > 0 ||
       this.executionJobs.size > 0 ||
       this.settlingTurns.size > 0 ||
-      [...this.active.values()].some(
-        (active) =>
-          active.running ||
-          active.queue.length > 0 ||
-          active.pendingSettlement !== undefined,
-      )
+      [...this.active.values()].some((active) => active.running)
     );
   }
 
@@ -813,10 +1393,14 @@ export class SessionSubagentHost {
 
   closeAdmission(): void {
     this.disposed = true;
+    for (const lease of this.leases.values()) {
+      lease.stopReason = "service-shutdown";
+      this.stateChanged(lease.parentSessionId);
+      lease.controller.abort("service-shutdown");
+    }
     for (const rootRunId of this.rootByExecution.values())
       this.sealedRoots.add(rootRunId);
     for (const active of this.active.values()) {
-      active.drainAfterInterrupt = false;
       active.stopping = true;
       active.pauseController.abort("service-shutdown");
       active.abortController?.abort("service-shutdown");
@@ -880,7 +1464,7 @@ export class SessionSubagentHost {
             input.parentSessionId,
           );
     const subagentId = execution.subagentId;
-    this.assertRootOpen(execution.rootRunId);
+    this.assertRootOpen(execution.rootRunId, execution.parentSessionId);
     if (this.closedSubagents.has(subagentId))
       throw new Error("Subagent is closed");
     const now = this.now();
@@ -893,17 +1477,7 @@ export class SessionSubagentHost {
       ownerId: this.options.ownerId,
       ownerPid: this.options.ownerPid,
       parentSessionId: input.parentSessionId,
-      pendingQueue: [
-        {
-          executionId: execution.executionId,
-          rootRunId: execution.rootRunId,
-          requesterRunId: execution.requesterRunId,
-          requesterScopeId: execution.requesterScopeId,
-          prompt: input.prompt,
-          timeoutMs: input.timeoutMs,
-          workdir: input.environment?.workdir,
-        },
-      ],
+      pendingQueue: [],
       role: input.role,
       sessionId: session.id,
       status: "pending",
@@ -914,7 +1488,8 @@ export class SessionSubagentHost {
     await this.options.store.create(record);
     if (
       this.closedSubagents.has(subagentId) ||
-      this.sealedRoots.has(execution.rootRunId)
+      this.sealedRoots.has(execution.rootRunId) ||
+      this.sealedParents.has(execution.parentSessionId)
     ) {
       const closed = this.closedSubagents.has(subagentId);
       await this.options.store.update(subagentId, {
@@ -1044,400 +1619,123 @@ export class SessionSubagentHost {
       });
   }
 
-  private async enqueueOrSchedule(
-    record: SubagentInstanceRecord,
-    prompt: string,
-    environment?: ToolExecutionEnvironment,
-    interrupt = false,
-    timeoutMs?: number,
-    waitForEntry = false,
-    signal?: AbortSignal,
-    entryAlreadyQueued = false,
-    reasoning?: ReasoningIntent,
-    execution?: SubagentExecutionRecord,
-    onAdmitted?: () => void,
-    runModel?: RunModel,
-  ): Promise<EntryOutcome> {
-    if (this.disposed) {
-      await this.markOwnedInterrupted(record.parentSessionId);
-      throw new Error("Subagent host is disposed");
-    }
-    const completion = waitForEntry
-      ? this.createDeferredCompletion()
-      : undefined;
-    const entry: ActiveQueuedSubagentInput = {
+  private async startExecution({
+    record,
+    prompt,
+    environment,
+    timeoutMs,
+    signal,
+    reasoning,
+    execution,
+    onAdmitted,
+    runModel,
+  }: {
+    readonly record: SubagentInstanceRecord;
+    readonly prompt: string;
+    readonly environment?: ToolExecutionEnvironment;
+    readonly timeoutMs?: number;
+    readonly signal?: AbortSignal;
+    readonly reasoning?: ReasoningIntent;
+    readonly execution: SubagentExecutionRecord;
+    readonly onAdmitted: () => void;
+    readonly runModel: RunModel;
+  }): Promise<EntryOutcome> {
+    this.assertRootOpen(execution.rootRunId, execution.parentSessionId);
+    const entry: ActiveExecutionInput = {
+      executionId: execution.executionId,
+      rootRunId: execution.rootRunId,
+      requesterRunId: execution.requesterRunId,
+      requesterScopeId: execution.requesterScopeId,
       runModel,
-      ...(execution
-        ? {
-            executionId: execution.executionId,
-            rootRunId: execution.rootRunId,
-            requesterRunId: execution.requesterRunId,
-            requesterScopeId: execution.requesterScopeId,
-          }
-        : {}),
-      ...(reasoning === undefined ? {} : { reasoning }),
-      completion,
+      reasoning,
       environment,
-      prompt,
       signal,
+      prompt,
       timeoutMs,
       workdir: environment?.workdir,
     };
-    const scheduled = await this.withSubagentLock(
-      record.subagentId,
-      async () => {
-        if (this.disposed) {
-          await this.markOwnedInterrupted(record.parentSessionId);
-          throw new Error("Subagent host is disposed");
-        }
-        if (execution) this.assertRootOpen(execution.rootRunId);
-        const active = this.active.get(record.subagentId);
-        if (active && !active.closed && !active.stopping) {
-          const persisted = await this.options.store.appendPendingQueue(
-            record.subagentId,
-            this.serializeInput(entry),
-            this.now(),
-          );
-          if (!persisted) {
-            throw new Error(`Subagent is closed: ${record.subagentId}`);
-          }
-          active.queue.push(entry);
-          this.bindQueuedAbort(active, entry);
-          if (interrupt && active.running) {
-            active.drainAfterInterrupt = true;
-            active.abortController?.abort("subagent interrupted");
-          }
-          return {
-            alreadyActive: true as const,
-            pendingSettlement: active.pendingSettlement,
-          };
-        }
-
-        const currentRecord = active
-          ? await this.mustGet(record.parentSessionId, record.subagentId)
-          : record;
-        if (
-          currentRecord.status === "running" ||
-          currentRecord.currentRunId !== undefined
-        ) {
+    const active = this.createActiveState(record.parentSessionId);
+    active.currentExecution = entry;
+    active.running = true;
+    this.active.set(record.subagentId, active);
+    const work = (async (): Promise<EntryOutcome> => {
+      try {
+        const current = await this.mustGet(
+          record.parentSessionId,
+          record.subagentId,
+        );
+        if (current.closedAt !== undefined)
+          throw new Error(`Subagent is closed: ${record.subagentId}`);
+        if (current.currentRunId !== undefined)
           throw new Error(
             `Subagent is active under another runtime owner: ${record.subagentId}`,
           );
-        }
-
-        const persisted = entryAlreadyQueued
-          ? currentRecord
-          : await this.options.store.appendPendingQueue(
-              record.subagentId,
-              this.serializeInput(entry),
-              this.now(),
-            );
-        if (!persisted) {
-          throw new Error(`Subagent is closed: ${record.subagentId}`);
-        }
-        const pendingQueue: ActiveQueuedSubagentInput[] = [];
-        for (const item of persisted.pendingQueue) {
-          if (!item.executionId || this.sealedRoots.has(item.rootRunId ?? ""))
-            continue;
-          const accepted = await this.options.executionStore.get({
-            executionId: item.executionId,
-            parentSessionId: record.parentSessionId,
-          });
-          if (accepted?.status === "queued") pendingQueue.push({ ...item });
-        }
-        if (pendingQueue.length === 0) {
-          throw new Error(
-            `Subagent is missing its persisted input: ${record.subagentId}`,
-          );
-        }
-        pendingQueue[pendingQueue.length - 1] = entry;
-        const pendingSettlement = this.settlingTurns.get(record.subagentId);
-        const scheduledActive = this.createActiveState(
-          currentRecord.parentSessionId,
-          pendingQueue,
-          pendingSettlement,
+        const runId = this.createRunId();
+        const startedAt = this.now();
+        await this.executionWrite(execution.rootRunId, () =>
+          this.options.executionStore.start(execution, runId, startedAt),
         );
-        const claimCompletion = this.createDeferredClaim();
-        scheduledActive.claimCompletion = claimCompletion;
-        this.active.set(record.subagentId, scheduledActive);
-        if (scheduledActive.queue.length > 1) {
-          this.bindQueuedAbort(scheduledActive, entry);
-        }
-        const drainPromise = Promise.resolve().then(() =>
-          this.drainQueue(persisted, scheduledActive),
-        );
-        scheduledActive.drainPromise = drainPromise;
-        void drainPromise.catch(() => undefined);
-        return {
-          alreadyActive: false as const,
-          claimCompletion,
-          pendingSettlement,
-        };
-      },
-    );
-    onAdmitted?.();
-    if (scheduled.alreadyActive) {
-      return await this.awaitCompletionOrGet(
-        record.parentSessionId,
-        record.subagentId,
-        completion,
-      );
-    }
-    if (!waitForEntry && scheduled.pendingSettlement !== undefined) {
-      return {
-        item: await this.mustGet(record.parentSessionId, record.subagentId),
-      };
-    }
-    await scheduled.claimCompletion.promise;
-    return await this.awaitCompletionOrGet(
-      record.parentSessionId,
-      record.subagentId,
-      completion,
-    );
-  }
-
-  private async drainQueue(
-    record: SubagentInstanceRecord,
-    active: ActiveSubagentState,
-  ): Promise<void> {
-    active.running = true;
-    let inFlight: ActiveQueuedSubagentInput | undefined;
-    try {
-      if (active.pendingSettlement !== undefined) {
-        const settled = await waitForSettlementOrAbort(
-          active.pendingSettlement,
-          active.pauseController.signal,
-        );
-        if (settled) {
-          active.pendingSettlement = undefined;
-        }
-      }
-      for (;;) {
-        if (this.isActiveClosed(active)) {
-          active.claimCompletion?.resolve();
-          active.claimCompletion = undefined;
-          return;
-        }
-        if (this.isActiveStopping(active)) {
-          active.claimCompletion?.reject(
-            new Error(
-              `Subagent run stopped before claim: ${record.subagentId}`,
-            ),
-          );
-          active.claimCompletion = undefined;
-          return;
-        }
-        if (this.currentPauseReason(active) !== undefined) {
-          active.claimCompletion?.resolve();
-          active.claimCompletion = undefined;
-          const { pausedForeground, pausedItem } = await this.withSubagentLock(
-            record.subagentId,
-            async () => {
-              active.stopping = true;
-              const pausedForeground = this.takePausedForegroundInputs(active);
-              const interruptedAt = this.now();
-              const pausedItem = await this.options.store.update(
-                record.subagentId,
-                {
-                  completedAt: interruptedAt,
-                  error: active.pauseReason,
-                  interruptedAt,
-                  output: active.pauseReason,
-                  pendingQueue: this.serializeQueue(active.queue),
-                  status: "interrupted",
-                  updatedAt: interruptedAt,
-                },
-              );
-              return { pausedForeground, pausedItem };
-            },
-          );
-          this.resolveQueuedCompletions(pausedForeground, pausedItem, true);
-          return;
-        }
-        let next: ActiveQueuedSubagentInput | undefined;
-        let effectiveTimeoutMs: number | undefined;
-        let runId: string | undefined;
-        let claimed: SubagentInstanceRecord | null | undefined;
-        await this.withSubagentLock(record.subagentId, async () => {
-          if (
-            this.isActiveClosed(active) ||
-            active.stopping ||
-            active.pauseReason !== undefined
-          ) {
-            return;
-          }
-          let queued = active.queue.shift();
-          while (queued?.rootRunId && this.sealedRoots.has(queued.rootRunId)) {
-            queued.unbindQueueAbort?.();
-            queued.completion?.reject(new Error("Subagent root run is closed"));
-            queued = active.queue.shift();
-          }
-          if (!queued) {
-            await this.options.store.update(record.subagentId, {
-              pendingQueue: this.serializeQueue(active.queue),
-              updatedAt: this.now(),
-            });
-            active.stopping = true;
-            return;
-          }
-          queued.unbindQueueAbort?.();
-          queued.unbindQueueAbort = undefined;
-          active.currentExecution = queued;
-          const timeout = normalizeTimeoutMs(
-            queued.timeoutMs ?? record.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS,
-          );
-          const nextRunId = this.createRunId();
-          const startedAt = this.now();
-          if (!queued.executionId || !queued.rootRunId)
-            throw new Error("Queued execution identity missing");
-          const queuedExecutionId = queued.executionId;
-          const queuedRootRunId = queued.rootRunId;
-          await this.executionWrite(queuedRootRunId, () =>
-            this.options.executionStore.start(
-              {
-                executionId: queuedExecutionId,
-                parentSessionId: record.parentSessionId,
-              },
-              nextRunId,
-              startedAt,
-            ),
-          );
-          this.assertRootOpen(queued.rootRunId);
-          const nextClaim = await this.options.store.claim(record.subagentId, {
-            completedAt: undefined,
-            currentInput: this.serializeInput(queued),
-            currentRunId: nextRunId,
-            error: undefined,
-            interruptedAt: undefined,
-            output: undefined,
-            ownerId: this.options.ownerId,
-            ownerPid: this.options.ownerPid,
-            pendingQueue: this.serializeQueue(active.queue),
+        this.assertRootOpen(execution.rootRunId, execution.parentSessionId);
+        const claimed = await this.options.store.claim(record.subagentId, {
+          completedAt: undefined,
+          currentInput: this.serializeInput(entry),
+          currentRunId: runId,
+          error: undefined,
+          interruptedAt: undefined,
+          output: undefined,
+          ownerId: this.options.ownerId,
+          ownerPid: this.options.ownerPid,
+          pendingQueue: closeLegacySubagentInputs(
+            current.pendingQueue,
+            "legacy queued input is no longer executable",
             startedAt,
-            status: "running",
-            updatedAt: startedAt,
-          });
-          if (!nextClaim) {
-            throw new Error(
-              `Subagent run claim rejected: ${record.subagentId}`,
-            );
-          }
-          next = queued;
-          effectiveTimeoutMs = timeout;
-          runId = nextRunId;
-          claimed = nextClaim;
+          ),
+          startedAt,
+          status: "running",
+          updatedAt: startedAt,
         });
-        if (this.isActiveClosed(active)) {
-          return;
-        }
-        if (this.isActiveStopping(active)) {
-          active.claimCompletion?.reject(
-            new Error(
-              `Subagent run stopped before claim: ${record.subagentId}`,
-            ),
-          );
-          active.claimCompletion = undefined;
-          return;
-        }
-        if (!next) {
-          active.claimCompletion?.resolve();
-          active.claimCompletion = undefined;
-          return;
-        }
-        if (!claimed || runId === undefined) {
+        if (!claimed)
           throw new Error(`Subagent run claim rejected: ${record.subagentId}`);
-        }
-        inFlight = next;
-        active.claimCompletion?.resolve();
-        active.claimCompletion = undefined;
-        const pauseReason = this.currentPauseReason(active);
-        const item =
-          pauseReason === undefined
-            ? await this.runTurn(
-                record,
-                next,
-                active,
-                runId,
-                effectiveTimeoutMs,
-              )
-            : await this.finishInterruptedRun(record, runId, pauseReason);
-        next.completion?.resolve({ item });
-        active.currentExecution = undefined;
-        inFlight = undefined;
-        const drainAfterInterrupt = active.drainAfterInterrupt;
-        const lastRunSettled = active.lastRunSettled;
-        active.drainAfterInterrupt = false;
-        if (this.isActiveClosed(active)) {
-          return;
-        }
-        if (item.status === "completed") {
-          continue;
-        }
-        if (
-          item.status === "interrupted" &&
-          drainAfterInterrupt &&
-          lastRunSettled
-        ) {
-          continue;
-        }
-        const { pausedForeground, pausedItem } = await this.withSubagentLock(
-          record.subagentId,
-          async () => {
-            active.stopping = true;
-            const pausedForeground = this.takePausedForegroundInputs(active);
-            const pausedItem = await this.options.store.update(
-              record.subagentId,
-              {
-                pendingQueue: this.serializeQueue(active.queue),
-                updatedAt: this.now(),
-              },
-            );
-            return { pausedForeground, pausedItem };
-          },
-        );
-        this.resolveQueuedCompletions(pausedForeground, pausedItem, true);
-        return;
-      }
-    } catch (error) {
-      active.claimCompletion?.reject(error);
-      active.claimCompletion = undefined;
-      inFlight?.unbindQueueAbort?.();
-      inFlight?.completion?.reject(error);
-      if (
-        active.currentExecution?.executionId &&
-        active.currentExecution.rootRunId &&
-        !(error instanceof SubagentPersistenceError)
-      ) {
-        await this.finishExecution(
-          {
-            executionId: active.currentExecution.executionId,
-            parentSessionId: record.parentSessionId,
-            rootRunId: active.currentExecution.rootRunId,
-          },
-          {
-            status: "failed",
-            error: errorMessage(error),
+        onAdmitted();
+        if (active.pauseReason !== undefined) {
+          await this.finishExecution(execution, {
+            status: "interrupted",
+            reason: active.pauseReason,
+            error: active.pauseReason,
             completedAt: this.now(),
-          },
-        );
+          });
+          return {
+            item: await this.finishInterruptedRun(
+              record,
+              runId,
+              active.pauseReason,
+            ),
+          };
+        }
+        return {
+          item: await this.runTurn(
+            record,
+            entry,
+            active,
+            runId,
+            timeoutMs ?? record.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS,
+          ),
+        };
+      } finally {
+        onAdmitted();
+        active.running = false;
+        if (this.active.get(record.subagentId) === active)
+          this.active.delete(record.subagentId);
       }
-      for (const queued of active.queue.splice(0)) {
-        queued.unbindQueueAbort?.();
-        queued.completion?.reject(error);
-      }
-      throw error;
-    } finally {
-      active.abortController = undefined;
-      active.running = false;
-      if (this.active.get(record.subagentId) === active) {
-        this.active.delete(record.subagentId);
-      }
-    }
+    })();
+    active.drainPromise = work.then(() => undefined);
+    void active.drainPromise.catch(() => undefined);
+    return work;
   }
 
   private async runTurn(
     record: SubagentInstanceRecord,
-    input: ActiveQueuedSubagentInput,
+    input: ActiveExecutionInput,
     active: ActiveSubagentState,
     runId: string,
     effectiveTimeoutMs: number | undefined,
@@ -1590,7 +1888,8 @@ export class SessionSubagentHost {
             parentSessionId: record.parentSessionId,
           })
         : null;
-      if (input.rootRunId) this.assertRootOpen(input.rootRunId);
+      if (input.rootRunId)
+        this.assertRootOpen(input.rootRunId, record.parentSessionId);
       if (turnSignal.aborted) return await markInterrupted();
       active.lastRunSettled = false;
       let turnPromise: Promise<AgentRunResult>;
@@ -1609,6 +1908,10 @@ export class SessionSubagentHost {
           signal: turnSignal,
           waitMode: "waitForCompletion",
           workdir: input.workdir,
+          onInputReady: () => {
+            if (input.executionId)
+              this.leases.get(input.executionId)?.resolveReady();
+          },
         });
       } catch (error) {
         active.lastRunSettled = true;
@@ -1658,6 +1961,7 @@ export class SessionSubagentHost {
         }
       };
       const turn = await waitForTurnOrAbort(turnPromise, turnSignal);
+      if (turn.kind === "aborted") trackSettlement();
       if (this.isActiveClosed(active)) {
         return await this.mustGet(record.parentSessionId, record.subagentId);
       }
@@ -1716,19 +2020,12 @@ export class SessionSubagentHost {
     }
   }
 
-  private createActiveState(
-    parentSessionId: string,
-    queue: readonly ActiveQueuedSubagentInput[] = [],
-    pendingSettlement?: Promise<void>,
-  ): ActiveSubagentState {
+  private createActiveState(parentSessionId: string): ActiveSubagentState {
     return {
       closed: false,
-      drainAfterInterrupt: false,
       lastRunSettled: true,
-      ...(pendingSettlement === undefined ? {} : { pendingSettlement }),
       parentSessionId,
       pauseController: new AbortController(),
-      queue: [...queue],
       running: false,
       stopping: false,
     };
@@ -1742,10 +2039,6 @@ export class SessionSubagentHost {
     return active.stopping;
   }
 
-  private currentPauseReason(active: ActiveSubagentState): string | undefined {
-    return active.pauseReason;
-  }
-
   private trackSettlingTurn(
     subagentId: string,
     settlement: Promise<void>,
@@ -1756,84 +2049,6 @@ export class SessionSubagentHost {
         this.settlingTurns.delete(subagentId);
       }
     });
-  }
-
-  private resolveQueuedCompletions(
-    queue: readonly ActiveQueuedSubagentInput[],
-    item: SubagentInstanceRecord,
-    paused?: true,
-  ): void {
-    for (const queued of queue) {
-      queued.unbindQueueAbort?.();
-      queued.completion?.resolve({ item, ...(paused ? { paused } : {}) });
-    }
-  }
-
-  private takePausedForegroundInputs(
-    active: ActiveSubagentState,
-  ): ActiveQueuedSubagentInput[] {
-    const paused: ActiveQueuedSubagentInput[] = [];
-    const retained: ActiveQueuedSubagentInput[] = [];
-    for (const queued of active.queue) {
-      if (!queued.completion) {
-        retained.push(queued);
-        continue;
-      }
-      queued.unbindQueueAbort?.();
-      queued.unbindQueueAbort = undefined;
-      paused.push(queued);
-      retained.push(this.detachQueuedInput(queued));
-    }
-    active.queue = retained;
-    return paused;
-  }
-
-  private bindQueuedAbort(
-    active: ActiveSubagentState,
-    input: ActiveQueuedSubagentInput,
-  ): void {
-    const signal = input.signal;
-    if (!signal) {
-      return;
-    }
-    const onAbort = (): void => {
-      const index = active.queue.indexOf(input);
-      if (index < 0) {
-        return;
-      }
-      active.queue[index] = this.detachQueuedInput(input);
-      input.unbindQueueAbort?.();
-      input.unbindQueueAbort = undefined;
-      const reason = errorMessage(
-        signal.reason ?? "queued subagent caller stopped waiting",
-      );
-      input.completion?.reject(new Error(reason));
-    };
-    input.unbindQueueAbort = (): void => {
-      signal.removeEventListener("abort", onAbort);
-    };
-    if (signal.aborted) {
-      onAbort();
-      return;
-    }
-    signal.addEventListener("abort", onAbort, { once: true });
-  }
-
-  private detachQueuedInput(
-    input: ActiveQueuedSubagentInput,
-  ): ActiveQueuedSubagentInput {
-    return {
-      executionId: input.executionId,
-      rootRunId: input.rootRunId,
-      requesterRunId: input.requesterRunId,
-      requesterScopeId: input.requesterScopeId,
-      ...(input.environment === undefined
-        ? {}
-        : { environment: input.environment }),
-      prompt: input.prompt,
-      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-      ...(input.workdir === undefined ? {} : { workdir: input.workdir }),
-    };
   }
 
   private finishInterruptedRun(
@@ -1855,49 +2070,18 @@ export class SessionSubagentHost {
     });
   }
 
-  private serializeQueue(
-    queue: readonly ActiveQueuedSubagentInput[],
-  ): QueuedSubagentInput[] {
-    return queue.map((input) => this.serializeInput(input));
-  }
-
-  private serializeInput(
-    input: ActiveQueuedSubagentInput,
-  ): QueuedSubagentInput {
+  private serializeInput(input: ActiveExecutionInput): QueuedSubagentInput {
     const {
       runModel: _runModel,
       reasoning: _reasoning,
-      completion: _completion,
       environment,
       signal: _signal,
-      unbindQueueAbort: _unbindQueueAbort,
       ...item
     } = input;
     return {
       ...item,
       workdir: item.workdir ?? environment?.workdir,
     };
-  }
-
-  private createDeferredCompletion(): DeferredCompletion {
-    let resolve!: (outcome: EntryOutcome) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<EntryOutcome>((innerResolve, innerReject) => {
-      resolve = innerResolve;
-      reject = innerReject;
-    });
-    void promise.catch(() => undefined);
-    return { promise, reject, resolve };
-  }
-
-  private createDeferredClaim(): DeferredClaim {
-    let resolve!: () => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<void>((innerResolve, innerReject) => {
-      resolve = innerResolve;
-      reject = innerReject;
-    });
-    return { promise, reject, resolve };
   }
 
   private markOwnedInterrupted(
@@ -1912,17 +2096,6 @@ export class SessionSubagentHost {
         this.options.ownerId === undefined &&
         this.options.ownerPid === undefined,
     });
-  }
-
-  private async awaitCompletionOrGet(
-    parentSessionId: string,
-    subagentId: string,
-    completion: DeferredCompletion | undefined,
-  ): Promise<EntryOutcome> {
-    if (!completion) {
-      return { item: await this.mustGet(parentSessionId, subagentId) };
-    }
-    return await completion.promise;
   }
 }
 

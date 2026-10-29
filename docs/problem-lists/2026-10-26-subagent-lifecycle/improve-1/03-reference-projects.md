@@ -80,6 +80,15 @@ ZCode 将运行中与已结束的子代理集中列出，点击查看所选子�
 
 本轮采用：主会话保留工具输入输出，启动链接直达右侧详情，同一 Tab 内返回实例列表，Active/Done 仅为视图分组。OpenCode 某些界面的跳转 child session/返回 parent 导航不直接照搬；ohbaby 要保留主会话并在右侧查看。文档/Review/浏览器/终端虽然出现在截图中，已明确不属于本批。
 
+**右侧栏的状态放在哪（2026-10-29 补查，支撑 D46）：** ZCode 和 opencode 的 Tab 容器都只在前端。
+
+- ZCode 用一个页面类型 union 列出所有面板（browser、terminal、subagent-session 等，见 [workspaceSidePane.ts](/Users/hansun025/Projects/code-cli/ZCode/packages/ui/src/lib/workspaceSidePane.ts)），状态放在 React 和一个内存 Map 里，不存服务端。
+- opencode 把 Tab 布局存在 localStorage（[layout.tsx](/Users/hansun025/Projects/code-cli/opencode/packages/app/src/shell/state/layout.tsx)）。
+- 两家的终端和浏览器都有各自独立的后端：终端是 PTY 服务，浏览器走 Electron 主进程。没有通用的面板后端。
+- ZCode 的子代理目录页调用专用的列表接口（`listSessionSubagents`），详情直接复用普通会话的阅读组件，只读。
+
+所以 improve-2 只做子代理实例的读取和控制接口，不建通用面板后端；improve-3 用前端的页面类型 union 给终端、浏览器留扩展位。
+
 ## 3.8 证据边界
 
 以上实现细节来自本地版本核查，代码行号随项目变化可能漂移。用户测试与截图用于说明观察到的客户端行为，不据此推断所有版本、所有模式。参考项目提供可借鉴的执行边界，但最终契约仍以用户确认与 ohbaby 现有代码的适配成本为准。

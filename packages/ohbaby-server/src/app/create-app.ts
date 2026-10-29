@@ -277,25 +277,31 @@ class DaemonServerAppRuntime implements DaemonRouteContext {
           ok: false,
           error: { message: errorMessage(error), ...(code ? { code } : {}) },
         },
-        code === "INVALID_SESSION_QUERY"
-          ? 400
-          : code === "SESSION_RECOVERY_UNSUPPORTED"
-            ? 426
-            : code === "SESSION_VIEW_UNAVAILABLE" ||
-                code === "SESSION_CONTROL_UNAVAILABLE"
-              ? 503
-              : code === "SESSION_SCOPE_CHANGED" ||
-                  code === "SESSION_CREATION_CONFLICT"
-                ? 409
-                : code === "INVALID_PERMISSION_CHOICE"
-                  ? 400
-                  : code === "PERMISSION_UNAVAILABLE"
+        code === "SUBAGENT_CLOSED"
+          ? 410
+          : code === "SUBAGENT_NOT_FOUND"
+            ? 404
+            : code === "SUBAGENT_SNAPSHOT_CHANGED"
+              ? 409
+              : code === "INVALID_SESSION_QUERY"
+                ? 400
+                : code === "SESSION_RECOVERY_UNSUPPORTED"
+                  ? 426
+                  : code === "SESSION_VIEW_UNAVAILABLE" ||
+                      code === "SESSION_CONTROL_UNAVAILABLE"
                     ? 503
-                    : code?.startsWith("PERMISSION_")
+                    : code === "SESSION_SCOPE_CHANGED" ||
+                        code === "SESSION_CREATION_CONFLICT"
                       ? 409
-                      : isDaemonForbiddenError(error)
-                        ? 403
-                        : 500,
+                      : code === "INVALID_PERMISSION_CHOICE"
+                        ? 400
+                        : code === "PERMISSION_UNAVAILABLE"
+                          ? 503
+                          : code?.startsWith("PERMISSION_")
+                            ? 409
+                            : isDaemonForbiddenError(error)
+                              ? 403
+                              : 500,
       );
     });
     registerSystemRoutes(this.app, this);

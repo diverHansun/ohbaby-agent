@@ -4,6 +4,7 @@ export { MessageEvent } from "./events.js";
 export { createMessageManager } from "./manager.js";
 export { createDatabaseMessageStore } from "./database-store.js";
 export { createInMemoryMessageStore } from "./store.js";
+export { buildRuntimeInputMessage } from "./runtime-input.js";
 export {
   escapeReminderValue,
   getMessageOrigin,

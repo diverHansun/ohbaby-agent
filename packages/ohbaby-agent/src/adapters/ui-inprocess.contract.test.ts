@@ -803,7 +803,7 @@ function createBackgroundSubagentFakeLLMClient(
                   prompt: "Background first pass",
                 },
                 callId: "call_subagent_open",
-                name: "subagent_run",
+                action: "spawn",
               }),
             ]),
           );
@@ -814,11 +814,11 @@ function createBackgroundSubagentFakeLLMClient(
               subagentControlToolCallEvent({
                 arguments: {
                   mode: "background",
-                  prompt: "Use the prior child finding",
-                  subagent_id: "subagent_1",
+                  message: "Use the prior child finding",
+                  agent_id: "subagent_1",
                 },
                 callId: "call_subagent_followup",
-                name: "subagent_run",
+                action: "send",
               }),
             ]),
           );
@@ -827,9 +827,9 @@ function createBackgroundSubagentFakeLLMClient(
           return Promise.resolve(
             createProviderStream([
               subagentControlToolCallEvent({
-                arguments: { subagent_id: "subagent_1" },
+                arguments: {},
                 callId: "call_subagent_status",
-                name: "subagent_status",
+                action: "list",
               }),
             ]),
           );
@@ -1003,7 +1003,7 @@ function createAbortableBackgroundSubagentLLMClient(
                   prompt: "Run until explicitly closed",
                 },
                 callId: "call_subagent_open_cancellable",
-                name: "subagent_run",
+                action: "spawn",
               }),
             ]),
           );
@@ -1012,9 +1012,9 @@ function createAbortableBackgroundSubagentLLMClient(
           return Promise.resolve(
             createProviderStream([
               subagentControlToolCallEvent({
-                arguments: { subagent_id: "subagent_1" },
+                arguments: { agent_id: "subagent_1" },
                 callId: "call_subagent_close_cancellable",
-                name: "subagent_close",
+                action: "close",
               }),
             ]),
           );
@@ -1093,7 +1093,7 @@ function createAbortableBackgroundRunTreeLLMClient(
                   prompt: "Run until the parent is interrupted",
                 },
                 callId: "call_subagent_run_tree",
-                name: "subagent_run",
+                action: "spawn",
               }),
             ]),
           );
@@ -1176,7 +1176,7 @@ function createCrossContinuationBackgroundLLMClient(
                   prompt: "Keep running across the next goal continuation",
                 },
                 callId: "call_cross_continuation_background",
-                name: "subagent_run",
+                action: "spawn",
               }),
             ]),
           );
@@ -1250,13 +1250,21 @@ function subagentRunToolCallEvent(input: {
   readonly role?: SubagentRole;
   readonly subagentId?: string;
 }): InterfaceProviderStreamEvent {
-  const argumentsPayload: Record<string, unknown> = {
-    description: input.description,
-    mode: input.mode ?? "foreground",
-    name: input.name,
-    prompt: input.prompt,
-    subagent_id: input.subagentId,
-  };
+  const argumentsPayload: Record<string, unknown> =
+    input.subagentId === undefined
+      ? {
+          action: "spawn",
+          description: input.description,
+          mode: input.mode ?? "foreground",
+          name: input.name,
+          prompt: input.prompt,
+        }
+      : {
+          action: "send",
+          agent_id: input.subagentId,
+          message: input.prompt,
+          mode: input.mode ?? "foreground",
+        };
   if (input.omitRole !== true && input.subagentId === undefined) {
     argumentsPayload.role = input.role ?? "explore";
   }
@@ -1266,7 +1274,7 @@ function subagentRunToolCallEvent(input: {
         argumentsDelta: JSON.stringify(argumentsPayload),
         id: input.callId,
         index: 0,
-        name: "subagent_run",
+        name: "agent",
       },
     ],
     finishReason: "tool_calls",
@@ -1276,15 +1284,18 @@ function subagentRunToolCallEvent(input: {
 function subagentControlToolCallEvent(input: {
   readonly arguments: Record<string, unknown>;
   readonly callId: string;
-  readonly name: "subagent_run" | "subagent_status" | "subagent_close";
+  readonly action: "spawn" | "send" | "list" | "close";
 }): InterfaceProviderStreamEvent {
   return {
     toolCallDeltas: [
       {
-        argumentsDelta: JSON.stringify(input.arguments),
+        argumentsDelta: JSON.stringify({
+          action: input.action,
+          ...input.arguments,
+        }),
         id: input.callId,
         index: 0,
-        name: input.name,
+        name: "agent",
       },
     ],
     finishReason: "tool_calls",
@@ -4602,7 +4613,7 @@ describe("createInProcessUiBackendClient", () => {
     }
     expect(parts[0].call).toMatchObject({
       id: "call_subagent_missing",
-      name: "subagent_run",
+      name: "agent",
       status: "failed",
     });
     expect(parts[1]?.type).toBe("tool-result");
@@ -4628,7 +4639,7 @@ describe("createInProcessUiBackendClient", () => {
           description: "Primary test agent",
           mode: "primary",
           name: "main",
-          tools: { include: ["subagent_run"] },
+          tools: { include: ["agent"] },
         },
         {
           description: "Configured exploration subagent.",
@@ -4713,7 +4724,7 @@ describe("createInProcessUiBackendClient", () => {
       expect(toolNames).toContain("todo_read");
       expect(toolNames).toContain("todo_write");
       expect(toolNames).toContain("write");
-      expect(toolNames).not.toContain("subagent_run");
+      expect(toolNames).not.toContain("agent");
       expect(toolNames).not.toContain("subagent_status");
       expect(toolNames).not.toContain("subagent_close");
     }
@@ -4780,20 +4791,10 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(childSignal?.aborted).toBe(false);
 
-    const queued = await client.submitPromptAccepted(
-      "Close the background explorer",
-      { sessionId: "session_1", clientRequestId: "close-background" },
-    );
-    const receipt = await client.steerQueuedPrompt({
-      promptId: queued.promptId,
-      expectedRunId: "run_1",
-      clientRequestId: "steer-close-background",
-    });
-    expect(receipt.status).toBe("steered");
-    if (receipt.status !== "steered")
-      throw new Error("Expected successful steer");
-    expect(receipt.receipt.acceptedTargetRunId).toBe("run_1");
     await running;
+    await client.submitPromptAndWait("Close the background explorer", {
+      sessionId: "session_1",
+    });
 
     expect(childSignal?.aborted).toBe(true);
     // close updates the subagent record synchronously and schedules run-ledger
@@ -4809,12 +4810,25 @@ describe("createInProcessUiBackendClient", () => {
       throw new Error("child run missing");
     }
     expect(childRun.sessionId).toMatch(/^session_/);
-    const closeToolResultText = JSON.stringify(
-      requests.filter((request) => !isExploreSubagentRequest(request)).at(-1)
-        ?.messages,
-    );
-    expect(closeToolResultText).toContain("previous_status: running");
-    expect(closeToolResultText).toContain("status: cancelled");
+    const closeToolResult = requests
+      .filter((request) => !isExploreSubagentRequest(request))
+      .at(-1)
+      ?.messages.find(
+        (message) =>
+          message.role === "tool" &&
+          message.callId === "call_subagent_close_cancellable",
+      );
+    expect(
+      toolMetadataFromContent(
+        typeof closeToolResult?.content === "string"
+          ? closeToolResult.content
+          : "",
+      ),
+    ).toMatchObject({
+      subagentId: "subagent_1",
+      previousStatus: "running",
+      cleanup: "confirmed",
+    });
     await vi.waitFor(() => {
       expect(destroyContext).toHaveBeenCalledWith({
         contextScopeId: "subagent_1",
@@ -4832,7 +4846,7 @@ describe("createInProcessUiBackendClient", () => {
           description: "Primary test agent",
           mode: "primary",
           name: "main",
-          tools: { include: ["subagent_run"] },
+          tools: { include: ["agent"] },
         },
         {
           description: "One-step generic child test agent",
@@ -4920,7 +4934,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(childRun?.sessionId).toMatch(/^session_/);
   });
 
-  it("interrupts an active background subagent when the parent prompt is aborted", async () => {
+  it("preserves an active background subagent when the parent prompt is aborted", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const parentContinued = createDeferred<AbortSignal | undefined>();
@@ -4958,20 +4972,20 @@ describe("createInProcessUiBackendClient", () => {
     await client.abortRun("run_1");
 
     expect(parentSignal?.aborted).toBe(true);
-    expect(childSignal?.aborted).toBe(true);
+    expect(childSignal?.aborted).toBe(false);
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
     ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
     await expect(runLedger.get("run_2")).resolves.toMatchObject({
-      status: "interrupted",
+      status: "running",
     });
     await expect(subagentStore.listByParent("session_1")).resolves.toEqual([
       expect.objectContaining({
-        pendingQueue: [],
-        status: "interrupted",
+        status: "running",
         subagentId: "subagent_1",
       }),
     ]);
+    await client.dispose();
   });
 
   it("continues the LLM loop after allow_once tool permission", async () => {
@@ -7960,7 +7974,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("keeps goal background work inside the original run until its result is handled", async () => {
+  it("yields the finished goal main run while background work remains active", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const secondTurnStarted = createDeferred<AbortSignal | undefined>();
@@ -11578,7 +11592,7 @@ it.each([false, true])(
           description: "Primary",
           mode: "primary",
           name: "main",
-          tools: { include: ["subagent_run"] },
+          tools: { include: ["agent"] },
         },
         {
           description: "Bounded child",
@@ -11648,6 +11662,11 @@ it.each([false, true])(
     });
     try {
       await client.submitPromptAndWait("Delegate a bounded background task");
+      await vi.waitFor(async () => {
+        expect(
+          await executions.list({ rootSessionId: "session_1" }),
+        ).toMatchObject([{ delivery: { state: "processed" } }]);
+      });
       expect(childRequests).toHaveLength(1);
       expect(childRequests[0]?.tools).toEqual([]);
       expect(JSON.stringify(childRequests[0]?.messages)).toContain(
@@ -11670,7 +11689,7 @@ it.each([false, true])(
         .find(
           (message) =>
             message.role === "user" &&
-            JSON.stringify(message.content).includes("Runtime subagent result"),
+            JSON.stringify(message.content).includes(`reason: ${reason}`),
         );
       expect(JSON.stringify(notification?.content)).toContain(
         `reason: ${reason}`,

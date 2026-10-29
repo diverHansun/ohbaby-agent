@@ -21,6 +21,46 @@ function setup() {
 afterEach(() => vi.useRealTimers());
 
 describe("active goal deadlines", () => {
+  it.each([false, true])(
+    "reclaims background roots after their primary settled, including a failed deadline write (%s)",
+    async (failWrite) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      const persistence = new InMemoryGoalPersistence();
+      const interruptions: GoalExecutionInterruptInput[] = [];
+      const service = new GoalService({
+        persistence,
+        executionControl: {
+          interruptGoalExecution: (input): Promise<void> => {
+            interruptions.push(input);
+            return Promise.resolve();
+          },
+        },
+      });
+      const goal = await service.createGoal("s", {
+        actor: "user",
+        objective: "delegated",
+        budgetLimits: { wallClockBudgetMs: 1000 },
+      });
+      const ticket = await service.admitTurnInBoundary(
+        "s",
+        goal.goalId,
+        service.currentExecutionEpoch("s"),
+      );
+      if (!ticket) throw new Error("Expected admission");
+      service.bindTicketRun(ticket, "settled-root");
+      await service.settleTurn("s", ticket, { status: "succeeded" });
+      if (failWrite)
+        persistence.append = (): Promise<void> =>
+          Promise.reject(new Error("disk unavailable"));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(interruptions).toMatchObject([
+        { goalId: goal.goalId, rootRunIds: ["settled-root"] },
+      ]);
+      service.dispose();
+    },
+  );
+
   it("blocks a long current run at its deadline and cancels preparation by captured ticket", async () => {
     const { service, interruptions } = setup();
     const goal = await service.createGoal("s", {

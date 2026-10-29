@@ -605,7 +605,10 @@ it("does not let an older recovery overwrite an instance claimed after another r
       rootRunId: "new-root",
       prompt: "next",
     };
-    await f.instances.appendPendingQueue("child", newPending, Date.now());
+    await f.instances.update("child", {
+      pendingQueue: [newPending],
+      updatedAt: Date.now(),
+    });
     release();
     await first;
     expect(

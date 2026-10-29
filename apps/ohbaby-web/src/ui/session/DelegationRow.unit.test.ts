@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import type { UiMessage, UiSubagentExecution, UiToolCall } from "ohbaby-sdk";
 import {
   DelegationRow,
+  isDelegationCall,
   delegationExecution,
   delegationTitle,
 } from "./DelegationRow.js";
@@ -231,4 +232,31 @@ it("shows an accepted failed child as Failed and keeps the conversation entry av
     });
     container.remove();
   }
+});
+
+it("renders new dispatches and history as delegations, while running sends stay ordinary tools", () => {
+  expect(isDelegationCall(call)).toBe(true);
+  expect(
+    isDelegationCall({ ...call, name: "agent", input: { action: "spawn" } }),
+  ).toBe(true);
+  expect(
+    isDelegationCall({
+      ...call,
+      name: "agent",
+      input: { action: "send", agent_id: "worker" },
+    }),
+  ).toBe(false);
+  expect(
+    isDelegationCall(
+      { ...call, name: "agent", input: { action: "send", agent_id: "worker" } },
+      execution,
+    ),
+  ).toBe(true);
+  for (const action of ["list", "monitor", "stop", "close"])
+    expect(
+      isDelegationCall(
+        { ...call, name: "agent", input: { action } },
+        execution,
+      ),
+    ).toBe(false);
 });

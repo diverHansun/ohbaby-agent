@@ -203,6 +203,7 @@ async function deliverFixtureResults(
 
 function createToolScheduler(): ToolSchedulerInstance {
   return {
+    getRunCleanup: () => ({ confirmed: true }),
     cancel: vi.fn(),
     cancelAll: vi.fn(),
     execute: vi.fn(),
@@ -390,10 +391,12 @@ describe("AgentInstance long task integration", () => {
       store: createInMemoryMessageStore(),
     });
     const lifecycleCalls: LifecycleSessionParams[] = [];
+    const inputReadyStatuses: string[] = [];
     const recordingLifecycle = {
       async *run(
         params: LifecycleSessionParams,
       ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+        if (params.isSubagent) expect(inputReadyStatuses).toEqual(["running"]);
         lifecycleCalls.push(params);
         await Promise.resolve();
         yield {
@@ -466,10 +469,17 @@ describe("AgentInstance long task integration", () => {
       runModel: testRunModel("fake-model"),
       initialUserMessageId: "user_subagent_identity",
       prompt: "subagent turn",
+      onInputReady: async () => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        inputReadyStatuses.push(
+          runManager.get("identity_run_2")?.status ?? "missing",
+        );
+      },
       waitMode: "waitForCompletion",
     });
 
     expect(lifecycleCalls).toHaveLength(2);
+    expect(inputReadyStatuses).toEqual(["running"]);
     expect(lifecycleCalls[0]).toMatchObject({
       initiatingUserMessageId: "user_primary_identity",
       parentMessageId: "user_primary_identity",

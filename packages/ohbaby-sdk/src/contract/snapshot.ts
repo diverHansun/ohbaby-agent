@@ -126,7 +126,8 @@ export interface UiMessage {
   readonly runtimeInputKind?:
     | "user-steer"
     | "subagent-result"
-    | "subagent-status";
+    | "subagent-status"
+    | "subagent-message";
   readonly modelRequests?: readonly UiModelRequest[];
   readonly runId?: string;
   readonly id: string;

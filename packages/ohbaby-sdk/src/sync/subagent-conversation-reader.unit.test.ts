@@ -92,6 +92,122 @@ function selection(watchId: string): UiSubagentConversationSelection {
 }
 
 describe("subagent conversation reader", () => {
+  it("does not reinstall a late baseline after its instance closes", async () => {
+    let receive: (event: UiEvent) => void = () => undefined;
+    let finish!: (view: UiSubagentConversationView) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const unwatch = vi.fn(() => Promise.resolve());
+    const reader = createSubagentConversationReader(
+      {
+        subscribeEvents: (handler): (() => void) => {
+          receive = handler;
+          return () => undefined;
+        },
+        watchSubagentConversation: () => Promise.resolve(selection("watch")),
+        unwatchSubagentConversation: unwatch,
+        getSubagentConversationView: () =>
+          new Promise((resolve) => {
+            finish = resolve;
+            entered();
+          }),
+      },
+      "root",
+    );
+    const reading = reader.select(execution("a"));
+    await started;
+    receive({
+      type: "subagent.conversation.unavailable",
+      rootSessionId: "root",
+      subagentId: "child",
+      watchId: "watch",
+      code: "SUBAGENT_CLOSED",
+      unavailable: {
+        type: "session.unavailable",
+        runtimeEpoch: "epoch",
+        sessionId: "real-session",
+        bindingGeneration: 1,
+        reason: "Subagent instance is closed",
+      },
+    });
+    finish(conversation());
+    await reading;
+    expect(reader.getSnapshot().conversation).toBeUndefined();
+    expect(reader.getSnapshot().error).toBe("Subagent instance is closed");
+    expect(unwatch).toHaveBeenCalledWith(
+      expect.objectContaining({ watchId: "watch" }),
+    );
+    reader.dispose();
+  });
+  it.each(["event", "read"] as const)(
+    "releases its watch and stops reconnecting after a closed-instance %s",
+    async (kind) => {
+      let receive: (event: UiEvent) => void = () => undefined;
+      const watch = vi.fn(() => Promise.resolve(selection("watch")));
+      const unwatch = vi.fn(() => Promise.resolve());
+      const read = vi.fn(() => Promise.resolve(conversation()));
+      const reader = createSubagentConversationReader(
+        {
+          subscribeEvents: (handler): (() => void) => {
+            receive = handler;
+            return () => undefined;
+          },
+          watchSubagentConversation: watch,
+          unwatchSubagentConversation: unwatch,
+          getSubagentConversationView: read,
+        },
+        "root",
+      );
+      await reader.select(execution("a"));
+      if (kind === "event")
+        receive({
+          type: "subagent.conversation.unavailable",
+          rootSessionId: "root",
+          subagentId: "child",
+          watchId: "watch",
+          code: "SUBAGENT_CLOSED",
+          unavailable: {
+            type: "session.unavailable",
+            runtimeEpoch: "epoch",
+            sessionId: "real-session",
+            bindingGeneration: 1,
+            reason: "Subagent instance is closed",
+          },
+        });
+      else {
+        read.mockRejectedValueOnce(
+          Object.assign(new Error("Subagent instance is closed"), {
+            code: "SUBAGENT_CLOSED",
+          }),
+        );
+        await reader.loadEarlier();
+      }
+      expect(unwatch).toHaveBeenCalledWith(
+        expect.objectContaining({ watchId: "watch" }),
+      );
+      expect(reader.getSnapshot()).toMatchObject({
+        loading: false,
+        locating: false,
+        reconnecting: false,
+        error: "Subagent instance is closed",
+      });
+      expect(reader.getSnapshot().conversation).toBeUndefined();
+      const reads = read.mock.calls.length;
+      receive({
+        type: "session.resync-required",
+        runtimeEpoch: "new-epoch",
+        sessionId: "root",
+        disconnected: false,
+      });
+      await reader.refresh();
+      await reader.jumpToLatest();
+      expect(watch).toHaveBeenCalledTimes(1);
+      expect(read).toHaveBeenCalledTimes(reads);
+      reader.dispose();
+    },
+  );
   it("cancels an in-flight watch by its preallocated ID before its response arrives", async () => {
     let finish: (selection: UiSubagentConversationSelection) => void = () =>
       undefined;

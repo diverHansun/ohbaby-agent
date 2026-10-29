@@ -22,6 +22,8 @@ const NESTED_SIGNAL_ARGUMENTS = new Map<PropertyKey, number>([
   ["getSessionControl", 0],
   ["getPromptReceipt", 0],
   ["listSubagentExecutions", 0],
+  ["listSubagentInstances", 0],
+  ["stopSubagent", 0],
   ["getSubagentExecutionView", 0],
   ["getSubagentConversationView", 0],
   ["watchSubagentConversation", 0],

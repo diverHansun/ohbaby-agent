@@ -412,6 +412,80 @@ for (const backend of ["memory", "sqlite"] as const)
       ).toEqual(["reserved-message", "assistant"]);
       expect(await f.messages.listBySession("session")).toHaveLength(3);
     });
+    it.each(["subagent-result", "subagent-message"] as const)(
+      "retains failed %s attempts for audit without replaying them after close",
+      async (source) => {
+        const f = await fixture();
+        await f.inputs.acceptRuntimeInput({
+          inputId: "failed-input",
+          source,
+          sourceId: "source",
+          runId: "run-a",
+          sessionId: "session",
+          message: {
+            info: {
+              id: "input-message",
+              role: "user",
+              agent: "default",
+              runId: "run-a",
+              sessionId: "session",
+              time: { created: 1 },
+            },
+            parts: [
+              {
+                id: "input-part",
+                messageId: "input-message",
+                sessionId: "session",
+                orderIndex: 0,
+                type: "text",
+                text: "Unprocessed prior input",
+              },
+            ],
+          },
+        });
+        await f.messages.createMessage({
+          id: "assistant",
+          role: "assistant",
+          agent: "default",
+          runId: "run-a",
+          sessionId: "session",
+        });
+        const request = {
+          requestId: "failed-attempt",
+          runId: "run-a",
+          messageId: "assistant",
+          step: 1,
+          attempt: 1,
+          purpose: "agent-step" as const,
+          startedAt: 1,
+          outcome: "running" as const,
+          inputIds: ["failed-input"],
+        };
+        await f.inputs.admitRequestAttempt(request);
+        await f.messages.updateMessage("assistant", {
+          modelRequests: [{ ...request, outcome: "error", endedAt: 2 }],
+        });
+        await f.inputs.close("run-a", "stopped");
+        const reader =
+          backend === "sqlite"
+            ? new DatabaseCurrentRunInputStore({ db: getDatabase() })
+            : f.inputs;
+        const input = await reader.getInput("failed-input");
+        expect(input).toMatchObject({
+          firstAttemptRequestId: "failed-attempt",
+        });
+        expect(typeof input?.closedAt).toBe("number");
+        const stored = await f.messages.listBySession("session");
+        expect(stored.map((message) => message.info.id)).toContain(
+          "input-message",
+        );
+        expect(
+          (await reader.filterModelHistory(stored)).map(
+            (message) => message.info.id,
+          ),
+        ).toEqual(["assistant"]);
+      },
+    );
     it("serializes Steer against normal claim and does not admit foreign scope or duplicate changed request membership", async () => {
       const f = await fixture();
       await expect(

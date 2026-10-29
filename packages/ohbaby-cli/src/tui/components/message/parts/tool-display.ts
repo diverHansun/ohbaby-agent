@@ -63,7 +63,12 @@ export function renderToolDisplay(
   // Status results are machine receipts (IDs, scopes and execution arrays).
   // The existing Subagents browser owns these details, including under Ctrl+O.
   // Run/close results may contain failures without result.error: retain them.
-  if (call.name === "subagent_status") return rows;
+  if (
+    call.name === "subagent_status" ||
+    (call.name === "agent" &&
+      (call.input.action === "list" || call.input.action === "monitor"))
+  )
+    return rows;
   if (details?.kind === "mutation" && details.dryRun)
     body("Dry run", theme.status.waiting);
   if (details?.kind === "bash" && details.jobId && details.status === "running")
@@ -220,14 +225,20 @@ function limitTitle(rows: string[], budget: number, width: number): string[] {
 }
 
 function primaryInput(call: UiToolCall): string {
-  if (call.name === "subagent_status") return "";
-  const keys = call.name.startsWith("subagent_")
-    ? ["name", "subagent_id"]
-    : ["task_output", "task_kill"].includes(call.name)
-      ? ["job_id"]
-      : ["grep", "glob"].includes(call.name)
-        ? ["pattern", "query", "path", "file_path"]
-        : ["command", "file_path", "path", "pattern", "query"];
+  if (
+    call.name === "subagent_status" ||
+    (call.name === "agent" &&
+      (call.input.action === "list" || call.input.action === "monitor"))
+  )
+    return "";
+  const keys =
+    call.name === "agent" || call.name.startsWith("subagent_")
+      ? ["name", "agent_id", "subagent_id"]
+      : ["task_output", "task_kill"].includes(call.name)
+        ? ["job_id"]
+        : ["grep", "glob"].includes(call.name)
+          ? ["pattern", "query", "path", "file_path"]
+          : ["command", "file_path", "path", "pattern", "query"];
   const values = keys.flatMap((key) =>
     typeof call.input[key] === "string" && call.input[key] !== ""
       ? [safeText(call.input[key])]
@@ -237,7 +248,7 @@ function primaryInput(call: UiToolCall): string {
     return ["grep", "glob"].includes(call.name)
       ? values.join(" ")
       : (values[0] ?? "");
-  if (call.name.startsWith("subagent_")) return "";
+  if (call.name === "agent" || call.name.startsWith("subagent_")) return "";
   return Object.entries(call.input)
     .filter(
       ([key, value]) =>

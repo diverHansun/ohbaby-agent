@@ -76,8 +76,9 @@ async function fixture(delegate: boolean, childTimeoutMs?: number) {
               }
             : delegate && !child
               ? tool(
-                  "subagent_run",
+                  "agent",
                   {
+                    action: "spawn",
                     role: "generic",
                     prompt: "Run one harmless bash command",
                     mode: "foreground",

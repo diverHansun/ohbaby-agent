@@ -394,3 +394,29 @@ it.each([
     }
   },
 );
+
+it.each(["list", "monitor"])(
+  "hides machine-only agent %s records but preserves errors",
+  (action) => {
+    const input = { action, agent_ids: ["internal-agent"] };
+    expect(
+      text(
+        display("agent", input, { output: '{"records":["internal"]}' }, true),
+      ),
+    ).toBe("Agent");
+    expect(
+      text(display("agent", input, { error: "Lookup failed" }, true)),
+    ).toContain("Lookup failed");
+  },
+);
+it("labels agent sends by stable ID without showing the message", () => {
+  expect(
+    text(
+      display(
+        "agent",
+        { action: "send", agent_id: "agent-1", message: "PRIVATE" },
+        {},
+      ),
+    ),
+  ).toBe("Agent agent-1");
+});

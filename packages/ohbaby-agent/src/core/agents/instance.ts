@@ -27,6 +27,7 @@ class DefaultAgentInstance implements AgentInstance {
 
   turn(input: AgentTurnInput): ReturnType<AgentInstance["turn"]> {
     return this.runner(this.deps, {
+      ...(input.onInputReady ? { onInputReady: input.onInputReady } : {}),
       runModel: input.runModel,
       ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
       agentName: this.identity.agentName,

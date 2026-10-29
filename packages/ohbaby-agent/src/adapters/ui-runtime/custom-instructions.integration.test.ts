@@ -28,6 +28,7 @@ type Protocol = (typeof protocols)[number];
 type WireRequest = Record<string, unknown>;
 
 const delegateArguments = JSON.stringify({
+  action: "spawn",
   role: "explore",
   mode: "foreground",
   prompt: "Inspect the delegated task and report done.",
@@ -54,7 +55,7 @@ function reply(protocol: Protocol, delegate: boolean): Response {
                       id: "call_delegate",
                       type: "function",
                       function: {
-                        name: "subagent_run",
+                        name: "agent",
                         arguments: delegateArguments,
                       },
                     },
@@ -89,7 +90,7 @@ function reply(protocol: Protocol, delegate: boolean): Response {
           ? {
               type: "tool_use",
               id: "call_delegate",
-              name: "subagent_run",
+              name: "agent",
               input: {},
             }
           : { type: "text", text: "" },
@@ -124,7 +125,7 @@ function reply(protocol: Protocol, delegate: boolean): Response {
           id: "item_delegate",
           type: "function_call",
           call_id: "call_delegate",
-          name: "subagent_run",
+          name: "agent",
           arguments: delegateArguments,
           status: "completed",
         }
@@ -326,7 +327,7 @@ describe.each(protocols)(
       const sandboxManager = createHostLocalSandboxManager(projectRoot);
       const acquire = sandboxManager.acquire.bind(sandboxManager);
       // A host sandbox may execute tools below the session's project boundary.
-      // Children inherit this actual tool environment through subagent_run.
+      // Children inherit this actual tool environment through agent.
       vi.spyOn(sandboxManager, "acquire").mockImplementation((input) =>
         acquire(
           typeof input === "string"
@@ -407,7 +408,7 @@ describe.each(protocols)(
         expect(systems[1]).toContain("<subagent_base>");
         expect(systems[1]).toContain("Task: explore");
         expect(systems[1]).not.toContain("You are Lychee");
-        expect(systems[1]).not.toContain("Subagent roles for subagent_run");
+        expect(systems[1]).not.toContain("Subagent roles for agent");
         expect(JSON.stringify(requests[1])).toContain(
           JSON.stringify(workdir).slice(1, -1),
         );

@@ -59,6 +59,42 @@ for (const backend of ["memory", "sqlite"] as const)
       await database();
       return new DatabaseSubagentExecutionStore({ db: getDatabase() });
     }
+    it("rebinds an unprocessed delivery to a new run without reopening its wakeup claim", async () => {
+      const s = await store();
+      await s.accept(input());
+      await s.finish(lookup, {
+        status: "completed",
+        output: "result",
+        completedAt: 2,
+      });
+      expect(await s.claimWakeup(lookup, 3)).toBe(true);
+      expect(await s.claimWakeup(lookup, 4)).toBe(false);
+      await s.markDelivered(lookup, "old-run-input", 5);
+      await expect(
+        s.markDelivered(lookup, "new-run-input", 6, "wrong-input"),
+      ).rejects.toThrow(/conflict/i);
+      await s.markDelivered(lookup, "new-run-input", 6, "old-run-input");
+      expect((await s.get(lookup))?.delivery).toMatchObject({
+        notificationId: "subagent-result:exec-1",
+        inputId: "new-run-input",
+        wakeupAttemptedAt: 3,
+      });
+      await s.markProcessed(lookup, "successful-request", 7);
+      await expect(
+        s.markDelivered(lookup, "third-run-input", 8, "new-run-input"),
+      ).rejects.toThrow(/conflict/i);
+    });
+    it("does not turn an explicit background stop into another parent wakeup", async () => {
+      const s = await store();
+      await s.accept(input());
+      await s.finish(lookup, {
+        status: "interrupted",
+        reason: "user-stop",
+        completedAt: 2,
+      });
+      expect((await s.get(lookup))?.delivery.state).toBe("none");
+      expect(await s.claimWakeup(lookup, 3)).toBe(false);
+    });
     it("reserves stable child message identity and acceptance order, including same-millisecond nested calls", async () => {
       const s = await store();
       const first = (await s.accept(input({ createdAt: 7 }))).record;

@@ -1,4 +1,5 @@
 import { CallDelivery, ToolDeliveryError } from "./delivery.js";
+import { RunCleanupTracker, type ToolCleanupState } from "./run-cleanup.js";
 import {
   getSourceCleanupState,
   SourceCleanupUnavailableError,
@@ -620,6 +621,7 @@ export function createToolScheduler(
   const now = options.now ?? Date.now;
   const calls = new Map<string, ToolCall>();
   const controllers = new Map<string, AbortController>();
+  const runCleanup = new RunCleanupTracker();
   const identity = (
     call: Pick<ToolCallRequest, "sessionId" | "runId" | "messageId" | "callId">,
   ): string =>
@@ -860,21 +862,26 @@ export function createToolScheduler(
       throw error;
     }
     takeOwnership();
+    const cleanup = runCleanup.begin(owner.runId);
     let timedOut = false;
     let settled = false;
     let deadline: NodeJS.Timeout | undefined;
     let observation: NodeJS.Timeout | undefined;
     let cleaning = false;
     let startPublished = false;
-    const earlyCleanup: ("in-progress" | "unconfirmed" | "confirmed")[] = [];
+    const earlyCleanup: ToolCleanupState[] = [];
     let rejectAbort!: (reason: unknown) => void;
     const abortPromise = new Promise<never>((_resolve, reject) => {
       rejectAbort = reject;
     });
     const toolOwnsCleanup = trustedToolAdmission(tool)?.cleanupOwner === "tool";
+    const detachedCleanup =
+      toolOwnsCleanup &&
+      trustedToolAdmission(tool)?.detachedCleanup?.(params) === true;
     const onAbort = (): void => {
       if (!settled && !cleaning && !toolOwnsCleanup) {
         cleaning = true;
+        cleanup.report("in-progress");
         // The original resource owner and scope reference already exist before
         // returning a logical result or making ordinary capacity available.
         if (startPublished)
@@ -928,9 +935,11 @@ export function createToolScheduler(
               }
             : undefined,
           reportCleanup: toolOwnsCleanup
-            ? (cleanup): void => {
-                if (startPublished) publish({ phase: "cleanup", cleanup });
-                else earlyCleanup.push(cleanup);
+            ? (state): void => {
+                if (!detachedCleanup) cleanup.report(state);
+                if (startPublished)
+                  publish({ phase: "cleanup", cleanup: state });
+                else earlyCleanup.push(state);
               }
             : undefined,
         }),
@@ -960,18 +969,29 @@ export function createToolScheduler(
       settled = true;
       if (observation) clearTimeout(observation);
       resourceLease.release();
-      if (releaseEnvironment)
-        void Promise.resolve()
-          .then(releaseEnvironment)
-          .catch((error: unknown) => {
-            options.onExecutionFactError?.(error, {
-              owner,
-              phase: "cleanup",
-              timestamp: now(),
-              cleanup: "unconfirmed",
-            });
-          });
-      if (cleaning)
+      cleanup.settle(
+        releaseEnvironment
+          ? async (): Promise<void> => {
+              try {
+                await releaseEnvironment();
+              } catch (error) {
+                options.onExecutionFactError?.(error, {
+                  owner,
+                  phase: "cleanup",
+                  timestamp: now(),
+                  cleanup: "unconfirmed",
+                });
+                throw error;
+              }
+            }
+          : undefined,
+      );
+      if (cleaning) {
+        cleanup.report(
+          trustedToolAdmission(tool)?.settlementConfirmsCleanup === false
+            ? "unconfirmed"
+            : "confirmed",
+        );
         publish({
           phase: "cleanup",
           cleanup:
@@ -979,6 +999,7 @@ export function createToolScheduler(
               ? "unconfirmed"
               : "confirmed",
         });
+      }
     };
     // Both branches observe the original operation, including rejection after
     // timeout. Cleanup observation failure never stands in for this settlement.
@@ -1622,6 +1643,10 @@ export function createToolScheduler(
       const environment = executionEnvironmentFor(prepared);
       let params = executionParamsFor(prepared);
       const admission = trustedToolAdmission(tool);
+      const capacityKind =
+        typeof admission?.capacity === "function"
+          ? admission.capacity(params)
+          : (admission?.capacity ?? "ordinary");
       const access = await waitForAbortable(
         () =>
           admission?.resolve?.(params, contextFor(prepared, environment)) ?? {
@@ -1637,8 +1662,8 @@ export function createToolScheduler(
           )
         : undefined;
       const sourceSensitive =
-        admission?.capacity !== "control" &&
-        admission?.capacity !== "dispatch" &&
+        capacityKind !== "control" &&
+        capacityKind !== "dispatch" &&
         (access.resources.some((resource) => resource.kind === "file") ||
           (plannedResources === undefined &&
             admission?.resolve === undefined) ||
@@ -1668,10 +1693,7 @@ export function createToolScheduler(
         admissionWait: sourceWait,
         canAcquire: () => {
           if (isStopped(call, controller)) return false;
-          capacity = concurrency.tryAcquire(
-            admission?.capacity ?? "ordinary",
-            call.sessionId,
-          );
+          capacity = concurrency.tryAcquire(capacityKind, call.sessionId);
           return capacity !== undefined;
         },
         onWait: (reason) => {
@@ -1982,7 +2004,10 @@ export function createToolScheduler(
     if (basicError)
       return { result: makeImmediateErrorResult(request, basicError) };
     const tool = registry.get(request.toolName);
-    const category = registry.getCategory(request.toolName) ?? "write";
+    const category =
+      (tool && trustedToolAdmission(tool)?.category?.(request.params)) ??
+      registry.getCategory(request.toolName) ??
+      "write";
     // Register identity and cancellation before any asynchronous policy lookup.
     const call = createCall(request, category);
     const controller = new AbortController();
@@ -2521,5 +2546,6 @@ export function createToolScheduler(
     getPendingCalls(): ToolCall[] {
       return Array.from(calls.values()).filter((call) => !isFinal(call.status));
     },
+    getRunCleanup: (runId) => runCleanup.snapshot(runId),
   };
 }

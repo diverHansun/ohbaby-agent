@@ -256,7 +256,7 @@ describe("composition resource admission across real sessions", () => {
       expect(childResult.output).toContain("after");
       expect(owners.get("read-child")).toMatchObject({
         sessionId: child.id,
-        rootRunId: "run-primary",
+        rootRunId: "run-child",
         executionId: "child-execution",
         rootSessionId: primary.id,
         contextScopeId: "child-scope",

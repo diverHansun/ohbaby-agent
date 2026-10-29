@@ -80,6 +80,24 @@ async function setup(output: string, requesterScopeId = "scope") {
   return { rootDir, store, storage, artifacts, lookup };
 }
 describe("execution result artifacts", () => {
+  it("includes the original task, stable name and unconsumed-message warning in automatic delivery", async () => {
+    const { store, storage, rootDir, lookup } = await setup("final report");
+    const artifacts = createSubagentResultArtifacts({
+      store,
+      storage,
+      rootDir,
+      sessionExists: () => Promise.resolve(true),
+      readDeliveryContext: () =>
+        Promise.resolve({ name: "Researcher", unprocessedMessageCount: 2 }),
+    });
+    const inline = await artifacts.prepare(lookup);
+    const file = await artifacts.prepare(lookup, { forceFile: true });
+    for (const result of [inline, file]) {
+      expect(result.body).toContain('name: "Researcher"');
+      expect(result.body).toContain('task: "report"');
+      expect(result.body).toContain("unprocessed_messages: 2 (not consumed");
+    }
+  });
   it.each([51199, 51200, 51201])(
     "preserves the complete UTF-8 report at %i bytes",
     async (size) => {

@@ -123,7 +123,7 @@ const writers = [
   "workspace injected",
   "goal",
   "subagent create",
-  "subagent append",
+  "subagent legacy queue update",
   "subagent claim",
   "subagent update",
   "subagent finish",
@@ -292,8 +292,11 @@ it.each(writers)(
           subagentId: "a2",
           contextScopeId: "child2",
         }),
-      "subagent append": () =>
-        subagents.appendPendingQueue("a", { prompt: "next" }, 2),
+      "subagent legacy queue update": () =>
+        subagents.update("a", {
+          pendingQueue: [{ prompt: "legacy" }],
+          updatedAt: 2,
+        }),
       "subagent claim": () =>
         subagents.claim("a", { status: "running", updatedAt: 2 }),
       "subagent update": () =>

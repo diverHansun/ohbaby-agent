@@ -176,9 +176,9 @@ describe("createSystemPromptProvider", () => {
       toolNames: [],
     });
 
-    expect(primaryPrompt).toContain("Subagent roles for subagent_run");
+    expect(primaryPrompt).toContain("Subagent roles for agent spawn");
     expect(primaryPrompt).toContain("Omit role to use generic");
-    expect(subagentPrompt).not.toContain("Subagent roles for subagent_run");
+    expect(subagentPrompt).not.toContain("Subagent roles for agent spawn");
     expect(availableSubagentRolesProvider).toHaveBeenCalledTimes(1);
   });
 

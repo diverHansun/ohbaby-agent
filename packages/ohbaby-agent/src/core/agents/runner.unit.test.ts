@@ -189,6 +189,7 @@ function createToolScheduler(
     getAvailableTools,
     getCategory: vi.fn(),
     getPendingCalls: vi.fn(),
+    getRunCleanup: () => ({ confirmed: true }),
     getStatus: vi.fn(),
     register: vi.fn(),
     registerCategory: vi.fn(),

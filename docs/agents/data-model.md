@@ -1,6 +1,6 @@
 # agents 模块 data-model.md
 
-> **状态：已被取代。** 本文仍描述旧 `Task` 工具、旧 timeout/maxSteps 与旧 subagent 调用模型，不再作为当前实现规范。当前 subagent instance/context/queue/timeout 语义以 [`2026-07-09-subagent-context`](./2026-07-09-subagent-context/README.md) 和 [`dfd-interface.md`](./dfd-interface.md) 为准。
+> **状态：已被取代。** 本文仍描述旧 `Task` 工具、旧 timeout/maxSteps 与旧 subagent 调用模型，不再作为当前实现规范。当前 subagent instance、执行名额、消息与结果交付语义以 [`dfd-interface.md`](./dfd-interface.md) 为准；旧设计目录保留作决策历史。
 
 本文档定义 `agents` 模块的核心数据类型与概念。
 

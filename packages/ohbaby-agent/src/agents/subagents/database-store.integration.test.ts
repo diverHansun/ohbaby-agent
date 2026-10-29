@@ -52,6 +52,117 @@ afterEach(async () => {
 });
 
 describe("DatabaseSubagentInstanceStore", () => {
+  it("publishes committed instance changes, isolates observers and ignores rejected writes", async () => {
+    const store = await initFixture();
+    const observed: string[] = [];
+    const unsubscribe = store.subscribe((record) => {
+      observed.push(record.status);
+    });
+    store.subscribe(() => {
+      throw new Error("observer failed");
+    });
+    const record = {
+      subagentId: "notify",
+      contextScopeId: "notify-scope",
+      sessionId: "child_1",
+      parentSessionId: "parent_1",
+      role: "explore" as const,
+      initialPrompt: "inspect",
+      status: "pending" as const,
+      pendingQueue: [],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    await store.create(record);
+    await expect(store.create(record)).rejects.toThrow();
+    await store.claim("notify", {
+      status: "running",
+      currentRunId: "run",
+      updatedAt: 2,
+    });
+    await store.claim("notify", {
+      status: "running",
+      currentRunId: "duplicate",
+      updatedAt: 3,
+    });
+    await store.finishRun("notify", "wrong-run", {
+      status: "failed",
+      updatedAt: 4,
+    });
+    await store.finishRun("notify", "run", {
+      status: "completed",
+      updatedAt: 5,
+    });
+    await store.update("notify", {
+      closedAt: 6,
+      status: "cancelled",
+      updatedAt: 6,
+    });
+    expect(observed).toEqual(["pending", "running", "completed", "cancelled"]);
+    unsubscribe();
+    await store.update("notify", { updatedAt: 7 });
+    expect(observed).toHaveLength(4);
+  });
+  it("publishes each recovery once and preserves legacy queue closure evidence", async () => {
+    const store = await initFixture();
+    const base = {
+      sessionId: "child_1",
+      parentSessionId: "parent_1",
+      role: "explore" as const,
+      initialPrompt: "inspect",
+      status: "running" as const,
+      pendingQueue: [{ prompt: "old queued", executionId: "old-execution" }],
+      currentInput: { prompt: "old current", executionId: "old-execution" },
+      currentRunId: "old-run",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    await store.create({
+      ...base,
+      subagentId: "repair",
+      contextScopeId: "repair",
+    });
+    await store.create({
+      ...base,
+      subagentId: "orphan",
+      contextScopeId: "orphan",
+    });
+    const events: string[] = [];
+    store.subscribe((record) => {
+      events.push(record.subagentId);
+    });
+    const recovery = {
+      subagentId: "repair",
+      executionIds: ["old-execution"],
+      rootRunIds: [],
+      expectedCurrentRunId: "old-run",
+      at: 10,
+    };
+    await store.recoverExecutionInputs(recovery);
+    await store.recoverExecutionInputs({ ...recovery, at: 20 });
+    await store.markInterrupted({
+      recoverUnknownOwner: true,
+      interruptedAt: 30,
+    });
+    await store.markInterrupted({
+      recoverUnknownOwner: true,
+      interruptedAt: 40,
+    });
+    expect(events).toEqual(["repair", "orphan"]);
+    for (const subagentId of events) {
+      const saved = await store.get({
+        subagentId,
+        parentSessionId: "parent_1",
+      });
+      expect(saved?.pendingQueue[0]).toMatchObject({
+        prompt: "old queued",
+        closeReason: "runtime interrupted",
+      });
+      expect(saved?.pendingQueue[0].closedAt).toBe(
+        subagentId === "repair" ? 10 : 30,
+      );
+    }
+  });
   it.each([0, -1, 1.5, NaN, Infinity])(
     "preserves invalid owner PID %s even when ownerId matches",
     async (ownerPid) => {
@@ -108,59 +219,18 @@ describe("DatabaseSubagentInstanceStore", () => {
         updatedAt: 1,
         ...(closed ? { closedAt: 0 } : {}),
       });
-      const queued = await store.appendPendingQueue(
-        "cancelled_child",
-        { prompt: "resume" },
-        2,
-      );
       const claimed = await store.claim("cancelled_child", {
         currentRunId: "next",
         status: "running",
         updatedAt: 3,
       });
       if (closed) {
-        expect(queued).toBeNull();
         expect(claimed).toBeNull();
       } else {
-        expect(queued?.pendingQueue).toEqual([{ prompt: "resume" }]);
         expect(claimed?.status).toBe("running");
       }
     },
   );
-
-  it("atomically appends durable queue entries without replacing prior prompts", async () => {
-    const store = await initFixture();
-    await store.create({
-      contextScopeId: "scope_append",
-      createdAt: 1,
-      initialPrompt: "initial",
-      parentSessionId: "parent_1",
-      pendingQueue: [{ prompt: "initial" }],
-      role: "explore",
-      sessionId: "child_1",
-      status: "pending",
-      subagentId: "subagent_append",
-      updatedAt: 1,
-    });
-
-    await Promise.all(
-      ["second", "third", "fourth"].map((prompt, index) =>
-        store.appendPendingQueue("subagent_append", { prompt }, index + 2),
-      ),
-    );
-
-    await expect(
-      store.get({ parentSessionId: "parent_1", subagentId: "subagent_append" }),
-    ).resolves.toMatchObject({
-      pendingQueue: [
-        { prompt: "initial" },
-        { prompt: "second" },
-        { prompt: "third" },
-        { prompt: "fourth" },
-      ],
-      updatedAt: 4,
-    });
-  });
 
   it("claims only once and prevents late run completion from overwriting close", async () => {
     const store = await initFixture();
@@ -525,7 +595,7 @@ describe("recoverExecutionInputs", () => {
     at: 100,
   };
 
-  it("removes only old inputs and seals its original current run once", async () => {
+  it("closes only old inputs and seals its original current run once", async () => {
     const store = await initFixture();
     await store.create(base);
     const recovered = await store.recoverExecutionInputs(recovery);
@@ -534,7 +604,14 @@ describe("recoverExecutionInputs", () => {
       interruptedAt: 100,
       completedAt: 100,
       lastRunId: "old-run",
-      pendingQueue: base.pendingQueue.slice(1),
+      pendingQueue: [
+        {
+          ...base.pendingQueue[0],
+          closedAt: 100,
+          closeReason: "runtime interrupted",
+        },
+        ...base.pendingQueue.slice(1),
+      ],
     });
     expect(recovered.currentInput).toBeUndefined();
     expect(recovered.currentRunId).toBeUndefined();
@@ -565,8 +642,14 @@ describe("recoverExecutionInputs", () => {
       rootRunId: "new-root",
       prompt: "new pending",
     };
-    await store.appendPendingQueue(base.subagentId, base.pendingQueue[0], 102);
-    await store.appendPendingQueue(base.subagentId, newPending, 103);
+    await store.update(base.subagentId, {
+      pendingQueue: [
+        ...base.pendingQueue.slice(1),
+        base.pendingQueue[0],
+        newPending,
+      ],
+      updatedAt: 103,
+    });
     const recovered = await store.recoverExecutionInputs({
       ...recovery,
       at: 200,
@@ -577,7 +660,15 @@ describe("recoverExecutionInputs", () => {
       ownerPid: 202,
       currentRunId: "new-run",
       currentInput: nextInput,
-      pendingQueue: [...base.pendingQueue.slice(1), newPending],
+      pendingQueue: [
+        ...base.pendingQueue.slice(1),
+        {
+          ...base.pendingQueue[0],
+          closedAt: 200,
+          closeReason: "runtime interrupted",
+        },
+        newPending,
+      ],
     });
     expect(
       await store.recoverExecutionInputs({ ...recovery, at: 300 }),

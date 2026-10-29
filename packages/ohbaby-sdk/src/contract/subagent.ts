@@ -87,6 +87,7 @@ export interface UiSubagentConversationQuery extends UiSubagentQuery {
   readonly after?: string;
   readonly anchorExecutionId?: string;
 }
+/** Current instance status for the title comes from the instance-list snapshot, not historical executions. */
 export interface UiSubagentConversationView {
   /** Stable instance name; absent only on older servers. */
   readonly displayName?: string;
@@ -121,6 +122,8 @@ export interface UiSubagentConversationUnavailableEvent {
   readonly rootSessionId: string;
   readonly subagentId: string;
   readonly watchId?: string;
+  /** A closed instance is terminal: release its watch instead of reconnecting. */
+  readonly code?: "SUBAGENT_CLOSED";
   readonly unavailable: UiSessionUnavailableEvent;
 }
 export type UiSubagentConversationEvent =

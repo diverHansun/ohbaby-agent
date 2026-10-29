@@ -85,8 +85,9 @@ describe("actual in-process child approvals", () => {
                     "child-call",
                   )
                 : tool(
-                    "subagent_run",
+                    "agent",
                     {
+                      action: "spawn",
                       role: "generic",
                       prompt: "Run one harmless local command",
                       mode: "foreground",

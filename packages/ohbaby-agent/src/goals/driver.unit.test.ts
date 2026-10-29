@@ -71,6 +71,25 @@ function scriptedRunner(
 }
 
 describe("driveGoal", () => {
+  it("yields an active goal after a successful turn when only background work remains", async () => {
+    const store = await makeActiveStore();
+    const { runner, prompts } = scriptedRunner(
+      () => ({ status: "succeeded" }),
+      store,
+    );
+    runner.shouldWaitForSubagents = (): Promise<boolean> =>
+      Promise.resolve(true);
+    await driveGoal({
+      store,
+      runner,
+      sessionId: "s1",
+      safetyCapTurns: 3,
+      pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
+    });
+    expect(prompts).toHaveLength(1);
+    expect(store.getSnapshot()?.status).toBe("active");
+  });
   it("uses a 1000-turn system safety cap", () => {
     expect(GOAL_SAFETY_CAP_TURNS).toBe(1000);
   });

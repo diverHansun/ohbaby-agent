@@ -59,18 +59,16 @@ describe("permission classifier", () => {
   });
 
   it("classifies subagent and skill tools", () => {
-    expect(classifyPermissionCall(call("subagent_run"))).toMatchObject({
-      category: "subagent",
-      kind: "subagent",
-    });
-    expect(classifyPermissionCall(call("subagent_status"))).toMatchObject({
-      category: "subagent",
-      kind: "subagent",
-    });
-    expect(classifyPermissionCall(call("subagent_close"))).toMatchObject({
-      category: "subagent",
-      kind: "subagent",
-    });
+    for (const action of ["spawn", "send", "stop", "close", "unknown"]) {
+      expect(
+        classifyPermissionCall(call("agent", { action }, "readonly")),
+      ).toMatchObject({ category: "subagent", kind: "subagent" });
+    }
+    for (const action of ["list", "monitor"]) {
+      expect(
+        classifyPermissionCall(call("agent", { action }, "subagent")),
+      ).toMatchObject({ category: "readonly", kind: "readonly" });
+    }
     expect(classifyPermissionCall(call("skill", { name: "review" }))).toEqual(
       expect.objectContaining({
         category: "skill",

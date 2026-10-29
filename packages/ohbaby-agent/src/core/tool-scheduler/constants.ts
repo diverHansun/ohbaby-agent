@@ -24,13 +24,7 @@ export const BUILTIN_TOOL_CATEGORIES: Record<string, ToolCategory> = {
   web_fetch: "network",
   web_search: "network",
   skill: "skill",
-  subagent_run: "subagent",
-  subagent_status: "subagent-control",
-  subagent_close: "subagent-control",
+  agent: "subagent",
 };
 
-export const SUBAGENT_DISABLED_TOOLS = new Set([
-  "subagent_run",
-  "subagent_status",
-  "subagent_close",
-]);
+export const SUBAGENT_DISABLED_TOOLS = new Set(["agent"]);

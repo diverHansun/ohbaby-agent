@@ -223,11 +223,7 @@ describe("AgentRegistry", () => {
   });
 
   it("rejects subagents that explicitly include recursive tools", async () => {
-    for (const toolName of [
-      "subagent_run",
-      "subagent_status",
-      "subagent_close",
-    ]) {
+    for (const toolName of ["agent"]) {
       const registry = new AgentRegistry({
         configLoader: (): AgentsConfig => ({
           agents: {

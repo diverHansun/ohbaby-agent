@@ -1,19 +1,12 @@
-import { RuntimeInputSnapshotChangedError } from "../../core/lifecycle/runtime-input-error.js";
+import { SUBAGENT_RESULT_SOURCE_PREFIX } from "./execution-store.js";
 import type { LifecycleRunInputPort } from "../../core/lifecycle/types.js";
-import type { MessageWithParts } from "../../core/message/index.js";
-import type {
-  CurrentRunInputStore,
-  CurrentRunInputRecord,
-} from "../../runtime/prompt-scheduler/current-run-inputs.js";
+import { buildRuntimeInputMessage } from "../../core/message/index.js";
+import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import type {
   SubagentExecutionStore,
   SubagentExecutionRecord,
 } from "./execution-store.js";
 import type { PreparedSubagentResult } from "./result-artifacts.js";
-import {
-  renderExecutionFacts,
-  type ExecutionFactView,
-} from "./execution-facts.js";
 
 export interface SubagentWaitState {
   readonly waiting: boolean;
@@ -24,13 +17,33 @@ interface RunIdentity {
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly isSubagent?: boolean;
+  readonly excludedSubagentRootRunIds?: readonly string[];
 }
-interface Snapshot {
-  readonly executions: readonly SubagentExecutionRecord[];
-  readonly open: readonly SubagentExecutionRecord[];
-  readonly facts: readonly ExecutionFactView[];
-  readonly approvalFingerprint?: string;
+export interface SubagentContinuationCoordinator {
+  createPort(identity: RunIdentity): LifecycleRunInputPort;
 }
+
+/** Page the durable session ledger; the history API's default 50 is not a lifecycle boundary. */
+export async function listSessionExecutions(
+  store: SubagentExecutionStore,
+  sessionId: string,
+): Promise<readonly SubagentExecutionRecord[]> {
+  const result: SubagentExecutionRecord[] = [];
+  let before: { createdAt: number; executionId: string } | undefined;
+  for (;;) {
+    const page = await store.list({
+      rootSessionId: sessionId,
+      limit: 200,
+      before,
+    });
+    result.push(...page);
+    if (page.length < 200) return result;
+    const last = page[page.length - 1];
+    before = { createdAt: last.createdAt, executionId: last.executionId };
+  }
+}
+
+/** Request membership stays immutable. Each receiving run owns a separate delivery input. */
 export function createSubagentContinuationCoordinator(options: {
   readonly executions: SubagentExecutionStore;
   readonly inputs: CurrentRunInputStore;
@@ -38,395 +51,139 @@ export function createSubagentContinuationCoordinator(options: {
     execution: SubagentExecutionRecord,
     signal?: AbortSignal,
   ) => Promise<PreparedSubagentResult>;
-  readonly collectFacts: (
-    execution: SubagentExecutionRecord,
-  ) => Promise<ExecutionFactView>;
-  readonly subscribe?: (identity: RunIdentity, wake: () => void) => () => void;
   readonly now?: () => number;
-  readonly checkIntervalMs?: number;
-  readonly checkTimeoutMs?: number;
-}) {
+}): SubagentContinuationCoordinator {
   const now = options.now ?? Date.now;
-  const listeners = new Map<string, Set<() => void>>();
-  const waits = new Map<string, SubagentWaitState>();
-  function notify(rootRunId: string): void {
-    for (const wake of listeners.get(rootRunId) ?? []) wake();
-  }
   function createPort(identity: RunIdentity): LifecycleRunInputPort {
-    let generation = 0;
-    let observationVersion = 0;
-    let nextWaitMs = 60_000;
-    let explainedApproval: string | undefined;
-    let previousApproval: string | undefined;
-    const observationFacts = new Map<string, string>();
-    const factSignature = (snapshot: Snapshot): string =>
-      JSON.stringify([
-        snapshot.open.map((execution) => execution.executionId).sort(),
-        snapshot.approvalFingerprint,
-      ]);
-    function runtimeMessage(
-      inputId: string,
-      source: CurrentRunInputRecord["source"],
-      sourceId: string,
-      body: string,
-      at: number,
-    ): MessageWithParts {
-      const messageId = `runtime:${inputId}`;
-      return {
-        info: {
-          id: messageId,
-          sessionId: identity.sessionId,
-          contextScopeId: identity.contextScopeId,
-          runId: identity.runId,
-          role: "user",
-          agent: "default",
-          time: { created: at, updated: at },
-          runtimeInput: {
-            kind: source,
-            inputId,
-            targetRunId: identity.runId,
-            sourceId,
-          },
-        },
-        parts: [
-          {
-            id: `${messageId}:text`,
-            sessionId: identity.sessionId,
-            contextScopeId: identity.contextScopeId,
-            messageId,
-            orderIndex: 0,
-            type: "text",
-            text: body,
-          },
-        ],
-      };
-    }
-    async function accept(
-      source: CurrentRunInputRecord["source"],
-      sourceId: string,
-      body: string,
-      at: number,
-      observation?: CurrentRunInputRecord["observation"],
-    ): Promise<void> {
-      const inputId = sourceId;
-      await options.inputs.acceptRuntimeInput({
-        inputId,
-        sourceId,
-        source,
-        runId: identity.runId,
-        sessionId: identity.sessionId,
-        contextScopeId: identity.contextScopeId,
-        message: runtimeMessage(inputId, source, sourceId, body, at),
-        observation,
-      });
-    }
-    async function reconcile(signal?: AbortSignal): Promise<Snapshot> {
+    const excludedRoots = new Set(identity.excludedSubagentRootRunIds);
+    async function reconcile(signal?: AbortSignal): Promise<void> {
       signal?.throwIfAborted();
-      const executions = identity.isSubagent
-        ? []
-        : (await options.executions.listByRootRun(identity.runId)).filter(
-            (e) =>
-              e.requesterRunId === identity.runId &&
-              e.parentSessionId === identity.sessionId &&
-              e.requesterScopeId === (identity.contextScopeId ?? "primary"),
-          );
-      for (const execution of executions) {
-        signal?.throwIfAborted();
-        if (execution.delivery.state === "pending") {
-          const inputId = execution.delivery.notificationId;
-          if (!inputId)
-            throw new Error("Terminal execution has no notification identity");
-          // On replay the committed message is authoritative, even if a file later disappeared.
-          if (!(await options.inputs.getInput(inputId))) {
-            const result = await options.prepareResult(execution, signal);
-            signal?.throwIfAborted();
-            await accept(
-              "subagent-result",
-              inputId,
-              result.body,
-              execution.completedAt ?? execution.updatedAt,
-            );
-          }
-          await options.executions.markDelivered(execution, inputId, now());
-        }
-        const inputId =
-          execution.delivery.inputId ?? execution.delivery.notificationId;
-        const input = inputId
-          ? await options.inputs.getInput(inputId)
-          : undefined;
-        if (
-          input?.processedRequestId &&
-          execution.delivery.state !== "processed"
-        )
-          await options.executions.markProcessed(
-            execution,
-            input.processedRequestId,
-            input.processedAt ?? now(),
-          );
-      }
-      const open = executions.filter(
-        (e) => e.status === "queued" || e.status === "running",
+      if (identity.isSubagent) return;
+      const sessionExecutions = (
+        await listSessionExecutions(options.executions, identity.sessionId)
+      ).filter(
+        (record) =>
+          record.parentSessionId === identity.sessionId &&
+          record.requesterScopeId === (identity.contextScopeId ?? "primary") &&
+          !excludedRoots.has(record.rootRunId),
       );
-      const facts = await Promise.all(open.map(options.collectFacts));
-      signal?.throwIfAborted();
-      const approvalFingerprint =
-        facts.length > 0 &&
-        facts.every((f) => f.approval.blocked && f.approval.fingerprint)
-          ? JSON.stringify(
-              facts
-                .map((f) => [f.executionId, f.approval.fingerprint])
-                .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-            )
-          : undefined;
-      const pending = await options.inputs.listPending(identity.runId);
+      const executions = sessionExecutions.filter(
+        (record) =>
+          record.delivery.state === "pending" ||
+          record.delivery.state === "delivered",
+      );
       if (
-        open.length === 0 ||
-        pending.some((i) => i.source !== "subagent-status")
+        executions.length > 0 ||
+        !sessionExecutions.some(
+          (record) =>
+            record.mode === "background" &&
+            (record.status === "queued" || record.status === "running"),
+        )
       )
         await options.inputs.dismissObservations(
           identity.runId,
-          open.length === 0
-            ? "executions-ended"
-            : "superseded-by-business-input",
+          "subagent facts changed",
         );
-      return { executions, open, facts, approvalFingerprint };
-    }
-    async function check(signal?: AbortSignal): Promise<Snapshot> {
-      for (let attempt = 0; ; attempt++) {
+      for (const execution of executions) {
         signal?.throwIfAborted();
-        const controller = new AbortController();
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let cancel = (): void => undefined;
-        const failed = new Promise<never>((_resolve, reject) => {
-          cancel = (): void => {
-            controller.abort(signal?.reason);
-            reject(abortError(signal?.reason));
-          };
-          signal?.addEventListener("abort", cancel, { once: true });
-          timer = setTimeout(() => {
-            const error = new Error("Subagent reconciliation timed out");
-            controller.abort(error);
-            reject(error);
-          }, options.checkTimeoutMs ?? 5000);
-        });
-        try {
-          return await Promise.race([reconcile(controller.signal), failed]);
-        } catch (error) {
-          signal?.throwIfAborted();
-          if (attempt >= 2)
-            throw new Error("Subagent supervision unavailable", {
-              cause: error,
-            });
-        } finally {
-          clearTimeout(timer);
-          signal?.removeEventListener("abort", cancel);
+        const sourceId = execution.delivery.notificationId;
+        if (!sourceId)
+          throw new Error("Terminal execution has no notification identity");
+        const old = execution.delivery.inputId
+          ? await options.inputs.getInput(execution.delivery.inputId)
+          : undefined;
+        if (old?.processedRequestId) {
+          await options.executions.markProcessed(
+            execution,
+            old.processedRequestId,
+            old.processedAt ?? now(),
+          );
+          continue;
         }
-        await delay(options.checkIntervalMs ?? 5000, signal);
+        // Another live run must finish owning its request before a retry can bind elsewhere.
+        if (old && old.runId !== identity.runId && old.closedAt === undefined)
+          continue;
+        const inputId = `${sourceId}:${identity.runId}`;
+        if (!(await options.inputs.getInput(inputId))) {
+          const result = await options.prepareResult(execution, signal);
+          signal?.throwIfAborted();
+          const at = now();
+          const messageId = `runtime:${inputId}`;
+          const message = buildRuntimeInputMessage({
+            messageId,
+            sessionId: identity.sessionId,
+            contextScopeId: identity.contextScopeId,
+            agent: "default",
+            createdAt: at,
+            origin: {
+              kind: "subagent-result",
+              inputId,
+              targetRunId: identity.runId,
+              sourceId,
+            },
+            text: result.body,
+          });
+          await options.inputs.acceptRuntimeInput({
+            inputId,
+            sourceId,
+            source: "subagent-result",
+            runId: identity.runId,
+            sessionId: identity.sessionId,
+            contextScopeId: identity.contextScopeId,
+            message,
+          });
+        }
+        await options.executions.markDelivered(
+          execution,
+          inputId,
+          now(),
+          execution.delivery.inputId,
+        );
+        // Delivery to a busy run is already its automatic opportunity to consume this result.
+        await options.executions.claimWakeup(execution, now());
       }
     }
-    async function observation(
-      snapshot: Snapshot,
-      reason: "deadline" | "approval-change",
-    ): Promise<void> {
-      await options.inputs.dismissObservations(
-        identity.runId,
-        "superseded-observation",
-      );
-      const at = now();
-      const sourceId = `subagent-status:${identity.runId}:${String(generation)}:${String(++observationVersion)}`;
-      observationFacts.set(sourceId, factSignature(snapshot));
-      await accept(
-        "subagent-status",
-        sourceId,
-        `Runtime subagent observation\nrootRunId: ${identity.runId}\nwaitGeneration: ${String(generation)}\nreason: ${reason}\nobservedAt: ${String(at)}\n${renderExecutionFacts(snapshot.facts)}\nAssess progress and next action. Explain any approval block to the user; approvals remain in the root session.`,
-        at,
-        {
-          waitGeneration: generation,
-          reason,
-          approvalFingerprint: snapshot.approvalFingerprint,
-          observedAt: at,
-        },
-      );
-      previousApproval = snapshot.approvalFingerprint;
-    }
     return {
-      async beforeStep(signal, finalStep) {
-        await check(signal);
+      async beforeStep(
+        signal,
+        finalStep,
+      ): ReturnType<LifecycleRunInputPort["beforeStep"]> {
+        await reconcile(signal);
         if (finalStep) await options.inputs.sealSteer(identity.runId);
         return options.inputs.getMessages(identity.runId);
       },
-      async beforeFinish(signal) {
-        if (identity.isSubagent)
-          return (await options.inputs.tryCloseForCompletion(identity.runId))
-            ? "finish"
-            : "continue";
-        generation++;
-        let revision = 0;
-        let waiter: (() => void) | undefined;
-        const wake = (): void => {
-          revision++;
-          waiter?.();
-        };
-        const entries = listeners.get(identity.runId) ?? new Set();
-        entries.add(wake);
-        listeners.set(identity.runId, entries);
-        const removeInput = options.inputs.subscribe(identity.runId, wake);
-        const removeFacts = options.subscribe?.(identity, wake);
-        let deadline = now() + nextWaitMs;
-        let paused = false;
-        try {
-          for (;;) {
-            const seen = revision;
-            const snapshot = await check(signal);
-            signal?.throwIfAborted();
-            if ((await options.inputs.listPending(identity.runId)).length)
-              return "continue";
-            if (snapshot.open.length === 0) {
-              if (await options.inputs.tryCloseForCompletion(identity.runId))
-                return "finish";
-              continue;
-            }
-            const fingerprint = snapshot.approvalFingerprint;
-            if (
-              fingerprint !== previousApproval &&
-              (fingerprint !== undefined || previousApproval !== undefined)
-            ) {
-              previousApproval = fingerprint;
-              if (
-                fingerprint !== explainedApproval ||
-                fingerprint === undefined
-              ) {
-                await observation(snapshot, "approval-change");
-                return "continue";
-              }
-            }
-            const shouldPause =
-              fingerprint !== undefined && fingerprint === explainedApproval;
-            if (paused && !shouldPause) deadline = now() + nextWaitMs;
-            paused = shouldPause;
-            if (!paused && now() >= deadline) {
-              await observation(snapshot, "deadline");
-              return "continue";
-            }
-            if (revision !== seen) continue;
-            waits.set(identity.runId, {
-              waiting: true,
-              approvalBlocked: paused,
-            });
-            await new Promise<void>((resolve, reject) => {
-              const duration = Math.min(
-                options.checkIntervalMs ?? 5000,
-                paused ? Infinity : Math.max(0, deadline - now()),
-              );
-              const timer = setTimeout(done, duration);
-              function cleanup(): void {
-                clearTimeout(timer);
-                signal?.removeEventListener("abort", abort);
-                waiter = undefined;
-              }
-              function done(): void {
-                cleanup();
-                resolve();
-              }
-              function abort(): void {
-                cleanup();
-                reject(abortError(signal?.reason));
-              }
-              waiter = done;
-              signal?.addEventListener("abort", abort, { once: true });
-              if (signal?.aborted) abort();
-              else if (revision !== seen) done();
-            });
-          }
-        } finally {
-          waits.delete(identity.runId);
-          removeInput();
-          removeFacts?.();
-          entries.delete(wake);
-          if (entries.size === 0) listeners.delete(identity.runId);
-        }
+      async beforeFinish(
+        signal,
+      ): ReturnType<LifecycleRunInputPort["beforeFinish"]> {
+        await reconcile(signal);
+        signal?.throwIfAborted();
+        return (await options.inputs.tryCloseForCompletion(identity.runId))
+          ? "finish"
+          : "continue";
       },
-      async admitRequestAttempt(request, signal) {
-        // Immutable observations are invalidated before their first attempt only.
-        const before = await options.inputs.listPending(identity.runId);
-        if (
-          before.some(
-            (i) =>
-              request.inputIds?.includes(i.inputId) &&
-              i.source === "subagent-status" &&
-              i.firstAttemptRequestId === undefined,
-          )
-        ) {
-          const snapshot = await check(signal);
-          for (const pending of before) {
-            if (
-              !request.inputIds?.includes(pending.inputId) ||
-              pending.source !== "subagent-status" ||
-              pending.firstAttemptRequestId !== undefined
-            )
-              continue;
-            const current = await options.inputs.getInput(pending.inputId);
-            if (
-              current?.closedAt === undefined &&
-              observationFacts.get(pending.inputId) !== factSignature(snapshot)
-            ) {
-              await observation(
-                snapshot,
-                pending.observation?.reason ?? "deadline",
-              );
-              throw new RuntimeInputSnapshotChangedError();
-            }
-          }
-          for (const id of request.inputIds ?? []) {
-            const current = await options.inputs.getInput(id);
-            if (current?.closedAt !== undefined)
-              throw new RuntimeInputSnapshotChangedError();
-          }
-        }
-        await options.inputs.admitRequestAttempt(request, signal);
-      },
-      async confirmRequestSuccess(requestId) {
+      admitRequestAttempt: (request, signal) =>
+        options.inputs.admitRequestAttempt(request, signal),
+      async confirmRequestSuccess(requestId): Promise<void> {
         const ids = await options.inputs.confirmRequestSuccess(requestId);
-        let businessInput = false;
-        for (const id of ids) {
-          const input = await options.inputs.getInput(id);
-          if (!input) throw new Error("Processed runtime input disappeared");
-          if (input.source !== "subagent-status") businessInput = true;
-          else {
-            nextWaitMs = 120_000;
-            explainedApproval = input.observation?.approvalFingerprint;
-          }
+        for (const inputId of ids) {
+          const input = await options.inputs.getInput(inputId);
+          if (input?.source !== "subagent-result") continue;
+          const executionId = input.sourceId.slice(
+            SUBAGENT_RESULT_SOURCE_PREFIX.length,
+          );
+          const execution = await options.executions.getForRoot(
+            executionId,
+            identity.sessionId,
+          );
+          if (execution)
+            await options.executions.markProcessed(
+              execution,
+              requestId,
+              input.processedAt ?? now(),
+            );
         }
-        if (businessInput) nextWaitMs = 60_000;
       },
     };
   }
-  return {
-    createPort,
-    notify,
-    getWaitState: (rootRunId: string): SubagentWaitState =>
-      waits.get(rootRunId) ?? { waiting: false, approvalBlocked: false },
-  };
-}
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(done, ms);
-    function done(): void {
-      signal?.removeEventListener("abort", abort);
-      resolve();
-    }
-    function abort(): void {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      reject(abortError(signal?.reason));
-    }
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort();
-  });
-}
-
-function abortError(reason: unknown): Error {
-  return reason instanceof Error
-    ? reason
-    : new Error(typeof reason === "string" ? reason : "Run cancelled");
+  return { createPort };
 }

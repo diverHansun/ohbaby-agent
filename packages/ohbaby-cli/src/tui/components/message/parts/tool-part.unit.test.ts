@@ -96,3 +96,32 @@ it("labels failure and approval independently of color", () => {
     }),
   ).toContain("approval");
 });
+
+it("labels agent spawn and send with names or IDs without exposing instructions", () => {
+  expect(
+    renderToolLabel(
+      toolCall("agent", "completed", {
+        action: "spawn",
+        name: "Audit UI",
+        prompt: "PRIVATE",
+      }).call,
+    ),
+  ).toBe("Agent Audit UI");
+  expect(
+    renderToolLabel(
+      toolCall("agent", "completed", {
+        action: "send",
+        agent_id: "agent-1",
+        message: "PRIVATE",
+      }).call,
+    ),
+  ).toBe("Agent agent-1");
+  expect(
+    renderToolLabel(
+      toolCall("agent", "completed", {
+        action: "monitor",
+        agent_ids: ["agent-1"],
+      }).call,
+    ),
+  ).toBe("Agent");
+});

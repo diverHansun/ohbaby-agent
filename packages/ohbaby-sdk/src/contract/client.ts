@@ -12,6 +12,7 @@ import type {
 } from "./permission.js";
 import type { UiReasoningConfig } from "./connect-model.js";
 import type { UiSessionRecoveryClient } from "./session-view.js";
+import type { UiSubagentInstanceClient } from "./subagent-instance.js";
 import type { UiSession } from "./snapshot.js";
 import type {
   UiCommandCompletion,
@@ -124,7 +125,10 @@ export type UiEventHandler = (event: UiEvent) => void;
 export type UiUnsubscribe = () => void;
 
 export interface UiQueryClient
-  extends Partial<UiSessionRecoveryClient>, Partial<UiSubagentReadClient> {
+  extends
+    Partial<UiSessionRecoveryClient>,
+    Partial<UiSubagentReadClient>,
+    Partial<Pick<UiSubagentInstanceClient, "listSubagentInstances">> {
   exportSession(input: UiExportSessionInput): Promise<UiSessionExport>;
   /** Explicit selection/startup barrier; never called by read endpoints. */
   initializeSession?(sessionId: string): Promise<void>;
@@ -200,7 +204,10 @@ export interface UiPromptQueueCommandClient {
 }
 
 export interface UiCommandClient
-  extends UiPromptCommandClient, UiPromptQueueCommandClient {
+  extends
+    UiPromptCommandClient,
+    UiPromptQueueCommandClient,
+    Partial<Pick<UiSubagentInstanceClient, "stopSubagent">> {
   createSession(input?: {
     /** Preferred primary session to reuse when it is authoritatively empty. */
     readonly reuseSessionId?: string;

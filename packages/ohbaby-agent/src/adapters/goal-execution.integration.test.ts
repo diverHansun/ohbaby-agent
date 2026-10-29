@@ -964,7 +964,8 @@ it.each([
         if (parentSteps === 1)
           yield tool("CreateGoal", { objective: "protected user goal" });
         else if (parentSteps === 2)
-          yield tool("subagent_run", {
+          yield tool("agent", {
+            action: "spawn",
             role: "explore",
             mode: "foreground",
             prompt: "Explore the authorization fixture",
@@ -1498,7 +1499,8 @@ it("G22 records only admitted parent usage while a child and independent summary
       primarySteps++;
       if (primarySteps === 1)
         yield {
-          ...tool("subagent_run", {
+          ...tool("agent", {
+            action: "spawn",
             role: "explore",
             mode: "foreground",
             prompt: "Explore the isolated fixture",
