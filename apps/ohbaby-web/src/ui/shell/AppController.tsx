@@ -13,6 +13,13 @@ import { selectViewModel } from "../session/selectors.js";
 import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
 import { type NoticeItem, NoticeStack } from "../shared/Notice.js";
+import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
+import { SidePanel } from "../side-panel/SidePanel.js";
+import {
+  type SidePageContext,
+  SidePanelPage,
+} from "../side-panel/SidePanelPage.js";
+import { useSidePanel } from "../side-panel/use-side-panel.js";
 import { Sidebar } from "../sidebar/Sidebar.js";
 import type {
   SessionActivity,
@@ -179,6 +186,19 @@ export function AppController(props: {
     [activeId, awaiting, running],
   );
 
+  const sidePanel = useSidePanel(activeId);
+  // Reading positions in the panel's subagent details; a new chat starts afresh.
+  const panelReadingCache = useMemo<SubagentReadingCache>(
+    () => new Map(),
+    [activeId],
+  );
+  const sidePageContext: SidePageContext = {
+    client,
+    rootSessionId: activeId,
+    subagentReadingCache: panelReadingCache,
+    setTabState: sidePanel.setTabState,
+  };
+
   const draftPicker = (
     <WorkspacePicker
       value={draft.workspaceDirectory}
@@ -261,6 +281,10 @@ export function AppController(props: {
           header={view.header}
           hasClient={client !== null}
           sessionId={view.activeSession?.id ?? null}
+          sidePanelOpen={sidePanel.state.open}
+          onOpenSidePanel={() => {
+            sidePanel.setOpen(true);
+          }}
           onOpenContextUsage={() => {
             const sessionId = view.activeSession?.id;
             if (sessionId && client)
@@ -289,6 +313,24 @@ export function AppController(props: {
             }
           />
         )
+      }
+      asideExpanded={sidePanel.state.expanded}
+      aside={
+        sidePanel.state.open ? (
+          <SidePanel
+            controls={sidePanel}
+            onClosed={() => {
+              requestAnimationFrame(() => {
+                document
+                  .querySelector<HTMLElement>("[data-side-panel-toggle]")
+                  ?.focus();
+              });
+            }}
+            renderPage={(tab) => (
+              <SidePanelPage tab={tab} context={sidePageContext} />
+            )}
+          />
+        ) : undefined
       }
       overlays={
         <>
