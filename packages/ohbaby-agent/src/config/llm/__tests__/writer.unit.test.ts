@@ -49,7 +49,7 @@ function findWriteCall(
     .mocked(fs.writeFile)
     .mock.calls.find(
       ([file]) =>
-        !callPathToString(file).includes("/backups/") &&
+        !/[/\\]backups[/\\]/u.test(callPathToString(file)) &&
         predicate(callPathToString(file)),
     );
 }
@@ -64,6 +64,35 @@ function parseModelJsonWrite(
     callContentToString(call[1]),
   ) as WrittenModelJson;
 }
+
+describe("findWriteCall", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+  });
+
+  it.each([
+    ["POSIX", "/repo/.ohbaby/backups/legacy/model.json"],
+    ["Windows", "D:\\repo\\.ohbaby\\backups\\legacy\\model.json"],
+    ["mixed", "D:/repo/.ohbaby\\backups\\legacy/model.json"],
+  ])(
+    "excludes %s backups when selecting the updated write",
+    async (_, backupPath) => {
+      const updatedPath = "D:/repo/.ohbaby/model.json.tmp-123-456";
+      await fs.writeFile(backupPath, "original config");
+      await fs.writeFile("D:/repo/.env.tmp-123-456", "unrelated config");
+      expect(
+        findWriteCall((file) => file.includes("model.json")),
+      ).toBeUndefined();
+
+      await fs.writeFile(updatedPath, "updated config");
+      expect(findWriteCall((file) => file.includes("model.json"))).toEqual([
+        updatedPath,
+        "updated config",
+      ]);
+    },
+  );
+});
 
 describe("setActiveLLMConfig", () => {
   beforeEach(() => {
