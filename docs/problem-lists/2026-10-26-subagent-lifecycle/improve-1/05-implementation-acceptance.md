@@ -1,6 +1,58 @@
 # 5. 实施验收
 
-## 第一轮（2026-10-29）：未通过，修复后复验
+## 第二轮（2026-10-29）：通过，带一项已知限制
+
+复验范围：`3d704ffc..b94cc001`，重点是 `c990b0ee`（生命周期修复）和 `b94cc001`（权威文档补回）。Codex 的逐项回复见 [06-backend-review-response.md](06-backend-review-response.md)。验收方用一个子代理逐项读代码核对，再自己补查了关键点；完整测试、构建和编译后的 Web E2E 由验收方重新跑过。
+
+### 检查结果
+
+| 检查 | 结果 |
+| --- | --- |
+| `pnpm typecheck` | 通过 |
+| `pnpm lint` | 0 个错误，109 个警告（原有的返回类型等警告） |
+| `pnpm test` | 640 个文件通过、6 个跳过；7484 项通过、17 项跳过，0 失败 |
+| `pnpm build` | 通过 |
+| 编译后的 Web E2E | 通过，退出码 0。验收方在内置浏览器里走完 E01–E05：发首个 prompt、`read fixture.txt` 完成、发后续消息、刷新。刷新前后两条最终回复各只有 1 条，会话不变，页面和标题里没有运行时标记。runner 的后端证据（3 次请求、cache key 稳定、工具结果被消费）、清理和诊断日志都是 PASS |
+| `pnpm test:smoke` | 没有重跑。Codex 那次 4 个文件、12 项全部因为没有真实服务而跳过，所以 smoke 对本轮没有证据价值，不能据此说真实 provider 通过 |
+
+### 第一轮问题的处理
+
+| # | 结论 | 依据 |
+| --- | --- | --- |
+| 1 sandbox 释放失败占住名额 | **没修，接受为已知限制** | Codex 的理由成立：`SandboxManager` 的 release 在物理销毁前就标记已释放，第二次调用不会重试，把它当成清理证据会归还一个其实没回收的名额（`sandbox/manager.ts:278-291`）。目前唯一的生产 adapter 是本机 host-local，它的 `destroy()` 不会失败（`sandbox/adapters/host-local.ts:58`）；子代理 close 时也是先停 shell、再销毁环境（`composition.ts:878-899`）。所以现在没有触发路径。但一旦触发，没有任何路径能释放这个名额，也没有任何提示：`beginCleanup` 遇到 `unconfirmed` 且没有 `settled` 时直接返回（`subagent-host.ts:839, 847`），`onExecutionFactError` 在 composition 里没接上。见下面"留给下一批的小修"第 1 条 |
+| 2 Goal 预算挡住所有唤醒 | 已修 | `subagent-wakeup.ts:167-201` 按 Goal 实际拥有的 root run 拆分候选。预算耗尽或 Goal 进行中时只排除 Goal 自己的结果，普通后台结果和监督照常唤醒 |
+| 3 Host 表只增不删 | 已修 | `pruneSeals`（`subagent-host.ts:396-417`）在准入结束、清理开始、按 root 中断时收缩；未处理消息改读持久输入；监督器每次替换审批集合。集成测试断言 16 张表归零 |
+| 4 monitor 读不到未处理消息原文 | 已修 | `monitor.ts` 返回原文、关闭原因和时间，和原有输出共用 16 KiB 预算，带截断标记 |
+| 5 每 5 秒全量扫描 | 已修 | 周期核对只覆盖还有后台执行的会话（`session-supervisor.ts:181, 311-314`） |
+| 6 runtimeInput 标记 | 已修 | 三处都改用 `buildRuntimeInputMessage`（`composition.ts:1325`、`continuation-coordinator.ts:112`、`execution-message-channel.ts:153`）。主会话唤醒不带 `contextScopeId`，和主历史 `IS NULL` 的读取一致 |
+| 7、8、10、12、14 | 已修 | 旧排队项关闭留档；死代码删除；常量集中；唤醒逻辑搬进 `subagent-wakeup.ts`；布尔参数改成选项对象 |
+| 9 Web 派遣行 | 移到 improve-3/4，由前端处理 | 本轮按分工没有改 Web |
+| 11 调度器按 bash 名特判 | 已修，设计合理 | 豁免只给受信任的 ToolAdmission，而且要求 `cleanupOwner: "tool"`。admission 存在以工具对象为键的 WeakMap 里，模型参数和工具名都伪造不了；MCP adapter 只注册 `settlementConfirmsCleanup: false` |
+| 13 重复代码 | 已修，剩一处 | `tools/utils/ripgrep-files.ts:47` 还有一份清理状态的字面量联合类型 |
+| 测试缺口 | 已补 | 06 的证据表逐项列了测试位置，验收方抽查的 4 个文件（74 项）通过 |
+| 文档问题 | 已补 | `dfd-interface.md`、`context-isolation.md`、`architecture.md` 补回了第一轮列出的约定 |
+
+### 新发现的问题
+
+都不挡合并。
+
+| # | 级别 | 问题 |
+| --- | --- | --- |
+| N1 | 建议修 | 卡住的名额没有任何提示（就是上面第 1 项的另一面）。另外，已关闭的实例不出现在 list 里（`subagent-host.ts:980-984`），如果它的名额卡住，用户只会看到"名额已满"，查不到原因 |
+| N2 | 建议修，推断 | 主 run 因结果持久化失败被 `runManager.fail` 中断后，`fail` 只同步 abort，run ledger 要等收尾才改状态。这期间如果 seal 已被 `pruneSeals` 撤掉，同一个 run 里正在执行的 spawn 可能通过 `resolveRequester`。窗口很窄，没有复现 |
+| N3 | 小问题 | 监督器准入重试 3 次耗尽后，只要还有后台执行，5 秒的周期核对会继续调用，持续的存储错误每 5 秒报一次。06 说的"成功或耗尽后停止"不完全准确 |
+| N4 | 小问题 | `subagent-wakeup.ts:44-60, 198`：`canStart` 填充 `candidates` 数组，`reserveSubagentWakeup` 按引用读取。能用但脆弱，改成 `canStart` 直接返回候选更清楚 |
+| N5 | 小问题 | `continuation-coordinator.ts` 写死了 `agent: "default"` |
+
+### 留给下一批的小修
+
+和 improve-2 的 B4 一起交给 Codex（见 [improve-2/05](../improve-2/05-implementation-acceptance.md)）：
+
+1. N1：把 `onExecutionFactError` 接到 `onNotice` 或日志，`beginCleanup` 静默返回的分支也报一次，让用户知道哪个名额为什么卡住。不要求自动释放。
+2. N3–N5、第 13 项剩下的一处，顺手改。
+3. N2 先写一个复现测试；复现不了就在代码里注释说明为什么安全。
+
+
 
 审查范围：`subagent/backend` 分支，`fe820619...3d704ffc`，4 个提交，112 个文件，约 8.1k 行新增、4.1k 行删除。
 
