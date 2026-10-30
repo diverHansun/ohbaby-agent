@@ -6,6 +6,7 @@ import {
   createSubagentConversationReader,
 } from "./subagent-conversation-reader.js";
 import type {
+  UiSubagentConversationQuery,
   UiSubagentConversationSelection,
   UiSubagentConversationView,
   UiSubagentExecution,
@@ -92,6 +93,336 @@ function selection(watchId: string): UiSubagentConversationSelection {
 }
 
 describe("subagent conversation reader", () => {
+  it("opens a pending instance without inventing an execution and follows its first execution", async () => {
+    let receive!: (event: UiEvent) => void;
+    const read = vi.fn<
+      (
+        query: UiSubagentConversationQuery,
+      ) => Promise<UiSubagentConversationView>
+    >(() => Promise.resolve({ ...conversation([]), executions: [] }));
+    const reader = createSubagentConversationReader(
+      {
+        subscribeEvents: (handler): (() => void) => {
+          receive = handler;
+          return () => undefined;
+        },
+        watchSubagentConversation: () => Promise.resolve(selection("watch")),
+        getSubagentConversationView: read,
+      },
+      "root",
+    );
+    await reader.selectInstance({ subagentId: "child" });
+    expect(read).toHaveBeenCalledWith(
+      expect.objectContaining({ subagentId: "child" }),
+    );
+    expect(read.mock.calls[0]?.[0]).not.toHaveProperty("anchorExecutionId");
+    expect(reader.getSnapshot()).toMatchObject({
+      selectedInstance: { subagentId: "child" },
+      loading: false,
+    });
+    expect(reader.getSnapshot().selected).toBeUndefined();
+    receive({
+      type: "subagent.conversation.changed",
+      rootSessionId: "root",
+      subagentId: "child",
+      watchId: "watch",
+      executions: [execution("first")],
+      change: {
+        type: "session.changed",
+        bindingGeneration: 1,
+        version: { ...conversation().view.version, sessionRevision: 2 },
+        messages: [message("first", "started")],
+      },
+    });
+    expect(reader.getSnapshot().selected?.executionId).toBe("first");
+    expect(reader.getSnapshot().conversation?.messages.at(-1)?.id).toBe(
+      "first",
+    );
+    reader.dispose();
+  });
+
+  it("preserves an instance's reading window but repeats each explicit anchor request", async () => {
+    const read = vi.fn((query: UiSubagentConversationQuery) =>
+      Promise.resolve({
+        ...conversation(),
+        anchorMessageId: query.anchorExecutionId
+          ? `parent-${query.anchorExecutionId}`
+          : undefined,
+        executions: [execution("a"), execution("b", 2)],
+      }),
+    );
+    const watch = vi.fn(() => Promise.resolve(selection("watch")));
+    const reader = createSubagentConversationReader(
+      { getSubagentConversationView: read, watchSubagentConversation: watch },
+      "root",
+    );
+    await reader.selectInstance({ subagentId: "child" });
+    expect(reader.getSnapshot().selected?.executionId).toBe("b");
+    await reader.loadEarlier();
+    const window = reader.getSnapshot().conversation;
+    await reader.selectInstance({ subagentId: "child" });
+    expect(reader.getSnapshot().conversation).toBe(window);
+    expect(read).toHaveBeenCalledTimes(2);
+    await reader.selectInstance({
+      subagentId: "child",
+      anchorExecutionId: "a",
+    });
+    await reader.selectInstance({
+      subagentId: "child",
+      anchorExecutionId: "a",
+    });
+    expect(read).toHaveBeenCalledTimes(4);
+    expect(read).toHaveBeenLastCalledWith(
+      expect.objectContaining({ anchorExecutionId: "a" }),
+    );
+    expect(reader.getSnapshot().selected?.executionId).toBe("a");
+    const messages = reader.getSnapshot().conversation?.messages;
+    await reader.selectInstance({ subagentId: "child" });
+    expect(reader.getSnapshot().selected?.executionId).toBe("b");
+    expect(reader.getSnapshot().conversation?.anchorMessageId).toBeUndefined();
+    expect(reader.getSnapshot().conversation?.messages).toBe(messages);
+    expect(read).toHaveBeenCalledTimes(4);
+    reader.dispose();
+  });
+
+  it.each(["loading", "error"] as const)(
+    "preserves loaded history when reopening an instance during a refresh %s",
+    async (refreshState) => {
+      const read = vi
+        .fn<
+          (
+            query: UiSubagentConversationQuery,
+          ) => Promise<UiSubagentConversationView>
+        >()
+        .mockResolvedValue({ ...conversation(), anchorMessageId: "live" });
+      const reader = createSubagentConversationReader(
+        {
+          getSubagentConversationView: read,
+          watchSubagentConversation: () => Promise.resolve(selection("watch")),
+        },
+        "root",
+      );
+      await reader.selectInstance({
+        subagentId: "child",
+        anchorExecutionId: "a",
+      });
+      read.mockResolvedValueOnce(
+        conversation([message("older", "earlier history")]),
+      );
+      await reader.loadEarlier();
+      expect(reader.getSnapshot().conversation?.messages).toHaveLength(2);
+      let finish!: (view: UiSubagentConversationView) => void;
+      let fail!: (error: Error) => void;
+      read.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = resolve;
+            fail = reject;
+          }),
+      );
+      const refreshing = reader.refresh();
+      if (refreshState === "error") {
+        fail(new Error("offline"));
+        await refreshing;
+        expect(reader.getSnapshot().error).toBe("offline");
+      }
+      read.mockResolvedValueOnce(conversation([message("live", "one")], 3));
+      await reader.selectInstance({ subagentId: "child" });
+      expect(
+        reader.getSnapshot().conversation?.messages.map((item) => item.id),
+      ).toContain("older");
+      expect(
+        reader.getSnapshot().conversation?.anchorMessageId,
+      ).toBeUndefined();
+      expect(
+        reader.getSnapshot().conversation?.view.version.sessionRevision,
+      ).toBe(3);
+      if (refreshState === "loading") {
+        finish(conversation([message("late", "stale refresh")], 2));
+        await refreshing;
+        expect(
+          reader.getSnapshot().conversation?.view.version.sessionRevision,
+        ).toBe(3);
+        expect(
+          reader.getSnapshot().conversation?.messages.map((item) => item.id),
+        ).not.toContain("late");
+      }
+      reader.dispose();
+    },
+  );
+
+  it.each([false, true])(
+    "updates selection from the latest baseline and buffered events (explicit execution: %s)",
+    async (explicitExecution) => {
+      let receive!: (event: UiEvent) => void;
+      const read = vi
+        .fn<
+          (
+            query: UiSubagentConversationQuery,
+          ) => Promise<UiSubagentConversationView>
+        >()
+        .mockResolvedValue(conversation());
+      const reader = createSubagentConversationReader(
+        {
+          subscribeEvents: (handler): (() => void) => {
+            receive = handler;
+            return () => undefined;
+          },
+          getSubagentConversationView: read,
+          watchSubagentConversation: () => Promise.resolve(selection("watch")),
+        },
+        "root",
+      );
+      if (explicitExecution) await reader.select(execution("a"));
+      else await reader.selectInstance({ subagentId: "child" });
+      read.mockResolvedValueOnce({
+        ...conversation(undefined, 2),
+        executions: [execution("a"), execution("b", 2)],
+      });
+      await reader.jumpToLatest();
+      expect(reader.getSnapshot().selected?.executionId).toBe(
+        explicitExecution ? "a" : "b",
+      );
+      let finish!: (view: UiSubagentConversationView) => void;
+      read.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const jumping = reader.jumpToLatest();
+      receive({
+        type: "subagent.conversation.changed",
+        rootSessionId: "root",
+        subagentId: "child",
+        watchId: "watch",
+        executions: [execution("c", 3)],
+        change: {
+          type: "session.changed",
+          bindingGeneration: 1,
+          version: { ...conversation().view.version, sessionRevision: 3 },
+          messages: [message("new", "new execution")],
+        },
+      });
+      finish({
+        ...conversation(undefined, 2),
+        executions: [execution("a"), execution("b", 2)],
+      });
+      await jumping;
+      expect(reader.getSnapshot().selected?.executionId).toBe(
+        explicitExecution ? "a" : "c",
+      );
+      expect(
+        reader.getSnapshot().conversation?.view.version.sessionRevision,
+      ).toBe(3);
+      reader.dispose();
+    },
+  );
+
+  it("keeps a late instance read from replacing a newer selection", async () => {
+    let finishRead!: (view: UiSubagentConversationView) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const unwatch = vi.fn(() => Promise.resolve());
+    const reader = createSubagentConversationReader(
+      {
+        watchSubagentConversation: (query) =>
+          Promise.resolve({
+            ...selection(query.watchId ?? "missing"),
+            subagentId: query.subagentId,
+          }),
+        unwatchSubagentConversation: unwatch,
+        getSubagentConversationView: (query) =>
+          query.subagentId === "child"
+            ? new Promise((resolve) => {
+                finishRead = resolve;
+                entered();
+              })
+            : Promise.resolve({
+                ...conversation(),
+                subagentId: "other",
+                executions: [{ ...execution("other"), subagentId: "other" }],
+              }),
+      },
+      "root",
+    );
+    const old = reader.selectInstance({ subagentId: "child" });
+    await started;
+    await reader.selectInstance({ subagentId: "other" });
+    finishRead(conversation());
+    await old;
+    expect(reader.getSnapshot().selectedInstance?.subagentId).toBe("other");
+    expect(reader.getSnapshot().conversation?.subagentId).toBe("other");
+    expect(unwatch).toHaveBeenCalledWith(
+      expect.objectContaining({ subagentId: "child" }),
+    );
+    reader.dispose();
+  });
+
+  it("releases a late instance watch without releasing the newer instance's watch", async () => {
+    let finishWatch!: (value: UiSubagentConversationSelection) => void;
+    const unwatch = vi.fn(() => Promise.resolve());
+    const read = vi.fn(() =>
+      Promise.resolve({
+        ...conversation(),
+        subagentId: "other",
+        executions: [{ ...execution("other"), subagentId: "other" }],
+      }),
+    );
+    const reader = createSubagentConversationReader(
+      {
+        watchSubagentConversation: (query) =>
+          query.subagentId === "child"
+            ? new Promise((resolve) => {
+                finishWatch = resolve;
+              })
+            : Promise.resolve({
+                ...selection("other-watch"),
+                subagentId: "other",
+              }),
+        getSubagentConversationView: read,
+        unwatchSubagentConversation: unwatch,
+      },
+      "root",
+    );
+    const old = reader.selectInstance({ subagentId: "child" });
+    await reader.selectInstance({ subagentId: "other" });
+    finishWatch(selection("old-watch"));
+    await old;
+    expect(reader.getSnapshot().selectedInstance?.subagentId).toBe("other");
+    expect(reader.getSnapshot().conversation?.subagentId).toBe("other");
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(unwatch).toHaveBeenCalledWith(
+      expect.objectContaining({ watchId: "old-watch" }),
+    );
+    expect(unwatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ watchId: "other-watch" }),
+    );
+    reader.dispose();
+  });
+
+  it("does not reopen a closed or disposed instance through selectInstance", async () => {
+    const read = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error("closed"), { code: "SUBAGENT_CLOSED" }),
+      ),
+    );
+    const watch = vi.fn(() => Promise.resolve(selection("watch")));
+    const reader = createSubagentConversationReader(
+      { getSubagentConversationView: read, watchSubagentConversation: watch },
+      "root",
+    );
+    await reader.selectInstance({ subagentId: "child" });
+    await reader.selectInstance({ subagentId: "child" });
+    expect(reader.getSnapshot().error).toBe("closed");
+    expect(watch).toHaveBeenCalledTimes(1);
+    reader.dispose();
+    await reader.selectInstance({ subagentId: "other" });
+    expect(watch).toHaveBeenCalledTimes(1);
+  });
+
   it("does not reinstall a late baseline after its instance closes", async () => {
     let receive: (event: UiEvent) => void = () => undefined;
     let finish!: (view: UiSubagentConversationView) => void;

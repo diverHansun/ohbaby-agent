@@ -7,6 +7,7 @@ import {
   DelegationRow,
   isDelegationCall,
   delegationExecution,
+  delegationNotStarted,
   delegationTitle,
 } from "./DelegationRow.js";
 const call: UiToolCall = {
@@ -89,10 +90,12 @@ it("keeps input and error output accessible when delegation failed before accept
             output: "admission failed",
             error: "invalid subagent",
           },
+          available: false,
           onOpen,
         }),
       );
     });
+    expect(container.querySelector(".ohb-delegation-row")).toBeNull();
     const button = container.querySelector<HTMLButtonElement>("button");
     expect(button?.disabled).toBe(false);
     expect(button?.getAttribute("aria-expanded")).toBe("false");
@@ -112,7 +115,7 @@ it("keeps input and error output accessible when delegation failed before accept
   }
 });
 
-it("renders accepted timeouts as a readable task status with an active conversation entry", () => {
+it("keeps the tool card and adds an entry that opens the instance at this delegation", () => {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -127,18 +130,30 @@ it("renders accepted timeouts as a readable task status with an active conversat
         createElement(DelegationRow, {
           call: { ...call, status: "failed" },
           execution: timedOut,
+          instanceName: "Code reviewer",
+          available: true,
           onOpen,
         }),
       );
     });
     expect(container.textContent).toContain("Timed out");
     expect(container.textContent).not.toContain("timed_out");
-    const button = container.querySelector<HTMLButtonElement>("button");
-    expect(button?.disabled).toBe(false);
+    // The agent tool card stays whole above the entry (D39).
+    expect(container.querySelector(".ohb-tool-panel")).not.toBeNull();
+    const entry = container.querySelector<HTMLButtonElement>(
+      ".ohb-delegation-row",
+    );
+    expect(entry?.textContent).toContain("Code reviewer");
+    expect(entry?.getAttribute("aria-label")).toBe(
+      "Open Code reviewer in Subagents",
+    );
     act(() => {
-      button?.click();
+      entry?.click();
     });
-    expect(onOpen).toHaveBeenCalledWith(timedOut, button);
+    expect(onOpen).toHaveBeenCalledWith({
+      subagentId: "worker",
+      executionId: "execution",
+    });
   } finally {
     act(() => {
       root.unmount();
@@ -160,6 +175,7 @@ it("keeps completed legacy delegation input and saved result readable without an
         createElement(DelegationRow, {
           call,
           result: { callId: call.id, output: "Legacy stored answer" },
+          available: true,
           onOpen: vi.fn(),
         }),
       );
@@ -202,7 +218,7 @@ it("labels each delegation with its own task even for the same named instance", 
   );
 });
 
-it("shows an accepted failed child as Failed and keeps the conversation entry available", () => {
+it("shows an accepted failed child as Failed and withdraws the entry once it is unavailable", () => {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -218,14 +234,36 @@ it("shows an accepted failed child as Failed and keeps the conversation entry av
   try {
     act(() => {
       root.render(
-        createElement(DelegationRow, { call, execution: failed, onOpen }),
+        createElement(DelegationRow, {
+          call,
+          execution: failed,
+          available: true,
+          onOpen,
+        }),
       );
     });
-    const button = container.querySelector<HTMLButtonElement>("button");
-    expect(container.textContent).toContain("Failed");
-    expect(button?.disabled).toBe(false);
-    act(() => button?.click());
-    expect(onOpen).toHaveBeenCalledWith(failed, button);
+    const entry = container.querySelector<HTMLButtonElement>(
+      ".ohb-delegation-row",
+    );
+    expect(entry?.textContent).toContain("Failed");
+    act(() => entry?.click());
+    expect(onOpen).toHaveBeenCalledWith({
+      subagentId: "worker",
+      executionId: "execution",
+    });
+    // Closed instance or a result that says nothing started: no entry, card stays.
+    act(() => {
+      root.render(
+        createElement(DelegationRow, {
+          call,
+          execution: failed,
+          available: false,
+          onOpen,
+        }),
+      );
+    });
+    expect(container.querySelector(".ohb-delegation-row")).toBeNull();
+    expect(container.querySelector(".ohb-tool-panel")).not.toBeNull();
   } finally {
     act(() => {
       root.unmount();
@@ -259,4 +297,26 @@ it("renders new dispatches and history as delegations, while running sends stay 
         execution,
       ),
     ).toBe(false);
+});
+
+it("reads from the tool result whether an execution started", () => {
+  const withResult = (subagent: Record<string, unknown>): UiMessage => ({
+    ...message,
+    parts: [
+      { type: "tool-call", call },
+      {
+        type: "tool-result",
+        result: { callId: call.id, output: "receipt" },
+        metadata: { subagent },
+      },
+    ],
+  });
+  expect(delegationNotStarted(message, call)).toBe(false);
+  expect(
+    delegationNotStarted(withResult({ started: false, reason: "full" }), call),
+  ).toBe(true);
+  expect(
+    delegationNotStarted(withResult({ started: false, accepted: true }), call),
+  ).toBe(true);
+  expect(delegationNotStarted(withResult({ started: true }), call)).toBe(false);
 });

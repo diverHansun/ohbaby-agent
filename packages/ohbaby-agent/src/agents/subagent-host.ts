@@ -1,4 +1,5 @@
 import { closeLegacySubagentInputs } from "./subagents/types.js";
+import { subagentAccessError } from "./subagents/access-error.js";
 import {
   MAX_SUBAGENT_EXECUTIONS,
   MAX_SUBAGENT_TIMEOUT_MS,
@@ -901,13 +902,12 @@ export class SessionSubagentHost {
         ?.abortController?.abort("subagent stopped");
     }
     const item = await this.options.store.get(input);
-    if (!item && !lease)
-      throw new Error(`Subagent not found: ${input.subagentId}`);
+    if (!item && !lease) throw subagentAccessError("SUBAGENT_NOT_FOUND");
     if (
       item?.closedAt !== undefined ||
       this.closedSubagents.has(input.subagentId)
     )
-      throw new Error(`Subagent is closed: ${input.subagentId}`);
+      throw subagentAccessError("SUBAGENT_CLOSED");
     if (mismatch)
       return {
         subagentId: input.subagentId,

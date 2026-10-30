@@ -25,6 +25,95 @@ function snapshot(revision: number, ids = ["one"]): UiSubagentInstanceSnapshot {
   };
 }
 describe("versioned subagent instance reader", () => {
+  it("shares a reconnect refresh with an explicit refresh from the same event dispatch", async () => {
+    let emit!: (event: UiEvent) => void;
+    const list = vi.fn().mockResolvedValue(snapshot(1));
+    const reader = createSubagentInstanceReader(
+      {
+        listSubagentInstances: list,
+        subscribeEvents: (handler): (() => void) => {
+          emit = handler;
+          return () => undefined;
+        },
+      },
+      { rootSessionId: "root" },
+    );
+    await reader.refresh();
+    list.mockResolvedValueOnce(snapshot(2, []));
+    emit({
+      type: "session.resync-required",
+      sessionId: "root",
+      runtimeEpoch: "epoch",
+      disconnected: false,
+    });
+    await reader.refresh();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(reader.getSnapshot().snapshot?.instances).toEqual([]);
+    reader.dispose();
+  });
+
+  it("refreshes after reconnect, coalesces event bursts and ignores unrelated or disposed events", async () => {
+    let emit!: (event: UiEvent) => void;
+    const list = vi.fn().mockResolvedValue(snapshot(1));
+    const unsubscribe = vi.fn();
+    const reader = createSubagentInstanceReader(
+      {
+        listSubagentInstances: list,
+        subscribeEvents: (handler) => {
+          emit = handler;
+          return unsubscribe;
+        },
+      },
+      { rootSessionId: "root" },
+    );
+    await reader.refresh();
+    emit({
+      type: "session.resync-required",
+      sessionId: "other",
+      runtimeEpoch: "epoch",
+    });
+    emit({
+      type: "session.resync-required",
+      sessionId: "root",
+      runtimeEpoch: "epoch",
+      disconnected: true,
+    });
+    await Promise.resolve();
+    expect(list).toHaveBeenCalledTimes(1);
+    list.mockResolvedValue(snapshot(2, []));
+    emit({
+      type: "session.resync-required",
+      sessionId: "root",
+      runtimeEpoch: "epoch",
+      disconnected: false,
+    });
+    emit({
+      type: "session.resync-required",
+      sessionId: null,
+      runtimeEpoch: "epoch",
+      disconnected: false,
+    });
+    await vi.waitFor(() => {
+      expect(reader.getSnapshot().snapshot?.revision).toBe(2);
+    });
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(reader.getSnapshot().snapshot?.instances).toEqual([]);
+    emit({
+      type: "session.resync-required",
+      sessionId: null,
+      runtimeEpoch: "epoch",
+    });
+    reader.dispose();
+    await Promise.resolve();
+    emit({
+      type: "session.resync-required",
+      sessionId: "root",
+      runtimeEpoch: "epoch",
+    });
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
   it("replaces complete snapshots and preserves a closed removal against stale revisions and failures", async () => {
     const list = vi.fn().mockResolvedValue(snapshot(1));
     const reader = createSubagentInstanceReader(
@@ -97,9 +186,9 @@ describe("versioned subagent instance reader", () => {
     });
     await vi.waitFor(() => {
       expect(reader.getSnapshot().loading).toBe(false);
+      expect(reader.getSnapshot().error).toContain("scope or version");
     });
     expect(reader.getSnapshot().snapshot?.instances).toHaveLength(1);
-    expect(reader.getSnapshot().error).toContain("scope or version");
     list.mockResolvedValueOnce({ ...snapshot(3, []), complete: false });
     await reader.refresh();
     expect(reader.getSnapshot().snapshot?.revision).toBe(1);

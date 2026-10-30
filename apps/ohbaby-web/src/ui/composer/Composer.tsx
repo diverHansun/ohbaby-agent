@@ -74,7 +74,6 @@ export function Composer(props: {
   >;
   readonly compact?: boolean;
   readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
-  readonly readOnly?: boolean;
   readonly draftScopeKey: string;
   readonly isPromptAdmitting: boolean;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
@@ -221,7 +220,7 @@ export function Composer(props: {
 
   const send = useCallback(() => {
     const text = draft.trim();
-    if (props.readOnly || !text || !canSend) {
+    if (!text || !canSend) {
       return;
     }
     if (queuedEdit) {
@@ -279,7 +278,6 @@ export function Composer(props: {
     persistDraft,
     props.draftScopeKey,
     props.onSubmit,
-    props.readOnly,
     queue,
     queuedEdit,
     setDraft,
@@ -321,32 +319,18 @@ export function Composer(props: {
     [props, queue, queuedEdit, send, slash],
   );
 
-  const blockReadOnly = (event: {
-    preventDefault(): void;
-    stopPropagation(): void;
-  }): void => {
-    if (props.readOnly) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  };
-
   return (
     <section
-      className={`${props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"}${props.readOnly ? " is-readonly" : ""}`}
+      className={
+        props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"
+      }
     >
-      <div
-        className="ohb-composer-content"
-        inert={props.readOnly}
-        aria-hidden={props.readOnly ? true : undefined}
-        onClickCapture={blockReadOnly}
-        onKeyDownCapture={blockReadOnly}
-      >
+      <div className="ohb-composer-content">
         {props.topContent}
         <div className="ohb-steer-recovery" ref={recoveryRef}>
           <UnconsumedSteers
             inputs={props.unconsumedSteers ?? []}
-            disabled={props.model.disabled || props.readOnly === true}
+            disabled={props.model.disabled}
             scopeKey={props.draftScopeKey}
             resend={async (input) => {
               const generation = draftScopeGeneration.current;
@@ -401,7 +385,6 @@ export function Composer(props: {
         />
         <GoalComposerStrip
           disabled={
-            Boolean(props.readOnly) ||
             props.model.disabled ||
             !props.model.canSend ||
             props.isPromptAdmitting ||
@@ -469,9 +452,6 @@ export function Composer(props: {
           }
         />
       </div>
-      {props.readOnly ? (
-        <div className="ohb-composer-readonly-label">Read-only subagent</div>
-      ) : null}
     </section>
   );
 }

@@ -4,6 +4,7 @@ import { InMemorySubagentExecutionStore } from "../../agents/subagents/execution
 import type {
   SubagentInstanceRecord,
   SubagentStatusResult,
+  SubagentStopResult,
 } from "../../agents/subagents/types.js";
 import type { UiSubagentInstancesInvalidatedEvent } from "ohbaby-sdk";
 import { SubagentInstanceProjection } from "./subagent-instances.js";
@@ -32,12 +33,14 @@ async function setup(
   executions: InMemorySubagentExecutionStore;
   projection: SubagentInstanceProjection;
   events: UiSubagentInstancesInvalidatedEvent[];
-  stop: () => Promise<undefined>;
+  stop: ReturnType<typeof vi.fn<() => Promise<SubagentStopResult | undefined>>>;
 }> {
   const instances = new InMemorySubagentInstanceStore();
   const executions = new InMemorySubagentExecutionStore();
   const events: UiSubagentInstancesInvalidatedEvent[] = [];
-  const stop = vi.fn(() => Promise.resolve(undefined));
+  const stop = vi.fn<() => Promise<SubagentStopResult | undefined>>(() =>
+    Promise.resolve(undefined),
+  );
   const projection = new SubagentInstanceProjection({
     runtimeEpoch: "epoch",
     instances,
@@ -66,6 +69,43 @@ async function setup(
   return { instances, executions, projection, events, stop };
 }
 describe("complete subagent instance snapshots", () => {
+  it("returns an admitted stop even while unrelated instance revisions keep changing", async () => {
+    const invalidate = vi.fn<() => void>();
+    const { projection, stop } = await setup(() => {
+      invalidate();
+      return Promise.resolve(undefined);
+    });
+    invalidate.mockImplementation(() => {
+      projection.invalidate("root");
+    });
+    stop.mockResolvedValue({
+      subagentId: "one",
+      stopped: true,
+      cleanup: "confirmed",
+      unprocessedMessages: [],
+    });
+    try {
+      await expect(
+        projection.stop({
+          rootSessionId: "root",
+          subagentId: "one",
+          expectedExecutionId: "old",
+        }),
+      ).resolves.toMatchObject({
+        outcome: "confirmed",
+        instance: { subagentId: "one", status: "completed" },
+      });
+      // The same churn still rejects a complete snapshot, whose coherence is a separate contract.
+      await expect(
+        projection.list({ rootSessionId: "root" }),
+      ).rejects.toMatchObject({
+        code: "SUBAGENT_SNAPSHOT_CHANGED",
+      });
+    } finally {
+      projection.dispose();
+    }
+  });
+
   it("retains more than fifty instances and collapses cross-turn executions into one row", async () => {
     const { instances, executions, projection } = await setup();
     for (let index = 0; index < 60; index++)

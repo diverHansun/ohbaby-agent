@@ -1,3 +1,10 @@
+/* A delegation keeps its agent tool card (D39); the entry line under it opens
+   the instance in the right panel. */
+.ohb-delegation {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .ohb-delegation-row {
   display: flex;
   align-items: center;
@@ -13,10 +20,6 @@
 }
 .ohb-delegation-row:hover {
   background: var(--bg-hover);
-}
-.ohb-delegation-row:disabled {
-  cursor: default;
-  opacity: 0.65;
 }
 .ohb-delegation-copy {
   display: flex;
@@ -51,103 +54,6 @@
 .ohb-delegation-copy.is-timed_out .ohb-delegation-meta {
   color: var(--danger-ink);
 }
-.ohb-subagent-view {
-  box-sizing: border-box;
-  position: absolute;
-  z-index: 26;
-  bottom: var(--child-bottom, 140px);
-  left: var(--child-left, 24px);
-  width: var(--child-width, calc(100% - 48px));
-  max-width: 800px;
-  height: var(--child-height, 60%);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  box-shadow: var(--shadow-modal);
-  animation: ohb-subagent-enter 180ms ease-out both;
-  overflow: hidden;
-}
-.ohb-subagent-view.is-expanded {
-  inset: 0;
-  width: 100%;
-  max-width: none;
-  height: auto;
-  transform: none;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-.ohb-subagent-heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  box-sizing: border-box;
-  min-height: 44px;
-  padding: 5px 8px 5px 14px;
-  border-bottom: 1px solid var(--border);
-  flex: none;
-}
-.ohb-subagent-title {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.ohb-subagent-title h2 {
-  font-size: 14px;
-  font-weight: 500;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  outline: none;
-}
-.ohb-subagent-title nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 45%;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.ohb-subagent-title nav button {
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.ohb-subagent-status {
-  font-size: 11px;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-.ohb-subagent-heading button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 32px;
-  height: 32px;
-  padding: 6px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.ohb-subagent-heading button:hover {
-  background: var(--bg-hover);
-}
-.ohb-subagent-view .ohb-stream {
-  padding: 20px 0 24px;
-}
-.ohb-subagent-view .ohb-stream-inner {
-  width: 100%;
-  box-sizing: border-box;
-}
 .ohb-parent-source {
   display: flex;
   align-items: center;
@@ -161,15 +67,6 @@
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   padding: 1px 4px;
-}
-.ohb-child-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 16px;
-  color: var(--text-dim);
-  font-size: 11px;
-  border-top: 1px solid var(--border);
 }
 .ohb-child-notice {
   margin: 0;
@@ -193,24 +90,6 @@
 .ohb-composer-content {
   display: contents;
 }
-.ohb-composer.is-readonly .ohb-composer-content > :not(.ohb-composer-input) {
-  display: none;
-}
-.ohb-composer.is-readonly .ohb-composer-input > * {
-  visibility: hidden;
-  pointer-events: none;
-}
-.ohb-composer-readonly-label {
-  position: absolute;
-  z-index: 3;
-  inset: 16px 24px 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  pointer-events: none;
-  font-size: 13px;
-}
 .ohb-prompt-queue-item > span {
   flex-shrink: 0;
 }
@@ -218,21 +97,6 @@
   display: block;
   max-width: 18rem;
   color: var(--danger-ink);
-}
-@media (max-width: 720px) {
-  .ohb-subagent-view {
-    left: var(--child-left, 14px);
-    width: var(--child-width, calc(100% - 28px));
-  }
-  .ohb-subagent-status {
-    display: none;
-  }
-}
-@media (pointer: coarse) {
-  .ohb-subagent-heading > button {
-    min-width: 44px;
-    height: 44px;
-  }
 }
 .ohb-child-stored-result h3 {
   font-size: 12px;
@@ -246,20 +110,4 @@
 }
 .ohb-delegation-duration {
   margin-left: 10px;
-}
-
-@keyframes ohb-subagent-enter {
-  from {
-    opacity: 0;
-    translate: 0 18px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ohb-subagent-view {
-    animation: none;
-  }
 }

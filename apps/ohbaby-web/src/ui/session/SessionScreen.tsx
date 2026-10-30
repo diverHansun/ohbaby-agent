@@ -1,4 +1,8 @@
-import { getUnconsumedSteers, type UiBackendClient } from "ohbaby-sdk";
+import {
+  getUnconsumedSteers,
+  type UiBackendClient,
+  type UiSubagentInstanceReaderState,
+} from "ohbaby-sdk";
 import type { ReactElement, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
@@ -20,7 +24,6 @@ import { selectPersistedPromptError } from "./prompt-projection.js";
 import { isConnectionAbnormal } from "./selectors.js";
 import { SessionBanners, SessionSyncNotice } from "./SessionBanners.js";
 import { SessionConversation } from "./SessionConversation.js";
-import { SubagentView } from "./SubagentView.js";
 import { useCommandOverlays } from "./useCommandOverlays.js";
 import { useCompactRequest } from "./use-compact-request.js";
 import { usePromptSubmission } from "./usePromptSubmission.js";
@@ -39,6 +42,8 @@ export function SessionScreen({
   draftPicker,
   onOpenModelSettings,
   onError,
+  subagentInstances,
+  onOpenSubagent,
 }: {
   readonly runtime: OhbabyWebRuntime;
   readonly client: UiBackendClient;
@@ -48,6 +53,13 @@ export function SessionScreen({
   readonly onOpenModelSettings: (fromDraft: boolean) => void;
   /** Failures away from where the user is looking: the top-right notices. */
   readonly onError: (error: unknown) => void;
+  /** The session's instance snapshot, shared with the right panel. */
+  readonly subagentInstances?: UiSubagentInstanceReaderState;
+  /** Opens an instance in the right panel at one delegation. */
+  readonly onOpenSubagent?: (input: {
+    readonly subagentId: string;
+    readonly executionId: string;
+  }) => void;
 }): ReactElement {
   const {
     storeSnapshot,
@@ -233,8 +245,7 @@ export function SessionScreen({
 
   const contentRef = useRef<HTMLDivElement>(null);
   const interactions = useSessionInteractions({ client, view, contentRef });
-  const { viewingSubagent, approvalDialogVisible, childExpanded } =
-    interactions;
+  const { approvalDialogVisible } = interactions;
 
   const showMain =
     !view.isEmpty ||
@@ -262,7 +273,6 @@ export function SessionScreen({
       }${approvalDialogVisible ? " has-approval" : ""}`}
     >
       <ApprovalPanel
-        visible={!viewingSubagent}
         disabled={storeSnapshot.permissionSync.status !== "ready"}
         error={storeSnapshot.permissionSync.error}
         syncing={storeSnapshot.permissionSync.status === "syncing"}
@@ -316,6 +326,8 @@ export function SessionScreen({
               : undefined
           }
           onInsertSkill={prefillComposer}
+          subagentInstances={subagentInstances}
+          onOpenSubagent={onOpenSubagent}
         />
       ) : (
         <DraftHero
@@ -329,15 +341,9 @@ export function SessionScreen({
       <div
         className="ohb-root-composer"
         inert={approvalDialogVisible}
-        style={{
-          display:
-            approvalDialogVisible || (viewingSubagent && childExpanded)
-              ? "none"
-              : "contents",
-        }}
+        style={{ display: approvalDialogVisible ? "none" : "contents" }}
       >
         <Composer
-          readOnly={viewingSubagent || approvalDialogVisible}
           client={client}
           compact={!showMain}
           draftScopeKey={draftScopeKey}
@@ -352,10 +358,7 @@ export function SessionScreen({
           stopLabel={stopRequest.label}
           model={{
             ...view.composer,
-            disabled:
-              view.composer.disabled ||
-              viewingSubagent ||
-              approvalDialogVisible,
+            disabled: view.composer.disabled || approvalDialogVisible,
           }}
           modelControl={
             <ModelMenu
@@ -366,7 +369,7 @@ export function SessionScreen({
               onSelect={selectModel}
               fallbackLabel={view.header.modelLabel}
               missing={modelMissing}
-              disabled={viewingSubagent || approvalDialogVisible}
+              disabled={approvalDialogVisible}
               onManage={() => {
                 onOpenModelSettings(false);
               }}
@@ -418,23 +421,7 @@ export function SessionScreen({
           }
         />
       </div>
-      {viewingSubagent ? (
-        <SubagentView
-          reader={interactions.childReader}
-          readingCache={interactions.childReadingCache}
-          state={interactions.childState}
-          rootTitle={view.activeSession?.title ?? "Main conversation"}
-          title={
-            interactions.childState.conversation?.displayName ?? "Subagent"
-          }
-          expanded={childExpanded}
-          onExpandedChange={interactions.setChildExpanded}
-          onClose={interactions.closeChild}
-          approvalRequired={view.pendingPermissions.length > 0}
-          anchorToken={String(interactions.childAnchorToken)}
-        />
-      ) : null}
-      {!viewingSubagent && overlays.structuredOverlay ? (
+      {overlays.structuredOverlay ? (
         <StructuredCommandOverlay
           key={draftScopeKey}
           client={client}

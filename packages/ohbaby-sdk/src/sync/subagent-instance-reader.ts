@@ -26,6 +26,7 @@ export function createSubagentInstanceReader(
   let generation = 0;
   let disposed = false;
   let pending: AbortController | undefined;
+  let refreshQueued = false;
   const listeners = new Set<() => void>();
   const isCurrent = (ticket: number, signal: AbortSignal): boolean =>
     !disposed && ticket === generation && !signal.aborted;
@@ -84,7 +85,27 @@ export function createSubagentInstanceReader(
       if (pending === controller) pending = undefined;
     }
   }
+  const requestRefresh = (): void => {
+    if (disposed || refreshQueued) return;
+    refreshQueued = true;
+    const selected = query;
+    const scheduledGeneration = generation;
+    queueMicrotask(() => {
+      refreshQueued = false;
+      if (!disposed && query === selected && generation === scheduledGeneration)
+        void refresh();
+    });
+  };
   const unsubscribe = client.subscribeEvents?.((event) => {
+    if (disposed) return;
+    if (event.type === "session.resync-required") {
+      if (
+        !event.disconnected &&
+        (event.sessionId === null || event.sessionId === query.rootSessionId)
+      )
+        requestRefresh();
+      return;
+    }
     if (
       event.type !== "subagent.instances.invalidated" ||
       event.rootSessionId !== query.rootSessionId ||
@@ -98,7 +119,7 @@ export function createSubagentInstanceReader(
       current.revision >= event.revision
     )
       return;
-    void refresh();
+    requestRefresh();
   });
   return {
     getSnapshot: (): UiSubagentInstanceReaderState => state,

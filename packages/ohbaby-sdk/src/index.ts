@@ -282,6 +282,7 @@ export {
 export type {
   UiSubagentConversationReaderState,
   UiSubagentConversationReader,
+  UiSubagentInstanceSelection,
 } from "./sync/subagent-conversation-reader.js";
 
 export { getUnconsumedSteers } from "./contract/run-inputs.js";

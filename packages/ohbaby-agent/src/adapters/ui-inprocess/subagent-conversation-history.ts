@@ -278,6 +278,15 @@ export function createSubagentConversationHistory(options: {
               limit: 1,
             })
           ).at(0));
+      // Access is validated by the conversation projection. A real pending
+      // instance may not have its first execution yet; cursors still must resolve.
+      if (record === undefined && !boundary && !anchor)
+        return {
+          messages: [],
+          executions: [],
+          history: { hasMore: false, hasLater: false },
+          anchorFound: false,
+        };
       if (
         record === undefined ||
         record.rootSessionId !== query.rootSessionId ||

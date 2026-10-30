@@ -6905,7 +6905,11 @@ it("reserves the measured approval height and updates it when the card resizes",
   }
 });
 
-it("keeps the child shell read-only and returns focus to pending approval when it closes", async () => {
+/** A chat with one completed legacy delegation of instance "worker" and a pending approval. */
+function delegationRuntime(): {
+  readonly fake: FakeRuntime;
+  readonly rootSessionId: string;
+} {
   const base = snapshotWithStatus({ kind: "running", runId: "run_1" });
   const rootSession = base.sessions[0];
   const fake = createFakeRuntime({
@@ -6950,36 +6954,105 @@ it("keeps the child shell read-only and returns focus to pending approval when i
       permissions: [permissionRequest()],
     },
   });
+  return { fake, rootSessionId: rootSession.id };
+}
+
+function workerSnapshot(
+  rootSessionId: string,
+  present: boolean,
+): Awaited<ReturnType<NonNullable<UiBackendClient["listSubagentInstances"]>>> {
+  return {
+    rootSessionId,
+    runtimeEpoch: "epoch",
+    revision: 1,
+    complete: true,
+    instances: present
+      ? [
+          {
+            rootSessionId,
+            subagentId: "worker",
+            displayName: "Worker",
+            description: "Investigate",
+            createdAt: 1,
+            updatedAt: 1,
+            status: "completed",
+            latestExecutionId: "exec",
+            approvalBlocked: false,
+            settling: false,
+            unprocessedMessageCount: 0,
+          },
+        ]
+      : [],
+  };
+}
+
+it("opens a delegation in the right panel while the approval and chat stay usable", async () => {
+  const { fake, rootSessionId } = delegationRuntime();
+  fake.client.listSubagentInstances = vi.fn(() =>
+    Promise.resolve(workerSnapshot(rootSessionId, true)),
+  );
+  fake.client.getSubagentExecutionView = vi.fn(() =>
+    Promise.reject(new Error("fixture unavailable")),
+  );
   fake.client.watchSubagentConversation = vi.fn(() =>
     Promise.reject(new Error("fixture unavailable")),
   );
   const app = mountApp(fake.runtime);
-  const trigger = app.container.querySelector<HTMLButtonElement>(
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  // The agent tool card stays; the entry under it carries the instance name.
+  const entry = app.container.querySelector<HTMLButtonElement>(
     ".ohb-delegation-row",
   );
+  expect(entry?.getAttribute("aria-label")).toBe("Open Worker in Subagents");
   await act(async () => {
-    trigger?.click();
-    await Promise.resolve();
+    entry?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(app.container.querySelector(".ohb-approval-panel")).toBeNull();
-  expect(app.container.querySelector(".ohb-subagent-view")).not.toBeNull();
-  expect(
-    app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
-      .display,
-  ).toBe("contents");
-  expect(app.container.textContent).toContain("Read-only subagent");
-  await act(async () => {
-    app.container
-      .querySelector<HTMLButtonElement>(
-        '.ohb-subagent-view [aria-label="Close"]',
-      )
-      ?.click();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  });
-  expect(document.activeElement).toBe(
-    app.container.querySelector(".ohb-approval-panel h2"),
+  const panel = app.container.querySelector(".ohb-side-panel");
+  expect(panel?.querySelector('[role="tab"]')?.textContent).toContain(
+    "Subagents",
   );
-  expect(document.activeElement).not.toBe(trigger);
+  expect(panel?.querySelector("h2")?.textContent).toBe("Worker");
+  // Located at this delegation's execution, not just the latest one.
+  expect(fake.client.getSubagentExecutionView).toHaveBeenCalledWith(
+    expect.objectContaining({ executionId: "exec" }),
+  );
+  // No sheet, no hidden approval, no locked chat (improve-4 I4-03).
+  expect(app.container.querySelector(".ohb-subagent-view")).toBeNull();
+  expect(app.container.querySelector(".ohb-approval-panel")).not.toBeNull();
+  expect(
+    app.container
+      .querySelector(".ohb-root-conversation")
+      ?.hasAttribute("inert"),
+  ).toBe(false);
+});
+
+it("withdraws a closed instance's entry but keeps it when the snapshot cannot be read", async () => {
+  const closed = delegationRuntime();
+  closed.fake.client.listSubagentInstances = vi.fn(() =>
+    Promise.resolve(workerSnapshot(closed.rootSessionId, false)),
+  );
+  const first = mountApp(closed.fake.runtime);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(first.container.querySelector(".ohb-delegation-row")).toBeNull();
+  // The agent tool card stays as the chat's record.
+  expect(
+    first.container.querySelector(".ohb-delegation .ohb-tool-panel"),
+  ).not.toBeNull();
+
+  const unreadable = delegationRuntime();
+  unreadable.fake.client.listSubagentInstances = vi.fn(() =>
+    Promise.reject(new Error("Daemon request failed")),
+  );
+  const second = mountApp(unreadable.fake.runtime);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(second.container.querySelector(".ohb-delegation-row")).not.toBeNull();
 });
 
 it("keeps slash parse failures beside input and clears only that error on editing", async () => {

@@ -34,10 +34,6 @@ export interface UiRuntimeComposition {
   stopSubagent(
     input: import("../../agents/subagents/types.js").SubagentStopInput,
   ): Promise<import("../../agents/subagents/types.js").SubagentStopResult>;
-  getSubagentWaitState(rootRunId: string): {
-    readonly waiting: boolean;
-    readonly approvalBlocked: boolean;
-  };
   getSubagentExecutionBudget(
     executionId: string,
   ):

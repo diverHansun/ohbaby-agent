@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -13,6 +14,14 @@ import { selectViewModel } from "../session/selectors.js";
 import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
 import { type NoticeItem, NoticeStack } from "../shared/Notice.js";
+import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
+import { useSubagentInstances } from "../shared/subagent-instances.js";
+import { SidePanel } from "../side-panel/SidePanel.js";
+import {
+  type SidePageContext,
+  SidePanelPage,
+} from "../side-panel/SidePanelPage.js";
+import { useSidePanel } from "../side-panel/use-side-panel.js";
 import { Sidebar } from "../sidebar/Sidebar.js";
 import type {
   SessionActivity,
@@ -179,6 +188,38 @@ export function AppController(props: {
     [activeId, awaiting, running],
   );
 
+  const sidePanel = useSidePanel(activeId);
+  // Only a panel the user just opened takes focus (see SidePanel focusOnOpen).
+  const [panelOpenedByUser, setPanelOpenedByUser] = useState(false);
+  // Reading positions in the panel's subagent details; a new chat starts afresh.
+  const panelReadingCache = useMemo<SubagentReadingCache>(
+    () => new Map(),
+    [activeId],
+  );
+  const subagentInstances = useSubagentInstances(client, activeId);
+  const sidePageContext: SidePageContext = {
+    client,
+    rootSessionId: activeId,
+    subagentReadingCache: panelReadingCache,
+    subagentInstances,
+    setTabState: sidePanel.setTabState,
+  };
+  const { revealPage } = sidePanel;
+  const anchorToken = useRef(0);
+  // The chat's delegation entries open the instance in the right panel,
+  // located at that delegation (improve-4/02 §2.7).
+  const openSubagent = useCallback(
+    (input: { subagentId: string; executionId: string }): void => {
+      anchorToken.current += 1;
+      setPanelOpenedByUser(true);
+      revealPage("subagents", {
+        subagentId: input.subagentId,
+        anchor: { executionId: input.executionId, token: anchorToken.current },
+      });
+    },
+    [revealPage],
+  );
+
   const draftPicker = (
     <WorkspacePicker
       value={draft.workspaceDirectory}
@@ -261,6 +302,11 @@ export function AppController(props: {
           header={view.header}
           hasClient={client !== null}
           sessionId={view.activeSession?.id ?? null}
+          sidePanelOpen={sidePanel.state.open}
+          onOpenSidePanel={() => {
+            setPanelOpenedByUser(true);
+            sidePanel.setOpen(true);
+          }}
           onOpenContextUsage={() => {
             const sessionId = view.activeSession?.id;
             if (sessionId && client)
@@ -278,6 +324,8 @@ export function AppController(props: {
             draftPicker={draftPicker}
             onOpenModelSettings={openModelSettings}
             onError={pushError}
+            subagentInstances={subagentInstances.state}
+            onOpenSubagent={openSubagent}
           />
         ) : (
           <DraftFallback
@@ -289,6 +337,26 @@ export function AppController(props: {
             }
           />
         )
+      }
+      asideExpanded={sidePanel.state.expanded}
+      aside={
+        sidePanel.state.open ? (
+          <SidePanel
+            controls={sidePanel}
+            focusOnOpen={panelOpenedByUser}
+            onClosed={() => {
+              setPanelOpenedByUser(false);
+              requestAnimationFrame(() => {
+                document
+                  .querySelector<HTMLElement>("[data-side-panel-toggle]")
+                  ?.focus();
+              });
+            }}
+            renderPage={(tab) => (
+              <SidePanelPage key={tab.id} tab={tab} context={sidePageContext} />
+            )}
+          />
+        ) : undefined
       }
       overlays={
         <>

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -7,7 +7,11 @@ import {
   type UiSubagentConversationReaderState,
   type UiSubagentExecution,
 } from "ohbaby-sdk";
-import { SubagentView, type SubagentReadingCache } from "./SubagentView.js";
+import {
+  readingMemory,
+  SubagentConversationBody,
+  type SubagentReadingCache,
+} from "./SubagentConversationBody.js";
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -15,6 +19,27 @@ const mounted: (() => void)[] = [];
 afterEach(() => {
   for (const cleanup of mounted.splice(0)) cleanup();
 });
+/** The reading body as a page hosts it; heading and controls belong to the host. */
+function ChildReading(props: {
+  readonly reader: ReturnType<typeof createSubagentConversationReader>;
+  readonly readingCache: SubagentReadingCache;
+  readonly state: UiSubagentConversationReaderState;
+  readonly anchorToken?: string;
+}): ReactElement {
+  const selected = props.state.selected;
+  const identity = `${selected?.rootSessionId ?? ""}:${selected?.subagentId ?? ""}`;
+  return (
+    <section>
+      <SubagentConversationBody
+        reader={props.reader}
+        state={props.state}
+        memory={readingMemory(props.readingCache, identity)}
+        identity={identity}
+        anchorToken={props.anchorToken}
+      />
+    </section>
+  );
+}
 const execution: UiSubagentExecution = {
   executionId: "exec",
   subagentId: "worker",
@@ -95,140 +120,6 @@ function state(): UiSubagentConversationReaderState {
     },
   };
 }
-it("keeps the same child transcript and open tools when expanding, with parent labels and no writable controls", () => {
-  const element = document.createElement("div");
-  document.body.append(element);
-  const root = createRoot(element);
-  const reader = createSubagentConversationReader({}, "root");
-  const readingCache: SubagentReadingCache = new Map();
-  const onClose = vi.fn();
-  const onExpandedChange = vi.fn();
-  const data = state();
-  const render = (expanded: boolean): void => {
-    act(() => {
-      root.render(
-        <SubagentView
-          reader={reader}
-          readingCache={readingCache}
-          state={data}
-          rootTitle="Main task"
-          title="Investigate issue"
-          approvalRequired
-          expanded={expanded}
-          onExpandedChange={onExpandedChange}
-          onClose={onClose}
-        />,
-      );
-    });
-  };
-  mounted.push(() => {
-    act(() => {
-      root.unmount();
-    });
-    reader.dispose();
-    element.remove();
-  });
-  render(false);
-  expect(element.querySelector('[role="dialog"]')).not.toBeNull();
-  expect(element.textContent).toContain("From parent");
-  expect(element.textContent).toContain("Queued");
-  expect(element.textContent).toContain("Approval required");
-  expect(element.textContent).not.toContain("Return to parent");
-  expect(
-    [...element.querySelectorAll("[data-message-id]")].map((row) =>
-      row.getAttribute("data-message-id"),
-    ),
-  ).toEqual(["parent", "m"]);
-  expect(element.querySelector(".ohb-child-footer")).toBeNull();
-  expect(
-    element.querySelector('button[aria-label="Jump to latest"]'),
-  ).toBeNull();
-  const transcript = element.querySelector(".ohb-stream");
-  act(() =>
-    element.querySelector<HTMLButtonElement>("button[aria-expanded]")?.click(),
-  );
-  expect(element.textContent).toContain("y".repeat(20000));
-  render(true);
-  expect(element.querySelector(".ohb-stream")).toBe(transcript);
-  expect(element.querySelector(".ohb-child-footer")?.textContent).toContain(
-    "Read-only",
-  );
-  expect(
-    element.querySelector('button[aria-label="Jump to latest"]'),
-  ).toBeNull();
-  expect(element.textContent).toContain("y".repeat(20000));
-  expect(element.querySelector("textarea")).toBeNull();
-  expect(element.querySelector('button[aria-label="Collapse"]')).not.toBeNull();
-  expect(element.textContent).toContain("Main task");
-  act(() =>
-    element
-      .querySelector<HTMLButtonElement>('button[aria-label="Close"]')
-      ?.click(),
-  );
-  expect(onClose).toHaveBeenCalledOnce();
-});
-it("handles Escape by collapsing first and closing a sheet, while ignoring IME composition", () => {
-  const element = document.createElement("div");
-  document.body.append(element);
-  const root = createRoot(element);
-  const reader = createSubagentConversationReader({}, "root");
-  const readingCache: SubagentReadingCache = new Map();
-  const onClose = vi.fn();
-  const onExpandedChange = vi.fn();
-  mounted.push(() => {
-    act(() => {
-      root.unmount();
-    });
-    reader.dispose();
-    element.remove();
-  });
-  const render = (expanded: boolean): void => {
-    act(() => {
-      root.render(
-        <SubagentView
-          reader={reader}
-          readingCache={readingCache}
-          state={state()}
-          rootTitle="Main"
-          title="Worker"
-          expanded={expanded}
-          onExpandedChange={onExpandedChange}
-          onClose={onClose}
-        />,
-      );
-    });
-  };
-  render(true);
-  element.querySelector<HTMLButtonElement>("nav button")?.focus();
-  void act(() =>
-    element.querySelector('[role="dialog"]')?.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Escape",
-        bubbles: true,
-        isComposing: true,
-      }),
-    ),
-  );
-  expect(onExpandedChange).not.toHaveBeenCalled();
-  void act(() =>
-    element
-      .querySelector('[role="dialog"]')
-      ?.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-      ),
-  );
-  expect(onExpandedChange).toHaveBeenCalledWith(false);
-  expect(onClose).not.toHaveBeenCalled();
-  render(false);
-  expect(element.contains(document.activeElement)).toBe(true);
-  void act(() =>
-    document.activeElement?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    ),
-  );
-  expect(onClose).toHaveBeenCalledOnce();
-});
-
 it("retains each logical child's tool expansion and updates the existing streaming message", () => {
   const element = document.createElement("div");
   document.body.append(element);
@@ -253,15 +144,10 @@ it("retains each logical child's tool expansion and updates the existing streami
   const render = (data: UiSubagentConversationReaderState): void => {
     act(() => {
       root.render(
-        <SubagentView
+        <ChildReading
           reader={reader}
           readingCache={readingCache}
           state={data}
-          rootTitle="Main"
-          title="Task"
-          expanded={false}
-          onExpandedChange={() => undefined}
-          onClose={() => undefined}
         />,
       );
     });
@@ -320,7 +206,7 @@ it("retains each logical child's tool expansion and updates the existing streami
   expect(row?.textContent).toBe("hello world");
 });
 
-it("keeps keyboard focus inside the child and only loads later history after user scrolling", () => {
+it("only loads later history after user scrolling", () => {
   const element = document.createElement("div");
   document.body.append(element);
   const root = createRoot(element);
@@ -343,20 +229,13 @@ it("keeps keyboard focus inside the child and only loads later history after use
   });
   act(() => {
     root.render(
-      <SubagentView
+      <ChildReading
         reader={reader}
         readingCache={readingCache}
         state={anchored}
-        rootTitle="Main"
-        title="Worker"
-        expanded={false}
-        onExpandedChange={() => undefined}
-        onClose={() => undefined}
       />,
     );
   });
-  expect(document.activeElement).toBe(element.querySelector("h2"));
-  expect(element.querySelector(".ohb-child-footer")).toBeNull();
   const last = element.querySelector<HTMLButtonElement>(
     ".ohb-child-gap button",
   );
@@ -366,97 +245,11 @@ it("keeps keyboard focus inside the child and only loads later history after use
     stream?.dispatchEvent(new Event("scroll"));
   });
   expect(loadLater).not.toHaveBeenCalled();
-  last?.focus();
-  act(() => {
-    last?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
-    );
-  });
-  expect(document.activeElement).toBe(
-    element.querySelector('button[aria-label="Expand"]'),
-  );
   act(() => {
     stream?.dispatchEvent(new WheelEvent("wheel"));
     stream?.dispatchEvent(new Event("scroll"));
   });
   expect(loadLater).toHaveBeenCalledOnce();
-
-  const foldedReasoning = {
-    ...data,
-    conversation: data.conversation
-      ? {
-          ...data.conversation,
-          messages: [
-            data.conversation.messages[0],
-            {
-              id: "m",
-              role: "assistant" as const,
-              createdAt: "2026-01-01",
-              parts: [
-                {
-                  type: "reasoning" as const,
-                  text: "folded thought",
-                  endReason: "normal" as const,
-                },
-                { type: "text" as const, text: "done" },
-              ],
-            },
-          ],
-        }
-      : undefined,
-  };
-  act(() => {
-    root.render(
-      <SubagentView
-        reader={reader}
-        readingCache={readingCache}
-        state={foldedReasoning}
-        rootTitle="Main"
-        title="Worker"
-        expanded={false}
-        onExpandedChange={() => undefined}
-        onClose={() => undefined}
-      />,
-    );
-  });
-  const summary = element.querySelector<HTMLElement>(
-    ".ohb-reasoning > summary",
-  );
-  const reasoningPre = element.querySelector<HTMLElement>(
-    ".ohb-reasoning > pre",
-  );
-  const expandButton = element.querySelector<HTMLButtonElement>(
-    'button[aria-label="Expand"]',
-  );
-  summary?.focus();
-  act(() => {
-    summary?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
-    );
-  });
-  expect(document.activeElement).toBe(expandButton);
-  act(() => {
-    expandButton?.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Tab",
-        shiftKey: true,
-        bubbles: true,
-      }),
-    );
-  });
-  expect(document.activeElement).toBe(summary);
-  element.querySelector("details")?.setAttribute("open", "");
-  act(() => {
-    expandButton?.focus();
-    expandButton?.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Tab",
-        shiftKey: true,
-        bubbles: true,
-      }),
-    );
-  });
-  expect(document.activeElement).toBe(reasoningPre);
 });
 
 it("keeps an explicit parent anchor even when it is within the auto-follow threshold", () => {
@@ -478,15 +271,10 @@ it("keeps an explicit parent anchor even when it is within the auto-follow thres
   try {
     act(() => {
       root.render(
-        <SubagentView
+        <ChildReading
           reader={reader}
           readingCache={readingCache}
           state={state()}
-          rootTitle="Main"
-          title="Worker"
-          expanded={false}
-          onExpandedChange={() => undefined}
-          onClose={() => undefined}
         />,
       );
     });
@@ -523,15 +311,10 @@ it("retains expanded tools after closing and reopening through the root-owned ca
   const render = (): void => {
     act(() => {
       root.render(
-        <SubagentView
+        <ChildReading
           reader={reader}
           readingCache={readingCache}
           state={state()}
-          rootTitle="Main"
-          title="Worker"
-          expanded={false}
-          onExpandedChange={() => undefined}
-          onClose={() => undefined}
         />,
       );
     });
@@ -574,15 +357,10 @@ it("shows available-history guidance when the delegation has no exact parent anc
   });
   act(() => {
     root.render(
-      <SubagentView
+      <ChildReading
         reader={reader}
         readingCache={readingCache}
         state={legacy}
-        rootTitle="Main"
-        title="Worker"
-        expanded={false}
-        onExpandedChange={() => undefined}
-        onClose={() => undefined}
       />,
     );
   });

@@ -17,4 +17,6 @@
 @import "./permissions/policy.css";
 @import "./permissions/permissions.css";
 @import "./session/subagents.css";
+@import "./side-panel/side-panel.css";
+@import "./side-panel/subagents/subagents-page.css";
 @import "./settings/settings.css";

@@ -827,14 +827,14 @@ describe("session-owned subagent lifecycle", () => {
         subagentId: first.execution.subagentId,
         expectedExecutionId: "stale",
       }),
-    ).rejects.toThrow(/not found/);
+    ).rejects.toMatchObject({ code: "SUBAGENT_NOT_FOUND" });
     await expect(
       f.host.stop({
         parentSessionId: "parent",
         subagentId: "missing",
         expectedExecutionId: "stale",
       }),
-    ).rejects.toThrow(/not found/);
+    ).rejects.toMatchObject({ code: "SUBAGENT_NOT_FOUND" });
   });
   it("reuses unconfirmed close cleanup and preserves the original durable close identity", async () => {
     const cleanup = deferred<undefined>();

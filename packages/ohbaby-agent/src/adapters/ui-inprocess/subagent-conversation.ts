@@ -11,7 +11,7 @@ import type {
 } from "ohbaby-sdk";
 import type { MessageManager } from "../../core/message/index.js";
 import type { SubagentInstanceStore } from "../../agents/subagents/types.js";
-import { subagentAccessError } from "./subagent-instances.js";
+import { subagentAccessError } from "../../agents/subagents/access-error.js";
 import type {
   SubagentExecutionRecord,
   SubagentExecutionStore,
@@ -197,7 +197,7 @@ export class SubagentConversationProjection {
 
   private async latest(
     input: UiSubagentConversationQuery,
-  ): Promise<SubagentExecutionRecord> {
+  ): Promise<SubagentExecutionRecord | undefined> {
     const records = await this.options.executions.list({
       rootSessionId: input.rootSessionId,
       subagentId: input.subagentId,
@@ -205,8 +205,9 @@ export class SubagentConversationProjection {
     });
     const record = records.at(0);
     if (
-      record?.rootSessionId !== input.rootSessionId ||
-      record.subagentId !== input.subagentId
+      record &&
+      (record.rootSessionId !== input.rootSessionId ||
+        record.subagentId !== input.subagentId)
     )
       throw subagentAccessError("SUBAGENT_NOT_FOUND");
     return record;
@@ -214,13 +215,17 @@ export class SubagentConversationProjection {
 
   private async scope(input: UiSubagentConversationQuery): Promise<ScopeView> {
     const latest = await this.latest(input);
-    await this.openInstance(latest.parentSessionId, input.subagentId);
-    const sessionId = latest.childSessionId ?? latest.rootSessionId;
+    const parentSessionId = latest?.parentSessionId ?? input.rootSessionId;
+    const instance = await this.openInstance(parentSessionId, input.subagentId);
+    if (!latest && !instance) throw subagentAccessError("SUBAGENT_NOT_FOUND");
+    // A pending instance has no execution lane yet. The parent supplies only
+    // session metadata; history/runs stay empty until a child binding arrives.
+    const sessionId = latest?.childSessionId ?? input.rootSessionId;
     const key = this.key(input);
     let scope = this.scopes.get(key);
     if (
       scope?.sessionId === sessionId &&
-      scope.scopeId === latest.childScopeId
+      scope.scopeId === latest?.childScopeId
     ) {
       scope.accessedAt = Date.now();
       return scope;
@@ -240,10 +245,10 @@ export class SubagentConversationProjection {
         for (const record of page.executions)
           executions.set(record.executionId, record);
         const metadata = await this.options.source.scopeMetadata(sessionId);
-        await this.openInstance(latest.parentSessionId, input.subagentId);
+        await this.openInstance(parentSessionId, input.subagentId);
         return {
           session: { ...metadata, messages: page.messages },
-          runs: latest.childSessionId
+          runs: latest?.childSessionId
             ? await this.options.runs(sessionId, latest.childScopeId)
             : [],
           prompts: [],
@@ -279,10 +284,10 @@ export class SubagentConversationProjection {
     });
     scope = {
       rootSessionId: input.rootSessionId,
-      parentSessionId: latest.parentSessionId,
+      parentSessionId,
       subagentId: input.subagentId,
       sessionId,
-      scopeId: latest.childScopeId,
+      scopeId: latest?.childScopeId,
       owner,
       executions,
       watches,
