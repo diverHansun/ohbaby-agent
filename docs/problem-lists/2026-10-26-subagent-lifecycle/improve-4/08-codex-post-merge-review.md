@@ -140,3 +140,36 @@
 测试通过不覆盖 R5、R6；现有用例缺少这两个边界。本轮没有把跳过的测试算作通过，也没有运行真实外部模型、深色模式或物理触摸设备验收。
 
 Standards：1 项 P2，最严重为 R5。Spec：1 项 P2，最严重为 R6。B5 是已确认的既有后端问题，单独保留，不混入本次 diff 的新增缺陷计数。
+
+## 修复记录（Claude，2026-10-30）
+
+R5、R6 已修复，B5 仍然开着（后端消息排序，另行处理）。
+
+**改法：** 跟随信号只在真正发出内容时触发，按 Codex 建议的最小修复做，没有新增滚动协调层。
+
+- **R5：** 去掉 `SessionScreen` 里无条件的 `setFollowToken`。改为由 `usePromptSubmission` 在两个时机调用 `onSend`：发出普通消息之前，以及 slash 命令真正交给后端执行之前。只打开面板的命令（`openOverlayForSlashText` 返回 `true`）不触发。
+- **R6：** `Composer` 新增 `onResendAccepted`。恢复区重发被接收、而且仍是当前会话时调用它，`SessionScreen` 把它接到同一个跟随信号上。重发失败，或者回执晚到、会话已经切换时，不触发。
+
+**回归测试：** 两条新测试在旧代码上都失败，在新代码上都通过。
+
+- `App.unit.test.tsx`："keeps the reading position when a slash command only opens a panel"。往上翻 → `/goal pause` 打开面板 → 位置不变，也没有发出消息。
+- `Composer.unit.test.tsx`："reports only an accepted resend so the stream can follow it"。重发失败时不触发跟随，成功时触发一次。
+
+**自动检查：**
+
+- `pnpm typecheck` 通过。
+- 改动文件 eslint 0 问题。
+- Web 全部 70 个测试文件、835 项测试通过。
+- `pnpm build` 通过。
+
+**编译产物上的浏览器复验**（`run-subagent-panel-e2e.mjs`，1280 × 720）：
+
+| 检查 | 修复前（Codex 实测） | 修复后 |
+| --- | --- | --- |
+| R5：顶部阅读时发 `/goal pause` | `scrollTop` 0 → 514 | 弹出 "No goal to pause." 面板，`scrollTop` 保持 0；用户消息数不变 |
+| R6：顶部阅读时 Resend `PANEL_FAIL` | 停在顶部，距底部 1091 px | `PANEL_FAIL` 由 1 条变 2 条，视图跟到底部，距底部 0 px |
+| 普通发送 `PANEL_SEND_READER` | 跟随 | 仍然跟随（`scrollTop` 425.5，正好在底部） |
+
+390 × 844 窄屏下没有横向溢出（页面宽度 390 px）。这次复验只走了上面三段，用 `quit` 结束。所以脚本输出 `cleanup-pass`，但整套场景的 `verified` 为 false，完整场景断言没有重跑。
+
+[R5 修复后](evidence/claude-r5-slash-keeps-position.jpg) · [R6 修复后](evidence/claude-r6-resend-follows.jpg)

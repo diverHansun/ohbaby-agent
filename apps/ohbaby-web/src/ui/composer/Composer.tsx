@@ -89,6 +89,8 @@ export function Composer(props: {
     clientRequestId?: string,
     reasoning?: UiReasoningConfig,
   ) => Promise<boolean>;
+  /** A recovered steer was resent and accepted: it is a send like onSubmit. */
+  readonly onResendAccepted?: () => void;
   readonly prefill?: import("./useComposerDraft.js").ComposerPrefill | null;
   readonly onEditRevision: (revision: number) => void;
   readonly model: ComposerModel;
@@ -348,10 +350,10 @@ export function Composer(props: {
                   );
                 throw caught;
               }
-              if (
-                generation === draftScopeGeneration.current &&
-                receipt.steer?.status === "error"
-              ) {
+              // Another session's late receipt must not move this stream.
+              if (generation !== draftScopeGeneration.current) return receipt;
+              props.onResendAccepted?.();
+              if (receipt.steer?.status === "error") {
                 state.setResendError(
                   `Accepted in queue · ${receipt.steer.error.message}`,
                 );

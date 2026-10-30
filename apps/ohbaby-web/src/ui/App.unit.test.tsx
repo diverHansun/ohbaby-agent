@@ -323,6 +323,40 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_000);
   });
 
+  it("keeps the reading position when a slash command only opens a panel", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "old-run" }),
+        status: { kind: "idle" as const },
+        runs: [],
+      },
+    });
+    fake.listCommands.mockResolvedValue(catalog(["goal"]));
+    const app = mountApp(fake.runtime);
+    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+    if (!stream) throw new Error("stream not found");
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_000,
+      scrollTop: 200,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -20 }));
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+    await flushTimers();
+
+    await setTextareaValue(app.container, "/goal pause");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await flushTimers();
+    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
+    expect(stream.scrollTop).toBe(200);
+  });
+
   it("lets an upward wheel leave the bottom before streamed output lands", async () => {
     const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
     const fake = createFakeRuntime({ snapshot: initial });

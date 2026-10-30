@@ -70,8 +70,12 @@ export function SessionScreen({
     promptRecoveryReminders,
   } = useSessionLoad(runtime);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Bumped on every send so the stream follows the new prompt (see ConversationStream).
+  // Bumped when a prompt is actually sent, so the stream follows it (see
+  // ConversationStream). Opening a panel from a slash command is not a send.
   const [followToken, setFollowToken] = useState(0);
+  const follow = useCallback(() => {
+    setFollowToken((token) => token + 1);
+  }, []);
   const [dismissedPromptErrorId, setDismissedPromptErrorId] = useState<
     string | null
   >(null);
@@ -143,6 +147,7 @@ export function SessionScreen({
       setCommandInputError: overlays.setCommandInputError,
       clearActionError,
       setActionError,
+      onSend: follow,
     });
   // Without a configured model, sending opens Settings › Models instead of
   // failing (D16). A failed read of the model is not "missing".
@@ -228,7 +233,6 @@ export function SessionScreen({
         )
           return false;
       }
-      setFollowToken((token) => token + 1);
       return submitText(text, clientRequestId, reasoning, draftEntryId);
     },
     [
@@ -358,6 +362,7 @@ export function SessionScreen({
           onSetPermission={setPermission}
           onStructuredCommand={overlays.openStructuredCommand}
           onSubmit={submit}
+          onResendAccepted={follow}
           onStop={stopRequest.stop}
           stopLabel={stopRequest.label}
           model={{

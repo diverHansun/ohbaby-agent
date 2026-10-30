@@ -34,6 +34,8 @@ export function usePromptSubmission(input: {
   readonly setCommandInputError: (error: CommandInputError | null) => void;
   readonly clearActionError: () => void;
   readonly setActionError: (message: string | null) => void;
+  /** Called right before a prompt or a run-starting command goes out; not for a panel open. */
+  readonly onSend: () => void;
 }): {
   readonly promptProjection: {
     readonly rows: readonly PromptProjectionModel[];
@@ -58,6 +60,7 @@ export function usePromptSubmission(input: {
     setCommandInputError,
     clearActionError,
     setActionError,
+    onSend,
   } = input;
   const [localPromptAttempts, setLocalPromptAttempts] = useState<
     readonly ScopedPromptAttempt[]
@@ -113,6 +116,7 @@ export function usePromptSubmission(input: {
       if (opened === true) return true;
       const resumeWithArguments = opened === "goal-resume-with-arguments";
       clearActionError();
+      onSend();
       try {
         const completion = await runtime.executeSlashCommand({
           ...(resumeWithArguments ? { allowOverlay: true } : {}),
@@ -156,6 +160,7 @@ export function usePromptSubmission(input: {
       clearActionError,
       commandScopeGeneration,
       draftScopeKey,
+      onSend,
       openOverlayForSlashText,
       runtime,
       setCommandInputError,
@@ -173,6 +178,7 @@ export function usePromptSubmission(input: {
       if (text.startsWith("/")) {
         return submitSlashCommand(text, clientRequestId);
       }
+      onSend();
       const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
       const submittedSessionId = view.composer.activeSessionId;
       const submittingClient = runtime.client;
@@ -278,6 +284,7 @@ export function usePromptSubmission(input: {
     [
       clearActionError,
       currentPromptAttempts,
+      onSend,
       runtime,
       selectedDirectory,
       setActionError,

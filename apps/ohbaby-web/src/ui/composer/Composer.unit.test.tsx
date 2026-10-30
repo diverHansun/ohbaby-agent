@@ -663,6 +663,44 @@ it("keeps every recovery item reachable without expanding long text by default",
   expect(document.querySelector("details.ohb-unsent-steer")).toBeNull();
 });
 
+it("reports only an accepted resend so the stream can follow it", async () => {
+  const resend = vi
+    .fn<UiBackendClient["resendSteerInput"]>()
+    .mockRejectedValueOnce(new Error("Network lost"))
+    .mockResolvedValue({
+      promptId: "new",
+      sessionId: "session",
+      clientRequestId: "resend-operation",
+      userMessageId: "new-message",
+      status: "queued",
+      createdAt: "2026-10-15T00:00:00Z",
+    });
+  const onResendAccepted = vi.fn();
+  fixture({
+    unconsumedSteers,
+    onResendAccepted,
+    client: {
+      resendSteerInput: resend,
+      getCurrentModel: () => Promise.resolve(null),
+      subscribeEvents: (): (() => void) => (): void => undefined,
+    } as unknown as UiBackendClient,
+  });
+  await flushAction(() =>
+    document
+      .querySelector<HTMLElement>("details.ohb-unsent-steer summary")
+      ?.click(),
+  );
+  await flushAction(() => {
+    clickLabel("Resend steer 1: Keep my requirement");
+  });
+  expect(onResendAccepted).not.toHaveBeenCalled();
+  await flushAction(() => {
+    clickLabel("Resend steer 1: Keep my requirement");
+  });
+  expect(resend).toHaveBeenCalledTimes(2);
+  expect(onResendAccepted).toHaveBeenCalledTimes(1);
+});
+
 it("resets expansion and failed recovery state when the session changes", async () => {
   const resend = vi
     .fn<UiBackendClient["resendSteerInput"]>()
