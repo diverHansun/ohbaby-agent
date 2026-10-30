@@ -168,7 +168,9 @@
 - 输入：`client`、`rootSessionId`。会话变化时整页重建，旧会话的读取全部释放。
 - 列表用 SDK 的 `createSubagentInstanceReader`，只传 `rootSessionId`，绑定由 client 注入。收到失效事件、`session.resync-required`，或停止之后，都刷新一次。
 - 分组只在前端推导：Active 是 `pending`、`running`，或 `settling`、`approvalBlocked` 为真；其余是 Done。
-- 详情用 SDK 的 conversation reader。在 SDK 能按 `subagentId` 直接打开之前（improve-2 B4），先按实例的 `latestExecutionId` 取一次执行再打开。
+- 详情用 SDK 的 conversation reader，由页面持有：回到列表时保留，再打开同一个实例就沿用已加载的内容和阅读位置，只在第一次打开时按锚点定位；实例离开快照（被关闭）时释放。服务端每个客户端只保留一个子代理订阅，所以页面和主会话的派遣浮层通过 `SubagentWatchCoordinator` 交接：谁最后打开谁读取，另一方关闭。
+- 从顶栏打开右侧栏时，焦点移到选中的 Tab 或入口页第一项；刷新后自动恢复打开时不抢焦点。
+- 在 SDK 能按 `subagentId` 直接打开之前（improve-2 B4），第一次打开时先按实例的 `latestExecutionId` 取一次执行记录，再交给 reader。
 - 停止调用 `stopSubagent`，带上实例当前的 `currentExecutionId`。错误码 `SUBAGENT_SNAPSHOT_CHANGED`（HTTP 409）当成“已提交，结果不确定”，刷新列表后以列表为准；其他 409（比如跨会话）照常报错。
 
 ## 4. 组件与模式
