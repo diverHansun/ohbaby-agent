@@ -1,7 +1,7 @@
 # 2. 优化方案与改动面：主会话入口切换与旧浮层迁移
 
 > 2026-10-29 按 D46 从 improve-1 拆出。讨论记录在 [improve-1/00](../improve-1/00-discussion.md)，现状见 [improve-1/01](../improve-1/01-problem-analysis-and-current-state.md) 的 P8。
-> 前提：improve-3 已合并，右侧栏可用。
+> 前提：improve-3 已完成并通过 Codex 复审的三项修复（`e7d6584e`）。improve-3 和 improve-4 一起合入 main，“新旧两个详情入口并存”的中间状态不单独发布。
 
 ## 2.1 目标与范围
 
@@ -37,7 +37,7 @@
 
 ## 2.5 分批实施
 
-按 D49 在 `subagent/frontend` 上实施，接在 improve-3 后面。
+在本地分支 `subagent/improve-4` 上实施，从 `subagent/frontend` 的 `e7d6584e` 切出，在主 checkout 里做，不用 worktree（D53）。
 
 | 批次 | 内容 | 完成标准 |
 | --- | --- | --- |
@@ -53,7 +53,32 @@
 | D10、D24：关闭后入口撤下，历史记录保留 | 2.2、2.4 |
 | D38、D46：替换旧浮层，最后只剩一套详情入口 | 2.3 |
 
-## 2.7 风险
+## 2.7 实施细化（2026-10-30，D53）
+
+对照 improve-3 之后的代码，把 2.2–2.4 落到具体做法：
+
+1. **入口行：** 完整保留 agent 工具卡，在它下面加一行入口：图标、实例名称、状态和用时，右边是 `›`。现在的派遣行会整个替换工具卡，这一批改掉。
+   - **何时显示：** 只看工具结果的结构化元数据。`started: true` 显示；`started: false, accepted: true`（运行中的 send）只显示工具卡里的投递回执；`started: false` 没有 `accepted`（满额或失败）不显示入口。
+   - **前台执行：** 还没有工具结果时，靠现有的执行记录匹配（`requestId`），确认启动后就显示入口。
+   - **顺带修 improve-1/05 第 9 项：** 被拒绝的 spawn 不显示派遣行；send 的标题取实例名称，不再写死 “Subagent task”。
+2. **点击后：**
+   - **展开右侧栏，选 Tab：** 当前 Tab 是 Subagents 就用它，否则用第一个 Subagents Tab，都没有就新开一个。
+   - **进入详情：** 直接打开这个实例，并按这次派遣的 `anchorExecutionId` 定位。这是用户明确要求的定位，即使这个实例已经在读，也重新跳到锚点。从列表进入仍然保留阅读位置（improve-3 R2）。
+   - **定位方式：** 用现有的 `reader.select(execution)`，不等 B4。
+3. **实例快照放到会话层：** 实例列表的读取从 Subagents 页提到 `AppController`，右侧栏列表和主会话入口行共用一份。
+   - **已关闭：** 快照里没有的实例算已关闭，入口行撤下，工具卡保留。
+   - **读取失败：** 保持原样，不当作已关闭。
+4. **删除旧浮层：**
+   - **要删的：** `SubagentView` 外壳、`subagent-layout.ts`、`childExpanded`、`useSessionInteractions` 里浮层专用的阅读器和测量逻辑、SessionScreen 里锁输入框和隐藏审批的逻辑、浮层专用的 CSS 和测试。
+   - **保留：** `SubagentConversationBody`、派遣行样式、审批布局、CLI 在用的 reader。
+   - **订阅协调器（improve-3 R1）也删掉：** 删完浮层后只剩一个读取方。“同一时刻只有一个详情订阅”改由结构保证：只有 Subagents 页持有阅读器，右侧栏只渲染当前 Tab。用测试固定这条规则。
+5. **回归和验收：**
+   - **回归：** 历史 `subagent_run` 记录、CLI reader、审批布局。
+   - **验收：** 用 `scripts/run-subagent-panel-e2e.mjs` 在编译产物上走 I4-02、I4-03 和 4.2 第 5 条的对抗性复查。
+   - **文档：** 同步 Web 设计文档 03、04、05。
+   - **不在这一批：** B4 仍由 Codex 做；每秒轮询执行列表的 reader 保持不动。
+
+## 2.8 风险
 
 | 风险 | 怎么防 |
 | --- | --- |

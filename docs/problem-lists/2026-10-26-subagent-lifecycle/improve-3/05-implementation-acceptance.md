@@ -101,7 +101,7 @@
 - **页面登记表：** 新增 `side-pages.ts`，每种页面登记标题、图标、说明、初始状态和是否跟会话走。Tab 栏、添加菜单、入口页都从这张表生成。
 - **Tab 状态：** 每个 Tab 带各自页面的状态（`{ id, kind, state }`），类型由页面种类决定。切换主会话时，只有跟会话走的页面会回到初始状态。
 - **渲染：** 新增 `SidePanelPage` 负责按页面种类渲染，外部依赖都放在 `SidePageContext` 里传进去。`AppController` 只剩一行接线。
-- **给 improve-4 用：** `openPage(kind, state)` 可以直接打开到某个实例的详情，improve-4 的“xx 子代理启动”入口会用它。
+- **给 improve-4 用：** `openPage(kind, state)` 可以直接打开到某个实例的详情，improve-4 的“xx 子代理启动”入口会用它（后续：improve-4 实际用的是新增的 `revealPage`，它会复用已有的 Subagents Tab）。
 
 加一种页面只改三处：登记表、状态类型、渲染分支（见 Web 设计文档 05 SidePanel）。
 
@@ -117,7 +117,7 @@ Codex 的独立审查见 [06-codex-review.md](06-codex-review.md)，结论是 R1
 
 | 问题 | 原因（已对照代码核实） | 修法 |
 | --- | --- | --- |
-| R1 新旧详情抢订阅，旧的悄悄停止更新 | 服务端每个客户端只保留一个子代理订阅（`client-view.ts` 的 `clearSubagentWatch`），右侧栏和旧浮层各开一个 reader | 新增 `SubagentWatchCoordinator`（`ui/shared/subagent-watch-owner.ts`）。打开详情前先认领订阅：用户最后打开的一方读取，另一方关闭（旧浮层直接收起，右侧栏回到列表并释放订阅）。不会再有停止更新却还显示着的详情。improve-4 删掉旧浮层后，协调器仍然保证“同一时刻只有一个详情订阅” |
+| R1 新旧详情抢订阅，旧的悄悄停止更新 | 服务端每个客户端只保留一个子代理订阅（`client-view.ts` 的 `clearSubagentWatch`），右侧栏和旧浮层各开一个 reader | 新增 `SubagentWatchCoordinator`（`ui/shared/subagent-watch-owner.ts`）。打开详情前先认领订阅：用户最后打开的一方读取，另一方关闭（旧浮层直接收起，右侧栏回到列表并释放订阅）。不会再有停止更新却还显示着的详情。improve-4 删掉旧浮层后，协调器仍然保证“同一时刻只有一个详情订阅”（后续：improve-4 按 D53 删掉了协调器，改由结构保证：只有 Subagents 页持有阅读器，右侧栏只渲染当前 Tab） |
 | R2 回到同一实例，阅读位置跳回开头 | 每次进详情都新建 reader 重新读；消息流每次挂载都重新按锚点定位，盖掉记住的位置 | reader 提到 Subagents 页面层持有，回到列表时保留；再打开同一实例直接沿用已加载内容，只在第一次打开时按锚点定位（`SubagentConversationBody` 新增 `followAnchor`）。实例离开快照时释放订阅 |
 | R3 窄屏首次打开，Escape 无效 | 打开后焦点留在 body，右侧栏收不到按键 | 从顶栏打开时把焦点放进右侧栏（选中的 Tab 或入口页第一项）；刷新后自动恢复打开时不抢焦点 |
 

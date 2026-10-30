@@ -112,7 +112,7 @@
 | 13 | 重复代码：请求方身份校验复制了两份；`"subagent-result:"` 前缀一处拼、一处 `slice` 解析；`RunCleanupSnapshot` 和 `ShellCleanupResult` 是同一个类型；`"in-progress"/"unconfirmed"/"confirmed"` 写了 6 遍；`goals/service.ts` 里同一个判断写了 7 遍 | `subagent-host.ts:315, 356`；`execution-store.ts:227`、`continuation-coordinator.ts:173`；`run-cleanup.ts:1`；`goals/service.ts:191` 等 | 各抽一个小函数或类型别名 |
 | 14 | `goals/service.ts:772` 的 `interruptInput` 和 `:598` 的 `pauseActiveGoal` 各带两个布尔参数 | 同左 | 改成选项对象 |
 
-`composition.ts:1256` 的 `getSubagentWaitState` 永远返回 false，这会让旧浮层的等待状态失效。旧浮层到 improve-4 就会删除，这一项留到那时一起清理，不在这一轮修。
+`composition.ts:1256` 的 `getSubagentWaitState` 永远返回 false，这会让旧浮层的等待状态失效。旧浮层到 improve-4 就会删除，这一项留到那时一起清理，不在这一轮修。（2026-10-30 后续：improve-4 已删除旧浮层，Web 不再依赖它；它在 agent 包里，属于后端，转给 Codex 的 B4 一起清理，见 improve-4/05。）
 
 ### 测试缺口（复验时要有证据）
 

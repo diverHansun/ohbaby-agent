@@ -10,7 +10,7 @@
 
 当前系统已有实例、执行、保存的会话历史、前后台派遣、执行预算和实时详情读取。这些基础应当复用。主要矛盾是后台工作的生命周期、结果交付和工具资源仍围绕原主 run 组织；单纯改工具名、取消一处 abort 或把并发常量改为 6，不能完成这次改造。
 
-目标行为以 [00 的 D01–D52](00-discussion.md) 为准；实施契约见 [02](02-optimization-plan-and-change-scope.md)，验收见 [04](04-test-and-acceptance.md)。
+目标行为以 [00 的 D01–D53](00-discussion.md) 为准；实施契约见 [02](02-optimization-plan-and-change-scope.md)，验收见 [04](04-test-and-acceptance.md)。
 
 ## 1.2 当前调用链
 

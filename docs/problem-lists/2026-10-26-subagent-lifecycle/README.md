@@ -2,7 +2,7 @@
 
 本议题 2026-10-26 开始讨论，2026-10-28 形成正式方案，2026-10-29 按 D46 拆成四个 improve。目标有两个：一是让后台子代理能跨主代理的轮次继续工作，并把停止、复用、关闭和结果交付的规则定清楚；二是把子代理的查看入口搬到 Web 右侧栏。
 
-**进度（2026-10-29）：** improve-1、improve-2 的后端已经实现并通过复验，在 `subagent/backend`；improve-3 前端正在 `subagent/frontend` 上实施。
+**进度（2026-10-30）：** improve-1、improve-2 已合入本地 main。improve-3 已完成并修复 Codex 复审的三个问题，在 `subagent/frontend`；improve-4 在本地分支 `subagent/improve-4` 上实施（D53）。improve-3 和 improve-4 一起合入 main。
 
 ## 四个 improve
 
@@ -13,9 +13,9 @@
 | 1 | 统一 `agent` 工具和子代理生命周期：执行名额、跨轮结果交付、monitor、监督；Web/TUI 同时认新旧工具名 | `subagent/backend` | [00](improve-1/00-discussion.md)、[01](improve-1/01-problem-analysis-and-current-state.md)、[02](improve-1/02-optimization-plan-and-change-scope.md)、[03](improve-1/03-reference-projects.md)、[04](improve-1/04-test-and-acceptance.md) |
 | 2 | 子代理实例的读取与控制后端：实例列表快照、单实例停止、详情定位、关闭后拒读 | `subagent/backend` | [02](improve-2/02-optimization-plan-and-change-scope.md)、[04](improve-2/04-test-and-acceptance.md) |
 | 3 | 右侧 Tab 容器、入口页、Subagents 列表和详情的前端 | `subagent/frontend` | [02](improve-3/02-optimization-plan-and-change-scope.md)、[04](improve-3/04-test-and-acceptance.md) |
-| 4 | 主会话入口切到右侧栏，删除旧浮层，回归 | `subagent/frontend` | [02](improve-4/02-optimization-plan-and-change-scope.md)、[04](improve-4/04-test-and-acceptance.md) |
+| 4 | 主会话入口切到右侧栏，删除旧浮层，回归 | `subagent/improve-4` | [02](improve-4/02-optimization-plan-and-change-scope.md)、[04](improve-4/04-test-and-acceptance.md) |
 
-所有讨论记录和用户原话（D01–D52）都在 [improve-1/00](improve-1/00-discussion.md)，现状分析和参考项目也只在 improve-1 里写一份，improve-2 到 4 直接引用。每个 improve 实施完成后，在各自目录里写 `05-implementation-acceptance.md`。
+所有讨论记录和用户原话（D01–D53）都在 [improve-1/00](improve-1/00-discussion.md)，现状分析和参考项目也只在 improve-1 里写一份，improve-2 到 4 直接引用。每个 improve 实施完成后，在各自目录里写 `05-implementation-acceptance.md`。
 
 ## 方案要点
 
