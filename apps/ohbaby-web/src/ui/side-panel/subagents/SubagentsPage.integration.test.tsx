@@ -14,6 +14,8 @@ import type {
   UiSubagentStopResult,
 } from "ohbaby-sdk";
 import type { SubagentReadingCache } from "../../session/SubagentConversationBody.js";
+import { createMockRuntime } from "../../../dev/mock-runtime.js";
+import { OhbabyWebApp } from "../../App.js";
 import type { SubagentAnchor } from "../side-pages.js";
 import { useSubagentInstances } from "../../shared/subagent-instances.js";
 import { SubagentsPage } from "./SubagentsPage.js";
@@ -25,6 +27,8 @@ import { SubagentsPage } from "./SubagentsPage.js";
 const mounted: (() => void)[] = [];
 afterEach(() => {
   for (const cleanup of mounted.splice(0)) cleanup();
+  localStorage.clear();
+  sessionStorage.clear();
 });
 
 function instance(
@@ -61,11 +65,14 @@ function snapshot(
   };
 }
 
-function execution(subagentId: string): UiSubagentExecution {
+function execution(
+  subagentId: string,
+  rootSessionId = "root",
+): UiSubagentExecution {
   return {
     executionId: `${subagentId}-exec`,
     subagentId,
-    rootSessionId: "root",
+    rootSessionId,
     rootRunId: "run",
     childUserMessageId: `${subagentId}-task`,
     status: "running",
@@ -76,7 +83,10 @@ function execution(subagentId: string): UiSubagentExecution {
   };
 }
 
-function conversation(subagentId: string): UiSubagentConversationView {
+function conversation(
+  subagentId: string,
+  rootSessionId = "root",
+): UiSubagentConversationView {
   const messages: UiMessage[] = [
     {
       id: `${subagentId}-task`,
@@ -92,13 +102,13 @@ function conversation(subagentId: string): UiSubagentConversationView {
     },
   ];
   return {
-    rootSessionId: "root",
+    rootSessionId,
     subagentId,
     displayName: subagentId,
     readOnly: true,
     anchorFound: true,
     anchorMessageId: `${subagentId}-task`,
-    executions: [execution(subagentId)],
+    executions: [execution(subagentId, rootSessionId)],
     messages,
     history: { hasMore: false, hasLater: false },
     view: {
@@ -126,7 +136,7 @@ function conversation(subagentId: string): UiSubagentConversationView {
   };
 }
 
-function fakeClient(): {
+function fakeClient(rootSessionId = "root"): {
   readonly client: UiBackendClient;
   readonly emit: (event: UiEvent) => void;
   readonly list: ReturnType<typeof vi.fn>;
@@ -153,7 +163,7 @@ function fakeClient(): {
       (input: { readonly executionId: string }) => {
         const subagentId = input.executionId.replace(/-exec$/u, "");
         return Promise.resolve({
-          execution: execution(subagentId),
+          execution: execution(subagentId, rootSessionId),
           messages: [],
           history: { hasMore: false },
           reasoningMissing: false,
@@ -164,7 +174,7 @@ function fakeClient(): {
     watchSubagentConversation: vi.fn(
       (input: { readonly subagentId: string; readonly watchId: string }) =>
         Promise.resolve({
-          rootSessionId: "root",
+          rootSessionId,
           subagentId: input.subagentId,
           runtimeEpoch: "epoch",
           bindingGeneration: 1,
@@ -174,7 +184,7 @@ function fakeClient(): {
     unwatchSubagentConversation: unwatch,
     getSubagentConversationView: vi.fn(
       (input: { readonly subagentId: string }) =>
-        Promise.resolve(conversation(input.subagentId)),
+        Promise.resolve(conversation(input.subagentId, rootSessionId)),
     ),
   } as unknown as UiBackendClient;
   return {
@@ -231,12 +241,13 @@ async function flush(): Promise<void> {
 
 async function mount(
   client: UiBackendClient,
+  app?: ReactElement,
 ): Promise<{ readonly element: HTMLElement; readonly unmount: () => void }> {
   const element = document.createElement("div");
   document.body.append(element);
   const root = createRoot(element);
   act(() => {
-    root.render(<Page client={client} cache={new Map()} />);
+    root.render(app ?? <Page client={client} cache={new Map()} />);
   });
   let removed = false;
   const unmount = (): void => {
@@ -270,6 +281,93 @@ async function click(element: HTMLElement): Promise<void> {
 }
 
 describe("Subagents page", () => {
+  it.each(["switching away from", "closing"])(
+    "releases the detail watch when %s its tab while another Subagents tab remains",
+    async (action) => {
+      const base = createMockRuntime("running");
+      const rootSessionId =
+        base.store.getSnapshot().view.snapshot?.activeSessionId;
+      if (!rootSessionId || !base.client)
+        throw new Error("Missing mock session");
+      const fake = fakeClient(rootSessionId);
+      fake.list.mockResolvedValue({
+        ...snapshot(1, [
+          instance("reviewer", {
+            rootSessionId,
+            status: "running",
+            currentExecutionId: "reviewer-exec",
+          }),
+        ]),
+        rootSessionId,
+      });
+      const client = new Proxy(base.client, {
+        get: (target, property, receiver): unknown =>
+          Reflect.get(fake.client, property) ??
+          Reflect.get(target, property, receiver),
+      });
+      const { element } = await mount(
+        client,
+        <OhbabyWebApp runtime={{ ...base, client }} />,
+      );
+      await click(find(element, "Open side panel"));
+      await click(find(element, "Subagents"));
+      const listTab = element.querySelector<HTMLButtonElement>('[role="tab"]');
+      if (!listTab) throw new Error("Missing list tab");
+      await click(find(element, "Add page"));
+      const menu = document.querySelector('[role="menu"]');
+      if (!menu) throw new Error("Missing add-page menu");
+      await click(find(menu, "Subagents"));
+      await click(find(element, "reviewer"));
+      expect(element.textContent).toContain("Answer from reviewer");
+      const closeDetail = element.querySelector<HTMLButtonElement>(
+        ".ohb-side-panel-tab.is-active .ohb-side-panel-tab-close",
+      );
+      if (!closeDetail) throw new Error("Missing detail tab close button");
+      const watch = vi.mocked(fake.client.watchSubagentConversation);
+      if (!watch) throw new Error("Missing conversation watch");
+      expect(watch).toHaveBeenCalledTimes(1);
+      const watchId = watch.mock.calls[0]?.[0].watchId;
+
+      // Returning to the list within this tab still keeps its reader and history.
+      await click(find(element, "Back to subagents"));
+      await click(find(element, "reviewer"));
+      expect(watch).toHaveBeenCalledTimes(1);
+      expect(fake.client.getSubagentConversationView).toHaveBeenCalledTimes(1);
+      expect(fake.unwatch).not.toHaveBeenCalled();
+
+      await click(action === "closing" ? closeDetail : listTab);
+      expect(listTab.getAttribute("aria-selected")).toBe("true");
+      expect(element.querySelector(".ohb-subagent-detail-header")).toBeNull();
+      expect(element.textContent).not.toContain("Answer from reviewer");
+      expect(fake.unwatch).toHaveBeenCalledTimes(1);
+      expect(fake.unwatch).toHaveBeenCalledWith({
+        rootSessionId,
+        subagentId: "reviewer",
+        runtimeEpoch: "epoch",
+        bindingGeneration: 1,
+        watchId,
+      });
+      expect(watch).toHaveBeenCalledTimes(1);
+      expect(fake.stop).not.toHaveBeenCalled();
+
+      if (action !== "closing") {
+        await click(closeDetail);
+        expect(fake.unwatch).toHaveBeenCalledTimes(1);
+      }
+      // Only the remaining, selected tab can acquire a new watch.
+      await click(find(element, "reviewer"));
+      expect(watch).toHaveBeenCalledTimes(2);
+      expect(element.textContent).toContain("Answer from reviewer");
+      expect(
+        element.querySelector('.ohb-subagent-detail-header [role="status"]')
+          ?.textContent,
+      ).toBe("Running");
+      await click(find(element, "Close side panel"));
+      expect(fake.unwatch).toHaveBeenCalledTimes(2);
+      expect(fake.stop).not.toHaveBeenCalled();
+    },
+  );
+
   it("lists one row per instance in Active and Done with real statuses and unprocessed messages", async () => {
     const fake = fakeClient();
     fake.list.mockResolvedValue(

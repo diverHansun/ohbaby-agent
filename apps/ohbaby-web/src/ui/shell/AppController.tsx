@@ -353,7 +353,7 @@ export function AppController(props: {
               });
             }}
             renderPage={(tab) => (
-              <SidePanelPage tab={tab} context={sidePageContext} />
+              <SidePanelPage key={tab.id} tab={tab} context={sidePageContext} />
             )}
           />
         ) : undefined
