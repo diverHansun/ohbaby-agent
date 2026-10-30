@@ -85,6 +85,12 @@ const prompts = {
     "Create a held Foreground instance; the parent waits until the UI stops it.",
   PANEL_CLOSE_RUNNING:
     "Close the latest open Runner through the real agent tool.",
+  PANEL_SEND_RUNNING:
+    "Send a message to the latest Runner while it is running; verify a delivery receipt without a new execution entry.",
+  PANEL_CAPACITY:
+    "Spawn seven held Capacity runners; verify the six-execution limit rejects excess calls without entry links. Run after the core scenario; quit cleans them up.",
+  PANEL_FAIL:
+    "Send to a nonexistent instance through the real agent tool; verify the failed tool card has no entry link.",
 };
 function record(type, data = {}) {
   console.log(`PANEL_EVENT ${JSON.stringify({ type, ...data })}`);
@@ -331,7 +337,7 @@ const provider = createServer(async (request, response) => {
     const commandIndex = messages.findLastIndex(
       (message) =>
         message.role === "user" &&
-        /^PANEL_(START|SEND_READER|CLOSE_READER|OTHER_SESSION|RUNNING|FOREGROUND|CLOSE_RUNNING)\b/.test(
+        /^PANEL_(START|SEND_READER|CLOSE_READER|OTHER_SESSION|RUNNING|FOREGROUND|CLOSE_RUNNING|SEND_RUNNING|CAPACITY|FAIL)\b/.test(
           content(message),
         ),
     );
@@ -350,6 +356,22 @@ const provider = createServer(async (request, response) => {
     );
     requests.push({ kind: "parent", command });
     if (alreadyCalled) {
+      // Expected agent rejections are real tool receipts, not provider failures.
+      if (["SEND_RUNNING", "CAPACITY", "FAIL"].includes(command)) {
+        finish(
+          response,
+          messages
+            .filter(
+              (message) =>
+                message.role === "tool" &&
+                message.tool_call_id?.startsWith(id + "_action_") &&
+                !message.tool_call_id.includes("_select"),
+            )
+            .map(content)
+            .join("\n\n"),
+        );
+        return;
+      }
       finish(
         response,
         `PANEL_${command}_ACCEPTED\n\nOpen the Subagents panel to inspect the real instances, execution history, and tool output.`,
@@ -369,6 +391,25 @@ const provider = createServer(async (request, response) => {
     else if (command === "RUNNING") specs = [spawnSpec("Runner", "RUNNER")];
     else if (command === "FOREGROUND")
       specs = [spawnSpec("Foreground", "FOREGROUND", "foreground")];
+    else if (command === "CAPACITY")
+      specs = Array.from({ length: 7 }, (_, index) =>
+        spawnSpec(`Capacity ${index + 1}`, "RUNNER"),
+      );
+    else if (command === "SEND_RUNNING" || command === "FAIL")
+      specs = [
+        [
+          "agent",
+          {
+            action: "send",
+            agent_id:
+              command === "SEND_RUNNING"
+                ? previousAgent(messages, "Runner")
+                : "panel-nonexistent-agent",
+            message: "Retain this message and continue the current task.",
+            mode: "background",
+          },
+        ],
+      ];
     else if (command === "SEND_READER")
       specs = [
         [
