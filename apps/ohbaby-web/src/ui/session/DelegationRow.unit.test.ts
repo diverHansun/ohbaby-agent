@@ -320,3 +320,48 @@ it("reads from the tool result whether an execution started", () => {
   ).toBe(true);
   expect(delegationNotStarted(withResult({ started: true }), call)).toBe(false);
 });
+
+it("says the delegation needs approval, like the Subagents list", () => {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const running = { ...execution, status: "running" as const };
+  try {
+    act(() => {
+      root.render(
+        createElement(DelegationRow, {
+          call,
+          execution: running,
+          available: true,
+          awaitingApproval: true,
+          onOpen: vi.fn(),
+        }),
+      );
+    });
+    const entry = container.querySelector(".ohb-delegation-row");
+    expect(entry?.textContent).toContain("Needs approval");
+    expect(entry?.textContent).not.toContain("Running");
+    expect(entry?.querySelector(".ohb-status-dot")).not.toBeNull();
+
+    act(() => {
+      root.render(
+        createElement(DelegationRow, {
+          call,
+          execution: running,
+          available: true,
+          onOpen: vi.fn(),
+        }),
+      );
+    });
+    expect(entry?.textContent).toContain("Running");
+    expect(entry?.querySelector(".ohb-spinner")).not.toBeNull();
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  }
+});

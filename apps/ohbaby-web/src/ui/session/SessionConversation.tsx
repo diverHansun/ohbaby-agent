@@ -44,6 +44,8 @@ export function SessionConversation(props: {
   readonly compacting: boolean;
   readonly compactNotice?: string;
   readonly onInsertSkill: (text: string) => void;
+  /** Changes when the user sends, so the stream follows the new prompt. */
+  readonly followToken?: number;
   /** The session's instance snapshot, shared with the right panel. */
   readonly subagentInstances?: UiSubagentInstanceReaderState;
   readonly onOpenSubagent?: (input: {
@@ -84,6 +86,10 @@ export function SessionConversation(props: {
                   result={result}
                   execution={execution}
                   instanceName={instance?.displayName}
+                  awaitingApproval={
+                    instance?.approvalBlocked === true &&
+                    instance.currentExecutionId === execution?.executionId
+                  }
                   available={
                     !delegationNotStarted(message, call) &&
                     !(
@@ -124,6 +130,7 @@ export function SessionConversation(props: {
             reasoningByMessageId={view.reasoningByMessageId}
             compacting={props.compacting}
             compactNotice={props.compactNotice}
+            followToken={props.followToken}
             commandNotices={
               <CommandNoticeList
                 notices={view.commandNotices.filter(

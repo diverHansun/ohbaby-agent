@@ -1,25 +1,46 @@
 /* A delegation keeps its agent tool card (D39); the entry line under it opens
-   the instance in the right panel. */
+   the instance in the right panel. The entry hangs off the card's icon with a
+   hairline elbow, so card and entry read as one item. */
 .ohb-delegation {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .ohb-delegation-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
+  width: calc(100% - 22px);
+  margin-left: 22px;
   padding: 3px 8px;
   border: 0;
   background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease);
+}
+/* The elbow starts under the tool card's icon (8px padding + half of 14px). */
+.ohb-delegation-row::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: -4px;
+  width: 7px;
+  height: calc(50% + 4px);
+  border-left: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  border-bottom-left-radius: 6px;
+  pointer-events: none;
 }
 .ohb-delegation-row:hover {
   background: var(--bg-hover);
+}
+.ohb-delegation-row > svg:last-child {
+  flex: none;
+  color: var(--text-dim);
 }
 .ohb-delegation-copy {
   display: flex;
@@ -39,13 +60,17 @@
 }
 .ohb-delegation-meta {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-left: auto;
   white-space: nowrap;
   font-size: 12px;
   color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
 }
-/* A neutral type icon like other tool rows; a spinner while it runs. Failure
-   is said in the meta text, not with a coloured dot. */
+/* A neutral type icon like other tool rows; the status glyph sits with the
+   status text, the same set as the Subagents page. */
 .ohb-delegation-icon {
   color: var(--text-dim);
   flex-shrink: 0;
@@ -109,5 +134,5 @@
   font: inherit;
 }
 .ohb-delegation-duration {
-  margin-left: 10px;
+  margin-left: 4px;
 }

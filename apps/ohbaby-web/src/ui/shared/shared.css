@@ -606,3 +606,39 @@
   flex: none;
   gap: 2px;
 }
+
+/* Status glyphs (StatusGlyph): the same 12px slot for every status, so labels
+   line up. Colour stays rare: the sidebar's amber for approval, a muted green
+   check, danger ink for failures; stopped stays dim. */
+.ohb-status-dot {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  height: 12px;
+  justify-content: center;
+  width: 12px;
+}
+
+.ohb-status-dot::before {
+  background: var(--warning);
+  border-radius: 50%;
+  content: "";
+  height: 6px;
+  width: 6px;
+}
+
+.ohb-status-glyph {
+  flex: none;
+}
+
+.ohb-status-glyph.is-done {
+  color: var(--success-ink);
+}
+
+.ohb-status-glyph.is-failed {
+  color: var(--danger-ink);
+}
+
+.ohb-status-glyph.is-stopped {
+  color: var(--text-dim);
+}

@@ -1,6 +1,6 @@
 /* Subagents page (03 §4.9): flat rows, no cards (D4). Group headers fold like
-   Claude's task groups; statuses stay quiet: a spinner while working, the
-   sidebar's amber dot while waiting for approval, danger ink only for failures. */
+   Claude's task groups; statuses stay quiet: one small glyph per status
+   (StatusGlyph), danger ink only for failures. */
 .ohb-subagent-list {
   flex: 1;
   min-height: 0;
@@ -112,13 +112,6 @@
 
 .ohb-subagent-instance-status.is-failed {
   color: var(--danger-ink);
-}
-
-.ohb-subagent-instance-dot {
-  background: var(--warning);
-  border-radius: 50%;
-  height: 6px;
-  width: 6px;
 }
 
 .ohb-subagent-instance-description {

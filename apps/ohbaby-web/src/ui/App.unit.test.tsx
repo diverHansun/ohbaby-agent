@@ -293,6 +293,36 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_400);
   });
 
+  it("follows the user's new prompt after reading up the stream", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "old-run" }),
+        status: { kind: "idle" as const },
+        runs: [],
+      },
+    });
+    const app = mountApp(fake.runtime);
+    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+    if (!stream) throw new Error("stream not found");
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_000,
+      scrollTop: 200,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -20 }));
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(200);
+
+    await setTextareaValue(app.container, "next question");
+    await pressTextareaKey(app.container, "Enter");
+    await flushTimers();
+    expect(stream.scrollTop).toBe(1_000);
+  });
+
   it("lets an upward wheel leave the bottom before streamed output lands", async () => {
     const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
     const fake = createFakeRuntime({ snapshot: initial });

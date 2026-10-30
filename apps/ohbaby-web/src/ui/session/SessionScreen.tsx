@@ -70,6 +70,8 @@ export function SessionScreen({
     promptRecoveryReminders,
   } = useSessionLoad(runtime);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Bumped on every send so the stream follows the new prompt (see ConversationStream).
+  const [followToken, setFollowToken] = useState(0);
   const [dismissedPromptErrorId, setDismissedPromptErrorId] = useState<
     string | null
   >(null);
@@ -226,6 +228,7 @@ export function SessionScreen({
         )
           return false;
       }
+      setFollowToken((token) => token + 1);
       return submitText(text, clientRequestId, reasoning, draftEntryId);
     },
     [
@@ -326,6 +329,7 @@ export function SessionScreen({
               : undefined
           }
           onInsertSkill={prefillComposer}
+          followToken={followToken}
           subagentInstances={subagentInstances}
           onOpenSubagent={onOpenSubagent}
         />

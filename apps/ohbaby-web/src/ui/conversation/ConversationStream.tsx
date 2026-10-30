@@ -67,6 +67,8 @@ export function ConversationStream(props: {
   readonly commandNotices: ReactNode;
   readonly compacting?: boolean;
   readonly compactNotice?: string;
+  /** Changes when the user sends a prompt; following resumes even after reading up. */
+  readonly followToken?: number;
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamInnerRef = useRef<HTMLDivElement | null>(null);
@@ -263,6 +265,17 @@ export function ConversationStream(props: {
     if (streamRef.current) streamRef.current.scrollTop = readingPosition.top;
     scheduleStickScroll();
   }, [activeSessionId, scheduleStickScroll]);
+
+  // Sending is a request to see the new prompt, like Claude and Codex: it
+  // re-arms following that an upward scroll or a manual disclosure turned off.
+  useLayoutEffect(() => {
+    if (!props.followToken) return;
+    anchorRef.current = null;
+    toggleAnchor.current = null;
+    stickToBottomRef.current = true;
+    readingPosition.sticky = true;
+    scheduleStickScroll();
+  }, [props.followToken, readingPosition, scheduleStickScroll]);
 
   useLayoutEffect(() => {
     if (!props.anchorMessageId) return;
@@ -540,7 +553,7 @@ export function ConversationStream(props: {
         {props.historyHasMore ||
         props.historyStale ||
         props.historyState === "error" ? (
-          <div role="status">
+          <div className="ohb-history-more" role="status">
             {props.historyStale ? (
               <span>
                 Earlier history changed. Refresh to see the latest version.{" "}

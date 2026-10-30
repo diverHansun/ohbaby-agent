@@ -8,7 +8,7 @@ import type {
 } from "ohbaby-sdk";
 import { ToolCard } from "../conversation/tool-card.js";
 import { useExecutionDuration } from "../conversation/use-execution-duration.js";
-import { Spinner } from "../shared/Spinner.js";
+import { StatusGlyph, type StatusTone } from "../shared/StatusGlyph.js";
 
 export function isDelegationCall(
   call: UiToolCall,
@@ -33,6 +33,17 @@ function subagentStatusLabel(status: UiSubagentExecution["status"]): string {
     timed_out: "Timed out",
   }[status];
 }
+
+const STATUS_TONES: Record<UiSubagentExecution["status"], StatusTone> = {
+  queued: "working",
+  running: "working",
+  completed: "done",
+  failed: "failed",
+  cancelled: "stopped",
+  interrupted: "stopped",
+  timed_out: "failed",
+};
+
 export function delegationExecution(
   message: UiMessage,
   call: UiToolCall,
@@ -110,6 +121,7 @@ export function DelegationRow({
   execution,
   result,
   instanceName,
+  awaitingApproval,
   available,
   onOpen,
 }: {
@@ -118,6 +130,8 @@ export function DelegationRow({
   readonly result?: UiToolResult;
   /** The instance's stable name from the session snapshot, when loaded. */
   readonly instanceName?: string;
+  /** The instance is waiting for approval in this execution (as in the list). */
+  readonly awaitingApproval?: boolean;
   /** False once the instance is closed or the result says nothing started. */
   readonly available: boolean;
   readonly onOpen?: (input: {
@@ -146,15 +160,18 @@ export function DelegationRow({
             });
           }}
         >
-          {execution.status === "running" ? (
-            <Spinner size={13} />
-          ) : (
-            <Bot aria-hidden="true" className="ohb-delegation-icon" size={14} />
-          )}
+          <Bot aria-hidden="true" className="ohb-delegation-icon" size={14} />
           <span className={`ohb-delegation-copy is-${execution.status}`}>
             <span className="ohb-delegation-title">{title}</span>
             <span className="ohb-delegation-meta">
-              {subagentStatusLabel(execution.status)}
+              <StatusGlyph
+                tone={
+                  awaitingApproval ? "approval" : STATUS_TONES[execution.status]
+                }
+              />
+              {awaitingApproval
+                ? "Needs approval"
+                : subagentStatusLabel(execution.status)}
               {duration ? (
                 <span className="ohb-delegation-duration">{duration}</span>
               ) : null}

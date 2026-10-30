@@ -1,4 +1,5 @@
 import type { UiSubagentInstance } from "ohbaby-sdk";
+import type { StatusTone } from "../../shared/StatusGlyph.js";
 
 export interface SubagentInstanceGroups {
   readonly active: readonly UiSubagentInstance[];
@@ -47,6 +48,24 @@ export function instanceStatusLabel(instance: UiSubagentInstance): string {
   if (instance.approvalBlocked) return "Needs approval";
   if (instance.settling && instance.status !== "running") return "Cleaning up";
   return STATUS_LABELS[instance.status];
+}
+
+/** The glyph beside the label; the overrides match instanceStatusLabel. */
+export function instanceStatusTone(instance: UiSubagentInstance): StatusTone {
+  if (instance.approvalBlocked) return "approval";
+  if (instance.settling || instance.status === "pending") return "working";
+  switch (instance.status) {
+    case "running":
+      return "working";
+    case "completed":
+      return "done";
+    case "failed":
+    case "timed_out":
+      return "failed";
+    case "interrupted":
+    case "cancelled":
+      return "stopped";
+  }
 }
 
 /** Failures read in the danger colour; every other status stays neutral. */
