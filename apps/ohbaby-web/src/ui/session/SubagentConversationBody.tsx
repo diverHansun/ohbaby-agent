@@ -30,8 +30,8 @@ export function readingMemory(
 }
 
 /**
- * A child's read-only conversation and its status lines. Shared by the
- * delegation sheet and the right panel's subagent detail.
+ * A child's read-only conversation and its status lines, as the right
+ * panel's subagent detail shows it.
  */
 export function SubagentConversationBody({
   reader,

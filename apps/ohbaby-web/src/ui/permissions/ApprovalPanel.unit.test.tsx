@@ -118,50 +118,6 @@ it("allows an explicit retry after response failure", async () => {
   }
 });
 
-it("retains a successful response lock while temporarily hidden by a child conversation", async () => {
-  const element = document.createElement("div");
-  document.body.append(element);
-  const root = createRoot(element);
-  const onRespond = vi.fn().mockResolvedValue(true);
-  const render = (visible: boolean): void => {
-    act(() => {
-      root.render(
-        <ApprovalPanel
-          visible={visible}
-          disabled={false}
-          syncing={false}
-          permissions={[request]}
-          onRetry={() => undefined}
-          onRespond={onRespond}
-        />,
-      );
-    });
-  };
-  try {
-    render(true);
-    await act(async () => {
-      element
-        .querySelector<HTMLButtonElement>(".ohb-permission-actions button")
-        ?.click();
-      await Promise.resolve();
-    });
-    render(false);
-    expect(element.querySelector('[role="dialog"]')).toBeNull();
-    render(true);
-    expect(
-      element.querySelector<HTMLButtonElement>(".ohb-permission-actions button")
-        ?.disabled,
-    ).toBe(true);
-    expect(document.activeElement).toBe(element.querySelector("h2"));
-    expect(onRespond).toHaveBeenCalledOnce();
-  } finally {
-    act(() => {
-      root.unmount();
-    });
-    element.remove();
-  }
-});
-
 it("collapses to its title row and expands back without losing the request", () => {
   const element = document.createElement("div");
   document.body.append(element);

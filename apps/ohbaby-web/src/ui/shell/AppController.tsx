@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -14,7 +15,7 @@ import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
 import { type NoticeItem, NoticeStack } from "../shared/Notice.js";
 import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
-import { createSubagentWatchCoordinator } from "../shared/subagent-watch-owner.js";
+import { useSubagentInstances } from "../shared/subagent-instances.js";
 import { SidePanel } from "../side-panel/SidePanel.js";
 import {
   type SidePageContext,
@@ -188,7 +189,6 @@ export function AppController(props: {
   );
 
   const sidePanel = useSidePanel(activeId);
-  const [subagentWatch] = useState(createSubagentWatchCoordinator);
   // Only a panel the user just opened takes focus (see SidePanel focusOnOpen).
   const [panelOpenedByUser, setPanelOpenedByUser] = useState(false);
   // Reading positions in the panel's subagent details; a new chat starts afresh.
@@ -196,13 +196,29 @@ export function AppController(props: {
     () => new Map(),
     [activeId],
   );
+  const subagentInstances = useSubagentInstances(client, activeId);
   const sidePageContext: SidePageContext = {
     client,
-    subagentWatch,
     rootSessionId: activeId,
     subagentReadingCache: panelReadingCache,
+    subagentInstances,
     setTabState: sidePanel.setTabState,
   };
+  const { revealPage } = sidePanel;
+  const anchorToken = useRef(0);
+  // The chat's delegation entries open the instance in the right panel,
+  // located at that delegation (improve-4/02 §2.7).
+  const openSubagent = useCallback(
+    (input: { subagentId: string; executionId: string }): void => {
+      anchorToken.current += 1;
+      setPanelOpenedByUser(true);
+      revealPage("subagents", {
+        subagentId: input.subagentId,
+        anchor: { executionId: input.executionId, token: anchorToken.current },
+      });
+    },
+    [revealPage],
+  );
 
   const draftPicker = (
     <WorkspacePicker
@@ -308,7 +324,8 @@ export function AppController(props: {
             draftPicker={draftPicker}
             onOpenModelSettings={openModelSettings}
             onError={pushError}
-            subagentWatch={subagentWatch}
+            subagentInstances={subagentInstances.state}
+            onOpenSubagent={openSubagent}
           />
         ) : (
           <DraftFallback

@@ -33,6 +33,15 @@ export interface SidePanelControls {
     kind: K,
     state?: SidePageStates[K],
   ) => void;
+  /**
+   * Shows a page in the panel for an entry point elsewhere: reuses the
+   * selected tab when it is that kind, else the first one of that kind, else
+   * opens a new tab; then replaces its state.
+   */
+  readonly revealPage: <K extends SidePageKind>(
+    kind: K,
+    state: SidePageStates[K],
+  ) => void;
   readonly selectTab: (id: string) => void;
   readonly closeTab: (id: string) => void;
   /** Replaces one tab's page state; the kind guards against a mismatched shape. */
@@ -105,6 +114,38 @@ export function useSidePanel(
     },
     [],
   );
+  const revealPage = useCallback(
+    <K extends SidePageKind>(kind: K, pageState: SidePageStates[K]): void => {
+      setState((current) => {
+        const active = current.tabs.find(
+          (tab) => tab.id === current.activeTabId,
+        );
+        const target =
+          active?.kind === kind
+            ? active
+            : // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- always true until a second page kind exists
+              current.tabs.find((tab) => tab.kind === kind);
+        if (!target) {
+          const tab = createTab(kind, pageState);
+          return {
+            ...current,
+            open: true,
+            tabs: [...current.tabs, tab],
+            activeTabId: tab.id,
+          };
+        }
+        return {
+          ...current,
+          open: true,
+          activeTabId: target.id,
+          tabs: current.tabs.map((tab) =>
+            tab.id === target.id ? { ...tab, state: pageState } : tab,
+          ),
+        };
+      });
+    },
+    [],
+  );
   const selectTab = useCallback((id: string): void => {
     setState((current) => ({ ...current, activeTabId: id }));
   }, []);
@@ -144,6 +185,7 @@ export function useSidePanel(
     setWidth,
     setExpanded,
     openPage,
+    revealPage,
     selectTab,
     closeTab,
     setTabState,

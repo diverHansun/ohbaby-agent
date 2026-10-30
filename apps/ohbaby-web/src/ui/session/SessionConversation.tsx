@@ -1,4 +1,8 @@
-import { getUnconsumedSteers, type UiBackendClient } from "ohbaby-sdk";
+import {
+  getUnconsumedSteers,
+  type UiBackendClient,
+  type UiSubagentInstanceReaderState,
+} from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useMemo } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
@@ -14,8 +18,13 @@ import {
 } from "../conversation/ConversationStream.js";
 import { DurationSampleContext } from "../conversation/use-execution-duration.js";
 import {
+  findInstance,
+  isClosedInstance,
+} from "../shared/subagent-instances.js";
+import {
   DelegationRow,
   delegationExecution,
+  delegationNotStarted,
   isDelegationCall,
 } from "./DelegationRow.js";
 import type { ViewModel } from "./selectors.js";
@@ -35,6 +44,12 @@ export function SessionConversation(props: {
   readonly compacting: boolean;
   readonly compactNotice?: string;
   readonly onInsertSkill: (text: string) => void;
+  /** The session's instance snapshot, shared with the right panel. */
+  readonly subagentInstances?: UiSubagentInstanceReaderState;
+  readonly onOpenSubagent?: (input: {
+    readonly subagentId: string;
+    readonly executionId: string;
+  }) => void;
 }): ReactElement {
   const { runtime, view, storeSnapshot, interactions } = props;
   const sessionId = view.activeSession?.id ?? null;
@@ -45,14 +60,8 @@ export function SessionConversation(props: {
         .find((notice) => createCommandResultModel(notice) !== null) ?? null,
     [view.commandNotices],
   );
-  const hidden = interactions.viewingSubagent && interactions.childExpanded;
   return (
-    <div
-      className="ohb-root-conversation"
-      tabIndex={-1}
-      inert={hidden}
-      style={hidden ? { visibility: "hidden" } : undefined}
-    >
+    <div className="ohb-root-conversation" tabIndex={-1}>
       <DurationSampleContext.Provider value={storeSnapshot.durationSample}>
         <ConversationPresentation.Provider
           value={{
@@ -63,14 +72,29 @@ export function SessionConversation(props: {
                 interactions.subagentState.list?.executions ?? [],
                 sessionId ?? "",
               );
-              return isDelegationCall(call, execution) ? (
+              if (!isDelegationCall(call, execution)) return undefined;
+              const instances = props.subagentInstances;
+              const instance =
+                execution && instances
+                  ? findInstance(instances, execution.subagentId)
+                  : undefined;
+              return (
                 <DelegationRow
                   call={call}
                   result={result}
                   execution={execution}
-                  onOpen={interactions.openChild}
+                  instanceName={instance?.displayName}
+                  available={
+                    !delegationNotStarted(message, call) &&
+                    !(
+                      execution &&
+                      instances &&
+                      isClosedInstance(instances, execution.subagentId)
+                    )
+                  }
+                  onOpen={props.onOpenSubagent}
                 />
-              ) : undefined;
+              );
             },
           }}
         >
@@ -113,7 +137,7 @@ export function SessionConversation(props: {
           />
         </ConversationPresentation.Provider>
       </DurationSampleContext.Provider>
-      {!interactions.viewingSubagent && commandModalNotice ? (
+      {commandModalNotice ? (
         <CommandResultModal
           header={view.header}
           notice={commandModalNotice}

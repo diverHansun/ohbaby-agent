@@ -19,9 +19,9 @@ import {
   type SubagentReadingCache,
 } from "../../session/SubagentConversationBody.js";
 import { readableError } from "../../shared/error-text.js";
-import type { SubagentWatchCoordinator } from "../../shared/subagent-watch-owner.js";
 import { IconButton } from "../../shared/IconButton.js";
 import { useDelayed } from "../../shared/use-delayed.js";
+import type { SubagentAnchor } from "../side-pages.js";
 import { stoppableExecutionId } from "./instance-status.js";
 import { InstanceStatus } from "./InstanceStatus.js";
 
@@ -49,39 +49,47 @@ export function SubagentInstanceDetail(props: {
   readonly rootSessionId: string;
   readonly instance: UiSubagentInstance;
   readonly reader: ConversationReader;
-  readonly watch: SubagentWatchCoordinator;
+  /** An explicit request to show one delegation; jumps there even mid-read. */
+  readonly anchor?: SubagentAnchor;
   readonly readingCache: SubagentReadingCache;
   readonly onBack: () => void;
   /** Called after a Stop answer, so the list snapshot is reloaded. */
   readonly onRefresh: () => void;
 }): ReactElement {
-  const { client, rootSessionId, instance, reader, watch } = props;
+  const { client, rootSessionId, instance, reader, anchor } = props;
   const state = useSyncExternalStore(
     useCallback((listener: () => void) => reader.subscribe(listener), [reader]),
     () => reader.getSnapshot(),
   );
-  // Opening a detail is the user's latest reading choice: take the one watch.
-  useEffect(() => {
-    watch.claim("panel");
-  }, [watch]);
-  // Only a fresh open jumps to the execution anchor; returning to an instance
-  // the page's reader still holds restores where the user was (I3-06).
-  const [followAnchor] = useState(
+  // A fresh open or an explicit delegation link jumps to the execution anchor;
+  // returning from the list to an instance the page's reader still holds
+  // restores where the user was (I3-06).
+  const [freshOpen] = useState(
     () => reader.getSnapshot().selected?.subagentId !== instance.subagentId,
   );
+  const followAnchor = freshOpen || anchor !== undefined;
 
   // Until the SDK reader can open an instance by subagentId (improve-2 B4),
-  // read the latest execution's record once and open the conversation from it.
+  // read one execution's record and open the conversation from it: the linked
+  // delegation's, or else the latest one.
   const latestExecutionId = instance.latestExecutionId;
+  const targetExecutionId = anchor?.executionId ?? latestExecutionId;
   const opened = state.selected?.subagentId === instance.subagentId;
+  // The last explicit request already handed to the reader; state, so a
+  // handled request re-renders even when the reader publishes nothing new.
+  const [appliedAnchor, setAppliedAnchor] = useState<number>();
+  const anchorPending = anchor !== undefined && appliedAnchor !== anchor.token;
   const [openError, setOpenError] = useState<string>();
   const [openAttempt, setOpenAttempt] = useState(0);
   const showOpening = useDelayed(
-    latestExecutionId !== undefined && !opened && openError === undefined,
+    targetExecutionId !== undefined &&
+      (!opened || anchorPending) &&
+      openError === undefined,
     300,
   );
   useEffect(() => {
-    if (opened || !latestExecutionId) return;
+    if ((opened && !anchorPending) || !targetExecutionId) return;
+    const token = anchor?.token;
     const controller = new AbortController();
     setOpenError(undefined);
     void (async (): Promise<void> => {
@@ -90,11 +98,13 @@ export function SubagentInstanceDetail(props: {
           throw new Error("Subagent conversations are unavailable");
         const view = await client.getSubagentExecutionView({
           rootSessionId,
-          executionId: latestExecutionId,
+          executionId: targetExecutionId,
           limit: 1,
           signal: controller.signal,
         });
-        if (!controller.signal.aborted) await reader.select(view.execution);
+        if (controller.signal.aborted) return;
+        setAppliedAnchor(token);
+        await reader.select(view.execution);
       } catch (error) {
         if (!controller.signal.aborted) setOpenError(errorText(error));
       }
@@ -102,7 +112,16 @@ export function SubagentInstanceDetail(props: {
     return (): void => {
       controller.abort();
     };
-  }, [client, reader, rootSessionId, latestExecutionId, opened, openAttempt]);
+  }, [
+    client,
+    reader,
+    rootSessionId,
+    targetExecutionId,
+    opened,
+    anchorPending,
+    anchor?.token,
+    openAttempt,
+  ]);
 
   // Stopping lasts until this execution has ended and cleaned up.
   const [stoppingExecutionId, setStoppingExecutionId] = useState<string>();
@@ -196,7 +215,7 @@ export function SubagentInstanceDetail(props: {
           </button>
         </p>
       ) : null}
-      {latestExecutionId ? null : (
+      {targetExecutionId ? null : (
         <p className="ohb-side-notice">Not started yet.</p>
       )}
       {showOpening ? (
@@ -212,6 +231,11 @@ export function SubagentInstanceDetail(props: {
             memory={memory}
             identity={identity}
             followAnchor={followAnchor}
+            anchorToken={
+              anchor
+                ? `${anchor.executionId}:${String(anchor.token)}`
+                : undefined
+            }
             approvalRequired={instance.approvalBlocked}
           />
         </div>

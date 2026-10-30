@@ -25,7 +25,6 @@ function fixture(overrides: Partial<ComponentProps<typeof Composer>> = {}): {
   readonly type: (text: string) => void;
   readonly render: (
     prefill: ComponentProps<typeof Composer>["prefill"],
-    readOnly?: boolean,
   ) => void;
   readonly revision: () => number;
   readonly update: (patch: Partial<ComponentProps<typeof Composer>>) => void;
@@ -95,13 +94,8 @@ function fixture(overrides: Partial<ComponentProps<typeof Composer>> = {}): {
   root = createRoot(container);
   const render = (
     prefill: ComponentProps<typeof Composer>["prefill"],
-    readOnly?: boolean,
   ): void => {
-    act(() =>
-      root?.render(
-        <Composer {...props} prefill={prefill} readOnly={readOnly} />,
-      ),
-    );
+    act(() => root?.render(<Composer {...props} prefill={prefill} />));
   };
   const input = (): HTMLTextAreaElement => {
     const element = container.querySelector("textarea");
@@ -195,29 +189,6 @@ describe("Composer prefill ownership", () => {
     f.render({ ...prefill, editRevision: f.revision() });
     expect(f.input().value).toBe("user changed it");
   });
-});
-
-it("keeps the draft and composer DOM while read-only mode blocks input actions", () => {
-  const onSubmit = vi.fn();
-  const onStop = vi.fn();
-  const f = fixture({ onSubmit, onStop });
-  f.type("draft to preserve");
-  const input = f.input();
-  f.render(null, true);
-  expect(f.input()).toBe(input);
-  expect(input.value).toBe("draft to preserve");
-  expect(input.closest("[inert]")).not.toBeNull();
-  expect(document.body.textContent).toContain("Read-only subagent");
-  void act(() =>
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    ),
-  );
-  expect(onSubmit).not.toHaveBeenCalled();
-  expect(onStop).not.toHaveBeenCalled();
-  f.render(null, false);
-  expect(f.input()).toBe(input);
-  expect(input.value).toBe("draft to preserve");
 });
 
 function queuedPrompt(
@@ -688,12 +659,6 @@ it("keeps every recovery item reachable without expanding long text by default",
     resend.mock.calls[0]?.[0].operationId,
   );
   expect(f.input().value).toBe("Unrelated draft");
-  f.render(null, true);
-  expect(
-    [...recovery.querySelectorAll<HTMLButtonElement>("button")].every(
-      (button) => button.disabled,
-    ),
-  ).toBe(true);
   f.update({ unconsumedSteers: [] });
   expect(document.querySelector("details.ohb-unsent-steer")).toBeNull();
 });

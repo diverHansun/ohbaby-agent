@@ -32,7 +32,6 @@ function permissionButtonClass(choice: UiPermissionChoice): string {
  */
 export function ApprovalPanel(props: {
   readonly disabled: boolean;
-  readonly visible?: boolean;
   readonly error?: string;
   readonly syncing: boolean;
   readonly onRetry: () => void;
@@ -59,11 +58,9 @@ export function ApprovalPanel(props: {
     for (const id of pending.current)
       if (!props.permissions.some((item) => item.id === id))
         pending.current.delete(id);
-    if (props.visible !== false)
-      heading.current?.focus({ preventScroll: true });
-  }, [request?.id, props.visible]);
+    heading.current?.focus({ preventScroll: true });
+  }, [request?.id]);
   const responding = request ? pending.current.has(request.id) : false;
-  if (props.visible === false) return null;
   if (!request) {
     return props.error ? (
       <div className="ohb-permission-sync" role="status">

@@ -212,6 +212,31 @@ it("leaves focus alone for a panel that was not just opened by the user", () => 
   expect(element.contains(document.activeElement)).toBe(false);
 });
 
+it("reveals a page from elsewhere in the selected tab of that kind, or a new one", () => {
+  const { element } = mount();
+  act(() => {
+    controls?.revealPage("subagents", { subagentId: "reviewer" });
+  });
+  expect(controls?.state.open).toBe(true);
+  expect(controls?.state.tabs).toHaveLength(1);
+  act(() => {
+    controls?.openPage("subagents");
+  });
+  act(() => {
+    controls?.revealPage("subagents", { subagentId: "writer" });
+  });
+  // The selected (second) tab is reused; no third tab appears.
+  expect(controls?.state.tabs.map((tab) => tab.state.subagentId)).toEqual([
+    "reviewer",
+    "writer",
+  ]);
+  // Only the selected tab's page is mounted, so one subagent reader at most.
+  expect(element.querySelectorAll('[data-testid="page"]')).toHaveLength(1);
+  expect(element.querySelector('[data-testid="page"]')?.textContent).toBe(
+    "subagents:writer",
+  );
+});
+
 it("clears the selected instance when the primary session changes", () => {
   const { element, render } = mount("root-a");
   act(() => {

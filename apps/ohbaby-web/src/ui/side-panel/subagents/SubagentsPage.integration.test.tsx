@@ -14,10 +14,8 @@ import type {
   UiSubagentStopResult,
 } from "ohbaby-sdk";
 import type { SubagentReadingCache } from "../../session/SubagentConversationBody.js";
-import {
-  createSubagentWatchCoordinator,
-  type SubagentWatchCoordinator,
-} from "../../shared/subagent-watch-owner.js";
+import type { SubagentAnchor } from "../side-pages.js";
+import { useSubagentInstances } from "../../shared/subagent-instances.js";
 import { SubagentsPage } from "./SubagentsPage.js";
 
 (
@@ -190,20 +188,36 @@ function fakeClient(): {
   };
 }
 
+/** Set by the mounted page: what the chat's entry link does. */
+let openAt: ((subagentId: string, executionId: string) => void) | undefined;
+let anchorTokens = 0;
+
 function Page(props: {
   readonly client: UiBackendClient;
   readonly cache: SubagentReadingCache;
-  readonly watch: SubagentWatchCoordinator;
+  readonly rootSessionId?: string;
 }): ReactElement {
-  const [selected, setSelected] = useState<string>();
+  const rootSessionId = props.rootSessionId ?? "root";
+  const instances = useSubagentInstances(props.client, rootSessionId);
+  const [tab, setTab] = useState<{
+    readonly subagentId?: string;
+    readonly anchor?: SubagentAnchor;
+  }>({});
+  openAt = (subagentId, executionId): void => {
+    anchorTokens += 1;
+    setTab({ subagentId, anchor: { executionId, token: anchorTokens } });
+  };
   return (
     <SubagentsPage
       client={props.client}
-      rootSessionId="root"
-      selectedSubagentId={selected}
-      onSelect={setSelected}
+      rootSessionId={rootSessionId}
+      selectedSubagentId={tab.subagentId}
+      anchor={tab.anchor}
+      instances={instances}
+      onSelect={(subagentId) => {
+        setTab({ subagentId });
+      }}
       readingCache={props.cache}
-      watch={props.watch}
     />
   );
 }
@@ -217,13 +231,12 @@ async function flush(): Promise<void> {
 
 async function mount(
   client: UiBackendClient,
-  watch: SubagentWatchCoordinator = createSubagentWatchCoordinator(),
 ): Promise<{ readonly element: HTMLElement; readonly unmount: () => void }> {
   const element = document.createElement("div");
   document.body.append(element);
   const root = createRoot(element);
   act(() => {
-    root.render(<Page client={client} cache={new Map()} watch={watch} />);
+    root.render(<Page client={client} cache={new Map()} />);
   });
   let removed = false;
   const unmount = (): void => {
@@ -477,13 +490,11 @@ describe("Subagents page", () => {
     const render = (rootSessionId: string): void => {
       act(() => {
         root.render(
-          <SubagentsPage
+          <Page
             key={rootSessionId}
             client={fake.client}
             rootSessionId={rootSessionId}
-            onSelect={() => undefined}
-            readingCache={new Map()}
-            watch={createSubagentWatchCoordinator()}
+            cache={new Map()}
           />,
         );
       });
@@ -559,24 +570,60 @@ describe("Subagents page", () => {
     expect(fake.unwatch).toHaveBeenCalledTimes(1);
   });
 
-  it("hands the one watch to the chat's sheet and leaves the detail instead of going stale", async () => {
+  it("opens a delegation link at its execution and jumps there again on a repeat request", async () => {
     const fake = fakeClient();
-    fake.list.mockResolvedValue(snapshot(1, [instance("reviewer")]));
-    const watch = createSubagentWatchCoordinator();
-    const { element } = await mount(fake.client, watch);
-    await click(find(element, "reviewer"));
-    expect(watch.owner()).toBe("panel");
+    fake.list.mockResolvedValue(
+      snapshot(1, [
+        instance("reviewer", {
+          status: "running",
+          currentExecutionId: "reviewer-exec-2",
+          latestExecutionId: "reviewer-exec-2",
+        }),
+        instance("tester"),
+      ]),
+    );
+    const { element } = await mount(fake.client);
+    const open = fake.client.getSubagentExecutionView as ReturnType<
+      typeof vi.fn
+    >;
     await act(async () => {
-      watch.claim("sheet");
+      openAt?.("reviewer", "reviewer-exec");
       await Promise.resolve();
     });
     await flush();
-    expect(element.querySelector("h2")).toBeNull();
-    expect(fake.unwatch).toHaveBeenCalledTimes(1);
-    // Opening the detail again takes the watch back.
+    // The linked delegation, not the latest execution, is opened and located.
+    expect(open).toHaveBeenLastCalledWith(
+      expect.objectContaining({ executionId: "reviewer-exec" }),
+    );
+    expect(fake.client.getSubagentConversationView).toHaveBeenLastCalledWith(
+      expect.objectContaining({ anchorExecutionId: "reviewer-exec" }),
+    );
+    expect(element.querySelector("h2")?.textContent).toBe("reviewer");
+    // The title keeps the instance's current status, not the old execution's.
+    expect(
+      element.querySelector('.ohb-subagent-detail-header [role="status"]')
+        ?.textContent,
+    ).toBe("Running");
+    await act(async () => {
+      openAt?.("reviewer", "reviewer-exec");
+      await Promise.resolve();
+    });
+    await flush();
+    expect(open).toHaveBeenCalledTimes(2);
+    // Back to the list and in again from the list keeps the held reading.
+    await click(find(element, "Back to subagents"));
     await click(find(element, "reviewer"));
-    expect(watch.owner()).toBe("panel");
-    expect(element.textContent).toContain("Answer from reviewer");
+    expect(open).toHaveBeenCalledTimes(2);
+    // A link to another instance while a detail is open switches to it.
+    await act(async () => {
+      openAt?.("tester", "tester-exec");
+      await Promise.resolve();
+    });
+    await flush();
+    expect(element.querySelector("h2")?.textContent).toBe("tester");
+    expect(open).toHaveBeenLastCalledWith(
+      expect.objectContaining({ executionId: "tester-exec" }),
+    );
   });
 
   it("shows an instance without any execution as not started", async () => {

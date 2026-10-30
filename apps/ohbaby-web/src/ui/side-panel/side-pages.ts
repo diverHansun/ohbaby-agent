@@ -6,8 +6,18 @@ import { Bot, type LucideIcon } from "lucide-react";
  * case in `SidePanelPage`; the panel, tabs and menu pick it up from there.
  */
 export interface SidePageStates {
-  /** The instance whose detail is open; absent shows the list. */
-  readonly subagents: { readonly subagentId?: string };
+  readonly subagents: {
+    /** The instance whose detail is open; absent shows the list. */
+    readonly subagentId?: string;
+    /** Set only by an explicit "show this delegation" request. */
+    readonly anchor?: SubagentAnchor;
+  };
+}
+
+/** One delegation to scroll to; a new `token` repeats the request. */
+export interface SubagentAnchor {
+  readonly executionId: string;
+  readonly token: number;
 }
 
 export type SidePageKind = keyof SidePageStates;
