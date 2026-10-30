@@ -93,14 +93,12 @@ function evaluateLevelFallback(
         `Skill requires confirmation: ${classification.label ?? call.toolName}`,
       );
     case "bash-dangerous":
-      return ask(
-        `Dangerous shell command requires confirmation: ${call.toolName}`,
-      );
+      return ask("This command may be dangerous, so it needs your approval.");
     case "dangerous":
       return ask(`Dangerous tool requires confirmation: ${call.toolName}`);
     case "bash-readonly":
     case "bash-mutating":
-      return ask(`Shell command requires confirmation: ${call.toolName}`);
+      return ask("Shell commands need your approval unless Full access is on.");
     case "write":
       return ask(`Write tool requires confirmation: ${call.toolName}`);
     default:
@@ -128,7 +126,7 @@ export function evaluatePermission(
     call.shellAnalysis?.completeness !== "complete"
   ) {
     return ask(
-      "Shell analysis is incomplete; approve this original command once.",
+      "This command is too complex to check automatically, so it can only be allowed once.",
       { rememberable: false },
     );
   }

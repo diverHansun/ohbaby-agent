@@ -189,12 +189,13 @@ const approval: UiPermissionRequest = {
   messageId: "m2",
   runId: "run_1",
   createdAt: now,
-  title: "Allow bash?",
-  description: "pnpm exec vitest run apps/ohbaby-web/src/ui/sidebar",
+  title: "Shell commands need your approval unless Full access is on.",
+  description: "bash(pnpm exec vitest run apps/ohbaby-web/src/ui/sidebar)",
+  command: "pnpm exec vitest run apps/ohbaby-web/src/ui/sidebar",
   choices: [
-    { id: "deny", label: "Deny", intent: "deny" },
     { id: "allow_once", label: "Allow once", intent: "allow" },
     { id: "allow_always", label: "Always allow", intent: "allow" },
+    { id: "reject", label: "Reject", intent: "deny" },
   ],
 };
 
@@ -226,8 +227,22 @@ function running(withApproval: boolean): UiSnapshot {
           {
             ...approval,
             id: "perm_2",
-            title: "Allow write_file?",
-            description: "apps/ohbaby-web/src/ui/sidebar/sidebar.css",
+            title:
+              "This command is too complex to check automatically, so it can only be allowed once.",
+            description: "",
+            command: `cd /tmp && python3 -c "
+lines=open('dl.txt').read().split('\\n')
+print('\\n'.join(lines[1139:1750]))" | grep -v "^\\s*$" | head -400`,
+            choices: approval.choices.filter(
+              (choice) => choice.id !== "allow_always",
+            ),
+          },
+          {
+            ...approval,
+            id: "perm_3",
+            title: "Write tool requires confirmation: write",
+            description: "write(apps/ohbaby-web/src/ui/sidebar/**)",
+            command: undefined,
           },
         ]
       : [],

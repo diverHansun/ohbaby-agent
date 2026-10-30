@@ -8,6 +8,7 @@ import {
   Maximize2,
   Minus,
   Square,
+  SquareTerminal,
 } from "lucide-react";
 import { IconButton } from "../shared/IconButton.js";
 
@@ -25,10 +26,19 @@ function permissionButtonClass(choice: UiPermissionChoice): string {
   return `${base} ohb-perm-deny`;
 }
 
+const MOD_KEY =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad/.test(navigator.userAgent)
+    ? "⌘"
+    : "Ctrl";
+
 /**
  * Tool approval floating inside the message area (03 §4.6). Choices come from
  * the backend; several pending requests page with previous/next. The title
- * takes focus rather than the first choice so Enter never approves by accident.
+ * takes focus rather than the first choice so Enter never approves by accident;
+ * from inside the card Esc rejects and ⌘/Ctrl+Enter allows once, like Claude
+ * and Codex. A shell command reads as a question over the command itself, with
+ * the backend's reason as the subtitle.
  */
 export function ApprovalPanel(props: {
   readonly disabled: boolean;
@@ -72,6 +82,30 @@ export function ApprovalPanel(props: {
     ) : null;
   }
   const multiple = props.permissions.length > 1;
+  const { command } = request;
+  const choices = request.choices.filter(
+    (choice) => choice.id !== "cancel" && choice.intent !== "abort",
+  );
+  const allowOnce = choices.find((choice) => choice.id === "allow_once");
+  const reject = choices.find((choice) => choice.intent === "deny");
+  const respond = (choice: UiPermissionChoice): void => {
+    if (pending.current.has(request.id) || props.disabled) return;
+    pending.current.add(request.id);
+    update((value) => value + 1);
+    const settle = (): void => {
+      pending.current.delete(request.id);
+      update((value) => value + 1);
+    };
+    void props.onRespond(request, choice).then((success) => {
+      if (!success) settle();
+    }, settle);
+  };
+  const shortcut = (choice: UiPermissionChoice): string | undefined =>
+    choice === reject
+      ? "Esc"
+      : choice === allowOnce
+        ? `${MOD_KEY} ↵`
+        : undefined;
   return (
     <div className="ohb-approval-layer">
       <section
@@ -79,17 +113,31 @@ export function ApprovalPanel(props: {
         role="dialog"
         aria-modal="false"
         aria-labelledby="ohb-approval-title"
+        onKeyDown={(event) => {
+          if (collapsed || event.defaultPrevented) return;
+          const choice =
+            event.key === "Escape"
+              ? reject
+              : event.key === "Enter" && (event.metaKey || event.ctrlKey)
+                ? allowOnce
+                : undefined;
+          if (!choice) return;
+          event.preventDefault();
+          event.stopPropagation();
+          respond(choice);
+        }}
       >
         <header className="ohb-approval-header">
           <div className="ohb-approval-heading">
             <span className="ohb-approval-source">
+              {command ? <SquareTerminal aria-hidden="true" size={13} /> : null}
               Needs approval ·{" "}
               {request.sessionId === request.rootSessionId
                 ? "Main agent"
                 : (request.sourceLabel ?? request.sessionId)}
             </span>
             <h2 id="ohb-approval-title" ref={heading} tabIndex={-1}>
-              {request.title}
+              {command ? "Run this command?" : request.title}
             </h2>
           </div>
           {multiple ? (
@@ -135,7 +183,17 @@ export function ApprovalPanel(props: {
         </header>
         {collapsed ? null : (
           <>
-            {request.description ? (
+            {command ? (
+              <>
+                <p className="ohb-approval-reason">{request.title}</p>
+                <div className="ohb-approval-body">
+                  <pre className="ohb-approval-detail ohb-approval-command">
+                    <span aria-hidden="true">$</span>
+                    <code>{command}</code>
+                  </pre>
+                </div>
+              </>
+            ) : request.description ? (
               <div className="ohb-approval-body">
                 <pre className="ohb-approval-detail">{request.description}</pre>
               </div>
@@ -156,7 +214,7 @@ export function ApprovalPanel(props: {
                   type="button"
                   className="ohb-approval-stop"
                   aria-label={props.cancelLabel ?? "Stop run"}
-                  title={props.cancelLabel ?? "Stop run"}
+                  title={props.cancelLabel ?? "Stop the whole run"}
                   aria-busy={props.cancelLabel !== undefined}
                   disabled={!props.canCancel || props.cancelLabel !== undefined}
                   onClick={props.onCancel}
@@ -174,43 +232,33 @@ export function ApprovalPanel(props: {
                 </button>
               ) : null}
               <span className="ohb-permission-choices">
-                {request.choices
-                  .filter(
-                    (choice) =>
-                      choice.id !== "cancel" && choice.intent !== "abort",
-                  )
-                  .map((choice) => (
+                {choices.map((choice) => {
+                  const keys = shortcut(choice);
+                  return (
                     <button
                       className={permissionButtonClass(choice)}
                       disabled={props.disabled || responding}
                       key={`${request.id}:${choice.id}`}
                       onClick={(event) => {
-                        if (
-                          event.detail > 1 ||
-                          pending.current.has(request.id) ||
-                          props.disabled
-                        )
-                          return;
-                        pending.current.add(request.id);
-                        update((value) => value + 1);
-                        void props.onRespond(request, choice).then(
-                          (success) => {
-                            if (!success) {
-                              pending.current.delete(request.id);
-                              update((value) => value + 1);
-                            }
-                          },
-                          () => {
-                            pending.current.delete(request.id);
-                            update((value) => value + 1);
-                          },
-                        );
+                        if (event.detail > 1) return;
+                        respond(choice);
                       }}
+                      title={
+                        choice.id === "allow_always"
+                          ? "Don't ask again for matching requests in this session"
+                          : undefined
+                      }
                       type="button"
                     >
                       {choice.label}
+                      {keys ? (
+                        <kbd className="ohb-perm-kbd" aria-hidden="true">
+                          {keys}
+                        </kbd>
+                      ) : null}
                     </button>
-                  ))}
+                  );
+                })}
               </span>
             </footer>
           </>

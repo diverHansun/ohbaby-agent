@@ -83,6 +83,24 @@ describe("approval projection", () => {
     ).toEqual(["allow_once", "reject"]);
   });
 
+  it("passes a bash request's original command through for display", () => {
+    const command = "cd /tmp && python3 -c 'print(1)' | head";
+    expect(
+      toUiPermissionRequest({
+        info: info({
+          type: "bash",
+          pattern: `bash(${command})`,
+          metadata: { params: { command } },
+        }),
+      }).command,
+    ).toBe(command);
+    expect(
+      toUiPermissionRequest({
+        info: info({ metadata: { params: { command } } }),
+      }),
+    ).not.toHaveProperty("command");
+  });
+
   it("captures immutable per-root baselines synchronously and delivers only after commit", () => {
     const projection = createPermissionProjection({ permissionEpoch: "epoch" });
     const events: UiPermissionEvent[] = [];

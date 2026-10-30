@@ -5281,7 +5281,14 @@ function permissionAction(
 ): HTMLButtonElement {
   const button = Array.from(
     container.querySelectorAll(".ohb-permission-actions button"),
-  ).find((candidate) => candidate.textContent === label);
+  ).find(
+    // The shortcut hint is aria-hidden, so the button's name is the label alone.
+    (candidate) =>
+      candidate.textContent.replace(
+        candidate.querySelector(".ohb-perm-kbd")?.textContent ?? "",
+        "",
+      ) === label,
+  );
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`permission action not found: ${label}`);
   }

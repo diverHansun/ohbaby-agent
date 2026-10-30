@@ -216,6 +216,8 @@ export interface UiPermissionRequest {
   readonly runId: string;
   readonly title: string;
   readonly description: string;
+  /** The shell command exactly as it will run, when the request is for bash. */
+  readonly command?: string;
   readonly choices: readonly UiPermissionChoice[];
 }
 

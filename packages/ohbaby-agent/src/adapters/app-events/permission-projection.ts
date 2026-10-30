@@ -31,6 +31,9 @@ export function toUiPermissionRequest(input: {
   const allowAlways =
     info.metadata.rememberable !== false &&
     isRememberablePermissionPattern(info.pattern);
+  // createInfo stores the tool's own params; the pattern may be a shortened rule.
+  const params = info.metadata.params as Record<string, unknown> | undefined;
+  const command = info.type === "bash" ? params?.command : undefined;
   return Object.freeze({
     choices: Object.freeze([
       Object.freeze({
@@ -50,6 +53,7 @@ export function toUiPermissionRequest(input: {
       Object.freeze({ id: "reject", label: "Reject", intent: "deny" } as const),
     ]),
     description: info.pattern,
+    ...(typeof command === "string" ? { command } : {}),
     id: info.id,
     sessionId: info.sessionId,
     runId: info.runId,

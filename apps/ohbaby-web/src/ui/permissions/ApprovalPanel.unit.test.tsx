@@ -159,3 +159,67 @@ it("collapses to its title row and expands back without losing the request", () 
     element.remove();
   }
 });
+
+it("asks about a shell command, shows it verbatim, and answers from the keyboard", () => {
+  const element = document.createElement("div");
+  document.body.append(element);
+  const root = createRoot(element);
+  const onRespond = vi.fn(() => new Promise<boolean>(() => undefined));
+  const shell: UiPermissionRequest = {
+    ...request,
+    title: "Shell commands need your approval unless Full access is on.",
+    description: "bash(git status)",
+    command: "git status",
+    choices: [
+      { id: "allow_once", intent: "allow", label: "Allow once" },
+      { id: "reject", intent: "deny", label: "Reject" },
+    ],
+  };
+  const render = (permissions: readonly UiPermissionRequest[]): void => {
+    act(() => {
+      root.render(
+        <ApprovalPanel
+          disabled={false}
+          syncing={false}
+          permissions={permissions}
+          onRetry={() => undefined}
+          onRespond={onRespond}
+        />,
+      );
+    });
+  };
+  const press = (init: KeyboardEventInit): void => {
+    act(() => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, ...init }),
+      );
+    });
+  };
+  try {
+    render([shell]);
+    expect(element.querySelector("h2")?.textContent).toBe("Run this command?");
+    expect(element.querySelector(".ohb-approval-reason")?.textContent).toBe(
+      shell.title,
+    );
+    expect(
+      element.querySelector(".ohb-approval-command code")?.textContent,
+    ).toBe("git status");
+    expect(element.textContent).not.toContain("bash(");
+    // Plain Enter on the focused title must not approve.
+    press({ key: "Enter" });
+    expect(onRespond).not.toHaveBeenCalled();
+    press({ key: "Escape" });
+    expect(onRespond).toHaveBeenLastCalledWith(shell, shell.choices[1]);
+    render([{ ...shell, id: "two" }]);
+    press({ key: "Enter", ctrlKey: true });
+    expect(onRespond).toHaveBeenLastCalledWith(
+      { ...shell, id: "two" },
+      shell.choices[0],
+    );
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    element.remove();
+  }
+});
