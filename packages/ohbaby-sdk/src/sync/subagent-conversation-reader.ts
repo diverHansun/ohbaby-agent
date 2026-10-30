@@ -498,8 +498,11 @@ export function createSubagentConversationReader(
       });
       if (!isCurrent(current, active.signal)) return;
       let next = install(result, acquired);
-      if (preserveWindow)
+      if (preserveWindow) {
         next = preserveReadingWindow(state.conversation, next);
+        if (selected.anchorExecutionId === undefined)
+          next = { ...next, anchorMessageId: undefined, anchorFound: true };
+      }
       publish({
         selected:
           selected.anchorExecutionId !== undefined && execution
@@ -691,9 +694,12 @@ export function createSubagentConversationReader(
       if (disposed || closedSubagentId === selection.subagentId)
         return Promise.resolve();
       const selected = { ...selection };
-      if (
+      const preserveWindow =
         selected.anchorExecutionId === undefined &&
         state.selectedInstance?.subagentId === selected.subagentId &&
+        state.conversation !== undefined;
+      if (
+        preserveWindow &&
         state.conversation &&
         watch &&
         !state.loading &&
@@ -703,15 +709,20 @@ export function createSubagentConversationReader(
         publish({
           selectedInstance: selected,
           selected: selectedExecution(conversation, selected),
-          ...(conversation.anchorMessageId === undefined
+          ...(conversation.anchorMessageId === undefined &&
+          conversation.anchorFound
             ? {}
             : {
-                conversation: { ...conversation, anchorMessageId: undefined },
+                conversation: {
+                  ...conversation,
+                  anchorMessageId: undefined,
+                  anchorFound: true,
+                },
               }),
         });
         return Promise.resolve();
       }
-      return startRead(selected);
+      return startRead(selected, undefined, preserveWindow);
     },
     close(): void {
       closedSubagentId = undefined;
@@ -743,8 +754,10 @@ export function createSubagentConversationReader(
       try {
         const result = await query(selected, active.signal);
         if (current !== ticket || disposed || watch !== selection) return;
+        const conversation = install(result, selection);
         publish({
-          conversation: install(result, selection),
+          selected: selectedExecution(conversation),
+          conversation,
           loading: false,
           locating: false,
         });

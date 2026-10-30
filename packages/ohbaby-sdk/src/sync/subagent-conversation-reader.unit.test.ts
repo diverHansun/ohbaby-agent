@@ -185,6 +185,140 @@ describe("subagent conversation reader", () => {
     reader.dispose();
   });
 
+  it.each(["loading", "error"] as const)(
+    "preserves loaded history when reopening an instance during a refresh %s",
+    async (refreshState) => {
+      const read = vi
+        .fn<
+          (
+            query: UiSubagentConversationQuery,
+          ) => Promise<UiSubagentConversationView>
+        >()
+        .mockResolvedValue({ ...conversation(), anchorMessageId: "live" });
+      const reader = createSubagentConversationReader(
+        {
+          getSubagentConversationView: read,
+          watchSubagentConversation: () => Promise.resolve(selection("watch")),
+        },
+        "root",
+      );
+      await reader.selectInstance({
+        subagentId: "child",
+        anchorExecutionId: "a",
+      });
+      read.mockResolvedValueOnce(
+        conversation([message("older", "earlier history")]),
+      );
+      await reader.loadEarlier();
+      expect(reader.getSnapshot().conversation?.messages).toHaveLength(2);
+      let finish!: (view: UiSubagentConversationView) => void;
+      let fail!: (error: Error) => void;
+      read.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = resolve;
+            fail = reject;
+          }),
+      );
+      const refreshing = reader.refresh();
+      if (refreshState === "error") {
+        fail(new Error("offline"));
+        await refreshing;
+        expect(reader.getSnapshot().error).toBe("offline");
+      }
+      read.mockResolvedValueOnce(conversation([message("live", "one")], 3));
+      await reader.selectInstance({ subagentId: "child" });
+      expect(
+        reader.getSnapshot().conversation?.messages.map((item) => item.id),
+      ).toContain("older");
+      expect(
+        reader.getSnapshot().conversation?.anchorMessageId,
+      ).toBeUndefined();
+      expect(
+        reader.getSnapshot().conversation?.view.version.sessionRevision,
+      ).toBe(3);
+      if (refreshState === "loading") {
+        finish(conversation([message("late", "stale refresh")], 2));
+        await refreshing;
+        expect(
+          reader.getSnapshot().conversation?.view.version.sessionRevision,
+        ).toBe(3);
+        expect(
+          reader.getSnapshot().conversation?.messages.map((item) => item.id),
+        ).not.toContain("late");
+      }
+      reader.dispose();
+    },
+  );
+
+  it.each([false, true])(
+    "updates selection from the latest baseline and buffered events (explicit execution: %s)",
+    async (explicitExecution) => {
+      let receive!: (event: UiEvent) => void;
+      const read = vi
+        .fn<
+          (
+            query: UiSubagentConversationQuery,
+          ) => Promise<UiSubagentConversationView>
+        >()
+        .mockResolvedValue(conversation());
+      const reader = createSubagentConversationReader(
+        {
+          subscribeEvents: (handler): (() => void) => {
+            receive = handler;
+            return () => undefined;
+          },
+          getSubagentConversationView: read,
+          watchSubagentConversation: () => Promise.resolve(selection("watch")),
+        },
+        "root",
+      );
+      if (explicitExecution) await reader.select(execution("a"));
+      else await reader.selectInstance({ subagentId: "child" });
+      read.mockResolvedValueOnce({
+        ...conversation(undefined, 2),
+        executions: [execution("a"), execution("b", 2)],
+      });
+      await reader.jumpToLatest();
+      expect(reader.getSnapshot().selected?.executionId).toBe(
+        explicitExecution ? "a" : "b",
+      );
+      let finish!: (view: UiSubagentConversationView) => void;
+      read.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const jumping = reader.jumpToLatest();
+      receive({
+        type: "subagent.conversation.changed",
+        rootSessionId: "root",
+        subagentId: "child",
+        watchId: "watch",
+        executions: [execution("c", 3)],
+        change: {
+          type: "session.changed",
+          bindingGeneration: 1,
+          version: { ...conversation().view.version, sessionRevision: 3 },
+          messages: [message("new", "new execution")],
+        },
+      });
+      finish({
+        ...conversation(undefined, 2),
+        executions: [execution("a"), execution("b", 2)],
+      });
+      await jumping;
+      expect(reader.getSnapshot().selected?.executionId).toBe(
+        explicitExecution ? "a" : "c",
+      );
+      expect(
+        reader.getSnapshot().conversation?.view.version.sessionRevision,
+      ).toBe(3);
+      reader.dispose();
+    },
+  );
+
   it("keeps a late instance read from replacing a newer selection", async () => {
     let finishRead!: (view: UiSubagentConversationView) => void;
     let entered!: () => void;
