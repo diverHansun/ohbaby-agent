@@ -902,8 +902,7 @@ export class SessionSubagentHost {
         ?.abortController?.abort("subagent stopped");
     }
     const item = await this.options.store.get(input);
-    if (!item && !lease)
-      throw subagentAccessError("SUBAGENT_NOT_FOUND");
+    if (!item && !lease) throw subagentAccessError("SUBAGENT_NOT_FOUND");
     if (
       item?.closedAt !== undefined ||
       this.closedSubagents.has(input.subagentId)
