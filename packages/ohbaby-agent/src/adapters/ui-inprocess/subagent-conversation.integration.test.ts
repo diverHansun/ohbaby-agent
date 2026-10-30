@@ -111,6 +111,36 @@ function fixture() {
 }
 
 describe("continuous subagent live projection", () => {
+  it("opens an empty pending instance and follows its first execution without exposing the parent", async () => {
+    const f = fixture();
+    const query = { rootSessionId: "root", subagentId: "a" };
+    await f.createInstance("a");
+    await f.instances.update("a", { status: "pending" });
+    try {
+      const pending = await f.conversations.read(query);
+      expect(pending.messages).toEqual([]);
+      expect(pending.executions).toEqual([]);
+      expect(pending.view.runs).toEqual([]);
+      expect(pending.displayName).toBe("Researcher alpha");
+      await f.conversations.retain({ ...query, watchId: "pending-watch" });
+      await f.accept("first");
+      const started = await f.conversations.read(query);
+      expect(started.executions).toMatchObject([{ executionId: "first" }]);
+      expect(started.messages.map((message) => message.role)).toEqual(["user"]);
+      await expect(
+        f.conversations.read({ ...query, subagentId: "missing" }),
+      ).rejects.toMatchObject({ code: "SUBAGENT_NOT_FOUND" });
+      await f.instances.update("a", { closedAt: 4 });
+      await expect(f.conversations.read(query)).rejects.toMatchObject({
+        code: "SUBAGENT_CLOSED",
+      });
+    } finally {
+      f.conversations.dispose();
+      f.source.reasoning.dispose();
+      f.source.owner.dispose();
+    }
+  });
+
   it.each(["running", "completed"] as const)(
     "closes a %s instance without requiring another execution event and preserves monitor history",
     async (status) => {

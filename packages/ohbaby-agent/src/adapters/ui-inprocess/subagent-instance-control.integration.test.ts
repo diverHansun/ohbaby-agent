@@ -439,6 +439,86 @@ describe("actual in-process subagent instance control", () => {
     }
   });
 
+  it("releasing a conversation watch leaves its child running to completion", async () => {
+    const gate = deferred();
+    let child: InterfaceProviderRequest | undefined;
+    const f = await fixture((request) => {
+      child = request;
+      return held(request, gate.promise, "CONTINUED-WITHOUT-WATCH");
+    });
+    try {
+      const receipt = await f.submit([spawn("A")]);
+      await f.client.waitForPrompt(receipt.promptId);
+      await eventually(() => {
+        expect(child).toBeDefined();
+      });
+      const a = await f.row("A");
+      const query = {
+        rootSessionId: "root",
+        subagentId: a.subagentId,
+        watchId: "watch-a",
+      };
+      await f.client.retainSubagentConversation(query);
+      await f.client.releaseSubagentConversation(query);
+      expect(child?.signal?.aborted).toBe(false);
+      expect((await f.row("A")).status).toBe("running");
+      gate.resolve();
+      await eventually(async () => {
+        expect((await f.row("A")).status).toBe("completed");
+      });
+      const view = await f.client.getSubagentConversationView(query);
+      expect(JSON.stringify(view.messages)).toContain(
+        "CONTINUED-WITHOUT-WATCH",
+      );
+    } finally {
+      gate.resolve();
+      await f.dispose();
+    }
+  });
+
+  it("closing a running instance removes it and rejects stale conversation reads", async () => {
+    const gate = deferred();
+    let child: InterfaceProviderRequest | undefined;
+    const f = await fixture((request) => {
+      child = request;
+      return held(request, gate.promise, "late result");
+    });
+    try {
+      const receipt = await f.submit([spawn("A")]);
+      await f.client.waitForPrompt(receipt.promptId);
+      await eventually(() => {
+        expect(child).toBeDefined();
+      });
+      const a = await f.row("A");
+      const query = { rootSessionId: "root", subagentId: a.subagentId };
+      await f.client.retainSubagentConversation({
+        ...query,
+        watchId: "before-close",
+      });
+      const closed = await f.submit([
+        { name: "agent", input: { action: "close", agent_id: a.subagentId } },
+      ]);
+      await f.client.waitForPrompt(closed.promptId);
+      expect(child?.signal?.aborted).toBe(true);
+      expect(
+        (await f.client.listSubagentInstances({ rootSessionId: "root" }))
+          .instances,
+      ).toEqual([]);
+      await expect(
+        f.client.getSubagentConversationView(query),
+      ).rejects.toMatchObject({ code: "SUBAGENT_CLOSED" });
+      await expect(
+        f.client.retainSubagentConversation({
+          ...query,
+          watchId: "stale-link",
+        }),
+      ).rejects.toMatchObject({ code: "SUBAGENT_CLOSED" });
+    } finally {
+      gate.resolve();
+      await f.dispose();
+    }
+  });
+
   it("invalidates the instance snapshot when late resource release clears settling", async () => {
     const released = deferred();
     const entered = deferred();

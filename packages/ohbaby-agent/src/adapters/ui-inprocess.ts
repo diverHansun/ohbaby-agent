@@ -4631,11 +4631,6 @@ export function createInProcessUiBackendClient(
       },
       activeRootRun: (id): Promise<string | undefined> =>
         Promise.resolve(runtimeController.getActiveRunId(id)),
-      waitState: (id) =>
-        runtime?.getSubagentWaitState(id) ?? {
-          waiting: false,
-          approvalBlocked: false,
-        },
       budget: (id) => runtime?.getSubagentExecutionBudget(id),
     });
   }

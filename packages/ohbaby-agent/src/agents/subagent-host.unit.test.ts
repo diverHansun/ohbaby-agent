@@ -699,6 +699,39 @@ describe("SessionSubagentHost", () => {
     expect(turn).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a coded terminal error when close wins during stop admission", async () => {
+    const { host, store } = createHostFixture();
+    const first = await runAndObserve(host, {
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      prompt: "inspect",
+      role: "explore",
+    });
+    const input = {
+      parentSessionId: "parent_1",
+      subagentId: first.item.subagentId,
+    };
+    const get = store.get.bind(store);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(store, "get").mockImplementationOnce(async (query) => {
+      await gate;
+      return get(query);
+    });
+    const stopping = host.stop(input);
+    const rejection = expect(stopping).rejects.toMatchObject({
+      code: "SUBAGENT_CLOSED",
+    });
+    await host.close(input);
+    release();
+    await rejection;
+    await expect(
+      host.stop({ parentSessionId: "parent_1", subagentId: "missing" }),
+    ).rejects.toMatchObject({ code: "SUBAGENT_NOT_FOUND" });
+  });
+
   it("keeps a running subagent cancelled when close wins the race", async () => {
     const { host, turn, store } = createHostFixture();
     let resolveTurn!: () => void;

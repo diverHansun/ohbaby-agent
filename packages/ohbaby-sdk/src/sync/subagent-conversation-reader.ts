@@ -14,7 +14,15 @@ import type {
   UiSubagentExecution,
 } from "../contract/subagent.js";
 
+export interface UiSubagentInstanceSelection {
+  readonly subagentId: string;
+  /** Omit to read the current conversation without requesting a delegation jump. */
+  readonly anchorExecutionId?: string;
+}
 export interface UiSubagentConversationReaderState {
+  /** Selected identity remains available even before the instance has an execution. */
+  readonly selectedInstance?: UiSubagentInstanceSelection;
+  /** Explicitly selected execution, or the latest known execution for instance reads. */
   readonly selected?: UiSubagentExecution;
   readonly conversation?: UiSubagentConversationView;
   readonly loading: boolean;
@@ -26,6 +34,9 @@ export interface UiSubagentConversationReader {
   readonly getSnapshot: () => UiSubagentConversationReaderState;
   readonly subscribe: (listener: () => void) => () => void;
   readonly select: (execution: UiSubagentExecution) => Promise<void>;
+  readonly selectInstance: (
+    selection: UiSubagentInstanceSelection,
+  ) => Promise<void>;
   readonly close: () => void;
   readonly refresh: () => Promise<void>;
   readonly loadEarlier: () => Promise<void>;
@@ -250,6 +261,25 @@ export function createSubagentConversationReader(
     state = { ...state, ...patch };
     for (const listener of listeners) listener();
   };
+  const selectedExecution = (
+    conversation: UiSubagentConversationView,
+    selection = state.selectedInstance,
+  ): UiSubagentExecution | undefined => {
+    const anchor = selection?.anchorExecutionId;
+    if (anchor !== undefined)
+      return (
+        conversation.executions.find((item) => item.executionId === anchor) ??
+        (state.selected?.executionId === anchor ? state.selected : undefined)
+      );
+    return [...conversation.executions]
+      .sort(
+        (left, right) =>
+          (left.delegationSequence ?? 0) - (right.delegationSequence ?? 0) ||
+          left.createdAt - right.createdAt ||
+          left.executionId.localeCompare(right.executionId),
+      )
+      .at(-1);
+  };
   const release = (
     selection: UiSubagentConversationUnwatchQuery | undefined,
   ): void => {
@@ -273,7 +303,7 @@ export function createSubagentConversationReader(
     return ticket;
   };
   const markClosed = (reason: string): void => {
-    closedSubagentId = state.selected?.subagentId;
+    closedSubagentId = state.selectedInstance?.subagentId;
     cancel();
     release(watch);
     watch = undefined;
@@ -299,7 +329,7 @@ export function createSubagentConversationReader(
   const isCurrent = (current: number, signal: AbortSignal): boolean =>
     current === ticket && !disposed && !signal.aborted;
   const query = (
-    selected: UiSubagentExecution,
+    selected: UiSubagentInstanceSelection,
     signal: AbortSignal,
     extra: Partial<UiSubagentConversationQuery> = {},
   ): Promise<UiSubagentConversationView> => {
@@ -406,11 +436,11 @@ export function createSubagentConversationReader(
     return next;
   };
   const startRead = async (
-    selected: UiSubagentExecution,
-    locate: boolean,
+    selected: UiSubagentInstanceSelection,
+    execution?: UiSubagentExecution,
     preserveWindow = false,
   ): Promise<void> => {
-    if (closedSubagentId === selected.subagentId) return;
+    if (disposed || closedSubagentId === selected.subagentId) return;
     closedSubagentId = undefined;
     if (!client.watchSubagentConversation) {
       publish({
@@ -434,9 +464,10 @@ export function createSubagentConversationReader(
     };
     pendingWatch = requestedWatch;
     publish({
-      selected,
+      selectedInstance: selected,
+      selected: execution,
       loading: true,
-      locating: locate,
+      locating: !preserveWindow && selected.anchorExecutionId !== undefined,
       reconnecting: false,
       error: undefined,
       ...(state.conversation?.subagentId === selected.subagentId
@@ -461,13 +492,19 @@ export function createSubagentConversationReader(
       watch = acquired;
       if (pendingWatch === requestedWatch) pendingWatch = undefined;
       const result = await query(selected, active.signal, {
-        ...(locate ? { anchorExecutionId: selected.executionId } : {}),
+        ...(preserveWindow || selected.anchorExecutionId === undefined
+          ? {}
+          : { anchorExecutionId: selected.anchorExecutionId }),
       });
       if (!isCurrent(current, active.signal)) return;
       let next = install(result, acquired);
       if (preserveWindow)
         next = preserveReadingWindow(state.conversation, next);
       publish({
+        selected:
+          selected.anchorExecutionId !== undefined && execution
+            ? execution
+            : selectedExecution(next),
         conversation: next,
         loading: false,
         locating: false,
@@ -480,7 +517,7 @@ export function createSubagentConversationReader(
         pendingWatch = undefined;
       }
       if (acquired && watch !== acquired) release(acquired);
-      if (current === ticket && !disposed && !active.signal.aborted) {
+      if (isCurrent(current, active.signal)) {
         if (!handleClosedError(error))
           publish({ loading: false, locating: false, error: errorText(error) });
       }
@@ -490,9 +527,9 @@ export function createSubagentConversationReader(
     }
   };
   const refresh = async (): Promise<void> => {
-    const selected = state.selected;
+    const selected = state.selectedInstance;
     if (!selected || closedSubagentId === selected.subagentId) return;
-    if (!watch) return startRead(selected, false);
+    if (!watch) return startRead(selected, state.selected, true);
     const current = cancel();
     const selection = watch;
     const active = new AbortController();
@@ -506,7 +543,12 @@ export function createSubagentConversationReader(
         state.conversation,
         install(result, selection),
       );
-      publish({ conversation: next, loading: false, reconnecting: false });
+      publish({
+        selected: selectedExecution(next),
+        conversation: next,
+        loading: false,
+        reconnecting: false,
+      });
     } catch (error) {
       if (
         current === ticket &&
@@ -527,14 +569,15 @@ export function createSubagentConversationReader(
   const onEvent = (event: UiEvent): void => {
     if (
       disposed ||
-      !state.selected ||
-      closedSubagentId === state.selected.subagentId
+      !state.selectedInstance ||
+      closedSubagentId === state.selectedInstance.subagentId
     )
       return;
     if (event.type === "session.resync-required") {
       if (event.sessionId !== null && event.sessionId !== rootSessionId) return;
       publish({ reconnecting: true });
-      if (!event.disconnected) void startRead(state.selected, false, true);
+      if (!event.disconnected)
+        void startRead(state.selectedInstance, state.selected, true);
       return;
     }
     if (
@@ -544,7 +587,7 @@ export function createSubagentConversationReader(
       return;
     if (
       event.rootSessionId !== rootSessionId ||
-      event.subagentId !== state.selected.subagentId
+      event.subagentId !== state.selectedInstance.subagentId
     )
       return;
     if (watch && event.watchId !== watch.watchId) return;
@@ -582,7 +625,8 @@ export function createSubagentConversationReader(
     }
     if (event.change.bindingGeneration !== watch.bindingGeneration) return;
     const applied = applyChange(state.conversation, event);
-    if (applied) publish({ conversation: applied });
+    if (applied)
+      publish({ selected: selectedExecution(applied), conversation: applied });
     else {
       publish({ reconnecting: true });
       void refresh();
@@ -590,7 +634,7 @@ export function createSubagentConversationReader(
   };
   const unsubEvents = client.subscribeEvents?.(onEvent);
   const loadPage = async (direction: "earlier" | "later"): Promise<void> => {
-    const selected = state.selected;
+    const selected = state.selectedInstance;
     const base = state.conversation;
     if (!selected || !base || !watch || state.loading) return;
     const cursor =
@@ -616,8 +660,10 @@ export function createSubagentConversationReader(
         void refresh();
         return;
       }
+      const conversation = mergePage(latest, page, direction);
       publish({
-        conversation: mergePage(latest, page, direction),
+        selected: selectedExecution(conversation),
+        conversation,
         loading: false,
       });
     } catch (error) {
@@ -634,13 +680,46 @@ export function createSubagentConversationReader(
       return () => listeners.delete(listener);
     },
     select: (execution: UiSubagentExecution): Promise<void> =>
-      startRead(execution, true),
+      startRead(
+        {
+          subagentId: execution.subagentId,
+          anchorExecutionId: execution.executionId,
+        },
+        execution,
+      ),
+    selectInstance(selection): Promise<void> {
+      if (disposed || closedSubagentId === selection.subagentId)
+        return Promise.resolve();
+      const selected = { ...selection };
+      if (
+        selected.anchorExecutionId === undefined &&
+        state.selectedInstance?.subagentId === selected.subagentId &&
+        state.conversation &&
+        watch &&
+        !state.loading &&
+        !state.error
+      ) {
+        const conversation = state.conversation;
+        publish({
+          selectedInstance: selected,
+          selected: selectedExecution(conversation, selected),
+          ...(conversation.anchorMessageId === undefined
+            ? {}
+            : {
+                conversation: { ...conversation, anchorMessageId: undefined },
+              }),
+        });
+        return Promise.resolve();
+      }
+      return startRead(selected);
+    },
     close(): void {
       closedSubagentId = undefined;
       cancel();
       release(watch);
       watch = undefined;
       publish({
+        selectedInstance: undefined,
         selected: undefined,
         conversation: undefined,
         loading: false,
@@ -653,7 +732,7 @@ export function createSubagentConversationReader(
     loadEarlier: (): Promise<void> => loadPage("earlier"),
     loadLater: (): Promise<void> => loadPage("later"),
     async jumpToLatest(): Promise<void> {
-      const selected = state.selected;
+      const selected = state.selectedInstance;
       if (!selected || !watch) return;
       const current = cancel();
       const selection = watch;

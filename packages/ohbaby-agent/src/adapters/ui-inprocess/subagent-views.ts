@@ -46,10 +46,6 @@ export function createSubagentViewReader(options: {
   readonly source: SourceSessionProjection;
   readonly rootExists: (id: string) => Promise<boolean>;
   readonly activeRootRun?: (id: string) => Promise<string | undefined>;
-  readonly waitState?: (runId: string) => {
-    waiting: boolean;
-    approvalBlocked: boolean;
-  };
   readonly budget?: (executionId: string) => UiSubagentBudget | undefined;
 }): {
   list(input: UiSubagentQuery): Promise<UiSubagentExecutionList>;
@@ -91,7 +87,6 @@ export function createSubagentViewReader(options: {
       const current = runId
         ? await options.executions.listByRootRun(runId)
         : [];
-      const wait = runId ? options.waitState?.(runId) : undefined;
       input.signal?.throwIfAborted();
       const page = records.slice(0, limit);
       const last = page.at(-1);
@@ -102,8 +97,9 @@ export function createSubagentViewReader(options: {
           records.length > limit && last
             ? encodeCursor(input.rootSessionId, last)
             : undefined,
-        waiting: wait?.waiting ?? false,
-        approvalBlocked: wait?.approvalBlocked ?? false,
+        // Retain the legacy execution-list shape; live status comes from instances.
+        waiting: false,
+        approvalBlocked: false,
         activeCount: current.filter(
           (r) => r.status === "queued" || r.status === "running",
         ).length,

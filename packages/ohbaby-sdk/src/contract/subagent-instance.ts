@@ -82,6 +82,12 @@ export interface UiSubagentNotFoundError {
   readonly message: string;
 }
 
+/** Retryable complete-snapshot read failure. Never indicates that an instance was closed. */
+export interface UiSubagentSnapshotChangedError {
+  readonly code: "SUBAGENT_SNAPSHOT_CHANGED";
+  readonly message: string;
+}
+
 /** Instance reads and controls. Closed instances reject with SUBAGENT_CLOSED; execution-history readers remain separate. */
 export interface UiSubagentInstanceClient {
   listSubagentInstances(

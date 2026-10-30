@@ -1272,10 +1272,6 @@ export async function createUiRuntimeComposition(
   };
 
   return {
-    getSubagentWaitState: () => ({
-      waiting: false,
-      approvalBlocked: false,
-    }),
     listSubagentState: (parentSessionId) =>
       subagentHost.list({ parentSessionId }),
     stopSubagent: (input) => subagentHost.stop(input),

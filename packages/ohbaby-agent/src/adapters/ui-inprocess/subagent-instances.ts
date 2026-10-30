@@ -8,6 +8,7 @@ import type {
 } from "ohbaby-sdk";
 import type {
   SubagentInstanceStore,
+  SubagentInstanceRecord,
   SubagentStatusResult,
   SubagentStopResult,
 } from "../../agents/subagents/types.js";
@@ -15,23 +16,11 @@ import type {
   SubagentExecutionRecord,
   SubagentExecutionStore,
 } from "../../agents/subagents/execution-store.js";
+import { subagentAccessError } from "../../agents/subagents/access-error.js";
 
 function nonEmpty(value?: string): string | undefined {
   const text = value?.trim();
   return text === "" ? undefined : text;
-}
-
-export function subagentAccessError(
-  code: "SUBAGENT_CLOSED" | "SUBAGENT_NOT_FOUND",
-): Error & { readonly code: string } {
-  return Object.assign(
-    new Error(
-      code === "SUBAGENT_CLOSED"
-        ? "Subagent instance is closed"
-        : "Subagent instance does not belong to this session",
-    ),
-    { code },
-  );
 }
 
 /** Complete instance snapshots; execution history remains a separate, paged API. */
@@ -104,6 +93,61 @@ export class SubagentInstanceProjection {
     return revision;
   }
 
+  private async projectRow(
+    item: SubagentInstanceRecord,
+    input: UiSubagentInstanceQuery,
+    runtime: SubagentStatusResult | undefined,
+  ): Promise<UiSubagentInstance> {
+    if (item.parentSessionId !== input.rootSessionId)
+      throw subagentAccessError("SUBAGENT_NOT_FOUND");
+    this.rootsByChild.set(item.sessionId, input.rootSessionId);
+    const execution =
+      runtime?.executions.find(
+        (entry) => entry.subagentId === item.subagentId,
+      ) ??
+      (
+        await this.options.executions.list({
+          rootSessionId: input.rootSessionId,
+          subagentId: item.subagentId,
+          limit: 1,
+        })
+      ).at(0);
+    const state = runtime?.runtime?.find(
+      (entry) => entry.subagentId === item.subagentId,
+    );
+    const active =
+      execution &&
+      (execution.status === "queued" || execution.status === "running");
+    return {
+      rootSessionId: input.rootSessionId,
+      subagentId: item.subagentId,
+      displayName:
+        nonEmpty(item.name) ?? nonEmpty(item.description) ?? "Subagent",
+      description:
+        nonEmpty(item.description) ??
+        (execution?.prompt ?? item.initialPrompt)
+          .replace(/\s+/gu, " ")
+          .slice(0, 240),
+      createdAt: item.createdAt,
+      updatedAt: Math.max(item.updatedAt, execution?.updatedAt ?? 0),
+      status: item.status,
+      currentExecutionId: state
+        ? state.executionId
+        : active
+          ? execution.executionId
+          : undefined,
+      latestExecutionId: execution?.executionId,
+      mode: execution?.mode,
+      approvalBlocked:
+        runtime?.facts?.find((fact) => fact.subagentId === item.subagentId)
+          ?.approval.blocked ?? false,
+      settling: state?.settling ?? false,
+      unprocessedMessageCount:
+        state?.unprocessedMessages.length ??
+        (execution ? await this.options.unprocessedCount(execution) : 0),
+    };
+  }
+
   async list(
     input: UiSubagentInstanceQuery,
   ): Promise<UiSubagentInstanceSnapshot> {
@@ -123,59 +167,7 @@ export class SubagentInstanceProjection {
       const instances = await Promise.all(
         records
           .filter((item) => item.closedAt === undefined)
-          .map(async (item): Promise<UiSubagentInstance> => {
-            if (item.parentSessionId !== input.rootSessionId)
-              throw subagentAccessError("SUBAGENT_NOT_FOUND");
-            this.rootsByChild.set(item.sessionId, input.rootSessionId);
-            const execution =
-              runtime?.executions.find(
-                (entry) => entry.subagentId === item.subagentId,
-              ) ??
-              (
-                await this.options.executions.list({
-                  rootSessionId: input.rootSessionId,
-                  subagentId: item.subagentId,
-                  limit: 1,
-                })
-              ).at(0);
-            const state = runtime?.runtime?.find(
-              (entry) => entry.subagentId === item.subagentId,
-            );
-            const active =
-              execution &&
-              (execution.status === "queued" || execution.status === "running");
-            return {
-              rootSessionId: input.rootSessionId,
-              subagentId: item.subagentId,
-              displayName:
-                nonEmpty(item.name) ?? nonEmpty(item.description) ?? "Subagent",
-              description:
-                nonEmpty(item.description) ??
-                (execution?.prompt ?? item.initialPrompt)
-                  .replace(/\s+/gu, " ")
-                  .slice(0, 240),
-              createdAt: item.createdAt,
-              updatedAt: Math.max(item.updatedAt, execution?.updatedAt ?? 0),
-              status: item.status,
-              currentExecutionId: state
-                ? state.executionId
-                : active
-                  ? execution.executionId
-                  : undefined,
-              latestExecutionId: execution?.executionId,
-              mode: execution?.mode,
-              approvalBlocked:
-                runtime?.facts?.find(
-                  (fact) => fact.subagentId === item.subagentId,
-                )?.approval.blocked ?? false,
-              settling: state?.settling ?? false,
-              unprocessedMessageCount:
-                state?.unprocessedMessages.length ??
-                (execution
-                  ? await this.options.unprocessedCount(execution)
-                  : 0),
-            };
-          }),
+          .map((item) => this.projectRow(item, input, runtime)),
       );
       await this.options.validateRoot(input);
       input.signal?.throwIfAborted();
@@ -217,11 +209,19 @@ export class SubagentInstanceProjection {
       throw subagentAccessError("SUBAGENT_CLOSED");
     input.signal?.throwIfAborted();
     const result = await this.options.stop(input);
-    const snapshot = await this.list(input);
-    const instance = snapshot.instances.find(
-      (item) => item.subagentId === input.subagentId,
-    );
-    if (!instance) throw subagentAccessError("SUBAGENT_CLOSED");
+    // Stop has already been admitted. Unrelated snapshot churn must not turn
+    // that acknowledgement into a failed command; only project this instance.
+    const runtime = await this.options.runtime(input.rootSessionId);
+    const current = await this.options.instances.get({
+      parentSessionId: input.rootSessionId,
+      subagentId: input.subagentId,
+    });
+    if (!current) throw subagentAccessError("SUBAGENT_NOT_FOUND");
+    if (current.closedAt !== undefined)
+      throw subagentAccessError("SUBAGENT_CLOSED");
+    const instance = await this.projectRow(current, input, runtime);
+    await this.options.validateRoot(input);
+    input.signal?.throwIfAborted();
     return {
       rootSessionId: input.rootSessionId,
       subagentId: input.subagentId,
