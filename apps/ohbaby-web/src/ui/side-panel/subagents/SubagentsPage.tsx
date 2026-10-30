@@ -1,4 +1,8 @@
-import { createSubagentInstanceReader, type UiBackendClient } from "ohbaby-sdk";
+import {
+  createSubagentConversationReader,
+  createSubagentInstanceReader,
+  type UiBackendClient,
+} from "ohbaby-sdk";
 import {
   type ReactElement,
   useCallback,
@@ -10,13 +14,16 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { SubagentReadingCache } from "../../session/SubagentConversationBody.js";
+import type { SubagentWatchCoordinator } from "../../shared/subagent-watch-owner.js";
 import { SubagentInstanceDetail } from "./SubagentInstanceDetail.js";
 import { SubagentInstanceList } from "./SubagentInstanceList.js";
 
 /**
  * The Subagents page: the instance list and one instance's detail in the same
- * tab. Unmounting it (closing the tab or the panel, switching chats) releases
- * every read; it never stops or closes a subagent.
+ * tab. It owns one conversation reader for its details, kept while the list
+ * shows so returning to the same instance resumes reading. Unmounting it
+ * (closing the tab or the panel, switching chats) releases every read; it
+ * never stops or closes a subagent.
  */
 export function SubagentsPage(props: {
   readonly client: UiBackendClient;
@@ -24,8 +31,9 @@ export function SubagentsPage(props: {
   readonly selectedSubagentId?: string;
   readonly onSelect: (subagentId: string | undefined) => void;
   readonly readingCache: SubagentReadingCache;
+  readonly watch: SubagentWatchCoordinator;
 }): ReactElement {
-  const { client, rootSessionId, selectedSubagentId } = props;
+  const { client, rootSessionId, selectedSubagentId, watch } = props;
   // The caller's callback may change every render; effects read the latest one.
   const onSelectRef = useRef(props.onSelect);
   useLayoutEffect(() => {
@@ -41,6 +49,28 @@ export function SubagentsPage(props: {
     setReturnFocus(subagentId);
     onSelectRef.current(undefined);
   }, []);
+  const conversation = useMemo(
+    () => createSubagentConversationReader(client, rootSessionId),
+    [client, rootSessionId],
+  );
+  useEffect(
+    () => (): void => {
+      conversation.dispose();
+    },
+    [conversation],
+  );
+  // The chat's delegation sheet took the one watch: release it and leave the
+  // detail, so nothing here keeps showing a conversation that stopped updating.
+  useEffect(
+    () =>
+      watch.subscribe(() => {
+        if (watch.owner() === "panel") return;
+        if (conversation.getSnapshot().selected === undefined) return;
+        conversation.close();
+        onSelectRef.current(undefined);
+      }),
+    [watch, conversation],
+  );
   // Only the root goes in the query; the client adds the current binding.
   const reader = useMemo(
     () => createSubagentInstanceReader(client, { rootSessionId }),
@@ -76,6 +106,17 @@ export function SubagentsPage(props: {
   useEffect(() => {
     if (closed && selectedSubagentId) back(selectedSubagentId);
   }, [closed, selectedSubagentId, back]);
+  // A held conversation whose instance left the complete snapshot was closed:
+  // release its watch even while the list is showing.
+  useEffect(() => {
+    const held = conversation.getSnapshot().selected?.subagentId;
+    if (
+      held !== undefined &&
+      state.snapshot &&
+      !state.snapshot.instances.some((item) => item.subagentId === held)
+    )
+      conversation.close();
+  }, [state.snapshot, conversation]);
 
   if (selected)
     return (
@@ -84,6 +125,8 @@ export function SubagentsPage(props: {
         client={client}
         rootSessionId={rootSessionId}
         instance={selected}
+        reader={conversation}
+        watch={watch}
         readingCache={props.readingCache}
         onBack={() => {
           back(selected.subagentId);

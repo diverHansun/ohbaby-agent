@@ -3,6 +3,7 @@ import {
   type CSSProperties,
   type ReactElement,
   type ReactNode,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -33,6 +34,11 @@ export function SidePanel(props: {
   readonly renderPage: (tab: SidePanelTab) => ReactNode;
   /** Called after the panel closes itself, so the caller can move focus back. */
   readonly onClosed?: () => void;
+  /**
+   * The user opened the panel, so focus moves into it; otherwise Escape below
+   * 1024px would reach nothing. A panel restored on reload leaves focus alone.
+   */
+  readonly focusOnOpen?: boolean;
 }): ReactElement {
   const {
     state,
@@ -68,6 +74,18 @@ export function SidePanel(props: {
     setOpen(false);
     props.onClosed?.();
   };
+  const focusOnOpen = props.focusOnOpen === true;
+  useLayoutEffect(() => {
+    const element = panel.current;
+    // A page that already took focus (a detail heading) keeps it.
+    if (!focusOnOpen || !element || element.contains(document.activeElement))
+      return;
+    element
+      .querySelector<HTMLElement>(
+        '[role="tab"][aria-selected="true"], .ohb-side-panel-entry button',
+      )
+      ?.focus({ preventScroll: true });
+  }, [focusOnOpen]);
 
   return (
     <aside

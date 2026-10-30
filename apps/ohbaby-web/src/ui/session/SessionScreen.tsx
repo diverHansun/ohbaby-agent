@@ -20,6 +20,7 @@ import { selectPersistedPromptError } from "./prompt-projection.js";
 import { isConnectionAbnormal } from "./selectors.js";
 import { SessionBanners, SessionSyncNotice } from "./SessionBanners.js";
 import { SessionConversation } from "./SessionConversation.js";
+import type { SubagentWatchCoordinator } from "../shared/subagent-watch-owner.js";
 import { SubagentView } from "./SubagentView.js";
 import { useCommandOverlays } from "./useCommandOverlays.js";
 import { useCompactRequest } from "./use-compact-request.js";
@@ -39,6 +40,7 @@ export function SessionScreen({
   draftPicker,
   onOpenModelSettings,
   onError,
+  subagentWatch,
 }: {
   readonly runtime: OhbabyWebRuntime;
   readonly client: UiBackendClient;
@@ -48,6 +50,8 @@ export function SessionScreen({
   readonly onOpenModelSettings: (fromDraft: boolean) => void;
   /** Failures away from where the user is looking: the top-right notices. */
   readonly onError: (error: unknown) => void;
+  /** Shared with the right panel: one subagent conversation watch per client. */
+  readonly subagentWatch?: SubagentWatchCoordinator;
 }): ReactElement {
   const {
     storeSnapshot,
@@ -232,7 +236,12 @@ export function SessionScreen({
   const listCommands = useCallback(() => runtime.listWebCommands(), [runtime]);
 
   const contentRef = useRef<HTMLDivElement>(null);
-  const interactions = useSessionInteractions({ client, view, contentRef });
+  const interactions = useSessionInteractions({
+    client,
+    view,
+    contentRef,
+    subagentWatch,
+  });
   const { viewingSubagent, approvalDialogVisible, childExpanded } =
     interactions;
 

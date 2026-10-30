@@ -14,6 +14,10 @@ import type {
   UiSubagentStopResult,
 } from "ohbaby-sdk";
 import type { SubagentReadingCache } from "../../session/SubagentConversationBody.js";
+import {
+  createSubagentWatchCoordinator,
+  type SubagentWatchCoordinator,
+} from "../../shared/subagent-watch-owner.js";
 import { SubagentsPage } from "./SubagentsPage.js";
 
 (
@@ -189,6 +193,7 @@ function fakeClient(): {
 function Page(props: {
   readonly client: UiBackendClient;
   readonly cache: SubagentReadingCache;
+  readonly watch: SubagentWatchCoordinator;
 }): ReactElement {
   const [selected, setSelected] = useState<string>();
   return (
@@ -198,6 +203,7 @@ function Page(props: {
       selectedSubagentId={selected}
       onSelect={setSelected}
       readingCache={props.cache}
+      watch={props.watch}
     />
   );
 }
@@ -211,12 +217,13 @@ async function flush(): Promise<void> {
 
 async function mount(
   client: UiBackendClient,
+  watch: SubagentWatchCoordinator = createSubagentWatchCoordinator(),
 ): Promise<{ readonly element: HTMLElement; readonly unmount: () => void }> {
   const element = document.createElement("div");
   document.body.append(element);
   const root = createRoot(element);
   act(() => {
-    root.render(<Page client={client} cache={new Map()} />);
+    root.render(<Page client={client} cache={new Map()} watch={watch} />);
   });
   let removed = false;
   const unmount = (): void => {
@@ -476,6 +483,7 @@ describe("Subagents page", () => {
             rootSessionId={rootSessionId}
             onSelect={() => undefined}
             readingCache={new Map()}
+            watch={createSubagentWatchCoordinator()}
           />,
         );
       });
@@ -521,6 +529,54 @@ describe("Subagents page", () => {
     expect(
       (document.activeElement as HTMLElement | null)?.dataset.subagentId,
     ).toBe("reviewer");
+  });
+
+  it("resumes the held conversation when returning to the same instance", async () => {
+    const fake = fakeClient();
+    fake.list.mockResolvedValue(
+      snapshot(1, [instance("reviewer"), instance("tester")]),
+    );
+    const { element } = await mount(fake.client);
+    await click(find(element, "reviewer"));
+    expect(element.textContent).toContain("Answer from reviewer");
+    await click(find(element, "Back to subagents"));
+    await click(find(element, "reviewer"));
+    expect(element.textContent).toContain("Answer from reviewer");
+    // No second open: the page's reader kept the loaded pages and the watch.
+    for (const method of [
+      "getSubagentExecutionView",
+      "watchSubagentConversation",
+      "getSubagentConversationView",
+    ] as const)
+      expect(
+        (fake.client[method] as ReturnType<typeof vi.fn>).mock.calls,
+      ).toHaveLength(1);
+    expect(fake.unwatch).not.toHaveBeenCalled();
+    // A different instance replaces the held one.
+    await click(find(element, "Back to subagents"));
+    await click(find(element, "tester"));
+    expect(element.textContent).toContain("Answer from tester");
+    expect(fake.unwatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands the one watch to the chat's sheet and leaves the detail instead of going stale", async () => {
+    const fake = fakeClient();
+    fake.list.mockResolvedValue(snapshot(1, [instance("reviewer")]));
+    const watch = createSubagentWatchCoordinator();
+    const { element } = await mount(fake.client, watch);
+    await click(find(element, "reviewer"));
+    expect(watch.owner()).toBe("panel");
+    await act(async () => {
+      watch.claim("sheet");
+      await Promise.resolve();
+    });
+    await flush();
+    expect(element.querySelector("h2")).toBeNull();
+    expect(fake.unwatch).toHaveBeenCalledTimes(1);
+    // Opening the detail again takes the watch back.
+    await click(find(element, "reviewer"));
+    expect(watch.owner()).toBe("panel");
+    expect(element.textContent).toContain("Answer from reviewer");
   });
 
   it("shows an instance without any execution as not started", async () => {

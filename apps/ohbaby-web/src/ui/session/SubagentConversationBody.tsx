@@ -39,6 +39,7 @@ export function SubagentConversationBody({
   memory,
   identity,
   anchorToken,
+  followAnchor = true,
   approvalRequired,
 }: {
   readonly reader: Reader;
@@ -47,6 +48,8 @@ export function SubagentConversationBody({
   /** Keys the stream's reading position; `rootSessionId:subagentId`. */
   readonly identity: string;
   readonly anchorToken?: string;
+  /** False when reopening a held conversation: keep the reading position instead. */
+  readonly followAnchor?: boolean;
   readonly approvalRequired?: boolean;
 }): ReactElement {
   const conversation = state.conversation;
@@ -96,7 +99,9 @@ export function SubagentConversationBody({
           preserveMessageOrder
           readingPosition={memory.position}
           anchorMessageId={
-            state.locating ? undefined : conversation?.anchorMessageId
+            state.locating || !followAnchor
+              ? undefined
+              : conversation?.anchorMessageId
           }
           anchorToken={anchorToken ?? selected?.executionId}
           onNearEnd={

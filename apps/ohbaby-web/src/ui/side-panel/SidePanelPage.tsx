@@ -1,6 +1,7 @@
 import type { UiBackendClient } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
+import type { SubagentWatchCoordinator } from "../shared/subagent-watch-owner.js";
 import type { SidePanelTab } from "./side-pages.js";
 import { SubagentsPage } from "./subagents/SubagentsPage.js";
 import type { SidePanelControls } from "./use-side-panel.js";
@@ -8,6 +9,8 @@ import type { SidePanelControls } from "./use-side-panel.js";
 /** What pages may need from the app; each page takes only its part. */
 export interface SidePageContext {
   readonly client: UiBackendClient | null;
+  /** One subagent conversation watch per client, shared with the chat's sheet. */
+  readonly subagentWatch: SubagentWatchCoordinator;
   /** The open primary session; absent for a new-chat draft. */
   readonly rootSessionId?: string;
   readonly subagentReadingCache: SubagentReadingCache;
@@ -34,6 +37,7 @@ export function SidePanelPage(props: {
             context.setTabState(tab.id, "subagents", { subagentId });
           }}
           readingCache={context.subagentReadingCache}
+          watch={context.subagentWatch}
         />
       ) : (
         <p className="ohb-side-notice">Open a chat to see its subagents.</p>

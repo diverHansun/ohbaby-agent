@@ -13,6 +13,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { SubagentWatchCoordinator } from "../shared/subagent-watch-owner.js";
 import type { ViewModel } from "./selectors.js";
 import { subagentSheetGeometry } from "./subagent-layout.js";
 import type { SubagentReadingCache } from "./SubagentConversationBody.js";
@@ -28,6 +29,7 @@ export function useSessionInteractions(input: {
   readonly client: UiBackendClient;
   readonly view: ViewModel;
   readonly contentRef: RefObject<HTMLDivElement | null>;
+  readonly subagentWatch?: SubagentWatchCoordinator;
 }): {
   readonly subagentState: ReturnType<
     ReturnType<typeof createSubagentReader>["getSnapshot"]
@@ -50,7 +52,7 @@ export function useSessionInteractions(input: {
   ) => void;
   readonly closeChild: () => void;
 } {
-  const { client, view, contentRef } = input;
+  const { client, view, contentRef, subagentWatch } = input;
   const sessionId = view.activeSession?.id;
   const subagents = useMemo(
     () => createSubagentReader(client, sessionId ?? ""),
@@ -106,9 +108,22 @@ export function useSessionInteractions(input: {
     ): void => {
       childTrigger.current = trigger;
       setChildAnchorToken((value) => value + 1);
+      subagentWatch?.claim("sheet");
       void childReader.select(execution);
     },
-    [childReader],
+    [childReader, subagentWatch],
+  );
+  // The right panel opened a detail and took the one watch: close the sheet
+  // rather than leave it showing a conversation that no longer updates.
+  useEffect(
+    () =>
+      subagentWatch?.subscribe(() => {
+        if (subagentWatch.owner() === "sheet") return;
+        if (childReader.getSnapshot().selected === undefined) return;
+        childReader.close();
+        setChildExpanded(false);
+      }),
+    [childReader, subagentWatch],
   );
 
   const closeChild = useCallback(() => {

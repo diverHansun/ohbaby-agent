@@ -21,12 +21,16 @@ afterEach(() => {
   controls = undefined;
 });
 
-function Harness(props: { readonly rootSessionId: string }): ReactElement {
+function Harness(props: {
+  readonly rootSessionId: string;
+  readonly focusOnOpen?: boolean;
+}): ReactElement {
   const panel = useSidePanel(props.rootSessionId);
   controls = panel;
   return panel.state.open ? (
     <SidePanel
       controls={panel}
+      focusOnOpen={props.focusOnOpen}
       renderPage={(tab) => (
         <p data-testid="page">
           {tab.kind}:{tab.state.subagentId ?? "list"}
@@ -38,7 +42,10 @@ function Harness(props: { readonly rootSessionId: string }): ReactElement {
   );
 }
 
-function mount(rootSessionId = "root"): {
+function mount(
+  rootSessionId = "root",
+  focusOnOpen = false,
+): {
   readonly element: HTMLElement;
   readonly render: (rootSessionId: string) => void;
 } {
@@ -47,7 +54,7 @@ function mount(rootSessionId = "root"): {
   const root = createRoot(element);
   const render = (id: string): void => {
     act(() => {
-      root.render(<Harness rootSessionId={id} />);
+      root.render(<Harness rootSessionId={id} focusOnOpen={focusOnOpen} />);
     });
   };
   render(rootSessionId);
@@ -170,6 +177,39 @@ it("starts closed on a narrow window even when it was open before", () => {
   } finally {
     window.matchMedia = original;
   }
+});
+
+it("moves focus into a panel the user opens so Escape reaches it on a narrow window", () => {
+  const original = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes("1023px"),
+    addEventListener: (): void => undefined,
+    removeEventListener: (): void => undefined,
+  })) as unknown as typeof window.matchMedia;
+  try {
+    const { element } = mount("root", true);
+    act(() => {
+      controls?.setOpen(true);
+    });
+    const entry = element.querySelector(".ohb-side-panel-entry button");
+    expect(document.activeElement).toBe(entry);
+    act(() => {
+      entry?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    expect(controls?.state.open).toBe(false);
+  } finally {
+    window.matchMedia = original;
+  }
+});
+
+it("leaves focus alone for a panel that was not just opened by the user", () => {
+  const { element } = mount();
+  act(() => {
+    controls?.setOpen(true);
+  });
+  expect(element.contains(document.activeElement)).toBe(false);
 });
 
 it("clears the selected instance when the primary session changes", () => {

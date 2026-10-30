@@ -1,15 +1,14 @@
 import { ChevronLeft, Square } from "lucide-react";
-import {
+import type {
   createSubagentConversationReader,
-  type UiBackendClient,
-  type UiSubagentInstance,
+  UiBackendClient,
+  UiSubagentInstance,
 } from "ohbaby-sdk";
 import {
   type ReactElement,
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -20,10 +19,13 @@ import {
   type SubagentReadingCache,
 } from "../../session/SubagentConversationBody.js";
 import { readableError } from "../../shared/error-text.js";
+import type { SubagentWatchCoordinator } from "../../shared/subagent-watch-owner.js";
 import { IconButton } from "../../shared/IconButton.js";
 import { useDelayed } from "../../shared/use-delayed.js";
 import { stoppableExecutionId } from "./instance-status.js";
 import { InstanceStatus } from "./InstanceStatus.js";
+
+type ConversationReader = ReturnType<typeof createSubagentConversationReader>;
 
 function errorText(error: unknown): string {
   return readableError(error instanceof Error ? error.message : String(error));
@@ -38,37 +40,40 @@ function errorCode(error: unknown): unknown {
 /**
  * One instance's read-only conversation with its current status and Stop
  * (03 §4.9). The header always shows the instance snapshot's status, never a
- * historical execution's (improve-2/05 item 3).
+ * historical execution's (improve-2/05 item 3). The conversation reader
+ * belongs to the page, so leaving for the list and coming back keeps the
+ * loaded pages and the reading position.
  */
 export function SubagentInstanceDetail(props: {
   readonly client: UiBackendClient;
   readonly rootSessionId: string;
   readonly instance: UiSubagentInstance;
+  readonly reader: ConversationReader;
+  readonly watch: SubagentWatchCoordinator;
   readonly readingCache: SubagentReadingCache;
   readonly onBack: () => void;
   /** Called after a Stop answer, so the list snapshot is reloaded. */
   readonly onRefresh: () => void;
 }): ReactElement {
-  const { client, rootSessionId, instance } = props;
-  const reader = useMemo(
-    () => createSubagentConversationReader(client, rootSessionId),
-    [client, rootSessionId],
-  );
+  const { client, rootSessionId, instance, reader, watch } = props;
   const state = useSyncExternalStore(
     useCallback((listener: () => void) => reader.subscribe(listener), [reader]),
     () => reader.getSnapshot(),
   );
-  useEffect(
-    () => (): void => {
-      reader.dispose();
-    },
-    [reader],
+  // Opening a detail is the user's latest reading choice: take the one watch.
+  useEffect(() => {
+    watch.claim("panel");
+  }, [watch]);
+  // Only a fresh open jumps to the execution anchor; returning to an instance
+  // the page's reader still holds restores where the user was (I3-06).
+  const [followAnchor] = useState(
+    () => reader.getSnapshot().selected?.subagentId !== instance.subagentId,
   );
 
   // Until the SDK reader can open an instance by subagentId (improve-2 B4),
   // read the latest execution's record once and open the conversation from it.
   const latestExecutionId = instance.latestExecutionId;
-  const opened = state.selected !== undefined;
+  const opened = state.selected?.subagentId === instance.subagentId;
   const [openError, setOpenError] = useState<string>();
   const [openAttempt, setOpenAttempt] = useState(0);
   const showOpening = useDelayed(
@@ -206,6 +211,7 @@ export function SubagentInstanceDetail(props: {
             state={state}
             memory={memory}
             identity={identity}
+            followAnchor={followAnchor}
             approvalRequired={instance.approvalBlocked}
           />
         </div>

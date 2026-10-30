@@ -14,6 +14,7 @@ import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
 import { type NoticeItem, NoticeStack } from "../shared/Notice.js";
 import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
+import { createSubagentWatchCoordinator } from "../shared/subagent-watch-owner.js";
 import { SidePanel } from "../side-panel/SidePanel.js";
 import {
   type SidePageContext,
@@ -187,6 +188,9 @@ export function AppController(props: {
   );
 
   const sidePanel = useSidePanel(activeId);
+  const [subagentWatch] = useState(createSubagentWatchCoordinator);
+  // Only a panel the user just opened takes focus (see SidePanel focusOnOpen).
+  const [panelOpenedByUser, setPanelOpenedByUser] = useState(false);
   // Reading positions in the panel's subagent details; a new chat starts afresh.
   const panelReadingCache = useMemo<SubagentReadingCache>(
     () => new Map(),
@@ -194,6 +198,7 @@ export function AppController(props: {
   );
   const sidePageContext: SidePageContext = {
     client,
+    subagentWatch,
     rootSessionId: activeId,
     subagentReadingCache: panelReadingCache,
     setTabState: sidePanel.setTabState,
@@ -283,6 +288,7 @@ export function AppController(props: {
           sessionId={view.activeSession?.id ?? null}
           sidePanelOpen={sidePanel.state.open}
           onOpenSidePanel={() => {
+            setPanelOpenedByUser(true);
             sidePanel.setOpen(true);
           }}
           onOpenContextUsage={() => {
@@ -302,6 +308,7 @@ export function AppController(props: {
             draftPicker={draftPicker}
             onOpenModelSettings={openModelSettings}
             onError={pushError}
+            subagentWatch={subagentWatch}
           />
         ) : (
           <DraftFallback
@@ -319,7 +326,9 @@ export function AppController(props: {
         sidePanel.state.open ? (
           <SidePanel
             controls={sidePanel}
+            focusOnOpen={panelOpenedByUser}
             onClosed={() => {
+              setPanelOpenedByUser(false);
               requestAnimationFrame(() => {
                 document
                   .querySelector<HTMLElement>("[data-side-panel-toggle]")
