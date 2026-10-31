@@ -25,7 +25,7 @@
 
 ## 非职责
 
-- 配置文件和环境变量的读取、配置单例与写回、网络探测、系统代理安装仍在 agent。`ohbaby-llm/src/config/` 只提供纯类型、校验和 profile 函数；工厂不会自行校验或加载文件。
+- 配置文件和环境变量的配置解析、配置单例与写回、网络探测、系统代理安装仍在 agent。`ohbaby-llm/src/config/` 只提供纯类型、校验和 profile 函数；工厂不会自行校验或加载文件。provider 的有限例外是 SDK 隔离：同步构造期间暂时移除 SDK 自行读取的 custom-header 环境变量，并在 finally 中恢复，以保留传入配置中的凭据和 SDK 默认协议头；不将这些环境值用作模型配置。
 - session/message/run 持久化、工具权限与执行、上下文裁剪和 overflow 恢复由上层负责。回调可由上层保存请求观测，但包本身不读写数据库。观测只描述请求尝试本身，run、step、compaction 等归属字段由上层在回调里补充。
 - token 估算、模型元数据和 UI reasoning 能力视图仍在 agent 的 `services/llm-model/`；本包传递 provider 真实 usage。
 - 不做 provider fallback，不新增自动续写，不把 `isComplete` 或已解析工具参数当作运行成功或工具执行授权。

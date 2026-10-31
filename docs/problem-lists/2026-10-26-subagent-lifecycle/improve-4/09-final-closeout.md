@@ -76,6 +76,24 @@
 
 先分批提交 D54、SDK 重试、中断排序、Web 查询跟随和本报告，再合入 main 并正常 push，不强推。推送内容的新增文本与路径检查未发现凭据或私钥，未纳入临时数据库、构建产物或本机配置。
 
-已合并的临时分支使用 `git branch -d` 清理；干净且已合并的 subagent-frontend worktree 可正常移除。保留 `claude/priceless-jennings-b88b8b` 和对应 worktree：其 `6f334142` 有尚未合入的独立 LLM 凭据环境修复，本轮没有擅自合并或删除它。远程其他分支不在清理范围。
+上一轮已清理已合并的临时分支及 subagent-frontend worktree，保留了 `claude/priceless-jennings-b88b8b` 和对应 worktree。当时尚未核对其补丁是否已被其他提交吸收，后续复查结论见下节。远程其他分支不在清理范围。
 
 已接受的交互取舍仍成立：新 spawn 入口可能稍晚于执行记录；切换 Tab 后从派遣入口恢复时会重新定位。两者不影响实例身份、关闭语义或阅读器资源释放。
+
+## 2026-10-31 补充：剩余分支与当前改动
+
+**结论：无需再次合并 Claude 分支。** 它唯一未进入 main 提交图的提交是 `6f334142`，但 main 的 `f9183e82` 已明确记录 `Based-on: 6f334142`，完整吸收其五个文件的凭据隔离行为。main 还修正了原补丁的认证头冲突：环境头名与 Authorization / X-Api-Key 相同时，原来的 null 覆盖会删除显式配置的凭据；现有实现只在同步构造 SDK 时排除环境头，并在 finally 中恢复。独立 Standards、Spec 复审确认没有遗漏必要内容，可以删除干净的旧 worktree 和已被吸收的分支，不制造空合并提交。
+
+本轮同时审查 `b3eaca0d..2fbee1be`：`bf09497c` 将直连、代理的流式 body timeout 交给已有 idle watchdog；`df06dd56` 增加六 Worker 场景；`2fbee1be` 提交用户暂存区和工作区的测试配置迁移，包含相对导入、runner 与文档路径三处同步。冻结提交的独立复审未发现 P1/P2。SDK 两处边界文档另补充了隔离环境头的有限例外，没有修改产品行为。
+
+| 本轮验证 | 结果 |
+| --- | --- |
+| 全量 pnpm test | 644 files passed，7543 passed，17 skipped，0 failed；共 650 files / 7560 tests，223.25 秒。 |
+| 凭据隔离与网络定向用例 | SDK 7/7；网络 3/3，包含默认超时对照及直连、代理六分钟静默。 |
+| typecheck、build、format:check、diff --check | 均通过。提交钩子正常执行；lint 0 errors、109 warnings。 |
+| 迁移后的 smoke 配置 | 显式设 OHBABY_RUN_REAL_RESPONSES_MIGRATION=0，正确发现目标文件，4/4 跳过；未发起真实模型请求，不算真实服务验收。 |
+| 编译 Web 的 TEAM / TEAM_RETRY | 首轮 6 个实例及 6 条入口，第 7 次满额拒绝没有入口；六个结果自动唤醒主会话并汇总。完成后重试 Worker 7 成功，列表 Active 0 / Done 7；Worker 1、7 的详情可读。SQLite 独立断言 7 次后台执行全部完成、21 次真实 read 完成，fixture failures 为空。 |
+
+浏览器检查了 1440×960 下的主会话、侧栏详情和输入框，主要控件没有遮挡。此轮专测新增 TEAM 场景，以 quit 清理，脚本输出 cleanup-pass、temporaryRootRemoved:true；verified:false 表示没有重跑原核心 finish 场景，其既有验收见上文。截图、页面快照及本轮临时测试数据按用户要求删除，仅保留步骤和结论。
+
+最低 Node 24.0.0 的兼容性也做了源码复核：[官方 fetch dispatch](https://github.com/nodejs/node/blob/v24.0.0/deps/undici/undici.js#L11676-L11688) 不额外传入 bodyTimeout，不会覆盖 Agent 的显式 0。跨平台运行结果仍以本次推送触发的 CI 为准。
