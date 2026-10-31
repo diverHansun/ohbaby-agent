@@ -71,6 +71,7 @@ export interface SubagentLookupInput {
   readonly subagentId: string;
 }
 
+/** Saved execution mode; "foreground" exists only in history (D54). */
 export type SubagentRunMode = "foreground" | "background";
 
 export interface SubagentRunInput {
@@ -81,7 +82,6 @@ export interface SubagentRunInput {
   readonly parentContextScopeId?: string;
   readonly parentSessionId: string;
   readonly prompt: string;
-  readonly mode: SubagentRunMode;
   readonly role?: SubagentRole;
   readonly subagentId?: string;
   readonly name?: string;

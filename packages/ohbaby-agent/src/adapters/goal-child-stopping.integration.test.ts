@@ -194,7 +194,6 @@ it.each([
         requestId: "goal-child",
         prompt: "goal child",
         role: "explore",
-        mode: "background",
       });
       const userChild = await host.run({
         parentSessionId: parent.id,
@@ -203,7 +202,6 @@ it.each([
         requestId: "user-child",
         prompt: "user child",
         role: "explore",
-        mode: "background",
       });
       await started;
       expect(signals.get("goal child")?.aborted).toBe(false);

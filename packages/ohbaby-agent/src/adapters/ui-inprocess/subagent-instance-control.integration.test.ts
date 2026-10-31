@@ -102,10 +102,7 @@ function held(
     yield { textDelta: value, finishReason: "stop" };
   })();
 }
-function spawn(
-  name: string,
-  mode: "foreground" | "background" = "background",
-): ToolCall {
+function spawn(name: string): ToolCall {
   return {
     name: "agent",
     input: {
@@ -113,7 +110,6 @@ function spawn(
       name,
       role: "generic",
       prompt: `TASK_${name}`,
-      mode,
     },
   };
 }
@@ -289,50 +285,46 @@ async function fixture(
 }
 
 describe("actual in-process subagent instance control", () => {
-  it.each(["background", "foreground"] as const)(
-    "stops one child while the parent is %s without aborting the parent or sibling",
-    async (mode) => {
-      const gate = deferred();
-      const children = new Map<string, InterfaceProviderRequest>();
-      const f = await fixture((request) => {
-        const name = JSON.stringify(request.messages).includes("TASK_A")
-          ? "A"
-          : "B";
-        children.set(name, request);
-        return held(request, gate.promise, `${name} complete`);
+  it("stops one child without aborting the parent or sibling", async () => {
+    const gate = deferred();
+    const children = new Map<string, InterfaceProviderRequest>();
+    const f = await fixture((request) => {
+      const name = JSON.stringify(request.messages).includes("TASK_A")
+        ? "A"
+        : "B";
+      children.set(name, request);
+      return held(request, gate.promise, `${name} complete`);
+    });
+    try {
+      const receipt = await f.submit([spawn("A"), spawn("B")]);
+      await eventually(() => {
+        expect(children.size).toBe(2);
       });
-      try {
-        const receipt = await f.submit([spawn("A", mode), spawn("B")]);
-        await eventually(() => {
-          expect(children.size).toBe(2);
-        });
-        if (mode === "background")
-          expect(
-            (await f.client.waitForPrompt(receipt.promptId)).prompt.status,
-          ).toBe("succeeded");
-        const a = await f.row("A");
-        const stopped = await f.client.stopSubagent({
-          rootSessionId: "root",
-          subagentId: a.subagentId,
-          expectedExecutionId: required(a.currentExecutionId),
-        });
-        expect(["accepted", "confirmed"]).toContain(stopped.outcome);
-        await eventually(async () => {
-          expect((await f.row("A")).status).toBe("interrupted");
-        });
-        expect((await f.row("B")).status).toBe("running");
-        expect(children.get("A")?.signal?.aborted).toBe(true);
-        expect(children.get("B")?.signal?.aborted).toBe(false);
-        expect(f.parents[0]?.signal?.aborted).toBe(false);
-        expect(
-          (await f.client.waitForPrompt(receipt.promptId)).prompt.status,
-        ).toBe("succeeded");
-      } finally {
-        gate.resolve();
-        await f.dispose();
-      }
-    },
-  );
+      expect(
+        (await f.client.waitForPrompt(receipt.promptId)).prompt.status,
+      ).toBe("succeeded");
+      const a = await f.row("A");
+      const stopped = await f.client.stopSubagent({
+        rootSessionId: "root",
+        subagentId: a.subagentId,
+        expectedExecutionId: required(a.currentExecutionId),
+      });
+      expect(["accepted", "confirmed"]).toContain(stopped.outcome);
+      await eventually(async () => {
+        expect((await f.row("A")).status).toBe("interrupted");
+      });
+      expect((await f.row("B")).status).toBe("running");
+      expect(children.get("A")?.signal?.aborted).toBe(true);
+      expect(children.get("B")?.signal?.aborted).toBe(false);
+      expect(f.parents[0]?.signal?.aborted).toBe(false);
+      expect(
+        (await f.client.waitForPrompt(receipt.promptId)).prompt.status,
+      ).toBe("succeeded");
+    } finally {
+      gate.resolve();
+      await f.dispose();
+    }
+  });
 
   it("does not stop a later execution when an old stop request arrives", async () => {
     const gate = deferred();
@@ -391,8 +383,11 @@ describe("actual in-process subagent instance control", () => {
   it("releases a closed instance's UI watch while retaining saved monitor history", async () => {
     const f = await fixture(() => text("SAVED-CHILD-RESULT"));
     try {
-      const receipt = await f.submit([spawn("A", "foreground")]);
+      const receipt = await f.submit([spawn("A")]);
       await f.client.waitForPrompt(receipt.promptId);
+      await eventually(async () => {
+        expect((await f.row("A")).status).toBe("completed");
+      });
       const a = await f.row("A");
       const query = { rootSessionId: "root", subagentId: a.subagentId };
       await f.client.retainSubagentConversation({

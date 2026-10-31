@@ -15,6 +15,13 @@ import {
   SessionSubagentHost as SessionSubagentHostImpl,
   type SessionSubagentHostOptions,
 } from "../../agents/subagent-host.js";
+import type {
+  SubagentRunInput,
+  SubagentRunResult,
+  SubagentSendInput,
+  SubagentSpawnInput,
+  SubagentStartResult,
+} from "../../agents/subagents/types.js";
 import {
   createUiRuntimeComposition as createComposition,
   type UiRuntimeCompositionOptions,
@@ -76,7 +83,15 @@ export class TestAgentService extends AgentServiceImpl {
     });
   }
 }
+/** `awaitResult` lets a test wait for a started execution's saved result. */
+export type TestSubagentRunInput = SubagentRunInput & {
+  readonly awaitResult?: boolean;
+};
 export class TestSessionSubagentHost extends SessionSubagentHostImpl {
+  private readonly stores: Pick<
+    SessionSubagentHostOptions,
+    "executionStore" | "store"
+  >;
   constructor(
     options: Omit<SessionSubagentHostOptions, "getParentRunModel"> & {
       readonly modelId: string;
@@ -88,6 +103,54 @@ export class TestSessionSubagentHost extends SessionSubagentHostImpl {
       ...options,
       getParentRunModel: options.getParentRunModel ?? ((): RunModel => model),
     });
+    this.stores = {
+      executionStore: options.executionStore,
+      store: options.store,
+    };
+  }
+
+  override run(input: TestSubagentRunInput): Promise<SubagentRunResult> {
+    return super.run(input);
+  }
+
+  override async spawn(
+    input: SubagentSpawnInput & { readonly awaitResult?: boolean },
+  ): Promise<SubagentStartResult> {
+    const started = await super.spawn(input);
+    return input.awaitResult ? this.settle(input, started) : started;
+  }
+
+  override async send(
+    input: SubagentSendInput & { readonly awaitResult?: boolean },
+  ): Promise<SubagentStartResult> {
+    const started = await super.send(input);
+    return input.awaitResult ? this.settle(input, started) : started;
+  }
+
+  /** Agents always run in the background (D54); wait for this one to end. */
+  private async settle(
+    input: { readonly parentSessionId: string },
+    started: SubagentStartResult,
+  ): Promise<SubagentStartResult> {
+    if (!started.started) return started;
+    const { executionId } = started.execution;
+    await this.executionJobs.get(executionId);
+    const execution = await this.stores.executionStore.get({
+      executionId,
+      parentSessionId: input.parentSessionId,
+    });
+    if (!execution) throw new Error("Started execution disappeared");
+    const item = await this.stores.store.get({
+      parentSessionId: input.parentSessionId,
+      subagentId: execution.subagentId,
+    });
+    return {
+      started: true,
+      execution,
+      ...(item ? { item } : {}),
+      output: execution.output ?? execution.error,
+      success: execution.status === "completed",
+    };
   }
 }
 export type TestUiRuntimeCompositionOptions = Omit<

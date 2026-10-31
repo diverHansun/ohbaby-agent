@@ -118,7 +118,7 @@ const context = {
 };
 
 describe("agent builtin tool", () => {
-  it("registers one plain object schema with six actions and a background default", () => {
+  it("registers one plain object schema with six actions and no mode choice", () => {
     const host = createHost();
     const names = createBuiltinTools({
       subagentHost: host,
@@ -132,9 +132,11 @@ describe("agent builtin tool", () => {
       required: ["action"],
       properties: {
         action: { enum: ["spawn", "send", "list", "monitor", "stop", "close"] },
-        mode: { default: "background" },
       },
     });
+    expect(tool(host).parametersJsonSchema).not.toHaveProperty(
+      "properties.mode",
+    );
     expect(tool(host).annotations?.readOnlyHint).not.toBe(true);
   });
   it("defaults spawn to background and returns the durable execution identity", async () => {
@@ -152,7 +154,6 @@ describe("agent builtin tool", () => {
     );
     expect(host.spawn).toHaveBeenCalledWith(
       expect.objectContaining({
-        mode: "background",
         prompt: "inspect",
         requesterRunId: "run_1",
         parentSessionId: "parent_1",
@@ -169,31 +170,33 @@ describe("agent builtin tool", () => {
       execution: { executionId: "execution_1" },
     });
   });
-  it("returns a direct foreground result or an explicit empty result note", async () => {
+  it.each(["spawn", "send"])(
+    "rejects foreground %s before reaching the host",
+    async (action) => {
+      const host = createHost();
+      await expect(
+        tool(host).execute(
+          {
+            action,
+            mode: "foreground",
+            ...(action === "spawn"
+              ? { prompt: "inspect" }
+              : { agent_id: "subagent_1", message: "continue" }),
+          },
+          context,
+        ),
+      ).rejects.toThrow(/always run in the background/u);
+      expect(host.spawn).not.toHaveBeenCalled();
+      expect(host.send).not.toHaveBeenCalled();
+    },
+  );
+  it("tolerates an explicit background mode", async () => {
     const host = createHost();
-    expect(
-      (
-        await tool(host).execute(
-          { action: "spawn", prompt: "inspect", mode: "foreground" },
-          context,
-        )
-      ).output,
-    ).toContain("<subagent_output>\ndone\n</subagent_output>");
-    host.spawn.mockResolvedValueOnce({
-      started: true,
-      execution: { ...execution, output: "" },
-      item,
-      output: "",
-      success: true,
-    });
-    expect(
-      (
-        await tool(host).execute(
-          { action: "spawn", prompt: "inspect", mode: "foreground" },
-          context,
-        )
-      ).output,
-    ).toContain("program_note: No output.");
+    await tool(host).execute(
+      { action: "spawn", prompt: "inspect", mode: "background" },
+      context,
+    );
+    expect(host.spawn.mock.calls[0]?.[0]).not.toHaveProperty("mode");
   });
   it("reports capacity refusal without a fictitious execution", async () => {
     const host = createHost();
@@ -227,7 +230,6 @@ describe("agent builtin tool", () => {
       expect.objectContaining({
         subagentId: "subagent_1",
         prompt: "check errors",
-        mode: "background",
       }),
     );
     expect(result.output).toContain("mode: foreground");
@@ -239,12 +241,7 @@ describe("agent builtin tool", () => {
   it("preserves execution metadata when send starts a new execution", async () => {
     const host = createHost();
     const result = await tool(host).execute(
-      {
-        action: "send",
-        agent_id: "subagent_1",
-        message: "continue",
-        mode: "foreground",
-      },
+      { action: "send", agent_id: "subagent_1", message: "continue" },
       context,
     );
     expect(result.metadata?.subagent).toMatchObject({
@@ -342,7 +339,7 @@ describe("agent builtin tool", () => {
         expect(method).not.toHaveBeenCalled();
     },
   );
-  it("delivers running messages and rejects the seventh execution immediately while six foreground calls remain open", async () => {
+  it("delivers running messages and rejects the seventh execution immediately while six background executions run", async () => {
     const bus = createBus();
     const executions = new InMemorySubagentExecutionStore();
     const messages = createMessageManager({
@@ -453,7 +450,7 @@ describe("agent builtin tool", () => {
       scheduler.execute({
         ...request,
         callId: `spawn-${String(index)}`,
-        params: { action: "spawn", prompt: "work", mode: "foreground" },
+        params: { action: "spawn", prompt: "work" },
       }),
     );
     await vi.waitFor(() => {
@@ -486,7 +483,6 @@ describe("agent builtin tool", () => {
         params: {
           action: "spawn",
           prompt: "must be refused",
-          mode: "background",
         },
       })
       .then((result) => {
@@ -503,8 +499,6 @@ describe("agent builtin tool", () => {
       if (!running.childRunId) throw new Error("Expected running child");
       expect(await inputs.listPending(running.childRunId)).toHaveLength(1);
       expect(turn).toHaveBeenCalledTimes(6);
-      for (let index = 0; index < 6; index++)
-        expect(scheduler.getStatus(`spawn-${String(index)}`)).toBe("executing");
     } finally {
       finish();
       await Promise.all([...active, send, seventh]);
@@ -515,7 +509,7 @@ describe("agent builtin tool", () => {
     }
   });
 
-  it("admits actual agent control actions while foreground spawn holds dispatch capacity", async () => {
+  it("admits actual agent control actions while a slow spawn holds dispatch capacity", async () => {
     const host = createHost();
     let finish!: () => void;
     const pending = new Promise<void>((resolve) => {
@@ -544,7 +538,7 @@ describe("agent builtin tool", () => {
     const spawned = scheduler.execute({
       ...request,
       callId: "spawn",
-      params: { action: "spawn", prompt: "inspect", mode: "foreground" },
+      params: { action: "spawn", prompt: "inspect" },
     });
     try {
       await vi.waitFor(() => {

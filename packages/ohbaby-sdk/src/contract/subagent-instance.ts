@@ -28,6 +28,7 @@ export interface UiSubagentInstance {
   /** Present while an execution still owns its slot, including cleanup. */
   readonly currentExecutionId?: string;
   readonly latestExecutionId?: string;
+  /** New executions are background; foreground remains readable in historical snapshots. */
   readonly mode?: "foreground" | "background";
   readonly approvalBlocked: boolean;
   /** Required execution cleanup, excluding naturally detached shell jobs. */

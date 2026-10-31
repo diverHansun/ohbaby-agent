@@ -62,6 +62,8 @@ improve-1 合并后，Web 还在用旧浮层。旧浮层按 execution 列出子�
 
 ### A. 统一工具与参数
 
+> **2026-10-31 修订（D54）：** 前台模式已删除。`agent` 不再有 `mode` 参数，所有执行都在后台运行；下文凡是讲前台执行、"本次执行的 mode"和主 Stop 停前台子代理的地方，都以 D54 为准，只作为历史设计保留。
+
 对模型只注册一个 `agent` 工具，action 有六个：`spawn`、`send`、`list`、`monitor`、`stop`、`close`。参数都写进 schema，服务端再按 action 校验一遍。schema 用现有模型提供方都兼容的普通对象，动作级的校验放在运行时做，不为了复杂的 JSON Schema 分支专门加适配层。
 
 | action | 参数 | 做什么、返回什么 |

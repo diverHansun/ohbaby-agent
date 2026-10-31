@@ -22,6 +22,7 @@ import type {
 } from "ohbaby-llm";
 import { createInMemorySessionManager } from "../../services/session/index.js";
 import { SkillRegistry } from "../../skill/index.js";
+import type { SubagentExecutionRecord } from "../../agents/subagents/execution-store.js";
 
 import {
   createHostLocalSandboxManager,
@@ -125,7 +126,6 @@ function subagentRunEvent(): InterfaceProviderStreamEvent {
         argumentsDelta: JSON.stringify({
           action: "spawn",
           description: "Explore first e2e",
-          mode: "foreground",
           prompt: "Find the first e2e target",
           role: "explore",
         }),
@@ -137,7 +137,6 @@ function subagentRunEvent(): InterfaceProviderStreamEvent {
         argumentsDelta: JSON.stringify({
           action: "spawn",
           description: "Explore second e2e",
-          mode: "foreground",
           prompt: "Find the second e2e target",
           role: "research",
         }),
@@ -289,6 +288,14 @@ function fakeLlmClient(
             ]),
           );
         }
+        // Agents run in the background (D54): the parent ends its turn on the receipt.
+        if (JSON.stringify(request.messages.at(-1)).includes("execution_id")) {
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "parent final result" },
+            ]),
+          );
+        }
         if (
           messages.includes("child first result") &&
           messages.includes("child second result")
@@ -325,7 +332,6 @@ function fakeLlmClient(
                   action: "spawn",
                   prompt: "Find the failing target",
                   role: "explore",
-                  mode: "foreground",
                 },
                 "call_failing_subagent",
               ),
@@ -341,7 +347,6 @@ function fakeLlmClient(
                   action: "spawn",
                   prompt: "Find the cancelled target",
                   role: "explore",
-                  mode: "foreground",
                   ...(options.exploreTimeoutMs === undefined
                     ? {}
                     : { timeout_ms: options.exploreTimeoutMs }),
@@ -360,7 +365,6 @@ function fakeLlmClient(
                   action: "spawn",
                   prompt: "Find the empty target",
                   role: "explore",
-                  mode: "foreground",
                 },
                 "call_empty_subagent",
               ),
@@ -376,8 +380,30 @@ function fakeLlmClient(
   };
 }
 
+async function settledExecutions(
+  composition: Awaited<ReturnType<typeof createUiRuntimeComposition>>,
+  count: number,
+): Promise<readonly SubagentExecutionRecord[]> {
+  let executions: readonly SubagentExecutionRecord[] = [];
+  await vi.waitFor(
+    async () => {
+      executions = (await composition.listSubagentState("session_parent"))
+        .executions;
+      expect(executions).toHaveLength(count);
+      expect(
+        executions.every(
+          (execution) =>
+            execution.status !== "queued" && execution.status !== "running",
+        ),
+      ).toBe(true);
+    },
+    { timeout: 5_000 },
+  );
+  return executions;
+}
+
 describe("subagent runtime e2e", () => {
-  it("runs different-role foreground subagents through isolated instance contexts in one child session", async () => {
+  it("runs different-role subagents through isolated instance contexts in one child session", async () => {
     const bus = createBus();
     const workdir = process.cwd();
     const messageManager = createMessageManager({
@@ -430,6 +456,11 @@ describe("subagent runtime e2e", () => {
     expect(completion.error).toBeUndefined();
     expect(completion.status).toBe("succeeded");
     expect(completion.finalResponse).toBe("parent final result");
+    expect(
+      (await settledExecutions(composition, 2)).map(
+        (execution) => execution.status,
+      ),
+    ).toEqual(["completed", "completed"]);
 
     const parentMessages = await messageManager.listBySession("session_parent");
     const childMessages = await messageManager.listBySession("session_child", {
@@ -455,16 +486,9 @@ describe("subagent runtime e2e", () => {
 
     expect(parentText).toContain("agent_id: subagent_e2e_1");
     expect(parentText).toContain("agent_id: subagent_e2e_2");
-    expect(parentText).toContain('"childSessionId":"session_child"');
-    expect(parentText).toContain('"childScopeId":"subagent_e2e_1"');
-    expect(parentText).toContain('"childScopeId":"subagent_e2e_2"');
     expect(parentText).toContain("parent final result");
-    expect(parentText).toContain(
-      "<subagent_output>\\nchild first result\\n</subagent_output>",
-    );
-    expect(parentText).toContain(
-      "<subagent_output>\\nchild second result\\n</subagent_output>",
-    );
+    // Results arrive later as delivered results, not inside the spawn receipt.
+    expect(parentText).not.toContain("child first result");
     expect(firstChildText).toContain("Find the first e2e target");
     expect(firstChildText).toContain("child first result");
     expect(secondChildText).toContain("Find the second e2e target");
@@ -509,7 +533,7 @@ describe("subagent runtime e2e", () => {
     }
   });
 
-  it("delivers a reasoning-only child as an empty final body with a separate parent-visible note", async () => {
+  it("records a reasoning-only child as an empty final body", async () => {
     const bus = createBus();
     const workdir = process.cwd();
     const messageManager = createMessageManager({
@@ -556,6 +580,7 @@ describe("subagent runtime e2e", () => {
       const completion = await composition.runManager.waitForCompletion(
         run.runId,
       );
+      const [execution] = await settledExecutions(composition, 1);
       const child = await messageManager.listBySession("session_child", {
         contextScopeId: "subagent_empty",
       });
@@ -564,10 +589,10 @@ describe("subagent runtime e2e", () => {
 
       expect(completion).toMatchObject({
         status: "succeeded",
-        finalResponse: "parent saw empty result",
+        finalResponse: "parent final result",
       });
-      expect(parentText).toContain("program_note: No output.");
-      expect(parentText).not.toContain("<subagent_output>");
+      expect(execution.status).toBe("completed");
+      expect(execution.output ?? "").toBe("");
       expect(child.at(-1)?.info.role).toBe("assistant");
       expect(
         child
@@ -583,7 +608,7 @@ describe("subagent runtime e2e", () => {
     }
   });
 
-  it("keeps a child stream fragment in history without delivering it as a failed report", async () => {
+  it("keeps a child stream fragment in history without recording it as the failed report", async () => {
     const bus = createBus();
     const workdir = process.cwd();
     const messageManager = createMessageManager({
@@ -630,6 +655,7 @@ describe("subagent runtime e2e", () => {
       const completion = await composition.runManager.waitForCompletion(
         run.runId,
       );
+      const [execution] = await settledExecutions(composition, 1);
       const child = await messageManager.listBySession("session_child", {
         contextScopeId: "subagent_failing",
       });
@@ -638,15 +664,14 @@ describe("subagent runtime e2e", () => {
 
       expect(completion).toMatchObject({
         status: "succeeded",
-        finalResponse: "parent saw child failure",
+        finalResponse: "parent final result",
       });
       expect(JSON.stringify(child)).toContain("partial child report");
-      expect(parentText).toContain("status: failed");
-      expect(parentText).toContain("<subagent_error>");
-      expect(parentText).toContain(
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toContain(
         "LLM provider stream was interrupted after partial output.",
       );
-      expect(parentText).not.toContain("<subagent_output>");
+      expect(execution.output ?? "").not.toContain("partial child report");
       expect(parentText).not.toContain("partial child report");
     } finally {
       await composition.dispose();
@@ -654,7 +679,7 @@ describe("subagent runtime e2e", () => {
   });
 
   it.each(["cancelled", "interrupted", "timed_out"] as const)(
-    "keeps a %s child's stream fragment in history without delivering it as a report",
+    "keeps a %s child's stream fragment in history without recording it as the report",
     async (terminalStatus) => {
       const bus = createBus();
       const workdir = process.cwd();
@@ -726,8 +751,12 @@ describe("subagent runtime e2e", () => {
         const completion = await composition.runManager.waitForCompletion(
           run.runId,
         );
+        // The parent no longer waits, so let the child's own deadline fire first.
+        if (terminalStatus === "timed_out")
+          await composition.runManager.waitForCompletion(childRun.runId);
         gate.release.resolve(undefined);
         await composition.runManager.waitForCompletion(childRun.runId);
+        const [execution] = await settledExecutions(composition, 1);
         const child = await messageManager.listBySession("session_child", {
           contextScopeId: "subagent_cancelled",
         });
@@ -737,26 +766,20 @@ describe("subagent runtime e2e", () => {
 
         expect(completion).toMatchObject({
           status: "succeeded",
-          finalResponse: "parent saw child failure",
+          finalResponse: "parent final result",
         });
         expect(JSON.stringify(child)).toContain("partial child report");
-        const expectedStatus =
-          terminalStatus === "cancelled" ? "interrupted" : terminalStatus;
-        expect(parentText).toContain(`status: ${expectedStatus}`);
-        if (terminalStatus === "cancelled") {
-          expect(parentText).toContain("terminal_reason: cancelled");
-        }
-        expect(parentText).toContain(
+        expect(execution.status).toBe(
+          terminalStatus === "cancelled" ? "interrupted" : terminalStatus,
+        );
+        expect(JSON.stringify(execution)).toContain(
           terminalStatus === "timed_out"
             ? "Subagent timed out after 100ms"
             : terminalStatus === "cancelled"
               ? "test child cancellation"
               : "test child interruption",
         );
-        // Root interruption is an execution receipt, not a child output body.
-        if (terminalStatus !== "interrupted")
-          expect(parentText).toContain("<subagent_error>");
-        expect(parentText).not.toContain("<subagent_output>");
+        expect(execution.output ?? "").not.toContain("partial child report");
         expect(parentText).not.toContain("partial child report");
       } finally {
         gate.release.resolve(undefined);
@@ -833,6 +856,7 @@ describe("subagent runtime e2e", () => {
     await expect(
       composition.runManager.waitForCompletion(result.runId),
     ).resolves.toMatchObject({ status: "succeeded" });
+    await settledExecutions(composition, 2);
 
     const exploreRequests = requests.filter((request) =>
       JSON.stringify(request.messages).includes("Task: explore"),

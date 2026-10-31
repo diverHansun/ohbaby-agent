@@ -798,11 +798,18 @@ export async function runNativeProfile(
   let currentMode: "on" | "off" = "on";
   let stopped = false;
   globalThis.fetch = async (input, init): Promise<Response> => {
-    check(!stopped, "PROFILE_STOPPED");
-    check(
-      captured.length < report.limits.maxRequests,
-      "PROFILE_HTTP_BUDGET_EXHAUSTED",
-    );
+    // Refuse with a client error, never a thrown fetch: the SDK would wrap a
+    // throw as a connection error, which the application retries.
+    const refusal = stopped
+      ? "PROFILE_STOPPED"
+      : captured.length >= report.limits.maxRequests
+        ? "PROFILE_HTTP_BUDGET_EXHAUSTED"
+        : undefined;
+    if (refusal)
+      return new Response(JSON.stringify({ error: { message: refusal } }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
     const raw =
       typeof init?.body === "string"
         ? init.body

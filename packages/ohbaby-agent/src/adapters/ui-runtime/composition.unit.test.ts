@@ -1104,12 +1104,10 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(contextManager.getUsage).not.toHaveBeenCalled();
   });
 
-  it("interrupts only foreground children from durable run identity after manager eviction", async () => {
+  it("leaves agents running when interrupting an evicted primary run", async () => {
     const bus = createBus();
     const runLedger = createInMemoryRunLedger();
-    const interruptByRootRun = vi
-      .spyOn(SessionSubagentHost.prototype, "interruptForegroundByRootRun")
-      .mockResolvedValue([]);
+    const stopAgent = vi.spyOn(SessionSubagentHost.prototype, "stop");
     const composition = await createUiRuntimeComposition({
       agentManager: new AgentManager(),
       bus,
@@ -1140,14 +1138,11 @@ describe("createUiRuntimeComposition skill tools", () => {
       ).resolves.toBeUndefined();
 
       expect(cancelRun).not.toHaveBeenCalled();
-      expect(interruptByRootRun).toHaveBeenCalledWith(
-        "run_evicted",
-        "user cancelled",
-      );
+      expect(stopAgent).not.toHaveBeenCalled();
     } finally {
       getRun.mockRestore();
       cancelRun.mockRestore();
-      interruptByRootRun.mockRestore();
+      stopAgent.mockRestore();
       await composition.dispose();
     }
   });

@@ -1,5 +1,7 @@
 # 2. 优化方案与改动面：主会话入口切换与旧浮层迁移
 
+> D54（2026-10-31）后新子执行统一后台运行，以下前台执行条款仅描述迁移前设计；历史 foreground 记录仍按执行身份读取，不再提供前台启动入口。
+
 > 2026-10-29 按 D46 从 improve-1 拆出。讨论记录在 [improve-1/00](../improve-1/00-discussion.md)，现状见 [improve-1/01](../improve-1/01-problem-analysis-and-current-state.md) 的 P8。
 > 前提：improve-3 已完成并通过 Codex 复审的三项修复（`e7d6584e`）。improve-3 和 improve-4 一起合入 main，“新旧两个详情入口并存”的中间状态不单独发布。
 

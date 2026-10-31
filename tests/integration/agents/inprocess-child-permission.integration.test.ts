@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { UiPermissionEvent, UiPermissionRequest } from "ohbaby-sdk";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import { AgentManager } from "../../../packages/ohbaby-agent/src/agents/index.js";
@@ -90,7 +90,6 @@ describe("actual in-process child approvals", () => {
                       action: "spawn",
                       role: "generic",
                       prompt: "Run one harmless local command",
-                      mode: "foreground",
                       description: "Permission child",
                     },
                     "delegate-call",
@@ -182,9 +181,12 @@ describe("actual in-process child approvals", () => {
       ]);
       const completion = await client.waitForPrompt(receipt.promptId);
       expect(completion.prompt.status).toBe("succeeded");
-      expect(
-        await readFile(join(directory, "permission-count.txt"), "utf8"),
-      ).toBe("x");
+      // The background child runs its approved command after the parent turn.
+      await vi.waitFor(async () => {
+        expect(
+          await readFile(join(directory, "permission-count.txt"), "utf8"),
+        ).toBe("x");
+      });
       expect(
         await client.getPermissionSnapshot({ rootSessionId: "root" }),
       ).toMatchObject({ permissionRevision: 2, requests: [] });

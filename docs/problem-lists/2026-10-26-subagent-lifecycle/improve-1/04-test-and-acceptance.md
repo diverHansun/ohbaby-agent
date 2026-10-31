@@ -3,6 +3,8 @@
 > 本文是后续实施验收要求，不是已通过的测试报告。本次只写规划文档，没有运行下列测试。
 > 对照 [02](02-optimization-plan-and-change-scope.md) 的 S1–S3，沿用仓库现有 unit / contract / integration / smoke / compiled Web E2E 分层，不新建一套测试政策。
 
+> 2026-10-31 按 D54 更新：新执行一律后台运行；foreground 只保留历史读取兼容。旧浮层相关验收已由 improve-4 的 D53 方案替代。
+
 ## 4.1 风险与测试方法
 
 improve-1 的风险主要在真实的执行归属、异步清理和请求输入边界，测试不能只断言状态字段变了。
@@ -19,17 +21,17 @@ improve-1 的风险主要在真实的执行归属、异步清理和请求输入�
 
 | ID | 场景 | 必须观察到的结果 | 主要层级 |
 | --- | --- | --- | --- |
-| A01 | 同一主会话同时启动混合前后台执行，并将异步创建卡住 | 前六个在 await 前占位；第七个立即明确未启动；没有容量队列；主代理不计数；另一主会话独立 | unit + integration |
+| A01 | 同一主会话同时启动后台执行，并将异步创建卡住 | 前六个在 await 前占位；第七个立即明确未启动；没有容量队列；主代理不计数；另一主会话独立 | unit + integration |
 | A02 | 一轮多个 spawn、相同请求重试、创建/绑定/持久化失败；预占后尚未创建完成就 stop/close | 每个调用独立成功或失败；允许部分成功；成功项不回滚；同一请求不重复执行或占位；失败部分资源清完后归还；先停止/关闭不被迟到创建结果重新启动 | contract + integration |
 | A03 | 执行终态已写但前台工具仍在清理；另一执行自然完成时留有 `run_in_background` shell；再对第三个执行 stop 时它也留有后台 shell | 前台工具未退出时仍占名额，不允许借空缺启动第七个，清理确认后只归还一次；自然完成的执行立即归还名额，其后台 shell 继续运行到自身超时，但该执行不能再开新命令；stop 的执行等其 shell 确认退出后才归还；close 回收实例全部 shell；stop/monitor 控制通道仍可使用 | integration，包含受管 shell |
 | A04 | 重复 stop/close、超时和晚到成功交错；清理 unconfirmed | 复用同次清理，终态不倒退；不重复 kill/release；未确认时如实报错并保留资源归属，迟到 confirmed 自动只还一次、无需再次控制调用，且不释放新执行的名额；无退出证据不强行归还 | unit + integration |
 | A05 | 主正常结束或用户 Stop 后后台继续开 shell、读文件 | 后台模型与工具继续；不会因旧 root seal 被拒；审批仍可处理；新主轮次不回收旧后台名额 | integration，包含受管 shell |
-| A06 | 主 Stop 时同时存在前台和后台；主代理用 `agent(action="stop")` 单独停某个 child（UI 单独停止在 improve-2、improve-3 验收） | 主 Stop 只结束本轮前台及主执行；后台继续；前台中断不唤醒主；单子停止不向上停止主或误伤兄弟 | integration |
+| A06 | 主 Stop 时同时存在多个后台子执行；主代理用 `agent(action="stop")` 单独停某个 child（UI 单独停止在 improve-2、improve-3 验收） | 主 Stop 只结束主执行及其工具，所有子代理继续；单子停止不向上停止主或误伤兄弟，停止回执不触发结果唤醒 | integration |
 | A07 | 运行中 send，当前请求受控暂停，然后允许进入下一请求 | 同一 execution 的下一模型请求收到消息；不 abort 当前请求、不改变 mode、不另占名额、不另建 execution | contract + integration |
 | A08 | send 与执行结束或 stop 交错；只剩一个名额时两条 send 同时命中同一空闲实例 | 执行自然完成前已受理的消息会被处理，不被静默丢弃；执行结束后的发送按新执行申请；“受理后、组装请求前 stop”时，消息以 `stopped` 关闭，stop 回执列出原文，list/monitor 可见未处理条数，不暗中开新 execution；随后显式 send 只带新消息，不自动带入旧消息；UI 停止、失败、超时同样关闭并留记录；启动中的第二条 send 归入同次执行，不双占或隐藏排队 | integration |
-| A09 | 完成/中断后 send，分别省略 mode 或指定 foreground | 复用同一 agent ID 与保存上下文；新 execution 重新申请名额；默认后台立即受理，前台等待结果；满额未启动 | contract + integration |
+| A09 | 完成/中断后 send，省略 mode、兼容 background，并尝试已删除的 foreground | 复用同一 agent ID 与保存上下文；新 execution 重新申请名额；统一后台立即受理；foreground 明确拒绝；满额未启动 | contract + integration |
 | A10 | close 活跃/空闲实例、重启后使用旧 ID；反复 spawn、执行、close 多个实例 | 自然完成后仍可 list/send，不自动 close；明确关闭后无可运行控制入口，list 隐藏、send 不重建，历史保留；重复 close 幂等；可另行 spawn 新 ID，停止后的实例仍与 closed 区分；Host 里的 `executionBudgets`、`rootByExecution`、`sealedRoots`、`closedSubagents` 在执行收尾或 close 后被清掉，不随实例数量持续增长 | integration + persistence |
-| A11 | 六 action 的 schema、调度、角色授权和 metadata | 无效/不适用字段拒绝；list/monitor 只读；stop/close 不排在 foreground 执行名额后；原禁用派遣的角色不能因统一名称绕过限制；默认模式各层一致；提示词包含按需关闭换新规则，无固定轮数自动关闭要求；工具说明、系统提示、子代理角色提示和 spawn/启动新执行的 send 回执包含 D43 的写冲突规则；主代理和子代理提示包含 D47 的四条软约束；monitor 的工具说明写明"返回快照、不等待、不要轮询"（D48）；旧 `subagent_status`、`subagent_close` 和 60/120 秒等待的说法已删除 | contract |
+| A11 | 六 action 的 schema、调度、角色授权和 metadata | 无效/不适用字段拒绝；list/monitor 只读；stop/close 不等待子执行名额；原禁用派遣的角色不能因统一名称绕过限制；schema 不暴露 mode，新执行各层均为 background，foreground 仅保留历史读取；提示词包含按需关闭换新规则，无固定轮数自动关闭要求；工具说明、系统提示、子代理角色提示和 spawn/启动新执行的 send 回执包含 D43 的写冲突规则；主代理和子代理提示包含 D47 的四条软约束；monitor 的工具说明写明"返回快照、不等待、不要轮询"（D48）；旧 `subagent_status`、`subagent_close` 和 60/120 秒等待的说法已删除 | contract |
 
 ## 4.3 S2：结果、读取、监督和恢复
 
@@ -38,7 +40,7 @@ improve-1 的风险主要在真实的执行归属、异步清理和请求输入�
 | A12 | 原主轮次结束，后台结果到达；主空闲或正在处理新用户消息 | 空闲经过同一执行门启动一轮；忙碌进入下一模型请求；包含原任务来源；不强行打断、不产生第二个并发主执行 | integration |
 | A13 | 结果/用户输入/监督同时到达，或恰逢主执行收尾 | 活动主执行最多一个；待交付结果不随旧 run 输入关闭丢失；多个结果可同次请求处理 | integration，受控竞态 |
 | A14 | 结果输入请求失败、被中断、事件重复或终态通知漏发 | 成功请求才确认；稳定 source 防重复消费；未处理内容保留，但同一结果已唤醒的主轮次失败/被停后不反复自动开新轮；既有事实核对可发现未触发过的漏事件，不靠 monitor 才交付 | integration + persistence |
-| A15 | foreground 完成；主动 stop/close；后台自然失败/超时 | 前台只经工具结果交付，不重复后台唤醒；取消控制回执不触发反弹轮次；后台自然失败/超时作为结果交付 | integration |
+| A15 | 读取历史 foreground 执行；主动 stop/close；后台自然失败/超时 | 历史 foreground 不按新后台结果重新投递；取消控制回执不触发反弹轮次；后台自然失败/超时作为结果交付 | integration |
 | A16 | monitor 一个/多个运行、完成、中断、closed 的目标 | 立即读取保存内容；模型调用数、订阅数、状态写入数、结果确认数均为零；已关闭历史可读但不恢复运行 | contract + integration |
 | A17 | monitor 长输出、多目标、游标、非法或跨会话 ID | 遵守每目标/总输出预算；截断可识别、有续读方式；单目标错误不抹掉其他结果；跨会话记录不可见 | unit + contract |
 | A18 | 主代理先工作很久，然后结束当前轮，仍有后台运行 | 从此次 idle 开始算 2 分钟，spawn 时间不影响；监督处理结束后从新 idle 算 5 分钟；普通进度不延后到期 | unit，fake clock |

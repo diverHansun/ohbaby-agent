@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UiEvent, UiPromptCacheUsage } from "ohbaby-sdk";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import {
@@ -60,10 +60,15 @@ function stop(tokenUsage?: TokenUsage): InterfaceProviderStreamEvent {
   return { finishReason: "stop", textDelta: "Done.", tokenUsage };
 }
 
-async function fixture(scripts: readonly ProviderScript[]) {
+/** Child requests (with a context scope) read `childScripts`; agents run in the background. */
+async function fixture(
+  scripts: readonly ProviderScript[],
+  childScripts: readonly ProviderScript[] = [],
+) {
   const directory = await mkdtemp(join(tmpdir(), "ohbaby-cache-steps-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   let scriptIndex = 0;
+  let childScriptIndex = 0;
   let runIndex = 0;
   const requests: InterfaceProviderRequest[] = [];
   const llmClient: LLMClientInstance = {
@@ -95,7 +100,10 @@ async function fixture(scripts: readonly ProviderScript[]) {
       isAbortError: () => false,
       async streamResponse(request) {
         requests.push(request);
-        const script = scripts[scriptIndex++];
+        const script =
+          request.contextScopeId === undefined
+            ? scripts[scriptIndex++]
+            : childScripts[childScriptIndex++];
         if (script === undefined)
           throw new Error("No provider script configured");
         if (typeof script === "function") return script(request);
@@ -314,32 +322,37 @@ describe("final step cache accounting through the in-process runtime", () => {
             argumentsDelta: JSON.stringify({
               action: "spawn",
               prompt: "Inspect directory",
-              mode: "foreground",
               description: "Inspect",
               role: "explore",
             }),
           },
         ],
       };
-      const f = await fixture([
-        [parentTool],
-        ...(childFails
+      const f = await fixture(
+        // The parent's result wake-up reports no usage, so it adds nothing.
+        [[parentTool], [stop(usage(1_000, 600))], [stop()]],
+        childFails
           ? [
               [toolStep(usage(10_000, 10_000))],
               async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
                 throw new Error("child provider failure after settled step");
               },
             ]
-          : [[stop(usage(10_000, 10_000))]]),
-        [stop(usage(1_000, 600))],
-      ]);
+          : [[stop(usage(10_000, 10_000))]],
+      );
       expect((await f.run()).prompt.status).toBe("succeeded");
-      expect(f.requests).toHaveLength(childFails ? 4 : 3);
-      expect(f.requests[1]?.contextScopeId).toBeDefined();
+      await vi.waitFor(async () => {
+        expect(f.requests).toHaveLength(childFails ? 5 : 4);
+        expect((await f.client.getSnapshot()).status.kind).toBe("idle");
+      });
+      const childRequests = f.requests.filter(
+        (request) => request.contextScopeId !== undefined,
+      );
+      expect(childRequests).toHaveLength(childFails ? 2 : 1);
       const childRun = await f.runLedger.get("run_2");
       expect(childRun).toMatchObject({
         status: childFails ? "failed" : "succeeded",
-        contextScopeId: f.requests[1]?.contextScopeId,
+        contextScopeId: childRequests[0]?.contextScopeId,
       });
       if (!childRun) throw new Error("Missing child run");
       const childParts = (
@@ -353,10 +366,10 @@ describe("final step cache accounting through the in-process runtime", () => {
           .filter((sample) => sample !== undefined),
       ).toEqual([usage(10_000, 10_000)]);
       if (childFails) {
-        expect(f.requests[2]?.contextScopeId).toBe(
-          f.requests[1]?.contextScopeId,
+        expect(childRequests[1]?.contextScopeId).toBe(
+          childRequests[0]?.contextScopeId,
         );
-        expect(JSON.stringify(f.requests[3]?.messages)).toContain(
+        expect(JSON.stringify(f.requests.at(-1)?.messages)).toContain(
           "child provider failure after settled step",
         );
       }

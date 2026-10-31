@@ -34,12 +34,12 @@
 - 校验目标 agent 必须是 subagent role。
 - 复用 parent 下的 child session，但每个 subagent 持有自己的 `contextScopeId`。
 - 通过 `AgentInstance` 调用 `core/agents.runAgent({ waitMode: "waitForCompletion" })`。
-- 将最终 assistant 输出包装成 `SubagentRunResult`。
+- 立即返回执行受理回执，最终 assistant 输出通过所属主会话的结果通道交付。
 - 维护 `cancelled/closedAt/timed_out/interrupted` 等可持久化状态。
 
 ### G4: 长生命周期 subagent 状态机
 
-`SessionSubagentHost` 负责 background/foreground、执行名额、send、stop、close 和纯读检查。它只管理编排状态，不重新实现 run 生命周期。
+`SessionSubagentHost` 负责统一后台执行、执行名额、send、stop、close 和纯读检查。它只管理编排状态，不重新实现 run 生命周期。foreground 类型仅用于历史记录读取（D54）。
 
 ### G5: 分层清晰
 

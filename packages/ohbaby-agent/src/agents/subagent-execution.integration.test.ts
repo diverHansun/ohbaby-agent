@@ -1,7 +1,10 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { ShellJobRegistry } from "../tools/shell-job-registry.js";
-import { TestSessionSubagentHost as SessionSubagentHost } from "../core/testing/runtime-model-fixtures.js";
+import {
+  TestSessionSubagentHost as SessionSubagentHost,
+  type TestSubagentRunInput,
+} from "../core/testing/runtime-model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { mergeReasoningIntent } from "ohbaby-llm";
 import { testRunModel } from "../core/testing/model-fixtures.js";
@@ -11,7 +14,6 @@ import type { Session } from "../services/session/index.js";
 
 import { InMemorySubagentInstanceStore } from "./subagents/in-memory-store.js";
 import { InMemorySubagentExecutionStore } from "./subagents/execution-store.js";
-import type { SubagentRunInput } from "./subagents/types.js";
 import type { SessionSubagentHostOptions } from "./subagent-host.js";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -27,7 +29,10 @@ function fixture(extra: Partial<SessionSubagentHostOptions> = {}): {
   executionStore: InMemorySubagentExecutionStore;
   create: ReturnType<typeof vi.fn<() => Promise<Session>>>;
   turn: ReturnType<typeof vi.fn<AgentInstance["turn"]>>;
-  input: (id: string, patch?: Partial<SubagentRunInput>) => SubagentRunInput;
+  input: (
+    id: string,
+    patch?: Partial<TestSubagentRunInput>,
+  ) => TestSubagentRunInput;
   onFatal: ReturnType<typeof vi.fn>;
   onTerminal: ReturnType<typeof vi.fn>;
 } {
@@ -98,13 +103,13 @@ function fixture(extra: Partial<SessionSubagentHostOptions> = {}): {
   });
   const input = (
     id: string,
-    patch: Partial<SubagentRunInput> = {},
-  ): SubagentRunInput => ({
+    patch: Partial<TestSubagentRunInput> = {},
+  ): TestSubagentRunInput => ({
     requesterRunId: "root_A",
     requesterMessageId: "message",
     requestId: id,
     parentSessionId: "parent",
-    mode: "foreground",
+    awaitResult: true,
     role: "explore",
     prompt: id,
     ...patch,
@@ -244,7 +249,7 @@ describe("session-owned subagent lifecycle", () => {
           f.input(`${parentSessionId}-${String(i)}`, {
             parentSessionId,
             requesterRunId: `${parentSessionId}-root`,
-            mode: i % 2 ? "background" : "foreground",
+            awaitResult: i % 2 === 0,
           }),
         ),
       ),
@@ -261,7 +266,7 @@ describe("session-owned subagent lifecycle", () => {
     }
     expect(
       await f.host.send({
-        ...f.input("busy idle", { mode: "background" }),
+        ...f.input("busy idle", { awaitResult: false }),
         subagentId: idle.execution.subagentId,
       }),
     ).toMatchObject({ started: false });
@@ -347,7 +352,7 @@ describe("session-owned subagent lifecycle", () => {
     const finish = deferred<Awaited<ReturnType<AgentInstance["turn"]>>>();
     f.turn.mockImplementation(() => finish.promise);
     const first = await f.host.run(
-      f.input("model-fixed", { mode: "background" }),
+      f.input("model-fixed", { awaitResult: false }),
     );
     await vi.waitFor(() => {
       expect(f.turn).toHaveBeenCalledTimes(1);
@@ -501,7 +506,7 @@ describe("session-owned subagent lifecycle", () => {
     f.turn.mockImplementation(() => finish.promise);
     const replacement = await f.host.send({
       ...f.input("replacement", {
-        mode: "background",
+        awaitResult: false,
         requesterRunId: "root_B",
       }),
       subagentId: first.execution.subagentId,
@@ -510,7 +515,7 @@ describe("session-owned subagent lifecycle", () => {
       Array.from({ length: 5 }, (_, i) =>
         f.host.spawn(
           f.input(`sibling-${String(i)}`, {
-            mode: "background",
+            awaitResult: false,
             requesterRunId: "root_B",
           }),
         ),
@@ -524,7 +529,7 @@ describe("session-owned subagent lifecycle", () => {
     await Promise.resolve();
     expect(
       await f.host.spawn(
-        f.input("still full", { mode: "background", requesterRunId: "root_B" }),
+        f.input("still full", { awaitResult: false, requesterRunId: "root_B" }),
       ),
     ).toMatchObject({ started: false });
     expect(
@@ -549,7 +554,7 @@ describe("session-owned subagent lifecycle", () => {
     });
   });
 
-  it.each(["failed", "timed_out", "parent stop"] as const)(
+  it.each(["failed", "timed_out", "stop"] as const)(
     "closes accepted messages and retains durable unprocessed facts after %s",
     async (kind) => {
       let closed: readonly { inputId: string; text: string; reason: string }[] =
@@ -604,8 +609,12 @@ describe("session-owned subagent lifecycle", () => {
           success: false,
           error: "model failed",
         });
-      if (kind === "parent stop")
-        await f.host.interruptForegroundByRootRun("root_A", "user stopped");
+      if (kind === "stop")
+        await f.host.stop({
+          parentSessionId: "parent",
+          subagentId: execution.subagentId,
+          expectedExecutionId: execution.executionId,
+        });
       await running;
       await vi.waitFor(() => {
         expect(f.host.hasActiveWork()).toBe(false);
@@ -615,7 +624,7 @@ describe("session-owned subagent lifecycle", () => {
         {
           inputId: "message",
           text: "unread follow-up",
-          reason: kind === "parent stop" ? "user stopped" : kind,
+          reason: kind === "stop" ? "stopped" : kind,
         },
       ]);
       expect(
@@ -679,11 +688,11 @@ describe("session-owned subagent lifecycle", () => {
     });
     const turn = deferred<Awaited<ReturnType<AgentInstance["turn"]>>>();
     f.turn.mockImplementation(() => turn.promise);
-    await f.host.run(f.input("first", { mode: "background" }));
-    await f.host.run(f.input("second", { mode: "background" }));
+    await f.host.run(f.input("first", { awaitResult: false }));
+    await f.host.run(f.input("second", { awaitResult: false }));
     await f.host.run(
       f.input("other", {
-        mode: "background",
+        awaitResult: false,
         parentSessionId: "other",
         requesterRunId: "root_B",
       }),
@@ -750,7 +759,7 @@ describe("session-owned subagent lifecycle", () => {
           },
         );
       }
-      await f.host.run(f.input("preparing", { mode: "background" }));
+      await f.host.run(f.input("preparing", { awaitResult: false }));
       await entered.promise;
       removed = true;
       await f.host.interruptByParent("parent", "parent session removed", {
@@ -788,7 +797,7 @@ describe("session-owned subagent lifecycle", () => {
     });
     const turn = deferred<Awaited<ReturnType<AgentInstance["turn"]>>>();
     f.turn.mockImplementation(() => turn.promise);
-    const started = await f.host.run(f.input("work", { mode: "background" }));
+    const started = await f.host.run(f.input("work", { awaitResult: false }));
     const send = f.input("send", {
       subagentId: started.execution.subagentId,
       prompt: "original update",
@@ -871,53 +880,6 @@ describe("session-owned subagent lifecycle", () => {
     ).rejects.toThrow(/closed/);
   });
 
-  it("a parent stop interrupts only its foreground execution", async () => {
-    const f = fixture();
-    const signals = new Map<string, AbortSignal>();
-    const finish = deferred<Awaited<ReturnType<AgentInstance["turn"]>>>();
-    f.turn.mockImplementation((input) => {
-      if (!input.signal) throw new Error("Expected execution signal");
-      signals.set(input.prompt, input.signal);
-      if (input.prompt === "background") return finish.promise;
-      return new Promise((resolve) =>
-        input.signal?.addEventListener(
-          "abort",
-          () => {
-            resolve({
-              mode: "waitForCompletion",
-              sessionId: "child",
-              success: false,
-              error: "stopped",
-              runStatus: "interrupted",
-            });
-          },
-          { once: true },
-        ),
-      );
-    });
-    await f.host.run(f.input("background", { mode: "background" }));
-    const foreground = f.host.run(f.input("foreground"));
-    await vi.waitFor(() => {
-      expect(signals.size).toBe(2);
-    });
-    await f.host.interruptForegroundByRootRun("root_A");
-    expect(signals.get("foreground")?.aborted).toBe(true);
-    expect(signals.get("background")?.aborted).toBe(false);
-    expect((await foreground).execution).toMatchObject({
-      status: "interrupted",
-      delivery: { state: "foreground" },
-    });
-    finish.resolve({
-      mode: "waitForCompletion",
-      sessionId: "child",
-      success: true,
-      finalOutput: "background result",
-    });
-    await vi.waitFor(() => {
-      expect(f.host.hasActiveWork()).toBe(false);
-    });
-  });
-
   it("concurrent sends to an idle instance share one new execution and reject a stale stop", async () => {
     const received: string[] = [];
     const f = fixture({
@@ -935,7 +897,7 @@ describe("session-owned subagent lifecycle", () => {
     const [first, second] = await Promise.all(
       ["first", "second"].map((prompt) =>
         f.host.send({
-          ...f.input(prompt, { mode: "background" }),
+          ...f.input(prompt, { awaitResult: false }),
           subagentId: original.execution.subagentId,
         }),
       ),
@@ -993,7 +955,7 @@ describe("session-owned subagent lifecycle", () => {
     );
     const all = await Promise.all(
       Array.from({ length: 6 }, (_, i) =>
-        f.host.run(f.input(`close-${String(i)}`, { mode: "background" })),
+        f.host.run(f.input(`close-${String(i)}`, { awaitResult: false })),
       ),
     );
     await vi.waitFor(() => {
@@ -1010,13 +972,13 @@ describe("session-owned subagent lifecycle", () => {
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(
-      await f.host.spawn(f.input("during-close-write", { mode: "background" })),
+      await f.host.spawn(f.input("during-close-write", { awaitResult: false })),
     ).toMatchObject({ started: false });
     closedWrite.resolve(undefined);
     expect(await closing).toMatchObject({ cleanup: "unconfirmed" });
     expect(
       await f.host.spawn(
-        f.input("during-scope-cleanup", { mode: "background" }),
+        f.input("during-scope-cleanup", { awaitResult: false }),
       ),
     ).toMatchObject({ started: false });
     scope.resolve(undefined);
@@ -1036,7 +998,7 @@ describe("session-owned subagent lifecycle", () => {
     f.create.mockImplementation(() => createGate.promise);
     const started = await Promise.all(
       Array.from({ length: 7 }, (_, i) =>
-        f.host.spawn(f.input(`capacity-${String(i)}`, { mode: "background" })),
+        f.host.spawn(f.input(`capacity-${String(i)}`, { awaitResult: false })),
       ),
     );
     expect(started.filter((result) => result.started)).toHaveLength(6);
@@ -1074,13 +1036,13 @@ describe("session-owned subagent lifecycle", () => {
       return finish.promise;
     });
     const initial = await f.host.run(
-      f.input("initial", { mode: "background" }),
+      f.input("initial", { awaitResult: false }),
     );
     await vi.waitFor(() => {
       expect(signal).toBeDefined();
     });
     const sent = await f.host.send({
-      ...f.input("message", { mode: "foreground" }),
+      ...f.input("message", { awaitResult: true }),
       subagentId: initial.execution.subagentId,
     });
     expect(sent).toMatchObject({
@@ -1122,7 +1084,7 @@ describe("session-owned subagent lifecycle", () => {
     f.turn.mockImplementation(() => finish.promise);
     const executions = await Promise.all(
       Array.from({ length: 6 }, (_, i) =>
-        f.host.run(f.input(`active-${String(i)}`, { mode: "background" })),
+        f.host.run(f.input(`active-${String(i)}`, { awaitResult: false })),
       ),
     );
     await vi.waitFor(() => {
@@ -1134,11 +1096,11 @@ describe("session-owned subagent lifecycle", () => {
     });
     expect(stopped.cleanup).toBe("unconfirmed");
     expect(
-      await f.host.spawn(f.input("too-early", { mode: "background" })),
+      await f.host.spawn(f.input("too-early", { awaitResult: false })),
     ).toMatchObject({ started: false });
     cleanup.resolve(undefined);
     expect(
-      await f.host.spawn(f.input("turn-still-exiting", { mode: "background" })),
+      await f.host.spawn(f.input("turn-still-exiting", { awaitResult: false })),
     ).toMatchObject({ started: false });
     finish.resolve({
       mode: "waitForCompletion",
@@ -1150,7 +1112,7 @@ describe("session-owned subagent lifecycle", () => {
       expect(f.host.hasActiveWork()).toBe(false);
     });
     expect(
-      await f.host.spawn(f.input("after-cleanup", { mode: "background" })),
+      await f.host.spawn(f.input("after-cleanup", { awaitResult: false })),
     ).toMatchObject({ started: true });
     await vi.waitFor(() => {
       expect(f.host.hasActiveWork()).toBe(false);
@@ -1274,8 +1236,8 @@ describe("accepted subagent execution host", () => {
       if (input.signal) signals.push(input.signal);
       return finish.promise;
     });
-    await f.host.run(f.input("one", { mode: "background" }));
-    await f.host.run(f.input("two", { mode: "background" }));
+    await f.host.run(f.input("one", { awaitResult: false }));
+    await f.host.run(f.input("two", { awaitResult: false }));
     await vi.waitFor(() => {
       expect(signals).toHaveLength(2);
     });
@@ -1287,7 +1249,7 @@ describe("accepted subagent execution host", () => {
       expect(signals.every((signal) => signal.aborted)).toBe(true);
       await expect(stopped).rejects.toThrow("root disk failure");
       await expect(
-        f.host.run(f.input("late", { mode: "background" })),
+        f.host.run(f.input("late", { awaitResult: false })),
       ).rejects.toThrow(/closed/);
     } finally {
       failure.mockRestore();
@@ -1330,10 +1292,10 @@ describe("accepted subagent execution host", () => {
           );
         }),
     );
-    const a = await f.host.run(f.input("one", { mode: "background" }));
+    const a = await f.host.run(f.input("one", { awaitResult: false }));
     await started.promise;
     const sent = await f.host.send({
-      ...f.input("unread", { mode: "background" }),
+      ...f.input("unread", { awaitResult: false }),
       subagentId: a.execution.subagentId,
     });
     expect(sent.accepted).toBe(true);
@@ -1367,7 +1329,7 @@ describe("accepted subagent execution host", () => {
     const f = fixture();
     const gate = deferred<Session>();
     f.create.mockImplementation(() => gate.promise);
-    const accepted = await f.host.run(f.input("one", { mode: "background" }));
+    const accepted = await f.host.run(f.input("one", { awaitResult: false }));
     await f.host.close({
       parentSessionId: "parent",
       subagentId: accepted.execution.subagentId,
@@ -1395,7 +1357,7 @@ describe("accepted subagent execution host", () => {
     const f = fixture();
     const gate = deferred<Session>();
     f.create.mockImplementation(() => gate.promise);
-    const receipt = await f.host.run(f.input("call", { mode: "background" }));
+    const receipt = await f.host.run(f.input("call", { awaitResult: false }));
     expect(receipt.execution).toMatchObject({
       status: "queued",
       rootRunId: "root_A",
@@ -1422,7 +1384,7 @@ describe("accepted subagent execution host", () => {
   });
   it("reuses an invocation and returns only background acceptance even for fast completion", async () => {
     const f = fixture();
-    const input = f.input("same", { mode: "background" });
+    const input = f.input("same", { awaitResult: false });
     const [a, b] = await Promise.all([f.host.run(input), f.host.run(input)]);
     expect(a.execution.executionId).toBe(b.execution.executionId);
     expect(a.output).toBeUndefined();
@@ -1433,7 +1395,7 @@ describe("accepted subagent execution host", () => {
     expect(f.turn).toHaveBeenCalledTimes(1);
     expect(await f.executionStore.listByRootRun("root_A")).toHaveLength(1);
   });
-  it("keeps two same-instance foreground reports and terminal reasons independently", async () => {
+  it("keeps two same-instance reports and terminal reasons independently", async () => {
     const f = fixture();
     const a = await f.host.run(f.input("one"));
     f.turn.mockResolvedValueOnce({
@@ -1450,7 +1412,7 @@ describe("accepted subagent execution host", () => {
     expect(a.execution.reason).toBe("max_steps_finalized");
     const records = await f.executionStore.listByRootRun("root_A");
     expect(records.map((r) => r.output)).toEqual(["exact report", "second"]);
-    expect(records.every((r) => r.delivery.state === "foreground")).toBe(true);
+    expect(records.every((r) => r.mode === "background")).toBe(true);
   });
   it("does not let late cancellation of A affect B on the same instance", async () => {
     const f = fixture();

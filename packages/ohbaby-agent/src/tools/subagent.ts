@@ -6,7 +6,6 @@ import { renderExecutionFacts } from "../agents/subagents/execution-facts.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
   SessionSubagentHost,
-  SubagentRunMode,
   SubagentRunResult,
   SubagentStatusResult,
 } from "../agents/index.js";
@@ -66,13 +65,14 @@ function timeoutParam(params: Record<string, unknown>): number | undefined {
     );
   return value;
 }
-function runMode(params: Record<string, unknown>): SubagentRunMode {
-  if (params.mode === undefined) return "background";
-  if (params.mode === "foreground" || params.mode === "background")
-    return params.mode;
-  throw new ToolParameterError(
-    'Expected parameter "mode" to be "foreground" or "background".',
-  );
+/** Agents always run in the background (D54); an explicit "background" is tolerated. */
+function assertBackgroundMode(params: Record<string, unknown>): void {
+  if (params.mode === undefined || params.mode === "background") return;
+  if (params.mode === "foreground")
+    throw new ToolParameterError(
+      'Foreground mode is not available: agents always run in the background and results arrive automatically. Omit "mode".',
+    );
+  throw new ToolParameterError('Expected parameter "mode" to be omitted.');
 }
 function monitorParams(params: Record<string, unknown>): {
   subagentIds: string[];
@@ -171,21 +171,10 @@ function startResult(
         },
       },
     };
-  if (execution.mode === "background")
-    receipt.push(
-      "accepted: true",
-      "This agent is running in the background; do not edit the files assigned to it concurrently. Results arrive automatically.",
-    );
-  else {
-    if (execution.reason) receipt.push(`terminal_reason: ${execution.reason}`);
-    if (result.output)
-      receipt.push(
-        result.success
-          ? `<subagent_output>\n${result.output}\n</subagent_output>`
-          : `<subagent_error>\n${result.output}\n</subagent_error>`,
-      );
-    else if (result.success) receipt.push("program_note: No output.");
-  }
+  receipt.push(
+    "accepted: true",
+    "This agent is running in the background; do not edit the files assigned to it concurrently. Results arrive automatically.",
+  );
   return {
     output: receipt.join("\n"),
     metadata: {
@@ -232,7 +221,7 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
     source: "builtin",
     timeoutOwner: "tool",
     description:
-      "Manage independent agents: spawn creates an instance; send gives an existing instance a message; list lists open instances; monitor immediately reads saved records without waiting; stop interrupts work and preserves context; close permanently closes an instance. Spawn/send default to background; results arrive automatically, so finish this turn when no independent work remains. Sending to a running agent does not interrupt it or change its mode; use stop then send to interrupt and continue. Do not poll monitor to wait. Keep completed instances for related follow-ups; close only obsolete instances, not to finish a turn or release execution slots. Give each writing agent an explicit, disjoint file scope and do not edit its files concurrently.",
+      "Manage independent agents: spawn creates an instance; send gives an existing instance a message; list lists open instances; monitor immediately reads saved records without waiting; stop interrupts work and preserves context; close permanently closes an instance. Spawn/send always run in the background; results arrive automatically and wake you, so finish this turn when no independent work remains. Sending to a running agent does not interrupt it; use stop then send to interrupt and continue. Do not poll monitor to wait. Keep completed instances for related follow-ups; close only obsolete instances, not to finish a turn or release execution slots. Give each writing agent an explicit, disjoint file scope and do not edit its files concurrently.",
     parametersJsonSchema: {
       type: "object",
       additionalProperties: false,
@@ -250,11 +239,6 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
           type: "string",
           default: DEFAULT_SUBAGENT_ROLE,
           enum: [...SUBAGENT_ROLES],
-        },
-        mode: {
-          type: "string",
-          default: "background",
-          enum: ["foreground", "background"],
         },
         timeout_ms: {
           type: "integer",
@@ -332,8 +316,8 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
         requestId: context.callId,
         environment: context.environment,
         signal: context.signal,
-        mode: runMode(params),
       };
+      assertBackgroundMode(params);
       if (action === "send")
         return startResult(
           action,

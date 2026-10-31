@@ -9,7 +9,6 @@ import {
   type CleanupResult,
 } from "../../runtime/shutdown.js";
 import { repairInterruptedRunHistory } from "../../runtime/execution-recovery/history.js";
-import { RunFinalizationError } from "../../runtime/run-manager/errors.js";
 import { subscribeApprovalExecutionChanges } from "../../agents/subagents/approval-blocking.js";
 import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import { createSubagentResultArtifacts } from "../../agents/subagents/result-artifacts.js";
@@ -734,21 +733,7 @@ export async function createUiRuntimeComposition(
     async beforeFinalize(runId, outcome): Promise<void> {
       const run = await runLedger.get(runId);
       if (!run) throw new Error(`Missing execution record for ${runId}`);
-      // Only the primary waits for descendants. A child finalizer must never wait
-      // for its root (the root is already waiting for that child's completion).
-      if (run.contextScopeId === undefined) {
-        const children = await subagentExecutionStore.listByRootRun(runId);
-        for (const child of children) {
-          if (child.mode !== "foreground") continue;
-          if (!child.childRunId || !runManager.get(child.childRunId)) continue;
-          try {
-            await runManager.waitForCompletion(child.childRunId);
-          } catch (error) {
-            if (!(error instanceof RunFinalizationError)) throw error;
-            await runManager.retryFinalization(child.childRunId);
-          }
-        }
-      }
+      // Agents always run in the background (D54): a primary never waits for them.
       if (outcome.status !== "succeeded") {
         await repairInterruptedRunHistory(options.messageManager, {
           sessionId: run.sessionId,
@@ -772,15 +757,13 @@ export async function createUiRuntimeComposition(
           (async (): Promise<void> => {
             const run = await runLedger.get(runId);
             // Natural child failure may leave a detached shell alive. Primary
-            // interruption also stops its foreground children and shell jobs.
+            // interruption stops its own shell jobs; agents keep running.
             if (
               run?.contextScopeId === undefined &&
               reason !== "succeeded" &&
               reason !== "completed"
-            ) {
+            )
               shellJobRegistry.cancelByRootRun(runId);
-              await subagentHost.interruptForegroundByRootRun(runId, reason);
-            }
           })(),
         ]);
         const errors = results.flatMap((result) =>
@@ -1017,11 +1000,6 @@ export async function createUiRuntimeComposition(
             subagentId: execution.subagentId,
             expectedExecutionId: execution.executionId,
           });
-      } else {
-        await subagentHost.interruptForegroundByRootRun(
-          runId,
-          reason ?? "user-stop",
-        );
       }
     });
 

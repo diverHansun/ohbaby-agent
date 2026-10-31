@@ -18,12 +18,12 @@
 
 主会话经 `AgentService.startSession → AgentInstance.turn → core/agents.runAgent → RunManager` 执行。子代理经 `SessionSubagentHost → AgentInstance.turn` 进入相同运行原语。
 
-`spawn` 默认后台执行。Host 在创建 session、sandbox、run 等异步工作之前预占本主会话的执行名额。前后台合计最多六个实际执行；满额直接返回未启动，不创建排队任务。每个实例同时只能有一个执行。
+`spawn` 一律后台执行，工具先返回受理回执。Host 在创建 session、sandbox、run 等异步工作之前预占本主会话的执行名额。最多六个实际执行；满额直接返回未启动，不创建排队任务。每个实例同时只能有一个执行。工具 schema 不再暴露 `mode`，旧调用显式传 `background` 仍可接受，`foreground` 会被拒绝（D54）。
 
 `send` 有两个结果：
 
 - 实例空闲：在同一 scope 启动新执行，模型取当前会话的选择。
-- 实例运行中：把消息写入该 child run 的 `CurrentRunInputStore`，下次模型请求读取；不打断当前工作，不改变 mode，不创建新 execution。输入 ID 绑定调用身份，重试返回原收据。
+- 实例运行中：把消息写入该 child run 的 `CurrentRunInputStore`，下次模型请求读取；不打断当前工作，不创建新 execution。输入 ID 绑定调用身份，重试返回原收据。
 
 RunManager 在 durable ledger 已标记 running 后通知输入通道就绪。输入受理与 run 封口使用同一存储事务；若结束先发生，Host 等旧执行实际收尾后才尝试新执行。旧版本的 `pendingQueue` 仅供恢复识别，不再自动 drain。
 
@@ -35,11 +35,11 @@ RunManager 在 durable ledger 已标记 running 后通知输入通道就绪。�
 
 名额只在模型调用、前台工具及必要资源清理全部确认后释放。取消超时只报告清理未确认，不能冒充物理退出；迟到退出证据可自动释放名额。自然完成、失败或超时只封口执行的 shell owner，已转后台的 shell 继续遵守十分钟上限，不占用子执行名额。显式 stop 取消当前执行的 shell，close 取消整个实例的 shell。
 
-普通主轮次完成或 Stop 保留后台子执行。主 Stop 只中断本轮前台子执行；直接停止子执行不向上取消主会话或兄弟实例。Goal 整体终止、预算耗尽、会话销毁和服务退出另外按实际归属回收执行。
+普通主轮次完成或 Stop 保留子执行；主 Stop 只停止主执行及其自己的工具。直接停止子执行不向上取消主会话或兄弟实例。Goal 整体终止、预算耗尽、会话销毁和服务退出另外按实际归属回收执行。
 
 ## 结果交付与监督
 
-后台自然终态把结果写到执行台账的 pending delivery。前台通过工具结果返回，主动 stop/close 的控制回执不触发后台结果唤醒。
+子执行自然终态把结果写到执行台账的 pending delivery，独立于最初的工具受理回执交付。主动 stop/close 的控制回执不触发结果唤醒。历史 foreground 记录继续只读，不能按新后台结果重新投递。
 
 - 主会话忙碌：continuation coordinator 在下一模型请求前接收本会话 pending 结果。
 - 主会话空闲：session supervisor 通过现有 `SessionExecutionGate` 和内部提交入口申请一轮，和用户输入共用执行门。

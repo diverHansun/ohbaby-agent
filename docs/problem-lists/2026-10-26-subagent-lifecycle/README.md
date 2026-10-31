@@ -15,21 +15,21 @@
 | 3 | 右侧 Tab 容器、入口页、Subagents 列表和详情的前端 | `subagent/frontend` | [02](improve-3/02-optimization-plan-and-change-scope.md)、[04](improve-3/04-test-and-acceptance.md) |
 | 4 | 主会话入口切到右侧栏，删除旧浮层，回归 | `subagent/improve-4` | [02](improve-4/02-optimization-plan-and-change-scope.md)、[04](improve-4/04-test-and-acceptance.md) |
 
-所有讨论记录和用户原话（D01–D53）都在 [improve-1/00](improve-1/00-discussion.md)，现状分析和参考项目也只在 improve-1 里写一份，improve-2 到 4 直接引用。每个 improve 实施完成后，在各自目录里写 `05-implementation-acceptance.md`。
+所有讨论记录和用户原话（D01–D54）都在 [improve-1/00](improve-1/00-discussion.md)，现状分析和参考项目也只在 improve-1 里写一份，improve-2 到 4 直接引用。每个 improve 实施完成后，在各自目录里写 `05-implementation-acceptance.md`。
 
 ## 方案要点
 
 **工具和控制（improve-1）**
 
 - 统一的 `agent` 工具有六个 action：spawn、send、list、monitor、stop、close。参数写进 schema，并按 action 校验。
-- spawn 和 send 启动的新执行默认后台，也可以显式指定前台。运行中的 send 把消息放进下一次模型请求，不打断当前工作，也不改 mode。
-- 每个主会话最多同时跑六个子执行，前后台共用。异步创建前先占名额，清理确认后才归还；满了就明确告知"未启动"，不自动排队。执行自然结束后，它留下的后台 shell 继续跑但不占名额；被 stop 时，要等这些 shell 退出后才还名额（D42）。
+- spawn 和 send 启动的执行一律在后台运行，没有前台模式（D54）。运行中的 send 把消息放进下一次模型请求，不打断当前工作。
+- 每个主会话最多同时跑六个子执行。异步创建前先占名额，清理确认后才归还；满了就明确告知"未启动"，不自动排队。执行自然结束后，它留下的后台 shell 继续跑但不占名额；被 stop 时，要等这些 shell 退出后才还名额（D42）。
 - stop 结束本次执行，实例还能接着用；close 注销实例，list 和 UI 都看不到，send 也无法恢复，但持久历史仍可供主模型只读。执行非自然结束时，还没消费的消息关闭并告知主代理，不带进下一次执行（D45）。
 - 已完成的实例默认保留供复用。确定不再需要，或者上下文已经不适合时，再 close 后新建。
 
 **结果和监督（improve-1）**
 
-- 用户按 Stop 只结束主执行和本轮的前台子执行，后台继续跑。主代理空闲时收到后台结果会新开一轮；忙的时候，结果进入下一次模型请求。
+- 用户按 Stop 只结束主执行，子代理继续跑；要停某个子代理，用 `agent(action="stop")` 或右侧栏。主代理空闲时收到后台结果会新开一轮；忙的时候，结果进入下一次模型请求。
 - monitor 立即读取一个或多个子代理已有的记录，不调用模型、不等待、不订阅。
 - 主代理空闲且有后台在跑时，首次 2 分钟、之后每 5 分钟监督唤醒一次；连续 3 次没有新事实就停（D44）。子代理卡住时，靠 30 分钟的执行超时兜底。
 - 没有文件隔离，写冲突靠提示词约束（D43）。派遣时还有四条提示词软约束（D47）。

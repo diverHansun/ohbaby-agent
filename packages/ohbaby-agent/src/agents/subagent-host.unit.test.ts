@@ -1,4 +1,7 @@
-import { TestSessionSubagentHost as SessionSubagentHost } from "../core/testing/runtime-model-fixtures.js";
+import {
+  TestSessionSubagentHost as SessionSubagentHost,
+  type TestSubagentRunInput,
+} from "../core/testing/runtime-model-fixtures.js";
 import { mergeReasoningIntent, type ReasoningIntent } from "ohbaby-llm";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -12,7 +15,6 @@ import { InMemorySubagentInstanceStore } from "./subagents/in-memory-store.js";
 import type {
   SubagentInstanceRecord,
   SubagentInstanceUpdate,
-  SubagentRunInput,
   SubagentRunResult,
 } from "./subagents/types.js";
 import { InMemorySubagentExecutionStore } from "./subagents/execution-store.js";
@@ -173,7 +175,7 @@ let invocationSequence = 0;
 async function runAndObserve(
   host: SessionSubagentHost,
   input: Omit<
-    SubagentRunInput,
+    TestSubagentRunInput,
     "requesterRunId" | "requesterMessageId" | "requestId"
   >,
 ): Promise<SubagentRunResult & { item: SubagentInstanceRecord }> {
@@ -257,7 +259,7 @@ describe("SessionSubagentHost", () => {
           tools: {},
         });
         const run = runAndObserve(host, {
-          mode: "foreground",
+          awaitResult: true,
           parentSessionId: "parent_1",
           role: "explore",
           prompt: "inspect",
@@ -295,7 +297,7 @@ describe("SessionSubagentHost", () => {
           parentSessionId: "parent_1",
           prompt: "task",
           role: "explore",
-          mode: "foreground",
+          awaitResult: true,
         }),
       ).rejects.toThrow("database unavailable");
       expect(onFatal).toHaveBeenCalledWith(expect.any(Error), "root");
@@ -307,7 +309,7 @@ describe("SessionSubagentHost", () => {
           parentSessionId: "parent_1",
           prompt: "task",
           role: "explore",
-          mode: "foreground",
+          awaitResult: true,
         }),
       ).rejects.toThrow(/database unavailable|closed/);
     },
@@ -318,7 +320,7 @@ describe("SessionSubagentHost", () => {
       requesterRunId: "root",
       requesterMessageId: "message",
       parentSessionId: "parent_1",
-      mode: "foreground" as const,
+      awaitResult: true,
     };
     const first = await host.run({
       ...base,
@@ -367,7 +369,6 @@ describe("SessionSubagentHost", () => {
       parentSessionId: "parent_1",
       prompt: "must not start",
       role: "explore",
-      mode: "background",
     });
     await enteredRead;
     await host.interruptByRootRun("root", "stopped");
@@ -393,7 +394,7 @@ describe("SessionSubagentHost", () => {
       error: "old failure",
     });
     const first = await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
@@ -435,7 +436,6 @@ describe("SessionSubagentHost", () => {
       parentSessionId: "parent_1",
       role: "explore",
       prompt: "background",
-      mode: "background",
     });
     await vi.waitFor(() => {
       expect(turn).toHaveBeenCalled();
@@ -463,7 +463,7 @@ describe("SessionSubagentHost", () => {
       tools: {},
     });
     await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       role: "explore",
       prompt: "inspect",
@@ -484,7 +484,7 @@ describe("SessionSubagentHost", () => {
     });
 
     const result = await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       role: "explore",
       prompt: "inspect",
@@ -495,7 +495,7 @@ describe("SessionSubagentHost", () => {
     expect(result.item.closedAt).toBeUndefined();
     await expect(
       runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         subagentId: result.item.subagentId,
         prompt: "resume",
@@ -511,7 +511,7 @@ describe("SessionSubagentHost", () => {
     );
     const { host, turn } = createHostFixture({ getParentReasoning });
     await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       parentContextScopeId: "sibling-off",
       role: "explore",
@@ -521,14 +521,14 @@ describe("SessionSubagentHost", () => {
     expect(getParentReasoning).toHaveBeenCalledWith("parent_1", "sibling-off");
     await host.dispose();
   });
-  it("rejects the foreground caller when durable claim persistence fails", async () => {
+  it("rejects the awaiting caller when durable claim persistence fails", async () => {
     const { host, turn } = createHostFixture({
       store: new ClaimFailingStore(),
     });
 
     await expect(
       runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         prompt: "inspect",
         role: "explore",
@@ -544,7 +544,6 @@ describe("SessionSubagentHost", () => {
 
     await expect(
       runAndObserve(host, {
-        mode: "background",
         parentSessionId: "parent_1",
         prompt: "inspect",
         role: "explore",
@@ -565,7 +564,7 @@ describe("SessionSubagentHost", () => {
     };
 
     const result = await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "must not start",
       role: "explore",
@@ -586,7 +585,7 @@ describe("SessionSubagentHost", () => {
     store.onClaim = undefined;
     await expect(
       runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         prompt: "resume after interruption",
         subagentId: result.item.subagentId,
@@ -605,11 +604,11 @@ describe("SessionSubagentHost", () => {
     ]);
   });
 
-  it("runs foreground subagents through scoped AgentInstance identity", async () => {
+  it("runs subagents through scoped AgentInstance identity", async () => {
     const { createInstance, host, turn } = createHostFixture();
 
     const result = await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "inspect",
       role: "explore",
@@ -663,7 +662,7 @@ describe("SessionSubagentHost", () => {
 
     await expect(
       runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         prompt: "continue",
         subagentId: "subagent_1",
@@ -676,7 +675,7 @@ describe("SessionSubagentHost", () => {
     const { host, turn } = createHostFixture();
 
     const first = await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "inspect",
       role: "explore",
@@ -690,7 +689,7 @@ describe("SessionSubagentHost", () => {
     expect(closed.item?.status).toBe("cancelled");
     await expect(
       runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         prompt: "try again",
         subagentId: first.item.subagentId,
@@ -702,7 +701,7 @@ describe("SessionSubagentHost", () => {
   it("reports a coded terminal error when close wins during stop admission", async () => {
     const { host, store } = createHostFixture();
     const first = await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "inspect",
       role: "explore",
@@ -750,7 +749,7 @@ describe("SessionSubagentHost", () => {
     );
 
     const running = runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "slow",
       role: "explore",
@@ -813,7 +812,7 @@ describe("SessionSubagentHost", () => {
     );
 
     const running = runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "slow",
       role: "explore",
@@ -853,7 +852,7 @@ describe("SessionSubagentHost", () => {
   it("keeps per-turn timeout overrides out of the instance default and reclaims owner", async () => {
     const { host, store, turn } = createHostFixture();
     const first = await runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
@@ -879,7 +878,7 @@ describe("SessionSubagentHost", () => {
     );
 
     const second = runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "second",
       subagentId: first.item.subagentId,
@@ -954,7 +953,6 @@ describe("SessionSubagentHost", () => {
     } satisfies AgentRunResult);
 
     const created = await runAndObserve(host, {
-      mode: "background",
       parentSessionId: "parent_1",
       prompt: "slow background",
       role: "explore",
@@ -1009,7 +1007,7 @@ describe("SessionSubagentHost", () => {
       );
 
       const running = runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         prompt: "slow",
         role: "explore",
@@ -1045,7 +1043,7 @@ describe("SessionSubagentHost", () => {
       );
 
       const running = runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         prompt: "ignore abort",
         role: "explore",
@@ -1066,7 +1064,7 @@ describe("SessionSubagentHost", () => {
     }
   });
 
-  it("does not treat parent aborts as timeout even when reasons collide", async () => {
+  it("keeps running after its requester aborts; only its own deadline ends it", async () => {
     const { host, turn } = createHostFixture();
     const controller = new AbortController();
     turn.mockImplementationOnce(
@@ -1089,7 +1087,7 @@ describe("SessionSubagentHost", () => {
     );
 
     const running = runAndObserve(host, {
-      mode: "foreground",
+      awaitResult: true,
       parentSessionId: "parent_1",
       prompt: "slow",
       role: "explore",
@@ -1102,17 +1100,11 @@ describe("SessionSubagentHost", () => {
       },
       { interval: 1 },
     );
-    controller.abort("Subagent timed out after 50ms");
+    controller.abort("requester stopped");
     const result = await running;
 
-    expect(result).toMatchObject({
-      item: {
-        output: "Subagent timed out after 50ms",
-        status: "interrupted",
-      },
-      output: "Subagent timed out after 50ms",
-      success: false,
-    });
+    expect(result.execution.status).toBe("timed_out");
+    expect(result.output).toBe("Subagent timed out after 50ms");
   });
 
   it("rejects invalid timeoutMs before creating a subagent record", async () => {
@@ -1120,7 +1112,6 @@ describe("SessionSubagentHost", () => {
 
     await expect(
       runAndObserve(host, {
-        mode: "background",
         parentSessionId: "parent_1",
         prompt: "bad timeout",
         role: "explore",
@@ -1134,7 +1125,6 @@ describe("SessionSubagentHost", () => {
 
     await expect(
       runAndObserve(host, {
-        mode: "background",
         parentSessionId: "parent_1",
         prompt: "too long",
         role: "explore",
@@ -1159,7 +1149,6 @@ describe("SessionSubagentHost", () => {
       requesterRunId: "dispose_root",
       requesterMessageId: "message",
       requestId: "held_create",
-      mode: "background",
       parentSessionId: "parent_1",
       prompt: "created during dispose",
       role: "explore",
@@ -1193,7 +1182,6 @@ describe("SessionSubagentHost", () => {
         }),
     );
     const first = await runAndObserve(firstFixture.host, {
-      mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
@@ -1202,7 +1190,6 @@ describe("SessionSubagentHost", () => {
 
     await expect(
       runAndObserve(secondFixture.host, {
-        mode: "background",
         parentSessionId: "parent_1",
         prompt: "must retry later",
         subagentId: first.item.subagentId,
@@ -1231,13 +1218,13 @@ describe("SessionSubagentHost", () => {
 
     const [first, second] = await Promise.all([
       runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         prompt: "first",
         role: "explore",
       }),
       runAndObserve(host, {
-        mode: "foreground",
+        awaitResult: true,
         parentSessionId: "parent_1",
         prompt: "second",
         role: "research",

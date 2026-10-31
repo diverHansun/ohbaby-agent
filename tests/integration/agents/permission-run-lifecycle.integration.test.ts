@@ -81,7 +81,6 @@ async function fixture(delegate: boolean, childTimeoutMs?: number) {
                     action: "spawn",
                     role: "generic",
                     prompt: "Run one harmless bash command",
-                    mode: "foreground",
                     description: "Permission child",
                     ...(childTimeoutMs === undefined
                       ? {}
@@ -151,7 +150,11 @@ describe("permission actual run lifecycle", () => {
           status: "succeeded",
           finalResponse: "parent complete",
         });
-        expect(requests).toHaveLength(1);
+        // A background child asks for approval after its parent has finished.
+        await vi.waitFor(() => {
+          expect(requests).toHaveLength(1);
+        });
+        await f.composition.runManager.waitForCompletion(requests[0].runId);
         expect(requests[0]).toMatchObject({
           sessionId: delegate ? "child" : "root",
           rootSessionId: "root",
@@ -167,7 +170,7 @@ describe("permission actual run lifecycle", () => {
     },
   );
 
-  it("revokes a real child approval when its primary execution is interrupted", async () => {
+  it("keeps a background child's approval when its primary execution is interrupted", async () => {
     const f = await fixture(true);
     let received!: (info: PermissionInfo) => void;
     const requested = new Promise<PermissionInfo>((resolve) => {
@@ -185,18 +188,20 @@ describe("permission actual run lifecycle", () => {
       const info = await requested;
       await f.composition.interruptRunTree(run.runId, "test interruption");
       await f.composition.runManager.waitForCompletion(run.runId);
-      expect(f.permission.listPending()).toEqual([]);
+      expect(f.permission.listPending()).toEqual([info]);
       expect(
-        f.permission.respond(info.sessionId, info.id, { type: "always" }),
-      ).toBe("revoked");
-      expect(f.permission.state.getSessionRules(info.sessionId)).toEqual([]);
+        f.permission.respond(info.sessionId, info.id, { type: "once" }),
+      ).toBe("accepted");
+      expect(
+        await f.composition.runManager.waitForCompletion(info.runId),
+      ).toMatchObject({ status: "succeeded" });
     } finally {
       await f.composition.dispose();
     }
   });
 });
 
-it("pauses a real child quota during pure approval waiting but still obeys root interruption", async () => {
+it("pauses a real child quota during pure approval waiting but still obeys its own stop", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   const f = await fixture(true, 50);
   let receive!: (info: PermissionInfo) => void;
@@ -216,12 +221,13 @@ it("pauses a real child quota during pure approval waiting but still obeys root 
     await vi.advanceTimersByTimeAsync(500);
     expect(f.permission.listPending()).toHaveLength(1);
     expect(f.composition.runManager.get(request.runId)?.status).toBe("running");
-    expect(f.composition.runManager.get(run.runId)?.status).toBe("running");
+    await f.composition.runManager.waitForCompletion(run.runId);
+    // Stopping the child itself, as the agent stop or the UI does.
     await f.composition.interruptRunTree(
-      run.runId,
+      request.runId,
       "stop during approval pause",
     );
-    await f.composition.runManager.waitForCompletion(run.runId);
+    await f.composition.runManager.waitForCompletion(request.runId);
     expect(f.permission.listPending()).toEqual([]);
     expect(
       f.permission.respond(request.sessionId, request.id, { type: "always" }),
@@ -280,7 +286,7 @@ it("cancels and revokes the actual run when the coordinator returns an unexpecte
   }
 });
 
-it("closes a foreground child wait before approval or execution when child run ownership mismatches", async () => {
+it("closes a child before approval or execution when child run ownership mismatches", async () => {
   const f = await fixture(true);
   const requests: PermissionInfo[] = [];
   const started = vi.fn();
@@ -325,9 +331,13 @@ it("closes a foreground child wait before approval or execution when child run o
     expect(f.composition.runManager.get("unexpected_child_run")?.status).toBe(
       "interrupted",
     );
-    expect(
-      JSON.stringify(await f.messageManager.listBySession("root")),
-    ).toContain("unexpected run id");
+    // A background child's failure is recorded on its execution.
+    await vi.waitFor(async () => {
+      const [execution] = (await f.composition.listSubagentState("root"))
+        .executions;
+      expect(execution?.status).toBe("failed");
+      expect(execution?.error).toContain("unexpected run id");
+    });
     expect(requests).toEqual([]);
     expect(started).not.toHaveBeenCalled();
     expect(f.permission.listPending()).toEqual([]);

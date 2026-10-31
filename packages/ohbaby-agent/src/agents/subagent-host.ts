@@ -293,7 +293,7 @@ export class SessionSubagentHost {
   private readonly invocationLocks = new Map<string, Promise<void>>();
   /** Orders acceptance through queue admission without waiting for child turns. */
   private readonly admissionTails = new Map<string, Promise<void>>();
-  private readonly executionJobs = new Map<string, Promise<EntryOutcome>>();
+  protected readonly executionJobs = new Map<string, Promise<EntryOutcome>>();
   private readonly rootByExecution = new Map<string, string>();
   private readonly executionBudgets = new Map<
     string,
@@ -529,7 +529,8 @@ export class SessionSubagentHost {
           requesterRunId: input.requesterRunId,
           requestId,
           subagentId: acceptedSubagentId,
-          mode: input.mode,
+          // Every new execution runs in the background (D54).
+          mode: "background",
           prompt: input.prompt,
           timeoutMs,
           createdAt: this.now(),
@@ -618,14 +619,7 @@ export class SessionSubagentHost {
             });
           } catch (error) {
             releaseAdmission();
-            if (
-              !(error instanceof SubagentPersistenceError) &&
-              !(
-                input.mode === "foreground" &&
-                input.signal?.aborted &&
-                !this.sealedRoots.has(root.rootRunId)
-              )
-            ) {
+            if (!(error instanceof SubagentPersistenceError)) {
               await this.finishExecution(execution, {
                 status:
                   this.sealedRoots.has(root.rootRunId) ||
@@ -643,19 +637,6 @@ export class SessionSubagentHost {
           }
         });
         this.executionJobs.set(executionId, job);
-        if (lease && input.mode === "foreground") {
-          const currentLease = lease;
-          const abort = (): void => {
-            currentLease.stopReason = "stopped";
-            this.stateChanged(currentLease.parentSessionId);
-            currentLease.controller.abort(input.signal?.reason);
-          };
-          if (input.signal?.aborted) abort();
-          else input.signal?.addEventListener("abort", abort, { once: true });
-          void job
-            .finally(() => input.signal?.removeEventListener("abort", abort))
-            .catch(() => undefined);
-        }
         void job
           .catch(() => undefined)
           .finally(() => {
@@ -672,38 +653,14 @@ export class SessionSubagentHost {
       if (this.invocationLocks.get(executionId) === lock)
         this.invocationLocks.delete(executionId);
     }
-    if (input.mode === "background") {
-      // Return the accepted snapshot, never a racing instance's latest report.
-      const {
-        output: _output,
-        error: _error,
-        lateResult: _lateResult,
-        ...receipt
-      } = execution;
-      return { started: true, execution: receipt };
-    }
-    const outcome = await this.executionJobs.get(executionId);
-    const result = await this.withSubagentLock(execution.subagentId, () =>
-      this.options.executionStore.get(lookup),
-    );
-    if (!result) throw new Error("Accepted subagent execution disappeared");
-    const item =
-      (outcome?.item &&
-      (outcome.paused || outcome.item.status === result.status)
-        ? outcome.item
-        : undefined) ??
-      (await this.options.store.get({
-        parentSessionId: input.parentSessionId,
-        subagentId: result.subagentId,
-      }));
-    return {
-      started: true,
-      execution: result,
-      ...(item ? { item } : {}),
-      ...(outcome?.paused ? { paused: true } : {}),
-      output: result.output ?? result.error,
-      success: result.status === "completed",
-    };
+    // Return the accepted snapshot, never a racing instance's latest report.
+    const {
+      output: _output,
+      error: _error,
+      lateResult: _lateResult,
+      ...receipt
+    } = execution;
+    return { started: true, execution: receipt };
   }
 
   private leaseFor(
@@ -944,35 +901,6 @@ export class SessionSubagentHost {
       cleanup: confirmed ? "confirmed" : "unconfirmed",
       unprocessedMessages: lease.unprocessedMessages,
     };
-  }
-
-  async interruptForegroundByRootRun(
-    rootRunId: string,
-    reason = "stopped",
-  ): Promise<readonly SubagentExecutionRecord[]> {
-    const targets = [...this.leases.values()].filter(
-      (lease) =>
-        lease.execution?.rootRunId === rootRunId &&
-        lease.execution.mode === "foreground",
-    );
-    for (const lease of targets) {
-      lease.stopReason = reason;
-      this.stateChanged(lease.parentSessionId);
-      lease.controller.abort(reason);
-      this.active.get(lease.subagentId)?.abortController?.abort(reason);
-    }
-    await Promise.all(
-      targets.map((lease) =>
-        this.stop({
-          parentSessionId: lease.parentSessionId,
-          subagentId: lease.subagentId,
-          expectedExecutionId: lease.executionId,
-        }),
-      ),
-    );
-    return (await this.options.executionStore.listByRootRun(rootRunId)).filter(
-      (execution) => execution.mode === "foreground",
-    );
   }
 
   async list(input: SubagentStatusInput): Promise<SubagentStatusResult> {

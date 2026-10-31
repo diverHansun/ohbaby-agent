@@ -81,8 +81,8 @@ const prompts = {
     "In a new session, create Other reader; verify session isolation, then return to the first session.",
   PANEL_RUNNING:
     "Create a fresh held Runner after stopping/closing the original Runner.",
-  PANEL_FOREGROUND:
-    "Create a held Foreground instance; the parent waits until the UI stops it.",
+  PANEL_HOLD:
+    "Hold the primary response without spawning a child; queue and Steer PANEL_FAIL, then Stop run and verify the existing Runner stays active. stdin tick updates both live streams.",
   PANEL_CLOSE_RUNNING:
     "Close the latest open Runner through the real agent tool.",
   PANEL_SEND_RUNNING:
@@ -133,6 +133,13 @@ function finish(response, text) {
   chunk(response, {}, "stop");
   response.end("data: [DONE]\n\n");
 }
+async function holdResponse(response, kind) {
+  heldResponses.add(response);
+  record("held-stream", { kind });
+  await new Promise((done) => response.once("close", done));
+  heldResponses.delete(response);
+  record("held-stream-closed", { kind });
+}
 function tools(response, body, specs, id) {
   const available = new Set(
     (body.tools ?? []).map((tool) => tool.function.name),
@@ -159,14 +166,13 @@ function tools(response, body, specs, id) {
   chunk(response, {}, "tool_calls");
   response.end("data: [DONE]\n\n");
 }
-function spawnSpec(name, kind, mode = "background") {
+function spawnSpec(name, kind) {
   return [
     "agent",
     {
       action: "spawn",
       name,
       role: "generic",
-      mode,
       timeout_ms: 1_800_000,
       description: `${name}: real compiled panel acceptance`,
       prompt: `PANEL_CHILD_${kind}\n${kind === "APPROVAL" ? "Run approval.cjs after user approval; it writes only the isolated approved.txt sentinel." : "Read only fixture.txt; do not change workspace files."} This is an isolated browser acceptance task.`,
@@ -204,18 +210,14 @@ async function childResponse(response, body, kind) {
     );
     return;
   }
-  if (kind === "RUNNER" || kind === "FOREGROUND") {
+  if (kind === "RUNNER") {
     chunk(response, {
       reasoning_content: `Inspecting ${kind.toLowerCase()} progress before the manual stop.`,
     });
     chunk(response, {
       content: `${kind}_STREAM_ACTIVE\n\nThis stream stays open until Stop or Close cancels the real child execution. The fixture is waiting without polling or additional model requests.`,
     });
-    heldResponses.add(response);
-    record("held-stream", { kind });
-    await new Promise((done) => response.once("close", done));
-    heldResponses.delete(response);
-    record("held-stream-closed", { kind });
+    await holdResponse(response, kind);
     return;
   }
   if (kind === "APPROVAL") {
@@ -324,9 +326,7 @@ const provider = createServer(async (request, response) => {
     const child = messages.find(
       (message) =>
         message.role === "user" &&
-        /^PANEL_CHILD_(READER|RUNNER|APPROVAL|OTHER|FOREGROUND)\b/.test(
-          content(message),
-        ),
+        /^PANEL_CHILD_(READER|RUNNER|APPROVAL|OTHER)\b/.test(content(message)),
     );
     if (child) {
       const kind = /^PANEL_CHILD_(\w+)/.exec(content(child))[1];
@@ -337,7 +337,7 @@ const provider = createServer(async (request, response) => {
     const commandIndex = messages.findLastIndex(
       (message) =>
         message.role === "user" &&
-        /^PANEL_(START|SEND_READER|CLOSE_READER|OTHER_SESSION|RUNNING|FOREGROUND|CLOSE_RUNNING|SEND_RUNNING|CAPACITY|FAIL)\b/.test(
+        /^PANEL_(START|SEND_READER|CLOSE_READER|OTHER_SESSION|RUNNING|HOLD|CLOSE_RUNNING|SEND_RUNNING|CAPACITY|FAIL)\b/.test(
           content(message),
         ),
     );
@@ -379,6 +379,18 @@ const provider = createServer(async (request, response) => {
       return;
     }
     record("command", { command });
+    if (command === "HOLD") {
+      chunk(response, {
+        reasoning_content:
+          "Keeping the primary response open for the queue, Steer, and Stop checks.",
+      });
+      chunk(response, {
+        content:
+          "PANEL_HOLD_STREAM_ACTIVE\n\nThis is the primary response. Queue PANEL_FAIL and Steer it into this run, then use Stop run. The existing background Runner should keep streaming; its next tick confirms it is still active.",
+      });
+      await holdResponse(response, "PARENT_HOLD");
+      return;
+    }
     let specs;
     if (command === "START")
       specs = [
@@ -389,8 +401,6 @@ const provider = createServer(async (request, response) => {
     else if (command === "OTHER_SESSION")
       specs = [spawnSpec("Other reader", "OTHER")];
     else if (command === "RUNNING") specs = [spawnSpec("Runner", "RUNNER")];
-    else if (command === "FOREGROUND")
-      specs = [spawnSpec("Foreground", "FOREGROUND", "foreground")];
     else if (command === "CAPACITY")
       specs = Array.from({ length: 7 }, (_, index) =>
         spawnSpec(`Capacity ${index + 1}`, "RUNNER"),
@@ -406,7 +416,6 @@ const provider = createServer(async (request, response) => {
                 ? previousAgent(messages, "Runner")
                 : "panel-nonexistent-agent",
             message: "Retain this message and continue the current task.",
-            mode: "background",
           },
         ],
       ];
@@ -419,7 +428,6 @@ const provider = createServer(async (request, response) => {
             agent_id: previousAgent(messages, "Reader"),
             message:
               "PANEL_CHILD_FOLLOWUP\nConfirm retained history in a second execution.",
-            mode: "background",
           },
         ],
       ];

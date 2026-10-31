@@ -12,7 +12,7 @@ import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
 } from "ohbaby-llm";
-import type { ModelMessage, LLMClientInstance } from "ohbaby-llm";
+import type { LLMClientInstance } from "ohbaby-llm";
 import { createBus, type BusInstance } from "../bus/index.js";
 import { CommandsEvent } from "../commands/index.js";
 import {
@@ -590,176 +590,56 @@ function toolMetadataFromContent(
   }
 }
 
-function subagentSessionIdFromMessages(
-  messages: readonly ModelMessage[],
-): string | undefined {
-  for (const message of messages) {
-    if (message.role !== "tool" || typeof message.content !== "string") {
-      continue;
-    }
-    try {
-      const payload = JSON.parse(message.content) as {
-        readonly metadata?: {
-          readonly subagent?: {
-            readonly sessionId?: unknown;
-          };
-        };
-      };
-      const sessionId = payload.metadata?.subagent?.sessionId;
-      if (typeof sessionId === "string") {
-        return sessionId;
-      }
-    } catch {
-      const metadata = toolMetadataFromContent(message.content);
-      const sessionId = metadata?.sessionId;
-      if (typeof sessionId === "string") {
-        return sessionId;
-      }
-    }
-  }
-  return undefined;
-}
-
-function subagentIdFromMessages(
-  messages: readonly ModelMessage[],
-): string | undefined {
-  for (const message of messages) {
-    if (message.role !== "tool" || typeof message.content !== "string") {
-      continue;
-    }
-    try {
-      const payload = JSON.parse(message.content) as {
-        readonly metadata?: {
-          readonly subagent?: {
-            readonly item?: {
-              readonly subagentId?: unknown;
-            };
-          };
-        };
-      };
-      const subagentId = payload.metadata?.subagent?.item?.subagentId;
-      if (typeof subagentId === "string") {
-        return subagentId;
-      }
-    } catch {
-      const metadata = toolMetadataFromContent(message.content);
-      const subagentId = metadata?.subagentId;
-      if (typeof subagentId === "string") {
-        return subagentId;
-      }
-      const match = /^subagent_id:\s*(\S+)/m.exec(message.content);
-      if (match?.[1]) {
-        return match[1];
-      }
-    }
-  }
-  return undefined;
-}
-
 function isExploreSubagentRequest(request: InterfaceProviderRequest): boolean {
   return JSON.stringify(request.messages).includes("Task: explore");
 }
 
-function createResumableTaskFakeLLMClient(
+function isChildRequest(request: InterfaceProviderRequest): boolean {
+  return JSON.stringify(request.messages).includes("<subagent_base>");
+}
+
+/** Agents run in the background (D54), so parent and child requests interleave. */
+function createDelegatingFakeLLMClient(
+  batches: {
+    readonly parent: readonly (readonly InterfaceProviderStreamEvent[])[];
+    readonly child: readonly (readonly InterfaceProviderStreamEvent[])[];
+  },
   requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
-  let lastSubagentSessionId: string | undefined;
+  const idle = [{ textDelta: "parent done", finishReason: "stop" as const }];
+  const parent = createSequentialFakeLLMClient(
+    [...batches.parent, idle, idle, idle],
+    requests,
+  );
+  const child = createSequentialFakeLLMClient(batches.child, requests);
   return {
+    ...parent,
     provider: {
-      id: "fake",
-      kind: "openai-compatible",
-      client: { kind: "fake" },
-      streamResponse(
-        request: InterfaceProviderRequest,
-      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
-        if (isTitleGenerationRequest(request)) {
-          return Promise.resolve(createTitleProviderStream(request));
-        }
-        requests.push(request);
-        const requestText = JSON.stringify(request.messages);
-        if (isExploreSubagentRequest(request)) {
-          const output = requestText.includes("Use the same child session")
-            ? "child used prior auth.ts"
-            : "child found auth.ts";
-          return Promise.resolve(
-            createProviderStream([{ textDelta: output, finishReason: "stop" }]),
-          );
-        }
-
-        const lastText = lastRequestMessageText(request);
-        if (lastText.includes("Delegate auth exploration")) {
-          return Promise.resolve(
-            createProviderStream([
-              subagentRunToolCallEvent({
-                callId: "call_subagent_first",
-                description: "Explore auth",
-                prompt: "Find auth files",
-              }),
-            ]),
-          );
-        }
-        if (lastText.includes("Continue the same exploration")) {
-          const subagentId =
-            subagentIdFromMessages(request.messages) ?? lastSubagentSessionId;
-          if (!subagentId) {
-            return Promise.reject(
-              new Error("Expected previous subagent id in parent context"),
-            );
-          }
-          return Promise.resolve(
-            createProviderStream([
-              subagentRunToolCallEvent({
-                callId: "call_subagent_resume",
-                description: "Resume auth",
-                prompt: "Use the same child session",
-                subagentId,
-              }),
-            ]),
-          );
-        }
-        if (lastText.includes("child found auth.ts")) {
-          lastSubagentSessionId =
-            subagentIdFromMessages(request.messages) ?? lastSubagentSessionId;
-          return Promise.resolve(
-            createProviderStream([
-              { textDelta: "parent saw child 1", finishReason: "stop" },
-            ]),
-          );
-        }
-        if (lastText.includes("child used prior auth.ts")) {
-          return Promise.resolve(
-            createProviderStream([
-              { textDelta: "parent saw child 2", finishReason: "stop" },
-            ]),
-          );
-        }
-        return Promise.reject(new Error("No fake LLM response configured"));
-      },
-      isAbortError(): boolean {
-        return false;
-      },
-    },
-    config: {
-      provider: "fake",
-      model: "fake-model",
-      modelProfiles: [
-        {
-          model: "fake-model",
-          contextWindowTokens: 128000,
-          reasoningCapabilities: {
-            mode: "none",
-            wire: "none",
-            supportsDisabled: true,
-          },
-        },
-      ],
-      apiKeyEnv: "FAKE_API_KEY",
-      baseUrl: "https://example.invalid/v1",
-      interfaceProvider: "openai-compatible",
-      temperature: 0,
-      maxTokens: 128,
+      ...parent.provider,
+      streamResponse: (request) =>
+        (isChildRequest(request) ? child : parent).provider.streamResponse(
+          request,
+        ),
     },
   };
+}
+
+async function waitForRequest(
+  requests: readonly InterfaceProviderRequest[],
+  matches: (request: InterfaceProviderRequest) => boolean,
+  label: string,
+): Promise<InterfaceProviderRequest> {
+  return withTimeout(
+    (async (): Promise<InterfaceProviderRequest> => {
+      for (;;) {
+        const found = requests.find(matches);
+        if (found) return found;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    })(),
+    2_000,
+    label,
+  );
 }
 
 function isGenericSubagentRequest(request: InterfaceProviderRequest): boolean {
@@ -1243,7 +1123,6 @@ function writeToolCallEvent(input: {
 function subagentRunToolCallEvent(input: {
   readonly callId: string;
   readonly description?: string;
-  readonly mode?: "foreground" | "background";
   readonly name?: string;
   readonly omitRole?: boolean;
   readonly prompt: string;
@@ -1255,7 +1134,6 @@ function subagentRunToolCallEvent(input: {
       ? {
           action: "spawn",
           description: input.description,
-          mode: input.mode ?? "foreground",
           name: input.name,
           prompt: input.prompt,
         }
@@ -1263,7 +1141,6 @@ function subagentRunToolCallEvent(input: {
           action: "send",
           agent_id: input.subagentId,
           message: input.prompt,
-          mode: input.mode ?? "foreground",
         };
   if (input.omitRole !== true && input.subagentId === undefined) {
     argumentsPayload.role = input.role ?? "explore";
@@ -4478,67 +4355,38 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("runs foreground subagents in isolated resumable child sessions with child history", async () => {
-    const requests: InterfaceProviderRequest[] = [];
-    const client = createInProcessUiBackendClient({
-      llmClient: createResumableTaskFakeLLMClient(requests),
-    });
-
-    await client.submitPromptAndWait("Delegate auth exploration");
-    await client.submitPromptAndWait("Continue the same exploration", {
-      sessionId: "session_1",
-    });
-
-    expect(requests).toHaveLength(6);
-    const firstChildText = JSON.stringify(requests[1]?.messages);
-    expect(firstChildText).toContain("Task: explore");
-    expect(firstChildText).toContain("<subagent_base>");
-    expect(firstChildText).toContain("Find auth files");
-    expect(firstChildText).not.toContain("Delegate auth exploration");
-
-    const resumedChildText = JSON.stringify(requests[4]?.messages);
-    expect(resumedChildText).toContain("Task: explore");
-    expect(resumedChildText).toContain("Find auth files");
-    expect(resumedChildText).toContain("child found auth.ts");
-    expect(resumedChildText).toContain("Use the same child session");
-    expect(resumedChildText).not.toContain("Delegate auth exploration");
-    expect(resumedChildText).not.toContain("Continue the same exploration");
-    expect(resumedChildText).not.toContain("parent saw child 1");
-
-    const parentToolResultText = JSON.stringify(requests[2]?.messages);
-    const childSessionId = subagentSessionIdFromMessages(
-      requests[2]?.messages ?? [],
-    );
-    expect(childSessionId).toMatch(/^session_/);
-    expect(parentToolResultText).toContain(childSessionId);
-    expect(parentToolResultText).toContain("child found auth.ts");
-  });
-
   it("defaults omitted subagent role to generic and keeps display metadata out of child context", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
-      llmClient: createSequentialFakeLLMClient(
-        [
-          [
-            subagentRunToolCallEvent({
-              callId: "call_subagent_generic",
-              description: "AI Events Researcher",
-              name: "events-scout",
-              omitRole: true,
-              prompt: "Inspect event marker files.",
-            }),
+      llmClient: createDelegatingFakeLLMClient(
+        {
+          parent: [
+            [
+              subagentRunToolCallEvent({
+                callId: "call_subagent_generic",
+                description: "AI Events Researcher",
+                name: "events-scout",
+                omitRole: true,
+                prompt: "Inspect event marker files.",
+              }),
+            ],
           ],
-          [{ textDelta: "generic child done", finishReason: "stop" }],
-          [{ textDelta: "parent saw generic child", finishReason: "stop" }],
-        ],
+          child: [[{ textDelta: "generic child done", finishReason: "stop" }]],
+        },
         requests,
       ),
     });
 
     await client.submitPromptAndWait("Delegate event research");
+    await waitForRequest(
+      requests,
+      (request) =>
+        !isChildRequest(request) &&
+        JSON.stringify(request.messages).includes("generic child done"),
+      "parent did not receive the background result",
+    );
 
-    expect(requests).toHaveLength(3);
-    const childText = JSON.stringify(requests[1]?.messages);
+    const childText = JSON.stringify(requests.find(isChildRequest)?.messages);
     expect(childText).toContain("Task: generic");
     expect(childText).toContain("Inspect event marker files.");
     expect(childText).not.toContain("AI Events Researcher");
@@ -4555,17 +4403,12 @@ describe("createInProcessUiBackendClient", () => {
     });
     expect(child.displayName).toBe("events-scout");
 
-    const parentToolMessageContent = requests[2]?.messages.at(-1)?.content;
-    const parentToolContent =
-      typeof parentToolMessageContent === "string"
-        ? parentToolMessageContent
-        : "";
-    expect(toolMetadataFromContent(parentToolContent)).toMatchObject({
-      description: "AI Events Researcher",
-      name: "events-scout",
-      role: "generic",
-      success: true,
-    });
+    const receipt = requests
+      .filter((request) => !isChildRequest(request))[1]
+      ?.messages.at(-1)?.content;
+    expect(
+      toolMetadataFromContent(typeof receipt === "string" ? receipt : ""),
+    ).toMatchObject({ action: "spawn", mode: "background", started: true });
   });
 
   it("returns invalid subagent continuation errors to the parent without creating a child session", async () => {
@@ -4655,25 +4498,31 @@ describe("createInProcessUiBackendClient", () => {
     });
     const client = createInProcessUiBackendClient({
       agentManager: new AgentManager({ registry }),
-      llmClient: createSequentialFakeLLMClient(
-        [
-          [
-            subagentRunToolCallEvent({
-              callId: "call_subagent_configured_child",
-              description: "Explore configured prompt",
-              prompt: "Inspect configured child prompt",
-            }),
+      llmClient: createDelegatingFakeLLMClient(
+        {
+          parent: [
+            [
+              subagentRunToolCallEvent({
+                callId: "call_subagent_configured_child",
+                description: "Explore configured prompt",
+                prompt: "Inspect configured child prompt",
+              }),
+            ],
           ],
-          [{ textDelta: "configured child done", finishReason: "stop" }],
-          [{ textDelta: "parent saw configured child", finishReason: "stop" }],
-        ],
+          child: [
+            [{ textDelta: "configured child done", finishReason: "stop" }],
+          ],
+        },
         requests,
       ),
     });
 
     await client.submitPromptAndWait("Delegate with configured child prompt");
 
-    const childText = JSON.stringify(requests[1]?.messages);
+    const childText = JSON.stringify(
+      (await waitForRequest(requests, isChildRequest, "child did not start"))
+        .messages,
+    );
     expect(childText).toContain("Task: explore");
     expect(childText).toContain("<agent_prompt_addon>");
     expect(childText).toContain("Use the configured child inspection rubric.");
@@ -4861,77 +4710,47 @@ describe("createInProcessUiBackendClient", () => {
     const agentManager = new AgentManager({ registry });
     const client = createInProcessUiBackendClient({
       agentManager,
-      llmClient: createSequentialFakeLLMClient(
-        [
-          [
-            subagentRunToolCallEvent({
-              callId: "call_subagent_short",
-              description: "Short max steps",
-              prompt: "List once and stop",
-              role: "generic",
-            }),
+      llmClient: createDelegatingFakeLLMClient(
+        {
+          parent: [
+            [
+              subagentRunToolCallEvent({
+                callId: "call_subagent_short",
+                description: "Short max steps",
+                prompt: "List once and stop",
+                role: "generic",
+              }),
+            ],
           ],
-          [
-            listToolCallEvent({
-              callId: "call_child_list",
-              path: "packages/ohbaby-agent/src/tools",
-            }),
+          child: [
+            [
+              listToolCallEvent({
+                callId: "call_child_list",
+                path: "packages/ohbaby-agent/src/tools",
+              }),
+            ],
           ],
-          [{ textDelta: "parent saw max steps bridge", finishReason: "stop" }],
-        ],
+        },
         requests,
       ),
     });
 
     await client.submitPromptAndWait("Delegate to a one step child");
 
-    expect(requests).toHaveLength(3);
-    const parentToolMessage = requests[2]?.messages.at(-1);
-    const parentToolContent =
-      typeof parentToolMessage?.content === "string"
-        ? parentToolMessage.content
-        : "";
-    expect(parentToolContent).toContain(
-      "Max steps reached and finalization response still requested tools.",
+    await waitForRequest(
+      requests,
+      (request) =>
+        !isChildRequest(request) &&
+        JSON.stringify(request.messages).includes(
+          "Max steps reached and finalization response still requested tools.",
+        ),
+      "parent did not receive the max-steps failure",
     );
-    expect(toolMetadataFromContent(parentToolContent)).toMatchObject({
-      success: false,
-    });
-  });
-
-  it("cancels an active foreground subagent when the parent prompt is aborted", async () => {
-    const requests: InterfaceProviderRequest[] = [];
-    const childStarted = createDeferred<AbortSignal | undefined>();
-    const runLedger = createInMemoryRunLedger();
-    const client = createInProcessUiBackendClient({
-      createRunId: (() => {
-        let nextRun = 1;
-        return (): string => {
-          const runId = `run_${String(nextRun)}`;
-          nextRun += 1;
-          return runId;
-        };
-      })(),
-      llmClient: createAbortableSubagentLLMClient(requests, childStarted),
-      runLedger,
-    });
-
-    const run = client.submitPromptAndWait("Delegate long work");
-    const childSignal = await withTimeout(
-      childStarted.promise,
-      1_000,
-      "child subagent did not start",
-    );
-
-    await client.abortRun("run_1");
-
-    expect(childSignal?.aborted).toBe(true);
-    await expect(
-      withTimeout(run, 1_000, "parent did not abort"),
-    ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
-    const childRun = await runLedger.get("run_2");
-    expect(childRun).toMatchObject({ status: "interrupted" });
-    expect(childRun?.sessionId).toMatch(/^session_/);
+    expect(requests.filter(isChildRequest)).toHaveLength(1);
+    expect(
+      (await client.listSubagentExecutions({ rootSessionId: "session_1" }))
+        .executions[0].status,
+    ).toBe("failed");
   });
 
   it("preserves an active background subagent when the parent prompt is aborted", async () => {
@@ -11419,7 +11238,6 @@ it.each([false, true])(
               const calls = [
                 subagentRunToolCallEvent({
                   callId: "wave-child",
-                  mode: "background",
                   prompt: "Return the wave finding",
                 }),
                 writeToolCallEvent({
@@ -11643,7 +11461,6 @@ it.each([false, true])(
                   ? [
                       subagentRunToolCallEvent({
                         callId: "bounded-child",
-                        mode: "background",
                         role: "generic",
                         prompt: "Finish within one step",
                       }),
@@ -11799,7 +11616,7 @@ describe("improve-4 durable Stop handoff", () => {
     "blocks B on root terminal write failure and %s repairs without rerunning A",
     async (repair) => {
       const requests: InterfaceProviderRequest[] = [];
-      const childStarted = createDeferred<AbortSignal | undefined>();
+      const aStarted = createDeferred<undefined>();
       const ledger = createInMemoryRunLedger();
       const original = ledger.markRunInterrupted.bind(ledger);
       let writable = false;
@@ -11809,18 +11626,21 @@ describe("improve-4 durable Stop handoff", () => {
         return original(runId, reason, terminal);
       };
       let runNumber = 0;
-      const llm = createAbortableSubagentLLMClient(requests, childStarted);
+      // A's own model request stays open until Stop aborts it.
+      const llm = createAbortableSubagentLLMClient(requests, createDeferred());
       const provider = llm.provider.streamResponse.bind(llm.provider);
       llm.provider.streamResponse = (request) => {
-        if (requests.length >= 2 && !isTitleGenerationRequest(request)) {
-          requests.push(request);
-          return Promise.resolve(
-            createProviderStream([
-              { textDelta: "B completed", finishReason: "stop" },
-            ]),
-          );
+        if (isTitleGenerationRequest(request)) return provider(request);
+        requests.push(request);
+        if (requests.length === 1) {
+          aStarted.resolve(undefined);
+          return Promise.resolve(createAbortableProviderStream(request.signal));
         }
-        return provider(request);
+        return Promise.resolve(
+          createProviderStream([
+            { textDelta: "B completed", finishReason: "stop" },
+          ]),
+        );
       };
       const client = createInProcessUiBackendClient({
         runLedger: ledger,
@@ -11831,7 +11651,7 @@ describe("improve-4 durable Stop handoff", () => {
         const a = await client.submitPromptAccepted("Delegate long work", {
           clientRequestId: "stop-a",
         });
-        await withTimeout(childStarted.promise, 1000, "child did not start");
+        await withTimeout(aStarted.promise, 1000, "A did not start");
         const b = await client.submitPromptAccepted("B", {
           sessionId: a.sessionId,
           clientRequestId: "stop-b",
@@ -11846,7 +11666,7 @@ describe("improve-4 durable Stop handoff", () => {
           "Stop must expose persistence failure",
         );
         expect(failed).toBeInstanceOf(Error);
-        expect(requests).toHaveLength(2);
+        expect(requests).toHaveLength(1);
         expect(
           (await client.getSnapshot()).prompts?.find(
             (prompt) => prompt.promptId === b.promptId,
@@ -11861,7 +11681,7 @@ describe("improve-4 durable Stop handoff", () => {
           expect(await ledger.get("run_1")).toMatchObject({
             status: "interrupted",
           });
-          expect(requests).toHaveLength(2);
+          expect(requests).toHaveLength(1);
           return;
         }
         await client.initializeSession(a.sessionId);
@@ -11871,7 +11691,7 @@ describe("improve-4 durable Stop handoff", () => {
           "B did not resume",
         );
         expect(result.prompt.status).toBe("succeeded");
-        expect(requests).toHaveLength(3);
+        expect(requests).toHaveLength(2);
         expect(await ledger.get("run_1")).toMatchObject({
           status: "interrupted",
         });

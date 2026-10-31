@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { AgentManager } from "../../agents/index.js";
 import {
@@ -52,7 +52,11 @@ function fakeLlmClient(
                 finishReason: "stop" as const,
                 textDelta: "child result",
               });
-            } else if (messages.includes("child result")) {
+            } else if (
+              messages.includes("child result") ||
+              // The background spawn receipt; the result arrives later.
+              JSON.stringify(request.messages.at(-1)).includes("execution_id")
+            ) {
               yield await Promise.resolve({
                 finishReason: "stop" as const,
                 textDelta: "parent done",
@@ -70,7 +74,6 @@ function fakeLlmClient(
                       description: "child",
                       role: "explore",
                       prompt: "Inspect this task",
-                      mode: "foreground",
                     }),
                   },
                 ],
@@ -126,11 +129,13 @@ it("pins child provider requests to the parent's active RunModel across session 
       sessionId: "parent-a",
     });
     for await (const event of first.events) void event;
-    expect(
-      aRequests.some((request) =>
-        JSON.stringify(request.messages).includes("Task: explore"),
-      ),
-    ).toBe(true);
+    await vi.waitFor(() => {
+      expect(
+        aRequests.some((request) =>
+          JSON.stringify(request.messages).includes("Task: explore"),
+        ),
+      ).toBe(true);
+    });
     expect(bRequests).toHaveLength(0);
     const second = await runtime.startSession({
       runModel: b,
@@ -140,11 +145,13 @@ it("pins child provider requests to the parent's active RunModel across session 
       sessionId: "parent-b",
     });
     for await (const event of second.events) void event;
-    expect(
-      bRequests.some((request) =>
-        JSON.stringify(request.messages).includes("Task: explore"),
-      ),
-    ).toBe(true);
+    await vi.waitFor(() => {
+      expect(
+        bRequests.some((request) =>
+          JSON.stringify(request.messages).includes("Task: explore"),
+        ),
+      ).toBe(true);
+    });
   } finally {
     await runtime.dispose();
   }

@@ -35,6 +35,7 @@ export interface UiSubagentExecution {
   readonly updatedAt: number;
   readonly terminalReason?: string;
   readonly resultStored: boolean;
+  /** foreground is a historical delivery state; new executions deliver in the background. */
   readonly delivery:
     | "none"
     | "foreground"

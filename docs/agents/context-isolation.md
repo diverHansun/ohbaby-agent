@@ -6,7 +6,7 @@
 
 主代理通过 `agent spawn` 传初始任务，通过 `agent send` 传后续任务或运行中消息。新执行由 `core/agents.runAgent` 写入初始输入；运行中消息由持久输入通道写入目标 child run，并在下一请求读取。一次执行固定其模型；空闲实例的新执行重新解析当前会话模型。
 
-前台结果经工具返回；后台结果进入所属主会话的 pending delivery。主代理只接收结果或结果文件路径，完整历史通过 `agent monitor` 按保存记录读取。UI 详情和模型历史读取各自遵守权限边界。
+新执行统一后台运行，工具只返回受理回执，最终结果进入所属主会话的 pending delivery。主代理只接收结果或结果文件路径，完整历史通过 `agent monitor` 按保存记录读取。UI 详情和模型历史读取各自遵守权限边界。旧 foreground 记录保留读取兼容，不再提供前台执行入口（D54）。
 
 shell owner 使用实际 child run。主轮次完成或 Stop 不取消后台执行；stop 只取消当前 child execution，close 清理整个实例。context 的销毁等待必要资源退出确认，兄弟 scope 不受影响。运行名额按实际执行计数，与实例数量及自然遗留后台 shell 分开。
 

@@ -238,7 +238,6 @@ it.each([
         requestId: "goal-child",
         prompt: "goal child",
         role: "explore",
-        mode: "background",
       });
       const user = await host.run({
         parentSessionId: parent.id,
@@ -247,7 +246,6 @@ it.each([
         requestId: "user-child",
         prompt: "user child",
         role: "explore",
-        mode: "background",
       });
       await vi.waitFor(() => {
         expect(signals.size).toBe(2);

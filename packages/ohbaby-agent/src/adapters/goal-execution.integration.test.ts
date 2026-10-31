@@ -967,11 +967,13 @@ it.each([
           yield tool("agent", {
             action: "spawn",
             role: "explore",
-            mode: "foreground",
             prompt: "Explore the authorization fixture",
             description: "goal mutation authorization",
           });
+        // The background child keeps the Goal active until its result wakes the parent.
         else if (parentSteps === 3)
+          yield { textDelta: "Waiting for the child", finishReason: "stop" };
+        else if (parentSteps === 4)
           yield tool("UpdateGoal", { status: "complete" });
         else yield { textDelta: "Parent finished", finishReason: "stop" };
       },
@@ -989,8 +991,8 @@ it.each([
       if (!(service instanceof GoalService))
         throw new Error("Expected live goal service");
       const activeRuns = await ledger.getActiveRuns();
+      // The parent turn may already have ended; its background child is still active.
       const child = activeRuns.find((run) => run.sessionId !== "one");
-      expect(activeRuns).toHaveLength(2);
       if (!child) throw new Error("Expected active child run");
       const goalTools = createGoalTools(service);
       const mutation = goalTools.find((entry) => entry.name === name);
@@ -1017,7 +1019,9 @@ it.each([
       }
       finishChild.resolve();
       await client.waitForPrompt(user.promptId);
-      expect((await persistence.list("one")).at(-1)?.type).toBe("clear");
+      await vi.waitFor(async () => {
+        expect((await persistence.list("one")).at(-1)?.type).toBe("clear");
+      });
     } finally {
       finishChild.resolve();
     }
@@ -1502,22 +1506,28 @@ it("G22 records only admitted parent usage while a child and independent summary
           ...tool("agent", {
             action: "spawn",
             role: "explore",
-            mode: "foreground",
             prompt: "Explore the isolated fixture",
             description: "usage isolation",
           }),
           tokenUsage: usage(10, 0),
         };
+      // The turn ends while the child works; its result wakes the next turn.
       else if (primarySteps === 2)
         yield {
-          ...tool("UpdateGoal", { status: "complete" }),
+          textDelta: "Waiting for the child",
+          finishReason: "stop",
           tokenUsage: usage(20, 3),
+        };
+      else if (primarySteps === 3)
+        yield {
+          ...tool("UpdateGoal", { status: "complete" }),
+          tokenUsage: usage(30, 4),
         };
       else
         yield {
           textDelta: "Parent finished",
           finishReason: "stop",
-          tokenUsage: usage(30, 4),
+          tokenUsage: usage(40, 5),
         };
     },
     { bus, messageManager },
@@ -1534,21 +1544,23 @@ it("G22 records only admitted parent usage while a child and independent summary
     });
     expect(childSteps).toBe(1);
     expect(summarySteps).toBe(1);
-    expect(primarySteps).toBe(3);
+    expect(primarySteps).toBe(4);
     expect(
       (await persistence.list("one"))
         .filter((record) => record.tokensUsed !== undefined)
         .at(-1),
     ).toMatchObject({
-      tokensUsed: 60,
-      cachedTokensUsed: 7,
+      // Only the parent's four steps: 10 + 20 + 30 + 40, cached 3 + 4 + 5.
+      tokensUsed: 100,
+      cachedTokensUsed: 12,
       usageIncomplete: false,
     });
     expect(
       (await persistence.list("one"))
         .filter((record) => record.turnsUsed !== undefined)
         .map((record) => record.turnsUsed),
-    ).toEqual([1]);
+      // The waiting turn and the turn the child's result woke.
+    ).toEqual([1, 2]);
   } finally {
     finishChild.resolve();
   }

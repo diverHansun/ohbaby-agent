@@ -30,7 +30,6 @@ type WireRequest = Record<string, unknown>;
 const delegateArguments = JSON.stringify({
   action: "spawn",
   role: "explore",
-  mode: "foreground",
   prompt: "Inspect the delegated task and report done.",
 });
 
@@ -384,11 +383,22 @@ describe.each(protocols)(
             status: "succeeded",
             finalResponse: "done",
           });
+          // The background child sends its own request after the receipt.
+          if (index === 0)
+            await vi.waitFor(() => {
+              expect(requests).toHaveLength(3);
+            });
         }
         expect(requests).toHaveLength(4);
         const systems = requests.map((body) => systemText(protocol, body));
+        const childIndex = systems.findIndex((system) =>
+          system.includes("<subagent_base>"),
+        );
+        const parents = systems.filter((_, index) => index !== childIndex);
         for (const [index, system] of systems.entries()) {
-          const version = index === 0 || index === 2 ? 1 : 2;
+          // The first run keeps its V1 snapshot; the child and later runs read V2.
+          const version =
+            index !== childIndex && parents.indexOf(system) < 2 ? 1 : 2;
           expect(system.split(`PROJECT_RULE_V${String(version)}`)).toHaveLength(
             2,
           );
@@ -403,13 +413,14 @@ describe.each(protocols)(
           expect(system).not.toContain("WRONG_WORKDIR_RULE");
           expect(system).not.toContain("<memory>");
         }
-        expect(systems[2]).toBe(systems[0]);
-        expect(systems[3]).not.toBe(systems[0]);
-        expect(systems[1]).toContain("<subagent_base>");
-        expect(systems[1]).toContain("Task: explore");
-        expect(systems[1]).not.toContain("You are Lychee");
-        expect(systems[1]).not.toContain("Subagent roles for agent");
-        expect(JSON.stringify(requests[1])).toContain(
+        expect(parents).toHaveLength(3);
+        expect(parents[1]).toBe(parents[0]);
+        expect(parents[2]).not.toBe(parents[0]);
+        const child = systems[childIndex] ?? "";
+        expect(child).toContain("Task: explore");
+        expect(child).not.toContain("You are Lychee");
+        expect(child).not.toContain("Subagent roles for agent");
+        expect(JSON.stringify(requests[childIndex])).toContain(
           JSON.stringify(workdir).slice(1, -1),
         );
       } finally {
