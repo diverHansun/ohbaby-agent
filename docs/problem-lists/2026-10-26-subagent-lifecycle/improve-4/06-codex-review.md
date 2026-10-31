@@ -67,17 +67,17 @@
 
 使用编译后的 CLI / Web、真实 SDK、REST / SSE、SQLite 和工具执行；模型响应由场景脚本提供，不使用线上模型。第一轮同时走了负面场景和窄屏；完整验收随后在独立环境重跑。
 
-第一轮误用全局 New chat，进入默认工作区，Other reader 找不到 fixture.txt，脚本提供方断言失败。该轮以 `quit` 清理，`verified:false`，不能作为完整通过证据。第二轮使用 **New chat in workspace**，正确完成全部主场景，终端输入 `finish` 后得到 `backend-pass`、`cleanup-pass`、`verified:true`，`failures=[]`。原始结果见 [完整场景日志](evidence/codex-panel-run.log)。
+第一轮误用全局 New chat，进入默认工作区，Other reader 找不到 fixture.txt，脚本提供方断言失败。该轮以 `quit` 清理，`verified:false`，不能作为完整通过证据。第二轮使用 **New chat in workspace**，正确完成全部主场景，终端输入 `finish` 后得到 `backend-pass`、`cleanup-pass`、`verified:true`，`failures=[]`。原始结果见 完整场景日志（测试附件已清理）。
 
-- [Reader 与仍可操作的审批](evidence/codex-reader-approval.png)
-- [前台工具未结束时的详情入口](evidence/codex-foreground-pending.png)
-- [关闭后刷新，工具卡保留、入口撤下](evidence/codex-closed-refresh.png)
-- [满额拒绝不生成入口](evidence/codex-capacity.png)
-- [390×844 的 Runner 详情](evidence/codex-mobile-runner.png)
-- [新会话只显示 Other reader](evidence/codex-other-session.png)
-- [通用 Web 刷新后无重复回复](evidence/codex-final-compiled-refresh.png)，[最终 E01–E05 日志](evidence/codex-final-compiled-web-run.log)
+- Reader 与仍可操作的审批（测试附件已清理）
+- 前台工具未结束时的详情入口（测试附件已清理）
+- 关闭后刷新，工具卡保留、入口撤下（测试附件已清理）
+- 满额拒绝不生成入口（测试附件已清理）
+- 390×844 的 Runner 详情（测试附件已清理）
+- 新会话只显示 Other reader（测试附件已清理）
+- 通用 Web 刷新后无重复回复（测试附件已清理），最终 E01–E05 日志（测试附件已清理）
 
-R4 修复后再次构建并复验：同 Tab 返回列表的 `scrollTop=2180` 不变；创建列表 Tab B 和 Runner 详情 Tab A，关闭 A 后剩一个 Tab、零详情，Runner 仍 Running。此时从脚本输入 `tick`，一个后台流收到 `PANEL_STREAM_TICK_1`；在 B 重开 Runner，能看到该标记，再用 UI Stop 停止。之后完成 Reader 续跑、关闭、刷新和新会话隔离，`finish` 再次得到 `backend-pass`、`cleanup-pass`、`verified:true`、`failures=[]`。见 [关详情 Tab 后的列表](evidence/codex-r4-closed-tab.png)、[重开后仍在运行并读到新内容](evidence/codex-r4-reopened-stream.png)、[最终场景日志](evidence/codex-r4-panel-run.log)。最终浏览器控制台没有 error / warn。
+R4 修复后再次构建并复验：同 Tab 返回列表的 `scrollTop=2180` 不变；创建列表 Tab B 和 Runner 详情 Tab A，关闭 A 后剩一个 Tab、零详情，Runner 仍 Running。此时从脚本输入 `tick`，一个后台流收到 `PANEL_STREAM_TICK_1`；在 B 重开 Runner，能看到该标记，再用 UI Stop 停止。之后完成 Reader 续跑、关闭、刷新和新会话隔离，`finish` 再次得到 `backend-pass`、`cleanup-pass`、`verified:true`、`failures=[]`。见 关详情 Tab 后的列表（测试附件已清理）、重开后仍在运行并读到新内容（测试附件已清理）、最终场景日志（测试附件已清理）。最终浏览器控制台没有 error / warn。
 
 默认宽屏为 1280×720；另走查 820×800 和 390×844。窄屏侧栏全宽展示，正文正常换行；关闭聊天抽屉后可操作列表与详情。验收结束恢复默认视口。
 

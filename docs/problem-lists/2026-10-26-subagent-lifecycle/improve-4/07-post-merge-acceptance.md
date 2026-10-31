@@ -35,9 +35,9 @@
 
 改动只在 `apps/ohbaby-web` 和设计文档 03（§4.3 消息、§4.9 列表）。
 
-![修改前：入口和工具卡并列，Approval 写 Running](evidence/post-merge-before-entries.jpg)
-![修改后：入口挂在卡片下，状态图标统一，Approval 显示 Needs approval](evidence/post-merge-entries-desktop.jpg)
-![390×844 下的入口](evidence/post-merge-entries-mobile.jpg)
+修改前：入口和工具卡并列，Approval 写 Running（测试附件已清理）
+修改后：入口挂在卡片下，状态图标统一，Approval 显示 Needs approval（测试附件已清理）
+390×844 下的入口（测试附件已清理）
 
 ## 修改后复验
 

@@ -28,12 +28,12 @@
 
 | 看了什么 | 结果 |
 | --- | --- |
-| `PANEL_START` 后的主会话 | 三个 agent 工具卡都在，每个下面一行入口：Reader（Completed）、Runner（Running）、Approval（Running）。审批浮层照常显示。![入口行](evidence/entry-rows.jpg) |
-| 点 Reader 的入口 | 右侧栏展开到 Subagents，详情标题 Reader、状态 Completed，定位到这次派遣（`From parent` 在顶部）。焦点在详情标题上。审批浮层还在，主会话没有被设为 `inert`，没有旧浮层。![入口打开右侧栏](evidence/entry-opens-panel.jpg) |
+| `PANEL_START` 后的主会话 | 三个 agent 工具卡都在，每个下面一行入口：Reader（Completed）、Runner（Running）、Approval（Running）。审批浮层照常显示。入口行（测试附件已清理） |
+| 点 Reader 的入口 | 右侧栏展开到 Subagents，详情标题 Reader、状态 Completed，定位到这次派遣（`From parent` 在顶部）。焦点在详情标题上。审批浮层还在，主会话没有被设为 `inert`，没有旧浮层。入口打开右侧栏（测试附件已清理） |
 | `PANEL_SEND_READER` 续跑 | 对空闲 Reader 的 send 启动了第二次执行，新入口标题是 “Reader”，不是写死的 “Subagent task” |
 | 两个 Reader 入口各点一次 | 点第二个：续跑那次的 `From parent` 出现在顶部附近（偏移 81px）；再点第一个：第一次派遣出现在顶部（偏移 12px）。详情一直开着，也能重新定位 |
 | 从入口打开 Runner 并停止 | Running → Interrupted，停止按钮消失 |
-| `PANEL_CLOSE_READER` | Reader 的两条入口都撤下，两张工具卡还在；Runner、Approval 的入口照常。![关闭后入口撤下](evidence/closed-entry-withdrawn.jpg) |
+| `PANEL_CLOSE_READER` | Reader 的两条入口都撤下，两张工具卡还在；Runner、Approval 的入口照常。关闭后入口撤下（测试附件已清理） |
 | **对抗性复查（04 §4.2 第 5 条）：** 刷新页面 | Reader 不出现在入口里，不出现在列表里，页面上也找不到它的任务说明 |
 | 新会话 `PANEL_OTHER_SESSION` | 只显示 Other reader 的入口和列表行，不带出上一个会话的实例 |
 | 脚本的 `finish` | `backend-pass`：Reader 两轮完成后关闭，Runner 被停止，Approval 完成，sentinel 正确，Other reader 属于另一个主会话。`cleanup-pass` 和 `verified: true` |

@@ -31,7 +31,7 @@
 
 依据：根 `CLAUDE.md` 的 KISS 原则；这是副作用触发范围过宽的正确性问题，不是格式或命名偏好。
 
-[浏览器证据](evidence/codex-postmerge-slash-scroll.png)
+浏览器证据（测试附件已清理）
 
 ## Spec
 
@@ -55,7 +55,7 @@
 
 最小修复：恢复区重发成功后，在仍属于当前会话的前提下触发与普通发送相同的跟随信号。复用现有状态即可；不要把队列编辑、重排或面板打开统一当成发送。补一个“向上阅读 → Resend 被接收 → 跟随新消息”的回归用例。
 
-[浏览器证据](evidence/codex-postmerge-resend-scroll.png)
+浏览器证据（测试附件已清理）
 
 ## 已有后端问题
 
@@ -69,7 +69,7 @@
 
 后续修复应在消息顺序约定内处理，不在 Web 中按文案识别和搬动提示。需要同时覆盖实时投影、刷新读取、主会话和子代理详情；还要考虑 reasoning 使用独立存储的情况，不能只看普通 text part 的顺序。
 
-[中断提示证据](evidence/codex-postmerge-interruption.png)
+中断提示证据（测试附件已清理）
 
 ## 端到端与视觉验收
 
@@ -102,7 +102,7 @@
 
 真实 read 返回 fixture 标记，工具卡 `phase=ended`、`outcome=success`。首轮与续聊回复刷新前后各 1 条，续聊用户消息刷新后 1 条，活动会话 URL 不变；页面和标题没有 runtime marker。后端核对 3 次请求的上下文键稳定、工具结果被模型请求消费。
 
-[刷新后的页面](evidence/codex-postmerge-compiled-refresh.png)
+刷新后的页面（测试附件已清理）
 
 ### UI 结论
 
@@ -118,11 +118,11 @@
 | 历史按钮是浏览器默认灰框 | 居中的细描边胶囊 | 与现有工具行一致；实际点击加载正常，保留 |
 | 普通发送不恢复跟随 | 新增发送信号 | 主路径有效，但 R5、R6 需要补齐触发边界 |
 
-![桌面入口、审批与详情](evidence/codex-postmerge-desktop.png)
+桌面入口、审批与详情（测试附件已清理）
 
-![390 px 窄屏入口与审批](evidence/codex-postmerge-mobile.png)
+390 px 窄屏入口与审批（测试附件已清理）
 
-[历史按钮与第二次派遣](evidence/codex-postmerge-history.png)
+历史按钮与第二次派遣（测试附件已清理）
 
 “运行中入口随 Total 折叠”仍是 07 已列出的产品取舍，本轮不改变。未把 10 px spinner 与 12 px 静态图标的轻微尺寸差异列为 P2，也没有因此要求新增抽象。
 
@@ -172,4 +172,4 @@ R5、R6 已修复，B5 仍然开着（后端消息排序，另行处理）。
 
 390 × 844 窄屏下没有横向溢出（页面宽度 390 px）。这次复验只走了上面三段，用 `quit` 结束。所以脚本输出 `cleanup-pass`，但整套场景的 `verified` 为 false，完整场景断言没有重跑。
 
-[R5 修复后](evidence/claude-r5-slash-keeps-position.jpg) · [R6 修复后](evidence/claude-r6-resend-follows.jpg)
+R5 修复后（测试附件已清理） · R6 修复后（测试附件已清理）

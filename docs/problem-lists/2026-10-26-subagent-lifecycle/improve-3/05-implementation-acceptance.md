@@ -132,9 +132,9 @@ Codex 的独立审查见 [06-codex-review.md](06-codex-review.md)，结论是 R1
 
   原有的“实例关闭后释放订阅”测试一开始失败，暴露出页面层 reader 在列表状态下仍挂着已关闭实例的订阅，已修复。
 - **浏览器复现（Codex 的场景脚本，编译产物 + 真实后端）：**
-  - **R1：** `PANEL_RUNNING` 后先在旧浮层看到 tick 1。打开右侧栏的 Runner 详情后旧浮层自动收起，右侧栏收到 tick 2。再从主会话打开旧浮层，右侧栏回到列表，旧浮层收到 tick 3。![R1 修复后](evidence/r1-fixed-sheet-owns-watch.jpg)
-  - **R2：** `PANEL_START` 后打开 Reader，滚到 `scrollTop=2465`（Reading checkpoint 11 附近），返回列表再打开，仍是 `2465`，内容高度都是 `11605`。审查时这里会跳回 `20`。![R2 修复后](evidence/r2-fixed-reading-restored.jpg)
-  - **R3：** 820×800，没有已开的 Tab，点顶栏开关：焦点在入口页第一项。按 Escape 关闭，焦点回到顶栏开关，主区不再是 `inert`。![R3 修复后](evidence/r3-fixed-narrow-focus.jpg)
+  - **R1：** `PANEL_RUNNING` 后先在旧浮层看到 tick 1。打开右侧栏的 Runner 详情后旧浮层自动收起，右侧栏收到 tick 2。再从主会话打开旧浮层，右侧栏回到列表，旧浮层收到 tick 3。R1 修复后（测试附件已清理）
+  - **R2：** `PANEL_START` 后打开 Reader，滚到 `scrollTop=2465`（Reading checkpoint 11 附近），返回列表再打开，仍是 `2465`，内容高度都是 `11605`。审查时这里会跳回 `20`。R2 修复后（测试附件已清理）
+  - **R3：** 820×800，没有已开的 Tab，点顶栏开关：焦点在入口页第一项。按 Escape 关闭，焦点回到顶栏开关，主区不再是 `inert`。R3 修复后（测试附件已清理）
 - **退出：** 场景脚本用 `quit` 退出，服务、端口和模型桩都清理了。`verified:false` 是因为没跑 `finish` 要求的全部核心场景，那些在 Codex 那轮已经通过。
 
 ### 行为变化

@@ -1,0 +1,73 @@
+# 9. 最终收尾：D54、Web 回归与发布检查
+
+日期：2026-10-31。执行与复审：Codex。
+
+**结论：本次范围通过，无未解决的 P1/P2。** D54 的所有新子代理执行统一后台运行；普通主会话 Stop 保留子代理。08 中的 R5、R6 和 B5 均已关闭。用户本轮明确要求检查后推送 main、清理临时分支，按此执行；旧文档中的“暂不 push”不是本轮的发布约束。
+
+## 范围
+
+- 起点：本地 `main=352971ed`，工作分支 `codex/postmerge-ui-review=6e561732`。复核 Claude 的 `8c3f681d` 审批样式和 `6e561732` 发送跟随修复，以及用户尚未提交的 D54、SDK 连接重试改动。
+- 补充最小修复：查询 slash 命令不触发滚动；中断事实在实时和持久化 UI 投影中排到正文之后；恢复模式迁移时遗漏的持久化读回断言。没有引入新前端协调器、队列或通用框架。
+- 同步当前权威文档、SDK 历史字段注释和验收表。保留历史决策与历轮 05–08，不把旧的前台验收结果改写成后台实现证据。
+- UI 沿用既有简洁布局、留白、弱分隔线和单一主操作；本轮没有扩大为视觉重设计。
+
+## Standards 复审
+
+| 项目 | 结论与处理 |
+| --- | --- |
+| D54 生命周期 | 通过。schema 不再暴露 mode；旧调用中的 background 可兼容，foreground 明确拒绝。新执行始终存为 background，旧 foreground 仅作历史读取。删除前台等待及主 Stop 向前台 child 传递的路径。 |
+| Stop 的职责 | 通过。普通主 Stop 只停止主 run 和自己的 shell；Goal 整体暂停、取消、预算终止按所属 root runs 清理，dispose 仍清理会话全部资源。Goal 中的普通用户 Stop 仍保留后台 child。 |
+| R5 残余问题 · P2，已修复 | Claude 的修复已覆盖面板型命令，但 `/status`、`/skills` 等透传查询仍触发 onSend。复现为：滚到历史上方 → 提交查询 → 页面打开结果面板但消息区滚到底部。现在只有接受了 prompt 的回执或成功的带参数 resume 才触发跟随；保留 generation 隔离迟到回执。回归测试修复前 6 项失败，修复后通过。 |
+| B5 · P2，已修复 | 主/子会话中断事实没有 sourceOrder，旧排序把它放到正文前。统一使用 metadata.kind 判断终止事实并排最后，普通部件顺序不变。覆盖主/子会话、有/无正文、reasoning 延迟存储、实时提交和持久化重读。新增 4 项修复前均失败，修复后通过。没有让 Web 识别提示文案。 |
+| SDK 网络重试 | 通过。识别 OpenAI、Anthropic SDK 的连接错误类型；上下文溢出和 abort 不被误重试。独立复核 4 个文件、90 项测试通过；作为单独提交处理。 |
+| 持久化覆盖 | 已补回。后台结果处理后 dispose client、关闭 SQLite，再打开新的 facade；验证只读历史、执行锚点、结果和 environment reminder。没有用同一个内存对象冒充恢复测试。 |
+
+独立后端、前端、契约/文档子代理完成复查。最终后端与前端只读复核均未发现剩余 P1/P2；中断排序实现亦由独立审查确认。根代理负责统一构建及浏览器操作，避免并行测试覆盖 dist。
+
+## Spec 与浏览器验收
+
+先完成全量测试、类型检查和构建，再运行真实编译产物。浏览器经过 Web → CLI/daemon → Host/SDK/SSE → SQLite → read/bash 工具；模型响应由本地 fixture 提供。
+
+| 检查 | 实测证据 |
+| --- | --- |
+| 主 Stop 保留子代理 | PANEL_START 后独立运行 PANEL_HOLD，排队并 Steer PANEL_FAIL，再 Stop run。只有 PARENT_HOLD 流关闭；tick 的 delivered=1，Runner 仍 Running 并显示 PANEL_STREAM_TICK_1。随后在详情 Stop 才结束 Runner。 |
+| 实例入口 | 运行中 send 返回 started:false，没有新入口；失败 send 只有工具错误；七个并发 spawn 得到六个 Running 实例和六条入口，第七个明确拒绝。 |
+| Reader 定位 | 列表重新打开前后 scrollTop 均约 7036 px；再次点击同一派遣入口回到约 20 px。第二轮入口定位到 FOLLOWUP；第一轮入口仍定位第一轮。 |
+| Tab 生命周期 | 两个 Subagents Tab，关闭当前详情 Tab 后剩余列表可重新打开 Runner，并收到 PANEL_STREAM_TICK_2。单 watch 的准确释放另由自动回归覆盖；浏览器结果不冒充服务端订阅计数。 |
+| R5、R6 | `/status`、`/skills` 不新增用户消息；skills 前后主流 scrollTop=0、scrollHeight=1768。旧阅读位置点击 Resend 后产生第二条 PANEL_FAIL 用户消息，距底部约 0.33 px。 |
+| B5 | 主 Stop 与子代理 Stop 后，Thought、正文、流式 tick 在前，中断提示在后。刷新重开 Runner 后顺序保持。 |
+| Close 与刷新 | Reader 关闭后详情退回列表、两个入口撤下；刷新后分别展开两组原工具记录，Reader 入口仍为 0，工具卡仍保留。 |
+| 会话隔离 | 在可见工作区导航创建新会话，确认欢迎页后发送 OTHER_SESSION；新会话列表只有自己的 Other reader。 |
+| 审批与布局 | 桌面双栏、390 px 窄屏均可查看审批问句、原始命令及 Allow once；窄屏可从详情返回主会话完成审批。没有遮挡、重叠或无法操作的主要控件。 |
+| 编译 Web E01–E05 | read 输出成功；续聊与刷新后 session 不变，两个最终答案与 followup 用户消息各 1 条，内部运行上下文未进入标题或消息。 |
+
+核心场景单独运行，脚本输出 `backend-pass`、`cleanup-pass`、`verified:true`，退出码 0。扩展场景用于 HOLD、重发、查询、多个 Tab 和满额检查，以 quit 清理，日志中的 verified:false 表示没有调用核心 finish，不能计为核心验证成功。扩展轮一度在未展开的侧栏点击新会话没有导航成功；展开侧栏、确认欢迎页后再发消息完成隔离检查，并在独立核心轮重新验证。没有修改脚本断言来接受误操作的数据。
+
+所有本轮测试 daemon、provider、端口和临时数据均已清理；浏览器临时 Tab 已关闭，视口覆盖已恢复。按用户补充要求，也清理本议题历轮验收目录内的 48 个截图、日志和文本附件，将文档引用改成文字说明；回归测试源码和验收结论保留。
+
+## 自动化结果
+
+| 命令 / 范围 | 结果 |
+| --- | --- |
+| pnpm test | **643 files passed，7540 passed，17 skipped，0 failed**；共 649 files / 7557 tests，耗时 224.28 秒。 |
+| pnpm typecheck | 通过。 |
+| pnpm build | 通过，包含 Web assets 复制进 CLI。 |
+| pnpm lint | 0 errors，109 warnings；未在收尾中扩展为全库 warning 清理。 |
+| pnpm format:check | 通过；两个既有 Web 测试文件仅格式调整。 |
+| pnpm test:smoke | 命令成功退出，4 files / 12 tests 全部因真实外部服务环境未启用而跳过；不算真实模型验证通过。 |
+| B5 定向验证 | 3 files / 39 tests 通过；reasoning 保存完成后的增强断言再次 4/4 通过。 |
+| Web 定向验证 | 7 files / 265 tests 通过。 |
+| D54 独立定向验证 | 13 files / 203 tests 通过；持久化重启用例另行通过。 |
+| git diff --check | 通过。各批提交继续执行仓库 pre-commit 的 lint、typecheck，不跳过 hook。 |
+
+验证环境为本机 macOS。远程 CI 的跨平台结论以推送后 Actions 的实际结果为准；本记录不将本机结果等同于 Linux/Windows 验证。
+
+## 证据与发布边界
+
+上述截图和脚本原始输出已在验收及独立复查时查看。用户随后要求删除测试产物，因此本报告只保留操作步骤、测量值、测试计数和结论，附件不进入最终提交。
+
+先分批提交 D54、SDK 重试、中断排序、Web 查询跟随和本报告，再合入 main 并正常 push，不强推。推送内容的新增文本与路径检查未发现凭据或私钥，未纳入临时数据库、构建产物或本机配置。
+
+已合并的临时分支使用 `git branch -d` 清理；干净且已合并的 subagent-frontend worktree 可正常移除。保留 `claude/priceless-jennings-b88b8b` 和对应 worktree：其 `6f334142` 有尚未合入的独立 LLM 凭据环境修复，本轮没有擅自合并或删除它。远程其他分支不在清理范围。
+
+已接受的交互取舍仍成立：新 spawn 入口可能稍晚于执行记录；切换 Tab 后从派遣入口恢复时会重新定位。两者不影响实例身份、关闭语义或阅读器资源释放。

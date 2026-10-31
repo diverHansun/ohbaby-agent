@@ -2,7 +2,7 @@
 
 本议题 2026-10-26 开始讨论，2026-10-28 形成正式方案，2026-10-29 按 D46 拆成四个 improve。目标有两个：一是让后台子代理能跨主代理的轮次继续工作，并把停止、复用、关闭和结果交付的规则定清楚；二是把子代理的查看入口搬到 Web 右侧栏。
 
-**进度（2026-10-30）：** improve-1、improve-2 已合入本地 main。improve-3 已完成并修复 Codex 复审的三个问题，在 `subagent/frontend`；improve-4 在本地分支 `subagent/improve-4` 上实施（D53）。improve-3 和 improve-4 一起合入 main。
+**进度（2026-10-31）：** improve-1 到 improve-4 已完成，D54 统一后台执行和最终复审修复已通过本机全量、端到端与独立子代理审查，进入 main 发布收尾。最终结论见 improve-4/09。
 
 ## 四个 improve
 
@@ -16,6 +16,8 @@
 | 4 | 主会话入口切到右侧栏，删除旧浮层，回归 | `subagent/improve-4` | [02](improve-4/02-optimization-plan-and-change-scope.md)、[04](improve-4/04-test-and-acceptance.md) |
 
 所有讨论记录和用户原话（D01–D54）都在 [improve-1/00](improve-1/00-discussion.md)，现状分析和参考项目也只在 improve-1 里写一份，improve-2 到 4 直接引用。每个 improve 实施完成后，在各自目录里写 `05-implementation-acceptance.md`。
+
+最终收尾与当前验收结论见 [improve-4/09](improve-4/09-final-closeout.md)：覆盖 D54、R5/R6/B5 修复、编译 Web 端到端测试和发布边界。
 
 ## 方案要点
 
