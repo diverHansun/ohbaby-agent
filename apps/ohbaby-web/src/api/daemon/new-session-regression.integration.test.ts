@@ -339,10 +339,9 @@ describe("New session real persistent REST regression", () => {
         const first = await f.backend.createSession();
         const db = getDatabase();
         if (kind === "foreign-project")
-          db.prepare("UPDATE session SET working_directory = ? WHERE id = ?").run(
-            "/another-project",
-            first.id,
-          );
+          db.prepare(
+            "UPDATE session SET working_directory = ? WHERE id = ?",
+          ).run("/another-project", first.id);
         if (kind === "subagent")
           db.prepare("UPDATE session SET data = ? WHERE id = ?").run(
             JSON.stringify({ isSubagent: true }),

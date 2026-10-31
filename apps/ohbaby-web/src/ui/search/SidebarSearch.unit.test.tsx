@@ -283,8 +283,20 @@ it("leaves IME candidate navigation and confirmation to the input method", async
   await tick();
   const input = required(host.querySelector("input"));
   act(() => {
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, isComposing: true }));
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, isComposing: true }));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        bubbles: true,
+        isComposing: true,
+      }),
+    );
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        isComposing: true,
+      }),
+    );
   });
   expect(document.activeElement).toBe(input);
   expect(select).not.toHaveBeenCalled();

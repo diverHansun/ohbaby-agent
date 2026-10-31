@@ -34,7 +34,7 @@ export function usePromptSubmission(input: {
   readonly setCommandInputError: (error: CommandInputError | null) => void;
   readonly clearActionError: () => void;
   readonly setActionError: (message: string | null) => void;
-  /** Called right before a prompt or a run-starting command goes out; not for a panel open. */
+  /** Called when sending a prompt or accepting a run-starting command; not for a panel open. */
   readonly onSend: () => void;
 }): {
   readonly promptProjection: {
@@ -116,7 +116,6 @@ export function usePromptSubmission(input: {
       if (opened === true) return true;
       const resumeWithArguments = opened === "goal-resume-with-arguments";
       clearActionError();
-      onSend();
       try {
         const completion = await runtime.executeSlashCommand({
           ...(resumeWithArguments ? { allowOverlay: true } : {}),
@@ -126,6 +125,14 @@ export function usePromptSubmission(input: {
           text,
           clientRequestId,
         });
+        // Status/help results open a modal. Only an accepted prompt or a
+        // successful goal resume requests new conversation content.
+        if (
+          generation === commandScopeGeneration.current &&
+          (completion.promptReceipt !== undefined ||
+            (resumeWithArguments && completion.status === "completed"))
+        )
+          onSend();
         if (
           resumeWithArguments &&
           completion.status === "failed" &&

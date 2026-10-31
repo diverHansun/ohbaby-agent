@@ -323,39 +323,145 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_000);
   });
 
-  it("keeps the reading position when a slash command only opens a panel", async () => {
-    const fake = createFakeRuntime({
-      snapshot: {
+  it.each(["goal", "status", "skills"] as const)(
+    "keeps the reading position when /%s only opens a panel",
+    async (command) => {
+      const fake = createFakeRuntime({
+        snapshot: {
+          ...snapshotWithStatus({ kind: "running", runId: "old-run" }),
+          status: { kind: "idle" as const },
+          runs: [],
+        },
+      });
+      fake.listCommands.mockResolvedValue(catalog([command]));
+      const app = mountApp(fake.runtime);
+      const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+      if (!stream) throw new Error("stream not found");
+      setScrollMetrics(stream, {
+        clientHeight: 400,
+        scrollHeight: 1_000,
+        scrollTop: 200,
+      });
+      await act(async () => {
+        stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -20 }));
+        stream.dispatchEvent(new Event("scroll"));
+        await Promise.resolve();
+      });
+      await flushTimers();
+
+      await setTextareaValue(
+        app.container,
+        command === "goal" ? "/goal pause" : `/${command}`,
+      );
+      await pressTextareaKey(app.container, "Enter");
+      if (command === "status") await showStatusModal(fake);
+      if (command === "skills") await showSkillsModal(fake, ["hansun-db"]);
+      await waitFor(() =>
+        Boolean(
+          app.container.querySelector(
+            command === "goal"
+              ? ".ohb-structured-overlay"
+              : ".ohb-command-modal",
+          ),
+        ),
+      );
+      await flushTimers();
+      expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
+      expect(stream.scrollTop).toBe(200);
+    },
+  );
+
+  it.each([
+    { text: "/hansun-db", command: "skill.hansun-db", outcome: "accepted" },
+    { text: "/goal resume 2 turns", command: "goal", outcome: "accepted" },
+    { text: "/hansun-db", command: "skill.hansun-db", outcome: "rejected" },
+    {
+      text: "/hansun-db",
+      command: "skill.hansun-db",
+      outcome: "session changed",
+    },
+  ] as const)(
+    "follows a run-starting slash only after acceptance in its session: $text, $outcome",
+    async ({ text, command, outcome }) => {
+      const initial = {
         ...snapshotWithStatus({ kind: "running", runId: "old-run" }),
         status: { kind: "idle" as const },
         runs: [],
-      },
-    });
-    fake.listCommands.mockResolvedValue(catalog(["goal"]));
-    const app = mountApp(fake.runtime);
-    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
-    if (!stream) throw new Error("stream not found");
-    setScrollMetrics(stream, {
-      clientHeight: 400,
-      scrollHeight: 1_000,
-      scrollTop: 200,
-    });
-    await act(async () => {
-      stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -20 }));
-      stream.dispatchEvent(new Event("scroll"));
-      await Promise.resolve();
-    });
-    await flushTimers();
+      };
+      const fake = createFakeRuntime({ snapshot: initial });
+      const completion = deferred<import("ohbaby-sdk").UiCommandCompletion>();
+      fake.listCommands.mockResolvedValue(catalog([command]));
+      fake.executeSlashCommand.mockReturnValue(completion.promise);
+      const app = mountApp(fake.runtime);
+      const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+      if (!stream) throw new Error("stream not found");
+      const readEarlier = async (): Promise<void> => {
+        setScrollMetrics(stream, {
+          clientHeight: 400,
+          scrollHeight: 1_000,
+          scrollTop: 200,
+        });
+        await act(async () => {
+          stream.dispatchEvent(new WheelEvent("wheel", { deltaY: -20 }));
+          stream.dispatchEvent(new Event("scroll"));
+          await Promise.resolve();
+        });
+        await flushTimers();
+      };
+      await readEarlier();
+      await setTextareaValue(app.container, text);
+      await pressTextareaKey(app.container, "Enter");
+      await waitFor(() => fake.executeSlashCommand.mock.calls.length === 1);
+      await flushTimers();
+      expect(stream.scrollTop).toBe(200);
 
-    await setTextareaValue(app.container, "/goal pause");
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await flushTimers();
-    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
-    expect(stream.scrollTop).toBe(200);
-  });
+      if (outcome === "session changed") {
+        act(() => {
+          fake.store.replaceSnapshot(
+            {
+              ...initial,
+              activeSessionId: "session_2",
+              sessions: initial.sessions.map((session) => ({
+                ...session,
+                id: "session_2",
+              })),
+            },
+            2,
+          );
+        });
+        await flushTimers();
+        await readEarlier();
+      }
+      await act(async () => {
+        if (outcome === "rejected") {
+          completion.reject(new Error("Command was not accepted"));
+          return;
+        }
+        completion.resolve({
+          status: "completed",
+          commandRunId: "command_1",
+          clientInvocationId: "invoke_1",
+          outputCount: 0,
+          eventCount: 0,
+          ...(command === "skill.hansun-db"
+            ? {
+                promptReceipt: {
+                  promptId: "skill-prompt",
+                  sessionId: "session_1",
+                  clientRequestId: "skill-request",
+                  userMessageId: "skill-message",
+                  status: "queued" as const,
+                  createdAt: timestamp,
+                },
+              }
+            : {}),
+        });
+        await Promise.resolve();
+      });
+      await flushTimers();
+      expect(stream.scrollTop).toBe(outcome === "accepted" ? 1_000 : 200);
+    },
+  );
 
   it("lets an upward wheel leave the bottom before streamed output lands", async () => {
     const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
