@@ -19,7 +19,10 @@ import {
   type DisplayReasoningChange,
   type DisplayReasoningRecord,
 } from "../../core/lifecycle/display-reasoning.js";
-import { messageToUiMessage } from "./persistent-store.js";
+import {
+  compareMessagePartOrder,
+  messageToUiMessage,
+} from "./persistent-store.js";
 import { SessionViewOwner } from "./session-view.js";
 import { messageCursor } from "../../core/message/pagination.js";
 
@@ -267,7 +270,7 @@ export class SourceSessionProjection {
       parts: [
         ...message.parts.filter((part) => !part.id || !pendingIds.has(part.id)),
         ...source.map(reasoningPart),
-      ].sort(compareParts),
+      ].sort(compareMessagePartOrder),
     };
   }
 
@@ -359,7 +362,7 @@ export class SourceSessionProjection {
     if (current) {
       const parts = current.parts.filter((value) => value.id !== part.partId);
       if (change.kind !== "missing") parts.push(reasoningPart(part));
-      messages = [{ ...current, parts: parts.sort(compareParts) }];
+      messages = [{ ...current, parts: parts.sort(compareMessagePartOrder) }];
     }
     if (records && record && change.kind === "saved") {
       const parts = record.parts.filter((value) => value.id !== part.partId);
@@ -620,12 +623,4 @@ function compareMessages(a: UiMessage, b: UiMessage): number {
 }
 function compareIds(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
-}
-function compareParts(
-  a: UiMessage["parts"][number],
-  b: UiMessage["parts"][number],
-): number {
-  return (
-    Number(a.metadata?.sourceOrder ?? 0) - Number(b.metadata?.sourceOrder ?? 0)
-  );
 }

@@ -190,16 +190,30 @@ function partToUiParts(part: Part): UiMessagePart[] {
   return toolPartToUiParts(part);
 }
 
+type OrderedMessagePart = Pick<UiMessagePart, "metadata"> & {
+  readonly orderIndex?: number;
+};
+
+/** Terminal facts follow saved and still-pending display content, including old records. */
+export function compareMessagePartOrder(
+  left: OrderedMessagePart,
+  right: OrderedMessagePart,
+): number {
+  const leftTerminal = left.metadata?.kind === "lifecycle-interruption";
+  const rightTerminal = right.metadata?.kind === "lifecycle-interruption";
+  if (leftTerminal !== rightTerminal) return leftTerminal ? 1 : -1;
+  return (
+    Number(left.metadata?.sourceOrder ?? left.orderIndex ?? 0) -
+    Number(right.metadata?.sourceOrder ?? right.orderIndex ?? 0)
+  );
+}
+
 export function messageToUiMessage(
   message: MessageWithParts,
 ): UiMessage | undefined {
   const activeParts = message.parts
     .filter(isActivePart)
-    .sort(
-      (left, right) =>
-        Number(left.metadata?.sourceOrder ?? left.orderIndex) -
-        Number(right.metadata?.sourceOrder ?? right.orderIndex),
-    );
+    .sort(compareMessagePartOrder);
   // Retired summaries remain durable compaction boundaries; never project their body.
   const summaryPart = message.parts.find(isContextSummaryPart);
   if (message.info.agent === SUMMARY_AGENT_NAME && summaryPart !== undefined) {
