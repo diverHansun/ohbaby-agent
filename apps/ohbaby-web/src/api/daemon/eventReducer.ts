@@ -153,23 +153,8 @@ function applyCommandEvent(
   notices: readonly CommandNotice[],
   event: UiEvent,
 ): readonly CommandNotice[] {
+  // The store seeds a notice when it registers a command; events only update it.
   switch (event.type) {
-    case "command.started":
-      if (
-        !["help", "status", "skills", "mcps"].includes(event.command.commandId)
-      )
-        return notices;
-      return upsertCommandNotice(notices, {
-        commandId: event.command.commandId,
-        createdAt: new Date(event.timestamp).toISOString(),
-        id: event.command.commandRunId,
-        kind: "running",
-        path: event.command.path,
-        ...(event.command.sessionId === undefined
-          ? {}
-          : { sessionId: event.command.sessionId }),
-        text: `/${event.command.path.join(" ")} running`,
-      });
     case "command.result.delivered": {
       if (!event.output) return notices;
       const existing = notices.find(

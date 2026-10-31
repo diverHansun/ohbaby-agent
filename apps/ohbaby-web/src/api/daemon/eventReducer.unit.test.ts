@@ -5,6 +5,7 @@ import {
   reduceUiEvent,
   replaceSnapshot,
 } from "./eventReducer.js";
+import type { ViewState } from "./wire.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
 
@@ -781,19 +782,15 @@ describe("ohbaby-web eventReducer", () => {
     });
   });
 
-  it("records command notices even if no snapshot has loaded yet", () => {
+  it("updates registered command notices even if no snapshot has loaded yet", () => {
     const state = reduceUiEvent(
-      createInitialViewState(),
+      withRunningNotice(createInitialViewState(), "status", "command_1"),
       {
-        command: {
-          clientInvocationId: "invoke_status",
-          commandId: "status",
-          commandRunId: "command_1",
-          path: ["status"],
-          surface: "tui",
-        },
+        clientInvocationId: "invoke_status",
+        commandRunId: "command_1",
+        output: { kind: "text", text: "ok" },
         timestamp: Date.parse(timestamp),
-        type: "command.started",
+        type: "command.result.delivered",
       },
       1,
     );
@@ -803,7 +800,7 @@ describe("ohbaby-web eventReducer", () => {
         {
           commandId: "status",
           id: "command_1",
-          kind: "running",
+          kind: "success",
         },
       ],
       lastAppliedSeqNum: 1,
@@ -811,11 +808,9 @@ describe("ohbaby-web eventReducer", () => {
     });
   });
 
-  it("projects slash command lifecycle events into command notices", () => {
-    let state = replaceSnapshot(emptySnapshot(), 0);
-
-    state = reduceUiEvent(
-      state,
+  it("leaves command notices to the store when a command starts", () => {
+    const state = reduceUiEvent(
+      replaceSnapshot(emptySnapshot(), 0),
       {
         command: {
           clientInvocationId: "invoke_status",
@@ -830,14 +825,15 @@ describe("ohbaby-web eventReducer", () => {
       1,
     );
 
-    expect(state.commandNotices).toMatchObject([
-      {
-        commandId: "status",
-        id: "command_1",
-        kind: "running",
-        path: ["status"],
-      },
-    ]);
+    expect(state.commandNotices).toEqual([]);
+  });
+
+  it("projects slash command lifecycle events into command notices", () => {
+    let state = withRunningNotice(
+      replaceSnapshot(emptySnapshot(), 0),
+      "status",
+      "command_1",
+    );
 
     state = reduceUiEvent(
       state,
@@ -941,20 +937,10 @@ describe("ohbaby-web eventReducer", () => {
 
   it("filters unsupported commands from help command notices", () => {
     const state = reduceUiEvent(
-      reduceUiEvent(
+      withRunningNotice(
         replaceSnapshot(emptySnapshot(), 0),
-        {
-          type: "command.started",
-          command: {
-            commandRunId: "command_help",
-            clientInvocationId: "invoke_help",
-            commandId: "help",
-            path: ["help"],
-            surface: "tui",
-          },
-          timestamp: Date.parse(timestamp),
-        },
-        0.5,
+        "help",
+        "command_help",
       ),
       {
         clientInvocationId: "invoke_help",
@@ -996,3 +982,22 @@ describe("ohbaby-web eventReducer", () => {
     ]);
   });
 });
+
+function withRunningNotice(
+  state: ViewState,
+  commandId: string,
+  id: string,
+): ViewState {
+  return {
+    ...state,
+    commandNotices: [
+      {
+        commandId,
+        createdAt: timestamp,
+        id,
+        kind: "running",
+        path: [commandId],
+      },
+    ],
+  };
+}

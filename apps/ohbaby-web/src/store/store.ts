@@ -124,7 +124,6 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       path: invocation.path,
       createdAt: new Date().toISOString(),
       kind: "running",
-      text: `/${invocation.path.join(" ")} running`,
     };
   }
   function commandError(id: string, message: string): void {

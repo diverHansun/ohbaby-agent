@@ -38,7 +38,6 @@ export function CommandNoticeList(props: {
           key={notice.id}
         >
           <div className="ohb-command-label">
-            {notice.kind === "running" ? <Spinner size={12} /> : null}
             <span>{commandName(notice)}</span>
             {props.onClose ? (
               <button
@@ -133,11 +132,12 @@ export function CommandResultModal(props: {
             <X aria-hidden="true" size={16} />
           </button>
         </header>
-        {props.notice.kind !== "success" ? (
-          <div
-            className="ohb-command-modal-body"
-            role={props.notice.kind === "error" ? "alert" : "status"}
-          >
+        {props.notice.kind === "running" ? (
+          <div className="ohb-command-modal-loading">
+            <Spinner label={`Loading ${model.title}`} size={16} />
+          </div>
+        ) : props.notice.kind === "error" ? (
+          <div className="ohb-command-modal-body" role="alert">
             {props.notice.text}
           </div>
         ) : null}

@@ -1,6 +1,6 @@
 /* Command results shown in place (mostly errors): the same calm card as the
    banners. The command name leads, the output sits below; an error's text
-   takes the error colour, a running command shows a spinner. */
+   takes the error colour. */
 .ohb-command-notices {
   display: flex;
   flex-direction: column;
@@ -161,6 +161,15 @@
 .ohb-command-modal-body {
   overflow-y: auto;
   padding: 6px 20px 14px;
+}
+
+/* While the result is on its way: just a spinner, centred in calm space. */
+.ohb-command-modal-loading {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: center;
+  padding: 44px 20px;
 }
 
 @media (max-width: 480px) {
