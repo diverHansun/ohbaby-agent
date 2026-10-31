@@ -21,7 +21,7 @@
 | `Spinner` | 基础 | 转圈 | `ui/shared/` | 新增（替换三色波点） |
 | `Notice` / `NoticeStack` | 基础 | 对话区右上角的通知（失败、后台事件） | `ui/shared/` | 新增 |
 | `Wordmark` | 基础 | 三色字标，`size: "sm" \| "md"`；`sm` 用于侧栏，`md` 只用于启动失败页 | `ui/shared/` | 由 `SessionStatus` 中的字标抽出 |
-| `LycheeMark` | 基础 | Lychee 单色线性图标，`size`，颜色取 `--brand-lychee`（D26） | `ui/shared/` | 新增 |
+| `LycheeMark` | 基础 | Lychee 线条图标（单颗、疙瘩边，D36），`size`，线条颜色取 `--brand-lychee` | `ui/shared/` | 新增 |
 | `AppController` | 功能区 | runtime 接线、视图切换、目录选择，向外壳提供区域内容 | `ui/shell/` | 新增 |
 | `AppShell` | 组合 | 侧栏 + 主区布局、收起、窄屏抽屉 | `ui/shell/` | 新增 |
 | `Sidebar` | 功能区 | 顶栏、会话树或搜索结果、底部设置入口 | `ui/sidebar/` | 改写自 `SessionSidebar` |

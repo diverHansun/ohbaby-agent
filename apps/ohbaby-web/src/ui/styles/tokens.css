@@ -56,6 +56,8 @@
   --brand-ba: #c97e92;
   --brand-by: #5f86c4;
   --brand-lychee: #c0444f;
+  --brand-lychee-leaf: #639922;
+  --brand-lychee-leaf-edge: #3b6d11;
   /* Categorical chart colours (context composition): muted, and away from the
      brand gold, pink, blue and lychee red. */
   --chart-1: #5b6472;

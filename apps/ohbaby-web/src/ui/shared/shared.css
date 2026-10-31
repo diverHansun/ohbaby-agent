@@ -36,6 +36,11 @@
   flex: none;
 }
 
+.ohb-lychee-leaf {
+  fill: var(--brand-lychee-leaf);
+  stroke: var(--brand-lychee-leaf-edge);
+}
+
 .ohb-icon-button {
   align-items: center;
   background: transparent;

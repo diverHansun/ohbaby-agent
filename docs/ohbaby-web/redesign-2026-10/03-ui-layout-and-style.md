@@ -42,7 +42,7 @@
 - 侧栏顶部左侧，小号（初值 15–16px，对应 pi-web 品牌字 15px/700，`app/sidebar.css:1021`）
 - 其他地方都不出现（启动失败页除外，那里没有侧栏）。思考中的指示不再用三色波点
 
-**Lychee 标识**（D26）：agent 的名字叫 Lychee，用单色线性荔枝图标（圆形果实、几道鳞纹、一片叶子），颜色 `--brand-lychee`，描边风格和 lucide 一致：
+**Lychee 标识**（D26，画法见 D36）：agent 的名字叫 Lychee，用线条荔枝图标（一颗果实，外轮廓是一圈疙瘩边，几道短鳞纹，一片叶子），线条颜色 `--brand-lychee`，叶子绿色，描边风格和 lucide 一致：
 - 空状态，工作区选择条上方，约 56px（D31）
 - favicon 用同一图形，加粗描边、减少鳞纹，保证 16px 下能认出
 - 其他地方都不出现，消息旁也不加
@@ -83,6 +83,7 @@
 | `--success` | 成功圆点 | #10b981 |
 | `--brand-oh` / `--brand-ba` / `--brand-by` | 只用于字标 | #c9a23f / #c97e92 / #5f86c4（沿用现值） |
 | `--brand-lychee` | 只用于 Lychee 标识（D26） | #c0444f |
+| `--brand-lychee-leaf` / `-leaf-edge` | Lychee 标识的叶子和叶缘（D36） | #639922 / #3b6d11 |
 
 `--danger`、`--warning`、`--success` 做文字时对比度不够，所以只用于圆点、图标、描边和浅底；需要做文字时用对应的 `-ink`。斜杠命令面板现有的金、粉、蓝分类色（`slashCommandAccent`、`.ohb-tool-blue` 等）改为中性色，品牌三色只留给字标（D5），荔枝红只留给 Lychee 标识（D26）。
 
