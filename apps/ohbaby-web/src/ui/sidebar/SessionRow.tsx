@@ -1,14 +1,14 @@
-import { Archive, MoreHorizontal, Pin } from "lucide-react";
+import { MoreHorizontal, Pin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
 import { Spinner } from "../shared/Spinner.js";
 import { relativeTime } from "./relative-time.js";
-import { ARCHIVE_BUSY_HINT, type SessionMenuAnchor } from "./SessionMenu.js";
+import type { SessionMenuAnchor } from "./SessionMenu.js";
 
 /**
  * One sidebar session (05 SessionRow): the open button, then a trailing
  * spinner (running), amber dot (awaiting approval) or relative time. On hover
- * the time gives way to Archive and the menu.
+ * the time gives way to the menu button.
  */
 export function SessionRow(props: {
   readonly session: SidebarSessionItem;
@@ -21,7 +21,6 @@ export function SessionRow(props: {
   readonly moving: boolean;
   readonly reordering: boolean;
   readonly onSelect: () => void;
-  readonly onArchive: (trigger: HTMLButtonElement) => void;
   readonly onUnpin: (focusTarget: HTMLElement | null) => void;
   readonly onMenu: (
     anchor: SessionMenuAnchor,
@@ -29,8 +28,6 @@ export function SessionRow(props: {
   ) => void;
 }): ReactElement {
   const title = props.session.title.trim() || "Untitled session";
-  // A run or approval keeps the chat busy; the server refuses to archive it (D3).
-  const busy = props.session.activity !== "idle";
   const mainRef = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLElement>(null);
@@ -170,7 +167,12 @@ export function SessionRow(props: {
             props.onUnpin(mainRef.current);
           }}
         >
-          <Pin aria-hidden="true" size={12} fill="currentColor" />
+          <Pin
+            aria-hidden="true"
+            className="ohb-pin-icon"
+            size={13}
+            strokeWidth={1.75}
+          />
         </button>
       ) : null}
       <button
@@ -191,18 +193,6 @@ export function SessionRow(props: {
         </span>
       </button>
       <span className="ohb-session-hover-actions">
-        <button
-          className="ohb-session-archive"
-          aria-label={`Archive ${title}`}
-          title={busy ? ARCHIVE_BUSY_HINT : `Archive ${title}`}
-          disabled={props.disabled || props.moving || busy}
-          onClick={(event) => {
-            props.onArchive(event.currentTarget);
-          }}
-          type="button"
-        >
-          <Archive aria-hidden="true" size={14} />
-        </button>
         <button
           ref={actionsRef}
           className="ohb-session-actions"

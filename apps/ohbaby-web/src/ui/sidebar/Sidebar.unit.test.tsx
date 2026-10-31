@@ -275,8 +275,9 @@ it("keeps a pin when archiving fails and clears it only after success", async ()
     await Promise.resolve();
   });
   expect(button("Unpin Chat B")).toBeTruthy();
+  click("Actions for Chat B");
   await act(async () => {
-    button("Archive Chat B").click();
+    button("Archive").click();
     await Promise.resolve();
   });
   expect(order()).toEqual(["Chat A", "Chat B", "Chat C"]);
@@ -287,8 +288,18 @@ it("keeps a pin when archiving fails and clears it only after success", async ()
 });
 
 it("moves focus to the next row once an archived row leaves the list", async () => {
+  act(() => {
+    button("Select Chat B").dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 40,
+        clientY: 70,
+      }),
+    );
+  });
   await act(async () => {
-    button("Archive Chat B").click();
+    button("Archive").click();
     await Promise.resolve();
   });
   render({ catalog: catalog(entries.filter((entry) => entry.id !== "B")) });
@@ -435,9 +446,6 @@ it("keeps Archive unavailable while a chat runs or awaits approval", () => {
     ]),
   });
   for (const id of ["A", "B"]) {
-    const hover = button(`Archive Chat ${id}`);
-    expect(hover.disabled).toBe(true);
-    expect(hover.title).toBe("Stop the chat before archiving");
     click(`Actions for Chat ${id}`);
     const item = button("ArchiveRunning");
     expect(item.disabled).toBe(true);
@@ -458,9 +466,9 @@ it("keeps Archive unavailable while a chat runs or awaits approval", () => {
         );
     });
   }
-  const idle = button("Archive Chat C");
+  click("Actions for Chat C");
+  const idle = button("Archive");
   expect(idle.disabled).toBe(false);
-  expect(idle.title).toBe("Archive Chat C");
 });
 
 it("shows an error with Retry only while there is no data", () => {

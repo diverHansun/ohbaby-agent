@@ -7,7 +7,6 @@ import {
 import { ContextUsageControl } from "../shared/ContextUsage.js";
 import { IconButton } from "../shared/IconButton.js";
 import { Spinner } from "../shared/Spinner.js";
-import { compactHomePath } from "../workspace/workspace-labels.js";
 
 const CONNECTION_LABELS: Partial<
   Record<HeaderModel["connectionKind"], string>
@@ -20,7 +19,7 @@ const CONNECTION_LABELS: Partial<
 
 /**
  * Top bar of the main area: sidebar toggle when the sidebar is closed,
- * the chat title, its working directory, context usage and the right panel's
+ * the chat title, context usage and the right panel's
  * toggle. Connection state is
  * shown only when a folder's instance exists and is not healthy (D6); with no
  * folder open there is nothing to connect to, so nothing is shown.
@@ -29,7 +28,6 @@ export function MainHeader(props: {
   readonly sidebarOpen: boolean;
   readonly onOpenSidebar: () => void;
   readonly title?: string;
-  readonly workingDirectory?: string;
   readonly header: HeaderModel;
   readonly hasClient: boolean;
   readonly sessionId: string | null;
@@ -50,14 +48,6 @@ export function MainHeader(props: {
       {props.title ? (
         <div className="ohb-main-header-title">
           <span className="ohb-main-header-name">{props.title}</span>
-          {props.workingDirectory ? (
-            <span
-              className="ohb-main-header-path"
-              title={props.workingDirectory}
-            >
-              {compactHomePath(props.workingDirectory)}
-            </span>
-          ) : null}
         </div>
       ) : (
         <div className="ohb-main-header-title" />

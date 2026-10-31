@@ -47,7 +47,8 @@ export function AppController(props: {
   readonly runtime: OhbabyWebRuntime;
 }): ReactElement {
   const { runtime } = props;
-  const workspace = useSyncExternalStore(
+  // Workspace changes can replace runtime.client; keep the shell subscribed.
+  useSyncExternalStore(
     (listener) => runtime.subscribeWorkspaces(listener),
     () => runtime.getWorkspaceSnapshot(),
     () => runtime.getWorkspaceSnapshot(),
@@ -294,11 +295,6 @@ export function AppController(props: {
           sidebarOpen={sidebarOpen}
           onOpenSidebar={openSidebar}
           title={view.activeSession?.title}
-          workingDirectory={
-            view.activeSession?.workingDirectory ??
-            workspace.selectedDirectory ??
-            undefined
-          }
           header={view.header}
           hasClient={client !== null}
           sessionId={view.activeSession?.id ?? null}

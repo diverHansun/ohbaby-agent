@@ -2,6 +2,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   ReactElement,
   ReactNode,
+  RefObject,
 } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -84,6 +85,8 @@ export function Menu(props: {
   readonly filterable?: boolean;
   /** Item to focus when the menu opens or changes level; defaults to the first item. */
   readonly focusSelector?: string;
+  /** The trigger handles its own toggle; its pointerdown is not an outside click. */
+  readonly triggerRef?: RefObject<HTMLElement | null>;
   /** Escape goes back one level when provided; otherwise it closes the menu. */
   readonly onEscape?: () => void;
   readonly onClose: (restoreFocus: boolean) => void;
@@ -151,7 +154,8 @@ export function Menu(props: {
     const outside = (event: PointerEvent): void => {
       if (
         event.target instanceof Node &&
-        !menuRef.current?.contains(event.target)
+        !menuRef.current?.contains(event.target) &&
+        !props.triggerRef?.current?.contains(event.target)
       )
         close();
     };
@@ -174,7 +178,7 @@ export function Menu(props: {
       window.removeEventListener("scroll", scroll, true);
       window.removeEventListener("resize", close);
     };
-  }, [sheet]);
+  }, [sheet, props.triggerRef]);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     const inFilter = event.target === filterRef.current;

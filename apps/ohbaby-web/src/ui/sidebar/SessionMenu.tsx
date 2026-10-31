@@ -166,8 +166,9 @@ export function SessionMenu(props: {
       >
         <Pin
           aria-hidden="true"
+          className="ohb-pin-icon"
           size={13}
-          fill={props.pinned ? "currentColor" : "none"}
+          strokeWidth={1.75}
         />
         <span>{props.pinned ? "Unpin" : "Pin"}</span>
       </button>

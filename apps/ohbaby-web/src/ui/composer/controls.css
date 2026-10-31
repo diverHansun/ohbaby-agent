@@ -181,7 +181,7 @@
     display: inline-flex;
   }
 
-  .ohb-composer-bar > .ohb-permission-toggle,
+  .ohb-composer-bar > .ohb-permission-button,
   .ohb-composer-bar > .ohb-reasoning-control,
   .ohb-composer-bar > .ohb-reasoning-status {
     display: none;

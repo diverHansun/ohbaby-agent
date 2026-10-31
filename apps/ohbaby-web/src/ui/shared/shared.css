@@ -137,6 +137,11 @@
   text-transform: uppercase;
 }
 
+/* The pin leans like a pushed-in thumbtack; a light outline keeps it quiet. */
+.ohb-pin-icon {
+  transform: rotate(45deg);
+}
+
 /* A read-only switch drawn inside a menu item. */
 .ohb-switch {
   background: var(--border-strong);

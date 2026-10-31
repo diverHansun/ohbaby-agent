@@ -167,9 +167,6 @@ export function SessionList(props: SessionListProps): ReactElement {
               if (session.id !== props.activeSessionId)
                 props.onSelectSession(session);
             }}
-            onArchive={(trigger) => {
-              archive(session, trigger);
-            }}
             onUnpin={(focus) => {
               setPin(session, false, focus);
             }}

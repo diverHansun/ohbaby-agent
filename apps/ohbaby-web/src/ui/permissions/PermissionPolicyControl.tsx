@@ -1,8 +1,9 @@
-import { Hand, ShieldAlert } from "lucide-react";
+import { Check, Hand, ShieldAlert } from "lucide-react";
 import type { UiPermissionLevel } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Menu, type MenuAnchor } from "../shared/Menu.js";
 
 /** The existing full-access confirmation; the phone More menu reuses it (D29). */
 export function FullAccessConfirmDialog(props: {
@@ -102,6 +103,31 @@ export function FullAccessConfirmDialog(props: {
   );
 }
 
+const PERMISSION_MODES = [
+  {
+    level: "default",
+    label: "Default",
+    description: "Ask before running commands or editing files",
+    Icon: Hand,
+  },
+  {
+    level: "full-access",
+    label: "Full access",
+    description: "Run commands and edit files without asking",
+    Icon: ShieldAlert,
+  },
+] as const satisfies readonly {
+  readonly level: UiPermissionLevel;
+  readonly label: string;
+  readonly description: string;
+  readonly Icon: typeof Hand;
+}[];
+
+/**
+ * The permission pill in the composer row: it names the current mode, and
+ * opens a small card listing each mode with one line on what it allows
+ * (after the Codex and Claude app pickers). Full access still asks first.
+ */
 export function PermissionPolicyControl(props: {
   readonly level: UiPermissionLevel;
   readonly disabled: boolean;
@@ -109,16 +135,30 @@ export function PermissionPolicyControl(props: {
     readonly level: UiPermissionLevel;
   }) => void;
 }): ReactElement {
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const [fullAccessConfirmOpen, setFullAccessConfirmOpen] = useState(false);
   const permissionButtonRef = useRef<HTMLButtonElement | null>(null);
   const returnPermissionFocusRef = useRef(false);
-  const cyclePermissionLevel = useCallback(() => {
-    if (props.level === "default") {
+  const current =
+    PERMISSION_MODES.find((mode) => mode.level === props.level) ??
+    PERMISSION_MODES[0];
+
+  const closeMenu = useCallback((restoreFocus: boolean): void => {
+    setAnchor(null);
+    if (restoreFocus) {
+      permissionButtonRef.current?.focus({ preventScroll: true });
+    }
+  }, []);
+
+  const choose = (level: UiPermissionLevel): void => {
+    if (level === "full-access" && props.level !== level) {
+      closeMenu(false);
       setFullAccessConfirmOpen(true);
       return;
     }
-    props.onSetPermission({ level: "default" });
-  }, [props.onSetPermission, props.level]);
+    closeMenu(true);
+    if (level !== props.level) props.onSetPermission({ level });
+  };
 
   const dismissFullAccessConfirm = useCallback((): void => {
     returnPermissionFocusRef.current = true;
@@ -141,28 +181,84 @@ export function PermissionPolicyControl(props: {
   return (
     <>
       <button
-        aria-label={
-          props.level === "default"
-            ? "Permission policy: default. Ask before protected actions. Click to enable full-access without approval prompts."
-            : "Permission policy: full-access. Run without approval prompts. Click to return to default."
-        }
-        className={`ohb-permission-toggle ohb-permission-${props.level}`}
+        aria-expanded={anchor !== null}
+        aria-haspopup="menu"
+        aria-label={`Permissions: ${current.label}`}
+        className={`ohb-permission-button ohb-permission-${props.level}`}
         disabled={props.disabled}
-        onClick={cyclePermissionLevel}
+        onClick={(event) => {
+          if (anchor) {
+            closeMenu(false);
+            return;
+          }
+          const bounds = event.currentTarget.getBoundingClientRect();
+          setAnchor({
+            x: bounds.left,
+            y: bounds.bottom + 6,
+            aboveY: bounds.top - 6,
+            alignRight: false,
+          });
+        }}
         ref={permissionButtonRef}
-        title={
-          props.level === "default"
-            ? "Default: ask before protected actions. Click for full-access."
-            : "Full-access: run without approval prompts. Click for default."
-        }
+        title={current.description}
         type="button"
       >
-        {props.level === "default" ? (
-          <Hand aria-hidden="true" size={17} />
-        ) : (
-          <ShieldAlert aria-hidden="true" size={17} />
-        )}
+        <current.Icon aria-hidden="true" size={14} strokeWidth={1.75} />
+        <span>{current.label}</span>
       </button>
+      {anchor ? (
+        <Menu
+          anchor={anchor}
+          className="ohb-permission-menu"
+          focusSelector="[aria-current='true']"
+          triggerRef={permissionButtonRef}
+          label="Permissions"
+          onClose={closeMenu}
+        >
+          <div className="ohb-permission-menu-heading" aria-hidden="true">
+            Permissions · this chat
+          </div>
+          {PERMISSION_MODES.map((mode) => {
+            const active = mode.level === props.level;
+            return (
+              <button
+                aria-current={active ? "true" : undefined}
+                className={
+                  mode.level === "full-access" ? "is-danger" : undefined
+                }
+                key={mode.level}
+                onClick={() => {
+                  choose(mode.level);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <mode.Icon
+                  aria-hidden="true"
+                  className="ohb-permission-menu-icon"
+                  size={15}
+                  strokeWidth={1.75}
+                />
+                <span className="ohb-permission-menu-text">
+                  <span className="ohb-permission-menu-label">
+                    {mode.label}
+                  </span>
+                  <span className="ohb-permission-menu-description">
+                    {mode.description}
+                  </span>
+                </span>
+                {active ? (
+                  <Check
+                    aria-hidden="true"
+                    className="ohb-menu-check"
+                    size={14}
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </Menu>
+      ) : null}
       {fullAccessConfirmOpen ? (
         <FullAccessConfirmDialog
           onConfirm={confirmFullAccess}

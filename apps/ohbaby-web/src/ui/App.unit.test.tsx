@@ -3501,18 +3501,27 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     const permissionButton = app.container.querySelector<HTMLButtonElement>(
-      ".ohb-permission-toggle",
+      ".ohb-permission-button",
     );
-    expect(permissionButton?.getAttribute("aria-label")).toContain("default");
-    expect(permissionButton?.getAttribute("aria-label")).toContain(
-      "without approval prompts",
+    expect(permissionButton?.getAttribute("aria-label")).toBe(
+      "Permissions: Default",
     );
+    expect(permissionButton?.textContent).toBe("Default");
     expect(permissionButton?.querySelector("svg")).not.toBeNull();
     expect(app.container.querySelector(".ohb-mode-button")).toBeNull();
-    await clickButton(
-      app.container,
-      "Default: ask before protected actions. Click for full-access.",
+    await clickButton(app.container, "Permissions: Default");
+    const items = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".ohb-permission-menu [role='menuitem']",
+      ),
     );
+    expect(
+      items.map(
+        (item) => item.querySelector(".ohb-permission-menu-label")?.textContent,
+      ),
+    ).toEqual(["Default", "Full access"]);
+    expect(items[0]?.getAttribute("aria-current")).toBe("true");
+    await choosePermissionMode("Full access");
 
     expect(fake.setPermission).not.toHaveBeenCalled();
     const dialog = document.querySelector('[role="dialog"]');
@@ -3602,10 +3611,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(
-      app.container,
-      "Default: ask before protected actions. Click for full-access.",
-    );
+    await clickButton(app.container, "Permissions: Default");
+    await choosePermissionMode("Full access");
     await clickButton(document, "Not now");
 
     expect(fake.setPermission).not.toHaveBeenCalled();
@@ -3614,7 +3621,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container.querySelector(".ohb-shell")?.hasAttribute("inert"),
     ).toBe(false);
     expect(document.activeElement).toBe(
-      app.container.querySelector(".ohb-permission-toggle"),
+      app.container.querySelector(".ohb-permission-button"),
     );
   });
 
@@ -3624,13 +3631,11 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
     const permissionButton = app.container.querySelector(
-      ".ohb-permission-toggle",
+      ".ohb-permission-button",
     );
 
-    await clickButton(
-      app.container,
-      "Default: ask before protected actions. Click for full-access.",
-    );
+    await clickButton(app.container, "Permissions: Default");
+    await choosePermissionMode("Full access");
     const confirm = document.querySelector<HTMLButtonElement>(
       'button[title="Use full access"]',
     );
@@ -3669,10 +3674,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(permissionButton);
 
-    await clickButton(
-      app.container,
-      "Default: ask before protected actions. Click for full-access.",
-    );
+    await clickButton(app.container, "Permissions: Default");
+    await choosePermissionMode("Full access");
     await act(async () => {
       document.querySelector<HTMLDivElement>(".ohb-full-access-layer")?.click();
       await Promise.resolve();
@@ -3695,10 +3698,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(
-      app.container,
-      "Full-access: run without approval prompts. Click for default.",
-    );
+    await clickButton(app.container, "Permissions: Full access");
+    await choosePermissionMode("Default");
 
     expect(fake.setPermission).toHaveBeenCalledWith({ level: "default" });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -5781,6 +5782,23 @@ async function pressWindowKey(key: string): Promise<void> {
   });
 }
 
+async function choosePermissionMode(label: string): Promise<void> {
+  const item = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(
+      ".ohb-permission-menu [role='menuitem']",
+    ),
+  ).find(
+    (candidate) =>
+      candidate.querySelector(".ohb-permission-menu-label")?.textContent ===
+      label,
+  );
+  if (!item) throw new Error(`permission mode not found: ${label}`);
+  await act(async () => {
+    item.click();
+    await Promise.resolve();
+  });
+}
+
 async function clickButton(
   container: ParentNode,
   title: string,
@@ -7008,7 +7026,7 @@ it("does not restore input focus after the user moved to another control before 
   const app = mountApp(fake.runtime);
   const input = app.container.querySelector<HTMLTextAreaElement>("textarea");
   const other = app.container.querySelector<HTMLButtonElement>(
-    ".ohb-permission-toggle",
+    ".ohb-permission-button",
   );
   act(() => {
     input?.focus();

@@ -1,35 +1,100 @@
-.ohb-permission-toggle {
+/* A quiet text button naming the current mode (Codex / Claude app style). It
+   only gains a background on hover; full access reads in the danger ink the
+   confirmation dialog uses, so the risky mode never looks like the default. */
+.ohb-permission-button {
   align-items: center;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 50%;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
   display: inline-flex;
-  flex: 0 0 32px;
-  height: 32px;
-  justify-content: center;
-  padding: 0;
-  width: 32px;
+  flex: none;
+  font-size: 13px;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+  white-space: nowrap;
 }
 
-.ohb-permission-default {
+.ohb-permission-button svg {
   color: var(--text-dim);
+  flex: none;
 }
 
-.ohb-permission-full-access {
+.ohb-permission-button:hover,
+.ohb-permission-button[aria-expanded="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-permission-button.ohb-permission-full-access,
+.ohb-permission-button.ohb-permission-full-access svg {
   color: var(--danger-ink);
 }
 
-.ohb-permission-toggle:hover {
-  border-color: var(--border);
+.ohb-permission-button.ohb-permission-full-access:hover,
+.ohb-permission-button.ohb-permission-full-access[aria-expanded="true"] {
+  background: var(--danger-soft);
 }
 
-.ohb-permission-full-access:hover {
-  border-color: var(--danger-border);
-}
-
-.ohb-permission-toggle:focus-visible {
-  outline: 2px solid currentColor;
+.ohb-permission-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+.ohb-menu.ohb-permission-menu:not(.is-sheet) {
+  padding: 5px;
+  width: 340px;
+}
+
+.ohb-permission-menu-heading {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 6px 10px 4px;
+}
+
+.ohb-menu.ohb-permission-menu [role="menuitem"] {
+  align-items: flex-start;
+  border-radius: var(--radius-sm);
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.ohb-permission-menu-icon {
+  margin-top: 2px;
+}
+
+.ohb-permission-menu .ohb-menu-check {
+  margin-top: 2px;
+}
+
+.ohb-permission-menu-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ohb-permission-menu-label {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.ohb-permission-menu-description {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.ohb-menu.ohb-permission-menu [role="menuitem"].is-danger svg,
+.ohb-permission-menu .is-danger .ohb-permission-menu-label,
+.ohb-permission-menu .is-danger .ohb-permission-menu-description {
+  color: var(--danger-ink);
 }
 
 .ohb-full-access-layer {
@@ -154,13 +219,5 @@
 
   .ohb-full-access-actions button {
     width: 100%;
-  }
-}
-
-@media (max-width: 639px) {
-  .ohb-permission-toggle {
-    flex-basis: 44px;
-    height: 44px;
-    width: 44px;
   }
 }

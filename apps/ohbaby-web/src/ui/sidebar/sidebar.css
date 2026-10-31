@@ -321,7 +321,7 @@ button.ohb-group-more:hover {
   width: 7px;
 }
 
-/* Time gives way to Archive and the menu on hover; activity marks stay. */
+/* Time gives way to the menu button on hover; activity marks stay. */
 .ohb-session-row:hover .ohb-session-meta > small,
 .ohb-session-row.is-menu-open .ohb-session-meta > small,
 .ohb-session-row:focus-within .ohb-session-meta > small {
@@ -342,7 +342,6 @@ button.ohb-group-more:hover {
 }
 
 .ohb-session-pin,
-.ohb-session-archive,
 .ohb-session-actions {
   align-items: center;
   background: transparent;
@@ -358,7 +357,6 @@ button.ohb-group-more:hover {
 }
 
 .ohb-session-pin:hover,
-.ohb-session-archive:hover,
 .ohb-session-actions:hover {
   background: var(--bg-hover);
   color: var(--text);
@@ -395,7 +393,6 @@ button.ohb-group-more:hover {
 
   .ohb-workspace-actions .ohb-icon-button,
   .ohb-session-pin,
-  .ohb-session-archive,
   .ohb-session-actions {
     height: 44px;
     width: 44px;
