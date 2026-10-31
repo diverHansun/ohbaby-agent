@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config";
-import e2eConfig from "./vitest.e2e.config.js";
+import e2eConfig from "../../vitest.e2e.config.js";
 
 export default defineConfig({
   ...e2eConfig,

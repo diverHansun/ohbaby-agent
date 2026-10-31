@@ -9,7 +9,7 @@ const child = spawn(
     "node_modules/vitest/vitest.mjs",
     "run",
     "--config",
-    "vitest.responses-migration.config.ts",
+    "tests/smoke/responses-migration.vitest.config.ts",
     "tests/smoke/responses-migration.real.e2e.test.ts",
     ...process.argv.slice(2),
   ],

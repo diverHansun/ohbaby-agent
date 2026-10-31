@@ -145,7 +145,7 @@ OHBABY_REAL_MIGRATION_EXTENDED=1 pnpm test:cache:real:accounting
 OHBABY_REAL_MIGRATION_PROFILE=bailian-qwen-chat pnpm test:cache:real:accounting
 ```
 
-执行前确认环境没有将 `OHBABY_REAL_MIGRATION_PROTOCOL` 限制为单个协议。单协议调试可用该筛选，但不能冒充最终三协议门。本轮增加 vitest.responses-migration.config.ts，仅发现该 real 文件；原 vitest.e2e.config.ts 只发现 packages 下 E2E，不能用于此 tests/smoke 文件。新增断言及装配须先实施。通过平台 profile 筛选补跑智谱/百炼，未支持的协议不伪称已测。
+执行前确认环境没有将 `OHBABY_REAL_MIGRATION_PROTOCOL` 限制为单个协议。单协议调试可用该筛选，但不能冒充最终三协议门。本轮增加 tests/smoke/responses-migration.vitest.config.ts，仅发现该 real 文件；原 vitest.e2e.config.ts 只发现 packages 下 E2E，不能用于此 tests/smoke 文件。新增断言及装配须先实施。通过平台 profile 筛选补跑智谱/百炼，未支持的协议不伪称已测。
 
 每次运行的最小证据：协议、模型、实际 endpoint、执行时间/提交 SHA；原生 usage 是否含读/写字段及其值；canonical input/read/write/observed；最终 Step 观察序列；主 session 的累计输入、读取与 share；可承载 Part 的 metadata。只记录必要用量和归属，不保存密钥或整段用户对话。
 
