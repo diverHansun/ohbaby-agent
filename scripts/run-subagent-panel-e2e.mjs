@@ -91,6 +91,10 @@ const prompts = {
     "Spawn seven held Capacity runners; verify the six-execution limit rejects excess calls without entry links. Run after the core scenario; quit cleans them up.",
   PANEL_FAIL:
     "Send to a nonexistent instance through the real agent tool; verify the failed tool card has no entry link.",
+  PANEL_TEAM:
+    "In a new session, spawn seven Workers in one turn: six start, the seventh is refused by the six-slot limit. Each Worker reads its own section and reports; results wake the parent, which summarizes them.",
+  PANEL_TEAM_RETRY:
+    "After the team finishes, spawn Worker 7 again; it starts because the six slots were returned.",
 };
 function record(type, data = {}) {
   console.log(`PANEL_EVENT ${JSON.stringify({ type, ...data })}`);
@@ -175,7 +179,7 @@ function spawnSpec(name, kind) {
       role: "generic",
       timeout_ms: 1_800_000,
       description: `${name}: real compiled panel acceptance`,
-      prompt: `PANEL_CHILD_${kind}\n${kind === "APPROVAL" ? "Run approval.cjs after user approval; it writes only the isolated approved.txt sentinel." : "Read only fixture.txt; do not change workspace files."} This is an isolated browser acceptance task.`,
+      prompt: `PANEL_CHILD_${kind} ${name}\n${kind === "APPROVAL" ? "Run approval.cjs after user approval; it writes only the isolated approved.txt sentinel." : "Read only fixture.txt; do not change workspace files."} This is an isolated browser acceptance task.`,
     },
   ];
 }
@@ -260,6 +264,47 @@ async function childResponse(response, body, kind) {
       message.role === "tool" &&
       /^panel_read_\d+_0$/.test(message.tool_call_id ?? ""),
   );
+  if (kind === "WORKER") {
+    const name = /^PANEL_CHILD_WORKER (Worker \d+)/m.exec(
+      messages.map(content).join("\n"),
+    )?.[1];
+    assert.ok(name, "Worker name missing from its prompt");
+    const index = Number(name.split(" ")[1]);
+    // Keep the six workers visibly active in the panel for a few seconds.
+    await delay(1_500);
+    if (reads.length < 3) {
+      const step = reads.length + 1;
+      chunk(response, {
+        content: `${name}: reading section ${index}, step ${step}/3.\n\n`,
+      });
+      tools(
+        response,
+        body,
+        [
+          [
+            "read",
+            {
+              file_path: "fixture.txt",
+              offset: (index - 1) * 30 + (step - 1) * 10 + 1,
+              limit: 10,
+            },
+          ],
+        ],
+        `panel_read_${step}`,
+      );
+      return;
+    }
+    assert.ok(
+      reads.every((message) => content(message).includes("PANEL_SOURCE_")),
+      "Real read output did not reach the worker",
+    );
+    record("worker-complete", { name, readCalls: reads.length });
+    finish(
+      response,
+      `WORKER_COMPLETE ${name}\n\nSection ${index} verified through ${reads.length} real read calls.`,
+    );
+    return;
+  }
   const count = kind === "OTHER" ? 2 : historySteps;
   if (reads.length < count) {
     const step = reads.length + 1;
@@ -326,7 +371,9 @@ const provider = createServer(async (request, response) => {
     const child = messages.find(
       (message) =>
         message.role === "user" &&
-        /^PANEL_CHILD_(READER|RUNNER|APPROVAL|OTHER)\b/.test(content(message)),
+        /^PANEL_CHILD_(READER|RUNNER|APPROVAL|OTHER|WORKER)\b/.test(
+          content(message),
+        ),
     );
     if (child) {
       const kind = /^PANEL_CHILD_(\w+)/.exec(content(child))[1];
@@ -337,7 +384,7 @@ const provider = createServer(async (request, response) => {
     const commandIndex = messages.findLastIndex(
       (message) =>
         message.role === "user" &&
-        /^PANEL_(START|SEND_READER|CLOSE_READER|OTHER_SESSION|RUNNING|HOLD|CLOSE_RUNNING|SEND_RUNNING|CAPACITY|FAIL)\b/.test(
+        /^PANEL_(START|SEND_READER|CLOSE_READER|OTHER_SESSION|RUNNING|HOLD|CLOSE_RUNNING|SEND_RUNNING|CAPACITY|FAIL|TEAM_RETRY|TEAM)\b/.test(
           content(message),
         ),
     );
@@ -356,8 +403,27 @@ const provider = createServer(async (request, response) => {
     );
     requests.push({ kind: "parent", command });
     if (alreadyCalled) {
+      // A delivered worker result wakes the parent: summarize what arrived.
+      const delivered = [
+        ...new Set(
+          messages
+            .slice(commandIndex)
+            .flatMap((message) => [
+              ...content(message).matchAll(/WORKER_COMPLETE (Worker \d+)/g),
+            ])
+            .map((match) => match[1]),
+        ),
+      ].sort((a, b) => Number(a.split(" ")[1]) - Number(b.split(" ")[1]));
+      if (command.startsWith("TEAM") && delivered.length > 0) {
+        record("team-summary", { delivered });
+        finish(
+          response,
+          `PANEL_${command}_SUMMARY\n\nDelivered results so far: ${delivered.length} (${delivered.join(", ")}).`,
+        );
+        return;
+      }
       // Expected agent rejections are real tool receipts, not provider failures.
-      if (["SEND_RUNNING", "CAPACITY", "FAIL"].includes(command)) {
+      if (["SEND_RUNNING", "CAPACITY", "FAIL", "TEAM"].includes(command)) {
         finish(
           response,
           messages
@@ -401,6 +467,12 @@ const provider = createServer(async (request, response) => {
     else if (command === "OTHER_SESSION")
       specs = [spawnSpec("Other reader", "OTHER")];
     else if (command === "RUNNING") specs = [spawnSpec("Runner", "RUNNER")];
+    else if (command === "TEAM")
+      specs = Array.from({ length: 7 }, (_, index) =>
+        spawnSpec(`Worker ${index + 1}`, "WORKER"),
+      );
+    else if (command === "TEAM_RETRY")
+      specs = [spawnSpec("Worker 7", "WORKER")];
     else if (command === "CAPACITY")
       specs = Array.from({ length: 7 }, (_, index) =>
         spawnSpec(`Capacity ${index + 1}`, "RUNNER"),
