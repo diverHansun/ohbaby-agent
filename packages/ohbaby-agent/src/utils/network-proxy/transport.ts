@@ -6,9 +6,13 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { Agent, Dispatcher, ProxyAgent } from "undici";
 import type { ProxyPolicy } from "./policy.js";
 
+// Model streams may stay silent for minutes; the runtime idle watchdog, not
+// undici's 300s default, decides when a response body has stalled.
+const fetchTimeouts = { bodyTimeout: 0 } as const;
+
 // The libraries own pooling and CONNECT/TLS. This layer only chooses the route.
 export class TransportGeneration {
-  private readonly directFetch = new Agent();
+  private readonly directFetch = new Agent(fetchTimeouts);
   private readonly directHttp = new http.Agent({
     keepAlive: true,
     proxyEnv: {},
@@ -29,7 +33,7 @@ export class TransportGeneration {
     if (!proxy) return this.directFetch.dispatch(options, handler);
     let agent = this.fetchProxies.get(proxy);
     if (!agent) {
-      agent = new ProxyAgent(proxy);
+      agent = new ProxyAgent({ uri: proxy, ...fetchTimeouts });
       this.fetchProxies.set(proxy, agent);
     }
     return agent.dispatch(options, handler);
