@@ -1,3 +1,5 @@
+import { APIConnectionError as AnthropicConnectionError } from "@anthropic-ai/sdk/error";
+import { APIConnectionError as OpenAIConnectionError } from "openai";
 import { isContextOverflowError } from "./errors.js";
 import { ProviderStreamIdleTimeoutError } from "./idle-watchdog.js";
 
@@ -109,6 +111,13 @@ export function isRetryableProviderError(error: unknown): boolean {
   if (error instanceof ProviderStreamIdleTimeoutError) return true;
   // Context recovery belongs to the forced-compaction path, never backoff.
   if (isContextOverflowError(error)) return false;
+  // SDK retries are off; their wrapped network failures (including request
+  // timeouts) carry no status or code, so classify them by type here.
+  if (
+    error instanceof OpenAIConnectionError ||
+    error instanceof AnthropicConnectionError
+  )
+    return true;
 
   const status = providerErrorStatus(error);
   if (

@@ -358,19 +358,27 @@ describe("installed SDK and project retry boundaries", () => {
       type: OpenAI.APIConnectionTimeoutError,
     },
   ])(
-    "preserves the outer classification after the SDK wraps $code",
+    "retries in the application after the SDK wraps $code",
     async ({ code, message, type }) => {
       const transport = Object.assign(new Error(message), { code });
-      expect(isRetryableProviderError(transport)).toBe(true);
-      const f = fixture(() => Promise.reject(transport));
+      const wrapped = fixture(() => Promise.reject(transport));
+      const failing = consume(wrapped.client);
+      await vi.runAllTimersAsync();
+      const { error } = await failing.done;
+      // The SDK hides the code; retries must still recognize the wrapper.
+      expect((error as { cause?: unknown }).cause).toBeInstanceOf(type);
+      expect(wrapped.providerCalls()).toBe(6);
+
+      const f = fixture((attempt) =>
+        attempt === 1
+          ? Promise.reject(transport)
+          : sse([chunk({ content: "done" }, "stop")]),
+      );
       const run = consume(f.client);
       await vi.runAllTimersAsync();
-      const { error } = await run.done;
-      expect(error).toBeInstanceOf(type);
-      expect(isRetryableProviderError(error)).toBe(false);
-      expect(f.attempts).toHaveLength(1);
-      expect(f.providerCalls()).toBe(1);
-      expect(run.frames.filter((frame) => frame.retry)).toHaveLength(0);
+      expect(await run.done).toEqual({});
+      expect(f.providerCalls()).toBe(2);
+      expect(run.frames.filter((frame) => frame.retry)).toHaveLength(1);
     },
   );
 
