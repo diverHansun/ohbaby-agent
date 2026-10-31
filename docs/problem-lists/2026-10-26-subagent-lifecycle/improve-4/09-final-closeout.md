@@ -62,6 +62,14 @@
 
 验证环境为本机 macOS。远程 CI 的跨平台结论以推送后 Actions 的实际结果为准；本记录不将本机结果等同于 Linux/Windows 验证。
 
+## Windows CI 补充修正
+
+首次推送 `7059a792` 后，[CI 41160662710](https://github.com/diverHansun/ohbaby-agent/actions/runs/41160662710) 的 Linux、macOS 和最低 Node 版本检查通过。Windows 的 projection/transport 组为 353 通过、1 失败：旧用例 `clears pending permission when abortRun cancels a running prompt` 在等待第一次审批事件时超时（1017 ms），尚未执行 abortRun。其默认事件等待只有 1000 ms，D54 未修改该用例主体。
+
+受控验证：临时将首次非标题 provider 请求延迟 1500 ms，原预算在 1022 ms 复现相同错误；仅给该用例首次事件等待传入 5000 ms，并在 finally 中 dispose client，同一探针在 1710 ms 通过。随后删除延迟探针。原有取消及队列继续的两个 1000 ms 上限和全部行为断言保持不变，没有改产品代码或全局超时。
+
+移除探针后，该文件 **174/174**、CI 同六文件组 **354/354** 通过，格式与 diff 检查通过；独立子代理复核无 P1/P2。此补充仅修改测试及本节，前述全量与浏览器验收对应的产品代码保持一致。后续提交重新触发跨平台 CI，最终结果以远程运行记录为准。
+
 ## 证据与发布边界
 
 上述截图和脚本原始输出已在验收及独立复查时查看。用户随后要求删除测试产物，因此本报告只保留操作步骤、测量值、测试计数和结论，附件不进入最终提交。

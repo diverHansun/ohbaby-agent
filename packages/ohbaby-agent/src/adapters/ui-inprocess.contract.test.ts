@@ -5194,8 +5194,9 @@ describe("createInProcessUiBackendClient", () => {
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-abort-permission-"),
     );
+    let client: ReturnType<typeof createInProcessUiBackendClient> | undefined;
     try {
-      const client = createInProcessUiBackendClient({
+      client = createInProcessUiBackendClient({
         llmClient: createSequentialFakeLLMClient(
           [
             [
@@ -5220,6 +5221,7 @@ describe("createInProcessUiBackendClient", () => {
         client,
         (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
+        5_000,
       );
       const run = client.submitPromptAndWait("Abort this write");
       const permissionEvent = await permission;
@@ -5268,6 +5270,7 @@ describe("createInProcessUiBackendClient", () => {
         { type: "text", text: "After abort." },
       ]);
     } finally {
+      await client?.dispose();
       await rm(directory, { force: true, recursive: true });
     }
   });
