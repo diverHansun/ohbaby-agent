@@ -8576,8 +8576,8 @@ describe("createInProcessUiBackendClient", () => {
         event.request.subject === "permission",
     );
     expect(permissionInteraction?.request.options).toEqual([
-      { id: "default", label: "default" },
-      { id: "full-access", label: "full-access" },
+      { id: "default", label: "Ask for approval" },
+      { id: "full-access", label: "Full access" },
     ]);
     await client.respondInteraction(
       permissionInteraction?.request.interactionId ?? "missing",
