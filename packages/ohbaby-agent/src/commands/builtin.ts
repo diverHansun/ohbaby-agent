@@ -590,11 +590,11 @@ async function handlePermissionLevelSelection(
     options: [
       {
         id: "default",
-        label: "default",
+        label: "Ask for approval",
       },
       {
         id: "full-access",
-        label: "full-access",
+        label: "Full access",
       },
     ],
     prompt: "Permission level",

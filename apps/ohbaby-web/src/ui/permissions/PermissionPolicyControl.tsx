@@ -74,7 +74,7 @@ export function FullAccessConfirmDialog(props: {
         <p id="ohb-full-access-description">
           When enabled, the agent skips confirmations for subsequent actions and
           may run commands, access the network, or modify workspace files. You
-          can switch back to the default permission at any time.
+          can switch back to Ask for approval at any time.
         </p>
         <div className="ohb-full-access-actions">
           <button
@@ -106,7 +106,7 @@ export function FullAccessConfirmDialog(props: {
 const PERMISSION_MODES = [
   {
     level: "default",
-    label: "Default",
+    label: "Ask for approval",
     description: "Ask before running commands or editing files",
     Icon: Hand,
   },

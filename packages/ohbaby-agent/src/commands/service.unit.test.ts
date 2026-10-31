@@ -2109,8 +2109,8 @@ describe("CommandService", () => {
       {
         kind: "select-one",
         options: [
-          { id: "default", label: "default" },
-          { id: "full-access", label: "full-access" },
+          { id: "default", label: "Ask for approval" },
+          { id: "full-access", label: "Full access" },
         ],
         prompt: "Permission level",
         subject: "permission",

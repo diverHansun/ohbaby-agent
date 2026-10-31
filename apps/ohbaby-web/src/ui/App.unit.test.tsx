@@ -3504,12 +3504,12 @@ describe("OhbabyWebApp slash command interactions", () => {
       ".ohb-permission-button",
     );
     expect(permissionButton?.getAttribute("aria-label")).toBe(
-      "Permissions: Default",
+      "Permissions: Ask for approval",
     );
-    expect(permissionButton?.textContent).toBe("Default");
+    expect(permissionButton?.textContent).toBe("Ask for approval");
     expect(permissionButton?.querySelector("svg")).not.toBeNull();
     expect(app.container.querySelector(".ohb-mode-button")).toBeNull();
-    await clickButton(app.container, "Permissions: Default");
+    await clickButton(app.container, "Permissions: Ask for approval");
     const items = Array.from(
       document.querySelectorAll<HTMLElement>(
         ".ohb-permission-menu [role='menuitem']",
@@ -3519,7 +3519,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       items.map(
         (item) => item.querySelector(".ohb-permission-menu-label")?.textContent,
       ),
-    ).toEqual(["Default", "Full access"]);
+    ).toEqual(["Ask for approval", "Full access"]);
     expect(items[0]?.getAttribute("aria-current")).toBe("true");
     await choosePermissionMode("Full access");
 
@@ -3611,7 +3611,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Permissions: Default");
+    await clickButton(app.container, "Permissions: Ask for approval");
     await choosePermissionMode("Full access");
     await clickButton(document, "Not now");
 
@@ -3634,7 +3634,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       ".ohb-permission-button",
     );
 
-    await clickButton(app.container, "Permissions: Default");
+    await clickButton(app.container, "Permissions: Ask for approval");
     await choosePermissionMode("Full access");
     const confirm = document.querySelector<HTMLButtonElement>(
       'button[title="Use full access"]',
@@ -3674,7 +3674,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(permissionButton);
 
-    await clickButton(app.container, "Permissions: Default");
+    await clickButton(app.container, "Permissions: Ask for approval");
     await choosePermissionMode("Full access");
     await act(async () => {
       document.querySelector<HTMLDivElement>(".ohb-full-access-layer")?.click();
@@ -3699,7 +3699,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     await clickButton(app.container, "Permissions: Full access");
-    await choosePermissionMode("Default");
+    await choosePermissionMode("Ask for approval");
 
     expect(fake.setPermission).toHaveBeenCalledWith({ level: "default" });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
