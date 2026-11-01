@@ -1,7 +1,7 @@
 {
   "name": "ohbaby-agent-workspace",
-  "version": "0.1.16",
-  "description": "Workspace for ohbaby-agent, ohbaby-sdk, and ohbaby-cli",
+  "version": "0.1.17",
+  "description": "Workspace for the ohbaby CLI, web UI, runtime, LLM clients, server, and SDK",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",

@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-server",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Explicit local server and remote client adapters for ohbaby",
   "type": "module",
   "publishConfig": {
@@ -46,5 +46,15 @@
   },
   "devDependencies": {
     "ohbaby-llm": "workspace:*"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/diverHansun/ohbaby-agent.git",
+    "directory": "packages/ohbaby-server"
+  },
+  "homepage": "https://github.com/diverHansun/ohbaby-agent#readme",
+  "bugs": {
+    "url": "https://github.com/diverHansun/ohbaby-agent/issues"
+  },
+  "license": "MIT"
 }

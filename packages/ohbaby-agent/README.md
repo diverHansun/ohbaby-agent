@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.17/assets/images/lychee-logo.png" alt="ohbaby-agent" width="120">
+</p>
+
 # ohbaby-agent
 
 Backend runtime package for ohbaby-agent.
@@ -11,11 +15,11 @@ This package owns:
   wiring
 - the `buildCoreAPIImpl` host factory consumed by the current CLI/TUI interface
 
-It depends on `ohbaby-sdk` for runtime/interface contracts. The current MVP user
-interface is the CLI/TUI in `ohbaby-cli`, which imports this package as the backend
-runtime. Future web or app interfaces can reuse the same runtime boundary.
+It depends on `ohbaby-sdk` for runtime/interface contracts and `ohbaby-llm` for
+provider-neutral model clients. Both the CLI/TUI and bundled web UI in `ohbaby-cli`
+use this backend runtime.
 
-Most users should install the MVP CLI package:
+Most users should install `ohbaby-cli`, which includes both the terminal and web interfaces:
 
 ```bash
 npm install -g ohbaby-cli

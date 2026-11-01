@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.17/assets/images/lychee-logo.png" alt="ohbaby-agent" width="120">
+</p>
+
 # ohbaby-llm
 
 Provider-neutral LLM streaming clients for OpenAI-compatible Chat Completions, OpenAI Responses, and Anthropic Messages. Requires Node.js >= 24 and ES modules.

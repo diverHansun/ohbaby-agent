@@ -1,7 +1,7 @@
 {
   "name": "ohbaby-cli",
-  "version": "0.1.16",
-  "description": "CLI frontend package for ohbaby-agent",
+  "version": "0.1.17",
+  "description": "Terminal and bundled web interfaces for the ohbaby AI coding agent",
   "type": "module",
   "engines": {
     "node": ">=24.0.0"
@@ -60,5 +60,15 @@
   },
   "devDependencies": {
     "@types/yargs": "^17.0.33"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/diverHansun/ohbaby-agent.git",
+    "directory": "packages/ohbaby-cli"
+  },
+  "homepage": "https://github.com/diverHansun/ohbaby-agent#readme",
+  "bugs": {
+    "url": "https://github.com/diverHansun/ohbaby-agent/issues"
+  },
+  "license": "MIT"
 }

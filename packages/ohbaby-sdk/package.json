@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-sdk",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Stable DTO and client contracts shared by ohbaby-agent frontends and runtime adapters",
   "type": "module",
   "publishConfig": {
@@ -34,5 +34,15 @@
     "build": "rimraf dist && tsup && tsc -b --force",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist coverage"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/diverHansun/ohbaby-agent.git",
+    "directory": "packages/ohbaby-sdk"
+  },
+  "homepage": "https://github.com/diverHansun/ohbaby-agent#readme",
+  "bugs": {
+    "url": "https://github.com/diverHansun/ohbaby-agent/issues"
+  },
+  "license": "MIT"
 }

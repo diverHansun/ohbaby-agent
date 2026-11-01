@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-llm",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Provider-neutral LLM clients, streaming, and configuration contracts",
   "type": "module",
   "publishConfig": {
@@ -42,5 +42,15 @@
     "@anthropic-ai/sdk": "^0.124.0",
     "openai": "^7.13.0",
     "zod": "^3.24.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/diverHansun/ohbaby-agent.git",
+    "directory": "packages/ohbaby-llm"
+  },
+  "homepage": "https://github.com/diverHansun/ohbaby-agent#readme",
+  "bugs": {
+    "url": "https://github.com/diverHansun/ohbaby-agent/issues"
+  },
+  "license": "MIT"
 }
