@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/logo.png" alt="ohbaby-agent" width="150">
+  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/lychee-logo.png" alt="ohbaby-agent" width="120">
 </p>
 
 <p align="center">The MVP CLI/TUI package for ohbaby-agent.</p>
