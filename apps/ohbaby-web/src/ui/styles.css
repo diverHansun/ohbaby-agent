@@ -19,4 +19,5 @@
 @import "./session/subagents.css";
 @import "./side-panel/side-panel.css";
 @import "./side-panel/subagents/subagents-page.css";
+@import "./side-panel/terminal/terminal-page.css";
 @import "./settings/settings.css";

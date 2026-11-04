@@ -133,10 +133,9 @@ apps/ohbaby-web/src/
 └─ ui/side-panel/
    ├─ terminal/
    │  ├─ TerminalPage.tsx                    一个 tab 的终端页面与各状态
-   │  ├─ use-terminal-tabs.ts                终端 tab 同步
+   │  ├─ use-terminal-tabs.ts                终端 tab 同步、新建、关闭确认流程（三者共用按 id 更新 tab 的逻辑，放在一起）
    │  ├─ TerminalView.tsx                    xterm.js 挂载与连接
    │  ├─ terminal-theme.ts                   CSS 变量 → xterm 配色
-   │  ├─ use-terminal-close.ts               关闭确认流程
    │  └─ terminal-page.css
    ├─ side-pages.ts                          改：登记 terminal 页面
    ├─ SidePanelPage.tsx                      改：加 terminal 分支，SidePageContext 带上终端客户端

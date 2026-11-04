@@ -374,6 +374,17 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     dispose: resolved,
     executeSlashCommand: () =>
       Promise.reject(new Error("mock runtime: slash commands")),
+    // The mock has no daemon, so terminals report unavailable instead of faking a shell.
+    terminals: {
+      list: () => Promise.resolve([]),
+      create: () =>
+        Promise.reject(new Error("Terminals need a running ohbaby serve")),
+      close: () => Promise.resolve(),
+      connect: (): WebSocket => {
+        throw new Error("Terminals need a running ohbaby serve");
+      },
+    },
+    terminalDirectory: () => null,
     getWorkspaceSnapshot: () => workspace,
     getDirectoryPickerRoots: () =>
       Promise.resolve({ ok: true, roots: [{ directory: "/", name: "/" }] }),

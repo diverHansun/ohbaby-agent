@@ -71,6 +71,7 @@ interface ErrorResponseBody {
     readonly code?: string;
     readonly targetDirectory?: string;
     readonly fields?: unknown;
+    readonly process?: unknown;
   };
 }
 
@@ -82,6 +83,8 @@ export interface DaemonRequestError extends Error {
   readonly targetDirectory?: string;
   /** Present on settings `VALIDATION_FAILED`: which request fields are invalid. */
   readonly fields?: readonly UiSettingsFieldError[];
+  /** Present on `TERMINAL_BUSY`: the program still running in the terminal. */
+  readonly process?: string;
 }
 
 export function isDaemonRequestError(
@@ -647,6 +650,7 @@ export class DaemonHttpClient {
           ? { targetDirectory: body.targetDirectory }
           : {}),
         ...(fields === undefined ? {} : { fields }),
+        ...(typeof body?.process === "string" ? { process: body.process } : {}),
       });
     }
     return value as T;

@@ -10,6 +10,7 @@ web 界面右侧面板中的内置终端：用户可以在浏览器里打开当�
 | [non-functional.md](non-functional.md) | 安全、资源上限、故障行为、暂缓项 |
 | [test.md](test.md) | 关键场景、集成点、自动化与人工验证 |
 | [backend-handoff.md](backend-handoff.md) | 后端分支、前端接入、实测结果与已知边界 |
+| [frontend-acceptance.md](frontend-acceptance.md) | 前端实现要点、自动化结果与浏览器端到端走查 |
 
 本模块不单独写 `data-model.md` 和 `use-case.md`，原因见 architecture 开头。
 

@@ -1,0 +1,25 @@
+/* The terminal fills the tab with no title bar of its own (D6), like Claude,
+   Codex and Cursor; the tab already names the directory. */
+.ohb-terminal {
+  background: var(--bg);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.ohb-terminal > .ohb-banner {
+  margin: 8px 10px 0;
+}
+
+.ohb-terminal-screen {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px 4px 4px 10px;
+}
+
+.ohb-terminal-screen .xterm {
+  height: 100%;
+}

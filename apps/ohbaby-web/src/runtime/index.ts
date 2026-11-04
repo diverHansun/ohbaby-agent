@@ -26,6 +26,7 @@ import { createOhbabyWebStore, type OhbabyWebStore } from "../store/store.js";
 import { sessionMovedTarget, waitForSessionReady } from "./session-moved.js";
 import { isDaemonRequestError } from "../api/daemon/http.js";
 import { SettingsClient } from "../api/daemon/settings-client.js";
+import { TerminalClient, type TerminalApi } from "../api/daemon/terminals.js";
 import { GlobalLayer } from "./global-layer.js";
 import { InstanceLayer } from "./instance-layer.js";
 import { SettingsLayer } from "./settings-layer.js";
@@ -96,6 +97,10 @@ export interface OhbabyWebRuntime {
     readonly sessionId?: string;
     readonly text: string;
   }): Promise<UiCommandCompletion>;
+  /** The daemon's user terminals (right panel). */
+  readonly terminals: TerminalApi;
+  /** Workspace a new terminal opens in; null opens it in the home directory (D3). */
+  terminalDirectory(): string | null;
   /** Workspaces plus the connected instance directory. */
   getWorkspaceSnapshot(): WorkspaceSnapshot;
   subscribeWorkspaces(listener: () => void): () => void;
@@ -121,6 +126,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   readonly draft = createDraftStore();
   readonly ready: Promise<void>;
   readonly settings: SettingsLayer;
+  readonly terminals: TerminalApi;
   private readonly global: GlobalLayer;
   private readonly instance: InstanceLayer;
   private workspaceSnapshot: WorkspaceSnapshot = {
@@ -136,6 +142,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     fetchImpl: typeof fetch | undefined,
   ) {
     this.global = new GlobalLayer(config, fetchImpl);
+    this.terminals = new TerminalClient(config, fetchImpl);
     this.instance = new InstanceLayer(config, fetchImpl, this.store);
     this.settings = new SettingsLayer(
       new SettingsClient(config, fetchImpl),
@@ -400,6 +407,17 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     } satisfies UiSlashCommandInvocation;
     this.store.beginCommand(invocation, input.allowOverlay === true);
     return client.executeCommand(invocation);
+  }
+
+  terminalDirectory(): string | null {
+    const bound = this.boundSessionId();
+    if (bound === null) return this.draft.getSnapshot().workspaceDirectory;
+    const row = this.catalog
+      .getSnapshot()
+      .sessions.find((session) => session.id === bound);
+    return row
+      ? row.workspaceDirectory
+      : this.workspaceOf(this.instance.directory);
   }
 
   getWorkspaceSnapshot(): WorkspaceSnapshot {

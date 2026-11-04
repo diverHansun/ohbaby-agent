@@ -22,6 +22,8 @@ import {
   SidePanelPage,
 } from "../side-panel/SidePanelPage.js";
 import { useSidePanel } from "../side-panel/use-side-panel.js";
+import { useTerminalTabs } from "../side-panel/terminal/use-terminal-tabs.js";
+import { ConfirmDialog } from "../shared/ConfirmDialog.js";
 import { Sidebar } from "../sidebar/Sidebar.js";
 import type {
   SessionActivity,
@@ -198,12 +200,25 @@ export function AppController(props: {
     [activeId],
   );
   const subagentInstances = useSubagentInstances(client, activeId);
+  const terminalDirectory = useCallback(
+    () => runtime.terminalDirectory(),
+    [runtime],
+  );
+  const terminalTabs = useTerminalTabs({
+    api: runtime.terminals,
+    panel: sidePanel,
+    directory: terminalDirectory,
+    onError: pushError,
+  });
   const sidePageContext: SidePageContext = {
     client,
     rootSessionId: activeId,
     subagentReadingCache: panelReadingCache,
     subagentInstances,
     setTabState: sidePanel.setTabState,
+    terminals: runtime.terminals,
+    onTerminalExit: terminalTabs.markExited,
+    onTerminalMissing: terminalTabs.sync,
   };
   const { revealPage } = sidePanel;
   const anchorToken = useRef(0);
@@ -340,6 +355,10 @@ export function AppController(props: {
           <SidePanel
             controls={sidePanel}
             focusOnOpen={panelOpenedByUser}
+            onNewTerminal={terminalTabs.createTerminal}
+            onCloseTerminal={(tab, remove) => {
+              terminalTabs.closeTerminal(tab, false, remove);
+            }}
             onClosed={() => {
               setPanelOpenedByUser(false);
               requestAnimationFrame(() => {
@@ -364,6 +383,20 @@ export function AppController(props: {
               );
             }}
           />
+          {terminalTabs.confirmation ? (
+            <ConfirmDialog
+              title="Close terminal?"
+              description={`${terminalTabs.confirmation.process} is still running in this terminal. Closing it ends the program too.`}
+              confirmLabel="Close"
+              danger
+              onConfirm={() => {
+                const pending = terminalTabs.confirmation;
+                if (pending)
+                  terminalTabs.closeTerminal(pending.tab, true, pending.remove);
+              }}
+              onCancel={terminalTabs.dismissConfirmation}
+            />
+          ) : null}
           {settingsDialog.state.mounted ? (
             <SettingsDialog
               settings={runtime.settings}

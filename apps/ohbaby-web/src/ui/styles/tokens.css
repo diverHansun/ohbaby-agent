@@ -68,6 +68,26 @@
   --chart-6: #5f8b8b;
   --chart-7: #8a7a9b;
 
+  /* Terminal ANSI palette for the light canvas (VS Code Light+), so prompts
+     and ls colours stay readable on white like Codex and Cursor. */
+  --term-black: #000000;
+  --term-red: #cd3131;
+  --term-green: #107c10;
+  --term-yellow: #949800;
+  --term-blue: #0451a5;
+  --term-magenta: #bc05bc;
+  --term-cyan: #0598bc;
+  --term-white: #555555;
+  --term-bright-black: #666666;
+  --term-bright-red: #cd3131;
+  --term-bright-green: #14ce14;
+  --term-bright-yellow: #b5ba00;
+  --term-bright-blue: #0451a5;
+  --term-bright-magenta: #bc05bc;
+  --term-bright-cyan: #0598bc;
+  --term-bright-white: #a5a5a5;
+  --term-selection: rgba(4, 81, 165, 0.18);
+
   /* Elevation: only floating elements get shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-card:

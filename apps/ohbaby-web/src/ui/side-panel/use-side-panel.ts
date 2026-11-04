@@ -50,13 +50,30 @@ export interface SidePanelControls {
     kind: K,
     state: SidePageStates[K],
   ) => void;
+  /**
+   * Appends tabs found elsewhere (terminals after a reload) without opening the
+   * panel or changing the selected tab; selects the first only when none is.
+   * With `reveal`, opens the panel on the (existing or new) tab of the first
+   * state instead, so a page that already arrived is never doubled.
+   */
+  readonly addTabs: <K extends SidePageKind>(
+    kind: K,
+    states: readonly SidePageStates[K][],
+    same: (left: SidePageStates[K], right: SidePageStates[K]) => boolean,
+    reveal?: boolean,
+  ) => void;
+  /** Rewrites every tab of one kind, e.g. after a terminal list read. */
+  readonly updateTabs: <K extends SidePageKind>(
+    kind: K,
+    update: (state: SidePageStates[K]) => SidePageStates[K],
+  ) => void;
 }
 
 function createTab<K extends SidePageKind>(
   kind: K,
   state: SidePageStates[K],
 ): SidePanelTab {
-  return { id: globalThis.crypto.randomUUID(), kind, state };
+  return { id: globalThis.crypto.randomUUID(), kind, state } as SidePanelTab;
 }
 
 /**
@@ -78,14 +95,12 @@ export function useSidePanel(
   useEffect(() => {
     setState((current) => ({
       ...current,
-      tabs: current.tabs.map((tab) =>
-        SIDE_PAGES[tab.kind].sessionScoped
-          ? {
-              ...tab,
-              state: SIDE_PAGES[tab.kind].initialState,
-            }
-          : tab,
-      ),
+      tabs: current.tabs.map((tab) => {
+        const { sessionScoped, initialState } = SIDE_PAGES[tab.kind];
+        return sessionScoped && initialState !== undefined
+          ? ({ ...tab, state: initialState } as SidePanelTab)
+          : tab;
+      }),
     }));
   }, [rootSessionId]);
 
@@ -104,7 +119,9 @@ export function useSidePanel(
   }, []);
   const openPage = useCallback(
     <K extends SidePageKind>(kind: K, pageState?: SidePageStates[K]): void => {
-      const tab = createTab(kind, pageState ?? SIDE_PAGES[kind].initialState);
+      const initial = pageState ?? SIDE_PAGES[kind].initialState;
+      if (initial === undefined) return;
+      const tab = createTab(kind, initial);
       setState((current) => ({
         ...current,
         open: true,
@@ -123,8 +140,7 @@ export function useSidePanel(
         const target =
           active?.kind === kind
             ? active
-            : // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- always true until a second page kind exists
-              current.tabs.find((tab) => tab.kind === kind);
+            : current.tabs.find((tab) => tab.kind === kind);
         if (!target) {
           const tab = createTab(kind, pageState);
           return {
@@ -139,7 +155,9 @@ export function useSidePanel(
           open: true,
           activeTabId: target.id,
           tabs: current.tabs.map((tab) =>
-            tab.id === target.id ? { ...tab, state: pageState } : tab,
+            tab.id === target.id
+              ? ({ ...tab, state: pageState } as SidePanelTab)
+              : tab,
           ),
         };
       });
@@ -170,12 +188,63 @@ export function useSidePanel(
       setState((current) => ({
         ...current,
         tabs: current.tabs.map((tab) =>
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- always true until a second page kind exists
           tab.id === id && tab.kind === kind
-            ? { ...tab, state: pageState }
+            ? ({ ...tab, state: pageState } as SidePanelTab)
             : tab,
         ),
       }));
+    },
+    [],
+  );
+  const addTabs = useCallback(
+    <K extends SidePageKind>(
+      kind: K,
+      states: readonly SidePageStates[K][],
+      same: (left: SidePageStates[K], right: SidePageStates[K]) => boolean,
+      reveal = false,
+    ): void => {
+      setState((current) => {
+        const find = (state: SidePageStates[K]): SidePanelTab | undefined =>
+          current.tabs.find(
+            (tab) =>
+              tab.kind === kind && same(tab.state as SidePageStates[K], state),
+          );
+        const added = states
+          .filter((state) => !find(state))
+          .map((state) => createTab(kind, state));
+        const tabs = [...current.tabs, ...added];
+        if (reveal && states.length > 0) {
+          const target = find(states[0]) ?? added[0];
+          return { ...current, open: true, tabs, activeTabId: target.id };
+        }
+        if (added.length === 0) return current;
+        return {
+          ...current,
+          tabs,
+          activeTabId: current.activeTabId ?? added[0]?.id,
+        };
+      });
+    },
+    [],
+  );
+  const updateTabs = useCallback(
+    <K extends SidePageKind>(
+      kind: K,
+      update: (state: SidePageStates[K]) => SidePageStates[K],
+    ): void => {
+      setState((current) => {
+        const tabs = current.tabs.map((tab) => {
+          if (tab.kind !== kind) return tab;
+          const state = update(tab.state as SidePageStates[K]);
+          return state === tab.state
+            ? tab
+            : ({ ...tab, state } as SidePanelTab);
+        });
+        // Unchanged tabs keep their identity, so nothing re-renders for nothing.
+        return tabs.some((tab, index) => tab !== current.tabs[index])
+          ? { ...current, tabs }
+          : current;
+      });
     },
     [],
   );
@@ -189,5 +258,7 @@ export function useSidePanel(
     selectTab,
     closeTab,
     setTabState,
+    addTabs,
+    updateTabs,
   };
 }

@@ -33,7 +33,9 @@ function Harness(props: {
       focusOnOpen={props.focusOnOpen}
       renderPage={(tab) => (
         <p data-testid="page">
-          {tab.kind}:{tab.state.subagentId ?? "list"}
+          {tab.kind}:
+          {(tab.kind === "subagents" ? tab.state.subagentId : undefined) ??
+            "list"}
         </p>
       )}
     />
@@ -101,7 +103,10 @@ it("starts closed with an entry page, opens Subagents tabs and offers only worki
 
   click(button(element, "Add page"));
   const items = [...document.querySelectorAll('[role="menuitem"]')];
-  expect(items.map((item) => item.textContent)).toEqual(["Subagents"]);
+  expect(items.map((item) => item.textContent)).toEqual([
+    "Subagents",
+    "Terminal",
+  ]);
   click(items[0] ?? null);
   // A page kind is not a unique key (D36): the menu adds a second tab and selects it.
   const tabs = [...element.querySelectorAll('[role="tab"]')];
@@ -226,10 +231,11 @@ it("reveals a page from elsewhere in the selected tab of that kind, or a new one
     controls?.revealPage("subagents", { subagentId: "writer" });
   });
   // The selected (second) tab is reused; no third tab appears.
-  expect(controls?.state.tabs.map((tab) => tab.state.subagentId)).toEqual([
-    "reviewer",
-    "writer",
-  ]);
+  expect(
+    controls?.state.tabs.map((tab) =>
+      tab.kind === "subagents" ? tab.state.subagentId : undefined,
+    ),
+  ).toEqual(["reviewer", "writer"]);
   // Only the selected tab's page is mounted, so one subagent reader at most.
   expect(element.querySelectorAll('[data-testid="page"]')).toHaveLength(1);
   expect(element.querySelector('[data-testid="page"]')?.textContent).toBe(

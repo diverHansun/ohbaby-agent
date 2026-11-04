@@ -17,6 +17,7 @@ import {
 import {
   SIDE_PAGE_KINDS,
   SIDE_PAGES,
+  type SidePageKind,
   type SidePanelTab,
 } from "./side-pages.js";
 import type { SidePanelControls } from "./use-side-panel.js";
@@ -39,6 +40,13 @@ export function SidePanel(props: {
    * 1024px would reach nothing. A panel restored on reload leaves focus alone.
    */
   readonly focusOnOpen?: boolean;
+  /** Terminals open only once the server created one (D1). */
+  readonly onNewTerminal?: () => void;
+  /** Terminal tabs close through the server and may ask first (D7). */
+  readonly onCloseTerminal?: (
+    tab: Extract<SidePanelTab, { kind: "terminal" }>,
+    remove: (id: string) => void,
+  ) => void;
 }): ReactElement {
   const {
     state,
@@ -69,6 +77,15 @@ export function SidePanel(props: {
         )
         ?.focus();
     });
+  };
+  const requestClose = (tab: SidePanelTab): void => {
+    if (tab.kind === "terminal" && props.onCloseTerminal)
+      props.onCloseTerminal(tab, closeTabAndFocus);
+    else closeTabAndFocus(tab.id);
+  };
+  const open = (kind: SidePageKind): void => {
+    if (kind === "terminal") props.onNewTerminal?.();
+    else openPage(kind);
   };
   const closePanel = (): void => {
     setOpen(false);
@@ -154,7 +171,7 @@ export function SidePanel(props: {
             if (index < 0 || !current) return;
             if (event.key === "Delete" || event.key === "Backspace") {
               event.preventDefault();
-              closeTabAndFocus(current.id);
+              requestClose(current);
               return;
             }
             const step =
@@ -176,6 +193,11 @@ export function SidePanel(props: {
         >
           {state.tabs.map((tab) => {
             const { title, icon: Icon } = SIDE_PAGES[tab.kind];
+            const label =
+              tab.kind === "terminal"
+                ? SIDE_PAGES.terminal.tabLabel?.(tab.state)
+                : undefined;
+            const closing = tab.kind === "terminal" && tab.state.closing;
             const selected = tab.id === state.activeTabId;
             return (
               <div
@@ -192,12 +214,13 @@ export function SidePanel(props: {
                   }
                   id={`ohb-side-tab-${tab.id}`}
                   tabIndex={selected ? 0 : -1}
+                  title={label?.detail}
                   onClick={() => {
                     selectTab(tab.id);
                   }}
                 >
                   <Icon aria-hidden="true" size={14} />
-                  <span>{title}</span>
+                  <span>{label?.title ?? title}</span>
                 </button>
                 {/* Mouse shortcut only; keyboard users close the selected tab with Delete. */}
                 <button
@@ -205,9 +228,10 @@ export function SidePanel(props: {
                   className="ohb-side-panel-tab-close"
                   aria-hidden="true"
                   tabIndex={-1}
-                  title={`Close ${title}`}
+                  title={`Close ${label?.title ?? title}`}
+                  disabled={closing}
                   onClick={() => {
-                    closeTabAndFocus(tab.id);
+                    requestClose(tab);
                   }}
                 >
                   <X size={12} />
@@ -274,7 +298,7 @@ export function SidePanel(props: {
                 key={kind}
                 type="button"
                 onClick={() => {
-                  openPage(kind);
+                  open(kind);
                 }}
               >
                 <span className="ohb-side-panel-entry-icon" aria-hidden="true">
@@ -309,7 +333,7 @@ export function SidePanel(props: {
                 type="button"
                 onClick={() => {
                   setAddMenu(null);
-                  openPage(kind);
+                  open(kind);
                 }}
               >
                 <Icon aria-hidden="true" size={14} />

@@ -5,16 +5,19 @@
     "emitDeclarationOnly": true,
     "rootDir": "src",
     "outDir": "dist",
-    "tsBuildInfoFile": "tsconfig.tsbuildinfo"
+    "tsBuildInfoFile": "tsconfig.tsbuildinfo",
+    "paths": {
+      "ohbaby-sdk": ["packages/ohbaby-sdk/src/index.ts"],
+      "ohbaby-agent": ["packages/ohbaby-agent/src/index.ts"],
+      "ohbaby-cli": ["packages/ohbaby-cli/src/index.ts"],
+      "ohbaby-llm": ["packages/ohbaby-llm/src/index.ts"],
+      "@xterm/xterm": [
+        "packages/ohbaby-server/src/terminal/xterm-headless-types.d.ts"
+      ]
+    }
   },
-  "include": [
-    "src/**/*.ts"
-  ],
-  "exclude": [
-    "dist",
-    "coverage",
-    "node_modules"
-  ],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "coverage", "node_modules"],
   "references": [
     {
       "path": "../ohbaby-llm"

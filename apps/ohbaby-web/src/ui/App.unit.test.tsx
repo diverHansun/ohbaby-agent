@@ -5286,6 +5286,13 @@ function createFakeRuntime(input: {
       selectSession,
       store,
       subscribeWorkspaces: () => () => undefined,
+      terminals: {
+        list: vi.fn(() => Promise.resolve([])),
+        create: vi.fn(),
+        close: vi.fn(),
+        connect: vi.fn(),
+      },
+      terminalDirectory: () => null,
     },
     selectSession,
     setPermission,

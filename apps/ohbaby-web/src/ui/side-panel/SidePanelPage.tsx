@@ -1,8 +1,10 @@
 import type { UiBackendClient } from "ohbaby-sdk";
+import type { TerminalApi } from "../../api/daemon/terminals.js";
 import type { ReactElement } from "react";
 import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
 import type { SidePanelTab } from "./side-pages.js";
 import { SubagentsPage } from "./subagents/SubagentsPage.js";
+import { TerminalPage } from "./terminal/TerminalPage.js";
 import type { SubagentInstances } from "../shared/subagent-instances.js";
 import type { SidePanelControls } from "./use-side-panel.js";
 
@@ -14,6 +16,13 @@ export interface SidePageContext {
   readonly subagentReadingCache: SubagentReadingCache;
   readonly subagentInstances: SubagentInstances;
   readonly setTabState: SidePanelControls["setTabState"];
+  readonly terminals: TerminalApi;
+  readonly onTerminalExit: (
+    tab: Extract<SidePanelTab, { kind: "terminal" }>,
+    exitCode: number,
+  ) => void;
+  /** Re-reads the terminal list after a socket says its terminal is gone. */
+  readonly onTerminalMissing: () => void;
 }
 
 /** Renders one tab's page. A new page kind adds its case here. */
@@ -23,8 +32,6 @@ export function SidePanelPage(props: {
 }): ReactElement {
   const { tab, context } = props;
   switch (tab.kind) {
-    // Only one page kind exists today; the next ones add their cases here.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see above
     case "subagents":
       return context.client && context.rootSessionId ? (
         <SubagentsPage
@@ -41,6 +48,17 @@ export function SidePanelPage(props: {
         />
       ) : (
         <p className="ohb-side-notice">Open a chat to see its subagents.</p>
+      );
+    case "terminal":
+      return (
+        <TerminalPage
+          api={context.terminals}
+          state={tab.state}
+          onExit={(exitCode) => {
+            context.onTerminalExit(tab, exitCode);
+          }}
+          onMissing={context.onTerminalMissing}
+        />
       );
   }
 }
