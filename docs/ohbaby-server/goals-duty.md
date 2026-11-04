@@ -54,6 +54,7 @@
 - **D4 横切中间件**：
   - auth（token，**fail-closed**，修 S4；常量时间比较）。
   - CORS（origin 白名单，修 S2，让本机 web 可跨 origin 访问）。
+  - Host 头校验：loopback 模式下只接受本机主机名（端口不限），防止 DNS 重绑定读取首页注入的 token。随内置终端一同引入，见 [terminal/goals-duty](../terminal/goals-duty.md) D11。
 - **D5 remote client**：提供 remote `UiBackendClient`，供 `ohbaby attach <url>` 与"启动 server 后用 client 验证"的集成测试复用。
 - **D6 foreground 生命周期**：`ohbaby serve` 前台启动一个 server 进程，前台停止、退出即清理。这是本包生命周期能力的**主路径**。
 - **D7 多项目宿主与发现**：用户级 pid/state 保证全机一个 serve；workspace header fail-closed；InstanceStore 懒加载 per-scope runtime；全局面板在同一 origin 切换 known project。
