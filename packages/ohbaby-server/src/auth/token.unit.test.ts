@@ -21,8 +21,10 @@ describe("daemon auth", () => {
     expect(isAuthorizedDaemonRequest(undefined, "token_1")).toBe(false);
   });
 
-  it("allows unauthenticated requests when no daemon token is configured", () => {
-    expect(isAuthorizedDaemonRequest(undefined, undefined)).toBe(true);
+  it("rejects every request when no daemon token is configured", () => {
+    expect(isAuthorizedDaemonRequest(undefined, undefined)).toBe(false);
+    expect(isAuthorizedDaemonRequest("Bearer ", undefined)).toBe(false);
+    expect(isAuthorizedDaemonRequest("Bearer ", "")).toBe(false);
   });
 
   it("redacts tokens before logging", () => {

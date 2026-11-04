@@ -96,16 +96,6 @@ export interface DaemonServerAppHandle {
   start(): Promise<void>;
 }
 
-function isAuthorized(
-  authorization: string | undefined,
-  token: string | undefined,
-): boolean {
-  if (!token) {
-    return false;
-  }
-  return isAuthorizedDaemonRequest(authorization, token);
-}
-
 function requireAuthToken(token: string | undefined): string {
   if (!token) {
     throw new Error("Daemon auth token is required");
@@ -331,7 +321,7 @@ class DaemonServerAppRuntime implements DaemonRouteContext {
   }
 
   isAuthorized(authorization: string | undefined): boolean {
-    return isAuthorized(authorization, this.authToken);
+    return isAuthorizedDaemonRequest(authorization, this.authToken);
   }
 
   authorizePromptMutation(

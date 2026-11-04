@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 const TOKEN_PREFIX = "ohbaby_";
 
@@ -10,14 +10,25 @@ export function daemonAuthHeader(token: string): string {
   return `Bearer ${token}`;
 }
 
+function digest(value: string): Buffer {
+  return createHash("sha256").update(value).digest();
+}
+
+/**
+ * Fails closed: with no configured token nothing is authorized. Comparing
+ * fixed-length digests keeps the check constant-time for any header length.
+ */
 export function isAuthorizedDaemonRequest(
   authorization: string | undefined,
   token: string | undefined,
 ): boolean {
-  if (!token) {
-    return true;
+  if (!token || authorization === undefined) {
+    return false;
   }
-  return authorization === daemonAuthHeader(token);
+  return timingSafeEqual(
+    digest(authorization),
+    digest(daemonAuthHeader(token)),
+  );
 }
 
 export function redactDaemonAuthToken(token: string | undefined): string {
