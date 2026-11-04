@@ -39,7 +39,7 @@
 | S5d | 关闭尚未完成时刷新；或接回时恰好已开始关闭 | 列表仍能找到记录；不把 4404 直接当成记录已删除；原关闭入口仍可等待已有任务，不因刷新后读到 `closing` 就永久禁用。列表查询失败不当作终端已结束 | D7、F1b、F6 |
 | S6 | 刷新网页、关闭面板 | shell 和其中运行的程序继续运行 | D9 |
 | S7 | 非 loopback 模式 | 终端的 REST 返回 403 `TERMINAL_LOOPBACK_ONLY`，WebSocket 握手被拒绝 | D11 |
-| S8 | daemon 未配置 token | 终端的 REST 返回 401，WebSocket 以 4401 关闭；其他接口行为不变 | D11 |
+| S8 | 终端 REST 请求不带 token 或 token 错误 | 返回 401，不新建、不列出、不关闭任何终端 | D11 |
 | S9 | Host 头主机名不是本机名（模拟 DNS 重绑定） | 首页、所有接口和 WebSocket 升级请求都返回 403，HTML 里的 token 不会下发；主机名是本机名但端口不同（SSH 转发）时正常访问 | D11 |
 | S10 | WebSocket 不带 token 或 token 错误；Origin 是其他网站 | token 问题以 4401 关闭；Origin 不是本机时握手被拒绝；两种情况都收不到任何终端数据，终端不登记这个查看者 | D10 |
 | S11 | node-pty 加载失败 | 新建返回 `TERMINAL_UNAVAILABLE` 并附原因；serve 的其他接口正常 | D12 |

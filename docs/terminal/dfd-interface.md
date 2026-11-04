@@ -34,7 +34,7 @@
 ### F2 新建终端
 
 1. 浏览器发 `POST /v1/terminals`，带 token 和当前视图的行列数；打开了 workspace 时带上 `x-ohbaby-directory`，没有 workspace 时不带。
-2. 终端路由依次检查：是否 loopback 模式、token 是否正确（未配置 token 一律视为未授权）；然后确定初始目录：带了 `x-ohbaby-directory` 时，用 `resolveWorkspaceScope` 校验并规范化，它会把子目录归到项目根目录，初始目录就是这个根目录；目录无效时按现有规则返回 400，不改用主目录。没带时，初始目录是 `os.homedir()`（D3）。
+2. 终端路由依次检查：是否 loopback 模式、token 是否正确（沿用现有鉴权）；然后确定初始目录：带了 `x-ohbaby-directory` 时，用 `resolveWorkspaceScope` 校验并规范化，它会把子目录归到项目根目录，初始目录就是这个根目录；目录无效时按现有规则返回 400，不改用主目录。没带时，初始目录是 `os.homedir()`（D3）。
 3. 终端管理器先检查是否正在停止，再计算“已登记终端 + 正在创建的任务”的总数，满 16 个返回 `TERMINAL_LIMIT_REACHED`。未满时立即登记创建任务、预留名额，然后才进入异步加载和创建；检查与预留之间不能等待异步操作。
 4. PTY 适配第一次被用到时加载 node-pty；加载失败则记住原因，本次及以后的新建都返回 `TERMINAL_UNAVAILABLE`。
 5. 启动配置算出 shell、参数、环境变量和初始目录（D3–D5），PTY 适配开出 shell。
@@ -139,7 +139,7 @@ type TerminalServerMessage =
 | `DELETE /v1/terminals/:id` | 可选 `?force=1` | 200 `{ ok }` | 409 `TERMINAL_BUSY`（附 `process`）；404 `TERMINAL_NOT_FOUND`；500 `TERMINAL_CLOSE_FAILED` |
 
 三个接口共同的失败：
-- 401 未授权，沿用现有响应 `{ ok: false, error: { message: "Unauthorized" } }`（现有 401 不带 code）。daemon 未配置 token 时同样返回 401。
+- 401 未授权，沿用现有响应 `{ ok: false, error: { message: "Unauthorized" } }`（现有 401 不带 code）。
 - 403 `TERMINAL_LOOPBACK_ONLY`：非 loopback 模式。
 - 403：Host 头不合法（F9，作用于所有接口）。
 - 400：目录无效，沿用现有错误码。只有 `POST` 会返回；`GET` 和 `DELETE` 忽略 `x-ohbaby-directory`。

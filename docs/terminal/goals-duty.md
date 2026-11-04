@@ -60,7 +60,7 @@
   - 同一终端可以在多个页面同时打开，各页面都能看到输出、都能输入；尺寸以最后一次调整为准。
 - **D11 安全边界**：终端是一个不经审批的 shell，能连上终端就能在本机执行任意命令，因此：
   - **只在本机地址开放**：`ohbaby serve` 监听非 loopback 地址时，终端整体关闭：REST 返回 403 `TERMINAL_LOOPBACK_ONLY`，WebSocket 握手直接拒绝。这与 `DIRECTORY_BROWSER_LOOPBACK_ONLY` 的先例一致。非 loopback 模式下 ohbaby 本身就不提供网页界面（`static-assets.ts` 返回 403），所以这条限制只体现在接口上，不需要页面提示。
-  - **严格校验 token**：现有 `isAuthorizedDaemonRequest` 在未配置 token 时放行所有请求。终端接口改用严格校验：未配置 token 时，任何请求都按未授权处理（401）。其他接口的现有行为不变。正常的 `ohbaby serve` 总会生成 token（`main.ts:656`），这道检查只防意外配置。
+  - **沿用现有 token 鉴权**：终端接口与其他接口共用 `isAuthorizedDaemonRequest`，不另加检查。它在未配置 token 时拒绝所有请求，并用常量时间比较（2026-11-04 在终端实施前修复，提交 `2a219aeb`）。
   - **本机模式下校验 Host 头**：只检查主机名，不检查端口。主机名必须是 `localhost`、`127.0.0.1`、`[::1]` 或 serve 实际绑定的 loopback 地址，否则返回 403。不检查端口是为了兼容 SSH 端口转发（例如 `ssh -L 9000:localhost:4096` 时 Host 是 `localhost:9000`）；DNS 重绑定攻击靠的是主机名，与端口无关。校验 Host 是为了防 DNS 重绑定：恶意网页把自己的域名指向 `127.0.0.1` 后，可以读取首页 HTML 里注入的 token（`window.__OHBABY__`）。这个问题现有代码已经存在，终端上线后后果会从“能替用户发 prompt”升级为“能直接执行命令”，所以必须在终端上线前修复（参考 kimi-code 在 WebSocket 握手时做的 Host 和 Origin 白名单）。这是 server 级改动，作用于所有接口，测试要覆盖现有接口不受影响；server 的设计文档在 D4 中同步记录了这一条。
 - **D12 终端不可用时降级**：node-pty 只在第一次新建终端时加载。加载失败时，用全局 `NoticeStack` 在右上角简短提示“终端不可用”及原因，不添加失败 tab，`ohbaby serve` 和聊天等其他功能照常工作。依赖选型（`@lydell/node-pty` 锁定精确版本等）见 [architecture](architecture.md)。
 
