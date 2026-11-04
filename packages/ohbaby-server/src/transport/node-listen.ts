@@ -1,4 +1,5 @@
-import type { Server } from "node:http";
+import type { IncomingMessage, Server } from "node:http";
+import type { Duplex } from "node:stream";
 import type { Hono } from "hono";
 import { serve } from "@hono/node-server";
 
@@ -6,6 +7,12 @@ export interface NodeListenOptions {
   readonly app: Hono;
   readonly host: string;
   readonly port: number;
+  readonly webSocket?: NodeWebSocketTransport;
+}
+
+export interface NodeWebSocketTransport {
+  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void;
+  stop(): Promise<void>;
 }
 
 export interface NodeListenHandle {
@@ -41,6 +48,11 @@ export async function listenToNodeServer(
         resolve();
       },
     ) as Server;
+    if (options.webSocket) {
+      server.on("upgrade", (request, socket, head) => {
+        options.webSocket?.handleUpgrade(request, socket, head);
+      });
+    }
     server.once("error", reject);
   });
 
@@ -53,6 +65,7 @@ export async function listenToNodeServer(
     host: options.host,
     port: currentPort,
     async stop(): Promise<void> {
+      await options.webSocket?.stop();
       await new Promise<void>((resolve, reject) => {
         startedServer.close((error?: Error) => {
           if (
@@ -69,6 +82,6 @@ export async function listenToNodeServer(
         startedServer.closeAllConnections();
       });
     },
-    url: `http://${options.host}:${String(currentPort)}`,
+    url: `http://${options.host.includes(":") && !options.host.startsWith("[") ? `[${options.host}]` : options.host}:${String(currentPort)}`,
   };
 }

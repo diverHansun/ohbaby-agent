@@ -134,7 +134,7 @@ importers:
         version: 16.6.1
       exa-js:
         specifier: ^2.0.12
-        version: 2.0.12
+        version: 2.0.12(ws@8.22.1)
       https-proxy-agent:
         specifier: ^7
         version: 7.0.6
@@ -171,7 +171,7 @@ importers:
         version: 15.0.12
       openai:
         specifier: ^7.13.0
-        version: 7.13.0(undici@7.30.0)(zod@3.25.76)
+        version: 7.13.0(undici@7.30.0)(ws@8.22.1)(zod@3.25.76)
       tree-sitter-bash:
         specifier: 0.25.0
         version: 0.25.0
@@ -226,7 +226,7 @@ importers:
         version: 0.124.0(zod@3.25.76)
       openai:
         specifier: ^7.13.0
-        version: 7.13.0(undici@7.30.0)(zod@3.25.76)
+        version: 7.13.0(undici@7.30.0)(ws@8.22.1)(zod@3.25.76)
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -238,6 +238,15 @@ importers:
       '@hono/node-server':
         specifier: ^2.0.5
         version: 2.0.5(hono@4.12.25)
+      '@lydell/node-pty':
+        specifier: 1.2.0-beta.18
+        version: 1.2.0-beta.18
+      '@xterm/addon-serialize':
+        specifier: 0.14.0
+        version: 0.14.0
+      '@xterm/headless':
+        specifier: 6.0.0
+        version: 6.0.0
       hono:
         specifier: ^4.12.25
         version: 4.12.25
@@ -247,7 +256,13 @@ importers:
       ohbaby-sdk:
         specifier: workspace:*
         version: link:../ohbaby-sdk
+      ws:
+        specifier: 8.22.1
+        version: 8.22.1
     devDependencies:
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
       ohbaby-llm:
         specifier: workspace:*
         version: link:../ohbaby-llm
@@ -805,6 +820,39 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@lydell/node-pty-darwin-arm64@1.2.0-beta.18':
+    resolution: {integrity: sha512-gJizeNHkkKCoggtj5Q0yf4btK6dPfr7E063SrOh1jHXp3IyjiErU4KwT7Cn29qb/OY5pBo/Utctenl03MyBtAg==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@lydell/node-pty-darwin-x64@1.2.0-beta.18':
+    resolution: {integrity: sha512-xnJQz+i5v7pkR1xo14ffTwvMm2DoK3KqPACQaJqxtMVkM7ojv14/KmkaV2jte7Q0BIzfU+VbKVUL9Zmf23G8VQ==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@lydell/node-pty-linux-arm64@1.2.0-beta.18':
+    resolution: {integrity: sha512-fM8jRcZDZwG7ihEOx/R7N1aGHdT4Fd6IQj1d6Jp7Qb9FeDWlIwLuVlxUkJOsW4V1ZmJe1xZl2+WR0RjqMvb2+Q==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@lydell/node-pty-linux-x64@1.2.0-beta.18':
+    resolution: {integrity: sha512-LGikvfcvoPrxXO7o1gCsd5ErrRWnQFYLxjJfX0uwBpi0oGPiTERUBLzKspzZs7wjXZqF30mnNB/C09uotu5vRA==}
+    cpu: [x64]
+    os: [linux]
+
+  '@lydell/node-pty-win32-arm64@1.2.0-beta.18':
+    resolution: {integrity: sha512-S6h4G3zYGe+pPQxhlNxg+MvJNUIwXFxhnUufx1QT45TgratKMxQfoGPidvnwoLwuXQ3hqQ7SsI93rH8RUoL09g==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@lydell/node-pty-win32-x64@1.2.0-beta.18':
+    resolution: {integrity: sha512-wBSMeAwEL04t694ln+QbLnc98YeF3mAwWm/NP8acYDAobPw/WK7KKpk8z07iyxv0gRH2Z2/L/f6vgtnBgxE0Bg==}
+    cpu: [x64]
+    os: [win32]
+
+  '@lydell/node-pty@1.2.0-beta.18':
+    resolution: {integrity: sha512-ryy4liRcw6QBBKWDIbJgTW7Pw8NI2xjri/5s/LZg/jJ8ZVg8MgA1xI/vjpT5qTvDvPjUpU5NybJBrKRgK/QvlA==}
+
   '@modelcontextprotocol/sdk@1.29.0':
     resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
     engines: {node: '>=18'}
@@ -996,6 +1044,9 @@ packages:
 
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
+
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@types/yargs-parser@21.0.3':
     resolution: {integrity: sha512-I4q9QU9MQv4oEOz4tAHJtNz1cwuLxn2F3xcc2iV5WdqLPpUnj30aUuxt1mAxYTG+oe8CZMV/+6rU4S4gRDzqtQ==}
@@ -1228,8 +1279,14 @@ packages:
   '@vscode/ripgrep@1.18.0':
     resolution: {integrity: sha512-ns5lWe44tSfbTMbVUsyB+I1819PVSw4AdpgK0RNkzfWfwy6+3IUNSxwSrfTno1/oWaS/hERNz+XLWVyga2aJBQ==}
 
+  '@xterm/addon-serialize@0.14.0':
+    resolution: {integrity: sha512-uteyTU1EkrQa2Ux6P/uFl2fzmXI46jy5uoQMKEOM0fKTyiW7cSn0WrFenHm5vO5uEXX/GpwW/FgILvv3r0WbkA==}
+
   '@xterm/headless@5.5.0':
     resolution: {integrity: sha512-5xXB7kdQlFBP82ViMJTwwEc3gKCLGKR/eoxQm4zge7GPBl86tCdI0IdPJjoKd8mUSFXz5V7i/25sfsEkP4j46g==}
+
+  '@xterm/headless@6.0.0':
+    resolution: {integrity: sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw==}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -2934,6 +2991,18 @@ packages:
       utf-8-validate:
         optional: true
 
+  ws@8.22.1:
+    resolution: {integrity: sha512-oyL6OPYme/CmiFvNuGzeoxCJ4nOrZE2O1FwM9MWM1AsGri6nLXB2pg+lNA8aLeXMSav0J6eIVS1j6vUPzUtK9g==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
@@ -3405,6 +3474,33 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
+  '@lydell/node-pty-darwin-arm64@1.2.0-beta.18':
+    optional: true
+
+  '@lydell/node-pty-darwin-x64@1.2.0-beta.18':
+    optional: true
+
+  '@lydell/node-pty-linux-arm64@1.2.0-beta.18':
+    optional: true
+
+  '@lydell/node-pty-linux-x64@1.2.0-beta.18':
+    optional: true
+
+  '@lydell/node-pty-win32-arm64@1.2.0-beta.18':
+    optional: true
+
+  '@lydell/node-pty-win32-x64@1.2.0-beta.18':
+    optional: true
+
+  '@lydell/node-pty@1.2.0-beta.18':
+    optionalDependencies:
+      '@lydell/node-pty-darwin-arm64': 1.2.0-beta.18
+      '@lydell/node-pty-darwin-x64': 1.2.0-beta.18
+      '@lydell/node-pty-linux-arm64': 1.2.0-beta.18
+      '@lydell/node-pty-linux-x64': 1.2.0-beta.18
+      '@lydell/node-pty-win32-arm64': 1.2.0-beta.18
+      '@lydell/node-pty-win32-x64': 1.2.0-beta.18
+
   '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.22)
@@ -3571,6 +3667,10 @@ snapshots:
 
   '@types/trusted-types@2.0.7':
     optional: true
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 24.12.4
 
   '@types/yargs-parser@21.0.3': {}
 
@@ -3881,7 +3981,11 @@ snapshots:
       '@vscode/ripgrep-win32-ia32': 1.18.0
       '@vscode/ripgrep-win32-x64': 1.18.0
 
+  '@xterm/addon-serialize@0.14.0': {}
+
   '@xterm/headless@5.5.0': {}
+
+  '@xterm/headless@6.0.0': {}
 
   accepts@2.0.0:
     dependencies:
@@ -4333,11 +4437,11 @@ snapshots:
     dependencies:
       eventsource-parser: 3.0.8
 
-  exa-js@2.0.12:
+  exa-js@2.0.12(ws@8.22.1):
     dependencies:
       cross-fetch: 4.1.0
       dotenv: 16.4.7
-      openai: 5.23.2(zod@3.25.76)
+      openai: 5.23.2(ws@8.22.1)(zod@3.25.76)
       zod: 3.25.76
       zod-to-json-schema: 3.25.1(zod@3.25.76)
     transitivePeerDependencies:
@@ -4887,13 +4991,15 @@ snapshots:
     dependencies:
       mimic-fn: 2.1.0
 
-  openai@5.23.2(zod@3.25.76):
+  openai@5.23.2(ws@8.22.1)(zod@3.25.76):
     optionalDependencies:
+      ws: 8.22.1
       zod: 3.25.76
 
-  openai@7.13.0(undici@7.30.0)(zod@3.25.76):
+  openai@7.13.0(undici@7.30.0)(ws@8.22.1)(zod@3.25.76):
     optionalDependencies:
       undici: 7.30.0
+      ws: 8.22.1
       zod: 3.25.76
 
   optionator@0.9.4:
@@ -5522,6 +5628,8 @@ snapshots:
   wrappy@1.0.2: {}
 
   ws@8.19.0: {}
+
+  ws@8.22.1: {}
 
   xml-name-validator@5.0.0: {}
 

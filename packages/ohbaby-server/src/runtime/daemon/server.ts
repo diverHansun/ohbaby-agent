@@ -49,6 +49,12 @@ import {
   WorkspaceScopeError,
 } from "../workspace-scope.js";
 import { isAuthorizedDaemonRequest } from "../../auth/token.js";
+import { isAllowedDaemonHost } from "../../auth/host-check.js";
+import { TerminalManager } from "../../terminal/terminal-manager.js";
+import {
+  registerTerminalRoutes,
+  createTerminalWebSocketTransport,
+} from "../../protocols/web/routes/terminals.js";
 import {
   moveSessionWorkspace,
   type GlobalSessionCatalog,
@@ -145,6 +151,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     if (this.closing) throw new Error("Daemon server is closing");
   }
   private readonly app = new Hono();
+  private readonly terminalManager = new TerminalManager();
   private readonly appHandle: DaemonServerAppHandle;
   private readonly instanceStore:
     | InstanceStore<WorkspaceAppInstance>
@@ -269,6 +276,16 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
   private mountRoutes(): void {
     this.app.use("*", async (context, next) => {
+      if (!isAllowedDaemonHost(context.req.header("host"), this.options.host)) {
+        return context.json(
+          { ok: false, error: { message: "Forbidden Host" } },
+          403,
+        );
+      }
+      await next();
+      return;
+    });
+    this.app.use("*", async (context, next) => {
       if (this.closing)
         return context.json(
           { ok: false, error: { message: "Daemon server is closing" } },
@@ -276,6 +293,11 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         );
       await next();
       return;
+    });
+    registerTerminalRoutes(this.app, {
+      manager: this.terminalManager,
+      host: this.options.host,
+      authToken: this.options.authToken,
     });
     if (!this.instanceStore) {
       this.app.all("*", (context) => this.appHandle.app.fetch(context.req.raw));
@@ -870,6 +892,11 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       app: this.app,
       host: this.options.host,
       port: this.options.port,
+      webSocket: createTerminalWebSocketTransport({
+        manager: this.terminalManager,
+        host: this.options.host,
+        authToken: this.options.authToken,
+      }),
     });
     try {
       this.assertOpen();
@@ -899,6 +926,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   closeAdmission(): void {
     if (this.closing) return;
     this.closing = true;
+    this.terminalManager.closeAdmission();
     this.options.backend.closeAdmission?.();
     this.instanceStore?.closeAdmission();
   }
@@ -910,6 +938,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     this.nodeServer = undefined;
     this.connections.clear();
     this.stopPromise = collectCleanup(options, {
+      terminals: () => this.terminalManager.stop(),
       workspaces: () =>
         this.instanceStore
           ? this.instanceStore.disposeAll(options)

@@ -330,3 +330,15 @@ export type {
   UiSettingsError,
   UiSettingsErrorResponse,
 } from "./contract/settings.js";
+
+export {
+  TERMINAL_PROTOCOL,
+  TERMINAL_TOKEN_PREFIX,
+  TERMINAL_MAX_INPUT_BYTES,
+  TERMINAL_MAX_BUFFER_BYTES,
+  TERMINAL_ERROR_CODES,
+  TERMINAL_CLOSE_CODES,
+  type TerminalInfo,
+  type TerminalClientMessage,
+  type TerminalServerMessage,
+} from "./contract/terminal.js";

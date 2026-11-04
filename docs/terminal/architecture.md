@@ -118,6 +118,8 @@ packages/ohbaby-server/src/
 │  ├─ terminal-session.ts                    终端会话
 │  ├─ shell-launch.ts                        启动配置（纯函数）
 │  ├─ pty.ts                                 PTY 适配与懒加载
+│  ├─ process-tree.ts                        进程表解析、归属和发信号前的身份检查
+│  ├─ errors.ts                              终端错误码与状态
 │  └─ index.ts                               对 server 其余部分的出口
 ├─ protocols/web/routes/terminals.ts         终端路由，形如现有的 registerGlobalSettingsRoutes
 ├─ auth/host-check.ts                        Host 头校验（新增）
@@ -149,7 +151,7 @@ apps/ohbaby-web/src/ui/shell/AppController.tsx 改：构造 SidePageContext 时�
 | 依赖 | 版本 | 所在包 | 用途 |
 | --- | --- | --- | --- |
 | `@lydell/node-pty` | `1.2.0-beta.18`，锁定精确版本 | server | 开 shell。各平台预编译包以可选依赖的方式提供，安装时不跑脚本、不编译 |
-| `ws`、`@types/ws` | `^8.22.1`、`^8.18.2` | server | WebSocket 服务端，`@hono/node-server` v2 的 `upgradeWebSocket` 需要它 |
+| `ws`、`@types/ws` | `8.22.1`、`8.18.2` | server | WebSocket 服务端，通过 Node HTTP server 的 `upgrade` 事件接入 |
 | `@xterm/headless` | `6.0.0` | server | 服务端屏幕，用于生成快照 |
 | `@xterm/addon-serialize` | `0.14.0` | server | 把屏幕序列化成快照 |
 | `@xterm/xterm` | `6.0.0` | web | 浏览器端显示 |
@@ -184,8 +186,8 @@ xterm 系列锁定精确版本，保证 headless、serialize 和浏览器端版�
 
 | 文件 | 改什么 | 风险 |
 | --- | --- | --- |
-| `packages/ohbaby-server/src/transport/node-listen.ts` | 创建 `new WebSocketServer({ noServer: true, handleProtocols, maxPayload: 65536 })` 并传给 `serve()` 的 `websocket` 选项。`handleProtocols` 只选中 `ohbaby.terminal.v1`：ws 默认选中浏览器提供的第一个子协议，Hono 的路由又不能设置响应里的子协议头。停止时先对 `wss.clients` 逐个 `terminate()`，再关闭 HTTP server | 已升级的 WebSocket 不受 `closeAllConnections()` 管，Hono 又要等 server 关闭后才关 `wss`，不先 `terminate()` 停止流程会被挂住 |
-| `packages/ohbaby-server/src/runtime/daemon/server.ts` | 创建终端管理器；在 `mountRoutes` 最前面加 Host 校验；终端路由注册在外层 `this.app` 上，位于多 workspace 分发和单 scope 兜底转发之前，两种模式都注册；`stop()` 先让终端管理器拒绝新建，再在清理步骤里“结束全部终端” | 终端路由不能放进内层的 workspace app：内层 app 经 `appHandle.app.fetch(context.req.raw)` 转发时不带 `env`，在里面调用 `upgradeWebSocket` 会返回 500。单 scope 模式下没有现成的目录解析，终端路由要自己调用 `resolveWorkspaceScope`（它会把子目录归到项目根目录，初始目录即为该根目录） |
+| `packages/ohbaby-server/src/transport/node-listen.ts` | 在 HTTP server 的 `upgrade` 事件上接入终端路由提供的 WebSocket 处理器；路由内部创建 `WebSocketServer({ noServer: true, handleProtocols, maxPayload: 65536 })`，只协商 `ohbaby.terminal.v1`。停止时先对 `wss.clients` 逐个 `terminate()`，再关闭 HTTP server | 已升级的 WebSocket 不受 `closeAllConnections()` 管，须单独结束，避免停止流程被挂住 |
+| `packages/ohbaby-server/src/runtime/daemon/server.ts` | 创建终端管理器；在 `mountRoutes` 最前面加 Host 校验；终端路由注册在外层 `this.app` 上，位于多 workspace 分发和单 scope 兜底转发之前，两种模式都注册；`stop()` 先让终端管理器拒绝新建，再在清理步骤里“结束全部终端” | 终端属于整个 serve，不能随 workspace app 分发；WebSocket 升级也在外层处理。新建带目录头时调用 `resolveWorkspaceScope`，无目录头时用 `os.homedir()`。GET 和 DELETE 忽略目录头 |
 | `packages/ohbaby-server/package.json` | 加上表中的服务端依赖 | 发布包体积变大 |
 | `packages/ohbaby-sdk/src/index.ts` | 导出终端契约 | 无 |
 | `apps/ohbaby-web/package.json` | 加上表中的浏览器端依赖 | 首屏体积：Terminal 页按需加载 xterm |
