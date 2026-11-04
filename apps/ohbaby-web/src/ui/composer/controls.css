@@ -98,6 +98,9 @@
   gap: 4px;
   max-width: 220px;
   min-height: 28px;
+  /* A narrow main area (right panel open) truncates the label instead of
+     pushing the bar past the composer. */
+  min-width: 0;
   padding: 0 8px;
   transition: background var(--duration-fast) var(--ease);
 }

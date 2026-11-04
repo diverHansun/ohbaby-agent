@@ -1,6 +1,9 @@
 /* Two-column shell (03 §4.1): sidebar + main area. On narrow windows the sidebar
    is a drawer over the main area. */
 .ohb-shell {
+  /* Room the right panel leaves the main area (03 §4.9). */
+  --main-min-width: 400px;
+  --shell-sidebar-width: 0px;
   display: flex;
   height: 100vh;
   height: 100dvh;
@@ -14,6 +17,10 @@
   transition: width var(--duration) var(--ease);
   width: 0;
   z-index: 40;
+}
+
+.ohb-shell.is-sidebar-open {
+  --shell-sidebar-width: var(--sidebar-width);
 }
 
 .ohb-shell.is-sidebar-open .ohb-shell-sidebar {

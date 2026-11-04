@@ -59,7 +59,11 @@ export function SidePanel(props: {
   } = props.controls;
   const [addMenu, setAddMenu] = useState<MenuAnchor | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
-  const drag = useRef<{ startX: number; startWidth: number } | null>(null);
+  const drag = useRef<{
+    startX: number;
+    startWidth: number;
+    maxWidth: number;
+  } | null>(null);
   const active = state.tabs.find((tab) => tab.id === state.activeTabId);
   const panel = useRef<HTMLElement>(null);
   const focusTab = (id: string): void => {
@@ -121,7 +125,10 @@ export function SidePanel(props: {
         }
       }}
       style={
-        { "--side-panel-width": `${String(state.width)}px` } as CSSProperties
+        {
+          "--side-panel-width": `${String(state.width)}px`,
+          "--side-panel-min-width": `${String(SIDE_PANEL_MIN_WIDTH)}px`,
+        } as CSSProperties
       }
     >
       <div
@@ -143,13 +150,32 @@ export function SidePanel(props: {
         onPointerDown={(event) => {
           if (event.button !== 0) return;
           event.currentTarget.setPointerCapture(event.pointerId);
-          drag.current = { startX: event.clientX, startWidth: state.width };
+          // CSS may show the panel narrower than its stored width (the main
+          // area keeps its minimum), so drag from what is on screen and stop
+          // where the CSS cap stops, leaving no dead zone on the way back.
+          const shown = panel.current?.getBoundingClientRect().width;
+          const main = panel.current
+            ?.closest(".ohb-shell")
+            ?.querySelector(".ohb-shell-main");
+          const mainMin = main
+            ? Number.parseFloat(
+                getComputedStyle(main).getPropertyValue("--main-min-width"),
+              )
+            : Number.NaN;
+          const startWidth = shown ?? state.width;
+          drag.current = {
+            startX: event.clientX,
+            startWidth,
+            maxWidth:
+              main && Number.isFinite(mainMin)
+                ? startWidth + main.getBoundingClientRect().width - mainMin
+                : Number.POSITIVE_INFINITY,
+          };
         }}
         onPointerMove={(event) => {
           if (!drag.current) return;
-          setWidth(
-            drag.current.startWidth + drag.current.startX - event.clientX,
-          );
+          const { startX, startWidth, maxWidth } = drag.current;
+          setWidth(Math.min(maxWidth, startWidth + startX - event.clientX));
         }}
         onPointerUp={() => {
           drag.current = null;

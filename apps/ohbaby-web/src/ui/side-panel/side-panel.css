@@ -10,7 +10,16 @@
   flex-direction: column;
   min-width: 0;
   position: relative;
-  width: var(--side-panel-width);
+  /* The chosen width, capped so the main area keeps --main-min-width (like
+     opencode's chat minimum). Pure CSS, so it follows window resizes and the
+     sidebar toggle on the same frame; the panel's own minimum still wins. */
+  width: min(
+    var(--side-panel-width),
+    max(
+      var(--side-panel-min-width),
+      100% - var(--shell-sidebar-width) - var(--main-min-width)
+    )
+  );
 }
 
 .ohb-side-panel-resize {
