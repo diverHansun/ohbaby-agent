@@ -131,6 +131,7 @@ export function TerminalView(props: {
     let generation = 0;
     let stopped = false;
     let exited = false;
+    let snapshotRestored = false;
     let retryMs = RETRY_FIRST_MS;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let healthyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -172,6 +173,7 @@ export function TerminalView(props: {
             current.write(item.data, () => {
               if (owner !== generation) return;
               writing = false;
+              snapshotRestored = true;
               // Only now does the panel's size apply (F3 step 7).
               queue.push({ type: "fit", announce: true });
               pump(owner);
@@ -196,6 +198,9 @@ export function TerminalView(props: {
       }
     };
     const requestFit = (announce: boolean): void => {
+      // The snapshot completion always fits and announces the latest host size.
+      // Sending it earlier can make new-size output race the old-size snapshot.
+      if (!snapshotRestored) return;
       const last = queue.at(-1);
       if (last?.type === "fit")
         queue[queue.length - 1] = {
@@ -223,6 +228,7 @@ export function TerminalView(props: {
       if (stopped) return;
       generation += 1;
       const owner = generation;
+      snapshotRestored = false;
       queue.length = 0;
       queuedBytes = 0;
       writing = false;
@@ -306,7 +312,15 @@ export function TerminalView(props: {
         });
         resizeObserver.observe(element);
         window.addEventListener("focus", onFocus);
-        created.focus();
+        // Restoring a tab must not take focus from the chat (or another input).
+        // Explicit panel actions already leave focus in the panel or on body.
+        const activeElement = document.activeElement;
+        if (
+          !activeElement ||
+          activeElement === document.body ||
+          element.closest(".ohb-side-panel")?.contains(activeElement)
+        )
+          created.focus();
         connect();
       },
       () => {

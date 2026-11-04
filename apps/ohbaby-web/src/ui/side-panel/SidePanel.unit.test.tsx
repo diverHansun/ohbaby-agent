@@ -307,3 +307,40 @@ it("remembers only whether the panel is open and its width", () => {
     width: 720,
   });
 });
+
+it("resizes from the visible width with the keyboard when the chat limits the panel", () => {
+  const { element } = mount();
+  act(() => {
+    controls?.setOpen(true);
+    controls?.setWidth(720);
+  });
+  element.className = "ohb-shell";
+  const main = document.createElement("main");
+  main.className = "ohb-shell-main";
+  main.style.setProperty("--main-min-width", "400px");
+  element.prepend(main);
+  const panel = element.querySelector("aside");
+  const handle = element.querySelector('[role="separator"]');
+  if (!panel || !handle) throw new Error("missing panel or resize handle");
+  const shownWidth = (): number => Math.min(controls?.state.width ?? 720, 532);
+  panel.getBoundingClientRect = (): DOMRect =>
+    new DOMRect(0, 0, shownWidth(), 600);
+  main.getBoundingClientRect = (): DOMRect =>
+    new DOMRect(0, 0, 932 - shownWidth(), 600);
+
+  const press = (key: string): void => {
+    act(() => {
+      handle.dispatchEvent(
+        new KeyboardEvent("keydown", { key, bubbles: true }),
+      );
+    });
+  };
+  press("ArrowRight");
+  expect(controls?.state.width).toBe(508);
+  press("ArrowLeft");
+  expect(controls?.state.width).toBe(532);
+  press("ArrowLeft");
+  expect(controls?.state.width).toBe(532);
+  press("ArrowRight");
+  expect(controls?.state.width).toBe(508);
+});

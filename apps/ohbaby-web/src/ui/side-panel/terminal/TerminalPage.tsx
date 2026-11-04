@@ -37,7 +37,8 @@ export function TerminalPage(props: {
     );
   }
   // Restored mid-close after a reload: nothing to reconnect, the x still works.
-  if (terminal.state === "closing") return <div className="ohb-terminal" />;
+  if (terminal.state === "closing" && exitCode === undefined)
+    return <div className="ohb-terminal" />;
   if (connectable) {
     return (
       <TerminalView

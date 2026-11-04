@@ -151,6 +151,20 @@ function fakeApi(terminals: TerminalInfo[] = []): TerminalApi & {
   };
 }
 
+function focusableSurface(): CreateTerminalSurface {
+  const fake = fakeSurface();
+  return async (host) => {
+    const input = document.createElement("textarea");
+    input.setAttribute("aria-label", "Terminal input");
+    host.append(input);
+    const surface = await fake.create(host);
+    surface.focus = (): void => {
+      input.focus();
+    };
+    return surface;
+  };
+}
+
 const mounted: (() => void)[] = [];
 afterEach(() => {
   for (const cleanup of mounted.splice(0)) cleanup();
@@ -296,6 +310,44 @@ beforeEach(() => {
 });
 
 describe("terminal tabs", () => {
+  it("preserves the chat input focus when sync restores the first terminal into an open panel", async () => {
+    const terminals: TerminalInfo[] = [];
+    const api = fakeApi(terminals);
+    const { element } = mount(
+      <>
+        <textarea aria-label="Chat draft" />
+        <Panel api={api} surface={focusableSurface()} />
+      </>,
+    );
+    await settle();
+    click(only(element, '[data-testid="open"]'));
+    const chat = only(element, '[aria-label="Chat draft"]');
+    chat.focus();
+    terminals.push(info("t1"));
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+    expect(tabs(element)).toBe("t1");
+    expect(api.sockets).toHaveLength(1);
+    expect(document.activeElement).toBe(chat);
+  });
+
+  it("focuses the terminal after the user creates it from the panel", async () => {
+    const { element } = mount(
+      <Panel api={fakeApi()} surface={focusableSurface()} />,
+    );
+    await settle();
+    click(only(element, '[data-testid="open"]'));
+    const entry = byText(element, ".ohb-side-panel-entry button", "Terminal");
+    entry.focus();
+    click(entry);
+    await settle();
+    expect(document.activeElement).toBe(
+      only(element, '[aria-label="Terminal input"]'),
+    );
+  });
+
   it("opens a tab only after the server created the terminal (S1b, S17)", async () => {
     const api = fakeApi();
     const errors: unknown[] = [];
@@ -370,6 +422,13 @@ describe("terminal tabs", () => {
     first.receive({ type: "snapshot", data: "$ ", cols: 80, rows: 24 });
     first.receive({ type: "exit", exitCode: 3 });
     first.serverClose(TERMINAL_CLOSE_CODES.NORMAL);
+    // Natural exit has been shown, but background-process cleanup is still running.
+    terminals[0] = info("t1", { state: "closing" });
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+    expect(element.querySelector(".ohb-terminal-screen")).not.toBeNull();
     terminals.splice(0);
     act(() => {
       window.dispatchEvent(new Event("focus"));
@@ -521,7 +580,14 @@ describe("terminal view", () => {
     const { api, surface } = view();
     await settle();
     const socket = api.sockets[0];
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(socket.sent).toEqual([]);
     socket.receive({ type: "snapshot", data: "SNAP", cols: 70, rows: 20 });
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
     socket.receive({ type: "output", data: "a" });
     socket.receive({ type: "output", data: "b" });
     // First the previous connection's writes drain, then the screen resets.

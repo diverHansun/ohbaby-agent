@@ -2,6 +2,8 @@
 
 web 界面右侧面板中的内置终端：用户可以在浏览器里打开当前 workspace 的真实 shell。
 
+实施状态（2026-11-04）：前后端实现、macOS arm64 端到端验收和独立审查已完成，合并收尾记录见 [frontend-acceptance.md](frontend-acceptance.md)。Linux、Windows 和 macOS x64 尚未真机验收；代码兼容检查不替代真机结果。
+
 | 文档 | 内容 |
 | --- | --- |
 | [goals-duty.md](goals-duty.md) | 为什么做、做什么、刻意不做什么，以及模块归属 |

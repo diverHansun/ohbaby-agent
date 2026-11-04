@@ -2,12 +2,12 @@
 
 > 用户要求自然退出也必须清理所属后台进程。已补上按系统会话归属清理的实现；真实 `sh`、`zsh`、daemon 接口回归及子代理审查均已通过。
 
-## 分支与范围
+## 后端阶段的分支与范围
 
 - 基线：`04accf97`（包含实施前更新的设计文档）。
 - 本地临时基线分支：`codex/terminal-temp`。
 - 后端分支：`codex/terminal-backend-temp`，从临时基线分支创建。
-- 本批包含 server 终端核心、REST/WebSocket、daemon Host 校验和停止清理、SDK 契约及测试。没有修改前端，不合并或推送；由用户验收后合并。
+- 后端阶段包含 server 终端核心、REST/WebSocket、daemon Host 校验和停止清理、SDK 契约及测试；当时未修改前端。前后端现已汇集到终端临时分支，最终验收见 [frontend-acceptance.md](frontend-acceptance.md)。
 
 ## 前端接入
 
@@ -42,7 +42,7 @@ pnpm run lint
 
 本次自然退出修正也完成后端及依赖构建、类型检查和改动 TypeScript 文件的 lint/格式检查。子代理独立审查通过，并额外运行真实 sh/zsh 自然退出验证；上述 759 项为主代理最终完整运行结果，不包含按名称过滤的审查命令。
 
-前端尚未实施，浏览器页面中的新建、标签恢复、复制粘贴、收起面板等交互未验收；由前端接入后按 [test.md](test.md) 完成。
+前端现已实施，浏览器中的新建、标签恢复、复制粘贴、收起面板及真实后台服务的关闭清理已走查。结果见 [frontend-acceptance.md](frontend-acceptance.md)。
 
 ## 审查修正与已知边界
 

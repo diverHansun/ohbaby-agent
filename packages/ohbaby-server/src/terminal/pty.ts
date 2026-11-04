@@ -205,9 +205,16 @@ class NativeTerminalPty implements TerminalPty {
 }
 
 function executable(file: string, env: NodeJS.ProcessEnv): boolean {
+  // Spreading process.env loses Windows' case-insensitive property access.
+  // Read Path/PATH alike without adding a duplicate key to the child environment.
+  const pathEnv =
+    env.PATH ??
+    (process.platform === "win32"
+      ? Object.entries(env).find(([key]) => key.toUpperCase() === "PATH")?.[1]
+      : undefined);
   const candidates = isAbsolute(file)
     ? [file]
-    : (env.PATH ?? "").split(delimiter).map((path) => join(path, file));
+    : (pathEnv ?? "").split(delimiter).map((path) => join(path, file));
   return candidates.some((path) => {
     try {
       accessSync(path, constants.X_OK);

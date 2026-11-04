@@ -66,6 +66,27 @@ export function SidePanel(props: {
   } | null>(null);
   const active = state.tabs.find((tab) => tab.id === state.activeTabId);
   const panel = useRef<HTMLElement>(null);
+  const resizeBounds = (): { width: number; maxWidth: number } => {
+    // CSS can show less than the stored width to preserve room for the chat.
+    // Both keyboard and pointer resizing start from what is on screen.
+    const shown = panel.current?.getBoundingClientRect().width;
+    const width = shown !== undefined && shown > 0 ? shown : state.width;
+    const main = panel.current
+      ?.closest(".ohb-shell")
+      ?.querySelector(".ohb-shell-main");
+    const mainMin = main
+      ? Number.parseFloat(
+          getComputedStyle(main).getPropertyValue("--main-min-width"),
+        )
+      : Number.NaN;
+    return {
+      width,
+      maxWidth:
+        main && Number.isFinite(mainMin)
+          ? width + main.getBoundingClientRect().width - mainMin
+          : Number.POSITIVE_INFINITY,
+    };
+  };
   const focusTab = (id: string): void => {
     requestAnimationFrame(() => {
       document.getElementById(`ohb-side-tab-${id}`)?.focus();
@@ -141,35 +162,21 @@ export function SidePanel(props: {
         aria-valuenow={state.width}
         tabIndex={0}
         onKeyDown={(event) => {
-          if (event.key === "ArrowLeft") setWidth(state.width + KEYBOARD_STEP);
-          else if (event.key === "ArrowRight")
-            setWidth(state.width - KEYBOARD_STEP);
-          else return;
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          const { width, maxWidth } = resizeBounds();
+          const step =
+            event.key === "ArrowLeft" ? KEYBOARD_STEP : -KEYBOARD_STEP;
+          setWidth(Math.min(maxWidth, width + step));
           event.preventDefault();
         }}
         onPointerDown={(event) => {
           if (event.button !== 0) return;
           event.currentTarget.setPointerCapture(event.pointerId);
-          // CSS may show the panel narrower than its stored width (the main
-          // area keeps its minimum), so drag from what is on screen and stop
-          // where the CSS cap stops, leaving no dead zone on the way back.
-          const shown = panel.current?.getBoundingClientRect().width;
-          const main = panel.current
-            ?.closest(".ohb-shell")
-            ?.querySelector(".ohb-shell-main");
-          const mainMin = main
-            ? Number.parseFloat(
-                getComputedStyle(main).getPropertyValue("--main-min-width"),
-              )
-            : Number.NaN;
-          const startWidth = shown ?? state.width;
+          const { width, maxWidth } = resizeBounds();
           drag.current = {
             startX: event.clientX,
-            startWidth,
-            maxWidth:
-              main && Number.isFinite(mainMin)
-                ? startWidth + main.getBoundingClientRect().width - mainMin
-                : Number.POSITIVE_INFINITY,
+            startWidth: width,
+            maxWidth,
           };
         }}
         onPointerMove={(event) => {
