@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { basename } from "node:path";
 import { promisify } from "node:util";
+import { readMacosSessions } from "./macos-session.js";
 
 export interface TerminalProcess {
   pid: number;
@@ -8,6 +9,7 @@ export interface TerminalProcess {
   tty: string;
   started: string;
   name: string;
+  sessionId?: number;
 }
 
 const columns = "pid=,ppid=,tty=,lstart=,stat=,comm=";
@@ -19,7 +21,10 @@ const psOptions = {
 };
 const exec = promisify(execFile);
 
-export function parseProcessTable(text: string): TerminalProcess[] {
+export function parseProcessTable(
+  text: string,
+  withSession = false,
+): TerminalProcess[] {
   const rows: TerminalProcess[] = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
@@ -29,20 +34,40 @@ export function parseProcessTable(text: string): TerminalProcess[] {
       );
     if (!match) throw new Error("Unable to parse terminal process table");
     if (/^[ZX]/.test(match[5])) continue;
+    const session = withSession ? /^(\d+)\s+(.+)$/.exec(match[6]) : null;
+    if (withSession && !session) throw new Error("Missing process session ID");
     rows.push({
       pid: Number(match[1]),
       parentPid: Number(match[2]),
       tty: match[3],
       started: match[4].replace(/\s+/g, " "),
-      name: basename(match[6]),
+      name: basename(session ? session[2] : match[6]),
+      ...(session ? { sessionId: Number(session[1]) } : {}),
     });
   }
   return rows;
 }
 
 export async function readProcessTable(): Promise<TerminalProcess[]> {
-  const { stdout } = await exec("/bin/ps", ["-A", "-o", columns], psOptions);
-  return parseProcessTable(stdout);
+  if (process.platform !== "linux" && process.platform !== "darwin")
+    throw new Error(
+      "Terminal process inspection is unsupported on this platform",
+    );
+  const linux = process.platform === "linux";
+  const selectedColumns = linux
+    ? columns.replace("comm=", "sid=,comm=")
+    : columns;
+  const { stdout } = await exec(
+    "/bin/ps",
+    ["-A", "-o", selectedColumns],
+    psOptions,
+  );
+  const rows = parseProcessTable(stdout, linux);
+  if (linux) return rows;
+  const sessions = await readMacosSessions(rows.map(({ pid }) => pid));
+  return rows
+    .filter(({ pid }) => sessions.has(pid))
+    .map((row) => ({ ...row, sessionId: sessions.get(row.pid) }));
 }
 
 export function sameProcess(
@@ -55,14 +80,20 @@ export function sameProcess(
 /** Keep captured orphans, but never adopt children of a recycled root PID. */
 export function collectTerminalProcesses(
   rows: readonly TerminalProcess[],
-  root: TerminalProcess,
+  root: TerminalProcess | undefined,
   known: readonly TerminalProcess[],
+  sessionId: number,
+  adoptSession = false,
 ): TerminalProcess[] {
   const members = new Map<number, TerminalProcess>();
+  const currentRoot = rows.find(({ pid }) => pid === sessionId);
+  const mayAdopt =
+    adoptSession && (!currentRoot || (root && sameProcess(root, currentRoot)));
   for (const row of rows) {
     if (
-      sameProcess(row, root) ||
-      known.some((member) => sameProcess(row, member))
+      known.some((member) => sameProcess(row, member)) ||
+      (row.sessionId === sessionId &&
+        (mayAdopt || (root && sameProcess(row, root))))
     )
       members.set(row.pid, row);
   }
@@ -73,8 +104,7 @@ export function collectTerminalProcesses(
       if (
         !members.has(row.pid) &&
         members.has(row.parentPid) &&
-        row.tty === root.tty &&
-        !/^\?+$/.test(row.tty)
+        row.sessionId === members.get(row.parentPid)?.sessionId
       ) {
         members.set(row.pid, row);
         changed = true;

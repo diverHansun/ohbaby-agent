@@ -2,6 +2,7 @@ import { accessSync, constants, statSync } from "node:fs";
 import { basename, delimiter, isAbsolute, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { IPty } from "@lydell/node-pty";
+import { ensureMacosSessionSupport } from "./macos-session.js";
 import { shellLaunchCandidates } from "./shell-launch.js";
 import {
   collectTerminalProcesses,
@@ -46,6 +47,7 @@ class NativeTerminalPty implements TerminalPty {
   private members: TerminalProcess[] = [];
   private paused = false;
   private cleanup: Promise<void> | undefined;
+  private sessionSealed = false;
 
   constructor(private readonly native: IPty) {
     this.pid = native.pid;
@@ -65,7 +67,7 @@ class NativeTerminalPty implements TerminalPty {
       // Capture before yielding: the numeric PID alone cannot authorize later signals.
       // An unavailable process table remains a retryable inspection/cleanup error.
       try {
-        this.capture(readProcessTableSync());
+        this.root = readProcessTableSync().find(({ pid }) => pid === this.pid);
       } catch {
         /* inspectChildren/terminate retries */
       }
@@ -113,19 +115,41 @@ class NativeTerminalPty implements TerminalPty {
   }
 
   private capture(rows: TerminalProcess[]): TerminalProcess[] {
+    const currentRoot = rows.find(({ pid }) => pid === this.pid);
+    if (!this.root && !this.exit) this.root = currentRoot;
+    if (this.root && currentRoot && !sameProcess(this.root, currentRoot))
+      this.sessionSealed = true;
     if (!this.root && !this.exit)
-      this.root = rows.find((row) => row.pid === this.pid);
-    if (this.root) {
-      const root = this.root;
-      this.root = rows.find((row) => sameProcess(row, root)) ?? root;
-      this.members = collectTerminalProcesses(rows, this.root, this.members);
-    } else if (!this.exit)
       throw new Error(`Cannot identify terminal shell ${String(this.pid)}`);
+    this.members = collectTerminalProcesses(
+      rows,
+      this.root,
+      this.members,
+      this.pid,
+      !this.sessionSealed,
+    );
     return this.members;
+  }
+  private async inspectProcesses(): Promise<TerminalProcess[]> {
+    let rows = await readProcessTable();
+    let members = this.capture(rows);
+    if (
+      this.exit &&
+      !this.sessionSealed &&
+      !rows.some((row) => row.sessionId === this.pid)
+    ) {
+      // ps and getsid are separate observations: a departing member can fork a
+      // successor absent from the first PID list. Re-scan before sealing empty.
+      rows = await readProcessTable();
+      members = this.capture(rows);
+      if (!rows.some((row) => row.sessionId === this.pid))
+        this.sessionSealed = true;
+    }
+    return members;
   }
   async inspectChildren(): Promise<readonly { pid: number; name: string }[]> {
     if (process.platform === "win32") return [];
-    return this.capture(await readProcessTable())
+    return (await this.inspectProcesses())
       .filter((member) => member.pid !== this.pid)
       .map(({ pid, name }) => ({ pid, name }));
   }
@@ -141,10 +165,10 @@ class NativeTerminalPty implements TerminalPty {
   }
 
   private async waitForMembers(deadline: number): Promise<TerminalProcess[]> {
-    let members = this.capture(await readProcessTable());
+    let members = await this.inspectProcesses();
     while ((members.length > 0 || !this.exit) && Date.now() < deadline) {
       await delay(Math.min(25, Math.max(1, deadline - Date.now())));
-      members = this.capture(await readProcessTable());
+      members = await this.inspectProcesses();
     }
     return members;
   }
@@ -158,7 +182,7 @@ class NativeTerminalPty implements TerminalPty {
         throw new Error(`Terminal shell ${String(this.pid)} did not exit`);
       return;
     }
-    const captured = this.capture(await readProcessTable());
+    const captured = await this.inspectProcesses();
     const root = captured.find((member) => member.pid === this.pid);
     if (root) signalTerminalProcess(root, "SIGHUP");
     let survivors = await this.waitForMembers(Date.now() + 2000);
@@ -200,9 +224,12 @@ export async function createTerminalPty(options: {
   rows: number;
   env?: NodeJS.ProcessEnv;
 }): Promise<{ pty: TerminalPty; shell: string }> {
+  if (!["darwin", "linux", "win32"].includes(process.platform))
+    throw new Error("Terminal is unsupported on this platform");
   // Cache the rejected promise as well: a missing native binary must not break serve startup.
   nativeModule ??= import("@lydell/node-pty");
   const nodePty = await nativeModule;
+  if (process.platform === "darwin") await ensureMacosSessionSupport();
   const candidates = shellLaunchCandidates(options.directory, options.env);
   const launch = candidates.find(({ file, env }) => executable(file, env));
   if (!launch) throw new Error("No executable terminal shell found");

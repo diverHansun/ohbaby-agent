@@ -470,3 +470,128 @@ describe("daemon terminal HTTP and WebSocket boundary", () => {
     });
   });
 });
+
+it("cleans unobserved background work on shell exit without affecting another terminal", async () => {
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const net = await import("node:net");
+  const directory = await mkdtemp(
+    path.join(tmpdir(), "terminal-natural-exit-"),
+  );
+  const resultPath = path.join(directory, "child.json");
+  let childPid: number | undefined;
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const quote = (value: string): string =>
+    "'" + value.replace(/'/g, "'\\''") + "'";
+  try {
+    await withDaemon(async (url) => {
+      const target = await createTerminal(url);
+      const keeper = await createTerminal(url);
+      const ws = new WebSocket(
+        `${url.replace("http:", "ws:")}/v1/terminals/${target.id}/attach`,
+        protocols,
+      );
+      try {
+        await once(ws, "open");
+        const childCode = `process.on("SIGHUP",()=>{});const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>require("fs").writeFileSync(${JSON.stringify(resultPath)},JSON.stringify({pid:process.pid,port:s.address().port})));`;
+        ws.send(
+          JSON.stringify({
+            type: "input",
+            data: `${quote(process.execPath)} -e ${quote(childCode)} &\r`,
+          }),
+        );
+        let child: { pid: number; port: number } | undefined;
+        await expect
+          .poll(
+            async () => {
+              try {
+                child = JSON.parse(await readFile(resultPath, "utf8")) as {
+                  pid: number;
+                  port: number;
+                };
+                return true;
+              } catch {
+                return false;
+              }
+            },
+            { timeout: 5000 },
+          )
+          .toBe(true);
+        if (!child) throw new Error("Background server did not start");
+        childPid = child.pid;
+        const childPort = child.port;
+        expect(alive(child.pid)).toBe(true);
+        // No DELETE or activity inspection before exit: these previously hid the bug.
+        const closed = once(ws, "close");
+        ws.send(JSON.stringify({ type: "input", data: "exit 0\rexit 0\r" }));
+        expect((await closed)[0]).toBe(1000);
+        await expect
+          .poll(
+            async () => {
+              const result = (await (
+                await fetch(`${url}/v1/terminals`, {
+                  headers: { authorization },
+                })
+              ).json()) as { terminals: { id: string }[] };
+              return result.terminals.map((item) => item.id);
+            },
+            { timeout: 5000 },
+          )
+          .toEqual([keeper.id]);
+        expect(alive(child.pid)).toBe(false);
+        const replacement = net.createServer();
+        try {
+          await new Promise<void>((resolve, reject) => {
+            replacement.once("error", reject);
+            replacement.listen(childPort, "127.0.0.1", resolve);
+          });
+        } finally {
+          await new Promise<void>((resolve) =>
+            replacement.close(() => {
+              resolve();
+            }),
+          );
+        }
+        const keeperSocket = new WebSocket(
+          `${url.replace("http:", "ws:")}/v1/terminals/${keeper.id}/attach`,
+          protocols,
+        );
+        let keeperOutput = "";
+        keeperSocket.on("message", (data) => {
+          if (!Buffer.isBuffer(data)) return;
+          const message = JSON.parse(data.toString()) as {
+            type: string;
+            data?: string;
+          };
+          if (message.type === "output") keeperOutput += message.data ?? "";
+        });
+        try {
+          await once(keeperSocket, "open");
+          keeperSocket.send(
+            JSON.stringify({
+              type: "input",
+              data: "printf 'kept-%s\\n' alive\r",
+            }),
+          );
+          await expect.poll(() => keeperOutput).toContain("kept-alive");
+        } finally {
+          keeperSocket.terminate();
+        }
+      } finally {
+        ws.terminate();
+      }
+    });
+  } finally {
+    if (childPid !== undefined && alive(childPid))
+      process.kill(childPid, "SIGKILL");
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 15000);
