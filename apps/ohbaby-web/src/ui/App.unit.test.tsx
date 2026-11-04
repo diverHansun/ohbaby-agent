@@ -3436,7 +3436,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
-  it("replaces the /status context row with the seven-bucket detail", async () => {
+  it("replaces the /status context row with the non-empty buckets", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
@@ -3451,13 +3451,12 @@ describe("OhbabyWebApp slash command interactions", () => {
         contextRow?.querySelectorAll(".ohb-context-composition-row") ?? [],
       ).map((row) => row.textContent),
     ).toEqual([
-      "System prompt~10K",
-      "Built-in tools~5K",
-      "MCP tools~2K",
-      "Skills~1K",
-      "Conversation~15K",
-      "Summarized conversation~4K",
-      "Subagent exchanges~0",
+      "System prompt10K10.0%",
+      "Built-in tools5K5.0%",
+      "MCP tools2K2.0%",
+      "Skills1K1.0%",
+      "Conversation15K15.0%",
+      "Summarized conversation4K4.0%",
     ]);
     expect(contextRow?.textContent).not.toContain("Cache");
     const cacheRow = Array.from(
@@ -3603,6 +3602,21 @@ describe("OhbabyWebApp slash command interactions", () => {
         '.ohb-main-header button[aria-label^="25% context used"]',
       ),
     ).not.toBeNull();
+  });
+
+  it("loads context usage for an opened chat without a click", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const getUsage = vi.spyOn(fake.client, "getContextWindowUsage");
+    mountApp(fake.runtime);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(getUsage).toHaveBeenCalledWith({
+      sessionId: "session_1",
+    });
   });
 
   it("leaves default permission unchanged when full-access confirmation is dismissed", async () => {

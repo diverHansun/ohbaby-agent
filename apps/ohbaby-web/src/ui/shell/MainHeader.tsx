@@ -31,7 +31,6 @@ export function MainHeader(props: {
   readonly header: HeaderModel;
   readonly hasClient: boolean;
   readonly sessionId: string | null;
-  readonly onOpenContextUsage?: () => void;
   /** The right panel's toggle; shown while the panel is closed, like the sidebar's. */
   readonly sidePanelOpen?: boolean;
   readonly onOpenSidePanel?: () => void;
@@ -66,7 +65,6 @@ export function MainHeader(props: {
         ) : null}
         {props.sessionId ? (
           <ContextUsageControl
-            onOpen={props.onOpenContextUsage}
             sessionId={props.sessionId}
             usage={props.header.contextWindowUsage}
           />

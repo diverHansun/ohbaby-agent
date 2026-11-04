@@ -34,7 +34,6 @@ const COMPOSITION_ROWS: readonly CompositionRow[] = [
 ];
 
 export function ContextUsageControl(props: {
-  readonly onOpen?: () => void;
   readonly sessionId: string | null;
   readonly usage: UiContextWindowUsage | null;
 }): ReactElement {
@@ -74,15 +73,8 @@ export function ContextUsageControl(props: {
   }, [open]);
 
   const percent = usage ? usagePercent(usage) : null;
-  // The ring turns amber at 70% and red at 90% (03 §4.2); colour only, no badge.
-  const level =
-    percent === null
-      ? ""
-      : percent >= 90
-        ? " is-critical"
-        : percent >= 70
-          ? " is-high"
-          : "";
+  // The ring is blue, and turns warning orange at 70%; colour only, no badge.
+  const level = percent !== null && percent >= 70 ? " is-warning" : "";
   const circumference = 2 * Math.PI * 6;
   const progress = usage
     ? clamp01(usage.contextWindowRatio) * circumference
@@ -106,7 +98,6 @@ export function ContextUsageControl(props: {
         aria-label={ariaLabel}
         className="ohb-context-ring-button"
         onClick={() => {
-          if (!open) props.onOpen?.();
           setOpen((current) => !current);
         }}
         type="button"
@@ -177,6 +168,11 @@ export function ContextUsageDetails(props: {
   const usage = props.usage;
   const composition = usage.composition;
   const usedWidth = clamp01(usage.contextWindowRatio) * 100;
+  // Empty categories are left out of the bar and the legend, as Claude Code's
+  // /context does; the order stays fixed so each colour keeps its place.
+  const visibleRows = composition
+    ? COMPOSITION_ROWS.filter((row) => composition[row.key] > 0)
+    : [];
 
   return (
     <div className="ohb-context-details">
@@ -184,7 +180,7 @@ export function ContextUsageDetails(props: {
         <strong>{usagePercent(usage)}% Full</strong>
         <span>
           ~{formatTokens(usage.currentTokens)} /{" "}
-          {formatTokens(usage.contextWindowTokens)}
+          {formatTokens(usage.contextWindowTokens)} tokens
         </span>
       </div>
       {composition ? (
@@ -197,37 +193,38 @@ export function ContextUsageDetails(props: {
               className="ohb-context-stack-used"
               style={{ width: `${String(usedWidth)}%` }}
             >
-              {COMPOSITION_ROWS.flatMap((row) => {
-                const tokens = composition[row.key];
-                if (tokens === 0) {
-                  return [];
-                }
-                return [
-                  <span
-                    aria-hidden="true"
-                    className="ohb-context-stack-segment"
-                    key={row.key}
-                    style={
-                      {
-                        "--ohb-context-segment-color": row.color,
-                        flexGrow: tokens,
-                      } as CSSProperties
-                    }
-                  />,
-                ];
-              })}
+              {visibleRows.map((row) => (
+                <span
+                  aria-hidden="true"
+                  className="ohb-context-stack-segment"
+                  key={row.key}
+                  style={
+                    {
+                      "--ohb-context-segment-color": row.color,
+                      flexGrow: composition[row.key],
+                    } as CSSProperties
+                  }
+                />
+              ))}
             </span>
           </div>
           <div className="ohb-context-composition">
-            {COMPOSITION_ROWS.map((row) => (
+            {visibleRows.map((row) => (
               <div className="ohb-context-composition-row" key={row.key}>
                 <span
                   aria-hidden="true"
-                  className="ohb-context-composition-dot"
+                  className="ohb-context-composition-swatch"
                   style={{ backgroundColor: row.color }}
                 />
-                <span>{row.label}</span>
-                <span>~{formatTokens(composition[row.key])}</span>
+                <span className="ohb-context-composition-label">
+                  {row.label}
+                </span>
+                <span className="ohb-context-composition-tokens">
+                  {formatTokens(composition[row.key])}
+                </span>
+                <span className="ohb-context-composition-percent">
+                  {formatShare(composition[row.key], usage.contextWindowTokens)}
+                </span>
               </div>
             ))}
           </div>
@@ -249,6 +246,14 @@ function formatTokens(value: number): string {
     return `${String(Math.round(value / 100) / 10)}K`;
   }
   return String(Math.round(value));
+}
+
+/** Share of the whole window, so the rows add up to the "% Full" headline. */
+function formatShare(tokens: number, windowTokens: number): string {
+  if (windowTokens <= 0) return "0%";
+  const percent = (tokens / windowTokens) * 100;
+  if (percent > 0 && percent < 0.1) return "<0.1%";
+  return `${percent.toFixed(1)}%`;
 }
 
 function clamp01(value: number): number {

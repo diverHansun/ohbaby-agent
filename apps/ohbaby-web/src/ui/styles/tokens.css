@@ -58,15 +58,17 @@
   --brand-lychee: #c0444f;
   --brand-lychee-leaf: #639922;
   --brand-lychee-leaf-edge: #3b6d11;
-  /* Categorical chart colours (context composition): muted, and away from the
-     brand gold, pink, blue and lychee red. */
-  --chart-1: #5b6472;
-  --chart-2: #7f8a99;
-  --chart-3: #6f8a7a;
-  --chart-4: #9a8768;
-  --chart-5: #b0705a;
-  --chart-6: #5f8b8b;
-  --chart-7: #8a7a9b;
+  /* Categorical chart colours (context composition): distinct hues in a fixed
+     order, checked for colour-blind separation on white. Conversation, usually
+     the largest share, takes blue. Three sit below 3:1
+     contrast, so every segment also has a text label in the legend. */
+  --chart-1: #6250d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #2a78d6;
+  --chart-6: #e87ba4;
+  --chart-7: #008300;
 
   /* Terminal ANSI palette for the light canvas (VS Code Light+), so prompts
      and ls colours stay readable on white like Codex and Cursor. */

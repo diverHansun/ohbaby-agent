@@ -2,7 +2,7 @@
 import type { UiContextWindowUsage } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ContextUsageControl } from "./ContextUsage.js";
 
 (
@@ -87,16 +87,15 @@ describe("ContextUsageControl", () => {
     );
   });
 
-  it("turns the ring amber at 70% and red at 90%", () => {
+  it("keeps the ring blue until it turns orange at 70%", () => {
     const at = (ratio: number): string | undefined =>
       render({
         ...usage(false),
         contextWindowRatio: ratio,
         currentTokens: ratio * 100_000,
       }).querySelector(".ohb-context-usage-control")?.className;
-    expect(at(0.69)).not.toMatch(/is-high|is-critical/u);
-    expect(at(0.7)).toContain("is-high");
-    expect(at(0.9)).toContain("is-critical");
+    expect(at(0.69)).not.toContain("is-warning");
+    expect(at(0.7)).toContain("is-warning");
   });
 
   it("opens a total-only detail without inventing composition rows", () => {
@@ -115,7 +114,7 @@ describe("ContextUsageControl", () => {
     expect(container.querySelector(".ohb-context-composition")).toBeNull();
   });
 
-  it("renders all seven rows in order, including a zero category", () => {
+  it("renders non-empty rows in fixed order with tokens and window share", () => {
     const container = render(usage(true));
     const trigger = container.querySelector(".ohb-context-ring-button");
     if (!trigger) {
@@ -127,17 +126,34 @@ describe("ContextUsageControl", () => {
       container.querySelectorAll(".ohb-context-composition-row"),
     ).map((row) => row.textContent);
     expect(rows).toEqual([
-      "System prompt~10K",
-      "Built-in tools~5K",
-      "MCP tools~2K",
-      "Skills~1K",
-      "Conversation~15K",
-      "Summarized conversation~4K",
-      "Subagent exchanges~0",
+      "System prompt10K10.0%",
+      "Built-in tools5K5.0%",
+      "MCP tools2K2.0%",
+      "Skills1K1.0%",
+      "Conversation15K15.0%",
+      "Summarized conversation4K4.0%",
     ]);
     expect(
       container.querySelectorAll(".ohb-context-stack-segment"),
     ).toHaveLength(6);
+  });
+
+  it("shows one decimal and a floor for tiny shares", () => {
+    const base = usage(true);
+    if (!base.composition) throw new Error("composition missing");
+    const container = render({
+      ...base,
+      composition: { ...base.composition, mcp: 1_234, skills: 50 },
+    });
+    const trigger = container.querySelector(".ohb-context-ring-button");
+    if (!trigger) throw new Error("context trigger missing");
+    click(trigger);
+
+    const text = Array.from(
+      container.querySelectorAll(".ohb-context-composition-percent"),
+    ).map((cell) => cell.textContent);
+    expect(text).toContain("1.2%");
+    expect(text).toContain("<0.1%");
   });
 
   it("closes the detail with Escape and outside pointer input", () => {
@@ -216,27 +232,12 @@ it("keeps the open popover when asynchronous context usage arrives", () => {
   );
 });
 
-it("queries only on opening and keeps cache out of context details", () => {
-  const container = render(null);
-  const root = roots.at(-1);
-  if (!root) throw new Error("root missing");
-  const onOpen = vi.fn();
-  act(() => {
-    root.render(
-      <ContextUsageControl
-        sessionId="session_1"
-        usage={usage(true)}
-        onOpen={onOpen}
-      />,
-    );
-  });
+it("keeps cache out of context details", () => {
+  const container = render(usage(true));
   const trigger = container.querySelector(".ohb-context-ring-button");
   if (!trigger) throw new Error("context trigger missing");
   click(trigger);
-  expect(onOpen).toHaveBeenCalledTimes(1);
   expect(container.querySelector('[role="dialog"]')?.textContent).not.toContain(
     "Cache",
   );
-  click(trigger);
-  expect(onOpen).toHaveBeenCalledTimes(1);
 });

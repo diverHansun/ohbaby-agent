@@ -191,6 +191,17 @@ export function AppController(props: {
     [activeId, awaiting, running],
   );
 
+  // A past chat has no usage until the daemon estimates it; ask once when the
+  // chat opens so the ring shows real numbers without a click. The answer
+  // arrives as a context.window.updated event.
+  const hasUsage = view.header.contextWindowUsage !== null;
+  useEffect(() => {
+    if (!activeId || !client || hasUsage) return;
+    void client
+      .getContextWindowUsage({ sessionId: activeId })
+      .catch(() => undefined);
+  }, [activeId, client, hasUsage]);
+
   const sidePanel = useSidePanel(activeId);
   // Only a panel the user just opened takes focus (see SidePanel focusOnOpen).
   const [panelOpenedByUser, setPanelOpenedByUser] = useState(false);
@@ -317,13 +328,6 @@ export function AppController(props: {
           onOpenSidePanel={() => {
             setPanelOpenedByUser(true);
             sidePanel.setOpen(true);
-          }}
-          onOpenContextUsage={() => {
-            const sessionId = view.activeSession?.id;
-            if (sessionId && client)
-              void client
-                .getContextWindowUsage({ sessionId })
-                .catch(() => undefined);
           }}
         />
       )}
