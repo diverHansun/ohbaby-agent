@@ -57,7 +57,8 @@ export async function readMacosSessions(
       ["-l", "JavaScript", "-e", SCRIPT, ...batch.map(String)],
       {
         encoding: "utf8",
-        timeout: 1000,
+        // osascript can start slowly on a busy or freshly booted machine.
+        timeout: 3000,
         maxBuffer: 256 * 1024,
       },
     );
@@ -67,11 +68,18 @@ export async function readMacosSessions(
   return sessions;
 }
 
-/** Cache failure as well as success; never launch an unmanageable terminal. */
+/**
+ * Never launch an unmanageable terminal, but cache only success: a slow first
+ * osascript start must not disable terminals until the daemon restarts.
+ */
 export function ensureMacosSessionSupport(): Promise<void> {
   capability ??= readMacosSessions([process.pid]).then((sessions) => {
     if (!sessions.has(process.pid))
       throw new Error("macOS terminal session inspection unavailable");
   });
-  return capability;
+  const probe = capability;
+  probe.catch(() => {
+    if (capability === probe) capability = undefined;
+  });
+  return probe;
 }
