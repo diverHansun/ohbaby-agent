@@ -1,3 +1,10 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import {
+  ensureSessionStorage,
+  SCRATCH_DIR,
+} from "../../paths/session-storage.js";
+import { sessionStoragePreparationFailed } from "../../observability/events.js";
 import type { RunModel } from "../../core/run-model.js";
 import { loadAgentConfigWithOrigins } from "../../config/agents/loaders.js";
 import { createSkillUsageReminderProvider } from "../../services/reminder/skill-usage.js";
@@ -471,6 +478,25 @@ export async function createUiRuntimeComposition(
   const sandboxManager =
     options.sandboxManager ??
     createHostLocalSandboxManager(options.workdir, {
+      initialTrustedRoots: async (scope) => {
+        const session = await sessionManager.get(scope.sessionId);
+        const ownerId = session?.parentId ?? scope.sessionId;
+        const directory = await ensureSessionStorage(ownerId);
+        const scratch = await fs.realpath(path.join(directory, SCRATCH_DIR));
+        return [
+          { kind: "session-storage", path: directory },
+          { kind: "session-scratch", path: scratch },
+        ];
+      },
+      onInitialTrustedRootsError: (error) => {
+        options.logger?.emit(sessionStoragePreparationFailed, { error });
+        options.onNotice?.({
+          title: "Session scratch unavailable",
+          level: "warning",
+          message:
+            "Session scratch preparation failed; the conversation can continue.",
+        });
+      },
       authorizeInternalRead: (input) =>
         resultArtifacts.authorizeRead({ ...input, operation: "read" }),
     });

@@ -65,6 +65,12 @@ interface PermissionRule {
 
 状态包括 `mode: plan | auto`、`level: default | full-access` 和 `Map<sessionId, readonly PermissionRule[]>`。规则样例为 `edit(src/**)`、`bash(git push)`、`skill(code-review)`；解析后分别保存 tool 与可选 pattern，工具级规则可无 pattern。敏感路径在 default 下不可记忆。Full Access 优先于 ask/allow 分支，但明确 deny 优先于 Full Access；切换不写会话规则、不变更已有 pending。
 
+读取、写入与 Bash 目录访问沿用同一种 `type: external_directory` 展示，但 `name` 和规则 `tool` 分别为 `external_directory_read`、`external_directory_write`、`external_directory_shell`。例如 `external_directory_read(/tmp/reports/**)` 的 always 只授权读取，不能匹配写入或 Bash。路径模式仍沿用现有 `tool(pattern)` 格式，审批按钮与终态流程不变。
+
+当前上下文中，读取 always 只登记 `external-read-approved`；写入登记 `external-write-approved`；Bash 目录访问登记 `external-approved`。读取与写入可信根都不自动授权 Shell。上下文重建后，PermissionManager 仍匹配已保存的操作规则。旧的 `external_directory(...)` allow 不视为已批准这些操作；旧 deny 继续生效。
+
+会话存储区的系统文件先于 cwd、普通上级可写可信根判断。模型可以直接读取，修改或 Bash 访问需要对应授权；scratch 可读写。明确 deny 优先于可信根放行与 Full Access，内部系统写文件不经过模型工具审批。
+
 ## 四、响应与终态
 
 | 响应          | 原 ask 结果                                              | 规则副作用                                          |

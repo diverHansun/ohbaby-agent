@@ -218,7 +218,7 @@ Skill 不被 plan 能力层拦截。`ask.reason` 必须包含 skill name。
 | `context.externalWrite === true` | ask，可通过 `always` 记住同一外部路径范围 |
 | `context.untrustedMcp === true` | ask |
 
-external write 的 `always` 写入 session rule，并将路径标记为 `external-write-approved`；下一次匹配同一外部路径范围不再弹窗。外部读或 bash preflight 的自动放行只写入普通 `external-approved`，不能绕过后续外部写审批；untrusted MCP 仍可选择不可记住。
+external write 的 `always` 保存 `external_directory_write(pattern)` 并登记 `external-write-approved`；读取保存 `external_directory_read(pattern)`、登记只读的 `external-read-approved`；Bash 目录访问保存 `external_directory_shell(pattern)`、登记 `external-approved`。三种规则只复用各自的操作范围，读取不能放行写入或 Bash，写入也不自动放行 Bash。会话系统文件先于 cwd 与普通上级可写可信根检查，明确 deny 始终优先；untrusted MCP 仍可选择不可记住。
 
 ---
 

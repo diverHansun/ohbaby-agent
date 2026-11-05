@@ -4,6 +4,7 @@ import { canonicalizePathTarget } from "../utils/path-canonicalize.js";
 import { SandboxBoundaryError } from "./errors.js";
 import { containsOrEqualPath } from "./boundary.js";
 import type { InternalSandboxContext } from "./context.js";
+import { isShellTrustedRootKind } from "./trusted-roots.js";
 import { preflightSandboxCommand } from "./preflight.js";
 import type {
   CommandContext,
@@ -122,7 +123,11 @@ export function createSandboxLease(input: {
       return preflightSandboxCommand({
         command,
         shellKind,
-        trustedRoots: trustedRootPaths(context),
+        sessionRoots: context.trustedRoots.snapshot(),
+        trustedRoots: context.trustedRoots
+          .snapshot()
+          .filter((root) => isShellTrustedRootKind(root.kind))
+          .map((root) => root.path),
         workdir: context.workdir,
       });
     },

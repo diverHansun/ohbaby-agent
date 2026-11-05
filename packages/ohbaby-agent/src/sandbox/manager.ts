@@ -108,6 +108,20 @@ export class SandboxManager implements SandboxManagerPort {
       });
       const workdir = await canonicalizePathTarget(handle.workdir);
       const capabilities = freezeCapabilities(adapter.getCapabilities(handle));
+      let trustedRoots = await TrustedRootRegistry.create(workdir);
+      try {
+        for (const root of (await this.options.initialTrustedRoots?.(scope)) ??
+          []) {
+          await trustedRoots.add(root);
+        }
+      } catch (error) {
+        trustedRoots = await TrustedRootRegistry.create(workdir);
+        try {
+          this.options.onInitialTrustedRootsError?.(error);
+        } catch {
+          /* Diagnostics must not stop the conversation. */
+        }
+      }
       const context: InternalSandboxContext = {
         adapter,
         adapterId,
@@ -120,7 +134,7 @@ export class SandboxManager implements SandboxManagerPort {
         scopeKey: scope.scopeKey,
         sessionId: scope.sessionId,
         status: "active",
-        trustedRoots: await TrustedRootRegistry.create(workdir),
+        trustedRoots,
         waiters: [],
         workdir,
       };

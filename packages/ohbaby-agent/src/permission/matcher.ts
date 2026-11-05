@@ -100,7 +100,10 @@ function canonicalToolName(toolName: string): string {
 
 function effectiveToolName(call: PermissionCall): string {
   const toolName = canonicalToolName(call.toolName);
-  if (toolName === "external_directory" || toolName === "sensitive_path") {
+  if (
+    toolName.startsWith("external_directory") ||
+    toolName === "sensitive_path"
+  ) {
     return toolName;
   }
   if (toolName === "bash") {
@@ -163,12 +166,12 @@ export function generatePermissionPattern(
   if (input.type === "external_directory") {
     const explicitPattern = getStringParam(input.params, ["pattern"]);
     if (explicitPattern) {
-      return `external_directory(${canonicalPath(explicitPattern)})`;
+      return `${canonicalToolName(input.name)}(${canonicalPath(explicitPattern)})`;
     }
     const externalPath = pathParam(input.params);
     if (externalPath) {
       const dir = directoryOf(externalPath) ?? externalPath;
-      return `external_directory(${canonicalPath(dir)}/**)`;
+      return `${canonicalToolName(input.name)}(${canonicalPath(dir)}/**)`;
     }
     return `external_directory(${canonicalToolName(input.name)})`;
   }
@@ -203,9 +206,8 @@ export function inferPermissionType(
   if (toolName === "bash") {
     return "bash";
   }
-  if (toolName === "external_directory" || toolName === "sensitive_path") {
-    return toolName;
-  }
+  if (toolName.startsWith("external_directory")) return "external_directory";
+  if (toolName === "sensitive_path") return "sensitive_path";
   if (toolName === "skill") {
     return "skill";
   }
@@ -240,7 +242,14 @@ export function matchesPermissionRule(
 ): boolean {
   const toolName = effectiveToolName(call);
   const ruleTool = canonicalToolName(rule.tool);
-  if (toolName !== ruleTool) {
+  if (
+    toolName !== ruleTool &&
+    !(
+      rule.decision === "deny" &&
+      ruleTool === "external_directory" &&
+      toolName.startsWith("external_directory_")
+    )
+  ) {
     return false;
   }
   if (!rule.pattern || rule.pattern.trim() === "") {

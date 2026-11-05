@@ -198,6 +198,7 @@ export interface CompactResult {
 }
 
 export interface PrepareTurnInput {
+  readonly sessionScratchDirectory?: string;
   readonly runModel: ContextModel;
   readonly requestSettings?: PreparedRequestSettings;
   readonly runId?: string;

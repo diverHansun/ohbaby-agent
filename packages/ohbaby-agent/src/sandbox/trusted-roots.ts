@@ -4,6 +4,9 @@ import { containsOrEqualPath } from "./boundary.js";
 
 export type TrustedRootKind =
   | "active-skill"
+  | "external-read-approved"
+  | "session-storage"
+  | "session-scratch"
   | "external-approved"
   | "external-write-approved"
   | "skill-output"
@@ -64,4 +67,31 @@ export class TrustedRootRegistry {
     this.roots.set(rootKey(resolved.path, resolved.kind), resolved);
     return resolved;
   }
+}
+
+/** Shell directory access needs its own approval; file reads/writes do not grant it. */
+export function isShellTrustedRootKind(kind: TrustedRootKind): boolean {
+  return (
+    kind !== "session-storage" &&
+    kind !== "external-read-approved" &&
+    kind !== "external-write-approved"
+  );
+}
+
+/** Registered storage takes precedence over an ordinary workspace or skill root. */
+export function isSessionSystemPath(
+  roots: readonly TrustedRoot[],
+  target: string,
+): boolean {
+  return roots.some(
+    (storage) =>
+      storage.kind === "session-storage" &&
+      containsOrEqualPath(storage.path, target) &&
+      !roots.some(
+        (scratch) =>
+          scratch.kind === "session-scratch" &&
+          containsOrEqualPath(storage.path, scratch.path) &&
+          containsOrEqualPath(scratch.path, target),
+      ),
+  );
 }

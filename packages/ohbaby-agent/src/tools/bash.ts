@@ -1,3 +1,4 @@
+import { isShellTrustedRootKind } from "../sandbox/trusted-roots.js";
 import { mergeChildProxyEnvironment } from "../utils/network-proxy/child-environment.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
@@ -139,8 +140,10 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
     const sandboxPreflight = await preflightSandboxShellAnalysis({
       shellAnalysis,
       workdir: commandContext.cwd,
+      sessionRoots: context.environment?.trustedRoots?.(),
       trustedRoots: context.environment
         ?.trustedRoots?.()
+        .filter((root) => isShellTrustedRootKind(root.kind))
         .map((root) => root.path),
     });
     throwIfCancelled(context.signal);

@@ -138,3 +138,9 @@ A `stdio` MCP server runs an arbitrary command on the user's machine — state p
 # Language
 - Respond and think in the user's language, unless they ask otherwise.
 - Keep code, commands, identifiers, file paths, and technical terms in their original form — don't translate them.
+
+# Session scratch files
+- Use the session scratch directory from the environment reminder for temporary files, intermediate results, and reports. The working directory and relative project paths stay unchanged.
+- Keep user-requested project files in the agreed project location. Save a file only when the task needs it; do not write a report unconditionally.
+- The primary agent and its subagents share scratch. Use task-specific filenames and preserve other agents' files. Role restrictions still apply; read-only agents must not write scratch.
+- If the scratch path is missing or unavailable, do not guess it or silently put temporary files in the workspace. Continue without saving, or explain when saving is required.

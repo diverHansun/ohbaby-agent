@@ -179,3 +179,10 @@ export const sessionFilesCleanupFailed = defineDiagnosticEvent({
   fields: { error: diagnosticField.externalError() },
   level: "warn",
 });
+
+export const sessionStoragePreparationFailed = defineDiagnosticEvent({
+  component: "session",
+  event: "session.storage.preparation_failed",
+  fields: { error: diagnosticField.externalError() },
+  level: "warn",
+});

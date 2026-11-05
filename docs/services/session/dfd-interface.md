@@ -136,6 +136,10 @@ remove(sessionId)
 
 删除消息内容由 Message 模块负责；session 模块只删除 session 元数据。
 
+归档根会话的永久删除走 `deleteArchivedSession`，数据库提交后由 `cleanupDeletedSessionFiles` 清理整棵会话树的快照引用、旧子代理结果以及 `<OHBABY_HOME>/sessions/<id>`。新增 `sessionStorageRoot` 依赖供路径注入；默认尊重 `OHBABY_HOME`。删除失败只记录日志，不撤销数据库删除，不触碰其他根会话或用户项目文件。
+
+会话存储区包含 `scratch/`、`subagents/` 和 `tool-results/`。一轮任务结束、子代理结束或关闭、归档、恢复和移动 workspace 都保留文件；仅永久删除归属根会话时清理，不做 TTL 或定时清理。超长工具输出存盘及 Files 前端仍属于 session-storage 第二期。
+
 ---
 
 ## 三、Interface Definition（接口定义）

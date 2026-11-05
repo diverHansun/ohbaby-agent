@@ -15,6 +15,7 @@ import type {
   PreflightResult,
   PreflightSensitivePath,
 } from "../../sandbox/index.js";
+import { isSessionSystemPath } from "../../sandbox/trusted-roots.js";
 import { ShellPreflightError } from "../../shell/preflight.js";
 import type { ShellAnalysisResult } from "../../shell/analysis/types.js";
 import type { BashPreparation } from "../../shell/execution.js";
@@ -201,6 +202,7 @@ function isOutsideTrustedEnvironment(
 
 function isWriteTrustedRootKind(kind: string): boolean {
   return (
+    kind === "session-scratch" ||
     kind === "workspace" ||
     kind === "skill-output" ||
     kind === "external-write-approved"
@@ -226,9 +228,15 @@ function isOutsideWriteTrustedEnvironment(
   environment: ToolExecutionEnvironment,
   resolvedPath: string,
 ): boolean {
-  if (!isOutsideWorkdir(environment.workdir, resolvedPath)) {
-    return false;
+  const roots = environment.trustedRoots?.() ?? [];
+  if (isSessionSystemPath(roots, resolvedPath)) {
+    return !roots.some(
+      (root) =>
+        root.kind === "external-write-approved" &&
+        isSameOrInsidePath(resolvedPath, root.path),
+    );
   }
+  if (!isOutsideWorkdir(environment.workdir, resolvedPath)) return false;
   return !containsWriteTrustedPath(environment, resolvedPath);
 }
 
@@ -1292,7 +1300,7 @@ export function createToolScheduler(
       await context.environment?.trustPath?.({
         kind: "external-approved",
         path: trustedRootFromExternalPath(externalPath),
-        source: "external_directory",
+        source: "external_directory_shell",
       });
     }
 
@@ -1316,7 +1324,7 @@ export function createToolScheduler(
                 messageId: call.messageId,
                 params,
                 sessionId: call.sessionId,
-                toolName: "external_directory",
+                toolName: "external_directory_shell",
               },
               permissionSnapshot,
             ),
@@ -1357,7 +1365,7 @@ export function createToolScheduler(
           }
         },
         reason: `External path access requires confirmation: ${externalPath.absolutePath}`,
-        toolName: "external_directory",
+        toolName: "external_directory_shell",
       });
       if (result) {
         return result;
@@ -1458,9 +1466,9 @@ export function createToolScheduler(
     async function trustExternalReadPath(): Promise<void> {
       if (context.internalRead) return;
       await context.environment?.trustPath?.({
-        kind: "external-write-approved",
+        kind: "external-read-approved",
         path: trustedRootFromExternalPath(externalPath),
-        source: "external_directory",
+        source: "external_directory_read",
       });
     }
 
@@ -1475,7 +1483,7 @@ export function createToolScheduler(
               messageId: call.messageId,
               params,
               sessionId: call.sessionId,
-              toolName: "external_directory",
+              toolName: "external_directory_read",
             },
             permissionState.getState(),
           ),
@@ -1510,7 +1518,7 @@ export function createToolScheduler(
         }
       },
       reason: `External path access requires confirmation: ${externalPath.absolutePath}`,
-      toolName: "external_directory",
+      toolName: "external_directory_read",
     });
   }
 
@@ -1541,9 +1549,9 @@ export function createToolScheduler(
 
     async function trustExternalWritePath(): Promise<void> {
       await context.environment?.trustPath?.({
-        kind: "external-approved",
+        kind: "external-write-approved",
         path: trustedRootFromExternalPath(externalPath),
-        source: "external_directory",
+        source: "external_directory_write",
       });
     }
 
@@ -1559,7 +1567,7 @@ export function createToolScheduler(
               messageId: call.messageId,
               params,
               sessionId: call.sessionId,
-              toolName: "external_directory",
+              toolName: "external_directory_write",
             },
             permissionSnapshot,
           ),
@@ -1598,7 +1606,7 @@ export function createToolScheduler(
         }
       },
       reason: `External write path access requires confirmation: ${externalPath.absolutePath}`,
-      toolName: "external_directory",
+      toolName: "external_directory_write",
     });
   }
 
@@ -2125,6 +2133,42 @@ export function createToolScheduler(
     );
     if ("status" in permissionDecision) {
       return permissionDecision;
+    }
+    const pathChecks = prepared.permissionContext.preflight
+      ? [
+          ...prepared.permissionContext.preflight.internalPaths,
+          ...prepared.permissionContext.preflight.externalPaths,
+        ].map((item) => ({
+          toolName: "external_directory_shell",
+          path: item.absolutePath,
+        }))
+      : prepared.permissionContext.accessIdentity
+        ? [
+            {
+              toolName:
+                prepared.category === "readonly"
+                  ? "external_directory_read"
+                  : "external_directory_write",
+              path: prepared.permissionContext.accessIdentity,
+            },
+          ]
+        : [];
+    for (const check of pathChecks) {
+      const decision = evaluatePermission(
+        {
+          ...prepared.call,
+          toolName: check.toolName,
+          category: "dangerous",
+          params: { path: check.path },
+        },
+        permissionState.getState(),
+      );
+      if (decision.type === "deny") {
+        transition(prepared.call, "rejected");
+        return makeResult(prepared.call, "rejected", {
+          error: createError("PermissionDeniedError", decision.reason),
+        });
+      }
     }
     const externalPermissionResult = await confirmExternalPreflightPermissions(
       prepared.call,

@@ -156,6 +156,7 @@ function createProviderStream(
 }
 
 function recordingFakeLlmClient(input: {
+  readonly onRequest?: (request: InterfaceProviderRequest) => Promise<void>;
   readonly config?: Partial<LLMClientInstance<FakeSdkClient>["config"]>;
   readonly events?: readonly InterfaceProviderStreamEvent[];
   readonly requests: InterfaceProviderRequest[];
@@ -188,9 +189,10 @@ function recordingFakeLlmClient(input: {
       isAbortError(): boolean {
         return false;
       },
-      streamResponse(
+      async streamResponse(
         request,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        await input.onRequest?.(request);
         input.requests.push(request);
         return Promise.resolve(
           createProviderStream(
@@ -333,6 +335,7 @@ interface FakeMcpManager {
 }
 
 async function createPromptCompositionForTest(input: {
+  readonly onRequest?: (request: InterfaceProviderRequest) => Promise<void>;
   readonly mcpTools?: readonly Tool[];
   readonly notices?: { readonly key?: string; readonly title: string }[];
   readonly policyMode: "ask" | "plan" | "agent";
@@ -358,7 +361,7 @@ async function createPromptCompositionForTest(input: {
   const composition = await createUiRuntimeComposition({
     agentManager: new AgentManager(),
     bus,
-    llmClient: recordingFakeLlmClient({ requests }),
+    llmClient: recordingFakeLlmClient({ requests, onRequest: input.onRequest }),
     mcpManager: { getAllTools: () => Promise.resolve(input.mcpTools ?? []) },
     messageManager,
     onNotice: input.notices
@@ -2535,3 +2538,266 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(latestRequest?.tools?.map((tool) => tool.name)).toContain(toolName);
   });
 });
+
+it("prepares private session scratch before the first model request and retains it after runs and workdir changes", async () => {
+  const home = await tempWorkdir();
+  vi.stubEnv("OHBABY_HOME", home);
+  const directory = path.join(
+    await (await import("node:fs/promises")).realpath(home),
+    "sessions",
+    "storage_parent",
+    "scratch",
+  );
+  const { composition, requests, workdir } =
+    await createPromptCompositionForTest({
+      policyMode: "agent",
+      onRequest: async () => {
+        expect(
+          (
+            await (await import("node:fs/promises")).stat(directory)
+          ).isDirectory(),
+        ).toBe(true);
+      },
+    });
+  try {
+    const first = await composition.startSession({
+      sessionId: "storage_parent",
+      projectRoot: workdir,
+      agentName: "build",
+      prompt: "Hello",
+    });
+    expect(
+      (await composition.runManager.waitForCompletion(first.runId)).status,
+    ).toBe("succeeded");
+    const { stat, readFile } = await import("node:fs/promises");
+    expect((await stat(directory)).isDirectory()).toBe(true);
+    expect(JSON.stringify(requests[0])).toContain(
+      `Session scratch directory: ${directory}`,
+    );
+    expect(JSON.stringify(requests[0])).toContain(
+      `Current working directory: ${workdir}`,
+    );
+    expect(JSON.stringify(requests[0])).toContain(
+      "temporary files, intermediate results, and reports",
+    );
+    await writeFile(path.join(directory, "keep.txt"), "keep");
+    const moved = await tempWorkdir();
+    await composition.setSessionWorkdir("storage_parent", moved);
+    const second = await composition.startSession({
+      sessionId: "storage_parent",
+      projectRoot: moved,
+      agentName: "build",
+      prompt: "Again",
+    });
+    expect(
+      (await composition.runManager.waitForCompletion(second.runId)).status,
+    ).toBe("succeeded");
+    expect(JSON.stringify(requests.at(-1))).toContain(
+      `Session scratch directory: ${directory}`,
+    );
+    expect(await readFile(path.join(directory, "keep.txt"), "utf8")).toBe(
+      "keep",
+    );
+  } finally {
+    await composition.dispose();
+    vi.unstubAllEnvs();
+  }
+});
+
+it("continues conversation and replaces an available scratch reminder after context rebuild preparation fails", async () => {
+  const home = await tempWorkdir();
+  vi.stubEnv("OHBABY_HOME", home);
+  const { composition, requests, workdir } =
+    await createPromptCompositionForTest({ policyMode: "agent" });
+  try {
+    const first = await composition.startSession({
+      sessionId: "storage_failure",
+      projectRoot: workdir,
+      agentName: "build",
+      prompt: "Hello",
+    });
+    expect(
+      (await composition.runManager.waitForCompletion(first.runId)).status,
+    ).toBe("succeeded");
+    const fs = await import("node:fs/promises");
+    await fs.rm(path.join(home, "sessions"), { recursive: true });
+    await fs.writeFile(path.join(home, "sessions"), "block creation");
+    const moved = await tempWorkdir();
+    await composition.setSessionWorkdir("storage_failure", moved);
+    const second = await composition.startSession({
+      sessionId: "storage_failure",
+      projectRoot: moved,
+      agentName: "build",
+      prompt: "Again",
+    });
+    expect(
+      (await composition.runManager.waitForCompletion(second.runId)).status,
+    ).toBe("succeeded");
+    expect(JSON.stringify(requests.at(-1))).toContain(
+      "Session scratch directory: unavailable",
+    );
+  } finally {
+    await composition.dispose();
+    vi.unstubAllEnvs();
+  }
+});
+
+it("shares prepared scratch and fixed rules across actual generic, explore and research model requests", async () => {
+  const home = await tempWorkdir();
+  vi.stubEnv("OHBABY_HOME", home);
+  const bus = createBus();
+  const workdir = await tempWorkdir();
+  const requests: InterfaceProviderRequest[] = [];
+  const executions = new InMemorySubagentExecutionStore();
+  const base = recordingFakeLlmClient({ requests });
+  let parentStep = 0;
+  const client: LLMClientInstance<FakeSdkClient> = {
+    ...base,
+    provider: {
+      ...base.provider,
+      streamResponse(request) {
+        requests.push(request);
+        const child = /Task: (generic|explore|research)/u.test(
+          JSON.stringify(request.messages),
+        );
+        return Promise.resolve(
+          createProviderStream(
+            child || ++parentStep > 1
+              ? [{ finishReason: "stop", textDelta: "done" }]
+              : [
+                  {
+                    finishReason: "tool_calls",
+                    toolCallDeltas: ["generic", "explore", "research"].map(
+                      (role, index) => ({
+                        id: `spawn_${role}`,
+                        index,
+                        name: "agent",
+                        argumentsDelta: JSON.stringify({
+                          action: "spawn",
+                          role,
+                          prompt: "Inspect this task",
+                          mode: "background",
+                        }),
+                      }),
+                    ),
+                  },
+                ],
+          ),
+        );
+      },
+    },
+  };
+  const composition = await createUiRuntimeComposition({
+    bus,
+    workdir,
+    llmClient: client,
+    subagentExecutionStore: executions,
+    messageManager: createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    }),
+    permissionState: createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    }),
+    skillRegistry: createMutableSkillRegistry([]),
+  });
+  try {
+    const parent = await composition.startSession({
+      sessionId: "shared_owner",
+      projectRoot: workdir,
+      agentName: "build",
+      prompt: "Delegate three tasks",
+    });
+    expect(
+      (await composition.runManager.waitForCompletion(parent.runId)).status,
+    ).toBe("succeeded");
+    const children = await executions.listByRootRun(parent.runId);
+    expect(children).toHaveLength(3);
+    for (const child of children)
+      if (child.childRunId)
+        expect(
+          (await composition.runManager.waitForCompletion(child.childRunId))
+            .status,
+        ).toBe("succeeded");
+    const fs = await import("node:fs/promises");
+    const scratch = path.join(
+      await fs.realpath(home),
+      "sessions",
+      "shared_owner",
+      "scratch",
+    );
+    for (const role of ["generic", "explore", "research"]) {
+      const request = requests.find(
+        (request) =>
+          JSON.stringify(request.messages).includes("<subagent_base>") &&
+          JSON.stringify(request.messages).includes(`Task: ${role}`),
+      );
+      expect(request).toBeDefined();
+      const text = JSON.stringify(request);
+      expect(text).toContain(`Session scratch directory: ${scratch}`);
+      expect(text).toContain(
+        "temporary files, intermediate results, and reports",
+      );
+      expect(text).toContain("Keep user-requested project files");
+      expect(text).toContain("Save a file only when the task needs it");
+      expect(text).toContain("do not guess it");
+      expect(text).not.toContain(
+        "Write full logs or lengthy analysis to a file",
+      );
+      if (role === "explore") {
+        expect(text).toContain("Operate read-only");
+      }
+    }
+    expect(await fs.readdir(scratch)).toEqual([]);
+    expect(await fs.readdir(path.join(home, "sessions"))).toEqual([
+      "shared_owner",
+    ]);
+  } finally {
+    await composition.dispose();
+    vi.unstubAllEnvs();
+  }
+});
+
+it.each(["scratch-link", "invalid-id"])(
+  "continues without advertising usable scratch after %s preparation fails",
+  async (failure) => {
+    const home = await tempWorkdir();
+    vi.stubEnv("OHBABY_HOME", home);
+    const fs = await import("node:fs/promises");
+    const sessionId = failure === "invalid-id" ? "../unsafe" : "linked_scratch";
+    if (failure === "scratch-link") {
+      const directory = path.join(home, "sessions", sessionId);
+      const records = path.join(directory, "subagents");
+      await fs.mkdir(records, { recursive: true });
+      await fs.symlink(records, path.join(directory, "scratch"), "junction");
+    }
+    const notices: { readonly key?: string; readonly title: string }[] = [];
+    const { composition, requests, workdir } =
+      await createPromptCompositionForTest({ policyMode: "agent", notices });
+    try {
+      const run = await composition.startSession({
+        sessionId,
+        projectRoot: workdir,
+        agentName: "build",
+        prompt: "Continue the conversation",
+      });
+      expect(
+        (await composition.runManager.waitForCompletion(run.runId)).status,
+      ).toBe("succeeded");
+      const text = JSON.stringify(requests[0]);
+      expect(text).toContain("Session scratch directory: unavailable");
+      expect(text).toContain("Current working directory:");
+      expect(text).toContain("Platform:");
+      expect(text).toContain("Date:");
+      expect(
+        notices.some(
+          (notice) => notice.title === "Session scratch unavailable",
+        ),
+      ).toBe(true);
+    } finally {
+      await composition.dispose();
+      vi.unstubAllEnvs();
+    }
+  },
+);

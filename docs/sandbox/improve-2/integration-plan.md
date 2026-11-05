@@ -11,7 +11,7 @@
 | [src/utils/](../../../packages/ohbaby-agent/src/utils/) | `path-canonicalize.ts` | — | shell/sandbox 双 walk-up canonicalize 收敛到共享工具 |
 | [src/shell/preflight.ts](../../../packages/ohbaby-agent/src/shell/preflight.ts) | — | import 共享 canonicalize | 删自有 `canonicalizeStaticPath` 副本 |
 | [src/adapters/ui-runtime/composition.ts](../../../packages/ohbaby-agent/src/adapters/ui-runtime/composition.ts) | — | 创建/注入 session `TrustedRootRegistry`，初始化 workspace root | — |
-| permission / scheduler | — | `external_directory always` 后写入 `external-approved` root；`allow once` 不写 | 保持 ask 顺序 |
+| permission / scheduler | — | 按 read/write/shell 操作分别保存 always 规则与可信根；`allow once` 不写 | 保持 ask 顺序 |
 
 ## 文件改动详情
 
@@ -22,6 +22,10 @@ type TrustedRootKind =
   | "workspace"
   | "active-skill"
   | "external-approved"
+  | "external-read-approved"
+  | "external-write-approved"
+  | "session-storage"
+  | "session-scratch"
   | "skill-output";
 
 interface TrustedRoot {
@@ -46,11 +50,12 @@ interface SandboxLease {
 
 - 提供 session-scoped registry：
   - `add(sessionId, root)`：canonicalize 后去重写入。
-  - `list(sessionId)`：返回 workspace + active-skill + external-approved + skill-output。
+  - `list(sessionId)`：返回 workspace、skill、各操作已批准路径及会话存储区。
   - `clearSession(sessionId)`：session 结束/清理时释放。
 - `workspace` root 在 sandbox context/session 创建时写入。
 - `active-skill` root 由 skill tool 成功加载 `SKILL.md` 后写入 exact `baseDir`，并保留到 session 结束。
-- `external-approved` root 只由 `external_directory` 的 `always` 响应写入；`once` 不写。
+- `external_directory_read` 的 always 登记 `external-read-approved`，只供读取；`external_directory_write` 登记 `external-write-approved`，供读写但不自动授予 Bash 访问；`external_directory_shell` 登记 `external-approved`，供 Bash 目录访问。`once` 不登记。
+- `session-storage` 默认只读，所属 `session-scratch` 默认可读写；两者由运行初始化回调创建并按真实路径登记。准备失败不登记会话根，环境提醒说明 scratch 不可用。
 - `skill-output` root 使用 workspace 内目录，供后续 skill script 输出和 file tools 读取。
 
 ### `src/sandbox/context.ts` / `manager.ts`
@@ -97,28 +102,18 @@ async function classifyOnePath(input: {
 
 - 透出 `trustedRoots()` 与 `containsTrustedPath(absolutePath)`（从 registry 读取当前 session）。
 - `resolvePath` / `resolvePathForExisting` / `resolvePathForWrite` 的 boundary 由单 workdir 改为 trusted roots。
-  这让用户 always 信任系统 temp 后，bash 和 Read/Grep/Glob/Write/Edit 共享同一边界事实。
-- `preflight()` 内部把当前 trusted roots 传给 `preflightSandboxCommand`。
+  读取边界保留所有可信根；调度器分别判断写入授权，Bash 只使用允许 Shell 访问的类型。读取批准不扩大成写入或 Bash 授权。
+- `preflight()` 将 Shell 可用可信根，以及完整的 session-storage/scratch 范围传给 `preflightSandboxCommand`。先判断系统文件，再判断 cwd 或普通上级可信根；对应的明确 Shell 授权仍可复用。
 - `resolveCommandContext` 签名已支持 env 注入；host-local 默认不注入（行为不变）。
 
 ### `src/core/tool-scheduler/scheduler.ts`
 
 - `ToolExecutionEnvironment`（或等价 adapter）需要暴露 trusted boundary helper，例如
   `trustedRoots()` / `containsTrustedPath()`，否则 scheduler 仍只能看 `environment.workdir`。
-- `preparePermissionContext` 当前用 `isOutsideWorkdir(environment.workdir, canonicalPath)` 判断 write/edit
-  的 `externalWrite`。本轮必须改为按 trusted roots 判断：
-  - canonicalPath 在 workspace / active-skill / external-approved / skill-output 任一 root 内 ⇒
-    `externalWrite = false`，但 Write/Edit 的普通工具权限仍照常 ask/allow。
-  - canonicalPath 不在任何 trusted root 内 ⇒ `externalWrite = true`，继续走现有外部写确认与隔离包装。
-- `confirmExternalPreflightPermissions` 需要拿到 `external_directory` ask 的实际响应：
-  - `once`：继续执行当前调用，不写 trusted roots。
-  - `always`：把 `externalPath.askPattern` 对应的 canonical directory 写入 `TrustedRootRegistry`，
-    kind = `external-approved`；不要把 glob pattern 本身当 root 存。
-- 若 `evaluatePermission` 因已有 session rule 返回 `allow`（auto-approved external_directory），也要幂等写入
-  同一个 canonical directory root，保证 permission 规则与 sandbox/file boundary 同步。
-- 当前 `confirmPermission()` 会把 `once`/`always` 都折叠成 `null` 返回；实现时要么让它返回 response，
-  要么为 external_directory 使用专门的确认函数，避免丢失 "always" 语义。
-- permission session rule 仍保留，trusted root 是给 sandbox/file tools 共享的边界事实，两者互补。
+- `createPermissionContext` 按真实目标判断写入边界：先判断已登记的 `session-storage` 减去所属 scratch，再判断 cwd、workspace、skill-output 或明确的 external-write-approved。系统文件不能因为 cwd 是 home、OHBABY_HOME 或上级可写可信根而免审批。scratch 内符号链接按最终目标判断。
+- 写入系统范围需要已有明确写入授权或当前审批。普通 Write/Edit 工具权限保持原流程；明确拒绝规则在可信根放行前检查，`full-access` 保持原语义。
+- 读取、写入和 Bash 目录访问分别使用 `external_directory_read(pattern)`、`external_directory_write(pattern)`、`external_directory_shell(pattern)`。PermissionManager 仍通过现有 `tool(pattern)` 格式生成、保存和匹配规则，不增加规则表或新审批交互。
+- 没有操作含义的旧 `external_directory` allow 不再匹配这三种操作；旧 deny 仍拒绝对应路径。已保存规则在上下文重建后继续有效，trusted roots 只是当前上下文中的边界事实。
 
 ### `src/skill/tool.ts` / registry 接缝（仅接入，不优化 skill 模块）
 
@@ -134,7 +129,7 @@ async function classifyOnePath(input: {
 - 不让 shell import sandbox，避免 sandbox 已经依赖 shell analysis/types 时形成方向混乱。
 - directory-changing commands（`cd`/`pushd`/`Set-Location`）当前以 workspace `rootCwd` 为硬边界。
   已确认：shell hard preflight 应允许 cd 到任一 trusted root；未信任外部目录不要在 shell 层自行拒绝，
-  应作为 external path 进入 `external_directory` permission 流。动态 cd 目标仍按现有静态检查策略处理。
+  应作为 external path 进入 `external_directory_shell` permission 流。动态 cd 目标仍按现有静态检查策略处理。
 
 ### `composition.ts`
 
@@ -150,8 +145,8 @@ async function classifyOnePath(input: {
 | **S2：TrustedRootRegistry 管线** | 新增 registry，workspace root 初始化，lease/file resolve/preflight 读取 registry | 单 workspace 行为与 improve-1 等价；registry 去重/清理单测 |
 | **S3：多根 boundary** | `classifySandboxPath` 遍历 trusted roots | boundary 单测覆盖 inside-第二根 / 全 outside |
 | **S4：executedScript 消费** | preflight 处理 executedScript + isExecutedScript 标注 | 依赖 shell improve-2 S2 已产出 executedScript；新增 preflight 单测 |
-| **S5：external always 共享根** | scheduler 捕获 external_directory always，将目录写入 registry；once 不写 | always 后 bash/file tools 都不再视该目录为 external；once 后仍 external |
-| **S6：scheduler/file boundary 共用** | `externalWrite` 与 file tools 改用 trusted boundary helper，不再只看 workdir | external-approved temp/active-skill root 内写入不被误判为 workspace 外写；普通 Write/Edit 权限仍照常 |
+| **S5：external always 共享根** | scheduler 捕获 external_directory always，将目录写入 registry；once 不写 | always 只批准对应操作；读取不授权写入或 Bash，once 后仍 external |
+| **S6：scheduler/file boundary 共用** | `externalWrite` 与 file tools 改用 trusted boundary helper，不再只看 workdir | scratch、workspace、skill-output、明确写入授权可写；系统范围先于 cwd 判断，普通 Write/Edit 权限仍照常 |
 | **S7：active skill root 接缝** | skill tool 成功加载后写入 exact baseDir | 已加载 skill script 不弹 external；未加载 skill 仍 external |
 | **S8：注入通道（G5）** | resolveCommandContext env 注入约定 + 测试 host-local 默认空 | host-local 行为不变；约定有单测占位 |
 
@@ -183,9 +178,9 @@ sandbox S8 (注入通道) ── 独立
 - [ ] registry 含第二根时，该根内路径不再进 externalPaths（不弹 external）。
 - [ ] denylist 仍优先：可信根内的 `.ssh` 仍 hard-deny。
 - [ ] 已加载 skill 的 exact baseDir 不弹 external；父级 skills 目录与未加载 skill 仍 external。
-- [ ] `external_directory` once 不升级 trusted root；always 升级，且 bash/file tools 共享。
-- [ ] 已有 session rule 自动 allow 的 external_directory 也幂等写入 canonical `external-approved` root。
-- [ ] `external-approved` / `active-skill` root 内的 Write/Edit 不再被 `externalWrite` 误判，但仍走普通 write 权限。
+- [ ] 各操作的 once 不升级 trusted root；always 仅升级对应操作范围。
+- [ ] read/write/shell 的 session rule 生成、保存及匹配互不混用；重建后仍按对应范围授权。
+- [ ] scratch 默认可写；session-storage 的其余范围先于 cwd、普通上级可信根进入审批，符号链接按真实目标判断。
 - [ ] 系统 temp 默认不可信；用户 always 信任后才进入 `external-approved`。
 - [ ] `python <skill根>/run.py` 在该根可信时不弹 external；不可信时弹 external 且标 isExecutedScript。
 - [ ] `./run.sh`（workspace 内）识别为 executedScript 且判 inside。

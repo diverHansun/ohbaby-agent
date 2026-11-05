@@ -620,6 +620,9 @@ export class Lifecycle {
         isSubagent: params.isSubagent,
         modelId: params.modelId,
         promptSnapshot,
+        sessionScratchDirectory: params.environment
+          ?.trustedRoots?.()
+          .find((root) => root.kind === "session-scratch")?.path,
         sessionId: params.sessionId,
         ...(params.signal === undefined ? {} : { signal: params.signal }),
         step,
@@ -765,6 +768,9 @@ export class Lifecycle {
           isSubagent: params.isSubagent,
           modelId: params.modelId,
           promptSnapshot,
+          sessionScratchDirectory: params.environment
+            ?.trustedRoots?.()
+            .find((root) => root.kind === "session-scratch")?.path,
           sessionId: params.sessionId,
           ...(params.signal === undefined ? {} : { signal: params.signal }),
           step,

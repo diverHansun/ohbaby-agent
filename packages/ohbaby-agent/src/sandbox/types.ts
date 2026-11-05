@@ -3,6 +3,7 @@ import type {
   ShellCommandAnalysis,
   ShellKind,
 } from "../shell/index.js";
+import type { NormalizedSandboxScope } from "./scope.js";
 import type { TrustedRoot, TrustedRootKind } from "./trusted-roots.js";
 
 export type SandboxIsolation = "none" | "worktree" | "container" | "remote";
@@ -63,12 +64,14 @@ export interface PreflightResult {
 export interface SandboxPreflightInput {
   readonly command: string;
   readonly shellKind: ShellKind;
+  readonly sessionRoots?: readonly TrustedRoot[];
   readonly trustedRoots?: readonly string[];
   readonly workdir: string;
 }
 
 export interface SandboxShellAnalysisPreflightInput {
   readonly shellAnalysis: ShellAnalysisResult;
+  readonly sessionRoots?: readonly TrustedRoot[];
   readonly trustedRoots?: readonly string[];
   readonly workdir: string;
 }
@@ -175,6 +178,10 @@ export interface SandboxManagerPort {
 }
 
 export interface SandboxManagerOptions {
+  readonly onInitialTrustedRootsError?: (error: unknown) => void;
+  readonly initialTrustedRoots?: (
+    scope: NormalizedSandboxScope,
+  ) => Promise<readonly TrustPathInput[]>;
   readonly authorizeInternalRead?: (input: {
     readonly path: string;
     readonly sessionId: string;

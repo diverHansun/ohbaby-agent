@@ -17,6 +17,7 @@ export function createEnvironmentReminderProvider(): ReminderProvider {
           : []),
         `Date: ${escapeReminderValue(info.date)}`,
         `Git repository: ${String(info.isGitRepo)}`,
+        `Session scratch directory: ${context.sessionScratchDirectory ? escapeReminderValue(context.sessionScratchDirectory) : "unavailable"}`,
       ].join("\n");
       return { key: text, text };
     },

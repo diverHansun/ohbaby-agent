@@ -124,7 +124,12 @@ export function createHostLocalEnvironment(
 
 export function createHostLocalSandboxManager(
   workdir = process.cwd(),
-  options: Pick<SandboxManagerOptions, "authorizeInternalRead"> = {},
+  options: Pick<
+    SandboxManagerOptions,
+    | "authorizeInternalRead"
+    | "initialTrustedRoots"
+    | "onInitialTrustedRootsError"
+  > = {},
 ): HostLocalSandboxManager {
   const fallbackWorkdir = createHostLocalEnvironment(workdir).workdir;
   const registry = new AdapterRegistry();

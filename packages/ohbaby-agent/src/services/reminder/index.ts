@@ -14,6 +14,7 @@ export const REMINDER_ORDER = [
 export type ReminderType = (typeof REMINDER_ORDER)[number];
 
 export interface ReminderContext {
+  readonly sessionScratchDirectory?: string;
   readonly environment?: EnvironmentInfo;
   readonly sessionId: string;
   readonly contextScopeId?: string;

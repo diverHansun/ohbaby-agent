@@ -101,7 +101,7 @@ describe("system prompt template assets", () => {
       "Keep your report to about 1–2k tokens",
     );
     expect(SUBAGENT_BASE_PROMPT).toContain(
-      "Write full logs or lengthy analysis to a file and return its path",
+      "When full logs or lengthy analysis need to be saved, use the session scratch directory",
     );
     for (const prompt of [
       PRIMARY_BASE_PROMPT,

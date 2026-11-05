@@ -5,6 +5,7 @@ import {
   type ShellCommandAnalysis,
 } from "../shell/index.js";
 import { resolveAnalyzedPath } from "../shell/preflight.js";
+import { isSessionSystemPath } from "./trusted-roots.js";
 import { classifySandboxPath } from "./boundary.js";
 import { classifyDenylistedPath, classifySensitivePath } from "./denylist.js";
 import { canonicalizeSandboxPath } from "./paths.js";
@@ -133,7 +134,18 @@ export async function preflightSandboxShellAnalysis(
         });
       }
 
-      if (classifySandboxPath({ absolutePath, trustedRoots }) === "outside") {
+      if (
+        (isSessionSystemPath(input.sessionRoots ?? [], absolutePath) &&
+          !(input.sessionRoots ?? []).some(
+            (root) =>
+              root.kind === "external-approved" &&
+              classifySandboxPath({
+                absolutePath,
+                trustedRoots: [root.path],
+              }) === "inside",
+          )) ||
+        classifySandboxPath({ absolutePath, trustedRoots }) === "outside"
+      ) {
         externalPaths.push({
           absolutePath,
           askPattern: await externalAskPattern(absolutePath),
@@ -169,6 +181,7 @@ export async function preflightSandboxCommand(
 ): Promise<PreflightResult> {
   const shell = await analyzeShellCommand(input.command, input.shellKind);
   return preflightSandboxShellAnalysis({
+    sessionRoots: input.sessionRoots,
     shellAnalysis: shell,
     trustedRoots: input.trustedRoots,
     workdir: input.workdir,

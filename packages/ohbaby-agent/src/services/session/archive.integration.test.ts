@@ -242,3 +242,60 @@ it("deletes more descendants than a bound SQL parameter list would allow", async
     count: 0,
   });
 });
+
+it("keeps session storage through restore and removes only the permanently deleted owner tree", async () => {
+  const fs = await import("node:fs/promises");
+  const { cleanupDeletedSessionFiles } = await import("./archive-files.js");
+  addSession("owner");
+  addSession("child", "owner", "active");
+  addSession("other");
+  const sessions = join(root, "sessions");
+  for (const id of ["owner", "other"])
+    for (const dir of ["scratch", "subagents", "tool-results"]) {
+      await fs.mkdir(join(sessions, id, dir), { recursive: true });
+      await fs.writeFile(join(sessions, id, dir, "keep.txt"), "keep");
+    }
+  await fs.writeFile(join(root, "project.txt"), "project");
+  await restoreArchivedSession("owner", restoreInput);
+  expect(
+    await fs.readFile(join(sessions, "owner", "scratch", "keep.txt"), "utf8"),
+  ).toBe("keep");
+  getDatabase()
+    .prepare("UPDATE session SET status = 'archived' WHERE id = 'owner'")
+    .run();
+  const result = await deleteArchivedSession("owner");
+  await cleanupDeletedSessionFiles(result, {
+    sessionStorageRoot: sessions,
+    resultStorageRoot: join(root, "results"),
+    snapshotRoot: root,
+    log: () => {
+      throw new Error("unexpected cleanup failure");
+    },
+  });
+  expect(readSessionRow(getDatabase(), "owner")).toBeNull();
+  await expect(fs.stat(join(sessions, "owner"))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  expect(
+    await fs.readFile(join(sessions, "other", "scratch", "keep.txt"), "utf8"),
+  ).toBe("keep");
+  expect(await fs.readFile(join(root, "project.txt"), "utf8")).toBe("project");
+});
+
+it("keeps database deletion committed when storage cleanup cannot access its parent", async () => {
+  const fs = await import("node:fs/promises");
+  const { cleanupDeletedSessionFiles } = await import("./archive-files.js");
+  addSession("owner");
+  const blocked = join(root, "blocked");
+  await fs.writeFile(blocked, "not a directory");
+  const result = await deleteArchivedSession("owner");
+  const failures: unknown[] = [];
+  await cleanupDeletedSessionFiles(result, {
+    sessionStorageRoot: blocked,
+    resultStorageRoot: join(root, "results"),
+    snapshotRoot: root,
+    log: (error) => failures.push(error),
+  });
+  expect(readSessionRow(getDatabase(), "owner")).toBeNull();
+  expect(failures).toHaveLength(1);
+});

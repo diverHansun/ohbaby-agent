@@ -569,8 +569,8 @@ describe("file tools scheduler integration", () => {
       "edit_outside",
     ]);
     expect(permissionUpdates.map((info) => info.name)).toEqual([
-      "external_directory",
-      "external_directory",
+      "external_directory_read",
+      "external_directory_read",
       "write",
       "edit",
     ]);

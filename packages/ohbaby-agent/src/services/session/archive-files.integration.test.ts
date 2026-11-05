@@ -83,7 +83,7 @@ it("logs cleanup failures and still attempts later files, rejecting unsafe stora
     ),
   ).resolves.toBeUndefined();
   expect(drop).toHaveBeenCalledOnce();
-  expect(log).toHaveBeenCalledTimes(2);
+  expect(log).toHaveBeenCalledTimes(3);
   expect(await readFile(join(root, "sentinel"), "utf8")).toBe("keep");
   await expect(
     readFile(join(root, "subagent-results", "child")),

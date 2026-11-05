@@ -1,3 +1,5 @@
+import path from "node:path";
+import { resolveSessionStorageDir } from "../../paths/session-storage.js";
 import { rm } from "node:fs/promises";
 import { GitSnapshotEngine } from "../../snapshot/diff-engine.js";
 import { PathResolver } from "../storage/path-resolver.js";
@@ -9,6 +11,7 @@ export async function cleanupDeletedSessionFiles(
   deps: {
     readonly snapshotRoot?: string;
     readonly resultStorageRoot?: string;
+    readonly sessionStorageRoot?: string;
     readonly log: (error: unknown) => void;
   },
 ): Promise<void> {
@@ -34,6 +37,17 @@ export async function cleanupDeletedSessionFiles(
         recursive: true,
         force: true,
       });
+    } catch (error) {
+      report(error);
+    }
+    try {
+      const directory = resolveSessionStorageDir(id);
+      await rm(
+        deps.sessionStorageRoot
+          ? path.join(deps.sessionStorageRoot, id)
+          : directory,
+        { recursive: true, force: true },
+      );
     } catch (error) {
       report(error);
     }

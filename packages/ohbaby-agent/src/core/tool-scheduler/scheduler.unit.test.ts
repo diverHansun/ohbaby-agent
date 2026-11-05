@@ -1061,12 +1061,12 @@ describe("ToolScheduler", () => {
       status: "success",
     });
 
-    expect(permissionOrder).toEqual(["external_directory", "bash"]);
+    expect(permissionOrder).toEqual(["external_directory_shell", "bash"]);
     const firstAsk = permission.ask.mock.calls[0][0];
     const preflight = firstAsk.metadata?.preflight;
     const externalPaths = (preflight as { externalPaths?: unknown })
       .externalPaths;
-    expect(firstAsk.toolName).toBe("external_directory");
+    expect(firstAsk.toolName).toBe("external_directory_shell");
     expect(firstAsk.params).toMatchObject({ path: "D:/outside/repo" });
     expect(Array.isArray(externalPaths)).toBe(true);
     expect(externalPaths).toHaveLength(1);
@@ -1126,7 +1126,7 @@ describe("ToolScheduler", () => {
       expect(trustPath).toHaveBeenCalledWith({
         kind: "external-approved",
         path: path.resolve(outside),
-        source: "external_directory",
+        source: "external_directory_shell",
       });
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
@@ -1180,7 +1180,7 @@ describe("ToolScheduler", () => {
     const execute = vi.fn(() => ({ output: "auto" }));
     const permissionState = createPermissionState({ bus: createBus() });
     permissionState.addSessionRule("session_1", {
-      tool: "external_directory",
+      tool: "external_directory_shell",
       decision: "allow",
       scope: "session",
     });
@@ -1225,7 +1225,7 @@ describe("ToolScheduler", () => {
     expect(trustPath).toHaveBeenCalledWith({
       kind: "external-approved",
       path: path.resolve("D:/outside"),
-      source: "external_directory",
+      source: "external_directory_shell",
     });
   });
 
@@ -1369,7 +1369,7 @@ describe("ToolScheduler", () => {
               {
                 kind: "external-write-approved",
                 path: realTrustedRoot,
-                source: "external_directory",
+                source: "external_directory_shell",
               },
             ],
             resolvePathForWrite: (inputPath) =>
@@ -1470,7 +1470,7 @@ describe("ToolScheduler", () => {
       await expect(resultPromise).resolves.toMatchObject({
         status: "success",
       });
-      expect(permissionOrder).toEqual(["external_directory", "bash"]);
+      expect(permissionOrder).toEqual(["external_directory_shell", "bash"]);
       expect(spawn.mock.calls[0]?.[1]).toEqual([
         "-lc",
         "chmod 600 ../outside.txt",
@@ -1569,7 +1569,7 @@ describe("ToolScheduler", () => {
     });
 
     expect(permissionOrder).toEqual([
-      "external_directory",
+      "external_directory_shell",
       "sensitive_path",
       "bash",
     ]);
@@ -2378,7 +2378,7 @@ describe("ToolScheduler", () => {
       expect(result).toMatchObject({ status: "success" });
       expect(result.output).toContain("secret");
       expect(permissionRequests.map((request) => request.toolName)).toEqual([
-        "external_directory",
+        "external_directory_read",
       ]);
       expect(permissionRequests[0]?.params).toMatchObject({
         path: await fs.realpath(externalFile),
@@ -2572,7 +2572,7 @@ describe("ToolScheduler", () => {
         status: "success",
       });
       expect(permission.ask).toHaveBeenCalledWith(
-        expect.objectContaining({ toolName: "external_directory" }),
+        expect.objectContaining({ toolName: "external_directory_read" }),
       );
     } finally {
       await fs.rm(tempRoot, { force: true, recursive: true });
@@ -2664,7 +2664,7 @@ describe("ToolScheduler", () => {
         status: "success",
       });
       expect(permission.ask).toHaveBeenCalledWith(
-        expect.objectContaining({ toolName: "external_directory" }),
+        expect.objectContaining({ toolName: "external_directory_read" }),
       );
     } finally {
       await fs.rm(tempRoot, { force: true, recursive: true });
@@ -2761,7 +2761,7 @@ describe("ToolScheduler", () => {
       expect(result.output).toContain("nested/match.txt");
       expect(permission.ask).toHaveBeenCalledTimes(1);
       expect(permission.ask).toHaveBeenCalledWith(
-        expect.objectContaining({ toolName: "external_directory" }),
+        expect.objectContaining({ toolName: "external_directory_read" }),
       );
     } finally {
       await fs.rm(tempRoot, { force: true, recursive: true });
@@ -2938,7 +2938,7 @@ describe("ToolScheduler", () => {
             },
           }),
         ).resolves.toMatchObject({ status: "rejected" });
-        expect(requests).toEqual(["external_directory", "write"]);
+        expect(requests).toEqual(["external_directory_read", "write"]);
         expect(await fs.readFile(externalFile, "utf8")).toBe("full access");
         await expect(
           fs.stat(path.join(outside, "after-default.txt")),
