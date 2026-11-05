@@ -83,3 +83,24 @@
 | 读取走只读可信路径，删掉专用通道 | claude-code、minimax、dsh |
 | 送达格式不变 | claude-code、kimi-code、ZCode、opencode 的后台路径 |
 | 子代理长日志写进 scratch | claude-code（coordinator 模式让 worker 用 scratchpad） |
+
+## 3.9 实施前复查：提示词与运行目录
+
+2026-11-05 再次核查本地源码。以下结论描述当前检出的实现；`claude-code` 本地仓库是逆向恢复版本，不视作官方完整契约。
+
+| 来源 | 代码事实 | 本项目取舍 |
+|---|---|---|
+| Claude `src/constants/prompts.ts:765`，普通主提示词接入在 `:500` | scratchpad 段同时包含实际路径和用途：临时脚本、中间结果、不属于项目的输出。该段受功能开关控制 | 借鉴用途说明与项目文件边界；不照搬开关，不要求每次汇报另建文件 |
+| Claude `packages/builtin-tools/src/tools/AgentTool/AgentTool.tsx:657`、`src/constants/prompts.ts:728` | 普通子代理走自身 prompt 和环境补充，环境补充不含主代理的 scratchpad 段；fork 子代理在同一 `AgentTool.tsx:624` 继承父提示词 | 不假设子代理自动继承规则；本项目分别更新主、子代理基础提示词 |
+| Kimi `packages/agent-core-v2/src/workspace/sessionLifecycle/sessionLifecycleService.ts:292`、`agent/tools/os/bash/bashTool.ts:160` | 会话存储目录与 cwd 分开，Bash 默认用工作目录 | 保留 cwd，不把存储目录当成新的运行目录 |
+| ZCode `apps/zcode-cli/packages/core/src/context/sections/desktop.ts:12` | Desktop Gen UI 有用途与会话路径提示，但只针对该场景，不是通用 scratchpad 规则 | 借鉴明确说明用途和路径，不扩展成所有角色共有的既有行为 |
+
+本项目已确认的适配是：固定规则分别放两个现有基础提示词，具体路径由共同的 environment 提醒提供。Claude 把规则与路径写在同一动态段，并非本项目这种拆分；这里按本项目已有的提示词与提醒结构实现，不新增提示词框架。
+
+## 3.10 初始化、保存失败与权限顺序复查
+
+| 来源 | 核查事实 | 对本项目的意义 |
+|---|---|---|
+| Claude `src/entrypoints/init.ts:231-237`、`src/utils/permissions/filesystem.ts:394-406` | 初始化中等待 scratchpad 创建完成；先创建目录才继续，普通创建异常会向上传递 | 借鉴初始化时准备，不等第一次写入；不把这段代码描述为创建失败后仍宣告成功 |
+| Kimi `packages/agent-core-v2/src/agent/toolResultTruncation/toolResultTruncationService.ts:68-81、131-145、293-302` | 写成功才返回路径；失败时返回保存失败说明和保留的预览 | 保存失败如实返回；这是保存失败，不一定是命令或工具本身执行失败 |
+| Claude `src/utils/permissions/filesystem.ts:1241-1250、1302-1342、1365-1379` | 先处理 scratchpad 等指定可写路径，再检查受保护路径，之后才应用工作目录的模式放行；另保留专门的会话授权规则 | 支持更具体的文件保护优先于普通 workspace 放行。仅作为局部顺序参考，不照搬权限模式，也不新增通用权限框架；本项目已确认将系统文件优先判断与读取授权分离纳入存储区第一期，见 00 §7.7 |

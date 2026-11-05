@@ -30,10 +30,11 @@
 | 位置 | `sessions/<rootSessionId>/subagents/<subagentId>/<executionId>.output` | 一个根会话的文件放在一处；参考项目都把子代理结果挂在会话名下（03） | 留在数据目录（两处分开）；按类型分顶层目录（ZCode 的做法，清理时容易漏） | 无 |
 | 会话 ID | 执行记录的 `rootSessionId` | 和存储区的归属一致；现在与 `parentSessionId` 同值 | `parentSessionId`（以后如果允许嵌套子代理，归属会对不上） | 无 |
 | 存储根 | 固定用 `resolveSessionStorageRoot()`，删掉 `resultStorageRoot` 选项 | 和存储区登记可信路径用的是同一个函数，不会对不上 | 改名保留一个可覆盖的选项（两处可能指向不同位置） | 测试只能用 `OHBABY_HOME` 隔离，这本来就是仓库约定 |
-| 读取授权 | 存储区的只读可信路径 `session-storage` | 一套机制管所有会话文件；整个根会话都能读 | 保留专用通道（8 个文件里的特殊逻辑） | 兄弟子代理、side chat 也能读，这是想要的结果 |
+| 读取授权 | 存储区的只读可信路径 `session-storage` | 一套机制管所有会话文件；整个根会话都能读 | 保留专用通道（9 个文件里的特殊逻辑） | 兄弟子代理、side chat 也能读，这是想要的结果 |
+| 模型改写审批 | 在 `default` 权限档位下，改写系统报告或工具原文需弹审批，批准后执行；系统自行导出不走该审批 | 落实默认只读，同时保留用户批准修改的能力 | 给系统文件免审批写权限；把默认只读做成不可批准的硬拒绝 | 需要核验批准、拒绝、取消三种结果 |
 | 写入保护 | 保留导出时的符号链接检查和真实路径核对 | Bash 仍可能在别处造符号链接，这两项检查兜底 | 删掉（以为只读权限就够了） | 无 |
 | 旧数据 | 不兼容、不迁移 | 没有发布版本；数据库是权威数据，路径不一致时会自动重新导出 | 迁移脚本；保留旧目录的清理代码 | 开发机上旧会话历史里的旧路径，读取时要确认 |
-| 子代理提示词 | 长日志写进 scratch 目录 | 不弄脏用户的工作区 | 不改（继续写进工作区） | 无 |
+| 子代理提示词 | 由会话存储区第一期改成长日志写进 scratch 目录，本议题只做集成回归（见 00 §7.2） | 不弄脏用户的工作区；同一改动不重复安排 | 本议题再改一遍 | 无 |
 | `forceFile` | 删除 | 没有调用方 | 保留给以后（YAGNI） | 无 |
 
 ## 2.3 分阶段实施
@@ -45,8 +46,9 @@
 会话存储区第一期已经落地，并满足：
 
 - 会话运行时，`initialTrustedRoots` 回调登记了两档可信路径：`session-storage`（整个会话目录，只读）和 `session-scratch`（`scratch/`，可写）。子代理上下文登记的是根会话的目录。
+- 系统文件判断优先于普通 cwd 和上级可信目录自动放行，读取授权不会放行写入或 Bash 目录访问；真实 always 保存与匹配流程已经修正，存储区 S3c、S3d 通过。
 - `cleanupDeletedSessionFiles` 已经会删 `sessions/<id>`。
-- 环境提醒里有 scratch 路径，子代理看到的是根会话的路径。
+- 主、子代理基础提示词分别包含固定的文件落点规则；环境提醒里有 scratch 路径，子代理看到的是根会话的路径。存储区 S6c 已验证主代理及三个子代理角色的实际请求。
 
 做不到时，本议题不开始。
 
@@ -84,12 +86,8 @@
 
 ### Stage 3：提示词和清理
 
-1. **子代理提示词** `A/core/system-prompt/prompts/subagents/base.md:27`，把这句改为（英文，和现有提示词一致）：
-
-   > Write full logs or lengthy analysis to a file in the session scratch directory listed in your environment reminder (not in the working directory). Other agents share that directory, so name the file after your task. Return its path. If no scratch directory is listed, keep the essentials in your report.
-
-   最后一句是兜底：环境提醒里的 scratch 那一行是可选的，算路径失败时会省略（存储区 dfd §2.2）。`explore.md` 不改：它要求只读，比通用规则更具体，`explore` 子代理仍然不写文件。
-2. **重新生成提示词资源**：`base.md` 会被编译进 `A/core/system-prompt/prompts/templates.generated.ts`，改完要运行 `pnpm -C packages/ohbaby-agent prompt:generate`，否则 `prompt:check` 和构建会失败。`A/core/system-prompt/__tests__/prompt-assets.unit.test.ts:104` 逐字断言了旧句子，同步改成新句子。
+1. **核对提示词接入**：2026-11-05 复查确认，主、子代理固定规则及子代理旧报告提示的改写，已纳入会话存储区第一期。这里不再安排同一改动，只核对规则仍符合[存储区 dfd §2.2](../../../services/session-storage/dfd-interface.md#22-告诉模型第一期)：需要保存时使用 scratch，不默认写进用户 workspace，不为每次汇报额外建文件，`explore` 保留只读要求。
+2. **核对生成资源**：存储区第一期负责运行 `prompt:generate` 并更新已有提示词断言；本议题运行 `pnpm -C packages/ohbaby-agent prompt:check`，结合 T15、T17 回归提示词和结果搬迁的配合。
 3. **`forceFile`**：从 `prepare()` 的选项类型和判断里删掉（`result-artifacts.ts:30`、`:228`）。`result-artifacts.integration.test.ts` 里有 11 处用它把短正文强制导出（:94、:122、:127、:165、:185、:299、:326、:330、:373、:384 附近），这些用例改成直接构造超过 51,200 字节的正文。
 
 ## 2.4 接口变化
@@ -132,10 +130,10 @@ cleanupDeletedSessionFiles(result, deps: { snapshotRoot?; sessionStorageRoot?; l
 
 | 风险 | 表现 | 处理 |
 |---|---|---|
-| 存储区的回调没登记上只读可信路径（例如归属 ID 不合法） | 读报告时弹外部读取确认 | 和存储区 S10 的处理一致：功能不坏，只是多一次确认。04 的 T8 覆盖 |
-| 用户对外部读取选了“始终允许” | 现有逻辑有个反直觉的地方：批准外部**读取**时登记的是可写的 `external-write-approved`（`A/core/tool-scheduler/scheduler.ts:1458-1464`），批准外部**写入**时登记的反而是不可写的 `external-approved`（`:1541-1547`）；“始终允许”还会加一条整个会话都生效的规则（`A/permission/manager.ts:288-296`）。正常情况下读 `subagents/` 不是外部读取，不会走到这里；但 fork 出来的会话读源会话的报告（T11）、或读旧路径时，选一次“始终允许”，那个目录在这个会话里就变成免确认可写 | 本议题不改。这是外部目录授权的既有行为，所有外部目录都一样；要修应该在权限模块单独处理（两种类型登记反了） |
-| 用户批准了一次对 `subagents/` 的写入 | 写入批准登记的是 `external-approved`，不算可写；如果选了“始终允许”，会话级规则之后会放行同类写入 | 用户明确批准的结果，和其他外部目录一致，不特殊处理 |
-| 用户把 `~` 或 `~/.ohbaby` 选作工作区 | 运行目录内的写入本来就不确认（`scheduler.ts:226-232`），Bash 预检也总是信任运行目录（`A/sandbox/preflight.ts:88-93`），只读那一档在这种情况下不起作用 | 接受，记为残余风险。专门为它改判断顺序属于过度设计 |
+| 存储区的回调没登记上只读可信路径（例如归属 ID 不合法） | 无法直接读取报告 | 初始化提醒明确说明 scratch 不可用；报告如已成功导出，其显式路径读取仍按外部读取流程审批。不要将目录准备失败解释为“只多一次确认就一定能写成功”。04 的 T8 覆盖 |
+| 用户对外部读取选了“始终允许” | 修改前的可信路径登记与共享 `external_directory` 会话规则都可能让读取许可放行写入，证据见 01 §1.10 | **第一期修正，不再接受为例外**：读取、写入、Bash 目录访问分别登记和匹配授权；两条路径都须修正，复用现有审批机制。Stage 0 检查 S3d |
+| 用户明确批准改写 `subagents/` | 批准的写入按授权范围执行；选择“始终允许”可放行对应范围内的后续写入 | 保留明确写入授权的语义，不把读取批准当成写入批准，也不把只读保护改成不可批准的硬拒绝 |
+| 用户把 `~` 或 `~/.ohbaby` 选作工作区，或存在覆盖会话目录的普通可信根 | 修改前的 cwd 与上级可写根自动放行会覆盖系统文件审批，见 01 §1.10 | **第一期修正，不再接受为例外**：调度器与 Bash 预检先识别已登记的系统文件范围，再处理普通目录自动放行；scratch 仍可读写。Stage 0 检查 S3c |
 | 模型用 Bash `cat` 读报告 | 要确认 | 送达消息和主提示词都让模型用 `read`；接受 |
 | 旧会话历史里的旧路径 | 读取时要确认 | 只影响开发机上的旧数据，接受 |
 
