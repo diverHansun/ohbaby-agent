@@ -1,0 +1,89 @@
+# 4. 测试与验收
+
+> 对应 [02](02-optimization-plan-and-change-scope.md) 的 Stage 1 至 4。测试与源码放在同一目录，`*.unit.test.ts(x)`、`*.integration.test.ts`、`*.contract.test.ts`，分别用 `pnpm test:unit`、`pnpm test:integration`、`pnpm test:contract` 运行。
+
+## 4.1 测试范围
+
+| 类型 | 覆盖什么 |
+|---|---|
+| integration | 打开与边界消息、模型上下文、列表过滤、操作拦截、子代理拦截、当前会话规则、关闭与启动清理、两个客户端互不影响、存储区归属 |
+| contract | 两个 side chat 路由、新错误码；HTTP 与进程内实现一致 |
+| unit | Web 的边界过滤、选中文字判断与引用格式 |
+| 浏览器走查 | 右侧面板、选中文字入口、审批、关闭（mock 场景和真实 daemon 各走一遍） |
+| 手工 | TUI `/btw` |
+
+## 4.2 关键场景
+
+### Stage 1：核心与服务端
+
+| ID | 场景 | 类型 | 验证点 |
+|---|---|---|---|
+| T1 | 打开 | integration | 主会话有三轮已结束的对话：side chat 是根会话，含这三轮的历史和一条边界消息；`data.sideChat` 的三个字段正确，改名或更新会话后仍在；`data` 里没有 `fork`；标题是“Side chat”，没有编号；主会话的行不变 |
+| T2 | 模型上下文与系统提示词 | integration | side chat 第一次提问时发给假 LLM 的请求：主会话三轮历史、边界消息、用户问题依次排列；系统提示词与主会话下一轮逐字相同 |
+| T3 | 主会话在运行或为空 | integration | 主会话第四轮正在运行时打开：历史只到第三轮，边界消息里有第四轮的用户输入原文，主会话的运行不受影响。主会话没有任何已结束的 prompt 时，side chat 只有边界消息 |
+| T4 | 列表过滤 | integration | 打开 side chat 后：全局列表（活跃、归档）、搜索、TUI 的 `/sessions` 与 `/resume`、TUI 与 daemon 的“继续上次会话”、归档后的替补会话、Web 备用侧栏都没有它；它仍在会话索引和会话快照里，能被绑定 |
+| T5 | 一个主会话一个 | integration | 同一主会话连续两次和并发两次调用 `openSideChat`，都得到同一个 side chat |
+| T6 | 操作拦截 | integration | 对 side chat：fork、撤销（撤销议题已落地时）、压缩、goal、切换模型、切换 reasoning、归档、移动工作区、导出都返回 `SIDE_CHAT_UNSUPPORTED`；以 side chat 为主会话再打开 side chat，也返回 `SIDE_CHAT_UNSUPPORTED`；prompt 提交和中止成功 |
+| T7 | 子代理 | integration | side chat 里模型调用 `agent` 工具，得到“Subagents are not available in side chat.”，没有创建子代理记录；其他工具照常执行并走审批 |
+| T8 | 不改当前会话 | integration | 进程内后端：向 side chat 提交后，后端的当前会话仍是主会话；之后的会话索引失效通知里 `selectedSessionId` 仍是主会话 |
+| T9 | 关闭 | integration | side chat 正在运行时关闭：排队的 prompt 被取消，运行被中止并等到结束；会话、消息、片段、prompt、run 行都被删除；内存里的视图、todo、权限规则被清掉；主会话不受影响；再次关闭返回 204。运行 5 秒内没结束时返回 `SESSION_RUNNING`，数据不删 |
+| T10 | 启动清理 | integration | 调用 `deleteOrphanSideChats(db, isPidAlive)`：`ownerPid` 已不在的两个 side chat（其中一个有标着运行中的 run 记录）被删除；`ownerPid` 还在的不删；主会话不受影响 |
+| T11 | 两个客户端 | integration | 客户端 A 绑定主会话，客户端 B 绑定 side chat：A 只收到主会话的事件和审批，B 只收到 side chat 的；B 提交后 A 的绑定不变 |
+| T12 | 存储区归属 | integration | 存储区第一期已落地时：side chat 的可信路径和环境提醒里是主会话的 `sessions/<mainId>`；能免确认读取主会话 scratch 里的文件；关闭 side chat 后这些文件仍在 |
+| T13 | 接口契约 | contract | 状态码与错误码同 02 §2.5，响应体带 `code`；HTTP 与进程内实现一致 |
+
+### Stage 2：Web
+
+| ID | 场景 | 类型 | 验证点 |
+|---|---|---|---|
+| T14 | 边界过滤 | unit | 面板只拿到 `boundaryMessageId` 之后的消息和对应的 prompt；继承来的轮次不出现 |
+| T15 | 主客户端不受影响 | 浏览器 | 打开 side chat 并提问，主会话的消息、运行状态、审批照常更新；关闭面板后主会话不受影响 |
+| T16 | 选中文字 | unit + 浏览器 | 在主会话消息正文里选中文字出现“Ask in side chat”；选区为空、落在输入框或 side chat 面板里时不出现；点击后面板打开，输入框里是 `> ` 引用加一个空行 |
+| T17 | 面板 | 浏览器 | 空状态说明可见；只显示 side chat 自己的对话；消息有复制按钮，没有 Edit、fork；没有模型、权限、goal 控件和斜杠命令面板 |
+| T18 | 审批 | 浏览器 | side chat 里触发需要审批的工具调用，审批出现在 side chat 面板里，主会话界面不出现；批准后 side chat 继续 |
+| T19 | 关闭、重开、切换主会话 | 浏览器 | 关闭需要确认，确认后面板消失，再打开得到一个空的新 side chat；切到另一个会话再切回来，再打开 Side chat 页回到原来那个，内容还在 |
+
+### Stage 3：TUI
+
+| ID | 场景 | 类型 | 验证点 |
+|---|---|---|---|
+| T20 | `/btw` | 手工 | 打开面板，标题栏写“Side chat · Esc to close”；输入框可用，输入 `/compact` 会作为普通文字发给 side chat；`/btw <问题>` 打开后立即提问；连接远程 daemon 时给出不可用的提示 |
+| T21 | 不被拉走 | 手工 | 在 side chat 里提问并等回答结束后关闭面板，TUI 回到主会话，主会话的消息和状态正确 |
+| T22 | 审批 | 手工 | side chat 的审批弹出现有的权限对话框，批准后继续；关闭面板后主会话的审批照常弹出 |
+| T23 | 关闭 | 手工 | 输入框为空时按 Esc 关闭面板并删除 side chat；输入框有内容时 Esc 不关闭 |
+
+## 4.3 集成边界
+
+- **side chat 与列表、操作**：T4、T6 逐项覆盖 01 §1.4.3、§1.4.4 的清单。
+- **两个客户端**：T11、T15。
+- **TUI 与后端当前会话**：T8、T21。
+- **与 fork 议题**：T1 至 T3 依赖 `forkSessionRows`，fork 议题的 T1、T3 至 T8、T13 是它的前提。
+- **与撤销、存储区议题**：T6 的撤销部分、T12 由后落地的一方补齐。
+
+## 4.4 回归清单
+
+- 子代理的创建、列表、对话查看、审批不受影响。
+- 主会话的提交、中止、压缩、goal、归档、删除不受影响。
+- 从不打开 side chat 的用户，会话列表、搜索、事件与改动前完全一致。
+- 右侧面板的子代理页和终端页不受影响。
+- 往普通会话提交时，后端当前会话照旧更新。
+
+## 4.5 发布门
+
+| 项 | 标准 | 如何验证 |
+|---|---|---|
+| 类型与格式 | 通过 | `pnpm typecheck`、`pnpm lint`、`pnpm format:check` |
+| 自动化测试 | T1 至 T14、T16 的单元部分通过 | `pnpm test:unit`、`pnpm test:integration`、`pnpm test:contract` |
+| 浏览器走查 | T15 至 T19 通过，附截图 | 内置浏览器 |
+| 手工 | T20 至 T23 通过 | 本机终端 |
+| 文档 | Stage 4 的文档已同步 | 评审 |
+
+## 4.6 对抗性审查要点
+
+| 攻击面 | 防御 | 残余风险 |
+|---|---|---|
+| 以后新增的列表不调用 `isUserFacingSession` | 一处定义；T4 | 新列表仍可能漏。评审时把“列表是否用 `isUserFacingSession`”列为检查项 |
+| 以后新增的会话级操作没有拦截 | T6 | 同上，评审时检查 |
+| side chat 修改文件 | 只有软提醒，工具照常走审批 | 用户批准了就会改。这是用户确认的行为 |
+| 第二个客户端泄漏 | 关闭时销毁；面板卸载时也销毁 | 浏览器直接关闭时，客户端由服务端按现有的过期规则回收 |
+| daemon 重启丢掉正在用的 side chat | 只删进程已不在的 | daemon 自己重启时，它名下的 side chat 会被删掉，Web 面板随之失效。和“关闭即删”的约定一致 |
