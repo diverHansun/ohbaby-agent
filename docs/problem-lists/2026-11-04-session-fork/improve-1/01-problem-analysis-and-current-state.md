@@ -99,7 +99,7 @@
 ## 1.5 子代理引用
 
 - 新会话里，源会话的子代理卡片按 `metadata.subagent.execution` 渲染。实例列表加载后，因为找不到实例，“打开”入口会被隐藏（`W/ui/shared/subagent-instances.ts:64`）；直接打开会返回 `SUBAGENT_NOT_FOUND`（`A/adapters/ui-inprocess/subagent-conversation.ts:153-174, 216-220`），执行视图报“Unknown execution for this root”（`subagent-views.ts:111-118`）。不会显示源会话的子代理内容。
-- 子代理的大结果文件只允许所属会话读取（`A/agents/subagents/result-artifacts.ts:246-281`），新会话的模型读不到。走普通沙箱时是弹窗还是拒绝，没有核实。
+- 子代理的大结果文件只允许所属会话读取（`A/agents/subagents/result-artifacts.ts:246-281`），新会话的模型读不到。走普通沙箱时是弹窗还是拒绝，没有核实。[子代理结果搬迁议题](../../2026-11-05-subagent-results-location/README.md)在本议题之前实施，之后报告放在源会话的存储区 `sessions/<源会话>/subagents/` 下；fork 出来的会话不在源会话的存储区里，读取时按外部路径弹确认。
 
 ## 1.6 现有操作放在哪里
 

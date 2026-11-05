@@ -8,8 +8,9 @@
 |---|---|
 | 会话存储区（session storage） | 一个归属会话独有的目录，`<OHBABY_HOME>/sessions/<ownerId>/` |
 | 归属会话（owner） | 存储区属于哪个会话：子代理会话归根会话，side chat 归主会话，其余会话归自己 |
-| scratch | 存储区里给 agent 用的子目录，放临时文件、中间结果和产物 |
-| tool-output | 存储区里给系统用的子目录，放超长工具输出的完整内容（第二期） |
+| scratch | 存储区里给 agent 用的子目录，放临时文件、中间结果和产物；唯一可写的部分 |
+| subagents | 存储区里给系统用的子目录，放子代理超过 50KiB 的长报告（由子代理结果搬迁议题写入） |
+| tool-results | 存储区里给系统用的子目录，放超长工具输出的完整内容（第二期） |
 
 不在本模块里的相近概念：
 
@@ -26,9 +27,11 @@
 
 ```
 <OHBABY_HOME>/sessions/
-└── <ownerId>/                       0700（非 Windows）
-    ├── scratch/                     agent 可写
-    └── tool-output/                 第二期：第一次写入时创建；系统写，agent 可读
+└── <ownerId>/                       0700（非 Windows）；整个目录只读（session-storage）
+    ├── scratch/                     agent 可写（session-scratch）
+    ├── subagents/                   子代理结果搬迁议题：第一次导出时创建；系统写，agent 可读
+    │   └── <subagentId>/<executionId>.output
+    └── tool-results/                第二期：第一次写入时创建；系统写，agent 可读
         ├── <callId>-<随机 6 位>.txt   非 Bash 工具的完整输出
         └── <jobId>.log               Bash 任务的完整 stdout 与 stderr
 ```
@@ -46,8 +49,8 @@
 
 | 时机 | 动作 | 谁负责 |
 |---|---|---|
-| 会话（或它的子代理、side chat）第一次运行，sandbox 上下文创建 | 建归属会话的 `sessions/<ownerId>/` 和 `scratch/`，登记为可信路径 | sandbox 调用注入的回调 |
-| 运行中 | agent 读写 `scratch/`；第二期工具把超长输出写进 `tool-output/` | agent、工具 |
+| 会话（或它的子代理、side chat）第一次运行，sandbox 上下文创建 | 建归属会话的 `sessions/<ownerId>/` 和 `scratch/`，登记两档可信路径：会话目录只读、`scratch/` 可写 | sandbox 调用注入的回调 |
+| 运行中 | agent 读写 `scratch/`；子代理的长报告导出到 `subagents/`；第二期工具把超长输出写进 `tool-results/` | agent、子代理结果导出、工具 |
 | 会话归档、移动工作区、撤销重发 | 不动 | — |
 | 归属会话被永久删除 | 删除 `sessions/<id>/`（子代理会话的 ID 没有目录，删除时不报错） | `cleanupDeletedSessionFiles` |
 | side chat 关闭、启动清理 side chat | 不删存储区，side chat 写的文件留在主会话的存储区里 | — |
