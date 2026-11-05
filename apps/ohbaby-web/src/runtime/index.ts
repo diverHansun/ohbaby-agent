@@ -27,6 +27,7 @@ import { sessionMovedTarget, waitForSessionReady } from "./session-moved.js";
 import { isDaemonRequestError } from "../api/daemon/http.js";
 import { SettingsClient } from "../api/daemon/settings-client.js";
 import { TerminalClient, type TerminalApi } from "../api/daemon/terminals.js";
+import type { SessionFilesApi } from "../api/daemon/session-files.js";
 import { GlobalLayer } from "./global-layer.js";
 import { InstanceLayer } from "./instance-layer.js";
 import { SettingsLayer } from "./settings-layer.js";
@@ -101,6 +102,8 @@ export interface OhbabyWebRuntime {
   readonly terminals: TerminalApi;
   /** Workspace a new terminal opens in; null opens it in the home directory (D3). */
   terminalDirectory(): string | null;
+  /** The open chat's scratch files (right panel Files page). */
+  readonly sessionFiles: SessionFilesApi;
   /** Workspaces plus the connected instance directory. */
   getWorkspaceSnapshot(): WorkspaceSnapshot;
   subscribeWorkspaces(listener: () => void): () => void;
@@ -127,6 +130,14 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   readonly ready: Promise<void>;
   readonly settings: SettingsLayer;
   readonly terminals: TerminalApi;
+  readonly sessionFiles: SessionFilesApi = {
+    list: (rootSessionId, signal) =>
+      this.instance.requireClient().listSessionFiles(rootSessionId, signal),
+    read: (rootSessionId, path, signal) =>
+      this.instance
+        .requireClient()
+        .readSessionFile(rootSessionId, path, signal),
+  };
   private readonly global: GlobalLayer;
   private readonly instance: InstanceLayer;
   private workspaceSnapshot: WorkspaceSnapshot = {

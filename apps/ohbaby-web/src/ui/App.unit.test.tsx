@@ -5307,6 +5307,10 @@ function createFakeRuntime(input: {
         connect: vi.fn(),
       },
       terminalDirectory: () => null,
+      sessionFiles: {
+        list: () => Promise.resolve([]),
+        read: () => Promise.reject(new Error("no files")),
+      },
     },
     selectSession,
     setPermission,

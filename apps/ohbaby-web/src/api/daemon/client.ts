@@ -32,6 +32,11 @@ import { ClientPrompts } from "./client-prompts.js";
 import { ClientSync } from "./client-sync.js";
 import { FetchDaemonEventStream } from "./events.js";
 import { createDaemonHttpClient, type DaemonHttpClient } from "./http.js";
+import {
+  sessionFileContent,
+  type SessionFileContent,
+  type SessionFileEntry,
+} from "./session-files.js";
 import type { OhbabyBootstrapConfig } from "./wire.js";
 
 /**
@@ -185,6 +190,39 @@ export class BrowserDaemonClient implements UiBackendClient {
     if (binding !== this.sync.permissionSync.getState().binding)
       throw new Error("Session binding changed during instance query");
     return result.result;
+  }
+  /** Scratch files of the bound root session (Files page). */
+  async listSessionFiles(
+    rootSessionId: string,
+    signal?: AbortSignal,
+  ): Promise<readonly SessionFileEntry[]> {
+    const binding = this.sync.permissionSync.getState().binding;
+    const result = await this.http.listSessionFiles({
+      sessionId: rootSessionId,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+      signal,
+    });
+    if (binding !== this.sync.permissionSync.getState().binding)
+      throw new Error("Session binding changed during file list");
+    return result.files;
+  }
+  async readSessionFile(
+    rootSessionId: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<SessionFileContent> {
+    const binding = this.sync.permissionSync.getState().binding;
+    const response = await this.http.readSessionFile({
+      sessionId: rootSessionId,
+      path,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+      signal,
+    });
+    if (binding !== this.sync.permissionSync.getState().binding)
+      throw new Error("Session binding changed during file read");
+    return sessionFileContent(response);
   }
   /** A stop may already have happened when the binding moves on; the receipt stands. */
   async stopSubagent(

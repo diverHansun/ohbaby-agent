@@ -15,6 +15,7 @@ import { selectSettings } from "../store/settings-cache.js";
 import { globalSessionPinsKey } from "../ui/sidebar/session-pins.js";
 import { DEFAULT_WORKSPACE, mockScenarios } from "./mock-scenarios.js";
 import { createMockSettingsApi } from "./mock-settings.js";
+import { mockSessionFiles } from "./mock-files.js";
 
 /** A few real-shaped commands so the slash palette can be previewed. */
 const MOCK_COMMANDS: UiWebCommandCatalog = {
@@ -385,6 +386,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
       },
     },
     terminalDirectory: () => null,
+    sessionFiles: mockSessionFiles,
     getWorkspaceSnapshot: () => workspace,
     getDirectoryPickerRoots: () =>
       Promise.resolve({ ok: true, roots: [{ directory: "/", name: "/" }] }),

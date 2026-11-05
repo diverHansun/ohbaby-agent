@@ -51,6 +51,7 @@ import type {
   WorkspaceOpenResponse,
 } from "./wire.js";
 import { requestDirectoryHeaders } from "ohbaby-sdk";
+import type { SessionFileEntry } from "./session-files.js";
 import type {
   UiInteractionResponse,
   UiSettingsFieldError,
@@ -246,6 +247,25 @@ export class DaemonHttpClient {
     return this.request(
       `/v1/sessions/${encodeURIComponent(input.rootSessionId)}/subagents${executionId ? `/${encodeURIComponent(executionId)}` : ""}?${query}`,
       { signal: input.signal },
+    );
+  }
+  listSessionFiles(
+    input: UiSessionScope,
+  ): Promise<{ ok: true; files: readonly SessionFileEntry[] }> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/files?${scopeQuery(input)}`,
+      { signal: input.signal },
+    );
+  }
+  /** The raw body: text or image bytes, told apart by its content type. */
+  readSessionFile(
+    input: UiSessionScope & { readonly path: string },
+  ): Promise<Response> {
+    const query = scopeQuery(input);
+    query.set("path", input.path);
+    return this.send(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/files/content?${query}`,
+      { accept: "*/*", signal: input.signal },
     );
   }
   getSessionView(
@@ -610,8 +630,26 @@ export class DaemonHttpClient {
       readonly signal?: AbortSignal;
     } = {},
   ): Promise<T> {
+    const response = await this.send(path, options);
+    return (await response.json()) as T;
+  }
+
+  /**
+   * The same transport for a body that is not JSON: an ok response comes back
+   * unread, an error one throws as `request` does.
+   */
+  async send(
+    path: string,
+    options: {
+      readonly accept?: string;
+      readonly body?: unknown;
+      readonly includeDirectory?: boolean;
+      readonly method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+      readonly signal?: AbortSignal;
+    } = {},
+  ): Promise<Response> {
     const headers: Record<string, string> = {
-      accept: "application/json",
+      accept: options.accept ?? "application/json",
       authorization: `Bearer ${this.token}`,
       ...(this.directory === undefined || options.includeDirectory === false
         ? {}
@@ -629,14 +667,13 @@ export class DaemonHttpClient {
       method: options.method ?? "GET",
       signal: options.signal,
     });
-    let value: unknown;
-    try {
-      value = (await response.json()) as unknown;
-    } catch (error) {
-      if (response.ok) throw error;
-      value = undefined;
-    }
     if (!response.ok) {
+      let value: unknown;
+      try {
+        value = (await response.json()) as unknown;
+      } catch {
+        value = undefined;
+      }
       const message =
         isErrorBody(value) && typeof value.error?.message === "string"
           ? value.error.message
@@ -653,7 +690,7 @@ export class DaemonHttpClient {
         ...(typeof body?.process === "string" ? { process: body.process } : {}),
       });
     }
-    return value as T;
+    return response;
   }
 }
 
