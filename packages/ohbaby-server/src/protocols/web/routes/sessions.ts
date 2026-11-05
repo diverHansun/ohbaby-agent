@@ -1,4 +1,9 @@
-import { SessionRunBusyError } from "ohbaby-agent";
+import {
+  listSessionFiles,
+  readSessionFile,
+  SessionFileError,
+  SessionRunBusyError,
+} from "ohbaby-agent";
 import { Hono } from "hono";
 import { isUiReasoningConfig, type UiBackendClient } from "ohbaby-sdk";
 import { selectPermissionSession } from "../../../coordination/permission-access.js";
@@ -8,6 +13,7 @@ import {
   parseSessionCreationOptions,
   parseSessionQuery,
   sessionReadForClient,
+  sessionFileReadForClient,
   sessionRecoveryCapability,
 } from "../../../coordination/session-access.js";
 import { createDaemonRpcFailure } from "../../jsonrpc/protocol.js";
@@ -32,6 +38,63 @@ export function registerSessionReadRoutes(
   app: Hono,
   ctx: DaemonRouteContext,
 ): void {
+  for (const suffix of ["files", "files/content"] as const) {
+    app.get(`/v1/sessions/:id/${suffix}`, async (context) => {
+      context.header("Cache-Control", "no-store");
+      context.header("X-Content-Type-Options", "nosniff");
+      const authorization = ctx.authorizePromptMutation(context);
+      if ("response" in authorization) return authorization.response;
+      const raw: Record<string, string | undefined> = context.req.query();
+      const query = parseSessionQuery({
+        ...raw,
+        sessionId: context.req.param("id"),
+        bindingGeneration: Number(raw.bindingGeneration),
+      });
+      try {
+        const result = await sessionFileReadForClient({
+          backend: ctx.options.backend,
+          views: ctx.clientViews,
+          clientId: authorization.clientId,
+          epoch: ctx.permissionEpoch,
+          query,
+          read: async () =>
+            suffix === "files"
+              ? {
+                  kind: "list" as const,
+                  files: await listSessionFiles(
+                    query.sessionId,
+                    context.req.raw.signal,
+                  ),
+                }
+              : readSessionFile(
+                  query.sessionId,
+                  raw.path ?? "",
+                  context.req.raw.signal,
+                ),
+        });
+        if (result.kind === "list")
+          return context.json({ ok: true, files: result.files });
+        if (result.kind === "text") {
+          context.header("Content-Type", "text/plain; charset=utf-8");
+          return context.body(result.text);
+        }
+        context.header("Content-Type", result.contentType);
+        return context.body(result.bytes);
+      } catch (error) {
+        if (!(error instanceof SessionFileError)) throw error;
+        const status = {
+          INVALID_PATH: 400,
+          FILE_NOT_FOUND: 404,
+          FILE_TOO_LARGE: 413,
+          UNSUPPORTED_FILE_TYPE: 415,
+        } as const;
+        return context.json(
+          { ok: false, error: { code: error.code, message: error.message } },
+          status[error.code],
+        );
+      }
+    });
+  }
   app.get("/v1/sessions/index", async (context) => {
     const authorization = ctx.authorizePromptMutation(context);
     if ("response" in authorization) return authorization.response;

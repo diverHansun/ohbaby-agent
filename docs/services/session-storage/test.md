@@ -48,10 +48,10 @@ side chat 的归属（用主会话的目录、关闭时不删除）在 side chat
 | S11 | 工具存盘 | `list`、`glob`、`web` 的输出超过显示阈值：结果附路径，文件包含实际采集内容；条目、扫描和 provider 限制不被误称为已恢复。子代理使用已登记的归属根，模型经真实 scheduler 用 `read` 免确认读取；重复 `callId` 写成两个 UUID 文件；短输出不建文件 |
 | S12 | Bash 存盘 | 真实前台及后台命令输出 stdout/stderr 合计 1 MiB，文件保留全部字节；恰好 10 MiB 完整，超出 1 字节转为部分文件，标记也在预算内；跨 chunk UTF-8 不损坏。逻辑取消后的迟到输出、强制 drain、dispose/prune 不宣称 Full，释放句柄但保留日志 |
 | S13 | 存盘失败如实返回 | 注入 open/write/close 失败及重定向目录、预置同名链接：保留内联内容，明确说明无法保存，不附成功路径。Bash 保留真实 completed/exitCode；短写循环完成，不把保存失败变成命令失败 |
-| S14 | 列文件 | `GET /files` 只列 `scratch/` 下的文件，不列 `tool-results/` |
-| S15 | 读文件越界 | `path` 为 `../x`、绝对路径、指向外部的符号链接时返回 `INVALID_PATH`；超过上限返回 `FILE_TOO_LARGE`；既不是文本也不是图片返回 `UNSUPPORTED_FILE_TYPE` |
-| S16 | 鉴权 | 未绑定该会话的客户端访问文件路由被拒绝 |
-| S17 | Files 页 | 右侧面板能列出文件，点开文本和图片能预览，其他类型只显示名字和大小 |
+| S14 | 列文件 | `GET /files` 递归列当前根会话 `scratch/` 普通文件，按相对路径排序，返回字节大小及 ISO 修改时间；不列系统目录、其他根、符号链接；scratch 不存在时为空且不创建目录 |
+| S15 | 读文件边界 | 拒绝绝对路径、NUL、反斜杠、`..` 路径段、父目录或最终文件符号链接、目录/FIFO 和重定向会话子树；允许普通 `..notes` 文件名及规范 home 别名。文本严格 UTF-8、1 MiB，PNG/JPEG/GIF/WebP 按签名、10 MiB；验证恰好上限及上限加 1 字节、读取期间增长、打开前父目录交换后恢复、读取中替换文件及句柄关闭。文件错误对应 400/404/413/415，其他 I/O 故障不假成功 |
+| S16 | 鉴权 | 两个路由都检查 bearer token、clientId、注册、epoch、generation、绑定根及可用根；拒绝其他根、子代理 ID 和过期绑定；真实异步读取期间切根或删除根时拒绝交付内容。文本与图片以原始内容返回，带 no-store、nosniff；HTML/SVG 只按文本服务 |
+| S17 | Files 页（后续） | 右侧面板能列出文件，点开文本和图片能预览，其他类型只显示名字和大小；本批后端不包含此项 |
 
 ## 3. Integration Points
 
@@ -67,7 +67,9 @@ side chat 的归属（用主会话的目录、关闭时不删除）在 side chat
 
 - 第一期发布门：S1 至 S10（含 S3b、S3c、S3d、S6b、S6c）通过；`pnpm typecheck`、`pnpm lint`、`pnpm -C packages/ohbaby-agent prompt:check` 通过；architecture §4.4 中第一期的文档已同步。
 - 第二期 a 发布门：S11 至 S13 通过；`docs/tools/` 中输出截断的说明已同步。
-- 第二期 b 发布门：S14 至 S16 通过，S17 浏览器走查附截图；`docs/ohbaby-web/` 的右侧面板说明已同步。
+- 第二期 b 后端发布门：S14 至 S16 的服务集成与真实 HTTP 合同测试通过；`pnpm typecheck`、`pnpm lint` 通过。前端发布门留到后续：S17 浏览器走查附截图，届时同步 `docs/ohbaby-web/` 的右侧面板说明。
+
+后端测试见 `packages/ohbaby-agent/src/services/session-storage.integration.test.ts` 与 `packages/ohbaby-server/src/app/session-files.integration.test.ts`。HTTP 测试经过真实注册、绑定选择和授权协调器，不用完整聊天 view 作授权。故障与竞态仅在底层文件 I/O 暂停或注入错误，文件内容仍经真实文件系统读取。
 
 ## 5. 子代理报告搬迁回归（2026-11-05）
 

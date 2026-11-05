@@ -3,6 +3,16 @@ export type {
   UiCommandRecord,
   UiCommandRecorder,
 } from "./host/command-record.js";
+export {
+  listSessionFiles,
+  readSessionFile,
+  SessionFileError,
+  SESSION_TEXT_FILE_MAX_BYTES,
+  SESSION_IMAGE_FILE_MAX_BYTES,
+  type SessionFileEntry,
+  type SessionFileContent,
+  type SessionFileErrorCode,
+} from "./services/session-storage.js";
 export { createInProcessUiBackendClient } from "./adapters/ui-inprocess.js";
 export type { UiPromptQueueExecutionPort } from "./adapters/ui-inprocess.js";
 export {

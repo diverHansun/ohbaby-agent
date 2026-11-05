@@ -120,6 +120,27 @@ function recheck(input: Access, binding: UiPermissionBinding): void {
     );
   }
 }
+/** Private scratch reads require a live selected root before and after file I/O. */
+export async function sessionFileReadForClient<T>(
+  input: Access & {
+    readonly query: UiSessionScope;
+    readonly read: () => Promise<T>;
+  },
+): Promise<T> {
+  const binding = capture(input, input.query);
+  if (binding.rootSessionId !== input.query.sessionId)
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Files are restricted to the selected root session",
+    );
+  await validateRoot(input.backend, input.query.sessionId);
+  recheck(input, binding);
+  const result = await input.read();
+  recheck(input, binding);
+  await validateRoot(input.backend, input.query.sessionId);
+  recheck(input, binding);
+  return result;
+}
 export async function sessionReadForClient(
   input: Access & {
     readonly query: UiSessionScope & {

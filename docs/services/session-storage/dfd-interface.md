@@ -1,6 +1,6 @@
 # dfd-interface
 
-2026-11-05 实施状态：第一期、子代理结果搬迁与第二期 a 工具输出存盘已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期 b 文件 API 与 Files 页尚未实现。
+2026-11-05 实施状态：第一期、子代理结果搬迁、第二期 a 工具输出存盘及第二期 b 后端文件 API 已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；Files 前端与 S17 浏览器验收留到后续。
 
 > 2026-11-04。路径缩写同 [architecture](architecture.md)。
 
@@ -106,15 +106,24 @@ Bash 由 `bash.ts` 准备输出目录并传可选 `outputDirectory`；`ShellJobR
 
 ```
 Web 右侧面板 Files 页打开
-  → GET /v1/sessions/:id/files              → 归属会话 scratch/ 下的文件列表（相对路径、大小、修改时间）
+  → GET /v1/sessions/:id/files?runtimeEpoch=...&bindingGeneration=...
+      → 当前绑定根会话 scratch/ 下的普通文件列表（相对路径、字节大小、ISO 修改时间），递归后按路径排序
   → 用户点开一个文件
-  → GET /v1/sessions/:id/files/content?path=<相对路径>
-      → 真实路径必须在 scratch/ 内、是普通文件、不是符号链接
-      → 文本文件不超过 1 MB 时返回文本；图片返回图片；其他类型返回 415，界面只显示文件名和大小
+  → GET /v1/sessions/:id/files/content?runtimeEpoch=...&bindingGeneration=...&path=<相对路径>
+      → path 非空，使用 / 分隔；拒绝绝对路径、NUL、反斜杠和 .. 路径段
+      → sessions、根会话、scratch 及内部每个路径分量都不能被符号链接重定向；允许配置 home 的系统规范路径别名
+      → 目标必须是 scratch 内的普通文件，打开前后核对真实路径及文件句柄身份
+      → 文本最多 1 MiB（1,048,576 字节），严格 UTF-8 解码，原文以 text/plain; charset=utf-8 返回；HTML、SVG 同样按文本返回
+      → PNG、JPEG、GIF、WebP 按内容签名识别，最多 10 MiB（10,485,760 字节），返回原始图片字节及对应 MIME
+      → 其他二进制或无效 UTF-8 返回 415，界面以后只显示文件名和大小
   → Web 用带鉴权的 fetch 取回内容再展示（需要新写一个取二进制的小函数，现有的 download-file.ts 只能把文本转成下载）
 ```
 
-鉴权照 `/view` 的写法（`S/protocols/web/routes/sessions.ts:72-96`：`authorizePromptMutation` 加 `sessionReadForClient`），只允许客户端读自己绑定的会话。
+鉴权复用 `/view` 的 bearer token、已注册客户端、`runtimeEpoch` 和 `bindingGeneration` 检查。专用 `sessionFileReadForClient` 在异步文件读取前后检查绑定和根会话仍然有效，不加载完整聊天 view。绑定变化或根会话不可用沿用 409。两个文件路由均带 `Cache-Control: no-store` 和 `X-Content-Type-Options: nosniff`；错误继续返回 `{ ok: false, error: { code, message } }`。
+
+列表只列普通文件，跳过符号链接及非普通条目，不列 `subagents/`、`tool-results/` 或其他根会话。scratch 尚未创建时返回空列表，读取请求不会创建目录；其他磁盘故障如实返回错误。内容用真实句柄有界读取，文件在读取时增长也不能突破固定容量，句柄在 `finally` 中关闭。这些检查不是操作系统级的文件隔离。
+
+本批只实现后端 API，Files 前端、带鉴权的二进制 fetch 和 S17 浏览器走查留到后续。
 
 ## 3. Interface Definition
 
@@ -164,16 +173,23 @@ type OutputFileSnapshot =
   | { status: "full" | "in-progress"; path: string; sizeBytes: number }
   | { status: "partial"; path: string; sizeBytes: number; reason: "size-limit" | "stdio-incomplete" };
 
-// 第二期 b 规划，尚未实现：
-listSessionFiles(ownerSessionId: string): Promise<ReadonlyArray<{ path: string; size: number; modifiedAt: string }>>
-readSessionFile(ownerSessionId: string, relativePath: string): Promise<
-  { kind: "text"; text: string } | { kind: "image"; contentType: string; bytes: Uint8Array }
->
+// 第二期 b 后端：
+export const SESSION_TEXT_FILE_MAX_BYTES = 1024 * 1024;
+export const SESSION_IMAGE_FILE_MAX_BYTES = 10 * 1024 * 1024;
+interface SessionFileEntry { readonly path: string; readonly size: number; readonly modifiedAt: string }
+type SessionFileContent =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "image"; readonly contentType: string; readonly bytes: Uint8Array<ArrayBuffer> };
+listSessionFiles(ownerSessionId: string, signal?: AbortSignal): Promise<readonly SessionFileEntry[]>
+readSessionFile(ownerSessionId: string, relativePath: string, signal?: AbortSignal): Promise<SessionFileContent>
+// 文件错误抛 SessionFileError，code 为下表四种值；这些 API、类型及常量从 ohbaby-agent 根入口导出。
 ```
 
 ```
-GET /v1/sessions/:id/files
-GET /v1/sessions/:id/files/content?path=<相对路径>
+GET /v1/sessions/:id/files?runtimeEpoch=...&bindingGeneration=...
+  → { ok: true, files: SessionFileEntry[] }
+GET /v1/sessions/:id/files/content?runtimeEpoch=...&bindingGeneration=...&path=<相对路径>
+  → 原始文本或图片字节
 400 INVALID_PATH            路径越界、是符号链接或不是普通文件
 404 FILE_NOT_FOUND
 413 FILE_TOO_LARGE

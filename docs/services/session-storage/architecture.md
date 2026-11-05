@@ -1,6 +1,6 @@
 # architecture
 
-2026-11-05 实施状态：第一期、子代理结果搬迁与第二期 a 工具输出存盘已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期 b 文件 API 与 Files 页尚未实现。
+2026-11-05 实施状态：第一期、子代理结果搬迁、第二期 a 工具输出存盘及第二期 b 后端文件 API 已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；Files 前端与 S17 浏览器验收留到后续。
 
 > 2026-11-04。以 [goals-duty](goals-duty.md) 为前提。路径缩写：`A/` = `packages/ohbaby-agent/src/`，`S/` = `packages/ohbaby-server/src/`，`W/` = `apps/ohbaby-web/src/`。
 
@@ -81,7 +81,8 @@
 | `A/services/session/archive-files.ts` | 删除 `sessions/<id>` |
 | 第二期 a 已实现 | `A/services/session-storage.ts`：从已登记根准备输出目录并保存文本；`A/utils/capped-output-file.ts`：同步有界文件捕获、10 MiB 上限与完整性说明 |
 | 第二期 a 接入 | `A/tools/utils/output.ts` 的显式异步包装与 list/glob/web 调用方；Bash 准备目录，shell registry 仅负责按 jobId 捕获日志及实际 stdio 生命周期 |
-| 第二期 b 规划 | `A/services/session-storage.ts` 的 `listSessionFiles`、`readSessionFile`；`S/protocols/web/routes/sessions.ts`、`W/ui/side-panel/`、`W/ui/session-files/` |
+| 第二期 b 后端（已实现） | `A/services/session-storage.ts` 的 `listSessionFiles`、`readSessionFile`；`S/coordination/session-access.ts` 专用绑定包装；`S/protocols/web/routes/sessions.ts` 两个只读路由 |
+| 第二期 b 前端（后续） | `W/ui/side-panel/`、`W/ui/session-files/` 与 S17 浏览器走查 |
 
 ## 4. Architectural Constraints & Trade-offs
 
