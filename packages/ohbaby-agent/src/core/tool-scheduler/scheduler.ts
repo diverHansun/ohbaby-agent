@@ -119,7 +119,6 @@ interface ToolPermissionContext {
   readonly externalRead: boolean;
   readonly externalReadAskPattern?: string;
   readonly externalReadPath?: string;
-  readonly internalRead?: boolean;
   readonly externalWrite: boolean;
   readonly externalWritePath?: string;
   readonly preflight?: PreflightResult;
@@ -1464,7 +1463,6 @@ export function createToolScheduler(
     };
 
     async function trustExternalReadPath(): Promise<void> {
-      if (context.internalRead) return;
       await context.environment?.trustPath?.({
         kind: "external-read-approved",
         path: trustedRootFromExternalPath(externalPath),
@@ -1479,7 +1477,7 @@ export function createToolScheduler(
           evaluatePermission(
             {
               callId: call.callId,
-              category: context.internalRead ? "readonly" : "dangerous",
+              category: "dangerous",
               messageId: call.messageId,
               params,
               sessionId: call.sessionId,
@@ -1909,11 +1907,6 @@ export function createToolScheduler(
       return {
         environment: request.environment,
         externalRead,
-        internalRead:
-          externalRead &&
-          tool.name === "read" &&
-          (await request.environment.authorizeInternalRead?.(canonicalPath)) ===
-            true,
         externalReadAskPattern: externalRead
           ? await externalPermissionAskPattern(canonicalPath)
           : undefined,
@@ -1986,7 +1979,6 @@ export function createToolScheduler(
     if (
       environment &&
       prepared.permissionContext.externalRead &&
-      !prepared.permissionContext.internalRead &&
       externalReadPath
     ) {
       return createExternalReadEnvironment(environment, externalReadPath);

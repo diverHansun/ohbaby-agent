@@ -1,5 +1,7 @@
 # architecture
 
+2026-11-05 实施状态：第一期与子代理结果搬迁已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期工具输出与 Files 页也尚未实现。
+
 > 2026-11-04。以 [goals-duty](goals-duty.md) 为前提。路径缩写：`A/` = `packages/ohbaby-agent/src/`，`S/` = `packages/ohbaby-server/src/`，`W/` = `apps/ohbaby-web/src/`。
 
 ## 1. Architecture Overview
@@ -11,7 +13,7 @@
 ```
 工具请求的会话 ──► 归属会话 id ──► ~/.ohbaby/sessions/<ownerId>/      只读（session-storage）
   子代理  → 根会话 id                ├─ scratch/       agent 写的临时文件与产物，可写（session-scratch）
-  side chat → 主会话 id              ├─ subagents/     子代理的长报告（子代理结果搬迁议题）
+  side chat（后续）→ 主会话 id              ├─ subagents/     子代理的长报告（子代理结果搬迁议题）
   其他    → 自己的 id                └─ tool-results/  超长工具输出（第二期）
          │
          ├─ sandbox 创建上下文时：注入的回调建目录 + 登记两档可信路径
@@ -25,16 +27,16 @@
 - 一个父会话下的所有子代理共用一个子会话，彼此只靠 `contextScopeId` 区分（`A/agents/subagent-host.ts:1386-1400`），run 也是用这个子会话 ID 申请 sandbox（`A/runtime/run-manager/manager.ts:400-404`）。如果按会话 ID 分目录，兄弟子代理会共用一个目录，父会话读子代理写的报告也要弹确认。
 - 存储区按归属会话分：子代理用它所属的根会话的目录。
 - 2026-11-05 复查确认：主代理和所属子代理共用同一个 `scratch/`，运行时不强制建立 `scratch/<subagentId>/`，也不为各子代理登记单独的 scratch 可信路径。提示词要求文件名区分任务、保留其他代理的文件；共享目录不改变 `explore` 的只读要求。
-- side chat 是隐藏的根会话，用途就是问主会话的事，所以它用 `data.sideChat.mainSessionId` 指向的主会话的目录。
-- fork 出来的会话是独立的根会话，用自己的目录。
+- side chat 议题落地时，隐藏根会话使用 `data.sideChat.mainSessionId` 指向的主会话目录；当前还没有这个归属分支。
+- fork 议题落地时，新会话作为独立根会话使用自己的目录，不复制源会话文件。
 
 参考：claude-code 的 scratchpad 按主会话分，主会话和它的子代理共享（`claude-code/src/utils/permissions/filesystem.ts:384`）。
 
 ### 1.2 接入点
 
-1. **sandbox**：sandbox 上下文按 `(sessionId, contextScopeId)` 创建，在一轮运行第一次申请时懒创建（`A/adapters/ui-runtime/host-local-environment.ts:208-215`），换运行目录、释放子代理作用域、daemon 重启后都会重建。`SandboxManager` 是通用组件，不应直接知道 `OHBABY_HOME`。做法是给 `SandboxManagerOptions` 加一个注入的回调 `initialTrustedRoots(scope)`，在 `TrustedRootRegistry.create` 处调用（`A/sandbox/manager.ts:123`）。回调由 `composition.ts` 提供。它只拿到 sandbox 作用域（`sessionId`、`contextScopeId`），拿不到工具请求，所以用 `sessionManager.get(scope.sessionId)` 查会话来定归属：有 `parentId`（子代理会话）就用 `parentId`；是 side chat 就用 `data.sideChat.mainSessionId`；否则用自己。子代理不能再创建子代理（`agent` 工具对子代理禁用，`A/core/tool-scheduler/constants.ts:30`），所以一层就够。然后建目录，返回两条：`{ kind: "session-storage", path: 会话目录 }`（只读）和 `{ kind: "session-scratch", path: 会话目录/scratch }`（可写）。现有的 `authorizeInternalRead` 也是这样注入的（`composition.ts:472-476`），可作参考；它会在子代理结果搬迁议题的 Stage 2 删除，之后以本回调为准。每次重建上下文都会重新登记。
+1. **sandbox**：sandbox 上下文按 `(sessionId, contextScopeId)` 创建，在一轮运行第一次申请时懒创建（`A/adapters/ui-runtime/host-local-environment.ts:208-215`），换运行目录、释放子代理作用域、daemon 重启后都会重建。`SandboxManager` 是通用组件，不应直接知道 `OHBABY_HOME`。做法是给 `SandboxManagerOptions` 加一个注入的回调 `initialTrustedRoots(scope)`，在 `TrustedRootRegistry.create` 处调用（`A/sandbox/manager.ts:123`）。回调由 `composition.ts` 提供。它只拿到 sandbox 作用域（`sessionId`、`contextScopeId`），拿不到工具请求，所以用 `sessionManager.get(scope.sessionId)` 查会话来定归属：有 `parentId`（子代理会话）就用 `parentId`，否则用自己；side chat 的归属分支留给其后续议题。子代理不能再创建子代理（`agent` 工具对子代理禁用，`A/core/tool-scheduler/constants.ts:30`），所以一层就够。然后建目录，返回两条：`{ kind: "session-storage", path: 会话目录 }`（只读）和 `{ kind: "session-scratch", path: 会话目录/scratch }`（可写）。写法沿用 sandbox 的依赖注入方式；子代理结果直接使用本回调登记的只读根，不保留专用读取通道。每次重建上下文都会重新登记。
 2. **环境提醒**：`A/services/reminder/environment.ts` 在现有几行之后给出本次运行已准备好的 scratch 绝对路径。不能只按 sessionId 重新拼路径就宣告可用：目录创建和可信路径登记都成功后才提供可用路径。准备失败时保留 cwd、平台、日期等信息，明确提示 scratch 暂不可用；状态变化要参与现有提醒的去重，避免重建失败后继续沿用旧的可用提示。具体状态传递复用当前运行上下文，不新增数据库状态或目录管理服务。
-3. **删除**：`A/services/session/archive-files.ts` 的 `cleanupDeletedSessionFiles` 已经在删除快照引用和子代理结果目录，加一个依赖 `sessionStorageRoot`（照 `resultStorageRoot` 的写法，:9-13），在同一个循环里删 `sessions/<id>`。`result.sessionIds` 是整棵会话树（`A/services/session/archive.ts:101-104`），里面有根会话 ID；子会话 ID 没有目录，`rm -f` 不报错。
+3. **删除**：`A/services/session/archive-files.ts` 的 `cleanupDeletedSessionFiles` 在数据库删除提交后清理快照引用，并按 `resolveSessionStorageDir(id)` 删除整个 `sessions/<id>`；测试可通过 `sessionStorageRoot` 隔离目录。子代理报告已归入会话目录，不再单独清理旧结果目录。`result.sessionIds` 是整棵会话树（`A/services/session/archive.ts:101-104`），里面有根会话 ID；子会话 ID 没有目录，`rm -f` 不报错。
 4. **第二期**：截断输出的工具调用存盘函数；服务端加两个只读路由；Web 右侧面板加 Files 页。
 
 ### 1.3 基础提示词与环境提醒的分工
@@ -67,13 +69,13 @@
 
 | 文件 | 内容 |
 |---|---|
-| `A/paths/session-storage.ts`（新） | `resolveSessionStorageDir(ownerSessionId, options?: OhbabyPathOptions)`、子目录名常量 `SCRATCH_DIR`、`TOOL_RESULTS_DIR`、`ensureSessionStorage(ownerSessionId, options?)`；校验 ID。写法照 `A/paths/default-directory.ts:24-33` 的 `ensureDefaultDirectory` |
+| `A/paths/session-storage.ts`（新） | `resolveSessionStorageRoot(options?)`、`resolveSessionStorageDir(ownerSessionId, options?)`、子目录名常量 `SCRATCH_DIR`、`SUBAGENTS_DIR`、`TOOL_RESULTS_DIR`、`ensureSessionStorage(ownerSessionId, options?)`；校验 ID。写法照 `A/paths/default-directory.ts:24-33` 的 `ensureDefaultDirectory` |
 | `A/sandbox/trusted-roots.ts` | 增加两档会话路径类型，保证读取授权不提供写入或 Shell 自动信任；新增或调整现有类型判断 |
 | `A/sandbox/{types,preflight,lease}.ts`、`A/tools/bash.ts` | 向 Bash 预检保留会话系统范围与 scratch 例外，先判断系统文件再判断 cwd；普通读取所用的 `trustedRootPaths()` 不过滤 |
 | `A/sandbox/manager.ts` | `SandboxManagerOptions` 加 `initialTrustedRoots`，创建上下文时调用 |
 | `A/core/tool-scheduler/scheduler.ts` | scratch 写权限、系统文件优先审批、区分外部读写与 Shell 的可信路径登记和审批规则身份 |
 | `A/permission/{matcher,manager,rule,types}.ts` 的相关接入 | 复用现有规则结构，为操作生成并匹配不同规则身份；核对真实 always 保存流程，不为本议题重写审批框架 |
-| `A/adapters/ui-runtime/composition.ts` | 提供 `initialTrustedRoots` 回调；算归属 ID（子代理 → 根会话，side chat → 主会话） |
+| `A/adapters/ui-runtime/composition.ts` | 提供 `initialTrustedRoots` 回调；算归属 ID（子代理 → 根会话，其余 → 自己）；side chat 分支待其议题实现 |
 | `A/services/reminder/{index,environment}.ts` 及运行上下文接入处 | 将当前运行准备结果传给提醒：成功提供实际 scratch 路径，失败明确说明不可用；不在提醒中另行拼出未准备好的路径 |
 | `A/core/system-prompt/prompts/{primary,subagents}/base.md` | 分别写固定文件落点规则，子代理旧报告提示同步改写；重新生成 `templates.generated.ts` 并更新提示词断言 |
 | `A/services/session/archive-files.ts` | 删除 `sessions/<id>` |

@@ -1,6 +1,13 @@
 import { GitSnapshotEngine } from "../../../../ohbaby-agent/src/snapshot/diff-engine.js";
 import type { UiGlobalSessionPage } from "ohbaby-sdk";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -184,13 +191,19 @@ it("enforces auth and lifecycle errors, then deletes a tree and its result files
   add("root");
   add("child", "active", "root");
   add("active", "active");
-  await mkdir(join(root, "storage/subagent-results/child"), {
+  const report = join(
+    root,
+    "home",
+    "sessions",
+    "root",
+    "subagents",
+    "child",
+    "execution.output",
+  );
+  await mkdir(join(root, "home", "sessions", "root", "subagents", "child"), {
     recursive: true,
   });
-  await writeFile(
-    join(root, "storage/subagent-results/child/output"),
-    "result",
-  );
+  await writeFile(report, "result");
   await start();
   for (const [method, suffix] of [
     ["POST", "/unarchive"],
@@ -223,6 +236,7 @@ it("enforces auth and lifecycle errors, then deletes a tree and its result files
     deletedSessionIds: ["root", "child"],
   });
   expect(getGlobalSession("root")).toBeNull();
+  await expect(stat(report)).rejects.toMatchObject({ code: "ENOENT" });
   expect(getGlobalSession("active")).not.toBeNull();
   expect(loadWorkspace).not.toHaveBeenCalled();
 });

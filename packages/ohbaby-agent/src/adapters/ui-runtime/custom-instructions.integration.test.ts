@@ -362,7 +362,6 @@ describe.each(protocols)(
         goalExecutionControl: {
           interruptGoalExecution: () => Promise.resolve(),
         },
-        resultStorageRoot: path.join(root, "results"),
         workdir: projectRoot,
       });
       try {

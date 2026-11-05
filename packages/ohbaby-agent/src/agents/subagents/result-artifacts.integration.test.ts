@@ -2,6 +2,7 @@ import {
   mkdtemp,
   readFile,
   realpath,
+  stat,
   mkdir,
   rm,
   symlink,
@@ -9,17 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { createBus } from "../../bus/index.js";
-import { createPermissionState } from "../../permission/index.js";
-import { createToolScheduler } from "../../core/tool-scheduler/index.js";
-import { createReadTool } from "../../tools/read.js";
-import {
-  AdapterRegistry,
-  HostLocalAdapter,
-  SandboxManager,
-  SandboxBoundaryError,
-} from "../../sandbox/index.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createStorage,
   type StorageKey,
@@ -38,15 +29,24 @@ import { createSubagentResultArtifacts } from "./result-artifacts.js";
 
 const directories: string[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     directories
       .splice(0)
       .map((path) => rm(path, { recursive: true, force: true })),
   );
 });
-async function setup(output: string, requesterScopeId = "scope") {
-  const rootDir = await mkdtemp(join(tmpdir(), "improve3-artifact-"));
-  directories.push(rootDir);
+async function setup(
+  output: string,
+  requesterScopeId = "scope",
+  rootSessionId = "parent",
+) {
+  const home = await realpath(
+    await mkdtemp(join(tmpdir(), "session-artifact-")),
+  );
+  directories.push(home);
+  vi.stubEnv("OHBABY_HOME", home);
+  const rootDir = join(home, "sessions");
   const store = new InMemorySubagentExecutionStore();
   const lookup = {
     executionId: "execution",
@@ -57,7 +57,7 @@ async function setup(output: string, requesterScopeId = "scope") {
     ...lookup,
     requestId: "call",
     requesterRunId: "root-run",
-    rootSessionId: "parent",
+    rootSessionId,
     rootRunId: "root-run",
     subagentId: "child",
     mode: "background",
@@ -91,7 +91,15 @@ describe("execution result artifacts", () => {
         Promise.resolve({ name: "Researcher", unprocessedMessageCount: 2 }),
     });
     const inline = await artifacts.prepare(lookup);
-    const file = await artifacts.prepare(lookup, { forceFile: true });
+    const long = await setup("final report".repeat(5000));
+    const file = await createSubagentResultArtifacts({
+      store: long.store,
+      storage: long.storage,
+      rootDir: long.rootDir,
+      sessionExists: () => Promise.resolve(true),
+      readDeliveryContext: () =>
+        Promise.resolve({ name: "Researcher", unprocessedMessageCount: 2 }),
+    }).prepare(long.lookup);
     for (const result of [inline, file]) {
       expect(result.body).toContain('name: "Researcher"');
       expect(result.body).toContain('task: "report"');
@@ -103,11 +111,16 @@ describe("execution result artifacts", () => {
     async (size) => {
       const output = "中".repeat(Math.floor(size / 3)) + "a".repeat(size % 3);
       expect(Buffer.byteLength(output)).toBe(size);
-      const { artifacts, lookup } = await setup(output);
+      const { artifacts, lookup, rootDir } = await setup(output);
       const result = await artifacts.prepare(lookup);
       if (size <= 51200) {
         expect(result.artifact).toBeUndefined();
         expect(result.body.endsWith(output)).toBe(true);
+        await expect(
+          stat(
+            join(rootDir, "parent", "subagents", "child", "execution.output"),
+          ),
+        ).rejects.toHaveProperty("code", "ENOENT");
       } else {
         expect(result.body).not.toContain(output.slice(0, 30));
         if (result.artifact?.state !== "ready")
@@ -116,124 +129,119 @@ describe("execution result artifacts", () => {
       }
     },
   );
-  it("does not publish a file which Read rejects for a late NUL", async () => {
-    const { artifacts, lookup } = await setup("a".repeat(5000) + "\0tail");
-    expect(
-      (await artifacts.prepare(lookup, { forceFile: true })).artifact?.state,
-    ).toBe("error");
-  });
-  it("authorizes the resolved read target instead of a later replacement", async () => {
-    const { artifacts, lookup, rootDir } = await setup("owned result");
-    const result = await artifacts.prepare(lookup, { forceFile: true });
+  it("exports under the root session with private directories and keeps prior executions", async () => {
+    const output = "root report\n".repeat(5000);
+    const { artifacts, lookup, rootDir, store } = await setup(
+      output,
+      "scope",
+      "owner",
+    );
+    const result = await artifacts.prepare(lookup);
     if (result.artifact?.state !== "ready") throw new Error("Missing artifact");
-    const file = result.artifact.path;
-    const outside = join(rootDir, "unregistered.txt");
-    await writeFile(outside, "outside");
-    await rm(file);
-    await symlink(outside, file);
-    const registry = new AdapterRegistry();
-    registry.register(new HostLocalAdapter());
-    const manager = new SandboxManager({
-      adapterRegistry: registry,
-      authorizeInternalRead: async (input) => {
-        await rm(file);
-        await writeFile(file, "owned result");
-        return artifacts.authorizeRead({ ...input, operation: "read" });
+    const expected = join(
+      rootDir,
+      "owner",
+      "subagents",
+      "child",
+      "execution.output",
+    );
+    expect(result.artifact.path).toBe(expected);
+    expect(result.body).toContain(
+      `Complete result: ${expected}\nsizeBytes: ${String(Buffer.byteLength(output))}\nestimatedTokens: ${String(Math.ceil(Buffer.byteLength(output) / 4))}`,
+    );
+    expect(result.body).not.toContain(output.slice(0, 20));
+    expect(await readFile(expected, "utf8")).toBe(output);
+    if (process.platform !== "win32")
+      for (const directory of [
+        rootDir,
+        join(rootDir, "owner"),
+        join(rootDir, "owner", "subagents"),
+        join(rootDir, "owner", "subagents", "child"),
+      ])
+        expect((await stat(directory)).mode & 0o777).toBe(0o700);
+    const next = { ...lookup, executionId: "next" };
+    await store.accept({
+      ...next,
+      requestId: "call-next",
+      requesterRunId: "root-run",
+      rootSessionId: "owner",
+      rootRunId: "root-run",
+      subagentId: "child",
+      mode: "background",
+      prompt: "next",
+      createdAt: 4,
+    });
+    await store.finish(next, {
+      status: "completed",
+      output: "next report".repeat(6000),
+      completedAt: 5,
+    });
+    const second = await artifacts.prepare(next);
+    expect(second.artifact?.state).toBe("ready");
+    if (second.artifact?.state !== "ready")
+      throw new Error("Missing next artifact");
+    expect(second.artifact.path).toBe(
+      join(rootDir, "owner", "subagents", "child", "next.output"),
+    );
+    expect(await readFile(expected, "utf8")).toBe(output);
+    expect(await readFile(second.artifact.path, "utf8")).toBe(
+      "next report".repeat(6000),
+    );
+  });
+  it("regenerates ready records from old paths and reports a missing-file save failure truthfully", async () => {
+    const output = "original report".repeat(4000);
+    const { artifacts, lookup, rootDir, store, storage } = await setup(output);
+    const old = join(rootDir, "old-location.output");
+    await store.updateArtifact(
+      lookup,
+      { state: "ready", path: old, sizeBytes: Buffer.byteLength(output) },
+      4,
+    );
+    const result = await artifacts.prepare(lookup);
+    if (result.artifact?.state !== "ready") throw new Error("Missing artifact");
+    expect(result.artifact.path).toBe(
+      join(rootDir, "parent", "subagents", "child", "execution.output"),
+    );
+    expect((await store.get(lookup))?.artifact).toEqual(result.artifact);
+    await rm(result.artifact.path);
+    const failing = createSubagentResultArtifacts({
+      store,
+      rootDir,
+      sessionExists: () => Promise.resolve(true),
+      storage: {
+        ...storage,
+        writeText: () => Promise.reject(new Error("disk unavailable")),
       },
     });
-    const workdir = join(rootDir, "workspace");
-    await mkdir(workdir);
-    await manager.createContext(
-      { sessionId: "parent", contextScopeId: "scope" },
-      { workdir },
+    const unavailable = await failing.prepare(lookup);
+    expect(unavailable.artifact?.state).toBe("error");
+    expect(unavailable.body).toContain(
+      "complete result remains saved in the database, but its result file is unavailable",
     );
-    const lease = await manager.acquire({
-      sessionId: "parent",
-      contextScopeId: "scope",
-    });
-    await expect(lease.resolvePathForExisting(file)).rejects.toBeInstanceOf(
-      SandboxBoundaryError,
-    );
-    await manager.release(lease);
-    await manager.destroyContext({
-      sessionId: "parent",
-      contextScopeId: "scope",
-    });
+    expect(unavailable.body).not.toContain("Complete result:");
+    expect((await store.get(lookup))?.output).toBe(output);
+    expect((await artifacts.prepare(lookup)).artifact?.state).toBe("ready");
+    expect(await readFile(result.artifact.path, "utf8")).toBe(output);
   });
-  it("authorizes the primary requester with an undefined context scope", async () => {
-    const { artifacts, lookup } = await setup("primary report", "primary");
-    const result = await artifacts.prepare(lookup, { forceFile: true });
-    if (result.artifact?.state !== "ready") throw new Error("Missing artifact");
-    expect(
-      await artifacts.authorizeRead({
-        path: result.artifact.path,
-        sessionId: "parent",
-        operation: "read",
-      }),
-    ).toBe(true);
-    expect(
-      await artifacts.authorizeRead({
-        path: result.artifact.path,
-        sessionId: "parent",
-        contextScopeId: "other",
-        operation: "read",
-      }),
-    ).toBe(false);
+  it("rejects a redirected subagents directory without writing a report into its target", async () => {
+    const { artifacts, lookup, rootDir, store } = await setup(
+      "private report".repeat(5000),
+    );
+    const target = join(rootDir, "outside");
+    await mkdir(target, { recursive: true });
+    await mkdir(join(rootDir, "parent"));
+    await symlink(target, join(rootDir, "parent", "subagents"));
+    const result = await artifacts.prepare(lookup);
+    expect(result.artifact?.state).toBe("error");
+    expect(result.body).not.toContain("Complete result:");
+    expect((await store.get(lookup))?.artifact.state).toBe("error");
+    await expect(
+      readFile(join(target, "child", "execution.output")),
+    ).rejects.toHaveProperty("code", "ENOENT");
   });
-  it("reads through the real scheduler and sandbox without granting write or directory trust", async () => {
-    const { artifacts, lookup, rootDir } = await setup("exact report");
-    const result = await artifacts.prepare(lookup, { forceFile: true });
-    if (result.artifact?.state !== "ready") throw new Error("Missing artifact");
-    const path = result.artifact.path;
-    const canonicalPath = await realpath(path);
-    const bus = createBus();
-    const permissionState = createPermissionState({ bus });
-    const registry = new AdapterRegistry();
-    registry.register(new HostLocalAdapter());
-    const manager = new SandboxManager({
-      adapterRegistry: registry,
-      authorizeInternalRead: (input) =>
-        artifacts.authorizeRead({ ...input, operation: "read" }),
-    });
-    const workdir = join(rootDir, "workspace");
-    await mkdir(workdir);
-    await manager.createContext(
-      { sessionId: "parent", contextScopeId: "scope" },
-      { workdir },
-    );
-    const lease = await manager.acquire({
-      sessionId: "parent",
-      contextScopeId: "scope",
-    });
-    const scheduler = createToolScheduler({ bus, permissionState });
-    scheduler.register(createReadTool());
-    const request = {
-      runId: "reader",
-      sessionId: "parent",
-      contextScopeId: "scope",
-      callId: "read",
-      messageId: "message",
-      toolName: "read",
-      params: { file_path: path },
-      environment: lease,
-    };
-    expect(await lease.authorizeInternalRead?.(canonicalPath)).toBe(true);
-    const read = await scheduler.execute(request);
-    expect(read.status).toBe("success");
-    expect(read.output).toContain("exact report");
-    await expect(lease.resolvePathForWrite(path)).rejects.toBeInstanceOf(
-      SandboxBoundaryError,
-    );
-    expect(lease.trustedRoots()).toHaveLength(1);
-    permissionState.addSessionRule("parent", {
-      tool: "external_directory",
-      decision: "deny",
-      scope: "session",
-    });
-    expect(
-      (await scheduler.execute({ ...request, callId: "denied" })).status,
-    ).toBe("rejected");
-    await lease.release();
+  it("does not publish a file which Read rejects for a late NUL", async () => {
+    const { artifacts, lookup } = await setup("a".repeat(52000) + "\0tail");
+    expect((await artifacts.prepare(lookup)).artifact?.state).toBe("error");
   });
   it("does not publish an unreadable file as a usable entry", async () => {
     const { artifacts, lookup, store } = await setup("\0" + "x".repeat(52000));
@@ -272,7 +280,7 @@ describe("execution result artifacts", () => {
     await artifacts.deleteSession("parent");
     unblock();
     expect((await preparing).artifact?.state).toBe("deleted");
-    expect(await storage.list(["subagent-results"])).toEqual([]);
+    expect(await storage.list(["parent", "subagents"])).toEqual([]);
     expect((await store.get(lookup))?.artifact).toEqual({
       state: "deleted",
       cleanupPending: false,
@@ -294,54 +302,23 @@ describe("execution result artifacts", () => {
     expect(await readFile(delivery.artifact.path, "utf8")).toBe(text);
     expect(delivery.artifact.sizeBytes).toBe(Buffer.byteLength(text));
   });
-  it("authorizes only the registered exact readonly file in its durable requester scope", async () => {
-    const { artifacts, lookup } = await setup("report");
-    const result = await artifacts.prepare(lookup, { forceFile: true });
-    if (result.artifact?.state !== "ready") throw new Error("Missing artifact");
-    const access = {
-      path: result.artifact.path,
-      sessionId: "parent",
-      contextScopeId: "scope",
-      operation: "read" as const,
-    };
-    expect(await artifacts.authorizeRead(access)).toBe(true);
-    expect(
-      await artifacts.authorizeRead({ ...access, sessionId: "other" }),
-    ).toBe(false);
-    expect(
-      await artifacts.authorizeRead({ ...access, contextScopeId: "other" }),
-    ).toBe(false);
-    expect(
-      await artifacts.authorizeRead({ ...access, operation: "write" }),
-    ).toBe(false);
-    expect(
-      await artifacts.authorizeRead({
-        ...access,
-        path: `${result.artifact.path}.other`,
-      }),
-    ).toBe(false);
-  });
   it("rejects symlink substitutions and rebuilds manually removed files from DB", async () => {
-    const { artifacts, lookup, rootDir } = await setup("original");
-    const result = await artifacts.prepare(lookup, { forceFile: true });
+    const { artifacts, lookup, rootDir } = await setup("original".repeat(8000));
+    const result = await artifacts.prepare(lookup);
     if (result.artifact?.state !== "ready") throw new Error("Missing artifact");
     const path = result.artifact.path;
     await rm(path);
-    const rebuilt = await artifacts.prepare(lookup, { forceFile: true });
+    const rebuilt = await artifacts.prepare(lookup);
     expect(rebuilt.artifact?.state).toBe("ready");
-    expect(await readFile(path, "utf8")).toBe("original");
+    expect(await readFile(path, "utf8")).toBe("original".repeat(8000));
     await rm(path);
     const secret = join(rootDir, "unrelated.txt");
     await writeFile(secret, "secret");
     await symlink(secret, path);
-    expect(
-      await artifacts.authorizeRead({
-        path,
-        sessionId: "parent",
-        contextScopeId: "scope",
-        operation: "read",
-      }),
-    ).toBe(false);
+    const replaced = await artifacts.prepare(lookup);
+    expect(replaced.artifact?.state).toBe("ready");
+    expect(await readFile(path, "utf8")).toBe("original".repeat(8000));
+    expect(await readFile(secret, "utf8")).toBe("secret");
   });
   it("retains complete DB body and returns explicit error after bounded export failure", async () => {
     const { store, storage, rootDir, lookup } = await setup(
@@ -368,9 +345,10 @@ describe("execution result artifacts", () => {
     expect((await store.get(lookup))?.output).toBe("large".repeat(11000));
   });
   it("durably revokes and cleans artifacts when a child session is deleted", async () => {
-    const { store, artifacts, lookup, storage, rootDir } =
-      await setup("retained");
-    const result = await artifacts.prepare(lookup, { forceFile: true });
+    const { store, artifacts, lookup, storage, rootDir } = await setup(
+      "retained".repeat(8000),
+    );
+    const result = await artifacts.prepare(lookup);
     if (result.artifact?.state !== "ready") throw new Error("Missing artifact");
     await artifacts.deleteSession("child-session");
     expect((await store.get(lookup))?.artifact.state).toBe("deleted");
@@ -380,9 +358,7 @@ describe("execution result artifacts", () => {
       rootDir,
       sessionExists: () => Promise.resolve(true),
     });
-    expect(
-      (await restarted.prepare(lookup, { forceFile: true })).body,
-    ).toContain("deleted");
+    expect((await restarted.prepare(lookup)).body).toContain("deleted");
     await expect(readFile(result.artifact.path)).rejects.toHaveProperty(
       "code",
       "ENOENT",
@@ -390,9 +366,13 @@ describe("execution result artifacts", () => {
   });
 
   it("reconciles unfinished exports and durable deletion intents after SQLite reopens without changing terminal executions", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "recovered-artifacts-"));
-    directories.push(rootDir);
-    const dbPath = join(rootDir, "agent.db");
+    const home = await realpath(
+      await mkdtemp(join(tmpdir(), "recovered-artifacts-")),
+    );
+    directories.push(home);
+    vi.stubEnv("OHBABY_HOME", home);
+    const rootDir = join(home, "sessions");
+    const dbPath = join(home, "agent.db");
     const storage = createStorage({ rootDir });
     const body = "complete terminal report\n".repeat(3000);
     const lookupFor = (executionId: string): Required<ExecutionLookup> => ({
@@ -401,8 +381,8 @@ describe("execution result artifacts", () => {
       requesterScopeId: "scope",
     });
     const keyFor = (executionId: string): StorageKey => [
-      "subagent-results",
       "parent",
+      "subagents",
       `child-${executionId}`,
       `${executionId}.output`,
     ];
@@ -481,33 +461,18 @@ describe("execution result artifacts", () => {
       const result = await artifacts.prepare(lookupFor("unfinished"));
       if (result.artifact?.state !== "ready")
         throw new Error("Missing recovered artifact");
+      expect(result.artifact.path).toBe(
+        join(
+          home,
+          "sessions",
+          "parent",
+          "subagents",
+          "child-unfinished",
+          "unfinished.output",
+        ),
+      );
       expect(await readFile(result.artifact.path, "utf8")).toBe(body);
       expect(await artifacts.prepare(lookupFor("unfinished"))).toEqual(result);
-      expect(
-        await artifacts.authorizeRead({
-          path: result.artifact.path,
-          sessionId: "parent",
-          contextScopeId: "scope",
-          operation: "read",
-        }),
-      ).toBe(true);
-      expect(
-        await artifacts.authorizeRead({
-          path: result.artifact.path,
-          sessionId: "parent",
-          contextScopeId: "other",
-          operation: "read",
-        }),
-      ).toBe(false);
-      expect(
-        await artifacts.authorizeRead({
-          path: result.artifact.path,
-          sessionId: "parent",
-          contextScopeId: "scope",
-          operation: "write",
-        }),
-      ).toBe(false);
-
       const deleted = await artifacts.prepare(lookupFor("revoked"));
       expect(deleted.artifact).toEqual({
         state: "deleted",

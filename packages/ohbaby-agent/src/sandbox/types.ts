@@ -137,7 +137,6 @@ export interface SandboxContext {
 }
 
 export interface SandboxLease {
-  authorizeInternalRead?(absolutePath: string): Promise<boolean>;
   readonly leaseId: string;
   readonly contextScopeId?: string;
   readonly scopeKey: string;
@@ -182,11 +181,6 @@ export interface SandboxManagerOptions {
   readonly initialTrustedRoots?: (
     scope: NormalizedSandboxScope,
   ) => Promise<readonly TrustPathInput[]>;
-  readonly authorizeInternalRead?: (input: {
-    readonly path: string;
-    readonly sessionId: string;
-    readonly contextScopeId?: string;
-  }) => Promise<boolean>;
   readonly adapterRegistry: {
     get(adapterId: SandboxAdapterId): SandboxAdapter | undefined;
   };

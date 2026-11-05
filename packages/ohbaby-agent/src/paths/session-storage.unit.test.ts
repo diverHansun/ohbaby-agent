@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   ensureSessionStorage,
   resolveSessionStorageDir,
+  resolveSessionStorageRoot,
   InvalidSessionStorageIdError,
 } from "./session-storage.js";
 let home: string;
@@ -17,6 +18,7 @@ afterEach(async () => {
   await fs.rm(home, { recursive: true, force: true });
 });
 it("prepares only scratch at a canonical private owner directory and preserves existing files", async () => {
+  expect(resolveSessionStorageRoot()).toBe(path.join(home, "sessions"));
   expect(resolveSessionStorageDir("session_1")).toBe(
     path.join(home, "sessions", "session_1"),
   );

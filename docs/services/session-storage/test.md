@@ -68,3 +68,9 @@ side chat 的归属（用主会话的目录、关闭时不删除）在 side chat
 - 第一期发布门：S1 至 S10（含 S3b、S3c、S3d、S6b、S6c）通过；`pnpm typecheck`、`pnpm lint`、`pnpm -C packages/ohbaby-agent prompt:check` 通过；architecture §4.4 中第一期的文档已同步。
 - 第二期 a 发布门：S11 至 S13 通过；`docs/tools/` 中输出截断的说明已同步。
 - 第二期 b 发布门：S14 至 S16 通过，S17 浏览器走查附截图；`docs/ohbaby-web/` 的右侧面板说明已同步。
+
+## 5. 子代理报告搬迁回归（2026-11-05）
+
+`result-artifacts.integration.test.ts` 覆盖新目录、根会话归属、每次执行独立文件、50 KiB 边界、旧路径及丢失文件重新导出、保存失败、符号链接、重试与删除墓碑。`result-artifacts.scheduler.integration.test.ts` 使用真实 SQLite、文件系统、调度器和 sandbox 验证根会话与兄弟子代理读取、改写审批、未登记根时的外部读取及 `SessionEvent.Removed` 清理；第一期的 `session-storage.scheduler.integration.test.ts` 继续验证上级 cwd、普通可信根与 always 规则不能绕过系统文件审批。
+
+真实 provider 与 daemon 的长报告走查仍按子代理结果议题的 T17 单独验收，不能用上述自动化用例代替。side chat、fork 的对应部分保留为条件验收，不计入当前已通过范围。

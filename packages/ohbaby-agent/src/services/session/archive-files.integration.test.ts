@@ -11,12 +11,14 @@ const exec = promisify(execFile);
 let root: string;
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   if (root) await rm(root, { recursive: true, force: true });
 });
 it("drops only deleted refs after the workdir is gone and cleans every descendant's result files", async () => {
   root = await mkdtemp(join(tmpdir(), "ohbaby-archive-files-"));
   const workdir = join(root, "work");
-  const storage = join(root, "storage");
+  vi.stubEnv("OHBABY_HOME", root);
+  const storage = join(root, "sessions");
   await mkdir(workdir);
   await writeFile(join(workdir, "file"), "before");
   const engine = new GitSnapshotEngine({ snapshotRoot: root });
@@ -32,8 +34,8 @@ it("drops only deleted refs after the workdir is gone and cleans every descendan
   });
   await engine.recordBaseline("keep", workdir);
   for (const id of ["root", "child", "grandchild", "keep"]) {
-    await mkdir(join(storage, "subagent-results", id), { recursive: true });
-    await writeFile(join(storage, "subagent-results", id, "result"), "result");
+    await mkdir(join(storage, id, "subagents"), { recursive: true });
+    await writeFile(join(storage, id, "subagents", "result"), "result");
   }
   await rm(workdir, { recursive: true });
   const log = vi.fn();
@@ -42,7 +44,7 @@ it("drops only deleted refs after the workdir is gone and cleans every descendan
       sessionIds: ["root", "child", "grandchild"],
       checkpoints: [{ checkpointId: "deleted", workdir }],
     },
-    { snapshotRoot: root, resultStorageRoot: storage, log },
+    { snapshotRoot: root, log },
   );
   const gitdir = join(
     root,
@@ -58,16 +60,17 @@ it("drops only deleted refs after the workdir is gone and cleans every descendan
   expect(refs.stdout.trim()).toBe("refs/snapshots/keep/pre");
   for (const id of ["root", "child", "grandchild"])
     await expect(
-      readFile(join(storage, "subagent-results", id, "result")),
+      readFile(join(storage, id, "subagents", "result")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   expect(
-    await readFile(join(storage, "subagent-results", "keep", "result"), "utf8"),
+    await readFile(join(storage, "keep", "subagents", "result"), "utf8"),
   ).toBe("result");
   expect(log).not.toHaveBeenCalled();
 });
 it("logs cleanup failures and still attempts later files, rejecting unsafe storage IDs", async () => {
   root = await mkdtemp(join(tmpdir(), "ohbaby-archive-failure-"));
-  await mkdir(join(root, "subagent-results", "child"), { recursive: true });
+  vi.stubEnv("OHBABY_HOME", root);
+  await mkdir(join(root, "sessions", "child"), { recursive: true });
   await writeFile(join(root, "sentinel"), "keep");
   const drop = vi
     .spyOn(GitSnapshotEngine.prototype, "dropRef")
@@ -79,13 +82,13 @@ it("logs cleanup failures and still attempts later files, rejecting unsafe stora
         sessionIds: ["..", "child"],
         checkpoints: [{ checkpointId: "cp", workdir: "/gone" }],
       },
-      { snapshotRoot: root, resultStorageRoot: root, log },
+      { snapshotRoot: root, log },
     ),
   ).resolves.toBeUndefined();
   expect(drop).toHaveBeenCalledOnce();
-  expect(log).toHaveBeenCalledTimes(3);
+  expect(log).toHaveBeenCalledTimes(2);
   expect(await readFile(join(root, "sentinel"), "utf8")).toBe("keep");
-  await expect(
-    readFile(join(root, "subagent-results", "child")),
-  ).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(readFile(join(root, "sessions", "child"))).rejects.toMatchObject(
+    { code: "ENOENT" },
+  );
 });

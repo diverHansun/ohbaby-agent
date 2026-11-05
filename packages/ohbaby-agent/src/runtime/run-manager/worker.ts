@@ -111,7 +111,6 @@ function toToolExecutionEnvironment(
   }
 
   return {
-    authorizeInternalRead: lease.authorizeInternalRead?.bind(lease),
     workdir: lease.workdir,
     scopeKey: lease.scopeKey,
     retain: lease.retain?.bind(lease),

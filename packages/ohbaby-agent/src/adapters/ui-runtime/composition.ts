@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   ensureSessionStorage,
+  resolveSessionStorageRoot,
   SCRATCH_DIR,
 } from "../../paths/session-storage.js";
 import { sessionStoragePreparationFailed } from "../../observability/events.js";
@@ -217,7 +218,6 @@ export interface UiRuntimeCompositionOptions {
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentExecutionStore?: SubagentExecutionStore;
   readonly currentRunInputStore?: CurrentRunInputStore;
-  readonly resultStorageRoot?: string;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
 }
@@ -376,8 +376,8 @@ export async function createUiRuntimeComposition(
       };
     },
     store: subagentExecutionStore,
-    storage: createStorage({ rootDir: options.resultStorageRoot }),
-    rootDir: options.resultStorageRoot,
+    storage: createStorage({ rootDir: resolveSessionStorageRoot() }),
+    rootDir: resolveSessionStorageRoot(),
     sessionExists: async (sessionId) =>
       Boolean(await sessionManager.get(sessionId)),
     now: options.now,
@@ -497,8 +497,6 @@ export async function createUiRuntimeComposition(
             "Session scratch preparation failed; the conversation can continue.",
         });
       },
-      authorizeInternalRead: (input) =>
-        resultArtifacts.authorizeRead({ ...input, operation: "read" }),
     });
 
   const todoService = new TodoService({

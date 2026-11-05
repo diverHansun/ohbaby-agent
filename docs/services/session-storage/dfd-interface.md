@@ -1,5 +1,7 @@
 # dfd-interface
 
+2026-11-05 实施状态：第一期与子代理结果搬迁已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期工具输出与 Files 页也尚未实现。
+
 > 2026-11-04。路径缩写同 [architecture](architecture.md)。
 
 ## 1. Context & Scope
@@ -27,7 +29,7 @@
 会话运行初始化，首轮模型请求及工具使用之前申请 sandbox（A/adapters/ui-runtime/host-local-environment.ts:208-215）
   → SandboxManager 创建 (sessionId, contextScopeId) 的上下文
   → 调用注入的 initialTrustedRoots(scope)
-      → sessionManager.get(scope.sessionId) 定归属：有 parentId → parentId；是 side chat → data.sideChat.mainSessionId；否则 → 自己
+      → sessionManager.get(scope.sessionId) 定归属：有 parentId → parentId；否则 → 自己（side chat 分支待其议题实现）
       → ensureSessionStorage(ownerId)：建 sessions/<ownerId>/scratch
       → 返回 [{ kind: "session-storage", path: sessions/<ownerId> },
               { kind: "session-scratch", path: sessions/<ownerId>/scratch }]
@@ -62,7 +64,7 @@
   → 子代理：subagents/base.md 提供固定规则，再叠加角色要求
 准备一轮运行，收集环境提醒
   → environment 提醒在现有几行之后加一行：
-    "Session scratch directory: <path> (shared by this session, its subagents and its side chat; for temporary files and outputs; not part of the workspace)"
+    "Session scratch directory: <path>"
   → 只写 scratch 路径。subagents/、tool-results/ 的路径由系统在交付结果时直接给出，不在提醒里列
   → 只有目录与可信路径准备成功才提供上述可用路径；失败时改为 "Session scratch directory: unavailable"，其余环境信息照常
   → 路径对一个会话固定，提醒内容不变就不重发；可用状态变化也会更新提醒
@@ -78,7 +80,7 @@
   → 对 result.sessionIds 里的每个 id：rm -rf sessions/<id>，force，失败只记日志
 ```
 
-目前唯一的删除路径是 daemon 的会话删除（`S/runtime/daemon/main.ts:557-566`）。side chat 议题新增的关闭与启动清理也会调用这个函数，但 side chat 自己没有存储区，删除时是空操作。
+目前唯一的删除路径是 daemon 的会话删除（`S/runtime/daemon/main.ts:557-566`）。side chat 议题落地时，其关闭与启动清理也需遵守归属规则；不能因关闭 side chat 而删除主会话目录。
 
 ### 2.4 超长工具输出（第二期 a）
 
@@ -117,10 +119,11 @@ Web 右侧面板 Files 页打开
 
 ```ts
 // A/paths/session-storage.ts
+export const SUBAGENTS_DIR = "subagents";
 export const SCRATCH_DIR = "scratch";
 export const TOOL_RESULTS_DIR = "tool-results";
 resolveSessionStorageDir(ownerSessionId: string, options?: OhbabyPathOptions): string
-// 子代理结果搬迁议题新增：SUBAGENTS_DIR = "subagents"、resolveSessionStorageRoot(options?)（返回 <OHBABY_HOME>/sessions）
+resolveSessionStorageRoot(options?: OhbabyPathOptions): string  // <OHBABY_HOME>/sessions
 ensureSessionStorage(ownerSessionId: string, options?: OhbabyPathOptions): Promise<string>  // 建会话目录和 scratch/，返回会话目录
 // 不合法的 id 抛 InvalidSessionStorageIdError
 

@@ -69,8 +69,6 @@ export interface ToolCommandContextOptions {
 }
 
 export interface ToolExecutionEnvironment {
-  /** Exact, registered runtime artifacts; never grants directory or write trust. */
-  authorizeInternalRead?(absolutePath: string): Promise<boolean>;
   readonly scopeKey?: string;
   retain?(): () => void | Promise<void>;
   readonly workdir: string;

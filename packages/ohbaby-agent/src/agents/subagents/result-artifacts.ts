@@ -1,5 +1,6 @@
-import { lstat, realpath } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { lstat, mkdir, realpath } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
+import { SUBAGENTS_DIR } from "../../paths/session-storage.js";
 import type { Storage, StorageKey } from "../../services/storage/index.js";
 import { PathResolver } from "../../services/storage/path-resolver.js";
 import {
@@ -14,12 +15,6 @@ import type {
 } from "./execution-store.js";
 
 export const INLINE_SUBAGENT_RESULT_BYTES = 51_200;
-export interface InternalResultAccess {
-  readonly path: string;
-  readonly sessionId: string;
-  readonly contextScopeId?: string;
-  readonly operation: "read" | "write";
-}
 export interface PreparedSubagentResult {
   readonly body: string;
   readonly artifact?: ExecutionArtifact;
@@ -27,9 +22,8 @@ export interface PreparedSubagentResult {
 export interface SubagentResultArtifacts {
   prepare(
     input: ExecutionLookup,
-    options?: { forceFile?: boolean; signal?: AbortSignal },
+    options?: { signal?: AbortSignal },
   ): Promise<PreparedSubagentResult>;
-  authorizeRead(input: InternalResultAccess): Promise<boolean>;
   deleteSession(sessionId: string): Promise<void>;
 }
 function identity(record: SubagentExecutionRecord): string {
@@ -58,8 +52,8 @@ export function createSubagentResultArtifacts(options: {
     return `${identity(record)}\nname: ${JSON.stringify((context?.name ?? record.subagentId).slice(0, 200))}${context?.unprocessedMessageCount === undefined ? "" : `\nunprocessed_messages: ${String(context.unprocessedMessageCount)}${context.unprocessedMessageCount > 0 ? " (not consumed; original messages and close reasons remain saved)" : ""}`}`;
   }
   const keyFor = (record: SubagentExecutionRecord): StorageKey => [
-    "subagent-results",
-    record.parentSessionId,
+    record.rootSessionId,
+    SUBAGENTS_DIR,
     record.subagentId,
     `${record.executionId}.output`,
   ];
@@ -172,7 +166,7 @@ export function createSubagentResultArtifacts(options: {
           now(),
         );
         // Storage owns atomic replacement; reject redirected parent directories before writing.
-        await resolver.ensureParent(path);
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 });
         const root = await realpath(resolver.rootDir);
         if (
           (await realpath(dirname(path))) !==
@@ -225,7 +219,6 @@ export function createSubagentResultArtifacts(options: {
       if (record.status === "queued" || record.status === "running")
         throw new Error("Result is not terminal");
       if (
-        !settings.forceFile &&
         (await alive(record)) &&
         Buffer.byteLength(record.output ?? "", "utf8") <=
           INLINE_SUBAGENT_RESULT_BYTES
@@ -242,43 +235,6 @@ export function createSubagentResultArtifacts(options: {
       } finally {
         pending.delete(record.executionId);
       }
-    },
-    async authorizeRead(input): Promise<boolean> {
-      if (input.operation !== "read") return false;
-      const path = resolve(input.path);
-      let root: string;
-      try {
-        root = await realpath(resolver.rootDir);
-      } catch {
-        return false;
-      }
-      const lexicalRelative = relative(resolver.rootDir, path);
-      const segments = (
-        lexicalRelative.startsWith(`..${sep}`)
-          ? relative(root, path)
-          : lexicalRelative
-      ).split(sep);
-      if (
-        segments.length !== 4 ||
-        segments[0] !== "subagent-results" ||
-        segments[1] !== input.sessionId ||
-        !segments[3].endsWith(".output")
-      )
-        return false;
-      const record = await options.store.get({
-        executionId: segments[3].slice(0, -7),
-        parentSessionId: input.sessionId,
-        requesterScopeId: input.contextScopeId ?? "primary",
-      });
-      return (
-        !!record &&
-        record.artifact.state === "ready" &&
-        record.artifact.path === resolver.resolve(keyFor(record)) &&
-        (path === record.artifact.path ||
-          path === resolve(root, ...keyFor(record))) &&
-        (await alive(record)) &&
-        (await canonical(record.artifact.path))
-      );
     },
     async deleteSession(sessionId): Promise<void> {
       const records = await options.store.revokeSessionArtifacts(

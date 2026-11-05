@@ -266,7 +266,6 @@ it("keeps session storage through restore and removes only the permanently delet
   const result = await deleteArchivedSession("owner");
   await cleanupDeletedSessionFiles(result, {
     sessionStorageRoot: sessions,
-    resultStorageRoot: join(root, "results"),
     snapshotRoot: root,
     log: () => {
       throw new Error("unexpected cleanup failure");
@@ -292,7 +291,6 @@ it("keeps database deletion committed when storage cleanup cannot access its par
   const failures: unknown[] = [];
   await cleanupDeletedSessionFiles(result, {
     sessionStorageRoot: blocked,
-    resultStorageRoot: join(root, "results"),
     snapshotRoot: root,
     log: (error) => failures.push(error),
   });

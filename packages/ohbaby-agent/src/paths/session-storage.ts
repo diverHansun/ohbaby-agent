@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveOhbabyHome, type OhbabyPathOptions } from "./ohbaby-home.js";
 
+export const SUBAGENTS_DIR = "subagents";
 export const SCRATCH_DIR = "scratch";
 export const TOOL_RESULTS_DIR = "tool-results";
 
@@ -14,13 +15,19 @@ export class InvalidSessionStorageIdError extends Error {
   }
 }
 
+export function resolveSessionStorageRoot(
+  options: OhbabyPathOptions = {},
+): string {
+  return path.join(resolveOhbabyHome(options), "sessions");
+}
+
 export function resolveSessionStorageDir(
   ownerSessionId: string,
   options: OhbabyPathOptions = {},
 ): string {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(ownerSessionId))
     throw new InvalidSessionStorageIdError();
-  return path.join(resolveOhbabyHome(options), "sessions", ownerSessionId);
+  return path.join(resolveSessionStorageRoot(options), ownerSessionId);
 }
 
 export async function ensureSessionStorage(
