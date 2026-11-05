@@ -1,8 +1,10 @@
 import type { UiBackendClient } from "ohbaby-sdk";
+import type { SessionFilesApi } from "../../api/daemon/session-files.js";
 import type { TerminalApi } from "../../api/daemon/terminals.js";
 import type { ReactElement } from "react";
 import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
 import type { SidePanelTab } from "./side-pages.js";
+import { FilesPage } from "./files/FilesPage.js";
 import { SubagentsPage } from "./subagents/SubagentsPage.js";
 import { TerminalPage } from "./terminal/TerminalPage.js";
 import type { SubagentInstances } from "../shared/subagent-instances.js";
@@ -16,6 +18,7 @@ export interface SidePageContext {
   readonly subagentReadingCache: SubagentReadingCache;
   readonly subagentInstances: SubagentInstances;
   readonly setTabState: SidePanelControls["setTabState"];
+  readonly sessionFiles: SessionFilesApi;
   readonly terminals: TerminalApi;
   readonly onTerminalExit: (
     tab: Extract<SidePanelTab, { kind: "terminal" }>,
@@ -48,6 +51,25 @@ export function SidePanelPage(props: {
         />
       ) : (
         <p className="ohb-side-notice">Open a chat to see its subagents.</p>
+      );
+    case "files":
+      return context.client && context.rootSessionId ? (
+        <FilesPage
+          key={context.rootSessionId}
+          api={context.sessionFiles}
+          client={context.client}
+          rootSessionId={context.rootSessionId}
+          selectedPath={tab.state.path}
+          onSelect={(path) => {
+            context.setTabState(
+              tab.id,
+              "files",
+              path === undefined ? {} : { path },
+            );
+          }}
+        />
+      ) : (
+        <p className="ohb-side-notice">Open a chat to see its files.</p>
       );
     case "terminal":
       return (

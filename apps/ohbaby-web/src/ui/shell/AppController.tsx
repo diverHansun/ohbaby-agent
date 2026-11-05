@@ -227,6 +227,7 @@ export function AppController(props: {
     subagentReadingCache: panelReadingCache,
     subagentInstances,
     setTabState: sidePanel.setTabState,
+    sessionFiles: runtime.sessionFiles,
     terminals: runtime.terminals,
     onTerminalExit: terminalTabs.markExited,
     onTerminalMissing: terminalTabs.sync,

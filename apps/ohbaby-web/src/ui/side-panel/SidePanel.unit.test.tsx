@@ -105,6 +105,7 @@ it("starts closed with an entry page, opens Subagents tabs and offers only worki
   const items = [...document.querySelectorAll('[role="menuitem"]')];
   expect(items.map((item) => item.textContent)).toEqual([
     "Subagents",
+    "Files",
     "Terminal",
   ]);
   click(items[0] ?? null);

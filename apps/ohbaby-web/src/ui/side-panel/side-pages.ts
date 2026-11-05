@@ -1,4 +1,4 @@
-import { Bot, SquareTerminal, type LucideIcon } from "lucide-react";
+import { Bot, FolderOpen, SquareTerminal, type LucideIcon } from "lucide-react";
 import type { TerminalInfo } from "ohbaby-sdk";
 
 /**
@@ -12,6 +12,10 @@ export interface SidePageStates {
     readonly subagentId?: string;
     /** Set only by an explicit "show this delegation" request. */
     readonly anchor?: SubagentAnchor;
+  };
+  readonly files: {
+    /** The file whose preview is open, relative to scratch; absent shows the list. */
+    readonly path?: string;
   };
   readonly terminal: {
     /** Always a real server terminal; tabs open only after it exists (D1). */
@@ -73,6 +77,13 @@ export const SIDE_PAGES: {
     title: "Subagents",
     description: "Read and stop this chat's subagents",
     icon: Bot,
+    initialState: {},
+    sessionScoped: true,
+  },
+  files: {
+    title: "Files",
+    description: "Open files this chat saved",
+    icon: FolderOpen,
     initialState: {},
     sessionScoped: true,
   },
