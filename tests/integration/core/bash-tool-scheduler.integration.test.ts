@@ -235,7 +235,7 @@ describe("bash tool scheduler integration", () => {
     expect(spawn).toHaveBeenCalledOnce();
   });
 
-  it("asks external_directory before bash and then executes with a rich sandbox lease", async () => {
+  it("asks external_directory_shell before bash and then executes with a rich sandbox lease", async () => {
     const externalFile = path.join(tempRoot, "outside.txt");
     await fs.writeFile(externalFile, "outside\n", "utf8");
     const child = new FakeChildProcess();
@@ -306,7 +306,9 @@ describe("bash tool scheduler integration", () => {
         "external_directory",
         "bash",
       ]);
-      expect(permissionUpdates[0]?.pattern).toContain("external_directory(");
+      expect(permissionUpdates[0]?.pattern).toContain(
+        "external_directory_shell(",
+      );
       const preflight = permissionUpdates[0]?.metadata.preflight as
         | {
             readonly externalPaths?: readonly {
