@@ -394,7 +394,7 @@ const approvalKinds = [
     category: "readonly" as const,
     source: "builtin" as const,
     params: { path: "/outside/report.txt" },
-    expected: "external_directory",
+    expected: "external_directory_read",
   },
   {
     label: "external write",
@@ -402,7 +402,7 @@ const approvalKinds = [
     category: "write" as const,
     source: "builtin" as const,
     params: { file_path: "/outside/report.txt" },
-    expected: "external_directory",
+    expected: "external_directory_write",
   },
 ];
 
@@ -515,7 +515,7 @@ describe("tool approval execution identity and cancellation", () => {
         }),
       ).toMatchObject({ status: "rejected" });
       expect(fixture.asks.map((input) => input.toolName)).toEqual([
-        "external_directory",
+        "external_directory_shell",
         "bash",
       ]);
       expect(new Set(fixture.updates.map((info) => info.id)).size).toBe(2);
