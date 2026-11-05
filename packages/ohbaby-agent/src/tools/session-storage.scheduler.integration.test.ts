@@ -67,6 +67,60 @@ function approvals(): {
   };
 }
 
+it("lets a child tool persist into the registered owner root and read its generated output without approval", async () => {
+  const workspace = path.join(root, "workspace");
+  const storage = path.join(root, "owner");
+  const scratch = path.join(storage, "scratch");
+  await fs.mkdir(workspace);
+  await fs.mkdir(scratch, { recursive: true });
+  const names = Array.from(
+    { length: 180 },
+    (_, index) => `${String(index).padStart(3, "0")}-${"x".repeat(200)}`,
+  );
+  await Promise.all(
+    names.map((name) => fs.writeFile(path.join(workspace, name), "")),
+  );
+  const sandbox = createHostLocalSandboxManager(workspace, {
+    initialTrustedRoots: () =>
+      Promise.resolve<readonly TrustPathInput[]>([
+        { kind: "session-storage", path: storage },
+        { kind: "session-scratch", path: scratch },
+      ]),
+  });
+  const policy = approvals();
+  const environment = await sandbox.acquire("child-session");
+  try {
+    const listed = await policy.scheduler.execute({
+      sessionId: "child-session",
+      runId: "run",
+      messageId: "message",
+      callId: "list",
+      toolName: "list",
+      params: { limit: 180 },
+      environment,
+    });
+    expect(listed.status).toBe("success");
+    expect(listed.metadata?.outputFile).toMatchObject({ status: "full" });
+    const file = (listed.metadata?.outputFile as { path: string }).path;
+    expect(path.dirname(file)).toBe(path.join(storage, "tool-results"));
+    const read = await policy.scheduler.execute({
+      sessionId: "child-session",
+      runId: "run",
+      messageId: "message",
+      callId: "read",
+      toolName: "read",
+      params: { file_path: file, offset: 180, limit: 1 },
+      environment,
+    });
+    expect(read.status).toBe("success");
+    expect(read.output).toContain(names[179]);
+    expect(policy.requests).toEqual([]);
+  } finally {
+    await environment.release();
+    await sandbox.dispose();
+  }
+});
+
 it("read always authorizes only reads through both live roots and remembered rules after context rebuild", async () => {
   const workspace = path.join(root, "workspace");
   const outside = path.join(root, "outside");

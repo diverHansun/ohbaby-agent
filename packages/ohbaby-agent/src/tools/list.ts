@@ -9,7 +9,7 @@ import {
   getOptionalStringParam,
   getStringArrayParam,
 } from "./utils/params.js";
-import { renderList } from "./utils/output.js";
+import { persistDisplayedOutput, renderList } from "./utils/output.js";
 import { resolvePathForExisting } from "./utils/context.js";
 import { DEFAULT_SEARCH_LIMIT, FILE_PATH_SCHEMA } from "./utils/text-files.js";
 
@@ -55,10 +55,22 @@ export function createListTool(): Tool {
           lines.push(`... (${String(visible.length - limit)} more entries)`);
         }
 
-        return {
-          output: renderList(lines, "Directory is empty."),
-          metadata: { count: Math.min(visible.length, limit), truncated },
-        };
+        const acquired = lines.length
+          ? lines.join("\n")
+          : "Directory is empty.";
+        const displayed = renderList(lines, "Directory is empty.");
+        const displayLimited = displayed !== acquired;
+        return persistDisplayedOutput({
+          context,
+          acquired,
+          displayed,
+          displayLimited,
+          metadata: {
+            count: Math.min(visible.length, limit),
+            truncated,
+            displayLimited,
+          },
+        });
       },
     },
     "tree",

@@ -12,6 +12,11 @@ import type { ToolExecutionOwner } from "../core/tool-scheduler/types.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import {
+  CappedOutputFile,
+  outputFileNotice,
+} from "../utils/capped-output-file.js";
 import type {
   Tool,
   ToolExecutionResult,
@@ -40,6 +45,8 @@ export type ShellJobStatus =
 type TerminationReason = "cancelled" | "timed_out";
 
 export interface ShellJobStartInput {
+  /** Already prepared by the caller; the registry owns only jobId.log and capture. */
+  readonly outputDirectory?: string;
   readonly background?: boolean;
   readonly child: ChildProcess | (() => ChildProcess);
   readonly owner?: ToolExecutionOwner;
@@ -82,6 +89,7 @@ export interface ShellJobRegistryOptions {
 }
 
 interface ShellJob {
+  readonly outputFile: CappedOutputFile;
   readonly background: boolean;
   releaseComplete: boolean;
   releaseTask?: Promise<void>;
@@ -229,6 +237,11 @@ export class ShellJobRegistry {
       resolveTerminal = resolve;
     });
     const job: ShellJob = {
+      outputFile: new CappedOutputFile(
+        input.outputDirectory
+          ? path.join(input.outputDirectory, `${jobId}.log`)
+          : undefined,
+      ),
       child,
       background: input.background ?? false,
       releaseComplete: false,
@@ -260,6 +273,7 @@ export class ShellJobRegistry {
     this.pruneTerminalJobs();
 
     child.stdout?.on("data", (chunk: unknown) => {
+      job.outputFile.append(chunk);
       const next =
         job.captureMode === "tail"
           ? appendTail(job.output, chunkToString(chunk))
@@ -272,6 +286,7 @@ export class ShellJobRegistry {
       job.truncated ||= next.truncated;
     });
     child.stderr?.on("data", (chunk: unknown) => {
+      job.outputFile.append(chunk);
       const next =
         job.captureMode === "tail"
           ? appendTail(job.output, chunkToString(chunk))
@@ -294,6 +309,7 @@ export class ShellJobRegistry {
     });
     child.once("close", (exitCode, signal) => {
       job.closed = true;
+      job.outputFile.finish(job.terminationReason === undefined);
       job.exitCode ??= exitCode;
       job.signal ??= signal;
       // Spawn failure without a PID proves no managed process was launched.
@@ -497,6 +513,7 @@ export class ShellJobRegistry {
         if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
         await job.cleanupTask;
         await job.releaseTask;
+        job.outputFile.finish(false);
         if (job.cleanup === "confirmed" && job.releaseComplete)
           this.jobs.delete(job.jobId);
       }),
@@ -520,6 +537,7 @@ export class ShellJobRegistry {
         if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
         await job.cleanupTask;
         await job.releaseTask;
+        job.outputFile.finish(false);
       }),
     );
     if (
@@ -549,11 +567,15 @@ export class ShellJobRegistry {
 
   private snapshot(job: ShellJob): ShellJobSnapshot {
     const rendered = renderOutput(job);
+    const outputFile = rendered.truncated
+      ? job.outputFile.snapshot(job.terminationReason !== undefined)
+      : undefined;
     const metadata = {
       ...job.metadata,
       jobId: job.jobId,
       status: job.status,
       truncated: rendered.truncated,
+      ...(outputFile ? { outputFile } : {}),
       ...(job.cleanup ? { cleanup: job.cleanup } : {}),
       ...(job.error ? { error: job.error } : {}),
       ...(isTerminal(job.status)
@@ -563,7 +585,9 @@ export class ShellJobRegistry {
     return {
       jobId: job.jobId,
       metadata,
-      output: rendered.output,
+      output: outputFile
+        ? `${rendered.output}\n\n${outputFileNotice(outputFile)}`
+        : rendered.output,
       status: job.status,
       truncated: rendered.truncated,
       ...(isTerminal(job.status)
@@ -617,7 +641,10 @@ export class ShellJobRegistry {
       );
       if (index < 0) return;
       const [id] = this.terminalJobIds.splice(index, 1);
-      if (id) this.jobs.delete(id);
+      if (id) {
+        this.jobs.get(id)?.outputFile.finish(false);
+        this.jobs.delete(id);
+      }
     }
   }
 
@@ -670,6 +697,7 @@ export class ShellJobRegistry {
       this.finishFromChild(job, job.exitCode ?? null, job.signal ?? null);
     else {
       job.outputDrain = setTimeout(() => {
+        job.outputFile.finish(false);
         job.child.stdout?.destroy();
         job.child.stderr?.destroy();
         this.finishFromChild(job, job.exitCode ?? null, job.signal ?? null);

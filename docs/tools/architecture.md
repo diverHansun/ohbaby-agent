@@ -377,6 +377,10 @@ edit 工具使用多种替换策略，按优先级尝试：
 2. 在输出末尾添加截断提示
 3. 提示中包含总数信息
 
+`list`、`glob`、`web_search`、`web_fetch` 在原显示截断后保存本次已取得的内容，返回原内联内容和文件引用。短输出不落盘；条目数、扫描或 provider 的限制保持原语义，文件不包含未采集的数据。文件位于本次环境登记的归属会话 `tool-results/<safe-callId>-<UUID>.txt`，重复调用 ID 不会覆盖。
+
+Bash 从命令开始同步保存 stdout/stderr 原始字节到同一目录的 `<jobId>.log`，同时保留原有有界内存捕获。单文件上限 10 MiB（10,485,760 字节，含标记）；超过上限保留部分输出并说明。实际 stdio close 且文件关闭成功后才给出 Full output；运行中、取消或捕获提前结束明确区分。保存失败不改变命令结果，原内联内容仍可用。文件随根会话保留，详见 [session-storage 接口](../services/session-storage/dfd-interface.md#24-超长工具输出第二期-a)。
+
 示例：
 ```
 ... (truncated, showing 100 of 256 files)

@@ -91,7 +91,9 @@ describe("glob file tool", () => {
     const realPaths = new Set(
       Array.from({ length: 50 }, (_, i) => `${directory}/${String(i)}.txt`),
     );
-    for (const line of (result.output ?? "").split("\n"))
+    const displayedPaths =
+      (result.output ?? "").split("... [results truncated]")[0] ?? "";
+    for (const line of displayedPaths.split("\n"))
       if (line && !line.includes("[results truncated]"))
         expect(realPaths.has(line)).toBe(true);
   });

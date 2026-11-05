@@ -1,6 +1,6 @@
 # dfd-interface
 
-2026-11-05 实施状态：第一期与子代理结果搬迁已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期工具输出与 Files 页也尚未实现。
+2026-11-05 实施状态：第一期、子代理结果搬迁与第二期 a 工具输出存盘已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期 b 文件 API 与 Files 页尚未实现。
 
 > 2026-11-04。路径缩写同 [architecture](architecture.md)。
 
@@ -85,19 +85,22 @@
 ### 2.4 超长工具输出（第二期 a）
 
 ```
-工具得到完整输出 text，长度超过它现有的截断阈值
-  （truncateOutput 默认 8k token，A/tools/utils/output.ts:4；web 的 WEB_OUTPUT_TOKEN_LIMIT 相同，A/tools/web.ts:28）
-  → writeToolOutput({ ownerId, callId, text })：第一次写时建 tool-results/，写 tool-results/<callId>-<随机>.txt，上限 10 MB
-  → 返回给模型：截断后的内容 + 一行 "Full output (N characters) saved to <path>. Use read or grep to inspect it."
-    只有文件包含完整输出时使用 Full output；达到 10 MB 上限时明确说明只保存了部分输出及其路径
+工具已取得的输出 text，超过现有显示阈值（默认 8k token）
+  → 从 context.environment.trustedRoots() 读取已登记的 session-storage 根
+  → writeToolOutput({ environment, callId, text })：建 tool-results/，写 <safe-callId>-<UUID>.txt
+    文件上限为 10 MiB = 10,485,760 字节，截断说明也计入上限；目录 0700、文件 0600（POSIX）
+  → 返回给模型：原截断内容 + "Full output (N bytes) saved to <path>. Use read or grep to inspect it."
+    只有文件包含本次已取得的全部输出时使用 Full output；达到文件上限时明确说明 Partial output 及路径
   → 写文件失败：返回保留的截断内容，并明确说明完整输出未能保存、不附成功路径；例如 "Full output could not be saved; only the truncated output is available."
 ```
 
-接入的工具：`list`（经 `renderList`，`A/tools/list.ts:59`）、`glob`（直接调 `truncateIfTooLong`，`A/tools/glob.ts:81`）、`web`（`renderResult` 现在拿不到调用上下文，`web.ts:487`，要把 `sessionId` 和 `callId` 传进去）。
+接入的工具是 `list`、`glob`、`web_search` 与 `web_fetch`。它们在最后的显示截断处调用 `persistDisplayedOutput`，短结果不落盘。`list` 的条目 limit、`glob` 的扫描限制和 Web provider 的采集限制保持不变；文件保存已取得的内容及原有不完整说明，不补采未取得的数据。
 
-Bash：`A/tools/shell-job-registry.ts` 在捕获时只保留头尾（`OUTPUT_CAPTURE_CHAR_LIMIT`，:29、:132-150）。任务启动参数里已有 `sessionId` 和 `owner.callId`（:42-54，`A/tools/bash.ts:248-259`）。第二期由 `bash.ts` 给任务传一个可选的输出文件路径 `tool-results/<jobId>.log`，任务在捕获的同时把完整的 stdout 和 stderr 追加写进去（上限 10 MB）；输出被截断时在结果里附上路径。任务登记本身不认识存储区。
+Bash 由 `bash.ts` 准备输出目录并传可选 `outputDirectory`；`ShellJobRegistry.start` 使用自己生成的 jobId 建 `<jobId>.log`。registry 不接触存储归属、会话数据库或 `OHBABY_HOME`。stdout/stderr 的原始 Buffer 按事件到达顺序同步写入文件，然后更新原有的有界内存头部或尾部；不承诺两个流在操作系统层面的全序。达到 10 MiB 后保留带截断说明的部分文件，停止后续写盘并关闭句柄，继续消费流与更新内存。同步写入处理短写，没有待写队列，UTF-8 截断不留下半个字符。
 
-输出保存失败与命令执行失败要分开说明：命令已执行成功、但日志写盘失败时，保留真实命令结果，同时报告日志未能完整保存。部分写入或达到文件上限时不得将文件描述为完整输出；失败说明不假装提供成功保存的路径。第二期落实这一原则。
+日志完成由实际 stdio `close` 决定，不能绑到提前发布的逻辑终态。运行中给出目前捕获的路径与 `in-progress`；取消、排空超时或 dispose/prune 放弃捕获时标记 `partial`，按已有清理期限封口并释放句柄。仅正常 stdio close 且文件关闭成功后给出 `full`。open/write/close 失败为 `unavailable`，不附成功路径，也不改变命令的 status、exitCode 或 executionOutcome。文件随根会话保留，任务淘汰和 registry dispose 不删除日志。
+
+内部写入拒绝被重定向的根、tool-results 目录与预置同名文件/链接；文件使用独占创建。缺少已登记根时不按 `context.sessionId` 猜路径，也不做每工具一次的数据库归属查询。
 
 ### 2.5 列文件与读文件（第二期 b）
 
@@ -147,7 +150,21 @@ isWriteTrustedRootKind(kind)  // session-scratch 可写；session-storage 与仅
 
 ```ts
 // A/services/session-storage.ts
-writeToolOutput(input: { ownerSessionId: string; callId: string; text: string }): Promise<string | undefined>
+prepareToolOutputDirectory(environment?: Pick<ToolExecutionEnvironment, "trustedRoots">): Promise<string | undefined>
+writeToolOutput(input: {
+  environment?: Pick<ToolExecutionEnvironment, "trustedRoots">;
+  callId: string;
+  text: string;
+}): Promise<OutputFileSnapshot>
+// 替换草案的 string | undefined，区分完整、达上限与失败，避免把部分文件称为完整。
+// 非 Bash 的返回只会是 full、partial(size-limit) 或 unavailable。
+// Bash 快照额外允许 in-progress、partial(stdio-incomplete)。
+type OutputFileSnapshot =
+  | { status: "unavailable" }
+  | { status: "full" | "in-progress"; path: string; sizeBytes: number }
+  | { status: "partial"; path: string; sizeBytes: number; reason: "size-limit" | "stdio-incomplete" };
+
+// 第二期 b 规划，尚未实现：
 listSessionFiles(ownerSessionId: string): Promise<ReadonlyArray<{ path: string; size: number; modifiedAt: string }>>
 readSessionFile(ownerSessionId: string, relativePath: string): Promise<
   { kind: "text"; text: string } | { kind: "image"; contentType: string; bytes: Uint8Array }

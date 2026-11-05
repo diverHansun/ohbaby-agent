@@ -1,6 +1,6 @@
 # architecture
 
-2026-11-05 实施状态：第一期与子代理结果搬迁已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期工具输出与 Files 页也尚未实现。
+2026-11-05 实施状态：第一期、子代理结果搬迁与第二期 a 工具输出存盘已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期 b 文件 API 与 Files 页尚未实现。
 
 > 2026-11-04。以 [goals-duty](goals-duty.md) 为前提。路径缩写：`A/` = `packages/ohbaby-agent/src/`，`S/` = `packages/ohbaby-server/src/`，`W/` = `apps/ohbaby-web/src/`。
 
@@ -79,8 +79,9 @@
 | `A/services/reminder/{index,environment}.ts` 及运行上下文接入处 | 将当前运行准备结果传给提醒：成功提供实际 scratch 路径，失败明确说明不可用；不在提醒中另行拼出未准备好的路径 |
 | `A/core/system-prompt/prompts/{primary,subagents}/base.md` | 分别写固定文件落点规则，子代理旧报告提示同步改写；重新生成 `templates.generated.ts` 并更新提示词断言 |
 | `A/services/session/archive-files.ts` | 删除 `sessions/<id>` |
-| 第二期新增 | `A/services/session-storage.ts`：`writeToolOutput`、`listSessionFiles`、`readSessionFile` |
-| 第二期修改 | `A/tools/utils/output.ts` 与调用方、`A/tools/glob.ts`、`A/tools/web.ts`、`A/tools/bash.ts`、`S/protocols/web/routes/sessions.ts`、`W/ui/side-panel/`；新建 `W/ui/session-files/` |
+| 第二期 a 已实现 | `A/services/session-storage.ts`：从已登记根准备输出目录并保存文本；`A/utils/capped-output-file.ts`：同步有界文件捕获、10 MiB 上限与完整性说明 |
+| 第二期 a 接入 | `A/tools/utils/output.ts` 的显式异步包装与 list/glob/web 调用方；Bash 准备目录，shell registry 仅负责按 jobId 捕获日志及实际 stdio 生命周期 |
+| 第二期 b 规划 | `A/services/session-storage.ts` 的 `listSessionFiles`、`readSessionFile`；`S/protocols/web/routes/sessions.ts`、`W/ui/side-panel/`、`W/ui/session-files/` |
 
 ## 4. Architectural Constraints & Trade-offs
 

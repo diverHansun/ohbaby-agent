@@ -1,5 +1,6 @@
 import { isShellTrustedRootKind } from "../sandbox/trusted-roots.js";
 import { mergeChildProxyEnvironment } from "../utils/network-proxy/child-environment.js";
+import { prepareToolOutputDirectory } from "../services/session-storage.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
   ChildProcess,
@@ -236,6 +237,9 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           commandPrefix.length > 0
             ? [...commandPrefix.slice(1), shellPath, ...args]
             : args;
+        const outputDirectory = await prepareToolOutputDirectory(
+          context.environment,
+        );
         const release = context.environment?.retain?.();
         let snapshot: ShellJobSnapshot;
         try {
@@ -249,6 +253,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             shellPath,
           });
           snapshot = registry.start({
+            outputDirectory,
             background: runInBackground,
             owner: context.owner ?? {
               sessionId: context.sessionId,

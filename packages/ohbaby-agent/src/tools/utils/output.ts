@@ -1,7 +1,34 @@
 import { createTwoFilesPatch } from "diff";
 import { truncateIfTooLong } from "../../utils/index.js";
+import type {
+  ToolExecutionContext,
+  ToolExecutionResult,
+} from "../../core/tool-scheduler/types.js";
+import { writeToolOutput } from "../../services/session-storage.js";
+import { outputFileNotice } from "../../utils/capped-output-file.js";
 
 export const DEFAULT_OUTPUT_TOKEN_LIMIT = 8_000;
+
+/** Persist only acquired content that the caller's existing display limit omitted. */
+export async function persistDisplayedOutput(input: {
+  readonly context: ToolExecutionContext;
+  readonly acquired: string;
+  readonly displayed: string;
+  readonly displayLimited: boolean;
+  readonly metadata: Record<string, unknown>;
+}): Promise<ToolExecutionResult> {
+  if (!input.displayLimited)
+    return { output: input.displayed, metadata: input.metadata };
+  const outputFile = await writeToolOutput({
+    environment: input.context.environment,
+    callId: input.context.callId,
+    text: input.acquired,
+  });
+  return {
+    output: `${input.displayed}\n\n${outputFileNotice(outputFile)}`,
+    metadata: { ...input.metadata, outputFile },
+  };
+}
 
 export function truncateOutput(
   output: string,

@@ -20,7 +20,7 @@ import {
   type SearchTimeRange,
 } from "../services/search-providers/index.js";
 import { ToolParameterError, getStringParam } from "./utils/params.js";
-import { truncateOutput } from "./utils/output.js";
+import { persistDisplayedOutput, truncateOutput } from "./utils/output.js";
 
 const MAX_RESULTS = 20;
 const MAX_FETCH_URLS = 10;
@@ -54,7 +54,7 @@ function createWebSearchTool(options: WebToolsOptions): Tool {
       const results = await provider.search(query, searchOptions);
       assertNotAborted(context);
 
-      return renderResult({
+      return renderResult(context, {
         metadata: {
           count: results.length,
           provider: provider.id,
@@ -124,7 +124,7 @@ function createWebFetchTool(options: WebToolsOptions): Tool {
       assertNotAborted(context);
 
       const successCount = results.filter((result) => result.success).length;
-      return renderResult({
+      return renderResult(context, {
         metadata: {
           count: results.length,
           failedCount: results.length - successCount,
@@ -481,18 +481,24 @@ function renderFetchResults(
     .join("\n\n");
 }
 
-function renderResult(input: {
-  readonly output: string;
-  readonly metadata: Record<string, unknown>;
-}): ToolExecutionResult {
+function renderResult(
+  context: ToolExecutionContext,
+  input: {
+    readonly output: string;
+    readonly metadata: Record<string, unknown>;
+  },
+): Promise<ToolExecutionResult> {
   const output = truncateOutput(input.output, WEB_OUTPUT_TOKEN_LIMIT);
-  return {
+  return persistDisplayedOutput({
+    context,
+    acquired: input.output,
+    displayed: output,
+    displayLimited: output !== input.output,
     metadata: {
       ...input.metadata,
       truncated: output !== input.output,
     },
-    output,
-  };
+  });
 }
 
 function compactObject<T extends Record<string, unknown>>(input: T): T {

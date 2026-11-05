@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ChildProcess } from "node:child_process";
@@ -40,6 +47,78 @@ function killShellTree(child: ChildProcess): ReturnType<typeof Shell.killTree> {
 }
 
 describe("shell job real-process integration", () => {
+  it.each([false, true])(
+    "persists real stdout and stderr beyond capture (background=%s)",
+    async (background) => {
+      const workdir = await realpath(
+        await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-full-output-")),
+      );
+      const storage = path.join(workdir, "owner");
+      await mkdir(storage);
+      const registry = new ShellJobRegistry({ killTree: killShellTree });
+      const bash = createBashTool({ registry });
+      const quote = (value: string): string =>
+        `'${value.replaceAll("'", "'\\''")}'`;
+      const script = path.join(workdir, "large-output.mjs");
+      await writeFile(
+        script,
+        "import fs from 'node:fs'; fs.writeSync(1, Buffer.alloc(524288, 65)); fs.writeSync(2, Buffer.alloc(524288, 66)); fs.writeSync(1, 'stdout-end'); fs.writeSync(2, 'stderr-end');",
+      );
+      const base = createContext(workdir);
+      if (!base.environment) throw new Error("Missing fixture environment");
+      const context = {
+        ...base,
+        sessionId: "child-session",
+        environment: {
+          ...base.environment,
+          trustedRoots: (): ReturnType<
+            NonNullable<ToolExecutionEnvironment["trustedRoots"]>
+          > => [{ kind: "session-storage", path: storage }],
+        },
+      };
+      try {
+        const started = await bash.execute(
+          {
+            command: `exec ${quote(process.execPath)} ${quote(script)}`,
+            run_in_background: background,
+            timeout: 5000,
+          },
+          context,
+        );
+        const result = background
+          ? await createTaskOutputTool(registry).execute(
+              { job_id: started.metadata?.jobId, block: true, wait_ms: 5000 },
+              context,
+            )
+          : started;
+        expect(result.metadata).toMatchObject({
+          status: "completed",
+          exitCode: 0,
+          truncated: true,
+          outputFile: { status: "full" },
+        });
+        const file = (result.metadata?.outputFile as { path: string }).path;
+        expect(file).toBe(
+          path.join(
+            storage,
+            "tool-results",
+            `${String(result.metadata?.jobId)}.log`,
+          ),
+        );
+        const bytes = await readFile(file);
+        expect(bytes.length).toBe(1_048_596);
+        expect(bytes.filter((byte) => byte === 65).length).toBe(524288);
+        expect(bytes.filter((byte) => byte === 66).length).toBe(524288);
+        expect(bytes.toString("utf8")).toContain("stdout-end");
+        expect(bytes.toString("utf8")).toContain("stderr-end");
+        await registry.dispose();
+        expect(await readFile(file)).toEqual(bytes);
+      } finally {
+        await registry.dispose();
+        await rm(workdir, { force: true, recursive: true });
+      }
+    },
+  );
   it("runs a background command and reads its terminal output", async () => {
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });

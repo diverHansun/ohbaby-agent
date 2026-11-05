@@ -10,7 +10,10 @@ import {
   getStringParam,
   ToolParameterError,
 } from "./utils/params.js";
-import { DEFAULT_OUTPUT_TOKEN_LIMIT } from "./utils/output.js";
+import {
+  DEFAULT_OUTPUT_TOKEN_LIMIT,
+  persistDisplayedOutput,
+} from "./utils/output.js";
 import { truncateIfTooLong } from "../utils/truncate.js";
 import { resolvePathForExisting } from "./utils/context.js";
 import { DEFAULT_SEARCH_LIMIT, FILE_PATH_SCHEMA } from "./utils/text-files.js";
@@ -87,8 +90,11 @@ export function createGlobTool(): Tool {
         const notice = scan.stopReason
           ? `\n\nGlob incomplete (${scan.stopReason}). Narrow the pattern or search root.`
           : "";
-        return {
-          output: rendered + notice,
+        return persistDisplayedOutput({
+          context,
+          acquired: matches.join("\n") + notice,
+          displayed: rendered + notice,
+          displayLimited,
           metadata: {
             count: matches.length,
             truncated: !scanComplete,
@@ -96,7 +102,7 @@ export function createGlobTool(): Tool {
             displayLimited,
             stopReason: scan.stopReason,
           },
-        };
+        });
       },
     },
     "tree",

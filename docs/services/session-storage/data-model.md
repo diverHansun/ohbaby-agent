@@ -1,6 +1,6 @@
 # data-model
 
-2026-11-05 实施状态：第一期与子代理结果搬迁已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期工具输出与 Files 页也尚未实现。
+2026-11-05 实施状态：第一期、子代理结果搬迁与第二期 a 工具输出存盘已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；第二期 b 文件 API 与 Files 页尚未实现。
 
 > 2026-11-04。本模块没有数据库表，下面的“数据”都是文件系统上的目录和文件。
 
@@ -38,15 +38,16 @@
     ├── subagents/                   子代理结果搬迁议题：第一次导出时创建；系统写，agent 可读
     │   └── <subagentId>/<executionId>.output
     └── tool-results/                第二期：第一次写入时创建；系统写，agent 可读
-        ├── <callId>-<随机 6 位>.txt   非 Bash 工具输出（受文件上限限制）
+        ├── <safe-callId>-<UUID>.txt   非 Bash 工具输出（受文件上限限制）
         └── <jobId>.log               Bash 任务的 stdout 与 stderr（受文件上限限制）
 ```
 
 - `ownerId` 只允许 `[A-Za-z0-9_-]`，长度不超过 128。
 - `scratch/` 由同一根会话的主代理和子代理共享，不强制按子代理再建一层目录。系统保存的最终长报告仍按 `subagents/<subagentId>/<executionId>.output` 区分代理与执行；两者是不同用途，本次确认不改变报告目录结构。
-- 文件名里的 `callId` 先把不允许的字符替换成 `_`，再加 6 位随机后缀。有的服务商会重复使用 `call_0` 这类 ID，不加后缀会互相覆盖。
+- 文件名里的 `callId` 只保留 `[A-Za-z0-9_-]`，其他字符替换成 `_`，取前 128 个字符，空串用 `call`；再加随机 UUID 后缀。有的服务商会重复使用 `call_0` 这类 ID，不加后缀会互相覆盖。独占创建同时拒绝覆盖已有文件或链接。
 - Bash 用任务 ID 命名，不用调用 ID：后台任务比发起它的那次调用活得久。
-- 第二期每个输出文件上限 10 MB，超出部分不写，并在文件末尾注明已截断。
+- 每个输出文件上限 10 MiB（10,485,760 字节，`TOOL_OUTPUT_MAX_BYTES`），文件末尾的截断说明也计入上限；不会截在 UTF-8 字符中间。POSIX 下目录 0700、文件 0600。
+- 工具结果里的 `metadata.outputFile` 只在显示发生截断时出现。完整文件为 `full`，达到上限或捕获提前结束为 `partial`，仍在捕获为 `in-progress`，保存失败为 `unavailable`。失败结果不携带成功路径；具体结构见 [dfd-interface §3.2](dfd-interface.md#32-第二期)。
 
 ### 2.2 不保存的信息
 
