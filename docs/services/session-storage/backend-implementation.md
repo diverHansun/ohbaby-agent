@@ -87,7 +87,7 @@ pnpm test:integration
 
 - **T17 真实运行尚未完成**：用本机 daemon 和真实 provider 派 `generic` 子代理生成日志及超过 50 KiB 的报告，确认日志在根会话 scratch、父代理收到新报告路径并能读全文。自动化请求、SQLite、scheduler 和进程测试不能替代这项手工验收。
 - 建议同时手工核对 default 模式下系统文件改写会审批、读取授权不能放行写入/Shell，以及永久删除根会话后的目录清理。自动化已覆盖这些行为，手工验收记录由后续验收会话补充。
-- Files 前端、S17 浏览器验收尚未实施。文件 API 的 HTTP 测试使用真实鉴权、绑定与文件系统，以及受控后端 fixture，不声称完成了浏览器联调。
+- Files 前端与 S17 浏览器走查已在后续前端分支完成，见 [frontend-implementation](frontend-implementation.md)。文件 API 的 HTTP 测试使用真实鉴权、绑定与文件系统，以及受控后端 fixture，不声称完成了浏览器联调。
 - side chat/fork 的条件场景留在各自议题，本次没有提前增加归属框架。仅在 macOS 验证，未做 Windows 实机测试。
 
 权限规则属于模型工具与文件 API 的访问控制，不是操作系统级隔离；文件读取也不提供内容快照保证。输出写入没有新增 fsync 崩溃一致性承诺。

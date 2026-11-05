@@ -174,6 +174,14 @@
 - 在 SDK 能按 `subagentId` 直接打开之前（improve-2 B4），打开时先取一次执行记录再交给 reader：入口行给了 `executionId` 就用它，否则用实例的 `latestExecutionId`。
 - 停止调用 `stopSubagent`，带上实例当前的 `currentExecutionId`。错误码 `SUBAGENT_SNAPSHOT_CHANGED`（HTTP 409）当成“已提交，结果不确定”，刷新列表后以列表为准；其他 409（比如跨会话）照常报错。
 
+### FilesPage
+
+- 输入：`api`（`SessionFilesApi`，由 runtime 提供）、`client`（只用来订阅事件）、`rootSessionId`、当前 Tab 的 `selectedPath` 和 `onSelect`。Tab 状态是 `{ path? }`，跟会话走（`sessionScoped`），切换主会话时回到列表。
+- `api.list` 和 `api.read` 只传根会话 ID，绑定（`runtimeEpoch`、`bindingGeneration`）由 `BrowserDaemonClient` 注入，和 `listSubagentInstances` 一样。读文件用 `DaemonHttpClient.send` 取原始响应：`image/*` 转成 object URL，其他按文本处理。object URL 在离开预览或重新读取时释放。
+- 列表由 `useSessionFiles` 持有：刷新失败时保留上一次的列表，并在上方显示原因和 Retry。预览在列表更新、文件的大小或修改时间变了时重新读取；列表已加载却没有这个文件时，显示“已不在”。
+- 从预览返回时，焦点回到对应的行；打开预览时焦点在文件名标题上。
+- 只读：不提供改名、删除或在编辑器中打开。复制只给文本，下载用浏览器自带的下载流程（daemon 接口需要 bearer token，不能直接给链接）。
+
 ## 4. 组件与模式
 
 以下是“模式”，由多个组件组合实现，不做成一个大组件：

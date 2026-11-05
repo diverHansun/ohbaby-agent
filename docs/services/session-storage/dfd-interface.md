@@ -1,6 +1,6 @@
 # dfd-interface
 
-2026-11-05 实施状态：第一期、子代理结果搬迁、第二期 a 工具输出存盘及第二期 b 后端文件 API 已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；Files 前端与 S17 浏览器验收留到后续。
+2026-11-05 实施状态：第一期、子代理结果搬迁、第二期 a 工具输出存盘及第二期 b 后端文件 API 已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；Files 前端已实现，S17 浏览器走查见 [frontend-implementation](frontend-implementation.md)。
 
 > 2026-11-04。路径缩写同 [architecture](architecture.md)。
 
@@ -123,7 +123,7 @@ Web 右侧面板 Files 页打开
 
 列表只列普通文件，跳过符号链接及非普通条目，不列 `subagents/`、`tool-results/` 或其他根会话。scratch 尚未创建时返回空列表，读取请求不会创建目录；其他磁盘故障如实返回错误。内容用真实句柄有界读取，文件在读取时增长也不能突破固定容量，句柄在 `finally` 中关闭。这些检查不是操作系统级的文件隔离。
 
-本批只实现后端 API，Files 前端、带鉴权的二进制 fetch 和 S17 浏览器走查留到后续。
+前端已实现：Web 用 `DaemonHttpClient.send` 带 bearer token 取原始响应，图片转 object URL，文本直接显示。页面行为见 `docs/ohbaby-web/redesign-2026-10/03-ui-layout-and-style.md` §4.9 的 Files 页。
 
 ## 3. Interface Definition
 

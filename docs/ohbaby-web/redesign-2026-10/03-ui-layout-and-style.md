@@ -361,7 +361,7 @@ Web search 是一页表单（API key、> More options：Key variable、Base URL�
 
 ### 4.9 右侧栏（D33、D34）
 
-右侧栏是一个 Tab 容器，现在只有 Subagents 一种页面，以后会加文件预览、终端、内置浏览器、Side chat。产品行为见[子代理生命周期 improve-3](../../problem-lists/2026-10-26-subagent-lifecycle/improve-3/02-optimization-plan-and-change-scope.md)，这里只定结构和视觉。2026-10-29 对照 Codex、Claude 桌面端和 Cursor 的右侧栏做了一轮优化（D34）。
+右侧栏是一个 Tab 容器，现在有 Subagents、Files、Terminal 三种页面，以后会加内置浏览器、Side chat。产品行为见[子代理生命周期 improve-3](../../problem-lists/2026-10-26-subagent-lifecycle/improve-3/02-optimization-plan-and-change-scope.md)，这里只定结构和视觉。2026-10-29 对照 Codex、Claude 桌面端和 Cursor 的右侧栏做了一轮优化（D34）。
 
 ```
 主区顶栏右端加开关 [|]                                  右侧栏（初值 420px，左边线可拖动改宽，320–720px）
@@ -403,6 +403,31 @@ Web search 是一页表单（API key、> More options：Key variable、Base URL�
 - **列表：** 行高随内容（两行），不做卡片；悬停用 `--bg-hover`。分组标题可以折叠，后面带数量。状态尽量安静，每种状态一个 12px 的小图标，文字因此对齐：运行中、收尾中是小转圈；等审批是琥珀色小点，和侧栏会话行一致；完成是淡绿色对勾；失败和超时是 `--danger-ink` 的感叹号圆圈加同色文字，不用红底；中断和取消是灰色斜杠圆圈。聊天里的入口行用同一套图标（`shared/StatusGlyph`）。
 - **停止按钮：** 描边胶囊，带实心小方块，和输入框的停止一样是黑色，不用红色（D32）。点击后变成禁用的 `Stopping…`，直到实例的收尾结束。
 - **加载：** 不做骨架屏；首次加载超过 300ms 才显示一行 `Loading…`，和主区一致。
+
+**Files 页（2026-11-05，会话存储区第二期 b）**
+
+```
++---------------------------------------+
+| (folder Files x) [+]           [<>] [|] |
+|  Scratch 4                        [↻] |  <- 小标题加数量；刷新时图标转动
+|  [doc] build.log            5.5 KB · 3m |  <- 单行：图标、文件名、淡色文件夹、大小 · 时间
+|  [doc] review.md  reports  9.0 KB · 42m |
+|  [img] panel.png  screenshots 1.3 MB · 1h |
++---------------------------------------+
+
+预览（同一个 Tab 里切换）：
++---------------------------------------+
+| [<] review.md     (Preview|Source) [⧉] [↓] |  <- 返回、名称；Markdown 才有切换；复制只给文本
+|     reports · 9.0 KB · 42m             |
+|  渲染后的 Markdown / 带行号的文本 / 图片  |  <- 标题下不加分隔线（D27）
++---------------------------------------+
+```
+
+- **范围：** 只列根会话 `scratch/` 下的普通文件，按服务端给的路径顺序平铺，不做树。子代理报告和工具原文由消息里的路径指向，不在这里列。
+- **刷新：** 打开页面时读一次；本会话或其子代理的运行状态变化后（`run.updated`，400ms 内合并），以及 `session.resync-required` 时再读；右上角可以手动刷新。服务端没有文件事件，所以不轮询。
+- **预览：** 文本用等宽字体，自动换行，左侧行号由 CSS 生成，复制时不带行号。Markdown 默认渲染，右上角可切到源码（参考 opencode、ZCode）。图片按面板宽度缩放，透明部分显示浅色棋盘格（参考 pi-web）。
+- **看不了的文件：** 不支持的类型显示 `No preview for this file type` 加文件名和大小；过大显示 `Too large to preview`，并说明文本 1 MB、图片 10 MB 的上限；文件已被删掉显示 `This file is no longer here`，带返回按钮；其他错误给出原因和 `Try again`。都不用红色。
+- **空状态：** `No files yet`，下面一句说明这些文件不在用户的工作区里。
 
 ## 5. 响应式
 

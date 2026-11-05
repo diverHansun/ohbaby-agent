@@ -51,7 +51,7 @@ side chat 的归属（用主会话的目录、关闭时不删除）在 side chat
 | S14 | 列文件 | `GET /files` 递归列当前根会话 `scratch/` 普通文件，按相对路径排序，返回字节大小及 ISO 修改时间；不列系统目录、其他根、符号链接；scratch 不存在时为空且不创建目录 |
 | S15 | 读文件边界 | 拒绝绝对路径、NUL、反斜杠、`..` 路径段、父目录或最终文件符号链接、目录/FIFO 和重定向会话子树；允许普通 `..notes` 文件名及规范 home 别名。文本严格 UTF-8、1 MiB，PNG/JPEG/GIF/WebP 按签名、10 MiB；验证恰好上限及上限加 1 字节、读取期间增长、打开前父目录交换后恢复、读取中替换文件及句柄关闭。文件错误对应 400/404/413/415，其他 I/O 故障不假成功 |
 | S16 | 鉴权 | 两个路由都检查 bearer token、clientId、注册、epoch、generation、绑定根及可用根；拒绝其他根、子代理 ID 和过期绑定；真实异步读取期间切根或删除根时拒绝交付内容。文本与图片以原始内容返回，带 no-store、nosniff；HTML/SVG 只按文本服务 |
-| S17 | Files 页（后续） | 右侧面板能列出文件，点开文本和图片能预览，其他类型只显示名字和大小；本批后端不包含此项 |
+| S17 | Files 页 | 右侧面板能列出文件，点开文本和图片能预览，其他类型只显示名字和大小。自动化见 `W/ui/side-panel/files/FilesPage.integration.test.tsx`，浏览器走查见 frontend-implementation |
 
 ## 3. Integration Points
 
@@ -67,7 +67,8 @@ side chat 的归属（用主会话的目录、关闭时不删除）在 side chat
 
 - 第一期发布门：S1 至 S10（含 S3b、S3c、S3d、S6b、S6c）通过；`pnpm typecheck`、`pnpm lint`、`pnpm -C packages/ohbaby-agent prompt:check` 通过；architecture §4.4 中第一期的文档已同步。
 - 第二期 a 发布门：S11 至 S13 通过；`docs/tools/` 中输出截断的说明已同步。
-- 第二期 b 后端发布门：S14 至 S16 的服务集成与真实 HTTP 合同测试通过；`pnpm typecheck`、`pnpm lint` 通过。前端发布门留到后续：S17 浏览器走查附截图，届时同步 `docs/ohbaby-web/` 的右侧面板说明。
+- 第二期 b 后端发布门：S14 至 S16 的服务集成与真实 HTTP 合同测试通过；`pnpm typecheck`、`pnpm lint` 通过。
+- 第二期 b 前端发布门：S17 自动化测试与浏览器走查通过；`docs/ohbaby-web/` 的右侧面板说明已同步。
 
 后端测试见 `packages/ohbaby-agent/src/services/session-storage.integration.test.ts` 与 `packages/ohbaby-server/src/app/session-files.integration.test.ts`。HTTP 测试经过真实注册、绑定选择和授权协调器，不用完整聊天 view 作授权。故障与竞态仅在底层文件 I/O 暂停或注入错误，文件内容仍经真实文件系统读取。
 

@@ -1,6 +1,6 @@
 # session-storage（会话存储区）
 
-2026-11-05 实施状态：第一期、子代理结果搬迁、第二期 a 工具输出存盘及第二期 b 后端文件 API 已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；Files 前端与 S17 浏览器验收留到后续。
+2026-11-05 实施状态：第一期、子代理结果搬迁、第二期 a 工具输出存盘及第二期 b 后端文件 API 已实现；当前归属按 `parentId ?? sessionId` 计算。本文涉及 side chat 共享、fork 独立目录及源文件读取的内容是后续议题的约束，尚未实现或验收；Files 前端已实现，S17 浏览器走查见 [frontend-implementation](frontend-implementation.md)。
 
 > 2026-11-05 实施前复查：已确认不改变 cwd，独立存放临时文件、报告和中间产物；固定规则分别放进主、子代理基础提示词，实际路径由环境提醒提供。先完善本模块，再处理子代理输出。两项权限修正纳入第一期，本轮文档复核暂未发现新的待决阻塞项，见[复查记录](../../problem-lists/2026-11-05-subagent-results-location/improve-1/00-discussion.md#7-实施前复查2026-11-05)。
 
@@ -26,6 +26,7 @@
 | [dfd-interface](dfd-interface.md) | 目录怎么建、怎么被 agent 使用、怎么删除；对外接口 |
 | [test](test.md) | 测试范围、关键场景、集成点 |
 | [backend-implementation](backend-implementation.md) | 后端提交、实际行为、自动化验证和待手工验收项目 |
+| [frontend-implementation](frontend-implementation.md) | Files 页的前端提交、行为、测试和浏览器走查 |
 
 `use-case.md` 与 `non-functional.md` 跳过：本模块没有多步骤的业务编排；安全与磁盘占用这两条非功能约束写在 architecture 的约束一节。
 
