@@ -25,6 +25,7 @@
 | [data-model](data-model.md) | 存储区、子目录、生命周期 |
 | [dfd-interface](dfd-interface.md) | 目录怎么建、怎么被 agent 使用、怎么删除；对外接口 |
 | [test](test.md) | 测试范围、关键场景、集成点 |
+| [backend-implementation](backend-implementation.md) | 后端提交、实际行为、自动化验证和待手工验收项目 |
 
 `use-case.md` 与 `non-functional.md` 跳过：本模块没有多步骤的业务编排；安全与磁盘占用这两条非功能约束写在 architecture 的约束一节。
 
