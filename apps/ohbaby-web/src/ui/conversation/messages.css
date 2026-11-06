@@ -510,6 +510,13 @@
   opacity: 1;
 }
 
+/* The latest answer is usually the last thing in the stream, with no gap
+   below to tuck into; its row takes real height so the composer, which floats
+   over the stream's bottom padding, never covers it. */
+.ohb-message-actions.is-persistent {
+  margin-bottom: 0;
+}
+
 .ohb-message-user > .ohb-message-actions {
   justify-content: flex-end;
 }
