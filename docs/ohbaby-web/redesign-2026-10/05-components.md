@@ -18,6 +18,8 @@
 |---|---|---|---|---|
 | `Menu` | 基础 | 弹出菜单：定位、键盘、过滤、焦点归还 | `ui/shared/` | 新增 |
 | `IconButton` | 基础 | 只有图标的按钮，带可读名称 | `ui/shared/` | 新增 |
+| `CopyButton` | 基础 | 复制按钮：成功显示对勾，失败如实提示；配 `writeClipboard` | `ui/shared/` | 新增（消息复制议题） |
+| `MessageActions` | 组合 | 消息下面的图标操作栏，按钮由调用方给 | `ui/conversation/` | 新增（消息复制议题） |
 | `Spinner` | 基础 | 转圈 | `ui/shared/` | 新增（替换三色波点） |
 | `Notice` / `NoticeStack` | 基础 | 对话区右上角的通知（失败、后台事件） | `ui/shared/` | 新增 |
 | `Wordmark` | 基础 | 三色字标，`size: "sm" \| "md"`；`sm` 用于侧栏，`md` 只用于启动失败页 | `ui/shared/` | 由 `SessionStatus` 中的字标抽出 |
@@ -152,6 +154,13 @@
 - **Anatomy**：在对应行下展开，配置按标签和值排成行，状态、失败原因和 Tools 独立展示；可选字段没有值时不显示。
 - **API**：接收只读配置 ViewModel 与当前实例的状态、工具列表，不接收保存、删除、启停或重连回调。
 - **约束**：Environment / Headers 只显示名字，URL 使用服务端脱敏结果；没有表单或开关。刷新由 `McpSection` 触发，只重读配置与状态。配置修改继续交给 ohbaby（D25）。
+
+### MessageActions 与 CopyButton
+
+- `MessageActions` 接收 `{ actions: { key, node }[]; persistent? }`，只负责排一行图标按钮和显示规则（悬停、焦点、触屏、`persistent`），不关心有哪些按钮。`ConversationStream` 决定哪条消息挂什么：用户消息（不含压缩摘要）和 `projectRunProcesses` 给出的每轮 `answerId` 挂复制；最新一条答案传 `persistent`。撤销和 fork 议题往同一个列表里加按钮。
+- `CopyButton`（`ui/shared/`）是全站唯一的复制按钮：入参是 `text`（字符串，或点击时才读取的函数）、`label`，可选 `copiedLabel`。经 `writeClipboard` 写入，成功显示对勾，失败显示 `Copy failed`，1.5 秒后恢复。消息、About 设置、Files 预览都用它。
+- `writeClipboard`（`ui/shared/clipboard.ts`）先用 `navigator.clipboard`，不可用或被拒绝时用隐藏的 `textarea` 加 `execCommand("copy")`，返回是否成功。
+- 代码块的复制按钮是 `MarkdownBlock` 的渲染器写进 HTML 的（`<div class="ohb-code-block">` 包住按钮和 `<pre>`），点击由 `MarkdownBlock` 的容器统一处理，复制同一块里 `<pre>` 的文字，去掉末尾换行。渲染器用模块内的 `Marked` 实例，不改全局 `marked`。
 
 ### SidePanel
 

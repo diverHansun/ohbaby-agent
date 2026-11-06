@@ -8,7 +8,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | Web 消息操作栏、剪贴板工具、用户消息与最终答案复制、代码块复制 | 规划中 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | Web 消息操作栏、剪贴板工具、用户消息与最终答案复制、代码块复制 | 已实施，待用户验收（2026-11-06，分支 `codex/message-copy`） |
 
 ## 本轮文档地图
 
@@ -20,6 +20,39 @@
 | [03 参考项目](improve-1/03-reference-projects.md) | deepseek-harness、ZCode、kimi-code、opencode 的复制做法与取舍 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 场景、回归清单、发布门 |
 | 05 实施验收 | 实施完成后由验收会话写入 `improve-1/05-implementation-acceptance.md` |
+
+## 实施记录（2026-11-06）
+
+在分支 `codex/message-copy` 上实施，没有合并或推送。只改 Web，后端、SDK、TUI 都没动。界面参考 Claude、Codex、Cursor 的做法；这几个桌面应用不在 `code-cli/` 下，参考的是产品的实际表现。
+
+**落地内容**：
+
+- `ui/shared/clipboard.ts` 的 `writeClipboard`：先用 `navigator.clipboard`，不可用或被拒绝时退回隐藏 `textarea` 加 `execCommand("copy")`，返回是否成功。
+- `ui/shared/CopyButton.tsx`：全站唯一的复制按钮，成功显示对勾，失败显示 `Copy failed`。About 设置和 Files 预览原来各有一份私有实现，都换成了它。
+- `ui/conversation/MessageActions.tsx` 与 `message-text.ts`：用户消息（含 steer）和每轮最终答案下面的操作栏，只复制 `text` 片段。
+- `ui/shared/MarkdownBlock.tsx`：模块内的 `Marked` 实例给每个代码块加 `Copy` 按钮，容器统一处理点击。
+
+**与 02 的三处出入**（实施时决定，请审查）：
+
+| 项 | 02 原文 | 实际 | 理由 |
+|---|---|---|---|
+| 代码块按钮的位置 | 插在 `<pre>` 开头 | 用 `<div class="ohb-code-block">` 包住按钮和 `<pre>`，按钮是 `<pre>` 的兄弟节点 | 按钮在 `<pre>` 里会随长代码横向滚走；放在外层才能固定在右上角，复制时也不会把按钮文字带进去 |
+| 代码块底色 | 未提 | 聊天里的 Markdown 代码块加了浅灰底（`--bg-panel`、圆角 8）；Files 预览原有的同类样式删掉，改用这一份 | 原来的代码块没有底色，角上的按钮会浮在文字上；Claude、Codex、Cursor 的代码块都有底色 |
+| 最新答案的操作栏 | 悬停或聚焦时显示 | 最新一条答案的操作栏一直显示，其余照旧 | 照 Claude 的做法；用户最常复制的是刚得到的回答 |
+
+另外，在触屏设备上代码块的 `Copy` 按钮一直显示，所以给代码留出顶部一条空间，免得挡住第一行代码。
+
+**审查后的修正**（子代理审查发现一项阻塞问题和几项应修问题，都已修复）：
+
+- 阻塞项：模型输出里的原始 HTML 能伪造代码块，显示一条命令、复制另一条。已改为按钮带随机令牌，只复制渲染器包装层直属的 `<pre>`，并补了测试（见 04 §4.5）。
+- iOS Safari 在只读的 `textarea` 里选不中文字，退回复制方式去掉了只读，并补上 `setSelectionRange`。没有真机验证。
+- 代码块按钮的读屏名称会随结果变成 `Copied` 或 `Copy failed`；按钮文字不会被拖选进复制内容。
+- 连续点击复制会重新计时；About、Files 预览的复制失败也显示错误色；用户气泡里的代码块改用页面底色，免得看不出来。
+- 运行中，或最新一轮没有最终答案时，不保留常显的操作栏。
+
+**已知限制**：右侧栏的子代理详情不传 prompt 记录，算不出“最终答案”，所以那里只有父代理派来的任务消息能复制，子代理自己的回答没有复制按钮。要补的话需要子代理视图提供轮次信息，留到以后。
+
+**验证**：Web 全部测试通过；用隔离的 daemon 加脚本模型在内置浏览器走查了 T4 到 T7、T9、T10（宽屏和 375px 手机宽度），复制结果用页面内的剪贴板记录核对过。T8（局域网 `http://`）没有实际环境，降级逻辑由 T2 的单元测试覆盖。
 
 ## 实施契约
 
