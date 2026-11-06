@@ -54,7 +54,7 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
 2. **打开**：新建 `A/adapters/ui-inprocess/side-chat.ts`，由 `ui-inprocess.ts` 注入依赖后暴露 `openSideChat({ mainSessionId })`。打开一个 `runWriteTransaction`，在回调里依次：
    1. 主会话必须存在、是根会话（不是子代理会话）、状态为 `active`、本身不是 side chat，否则分别返回 `SESSION_NOT_FOUND`、`SESSION_NOT_ROOT`、`SESSION_ARCHIVED`、`SIDE_CHAT_UNSUPPORTED`。
    2. 已有 `data.sideChat.mainSessionId` 等于主会话的会话时，直接返回它。
-   3. 否则调用 `forkSessionRows(tx, { sourceSessionId: mainSessionId, cutPromptId, promptScopeKey, title: "Side chat", data: { sideChat: { mainSessionId, boundaryMessageId, ownerPid: process.pid } } })`。`cutPromptId` 取主会话最近一个已结束、未被撤销的 prompt，没有就传 `null`（只建会话行）。`boundaryMessageId` 事先生成好。
+   3. 否则调用 `forkSessionRows(tx, { sourceSessionId: mainSessionId, cutPromptId, promptScopeKey, title: "Side chat", data: { sideChat: { mainSessionId, boundaryMessageId, ownerPid: process.pid } } })`。`cutPromptId` 取主会话最近一个已结束、未被撤销的 prompt，没有就传 `null`（只建会话行）。“未被撤销”依赖撤销议题的 `undone_at` 列，按撤销与 fork 的约定，由后落地的一方在这条查询里加上条件。`boundaryMessageId` 事先生成好。
    4. 写边界消息：一条 `role: "user"` 的消息，一个文本片段，不带 `runtimeInput`，ID 为上一步的 `boundaryMessageId`，`created_at` 为当前时间。`filterModelHistory` 会保留这样的消息（`A/runtime/prompt-scheduler/current-run-inputs.ts:524-526`）。正文用英文，依次写：
       - 这是一个旁路对话，之前的内容是从主会话继承的，只供参考；
       - 不要接着做主会话里的任务；
@@ -68,16 +68,20 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
    - Web 备用侧栏：按索引条目的 `isSideChat` 过滤。
    - 其余各处：调用 `isUserFacingSession`。TUI 启动“继续上次会话”时把 side chat 归为 `temporary`。
 4. **操作拦截**：在 01 §1.4.4 表里各操作的入口加一行检查，目标是 side chat 时返回 `SIDE_CHAT_UNSUPPORTED`。检查不放进 `assertCanUseAsPrimarySession`，它也管 prompt 提交。fork 入口由本议题加（fork 是前置议题）；撤销入口由撤销与本议题中后落地的一方加。
-5. **子代理**：在 `accessGuard`（`A/adapters/ui-runtime/composition.ts:416-428`）里，请求会话是 side chat 且工具是 `agent` 时，返回“Subagents are not available in side chat.”。
+5. **子代理**：在 `accessGuard`（`A/adapters/ui-runtime/composition.ts:424-435`）里，请求会话是 side chat 且工具是 `agent` 时，返回“Subagents are not available in side chat.”。
 6. **不改当前会话**：prompt 提交路径设当前会话的两处（`ui-inprocess.ts:1795`、`:4110`），在目标会话是 side chat 时跳过 `stateStore.setActiveSessionId`。
-7. **存储区**：会话存储区模块的归属规则里，side chat 归主会话：`initialTrustedRoots` 回调和环境提醒都用 `data.sideChat.mainSessionId` 作为归属 ID（见 `docs/services/session-storage/architecture.md` §1.1、§1.2）。存储区第一期和本议题谁后落地，谁负责让这条规则生效并补 04 的 T12。
+7. **存储区**：会话存储区已经落地（2026-11-05），由本议题让“side chat 归主会话”这条规则生效，并补 04 的 T12。
+   - 归属只在一处计算：`initialTrustedRoots` 回调（`A/adapters/ui-runtime/composition.ts:481-489`），现在是 `session?.parentId ?? scope.sessionId`。在这里加一个分支：会话是 side chat 时用 `data.sideChat.mainSessionId`。
+   - 环境提醒、工具输出存盘和 Bash 日志都从登记好的可信路径里取存储位置（`A/core/lifecycle/lifecycle.ts:623-625`、`A/tools/utils/output.ts:22`），不用另外改。
+   - 关闭时 `cleanupDeletedSessionFiles` 按会话 ID 删除 `sessions/<id>`，不计算归属。side chat 没有自己的目录，所以这一步什么也不删，主会话的目录和 side chat 写进主会话 scratch 的文件都保留。不要为了“清理 side chat 的文件”在这里改成按归属删除。
+   - side chat 面板不放 Files 页。Files 接口按客户端绑定的根会话找目录（`S/protocols/web/routes/sessions.ts:63-75`），由 side chat 的客户端调用时会找 `sessions/<sideChatId>`，以后要在面板里放文件页时，需要先改这一点。
 8. **关闭**：在 `A/services/session/archive.ts` 旁新增 `deleteSideChatSession(db, sideChatId, { skipBusyCheck })`：要求是 side chat，不要求已归档；删除方式同 `deleteArchivedSession`。adapter 的 `closeSideChat({ mainSessionId })`：
    - 找不到 side chat 时直接返回；
    - 取消它排队中的 prompt，对正在运行的一轮调用 `abortRun`（`ui-inprocess.ts:5379`）；`abortRun` 不保证返回时运行已经结束，所以接着每 100 毫秒检查一次 `sourceLedger.getActiveRuns(sideChatId)` 和活动 prompt，直到都为空，最多等 5 秒，超时返回 `SESSION_RUNNING`；
    - 调用删除函数，清理内存状态（参照归档 `ui-inprocess.ts:3300-3306`，另加 `permissionState.clearSession`），调用 `cleanupDeletedSessionFiles`，发布会话移除事件。
 9. **启动清理**：抽出函数 `deleteOrphanSideChats(db, isPidAlive)`：找出所有 side chat，`ownerPid` 对应进程已不存在的，调用 `deleteSideChatSession(..., { skipBusyCheck: true })` 并清理文件。在 `S/runtime/daemon/main.ts:178-186` 用全局数据库调用它（同 :558 的用法）。
 10. **路由与 SDK**：
-    - `S/protocols/web/routes/sessions.ts` 新增 `POST /v1/sessions/:mainId/side-chat` 和 `DELETE /v1/sessions/:mainId/side-chat`。状态码沿用 `globalSessionErrorStatus`（`S/protocols/global-sessions.ts:94-120`），在里面加 `SIDE_CHAT_UNSUPPORTED` → 409；响应体带 `code`。
+    - `S/protocols/web/routes/sessions.ts` 新增 `POST /v1/sessions/:mainId/side-chat` 和 `DELETE /v1/sessions/:mainId/side-chat`。状态码沿用 `globalSessionErrorStatus`（`S/protocols/global-sessions.ts:94-120`），在里面加 `SIDE_CHAT_UNSUPPORTED` → 409；响应体带 `code`。撤销、fork 议题已经改好的路由错误处理直接复用。
     - `packages/ohbaby-sdk/src/contract/client.ts` 加 `openSideChat`、`closeSideChat`，HTTP 与进程内实现一致；`SIDE_CHAT_UNSUPPORTED` 放进 `contract/global-sessions.ts`。
 
 **完成定义**：04 的 T1 至 T13 通过。
@@ -86,7 +90,7 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
 
 **改动**：
 
-1. **运行时接口**：`OhbabyWebRuntime`（`W/runtime/index.ts:37` 起）加 `openSideChat(mainSessionId)` 和 `closeSideChat(mainSessionId)`，mock 运行时（`W/dev/mock-runtime.ts`）同步实现。
+1. **运行时接口**：`OhbabyWebRuntime`（`W/runtime/index.ts:38` 起）加 `openSideChat(mainSessionId)` 和 `closeSideChat(mainSessionId)`，mock 运行时（`W/dev/mock-runtime.ts`）同步实现。
 2. **side chat 客户端**：新建 `W/ui/side-chat/side-chat-runtime.ts`。打开时：
    - 调用 `runtime.openSideChat` 拿到 `sideChatId`；
    - 用 `createOhbabyWebStore()` 建一个新 store，用 `createBrowserDaemonClient` 和新的 `randomUUID()` clientId 建一个新客户端，并打开它自己的事件流；注册时带 `startupIntent.resumeSessionId = sideChatId`（`S/coordination/client-view.ts:124-133`）；
@@ -95,7 +99,7 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
    关闭时先调用 `runtime.closeSideChat`，再销毁这个客户端和它的事件流。这个客户端建在 `InstanceLayer` 之外，不影响主客户端。现有的 `GlobalLayer.scopedHttp` 也是在 `InstanceLayer` 之外建客户端，但它不开事件流，这里需要开。
 3. **右侧面板页**：在 `W/ui/side-panel/side-pages.ts` 的 `SidePageStates`、`SIDE_PAGES` 和 `SidePanelPage.tsx` 各加一项“Side chat”，`sessionScoped: true`。切换主会话时页面重置，但不关闭 side chat；切回来再打开，`openSideChat` 返回原来那个。
 4. **面板内容**：新建 `W/ui/side-chat/SideChatPage.tsx`。
-   - 给 `ConversationStream` 加一个开关 `variant: "side-chat"`：为真时，消息操作栏只挂复制按钮（不挂 Edit、fork），也不挂“Ask in side chat”。由本议题添加。
+   - 给 `ConversationStream` 加一个开关 `variant: "side-chat"`：为真时，消息操作栏只挂复制按钮（不挂 Edit、fork），也不挂“Ask in side chat”。由本议题添加。按 2026-11-06 讨论的顺序，本议题在撤销和 fork 之后实施，Edit、fork 按钮那时已经存在，这个开关负责把它们藏起来；如果顺序变了、本议题先落地，后做的撤销或 fork 要在挂按钮时遵守这个开关。
    - 用 `ConversationPresentation` 包住 `ConversationStream`（参照 `W/ui/session/SubagentConversationBody.tsx`），只传 `boundaryMessageId` 之后的消息和这些消息对应的 prompt。没有内容时显示空状态说明：“Ask anything about this session. The main conversation won’t see this chat. It’s deleted when you close it.”
    - 下方用 `W/ui/composer/ComposerInput.tsx` 做输入框，关闭斜杠命令面板，配发送和停止按钮，不放模型、权限、goal 控件。
    - 审批用 `ApprovalPanel`，数据来自 side chat 自己的 store。

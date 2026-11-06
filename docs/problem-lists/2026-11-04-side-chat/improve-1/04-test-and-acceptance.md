@@ -29,7 +29,7 @@
 | T9 | 关闭 | integration | side chat 正在运行时关闭：排队的 prompt 被取消，运行被中止并等到结束；会话、消息、片段、prompt、run 行都被删除；内存里的视图、todo、权限规则被清掉；主会话不受影响；再次关闭返回 204。运行 5 秒内没结束时返回 `SESSION_RUNNING`，数据不删 |
 | T10 | 启动清理 | integration | 调用 `deleteOrphanSideChats(db, isPidAlive)`：`ownerPid` 已不在的两个 side chat（其中一个有标着运行中的 run 记录）被删除；`ownerPid` 还在的不删；主会话不受影响 |
 | T11 | 两个客户端 | integration | 客户端 A 绑定主会话，客户端 B 绑定 side chat：A 只收到主会话的事件和审批，B 只收到 side chat 的；B 提交后 A 的绑定不变 |
-| T12 | 存储区归属 | integration | 存储区第一期已落地时：side chat 的可信路径和环境提醒里是主会话的 `sessions/<mainId>`；能免确认读取主会话 scratch 里的文件；关闭 side chat 后这些文件仍在 |
+| T12 | 存储区归属 | integration | side chat 的可信路径和环境提醒里是主会话的 `sessions/<mainId>`，不会建出 `sessions/<sideChatId>`；能免确认读取主会话 scratch 里的文件；side chat 往 scratch 写的文件也落在主会话的目录里；关闭 side chat（以及启动清理）后，主会话的目录和这些文件都还在 |
 | T13 | 接口契约 | contract | 状态码与错误码同 02 §2.5，响应体带 `code`；HTTP 与进程内实现一致 |
 
 ### Stage 2：Web
@@ -58,7 +58,7 @@
 - **两个客户端**：T11、T15。
 - **TUI 与后端当前会话**：T8、T21。
 - **与 fork 议题**：T1 至 T3 依赖 `forkSessionRows`，fork 议题的 T1、T3 至 T8、T13 是它的前提。
-- **与撤销、存储区议题**：T6 的撤销部分、T12 由后落地的一方补齐。
+- **与撤销、存储区议题**：T6 的撤销部分由撤销与本议题中后落地的一方补齐。存储区已经落地，T12 由本议题补齐。
 
 ## 4.4 回归清单
 

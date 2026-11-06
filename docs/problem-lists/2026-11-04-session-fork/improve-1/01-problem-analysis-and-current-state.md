@@ -66,7 +66,7 @@
 |---|---|
 | 消息 `data` | `id`、`sessionId`、`runId`、`parentId`（`A/core/message/types.ts:75`）、`runtimeInput.{inputId, targetRunId, sourceId}`、`modelRequests[].{runId, messageId, requestId, inputIds}` |
 | 片段 `data` | `id`、`messageId`、`sessionId`、`contextScopeId`；提醒片段的 `metadata.anchorAssistantId`（没有锚点的提醒会被隐藏，`A/core/context/reminder-history.ts:8-45`）；推理片段的 `metadata.runId`；工具片段的 `metadata.execution.runId` |
-| 提醒片段 ID | 格式是 `${messageId}:${i}`（`context-manager.ts:1656`） |
+| 提醒片段 ID | 格式是 `${messageId}:${i}`（`context-manager.ts:1657`） |
 | 压缩摘要 `metadata` | `compactionId, readIds, keptIds, protectedInputIds, omittedPartIds`（`context-manager.ts:1120-1131`），只在生成时用，之后不再读取 |
 | `prompt_submission` | `prompt_id`（主键）、`user_message_id`（唯一）、`run_id`、`client_request_id`（同一 `scope_key` 内唯一，`migrations.ts:536`）、`steer_receipt`（JSON，含 promptId、userMessageId、inputId 等，有唯一索引 :537）、`resend_of_prompt_id`；`admission_order` 在同一 `scope_key` 内递增（`database-store.ts:975`） |
 | 子代理工具片段 | `state.metadata.subagent.execution.{executionId, subagentId, childSessionId, ...}`（`A/tools/subagent.ts:121-200`），指向源会话的子代理 |
@@ -99,11 +99,14 @@
 ## 1.5 子代理引用
 
 - 新会话里，源会话的子代理卡片按 `metadata.subagent.execution` 渲染。实例列表加载后，因为找不到实例，“打开”入口会被隐藏（`W/ui/shared/subagent-instances.ts:64`）；直接打开会返回 `SUBAGENT_NOT_FOUND`（`A/adapters/ui-inprocess/subagent-conversation.ts:153-174, 216-220`），执行视图报“Unknown execution for this root”（`subagent-views.ts:111-118`）。不会显示源会话的子代理内容。
-- 子代理的大结果文件只允许所属会话读取（`A/agents/subagents/result-artifacts.ts:246-281`），新会话的模型读不到。走普通沙箱时是弹窗还是拒绝，没有核实。[子代理结果搬迁议题](../../2026-11-05-subagent-results-location/README.md)在本议题之前实施，之后报告放在源会话的存储区 `sessions/<源会话>/subagents/` 下；fork 出来的会话不在源会话的存储区里，读取时按外部路径弹确认。
+- 会话的文件放在根会话的存储区里（2026-11-06 按 `main` `2728b8fb` 复核）：
+  - 子代理的大结果文件在 `sessions/<源会话>/subagents/` 下（`A/agents/subagents/result-artifacts.ts:54-59`）。原来那条只许所属会话读取的专用通道 `authorizeInternalRead` 已由[子代理结果搬迁议题](../../2026-11-05-subagent-results-location/README.md)删除。
+  - 工具的超长输出存在 `sessions/<源会话>/tool-results/` 下，工具结果的 `metadata.outputFile` 记着这个路径（`A/tools/utils/output.ts:28-29`）。
+  - sandbox 只把会话自己的存储区登记为可信路径（`A/adapters/ui-runtime/composition.ts:481-489`）。fork 出来的会话有自己的存储区，复制过来的历史里指向源会话这两个目录的路径，对它来说是普通的外部路径，预计读取时弹外部读取确认。这一点是读代码得出的，由 04 的 T14b 验证。
 
 ## 1.6 现有操作放在哪里
 
-- 需要 prompt 作用域、忙碌判断和事件发布的会话操作在 adapter 层，例如归档 `archiveSessionInternal`（`ui-inprocess.ts:3258`）、压缩（:3609），对应路由在 `packages/ohbaby-server/src/protocols/web/routes/sessions.ts`（归档 :264-296）。
+- 需要 prompt 作用域、忙碌判断和事件发布的会话操作在 adapter 层，例如归档 `archiveSessionInternal`（`ui-inprocess.ts:3258`）、压缩（:3609），对应路由在 `packages/ohbaby-server/src/protocols/web/routes/sessions.ts`（归档 :327）。
 - 纯数据库的会话操作在 `A/services/session/*.ts`，例如 `archive.ts`、`workspace-move.ts`。
 
 **结论**：SQL 复制放进 `A/services/session/fork.ts`，由 adapter 层的一个方法调用（它知道 `promptScopeKey`，也负责发布事件），路由放在 `sessions.ts` 的归档旁边。

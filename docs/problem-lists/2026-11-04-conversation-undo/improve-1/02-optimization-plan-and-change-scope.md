@@ -84,7 +84,7 @@ Web Edit / TUI /undo ──► POST /v1/sessions/:id/undo { promptId }
    - fork：如果 fork 议题已经落地，在 `A/services/session/fork.ts` 的选行和取切点的查询里加 `undone_at IS NULL`，并补 fork 04 §4.3 的用例；反之由 fork 议题实施时补。
    - side chat：撤销入口对 side chat 会话返回 `SIDE_CHAT_UNSUPPORTED`。撤销和 side chat 谁后落地，谁在撤销入口补上这个检查和对应用例。
 9. **路由与 SDK**：
-   - `packages/ohbaby-server/src/protocols/web/routes/sessions.ts` 新增 `POST /v1/sessions/:sessionId/undo`，校验与其他会话路由一致。现有会话路由只返回 400 和错误文本（:338-350），不能直接照抄；状态码沿用 `packages/ohbaby-server/src/protocols/global-sessions.ts:94-120` 的 `globalSessionErrorStatus`（`SESSION_NOT_FOUND` 404，`SESSION_NOT_ROOT`、`SESSION_ARCHIVED`、`SESSION_RUNNING` 409）。这个函数遇到不认识的错误码会返回 500，所以要在里面加上两个新错误码 → 400。响应体带上 `code`。
+   - `packages/ohbaby-server/src/protocols/web/routes/sessions.ts` 新增 `POST /v1/sessions/:sessionId/undo`，校验与其他会话路由一致。现有会话路由多数只返回 400 和错误文本（例如压缩路由 :400-412），不能直接照抄；同一文件里的 Files 路由（:84-96）已经按错误码映射状态码并返回 `{ ok: false, error: { code, message } }`，可以照它的写法；状态码沿用 `packages/ohbaby-server/src/protocols/global-sessions.ts:94-120` 的 `globalSessionErrorStatus`（`SESSION_NOT_FOUND` 404，`SESSION_NOT_ROOT`、`SESSION_ARCHIVED`、`SESSION_RUNNING` 409）。这个函数遇到不认识的错误码会返回 500，所以要在里面加上两个新错误码 → 400。响应体带上 `code`。
    - `packages/ohbaby-sdk/src/contract/client.ts` 的会话命令客户端加 `undoSession({ sessionId, promptId })`，HTTP 客户端和进程内实现行为一致。
    - 新错误码 `UNDO_TARGET_INVALID`、`UNDO_BEFORE_COMPACTION` 与现有的 `SESSION_RUNNING`、`SESSION_NOT_ROOT`、`SESSION_ARCHIVED`（`packages/ohbaby-sdk/src/contract/global-sessions.ts:6` 附近）放在一起。
 
@@ -156,7 +156,7 @@ POST /v1/sessions/:sessionId/undo
 404 SESSION_NOT_FOUND       会话不存在
 409 SESSION_RUNNING         闸门被占、恢复未就绪、有排队或活动 prompt、goal active、正在压缩
 409 SESSION_NOT_ROOT        子代理会话
-409 SIDE_CHAT_UNSUPPORTED   side chat 会话（由 side chat 议题加入）
+409 SIDE_CHAT_UNSUPPORTED   side chat 会话（撤销与 side chat 中后落地的一方加入，见 Stage 1 第 8 步）
 409 SESSION_ARCHIVED        已归档会话
 400 UNDO_TARGET_INVALID     目标不存在、不属于该会话、未结束、是 steer、已被撤销
 400 UNDO_BEFORE_COMPACTION  目标在最近一次压缩之前

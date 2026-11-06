@@ -33,6 +33,8 @@
 | T12 | 不继承的状态 | integration | 源会话有 active goal、排队的 prompt、子代理实例：新会话都没有；新会话的 todo 按复制的历史重建，与源会话切点时一致；源会话里未处理的 steer 在新会话里同样显示为未处理（00 P12） |
 | T13 | 拒绝条件 | integration | 会话不存在返回 `SESSION_NOT_FOUND`；子代理会话返回 `SESSION_NOT_ROOT`；已归档返回 `SESSION_ARCHIVED`；prompt 不存在、属于别的会话、未结束、状态是 `steered`、会话里没有已结束的 prompt，都返回 `FORK_TARGET_INVALID`；失败时不留下任何新行 |
 | T14 | 接口契约 | contract | 请求体校验、响应结构、错误码与 02 §2.5 一致，响应体带 `code`；进程内与 HTTP 实现一致 |
+| T14b | 源会话存储区里的文件 | integration | 源会话有一份超过 51,200 字节、已导出到 `subagents/` 的子代理报告，和一份存到 `tool-results/` 的工具长输出；从之后的一轮 fork。新会话的历史里这两个路径原样保留，没有被改写；默认权限档位下，新会话用 `read` 读它们时弹外部读取确认，拒绝后读不到；新会话自己的 `scratch/` 不受影响 |
+| T14c | 环境提醒里的 scratch 路径 | integration | 复制过来的历史里有源会话的环境提醒（带源会话的 scratch 路径）。新会话第一轮运行时，模型请求里出现一条新的环境提醒，带新会话自己的 scratch 绝对路径，排在复制来的历史之后 |
 
 ### Stage 2：Web
 
@@ -68,7 +70,7 @@
 | 项 | 标准 | 如何验证 |
 |---|---|---|
 | 类型与格式 | 通过 | `pnpm typecheck`、`pnpm lint`、`pnpm format:check` |
-| 自动化测试 | T1 至 T14 通过 | `pnpm test:integration`、`pnpm test:contract` |
+| 自动化测试 | T1 至 T14（含 T14b、T14c）通过 | `pnpm test:integration`、`pnpm test:contract` |
 | 浏览器走查 | T15 至 T18 通过，附截图 | 内置浏览器 |
 | 手工 | T19、T20 通过 | 本机终端 |
 | 文档 | Stage 4 列出的文档已同步 | 评审 |

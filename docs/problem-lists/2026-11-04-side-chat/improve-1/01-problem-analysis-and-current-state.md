@@ -1,10 +1,10 @@
 # 1. 现状与问题分析
 
-> 代码基线：2026-11-04，`main` 分支 `c9cbd475`。本议题开始前没有任何相关实施。路径缩写：`A/` = `packages/ohbaby-agent/src/`，`S/` = `packages/ohbaby-server/src/`，`W/` = `apps/ohbaby-web/src/`，`T/` = `packages/ohbaby-cli/src/tui/`。
+> 代码基线：2026-11-04，`main` 分支 `c9cbd475`。本议题开始前没有任何相关实施。2026-11-06 按 `main` `2728b8fb`（会话存储区与 Files 页落地后）复核，会话存储区改动过的文件里的行号已更新。路径缩写：`A/` = `packages/ohbaby-agent/src/`，`S/` = `packages/ohbaby-server/src/`，`W/` = `apps/ohbaby-web/src/`，`T/` = `packages/ohbaby-cli/src/tui/`。
 
 ## 1.1 问题陈述
 
-1. **没有“临时问一句”的地方。** 斜杠命令里没有 side、btw 一类的命令（`A/commands/catalog.ts`），Web 右侧面板只有子代理和终端两页。
+1. **没有“临时问一句”的地方。** 斜杠命令里没有 side、btw 一类的命令（`A/commands/catalog.ts`），Web 右侧面板现在有子代理、Files、终端三页。
 2. **side chat 放在哪一类会话里，决定了要改多少地方。** 子会话（有 `parent_id`）会被大量“只认根会话”的检查拦住；根会话能用全部现有机制，但会出现在各种列表里、能做 fork 和归档。
 3. **一个客户端同一时间只绑定一个会话。** side chat 要和主会话同时显示、同时能发消息。
 4. **TUI 和后端共用一个“当前会话”。** 往别的会话提交会把 TUI 拉过去。
@@ -29,7 +29,7 @@
 |---|---|---|
 | `validatePermissionRoot` 拒绝非主会话 | `A/adapters/ui-inprocess.ts:2490-2498`，被视图、历史、控制（:4610-4618）、回执（:4879）、steer（:5014、:5049）、重新提交（:5134）、进入会话（:1020）调用 | 读不到、发不了、停不了 |
 | `assertCanUseAsPrimarySession` 拒绝有父会话的会话 | `ui-inprocess.ts:3355-3374`，被 prompt 提交（:1711、:3838）等调用 | 不能提交 |
-| 服务端只允许读取客户端绑定的根会话 | `S/coordination/session-access.ts:134-137`，中止也经过它（:187-196） | 读不到、停不了 |
+| 服务端只允许读取客户端绑定的根会话 | `S/coordination/session-access.ts:155-158`，中止也经过它（:209-217） | 读不到、停不了 |
 | 提交时把客户端绑定切到目标会话 | `S/coordination/client-view.ts:676-684`；后端也会设当前会话（`ui-inprocess.ts:1795, 4110`） | 第一次在 side chat 提问后，主会话的事件就收不到了 |
 | `stateStore.getSession` 对子会话返回空 | `A/adapters/ui-state/persistent-store.ts:611-620` | 拿不到视图 |
 
@@ -39,9 +39,9 @@
 
 ### 1.4.1 Web 可以多开一个客户端
 
-- `createBrowserDaemonClient({ config, fetch, store })`（`W/api/daemon/client.ts:521-539`）按 `config.clientId` 建自己的 HTTP 客户端和事件流，store 由调用方传入，没有模块级单例。`createOhbabyWebStore()` 每次调用都是新实例（`W/store/store.ts:65`）。
+- `createBrowserDaemonClient({ config, fetch, store })`（`W/api/daemon/client.ts:565-583`）按 `config.clientId` 建自己的 HTTP 客户端和事件流，store 由调用方传入，没有模块级单例。`createOhbabyWebStore()` 每次调用都是新实例（`W/store/store.ts:65`）。
 - `GlobalLayer.scopedHttp` 已经用 `randomUUID()` 在 `InstanceLayer` 之外注册额外的客户端（`W/runtime/global-layer.ts:235-256`），可以参照；不同的是它不开事件流（:231-233），side chat 的客户端要开。`InstanceLayer` 只持有一个 `activeClient`，连接新的会关掉旧的（`W/runtime/instance-layer.ts:199-201`），所以 side chat 的客户端要建在它之外。
-- 服务端接受任意 clientId 注册（`S/protocols/web/routes/events.ts:111-127`）。注册时带 `startupIntent.resumeSessionId` 就能绑定到指定会话，条件是这个会话在会话索引里、是根会话（`client-view.ts:124-133`）；或者用 `PATCH /v1/sessions/:id/select`（`S/protocols/web/routes/sessions.ts:233`），它只改这个客户端的绑定（`S/coordination/permission-access.ts:97-128`）。
+- 服务端接受任意 clientId 注册（`S/protocols/web/routes/events.ts:111-127`）。注册时带 `startupIntent.resumeSessionId` 就能绑定到指定会话，条件是这个会话在会话索引里、是根会话（`client-view.ts:124-133`）；或者用 `PATCH /v1/sessions/:id/select`（`S/protocols/web/routes/sessions.ts:296`），它只改这个客户端的绑定（`S/coordination/permission-access.ts:97-128`）。
 - 每个客户端有自己的绑定，快照（`client-view.ts:210-251`）、事件（:870）、会话索引失效通知（`S/app/sse-hub.ts:527-534`）都按客户端过滤。
 - `SessionScreen` 和它的 hook 读 `runtime.store`、`runtime.client`（`W/ui/session/SessionScreen.tsx:64-99`），side chat 面板需要一个精简的同类对象。`ApprovalPanel` 完全靠 props 驱动（`W/ui/permissions/ApprovalPanel.tsx:43`），可以直接复用。
 
@@ -69,7 +69,7 @@
 |---|---|
 | `A/services/session/global-query.ts:131` | 全局列表（活跃和归档） |
 | `global-query.ts:268` | 搜索；不过滤会因为复制了主会话历史而出现重复结果 |
-| `W/runtime/index.ts:787` | Web 没有控制面时的备用侧栏，需要索引条目带 `isSideChat` |
+| `W/runtime/index.ts:798` | Web 没有控制面时的备用侧栏，需要索引条目带 `isSideChat` |
 | `ui-inprocess.ts:3112-3117` | TUI 的 `/sessions`、`/resume` |
 | `A/adapters/ui-persistent.ts:678` | TUI 启动时“继续上次会话”；`resolveStartupSession` 会忽略非主会话（`A/adapters/ui-startup-session.ts:24-27`） |
 | `client-view.ts:141-143` | daemon 的“继续上次会话” |
@@ -82,21 +82,21 @@
 
 | 操作 | 入口 |
 |---|---|
-| 压缩 | `resolveCompactTarget`（`ui-inprocess.ts:3591`），路由 `sessions.ts:316` |
+| 压缩 | `resolveCompactTarget`（`ui-inprocess.ts:3591`），路由 `sessions.ts:379` |
 | goal | `resolveGoalSessionId`（`ui-inprocess.ts:4454-4471`） |
-| 切换模型、reasoning | `sessions.ts:104, 139` → `ui-inprocess.ts:2990, 2966` |
+| 切换模型、reasoning | `sessions.ts:167, 202` → `ui-inprocess.ts:2990, 2966` |
 | 归档 | `ui-inprocess.ts:3273` |
 | 移动工作区 | `S/runtime/daemon/server.ts:770`、`S/coordination/session-workspace-move.ts:67` |
-| 导出 | `sessions.ts:44` |
+| 导出 | `sessions.ts:107` |
 | fork、撤销 | 由各自议题新建，需在入口加检查 |
 | 斜杠命令 `/new`、`/resume`、`/sessions` | 会改客户端绑定（`client-view.ts:807-816`），side chat 面板不提供斜杠命令 |
-| 创建子代理 | `resolveRequester`（`A/adapters/ui-runtime/composition.ts:930-943`）只拒绝有父会话的请求方，side chat 作为根会话能通过。调度器的 `accessGuard`（`A/core/tool-scheduler/scheduler.ts:2062-2072`，实现在 `composition.ts:416-428`）可以按会话拒绝 `agent` 工具（`A/tools/subagent.ts:27-29`），不改工具列表 |
+| 创建子代理 | `resolveRequester`（`A/adapters/ui-runtime/composition.ts:954-970`）只拒绝有父会话的请求方，side chat 作为根会话能通过。调度器的 `accessGuard`（`A/core/tool-scheduler/scheduler.ts:2062-2072`，实现在 `composition.ts:424-435`）可以按会话拒绝 `agent` 工具（`A/tools/subagent.ts:27-29`），不改工具列表 |
 
 不能把这些检查放进 `assertCanUseAsPrimarySession`，它也管 prompt 提交。
 
 ## 1.5 边界消息
 
-- 提醒类消息要锚定在一条助手消息上（`A/core/message/origin.ts:61-71`），只在准备一轮运行时创建（`A/core/context/context-manager.ts:1640-1670`），锚点缺失的会被隐藏（`A/core/context/reminder-history.ts:7-11`）。打开 side chat 时写不了。
+- 提醒类消息要锚定在一条助手消息上（`A/core/message/origin.ts:61-71`），只在准备一轮运行时创建（`A/core/context/context-manager.ts:1641-1671`），锚点缺失的会被隐藏（`A/core/context/reminder-history.ts:7-11`）。打开 side chat 时写不了。
 - 普通用户消息、不带 `runtimeInput` 时，会被 `filterModelHistory` 保留（`A/runtime/prompt-scheduler/current-run-inputs.ts:524-526`），可以在打开时写入。
 
 ## 1.6 权限审批
@@ -107,7 +107,7 @@
 ## 1.7 系统提示词与缓存
 
 - 系统提示词、工具、提醒由每一轮 run 的 `isSubagent` 参数决定（`A/core/lifecycle/lifecycle.ts:595`）。主会话的 prompt 不传这个参数（`ui-inprocess.ts:4038-4056`），side chat 作为根会话走同一条路径，系统提示词与主会话一致。
-- OpenAI 兼容接口的缓存 key 按会话 ID 计算（`packages/ohbaby-llm/src/client/prompt-cache.ts:192-209, 260-268`）。已加载的 MCP 工具按 `(sessionId, contextScopeId)` 存放和排序（`composition.ts:567-588`、`A/mcp/integration/tool-sequence.ts:16-18`），主会话加载过的 MCP 工具，side chat 一开始没有。
+- OpenAI 兼容接口的缓存 key 按会话 ID 计算（`packages/ohbaby-llm/src/client/prompt-cache.ts:192-209, 260-268`）。已加载的 MCP 工具按 `(sessionId, contextScopeId)` 存放和排序（`composition.ts:591-610`、`A/mcp/integration/tool-sequence.ts:16-18`），主会话加载过的 MCP 工具，side chat 一开始没有。
 
 ## 1.8 删除与启动清理
 
@@ -118,7 +118,7 @@
 
 ## 1.9 Web 右侧面板与选中文字
 
-- 右侧面板按页注册：`SidePageStates`、`SIDE_PAGES`（`W/ui/side-panel/side-pages.ts:9-26, 69-89`，注释里已提到 side chat）和 `SidePanelPage.tsx:33-63` 各加一项。`sessionScoped: true` 的页在主会话切换时重置（`use-side-panel.ts:96-106`）。
+- 右侧面板按页注册：`SidePageStates`、`SIDE_PAGES`（`W/ui/side-panel/side-pages.ts:9-30, 73-101`，注释里已提到 side chat）和 `SidePanelPage.tsx:32-86` 各加一项。Files 页（`files`）是照这个方式加的，可以参照。`sessionScoped: true` 的页在主会话切换时重置（`use-side-panel.ts:96-106`）。
 - 渲染别的会话可参照 `W/ui/session/SubagentConversationBody.tsx:36-151`：用 `ConversationPresentation` 包住 `ConversationStream`。输入框可以用只管展示的 `W/ui/composer/ComposerInput.tsx`。
 - 消息区没有任何选中文字的处理，挂载点是 `ConversationStream.tsx:537-552` 的 `.ohb-stream` 容器。
 

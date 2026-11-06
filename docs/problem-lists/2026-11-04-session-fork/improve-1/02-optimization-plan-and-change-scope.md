@@ -88,7 +88,7 @@ adapter 层：发布会话创建事件 → 返回 { sessionId, title }
    - `packages/ohbaby-server/src/protocols/web/routes/sessions.ts` 在归档路由旁边新增 `POST /v1/sessions/:sessionId/fork`。状态码沿用现有映射 `globalSessionErrorStatus`（`packages/ohbaby-server/src/protocols/global-sessions.ts:94-120`：`SESSION_NOT_FOUND` 404，`SESSION_NOT_ROOT`、`SESSION_ARCHIVED` 409）。这个函数遇到不认识的错误码会返回 500，所以要在里面加上 `FORK_TARGET_INVALID` → 400。响应体带 `code`。路由的错误处理如果撤销议题已经改好，直接复用。
    - `packages/ohbaby-sdk/src/contract/client.ts` 加 `forkSession({ sessionId, promptId? })`，HTTP 客户端和进程内实现行为一致；`FORK_TARGET_INVALID` 和现有错误码一起放在 `packages/ohbaby-sdk/src/contract/global-sessions.ts`。
 
-**完成定义**：04 的 T1 至 T14 通过。
+**完成定义**：04 的 T1 至 T14（含 T14b、T14c）通过。
 
 ### Stage 2：Web
 
@@ -98,7 +98,7 @@ adapter 层：发布会话创建事件 → 返回 { sessionId, title }
 
 1. 每轮最终答案（`RunProcess.answerId` 指向的消息）的 `MessageActions` 加 fork 按钮，图标加提示“Fork from here”，调用时带上这一轮的 `promptId`。最终答案只在一轮结束后才会出现，所以按钮不需要额外的可用性判断。
 2. `W/ui/sidebar/SessionMenu.tsx` 加“Fork”菜单项，调用时不带 `promptId`。会话没有消息时置灰，提示“Nothing to fork yet”。
-3. 成功后调用 `runtime.openSession(newSessionId)`（`W/runtime/index.ts:88`）切换到新会话。失败时按错误码提示。
+3. 成功后调用 `runtime.openSession(newSessionId)`（`W/runtime/index.ts:89`）切换到新会话。失败时按错误码提示。
 4. side chat 会话里不显示这两个入口：side chat 议题会给 `ConversationStream` 加一个开关，side chat 面板里只挂复制按钮。后端的 `SIDE_CHAT_UNSUPPORTED` 检查由 side chat 议题加在本议题的 fork 入口上。
 
 **完成定义**：04 的 T15 至 T18 通过（浏览器走查）。
@@ -193,4 +193,4 @@ forkSessionRows(tx, input: {
 |---|---|
 | 从一轮中间或从用户消息 fork | 不做 |
 | 侧栏显示 fork 关系、跳回源会话 | 不做 |
-| 让 fork 出来的会话能打开源会话的子代理、免确认读取其大结果文件 | 不做。[子代理结果搬迁议题](../../2026-11-05-subagent-results-location/README.md)已把报告统一放进源会话的存储区，fork 出来的会话读取时弹确认即可，不另开授权 |
+| 让 fork 出来的会话能打开源会话的子代理、免确认读取源会话存储区里的文件 | 不做。[子代理结果搬迁议题](../../2026-11-05-subagent-results-location/README.md)和会话存储区第二期 a 已把子代理报告（`subagents/`）和工具长输出（`tool-results/`）都放进源会话的存储区。复制过来的历史里的这类路径不改写，fork 出来的会话读取时按外部路径弹确认即可，不另开授权（04 T14b） |
