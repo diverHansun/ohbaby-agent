@@ -322,4 +322,114 @@ describe("Files page", () => {
       true,
     );
   });
+
+  it("refreshes after reconnect, but not when the connection drops", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let current = [entry("before.txt")];
+    const files = api(
+      () => current,
+      () => Promise.reject(new Error("unused")),
+    );
+    const { client, emit } = fakeClient();
+    const view = await render(files, client);
+    const resync = {
+      type: "session.resync-required" as const,
+      runtimeEpoch: "epoch",
+      sessionId: "root",
+      bindingGeneration: 1,
+      connectionGeneration: 2,
+    };
+    await act(async () => {
+      emit({ ...resync, disconnected: true });
+      vi.advanceTimersByTime(400);
+      await Promise.resolve();
+    });
+    expect(files.list).toHaveBeenCalledTimes(1);
+    current = [entry("after.txt")];
+    await act(async () => {
+      emit({ ...resync, disconnected: false });
+      vi.advanceTimersByTime(400);
+      await Promise.resolve();
+    });
+    await settle();
+    expect(view.querySelector("[data-file-path='after.txt']")).not.toBeNull();
+    expect(view.querySelector("[data-file-path='before.txt']")).toBeNull();
+  });
+
+  it("releases a late image from the previous root without replacing the new preview", async () => {
+    const revoke = vi.fn();
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revoke,
+    });
+    let finishList!: (files: readonly SessionFileEntry[]) => void;
+    let finishImage!: (content: SessionFileContent) => void;
+    const oldList = new Promise<readonly SessionFileEntry[]>((resolve) => {
+      finishList = resolve;
+    });
+    const oldImage = new Promise<SessionFileContent>((resolve) => {
+      finishImage = resolve;
+    });
+    const signals: AbortSignal[] = [];
+    const files: SessionFilesApi = {
+      list: (root, signal) => {
+        if (root === "old") {
+          if (signal) signals.push(signal);
+          return oldList;
+        }
+        return Promise.resolve([entry("current.txt")]);
+      },
+      read: (root, _path, signal) => {
+        if (root === "old") {
+          if (signal) signals.push(signal);
+          return oldImage;
+        }
+        return Promise.resolve({ kind: "text", text: "Current root" });
+      },
+    };
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mounted.push(() => {
+      act(() => {
+        root.unmount();
+      });
+      container.remove();
+    });
+    const { client } = fakeClient();
+    const show = async (id: string, path: string): Promise<void> => {
+      await act(async () => {
+        // SidePanelPage keys FilesPage by rootSessionId when the chat changes.
+        root.render(
+          <FilesPage
+            key={id}
+            api={files}
+            client={client}
+            rootSessionId={id}
+            selectedPath={path}
+            onSelect={() => undefined}
+          />,
+        );
+        await Promise.resolve();
+      });
+      await settle();
+    };
+    await show("old", "previous.png");
+    await show("new", "current.txt");
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    await act(async () => {
+      // A transport can finish despite abort; the disposed reader owns cleanup.
+      finishList([entry("previous.png")]);
+      finishImage({ kind: "image", url: "blob:previous-root" });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(revoke).toHaveBeenCalledWith("blob:previous-root");
+    expect(container.querySelector(".ohb-file-text")?.textContent).toBe(
+      "Current root\n",
+    );
+    expect(container.textContent).not.toContain("previous.png");
+    expect(container.querySelector("img")).toBeNull();
+  });
 });

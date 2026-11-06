@@ -222,7 +222,13 @@ export class BrowserDaemonClient implements UiBackendClient {
     });
     if (binding !== this.sync.permissionSync.getState().binding)
       throw new Error("Session binding changed during file read");
-    return sessionFileContent(response);
+    // Fetch has only delivered headers; the body can outlive this binding too.
+    const content = await sessionFileContent(response);
+    if (binding !== this.sync.permissionSync.getState().binding) {
+      if (content.kind === "image") URL.revokeObjectURL(content.url);
+      throw new Error("Session binding changed during file read");
+    }
+    return content;
   }
   /** A stop may already have happened when the binding moves on; the receipt stands. */
   async stopSubagent(
