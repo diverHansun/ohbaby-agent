@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { ConversationPresentation } from "./ConversationPresentation.js";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import { MarkdownBlock } from "../shared/MarkdownBlock.js";
+import { isCompactionMessage } from "./message-text.js";
 import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 
 export function MessageRow(props: {
@@ -13,15 +14,15 @@ export function MessageRow(props: {
   readonly beforeText?: ReactNode;
   readonly reasoningHidden?: boolean;
   readonly reasoningIdPrefix?: string;
+  /** The action row under the body (copy, and later Edit and fork). */
+  readonly actions?: ReactNode;
 }): ReactElement | null {
   const presentation = useContext(ConversationPresentation);
   const delegation = presentation.executions?.find(
     (item) => item.childUserMessageId === props.message.id,
   );
   const isUser = props.message.role === "user";
-  const isCompaction = props.message.parts.some(
-    (part) => part.metadata?.kind === "context-compaction",
-  );
+  const isCompaction = isCompactionMessage(props.message);
   const visibleParts = filterTodoToolParts(props.message.parts);
   const pairedParts = pairToolParts(visibleParts);
   const firstText = pairedParts.findIndex(
@@ -120,6 +121,7 @@ export function MessageRow(props: {
           );
         })}
       </div>
+      {props.actions}
     </article>
   );
 }

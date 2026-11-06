@@ -22,6 +22,9 @@ import {
   ModelWaiting,
   PromptDuration,
 } from "./ExecutionProgress.js";
+import { CopyButton } from "../shared/CopyButton.js";
+import { MessageActions } from "./MessageActions.js";
+import { isCompactionMessage, messageBodyText } from "./message-text.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
 import { projectRunProcesses, type RunProcess } from "./run-process.js";
 import { isNearBottom, scrollToBottom, scrollsNested } from "./streamScroll.js";
@@ -154,6 +157,40 @@ export function ConversationStream(props: {
       for (const id of process.processIds) processOwners.set(id, process);
     }
   }
+  // Copy sits on user messages and on each turn's final answer only, the
+  // message the folded view shows (copy topic 02 §2.2). The newest finished
+  // turn's answer keeps its row visible, as in Claude; none does while a turn
+  // runs or when the newest turn ended without an answer.
+  const answerIds = new Set(
+    processes.flatMap((process) =>
+      process.answerId ? [process.answerId] : [],
+    ),
+  );
+  const latestAnswerId = props.isRunning
+    ? undefined
+    : processes.at(-1)?.answerId;
+  const messageActions = (message: UiMessage): ReactNode => {
+    const copyable =
+      (message.role === "user" && !isCompactionMessage(message)) ||
+      answerIds.has(message.id);
+    if (!copyable || messageBodyText(message) === "") return null;
+    return (
+      <MessageActions
+        persistent={message.id === latestAnswerId}
+        actions={[
+          {
+            key: "copy",
+            node: (
+              <CopyButton
+                label={message.role === "user" ? "Copy message" : "Copy answer"}
+                text={() => messageBodyText(message)}
+              />
+            ),
+          },
+        ]}
+      />
+    );
+  };
   const isOpen = (process: RunProcess): boolean =>
     !process.foldable || expandedRuns[runKey(process)] === true;
   const hiddenIds = new Set(
@@ -607,6 +644,7 @@ export function ConversationStream(props: {
                   beforeText={(beforeAnswer.get(item.message.id) ?? [])
                     .filter((process) => !process.foldable)
                     .map(renderDuration)}
+                  actions={messageActions(item.message)}
                 />
                 {(terminalAfter.get(item.message.id) ?? []).map(renderDuration)}
               </div>

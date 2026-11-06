@@ -489,3 +489,37 @@
 .ohb-history-more button:disabled {
   color: var(--text-dim);
 }
+
+/* Message actions (copy topic): a quiet icon row under the user bubble and
+   under each turn's final answer, like Claude and Codex. It appears on hover
+   or keyboard focus, stays for the latest answer and on touch screens, and
+   tucks into the stream gap so a message grows by only a few pixels. */
+.ohb-message-actions {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  height: 28px;
+  margin: 2px -6px -22px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.ohb-message:hover > .ohb-message-actions,
+.ohb-message-actions:focus-within,
+.ohb-message-actions.is-persistent {
+  opacity: 1;
+}
+
+.ohb-message-user > .ohb-message-actions {
+  justify-content: flex-end;
+}
+
+.ohb-message-action {
+  display: inline-flex;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .ohb-message-actions {
+    opacity: 1;
+  }
+}
