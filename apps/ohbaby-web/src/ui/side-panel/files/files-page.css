@@ -310,21 +310,6 @@
   padding-left: 12px;
 }
 
-.ohb-file-markdown pre {
-  background: var(--bg-panel);
-  border-radius: var(--radius-md);
-  font-size: 12.5px;
-  line-height: 1.6;
-  margin: 0 0 12px;
-  padding: 10px 12px;
-}
-
-.ohb-file-markdown pre code {
-  background: none;
-  font-size: inherit;
-  padding: 0;
-}
-
 .ohb-file-markdown table {
   border-collapse: collapse;
   font-size: 13px;

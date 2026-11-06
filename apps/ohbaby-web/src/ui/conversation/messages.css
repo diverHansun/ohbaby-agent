@@ -518,8 +518,78 @@
   display: inline-flex;
 }
 
+/* Code blocks in Markdown: a soft panel with a small Copy label in the
+   corner, shown on hover or focus (Claude, Cursor). The wrapper keeps the
+   button in place while long lines scroll sideways. */
+.ohb-code-block {
+  margin: 0 0 12px;
+  position: relative;
+}
+
+.ohb-code-block pre {
+  background: var(--bg-panel);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+/* Inside the grey user bubble the panel would vanish; use the page colour. */
+.ohb-message-user-bubble .ohb-code-block pre {
+  background: var(--bg);
+}
+
+.ohb-code-block pre code {
+  background: none;
+  font-size: inherit;
+  padding: 0;
+}
+
+.ohb-code-copy {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  height: 22px;
+  opacity: 0;
+  padding: 0 8px;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  transition:
+    opacity var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+  /* Keeps the label out of a drag-selection across the block. */
+  user-select: none;
+}
+
+.ohb-code-block:hover .ohb-code-copy,
+.ohb-code-copy:focus-visible,
+.ohb-code-copy[data-copy-state] {
+  opacity: 1;
+}
+
+.ohb-code-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-code-copy[data-copy-state="failed"] {
+  color: var(--danger-ink);
+}
+
 @media (hover: none), (pointer: coarse) {
-  .ohb-message-actions {
+  .ohb-message-actions,
+  .ohb-code-copy {
     opacity: 1;
+  }
+
+  /* The always-visible button gets its own strip instead of covering code. */
+  .ohb-code-block pre {
+    padding-top: 34px;
   }
 }
