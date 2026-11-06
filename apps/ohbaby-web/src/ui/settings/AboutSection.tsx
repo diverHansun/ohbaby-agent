@@ -1,8 +1,6 @@
-import { Check, Copy } from "lucide-react";
 import type { ReactElement } from "react";
-import { useEffect, useState } from "react";
 import type { SettingsLayer } from "../../runtime/settings-layer.js";
-import { IconButton } from "../shared/IconButton.js";
+import { CopyButton } from "../shared/CopyButton.js";
 import { SettingsRow } from "../shared/SettingsRow.js";
 import { SectionHeader, SectionStatus } from "./SectionFrame.js";
 import { useSettingsResource } from "./useSettingsResource.js";
@@ -33,46 +31,16 @@ export function AboutSection(props: {
             key={label}
             label={label}
             value={<code className="ohb-about-value">{value}</code>}
-            control={<CopyButton label={label} value={value} />}
+            control={
+              <CopyButton
+                label={`Copy ${label}`}
+                copiedLabel={`${label} copied`}
+                text={value}
+              />
+            }
           />
         ),
       )}
     </section>
-  );
-}
-
-/** Copies quietly: the icon turns into a check for a moment, no notice. */
-function CopyButton(props: {
-  readonly label: string;
-  readonly value: string;
-}): ReactElement {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => {
-      setCopied(false);
-    }, 1500);
-    return (): void => {
-      clearTimeout(timer);
-    };
-  }, [copied]);
-  return (
-    <IconButton
-      label={copied ? `${props.label} copied` : `Copy ${props.label}`}
-      onClick={() => {
-        void navigator.clipboard
-          .writeText(props.value)
-          .then(() => {
-            setCopied(true);
-          })
-          .catch(() => undefined);
-      }}
-    >
-      {copied ? (
-        <Check aria-hidden="true" size={14} />
-      ) : (
-        <Copy aria-hidden="true" size={14} />
-      )}
-    </IconButton>
   );
 }

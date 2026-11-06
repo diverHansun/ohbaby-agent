@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, Copy, Download } from "lucide-react";
+import { ChevronLeft, Download } from "lucide-react";
 import {
   type ReactElement,
   useEffect,
@@ -12,6 +12,7 @@ import type {
   SessionFilesApi,
 } from "../../../api/daemon/session-files.js";
 import { isDaemonRequestError } from "../../../api/daemon/http.js";
+import { CopyButton } from "../../shared/CopyButton.js";
 import { IconButton } from "../../shared/IconButton.js";
 import { MarkdownBlock } from "../../shared/MarkdownBlock.js";
 import { downloadTextFile } from "../../shared/download-file.js";
@@ -104,38 +105,6 @@ function downloadImage(url: string, filename: string): void {
   document.body.append(link);
   link.click();
   link.remove();
-}
-
-function CopyButton(props: { readonly text: string }): ReactElement {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => {
-      setCopied(false);
-    }, 1500);
-    return (): void => {
-      clearTimeout(timer);
-    };
-  }, [copied]);
-  return (
-    <IconButton
-      label={copied ? "Copied" : "Copy contents"}
-      onClick={() => {
-        void navigator.clipboard
-          .writeText(props.text)
-          .then(() => {
-            setCopied(true);
-          })
-          .catch(() => undefined);
-      }}
-    >
-      {copied ? (
-        <Check aria-hidden="true" size={14} />
-      ) : (
-        <Copy aria-hidden="true" size={14} />
-      )}
-    </IconButton>
-  );
 }
 
 /** Plain text with a line-number gutter; numbers are CSS, so copying skips them. */
@@ -344,7 +313,9 @@ export function FilePreview(props: {
             </button>
           </div>
         ) : null}
-        {content?.kind === "text" ? <CopyButton text={content.text} /> : null}
+        {content?.kind === "text" ? (
+          <CopyButton label="Copy contents" text={content.text} />
+        ) : null}
         {content ? (
           <IconButton
             label="Download"

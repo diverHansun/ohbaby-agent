@@ -63,6 +63,11 @@
   color: var(--text);
 }
 
+/* A copy that failed says so in the error colour, wherever the button is. */
+.ohb-icon-button[data-copy-state="failed"] {
+  color: var(--danger-ink);
+}
+
 /* An icon button whose work is under way, e.g. a refresh. */
 .ohb-icon-button.is-spinning svg {
   animation: ohb-spin 0.9s linear infinite;
