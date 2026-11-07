@@ -716,11 +716,6 @@ export function createInProcessUiBackendClient(
     options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
   const sourceLedger =
     options.runLedger ?? stateStore.runLedger ?? createInMemoryRunLedger();
-  function projectRunRecord(
-    record: import("../runtime/run-ledger/index.js").RunLedgerRecord,
-  ): Promise<UiRun> {
-    return Promise.resolve(runToUiRun(record));
-  }
   async function unconsumedSteers(
     sessionId: string,
   ): Promise<readonly import("ohbaby-sdk").UiUnconsumedSteer[] | undefined> {
@@ -777,15 +772,33 @@ export function createInProcessUiBackendClient(
           unconsumedSteers: await unconsumedSteers(sessionId),
         };
       },
-      runs: async (sessionId): Promise<readonly UiRun[]> => {
-        const stored = await Promise.all(
-          (await sourceLedger.listBySession(sessionId, { limit: 50 }))
-            .filter((run) => run.contextScopeId === undefined)
-            .map(projectRunRecord),
+      runs: async (sessionId, selection): Promise<readonly UiRun[]> => {
+        if (selection === "current") {
+          const active = (await sourceLedger.getActiveRuns(sessionId)).filter(
+            (run) => run.contextScopeId === undefined,
+          );
+          if (active.length) return active.map(runToUiRun);
+        }
+        const stored = await sourceLedger.listBySession(sessionId, {
+          mainOnly: true,
+          ...(selection === "current" ? { limit: 1 } : { runIds: selection }),
+        });
+        const runs = stored.map(runToUiRun);
+        if (selection === "current" && runs.length) return runs;
+        const missing =
+          selection === "current" ? undefined : new Set(selection);
+        for (const run of runs) missing?.delete(run.id);
+        if (missing?.size === 0 || initialSnapshot.runs.length === 0)
+          return runs;
+        const fallback = initialSnapshot.runs.filter(
+          (run) =>
+            run.sessionId === sessionId && (!missing || missing.has(run.id)),
         );
-        return stored.length
-          ? stored
-          : initialSnapshot.runs.filter((run) => run.sessionId === sessionId);
+        return [...runs, ...fallback].sort(
+          (a, b) =>
+            b.startedAt.localeCompare(a.startedAt) ||
+            (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+        );
       },
       prompts: async (
         sessionId,
@@ -874,16 +887,13 @@ export function createInProcessUiBackendClient(
       run: (sessionId, operation) =>
         sourceProjection.owner.run(sessionId, operation),
       onCommitted: (record) => {
-        if (record.contextScopeId === undefined)
-          void projectRunRecord(record)
-            .then(async (run) => {
-              await sourceProjection.commitEvent({ type: "run.updated", run });
-              refreshSteerRecovery(record.sessionId);
-            })
-            .catch((error: unknown) => {
-              sourceProjection.owner.markUnavailable(record.sessionId, error);
-            });
-        else sourceProjection.commitScopeRun(runToUiRun(record));
+        const run = runToUiRun(record);
+        if (record.contextScopeId !== undefined) {
+          sourceProjection.commitScopeRun(run);
+          return;
+        }
+        void sourceProjection.commitEvent({ type: "run.updated", run });
+        refreshSteerRecovery(record.sessionId);
       },
       onProjectionError: (sessionId, error): void => {
         sourceProjection.owner.markUnavailable(sessionId, error);
@@ -1177,10 +1187,9 @@ export function createInProcessUiBackendClient(
   currentRunInputStore?.setMessageCommitObserver((message): void => {
     // Queue after any scheduler owner lane; never await that lane recursively.
     void sourceProjection.owner
-      .run(message.info.sessionId, () => {
-        sourceProjection.acceptRuntimeInput(message);
-        return Promise.resolve();
-      })
+      .run(message.info.sessionId, () =>
+        sourceProjection.acceptRuntimeInput(message),
+      )
       .catch((error: unknown) => {
         sourceProjection.owner.markUnavailable(message.info.sessionId, error);
       });
@@ -2462,7 +2471,7 @@ export function createInProcessUiBackendClient(
       runs: await Promise.all(
         snapshot.runs.map(async (run) => {
           const record = await sourceLedger.get(run.id);
-          return record ? { ...run, ...(await projectRunRecord(record)) } : run;
+          return record ? { ...run, ...runToUiRun(record) } : run;
         }),
       ),
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),

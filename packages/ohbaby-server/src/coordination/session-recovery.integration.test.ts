@@ -43,7 +43,18 @@ function baseline(sessionId = "root"): UiSessionView {
         },
       ],
     },
-    runs: [],
+    runs: [
+      {
+        id: "real-run",
+        sessionId,
+        startedAt: stamp,
+        endedAt: stamp,
+        updatedAt: stamp,
+        trigger: "subagent",
+        outcome: "cancelled",
+        status: { kind: "idle" },
+      },
+    ],
     prompts: [],
     history: { hasMore: false },
     reasoningMissing: false,
@@ -77,6 +88,7 @@ async function setup(
       Promise.resolve({
         version: baseline(input.sessionId).version,
         messages: baseline(input.sessionId).session.messages,
+        runs: baseline(input.sessionId).runs,
         prompts: [],
         hasMore: false,
         reasoningMissing: false,
@@ -353,9 +365,12 @@ describe("source session recovery HTTP/RPC/SSE", () => {
         }),
       });
       expect(rpc.status).toBe(200);
+      const result = ((await rest.json()) as Record<string, unknown>)[key];
       expect(((await rpc.json()) as { result: unknown }).result).toEqual(
-        ((await rest.json()) as Record<string, unknown>)[key],
+        result,
       );
+      if (key === "history")
+        expect(result).toMatchObject({ runs: baseline().runs });
     }
     expect(backend.getSnapshot).not.toHaveBeenCalled();
   });
