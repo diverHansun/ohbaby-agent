@@ -59,7 +59,7 @@ daemon.init() → runManager.init()
 
 ```
 CLI 或 Admin UI
-  → runLedger.listBySession(sessionId, { limit?, cursor? })
+  → runLedger.listBySession(sessionId, { limit?, mainOnly?, runIds? })
     [按 session 分页查询历史 run 列表]
   → runLedger.get(runId)
     [查询单条 run 详情]
@@ -89,7 +89,7 @@ CLI 或 Admin UI
 | 接口 | 语义 | 使用场景 |
 |---|---|---|
 | `get(runId)` | 查询单条 RunLedgerRecord | 详情查看 |
-| `listBySession(sessionId, options?)` | 分页查询 session 下的历史 run | 历史列表 |
+| `listBySession(sessionId, options?)` | 按创建时间倒序查询 session 的 run，可按主会话作用域和一批 run ID 筛选 | 历史列表 |
 | `getActiveRuns(sessionId?)` | 查询 status='running' 或 'pending' 的活跃账本记录 | 启动诊断 / 管理命令 / debug UI |
 
 ---

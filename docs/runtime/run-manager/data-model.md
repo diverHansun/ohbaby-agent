@@ -24,7 +24,7 @@ RunManager 在 `startRun()` 阶段组装的已解析上下文，传递给 RunWor
 
 ### 概念 5：TriggerSource（触发来源）
 
-标识 Run 的触发渠道：`'user' | 'scheduler' | 'heartbeat' | 'channel' | 'follow-up'`。触发来源决定 RunDefaultsPolicy 选取哪套默认值，并写入账本供审计使用。注意：scheduler 内部的 `scheduled/reminder` 是 Job kind，不直接作为 Run 的 triggerSource。
+主会话的 `triggerSource` 取 `user`、`goal` 或 `subagent`。创建 run 时按该值读取默认策略并写入账本。策略表必须覆盖全部触发来源，三种来源默认使用 `interactive` 权限、`reject` 并发策略和 `continue` 断连策略。
 
 ---
 
