@@ -2,15 +2,16 @@
 
 本议题于 2026-11-04 开启。目标是让 Web 上的用户消息、AI 的最终答案和代码块都能一键复制，复制的内容只有正文，不带思考过程和工具执行过程。
 
-本议题只改 Web，TUI 不新增复制命令。
+本议题只做 Web 的复制，TUI 不新增复制命令。improve-1 只改 Web；improve-2 为修正最终答案的判定，将在后端投影和 SDK 契约上各改一处。
 
 ## 轮次地图
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | Web 消息操作栏、剪贴板工具、用户消息与最终答案复制、代码块复制 | 已实施，待用户验收（2026-11-06，分支 `codex/message-copy`） |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | Web 消息操作栏、剪贴板工具、用户消息与最终答案复制、代码块复制 | 已实施并合入 `main`；用户验收时发现两处漏网，转入 improve-2 |
+| [improve-2](improve-2/00-discussion.md) | 2026-11-07 | 复发返修：用户验收 improve-1 时发现两处漏网 | 长会话旧答复丢失复制按钮；隐藏工具后中断，阶段说明被当成最终答案 | 规划定稿（2026-11-07），待实施 |
 
-## 本轮文档地图
+## improve-1 文档地图
 
 | 文档 | 内容 |
 |---|---|
@@ -21,9 +22,20 @@
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 场景、回归清单、发布门 |
 | 05 实施验收 | 实施完成后由验收会话写入 `improve-1/05-implementation-acceptance.md` |
 
+## improve-2 文档地图
+
+| 文档 | 内容 |
+|---|---|
+| [00 讨论与已确认要点](improve-2/00-discussion.md) | 两个问题的修法、放弃的选项、不在本轮的事项 |
+| [01 现状与问题分析](improve-2/01-problem-analysis-and-current-state.md) | Web store 的三份缓存、后端窗口如何裁掉 run 和 prompt、隐藏工具在哪里丢掉、已有测试的缺口 |
+| [02 方案与改动面](improve-2/02-optimization-plan-and-change-scope.md) | 决策表、Stage 1（Web 缓存 run 和 prompt）、Stage 2（隐藏工具留标记）、兼容与风险 |
+| [03 参考项目](improve-2/03-reference-projects.md) | codex、deepseek-harness、kimi-code、ZCode 怎么隐藏工具、怎么判定最终答案 |
+| [04 测试与验收](improve-2/04-test-and-acceptance.md) | 成对回归、浏览器走查、发布门 |
+| 05 实施验收 | 实施完成后由验收会话写入 `improve-2/05-implementation-acceptance.md` |
+
 ## 实施记录（2026-11-06）
 
-在分支 `codex/message-copy` 上实施，没有合并或推送。只改 Web，后端、SDK、TUI 都没动。界面参考 Claude、Codex、Cursor 的做法；这几个桌面应用不在 `code-cli/` 下，参考的是产品的实际表现。
+在分支 `codex/message-copy` 上实施，当时没有合并或推送；后来并入 `main`（2026-11-07 的 `c0c24b4f` 已包含）。只改 Web，后端、SDK、TUI 都没动。界面参考 Claude、Codex、Cursor 的做法；这几个桌面应用不在 `code-cli/` 下，参考的是产品的实际表现。
 
 **落地内容**：
 

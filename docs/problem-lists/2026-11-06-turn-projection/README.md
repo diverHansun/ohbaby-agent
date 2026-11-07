@@ -57,7 +57,7 @@
 | 议题 | 关系 |
 |---|---|
 | [Web 整轮过程折叠](../2026-09-29-web-run-process-collapse/README.md) | 定下了现在“按 prompt 判断一轮、不加 SDK 字段”的做法。本议题有意改为按 run 判断，并给 `UiRun` 加字段；折叠的其余规则保留 |
-| [消息复制](../2026-11-04-message-copy/README.md) | 复制按钮挂在每轮最终答案上，常显的那一行跟最后一个已结束的轮次走。本议题落地后，唤醒那一轮的回答也能复制 |
+| [消息复制](../2026-11-04-message-copy/README.md) | 复制按钮挂在每轮最终答案上，常显的那一行跟最后一个已结束的轮次走。本议题落地后，唤醒那一轮的回答也能复制。验收时发现长会话里 Web 没有缓存滑出窗口的 run（本议题 Stage 2 的遗漏），在消息复制的 [improve-2](../2026-11-04-message-copy/improve-2/00-discussion.md) 里一起修 |
 | [会话 fork](../2026-11-04-session-fork/README.md) | 切点现在按 prompt 定，会漏掉之后的唤醒轮次。本议题落地后再改为按 run 定 |
 | [撤销重发](../2026-11-04-conversation-undo/README.md) | 本议题勘测发现 `subagent_execution.root_prompt_id` 从未写入，撤销方案靠它找子代理行不通。本议题落地后在撤销议题里修订 |
 | [side chat](../2026-11-04-side-chat/README.md) | 复制主会话历史的切点同样要改为按 run 定，本议题落地后再改 |
