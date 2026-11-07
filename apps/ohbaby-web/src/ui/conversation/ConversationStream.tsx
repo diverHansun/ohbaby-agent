@@ -15,6 +15,7 @@ import type {
   UiRun,
   UiUnconsumedSteer,
 } from "ohbaby-sdk";
+import { turnTriggerLabel } from "ohbaby-sdk";
 import type { ReactNode } from "react";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import {
@@ -62,6 +63,8 @@ export function ConversationStream(props: {
   readonly messages: readonly UiMessage[];
   readonly sessionId: string | null;
   readonly prompts: readonly UiPromptSubmission[];
+  /** This session's main runs; each ended run with messages is one turn. */
+  readonly runs?: readonly UiRun[];
   readonly activeRun: UiRun | undefined;
   readonly isRunning: boolean;
   readonly reasoningByMessageId: Readonly<
@@ -126,7 +129,7 @@ export function ConversationStream(props: {
     Readonly<Partial<Record<string, boolean>>>
   >({});
   const runKey = (process: RunProcess): string =>
-    JSON.stringify([props.sessionId, process.prompt.runId]);
+    JSON.stringify([props.sessionId, process.runId]);
   const messageDomId = (id: string): string =>
     `${idPrefix}-${encodeURIComponent(props.sessionId ?? "")}-${encodeURIComponent(id)}`;
   const processes = projectRunProcesses(
@@ -136,6 +139,8 @@ export function ConversationStream(props: {
     props.prompts,
     props.sessionId,
     props.reasoningByMessageId,
+    props.runs,
+    messages,
   );
   const beforeAnswer = new Map<string, RunProcess[]>();
   const beforeProcess = new Map<string, RunProcess[]>();
@@ -226,17 +231,18 @@ export function ConversationStream(props: {
     ];
     return (
       <PromptDuration
-        key={process.prompt.promptId}
-        prompt={process.prompt}
+        key={process.runId}
+        timing={process.timing}
+        label={turnTriggerLabel(process.trigger)}
         disclosure={
           process.foldable
             ? {
                 open: isOpen(process),
                 controls: controls.join(" "),
-                id: `${messageDomId(process.prompt.promptId)}-disclosure`,
+                id: `${messageDomId(`run:${process.runId}`)}-disclosure`,
                 onToggle: (): void => {
                   const stream = streamRef.current;
-                  const id = `${messageDomId(process.prompt.promptId)}-disclosure`;
+                  const id = `${messageDomId(`run:${process.runId}`)}-disclosure`;
                   const control = document.getElementById(id);
                   if (stream && control) {
                     toggleAnchor.current = {
@@ -379,7 +385,7 @@ export function ConversationStream(props: {
         );
       if (owner)
         document
-          .getElementById(`${messageDomId(owner.prompt.promptId)}-disclosure`)
+          .getElementById(`${messageDomId(`run:${owner.runId}`)}-disclosure`)
           ?.focus({ preventScroll: true });
       focusedProcessElement.current = null;
     }
@@ -397,7 +403,7 @@ export function ConversationStream(props: {
     ) {
       const owner = readingOwner;
       const control = document.getElementById(
-        `${messageDomId(owner.prompt.promptId)}-disclosure`,
+        `${messageDomId(`run:${owner.runId}`)}-disclosure`,
       );
       const answer = owner.answerId
         ? document.getElementById(messageDomId(owner.answerId))

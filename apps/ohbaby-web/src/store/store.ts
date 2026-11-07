@@ -1,8 +1,10 @@
-import type {
-  UiCommandCompletion,
-  UiCommandError,
-  UiCommandInvocation,
-  UiPromptSubmission,
+import {
+  isPromptPending,
+  type UiCommandCompletion,
+  type UiCommandError,
+  type UiCommandInvocation,
+  type UiPromptSubmission,
+  type UiRun,
 } from "ohbaby-sdk";
 import {
   createInitialViewState,
@@ -92,6 +94,8 @@ export function createOhbabyWebStore(): OhbabyWebStore {
   let invalidatedAt = -1;
   const deleted = new Set<string>();
   const loadedPrompts = new Map<string, UiPromptSubmission>();
+  /** Runs of older pages; the live view's copies win (turn-projection 02 Stage 2). */
+  const loadedRuns = new Map<string, UiRun>();
   const listeners = new Set<StoreListener>();
   const commands = new Map<
     string,
@@ -230,7 +234,14 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       snapshot: {
         sessions: [{ ...view.session, messages: ordered }],
         activeSessionId: view.session.id,
-        runs: view.runs,
+        // Live runs first, as the server orders them (newest first); older
+        // pages' runs follow unless the live view already has them.
+        runs: [
+          ...view.runs,
+          ...[...loadedRuns.values()].filter(
+            (run) => !view.runs.some((live) => live.id === run.id),
+          ),
+        ],
         serverNow,
         prompts: [
           ...new Map([
@@ -363,6 +374,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         clearCommands();
         loaded.clear();
         loadedPrompts.clear();
+        loadedRuns.clear();
         observed.clear();
         deleted.clear();
         invalidatedAt = -1;
@@ -455,8 +467,12 @@ export function createOhbabyWebStore(): OhbabyWebStore {
             observed.delete(id);
           }
         }
+      for (const run of page.runs)
+        if (run.sessionId === view.session.id) loadedRuns.set(run.id, run);
       for (const prompt of page.prompts) {
-        if (prompt.sessionId !== view.session.id) continue;
+        // Pages also list pending prompts, which the live view tracks.
+        if (prompt.sessionId !== view.session.id || isPromptPending(prompt))
+          continue;
         const previous = loadedPrompts.get(prompt.promptId);
         if (!previous || previous.updatedAt <= prompt.updatedAt)
           loadedPrompts.set(prompt.promptId, prompt);
@@ -635,6 +651,8 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     reset(): void {
       clearCommands();
       loaded.clear();
+      loadedPrompts.clear();
+      loadedRuns.clear();
       observed.clear();
       deleted.clear();
       invalidatedAt = -1;

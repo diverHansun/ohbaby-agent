@@ -913,6 +913,7 @@ describe("browser session recovery", () => {
               messages: [
                 { id: "older", role: "user", createdAt: "2025", parts: [] },
               ],
+              runs: [],
               prompts: [],
               reasoningMissing: false,
               hasMore: true,

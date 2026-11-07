@@ -64,6 +64,29 @@ describe("session view store", () => {
     store.setSessionSync(ready(view(1)));
     expect(store.getSnapshot().view.snapshot?.prompts).toEqual([prompt]);
   });
+  it("keeps the runs of older history pages behind the live view's copies (turn-projection T13)", () => {
+    const store = createOhbabyWebStore();
+    const live = {
+      id: "live",
+      sessionId: "s",
+      status: { kind: "idle" as const },
+      startedAt: "2026-01-01T00:02:00Z",
+      updatedAt: "2026-01-01T00:02:00Z",
+      outcome: "succeeded" as const,
+    };
+    store.setSessionSync(ready({ ...view(), runs: [live] }));
+    const old = { ...live, id: "old", startedAt: "2026-01-01T00:00:00Z" };
+    store.installSessionHistory({
+      runs: [old, { ...live, outcome: "failed" as const }],
+      version: view().version,
+      messages: [message("1")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    store.setSessionSync(ready({ ...view(1), runs: [live] }));
+    expect(store.getSnapshot().view.snapshot?.runs).toEqual([{ ...live }, old]);
+  });
   it("keeps loaded pages across deltas and reconnect, rejects stale page overwrites", () => {
     const store = createOhbabyWebStore();
     store.setSessionSync(ready(view()));

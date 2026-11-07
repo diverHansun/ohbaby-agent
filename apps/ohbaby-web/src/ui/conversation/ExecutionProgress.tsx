@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import type { UiRun } from "ohbaby-sdk";
 import type { ReactElement } from "react";
+import type { TurnTiming } from "./run-process.js";
 import { useExecutionDuration } from "./use-execution-duration.js";
 
 export function ModelWaiting({
@@ -55,11 +56,18 @@ export function Compacting(): ReactElement {
   );
 }
 
+/**
+ * A turn's end line: total time and, unless it succeeded, how it ended. The
+ * name predates turns by run; it now serves any turn, with or without a prompt
+ * (turn-projection 00 P12). `label` names what started a non-user turn.
+ */
 export function PromptDuration({
-  prompt,
+  timing,
+  label: origin,
   disclosure,
 }: {
-  readonly prompt: import("ohbaby-sdk").UiPromptSubmission;
+  readonly timing: TurnTiming;
+  readonly label?: string;
   readonly disclosure?: {
     readonly open: boolean;
     readonly controls: string;
@@ -68,16 +76,18 @@ export function PromptDuration({
   };
 }): ReactElement {
   const duration = useExecutionDuration(
-    prompt.promptId,
-    prompt.endTimeSource === "recovery"
-      ? undefined
-      : Date.parse(prompt.acceptedAt ?? prompt.createdAt),
-    prompt.endedAt === undefined ? undefined : Date.parse(prompt.endedAt),
+    timing.id,
+    timing.startedAt === undefined ? undefined : Date.parse(timing.startedAt),
+    Date.parse(timing.endedAt),
   );
-  const label =
-    prompt.endTimeSource === "recovery"
-      ? `${prompt.status} · End time unknown (recovered)`
-      : `${prompt.status !== "succeeded" ? `${prompt.status} · ` : ""}Total ${duration ?? "—"}`;
+  const status =
+    timing.status === undefined || timing.status === "succeeded"
+      ? ""
+      : `${timing.status} · `;
+  const result = timing.recovered
+    ? `${timing.status ?? "ended"} · End time unknown (recovered)`
+    : `${status}Total ${duration ?? "—"}`;
+  const label = origin ? `${origin} · ${result}` : result;
   return disclosure ? (
     <div className="ohb-run-header">
       <button

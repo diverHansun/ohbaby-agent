@@ -118,6 +118,9 @@ export function SessionConversation(props: {
             prompts={(view.snapshot?.prompts ?? []).filter(
               (prompt) => prompt.sessionId === sessionId,
             )}
+            runs={(view.snapshot?.runs ?? []).filter(
+              (run) => run.sessionId === sessionId,
+            )}
             activeRun={view.snapshot?.runs.find(
               (run) =>
                 run.sessionId === view.composer.activeSessionId &&

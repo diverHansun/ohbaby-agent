@@ -282,6 +282,158 @@ print('\\n'.join(lines[1139:1750]))" | grep -v "^\\s*$" | head -400`,
   };
 }
 
+/**
+ * A user turn that starts a subagent, then the turn its result woke up
+ * (turn-projection): each folds on its own, and the second is labelled.
+ */
+function wakeUp(): UiSnapshot {
+  const sessionId = "session_w";
+  const messages: UiMessage[] = [
+    {
+      id: "w-user",
+      role: "user",
+      createdAt: iso(12),
+      parts: [
+        {
+          type: "text",
+          text: "Ask a subagent to check the docs for broken links, then summarise what it finds.",
+        },
+      ],
+    },
+    {
+      id: "w-start",
+      role: "assistant",
+      runId: "run_w1",
+      createdAt: iso(12),
+      parts: [
+        {
+          type: "reasoning",
+          text: "A link check is self-contained work.",
+          endReason: "normal",
+        },
+        {
+          type: "tool-call",
+          call: {
+            id: "call_w1",
+            name: "task",
+            input: { description: "Check docs links" },
+            status: "completed",
+          },
+        },
+        {
+          type: "tool-result",
+          result: { callId: "call_w1", output: "Started subagent docs-links" },
+        },
+      ],
+    },
+    {
+      id: "w-ack",
+      role: "assistant",
+      runId: "run_w1",
+      createdAt: iso(11.9),
+      parts: [
+        {
+          type: "text",
+          text: "I've started a subagent to check the docs links. I'll summarise once it reports back.",
+        },
+      ],
+    },
+    {
+      id: "w-status",
+      role: "user",
+      runId: "run_w2",
+      runtimeInputKind: "subagent-status",
+      createdAt: iso(8),
+      parts: [{ type: "text", text: "docs-links finished" }],
+    },
+    {
+      id: "w-read",
+      role: "assistant",
+      runId: "run_w2",
+      createdAt: iso(8),
+      parts: [
+        {
+          type: "reasoning",
+          text: "Read the subagent's report first.",
+          endReason: "normal",
+        },
+        {
+          type: "tool-call",
+          call: {
+            id: "call_w2",
+            name: "task_output",
+            input: { id: "docs-links" },
+            status: "completed",
+          },
+        },
+        {
+          type: "tool-result",
+          result: { callId: "call_w2", output: "2 broken links" },
+        },
+      ],
+    },
+    {
+      id: "w-answer",
+      role: "assistant",
+      runId: "run_w2",
+      createdAt: iso(7.9),
+      parts: [
+        {
+          type: "text",
+          text: "The subagent found **2 broken links**:\n\n- `docs/setup.md` points to a removed `install.md`.\n- `README.md` links an old release page.\n\nEverything else resolves.",
+        },
+      ],
+    },
+  ];
+  const ended = {
+    sessionId,
+    status: { kind: "idle" },
+    outcome: "succeeded",
+  } as const;
+  return {
+    ...base,
+    activeSessionId: sessionId,
+    sessions: [
+      session(sessionId, "Check the docs links", 7, messages),
+      ...history,
+    ],
+    runs: [
+      {
+        ...ended,
+        id: "run_w1",
+        trigger: "user",
+        startedAt: iso(12),
+        endedAt: iso(11.9),
+        updatedAt: iso(11.9),
+      },
+      {
+        ...ended,
+        id: "run_w2",
+        trigger: "subagent",
+        startedAt: iso(8),
+        endedAt: iso(7.85),
+        updatedAt: iso(7.85),
+      },
+    ],
+    prompts: [
+      {
+        promptId: "prompt_w1",
+        clientRequestId: "request_w1",
+        scopeKey: sessionId,
+        sessionId,
+        userMessageId: "w-user",
+        text: "Ask a subagent to check the docs for broken links, then summarise what it finds.",
+        status: "succeeded",
+        runId: "run_w1",
+        createdAt: iso(12),
+        acceptedAt: iso(12),
+        updatedAt: iso(11.9),
+        endedAt: iso(11.9),
+      },
+    ],
+  };
+}
+
 const agentWorkspace = "/Users/demo/Projects/ohbaby-agent";
 const piWorkspace = "/Users/demo/Projects/pi-web";
 const notesWorkspace = "/Users/demo/notes";
@@ -499,6 +651,15 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     model,
     sessions: byRecency([
       globalRow("session_1", runningSession.title, 1, agentWorkspace),
+      ...typicalSessions(),
+    ]),
+  }),
+  "wake-up": () => ({
+    snapshot: wakeUp(),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_w", "Check the docs links", 7, agentWorkspace),
       ...typicalSessions(),
     ]),
   }),

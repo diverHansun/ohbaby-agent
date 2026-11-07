@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UiMessage, UiPromptSubmission } from "ohbaby-sdk";
+import type { UiMessage, UiPromptSubmission, UiRun } from "ohbaby-sdk";
 import { ConversationStream } from "./ConversationStream.js";
 import { messageBodyText } from "./message-text.js";
 
@@ -67,6 +67,7 @@ function render(
   messages: readonly UiMessage[],
   prompts: readonly UiPromptSubmission[] = [prompt("run")],
   isRunning = false,
+  runs: readonly UiRun[] = [],
 ): HTMLDivElement {
   const container = document.createElement("div");
   document.body.append(container);
@@ -82,6 +83,7 @@ function render(
         messages={messages}
         sessionId="session"
         prompts={prompts}
+        runs={runs}
         activeRun={undefined}
         isRunning={isRunning}
         reasoningByMessageId={{}}
@@ -166,10 +168,17 @@ describe("message copy buttons", () => {
         ],
         [prompt("run", { status: "running", endedAt: undefined })],
       ],
-      // Failed with an error message.
+      // Only a stop note, no model text (turn-projection T11).
       [
-        [msg("answer", "assistant", [text("boom")], { status: "error" })],
-        [prompt("run", { status: "failed" })],
+        [
+          msg("answer", "assistant", [
+            {
+              ...text("[Response cancelled by the user.]"),
+              metadata: { kind: "lifecycle-interruption" },
+            },
+          ]),
+        ],
+        [prompt("run", { status: "cancelled" })],
       ],
       // Ended on a tool call.
       [
@@ -264,5 +273,97 @@ describe("message copy buttons", () => {
     );
     expect(view.querySelector(".ohb-message-actions.is-persistent")).toBeNull();
     expect(copyButtonsIn(view).has("old-answer")).toBe(true);
+  });
+
+  it("labels a subagent wake-up turn and copies its final answer (T7)", async () => {
+    const wake: UiRun = {
+      id: "wake",
+      sessionId: "session",
+      status: { kind: "idle" },
+      startedAt: "2026-11-06T00:01:00Z",
+      endedAt: "2026-11-06T00:01:04Z",
+      updatedAt: "2026-11-06T00:01:04Z",
+      trigger: "subagent",
+      outcome: "succeeded",
+    };
+    const view = render(
+      [
+        msg("user-run", "user", [text("Research both schools")]),
+        msg("answer", "assistant", [text("Dispatched two agents.")]),
+        msg("status", "user", [text("Runtime subagent result wake-up.")], {
+          runId: "wake",
+          runtimeInputKind: "subagent-status",
+        }),
+        msg("wake-progress", "assistant", [text("Reading the reports.")], {
+          runId: "wake",
+          createdAt: "2026-11-06T00:01:01Z",
+        }),
+        msg("wake-answer", "assistant", [text("Both plans are out.")], {
+          runId: "wake",
+          createdAt: "2026-11-06T00:01:03Z",
+        }),
+      ],
+      [prompt("run")],
+      false,
+      [wake],
+    );
+    expect(view.textContent).toContain("Subagent update · Total 4s");
+    const buttons = copyButtonsIn(view);
+    expect([...buttons.keys()]).toEqual(["user-run", "answer", "wake-answer"]);
+    const persistent = view.querySelector(".ohb-message-actions.is-persistent");
+    expect(
+      persistent?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId,
+    ).toBe("wake-answer");
+    const copy = buttons.get("wake-answer");
+    if (!copy) throw new Error("no wake-up copy button");
+    await click(copy);
+    expect(writeText).toHaveBeenLastCalledWith("Both plans are out.");
+  });
+
+  it("copies a stopped reply's own text, not the stop note (T11)", async () => {
+    const view = render(
+      [
+        msg("user-run", "user", [text("Explain")]),
+        msg(
+          "partial",
+          "assistant",
+          [
+            text("The first half of the reply"),
+            {
+              ...text("[Response cancelled by the user.]"),
+              metadata: { kind: "lifecycle-interruption" },
+            },
+          ],
+          { status: "error" },
+        ),
+      ],
+      [prompt("run", { status: "cancelled" })],
+    );
+    expect(view.textContent).toContain("[Response cancelled by the user.]");
+    const copy = copyButtonsIn(view).get("partial");
+    if (!copy) throw new Error("no copy button on the stopped reply");
+    await click(copy);
+    expect(writeText).toHaveBeenLastCalledWith("The first half of the reply");
+  });
+
+  it("gives only the closing reply of a run a copy button, even expanded (T11b)", () => {
+    const view = render([
+      msg("user-run", "user", [text("Fix it")]),
+      msg("interim", "assistant", [
+        text("Found the cause; now patching."),
+        {
+          type: "tool-call",
+          call: { id: "c1", name: "edit", status: "completed", input: {} },
+        },
+      ]),
+      msg("closing", "assistant", [text("Patched and tested.")]),
+    ]);
+    const disclosure = view.querySelector<HTMLButtonElement>(
+      "button.ohb-prompt-duration",
+    );
+    act(() => {
+      disclosure?.click();
+    });
+    expect([...copyButtonsIn(view).keys()]).toEqual(["user-run", "closing"]);
   });
 });
