@@ -1,18 +1,22 @@
 import { randomUUID } from "node:crypto";
 import {
   createSessionSync,
+  isPromptPending,
   sameSessionGeneration,
   type CoreAPI,
   type SessionSyncState,
   type UiEvent,
-  type UiMessage,
   type UiPromptReceipt,
   type UiReasoningConfig,
   type UiSessionControl,
   type UiSessionScope,
   type UiSessionRecoveryClient,
 } from "ohbaby-sdk";
-import type { TuiStore } from "./store/snapshot.js";
+import {
+  NO_OLDER_HISTORY,
+  type TuiOlderHistory,
+  type TuiStore,
+} from "./store/snapshot.js";
 
 export interface PendingTuiPrompt {
   readonly clientRequestId: string;
@@ -98,7 +102,7 @@ export function createTuiSessionRecovery(options: {
     indexTicket = 0;
   let connection: string | number = "in-process";
   let scope: UiSessionScope | null = null;
-  let older: readonly UiMessage[] = [];
+  let older: TuiOlderHistory = NO_OLDER_HISTORY;
   let historyBefore: string | undefined;
   let historyMore = true,
     historyBusy = false;
@@ -243,7 +247,7 @@ export function createTuiSessionRecovery(options: {
         if (
           state.sync.view &&
           !sameSessionGeneration(state.sync.view.version, next.view.version) &&
-          older.length
+          older.messages.length
         ) {
           historyStale = true;
           historyBefore = undefined;
@@ -309,8 +313,10 @@ export function createTuiSessionRecovery(options: {
     ++controlTicket;
     controlDirty = false;
     const preserveHistory =
-      sessionId !== null && scope?.sessionId === sessionId && older.length > 0;
-    if (!preserveHistory) older = [];
+      sessionId !== null &&
+      scope?.sessionId === sessionId &&
+      older.messages.length > 0;
+    if (!preserveHistory) older = NO_OLDER_HISTORY;
     historyBefore = undefined;
     historyMore = true;
     historyBusy = false;
@@ -506,7 +512,7 @@ export function createTuiSessionRecovery(options: {
             event.version.sessionRevision > current.version.sessionRevision;
 
           if (applies && event.historyInvalidated) {
-            historyStale = older.length > 0;
+            historyStale = older.messages.length > 0;
             historyBefore = undefined;
             historyMore = true;
             invalidatedAt = event.version.sessionRevision;
@@ -544,10 +550,13 @@ export function createTuiSessionRecovery(options: {
               resetTranscript = true;
           }
           if (applies && event.removedMessageIds)
-            older = older.filter(
-              (message) => !event.removedMessageIds?.includes(message.id),
+            older = anchored(
+              older.messages.filter(
+                (message) => !event.removedMessageIds?.includes(message.id),
+              ),
+              older,
             );
-          if (older.length === 0) historyStale = false;
+          if (older.messages.length === 0) historyStale = false;
           sync.receive(event);
           // Text deltas do not change the independently queried Stop target.
           if (
@@ -620,7 +629,7 @@ export function createTuiSessionRecovery(options: {
         sync.getState().status !== "ready" ||
         historyBusy ||
         !historyMore ||
-        (!older.length && !view.history.hasMore)
+        (!older.messages.length && !view.history.hasMore)
       )
         return;
       historyBusy = true;
@@ -648,13 +657,17 @@ export function createTuiSessionRecovery(options: {
             page.bindingGeneration !== current.bindingGeneration)
         )
           return;
-        const messages = new Map(
-          [...page.messages, ...(historyStale ? [] : older)].map((message) => [
-            message.id,
-            message,
-          ]),
+        const kept = historyStale ? NO_OLDER_HISTORY : older;
+        older = anchored(
+          uniqueBy([...page.messages, ...kept.messages], (m) => m.id),
+          {
+            runs: uniqueBy([...page.runs, ...kept.runs], (run) => run.id),
+            prompts: uniqueBy(
+              [...page.prompts, ...kept.prompts],
+              (prompt) => prompt.promptId,
+            ),
+          },
         );
-        older = [...messages.values()];
         historyBefore = page.before;
         historyMore = page.hasMore;
         historyStale = false;
@@ -799,4 +812,34 @@ export function createTuiSessionRecovery(options: {
       sync.dispose();
     },
   };
+}
+
+/**
+ * Older pages' runs and prompts, kept only while their messages are loaded. A
+ * page also lists the session's pending prompts; the live view tracks those,
+ * and a frozen copy would bring back a prompt that has since gone.
+ */
+function anchored(
+  messages: TuiOlderHistory["messages"],
+  history: Pick<TuiOlderHistory, "runs" | "prompts">,
+): TuiOlderHistory {
+  const messageIds = new Set(messages.map((message) => message.id));
+  const runIds = new Set(
+    messages.flatMap((message) => (message.runId ? [message.runId] : [])),
+  );
+  return {
+    messages,
+    runs: history.runs.filter((run) => runIds.has(run.id)),
+    prompts: history.prompts.filter(
+      (prompt) =>
+        !isPromptPending(prompt) &&
+        (messageIds.has(prompt.userMessageId) ||
+          (prompt.runId !== undefined && runIds.has(prompt.runId))),
+    ),
+  };
+}
+
+/** One item per key in first-seen order; a later duplicate's value wins. */
+function uniqueBy<T>(items: readonly T[], key: (item: T) => string): T[] {
+  return [...new Map(items.map((item) => [key(item), item])).values()];
 }

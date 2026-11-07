@@ -36,7 +36,7 @@ interface ProjectedRow {
   readonly id: string;
   readonly message: UiMessage;
   readonly part?: RenderedPart;
-  readonly promptCompletion?: TranscriptItem["promptCompletion"];
+  readonly turnCompletion?: TranscriptItem["turnCompletion"];
   readonly fingerprint: string;
 }
 
@@ -101,7 +101,7 @@ export function ReplayableTranscript({
     message: UiMessage,
     messageId: string,
     cached?: CachedRow,
-    promptCompletion?: TranscriptItem["promptCompletion"],
+    turnCompletion?: TranscriptItem["turnCompletion"],
     steerState?: "unconsumed" | "unconfirmed",
   ): void => {
     const index = lineCounts.get(messageId) ?? 0;
@@ -111,14 +111,14 @@ export function ReplayableTranscript({
       id,
       message,
       part: cached?.part,
-      promptCompletion,
+      turnCompletion,
       steerState,
-      fingerprint: `${id}:${cached?.fingerprint ?? steerState ?? (promptCompletion ? JSON.stringify(promptCompletion) : "blank")}`,
+      fingerprint: `${id}:${cached?.fingerprint ?? steerState ?? (turnCompletion ? JSON.stringify([turnCompletion.trigger, turnCompletion.timing]) : "blank")}`,
     });
   };
   for (const item of items) {
-    if (item.promptCompletion) {
-      append(item.message, item.messageId, undefined, item.promptCompletion);
+    if (item.turnCompletion) {
+      append(item.message, item.messageId, undefined, item.turnCompletion);
     } else {
       const recovery = unconsumedSteers?.find(
         (input) => input.messageId === item.messageId,
@@ -223,8 +223,8 @@ export function ReplayableTranscript({
                 ? "Processing unconfirmed"
                 : "Not processed"}
             </Text>
-          ) : row.promptCompletion ? (
-            <PromptCompletion key={row.id} prompt={row.promptCompletion} />
+          ) : row.turnCompletion ? (
+            <PromptCompletion key={row.id} turn={row.turnCompletion} />
           ) : row.part ? (
             <Box key={row.id}>
               <MessageParts message={row.message} parts={[row.part]} />

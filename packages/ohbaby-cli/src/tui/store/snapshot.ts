@@ -106,13 +106,26 @@ export interface TuiStoreState {
   readonly catalogInvalidation: TuiCommandCatalogInvalidation | null;
 }
 
+/** What earlier history pages hold beyond the live session view. */
+export interface TuiOlderHistory {
+  readonly messages: readonly UiMessage[];
+  readonly runs: readonly UiRun[];
+  readonly prompts: readonly UiPromptSubmission[];
+}
+
+export const NO_OLDER_HISTORY: TuiOlderHistory = {
+  messages: [],
+  runs: [],
+  prompts: [],
+};
+
 export interface TuiStore {
   readonly getState: () => TuiStoreState;
   readonly dispatch: (event: UiEvent) => void;
   readonly dispatchMany: (events: readonly UiEvent[]) => void;
   readonly installSessionView: (
     view: UiSessionView,
-    older?: readonly UiMessage[],
+    older?: TuiOlderHistory,
     resetTranscript?: boolean,
   ) => void;
   readonly selectSession: (sessionId: string | null) => void;

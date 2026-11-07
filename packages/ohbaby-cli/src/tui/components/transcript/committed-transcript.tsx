@@ -49,15 +49,15 @@ export const CommittedTranscript = memo(function CommittedTranscript({
   const partStarts = new Map<string, number>();
   const entries = items.map((item) => {
     const start = partStarts.get(item.messageId) ?? 0;
-    if (!item.promptCompletion)
+    if (!item.turnCompletion)
       partStarts.set(item.messageId, start + item.message.parts.length);
     return { item, anchorId: transcriptAnchorId(item.messageId, start) };
   });
   return (
     <Box flexDirection="column">
       {entries.map(({ item, anchorId }) =>
-        item.promptCompletion ? (
-          <PromptCompletion key={item.id} prompt={item.promptCompletion} />
+        item.turnCompletion ? (
+          <PromptCompletion key={item.id} turn={item.turnCompletion} />
         ) : (
           <MessageRow
             anchorId={anchorId}

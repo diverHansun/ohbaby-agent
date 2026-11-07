@@ -289,6 +289,7 @@ describe("TUI source recovery", () => {
     release({
       version: view().version,
       messages: [old, { ...old, id: "older" }],
+      runs: [],
       prompts: [],
       reasoningMissing: true,
       hasMore: false,
@@ -377,6 +378,124 @@ describe("TUI source recovery", () => {
     expect(client.abortRun).not.toHaveBeenCalled();
     recovery.dispose();
   });
+  it("gives older turns an end line once their history page loads (T17)", async () => {
+    const ended = {
+      sessionId: "a",
+      status: { kind: "idle" as const },
+      trigger: "user" as const,
+      outcome: "succeeded" as const,
+    };
+    const liveRun = {
+      ...ended,
+      id: "live-run",
+      startedAt: "2026-01-02T00:00:00Z",
+      endedAt: "2026-01-02T00:00:03Z",
+      updatedAt: "2026-01-02T00:00:03Z",
+    };
+    const oldRun = {
+      ...ended,
+      id: "old-run",
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: "2026-01-01T00:00:02Z",
+      updatedAt: "2026-01-01T00:00:02Z",
+    };
+    const initial = {
+      ...view(),
+      session: {
+        ...view().session,
+        messages: [
+          {
+            id: "live-answer",
+            createdAt: "2026-01-02T00:00:01Z",
+            role: "assistant" as const,
+            runId: "live-run",
+            parts: [{ type: "text" as const, text: "live" }],
+          },
+        ],
+      },
+      runs: [liveRun],
+      history: { hasMore: true, before: "cursor" },
+    };
+    const { recovery, store } = setup({
+      getSessionView: vi.fn(() => Promise.resolve(initial)),
+      getSessionHistory: vi.fn(() =>
+        Promise.resolve({
+          version: view().version,
+          messages: [
+            {
+              id: "old-answer",
+              createdAt: "2026-01-01T00:00:01Z",
+              role: "assistant",
+              runId: "old-run",
+              parts: [{ type: "text", text: "old" }],
+            },
+          ],
+          // The page repeats a run the live view already has.
+          runs: [oldRun, liveRun],
+          prompts: [],
+          reasoningMissing: false,
+          hasMore: false,
+        }),
+      ),
+    });
+    await recovery.start();
+    await tick();
+    const lines = (): string[] =>
+      store
+        .getState()
+        .committedItems.flatMap((item) =>
+          item.turnCompletion ? [item.turnCompletion.runId] : [],
+        );
+    expect(lines()).toEqual(["live-run"]);
+    await recovery.loadHistory();
+    expect(lines()).toEqual(["old-run", "live-run"]);
+    expect(store.getState().committedItems.map((item) => item.id)).toEqual([
+      "old-answer",
+      "turn-completion:old-run",
+      "live-answer",
+      "turn-completion:live-run",
+    ]);
+    recovery.dispose();
+  });
+  it("does not keep a history page's copy of a pending prompt", async () => {
+    const queued = {
+      promptId: "queued",
+      clientRequestId: "request",
+      scopeKey: "a",
+      sessionId: "a",
+      userMessageId: "never-written",
+      text: "later",
+      status: "queued" as const,
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+    };
+    const { recovery, store } = setup({
+      getSessionView: vi.fn(() =>
+        Promise.resolve({
+          ...view(),
+          history: { hasMore: true, before: "cursor" },
+        }),
+      ),
+      getSessionHistory: vi.fn(() =>
+        Promise.resolve({
+          version: view().version,
+          messages: [
+            { id: "old", createdAt: "2025-01-01", role: "user", parts: [] },
+          ],
+          runs: [],
+          // Pages list every pending prompt; this one was cancelled since.
+          prompts: [queued],
+          reasoningMissing: false,
+          hasMore: false,
+        }),
+      ),
+    });
+    await recovery.start();
+    await tick();
+    await recovery.loadHistory();
+    expect(store.getState().prompts).toEqual([]);
+    recovery.dispose();
+  });
   it("does not let old epoch events invalidate loaded history", async () => {
     const initial = { ...view(), history: { hasMore: true, before: "cursor" } };
     const { recovery, store } = setup({
@@ -392,6 +511,7 @@ describe("TUI source recovery", () => {
               parts: [],
             },
           ],
+          runs: [],
           prompts: [],
           reasoningMissing: false,
           hasMore: false,
@@ -759,6 +879,7 @@ it("keeps invalidated history readable after a failed refresh, then clears stale
   const page = {
     version: view().version,
     messages: [old],
+    runs: [],
     prompts: [],
     reasoningMissing: false,
     hasMore: false,

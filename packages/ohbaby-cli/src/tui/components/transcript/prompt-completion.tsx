@@ -1,28 +1,31 @@
 import { useExecutionDuration } from "../execution-duration.js";
-import type { UiPromptSubmission } from "ohbaby-sdk";
+import { turnTriggerLabel, type UiTurn } from "ohbaby-sdk";
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
 
+/** A turn's end line: what started it when not the user, its result and total time. */
 export function PromptCompletion({
-  prompt,
+  turn,
 }: {
-  readonly prompt: UiPromptSubmission;
+  readonly turn: UiTurn;
 }): ReactElement {
+  const { timing } = turn;
   const duration = useExecutionDuration(
-    prompt.promptId,
-    prompt.endTimeSource === "recovery"
-      ? undefined
-      : Date.parse(prompt.acceptedAt ?? prompt.createdAt),
-    prompt.endedAt === undefined ? undefined : Date.parse(prompt.endedAt),
+    timing.id,
+    timing.startedAt === undefined ? undefined : Date.parse(timing.startedAt),
+    Date.parse(timing.endedAt),
   );
+  const label = turnTriggerLabel(turn.trigger);
+  const result = timing.recovered
+    ? `${timing.status ?? "ended"} · End time unknown (recovered)`
+    : `${
+        timing.status === undefined || timing.status === "succeeded"
+          ? ""
+          : `${timing.status} · `
+      }Total ${duration ?? "—"}`;
   return (
     <Box marginBottom={1}>
-      <Text dimColor>
-        {prompt.status === "succeeded" ? "" : `${prompt.status} · `}
-        {prompt.endTimeSource === "recovery"
-          ? "End time unknown (recovered)"
-          : `Total ${duration ?? "—"}`}
-      </Text>
+      <Text dimColor>{label ? `${label} · ${result}` : result}</Text>
     </Box>
   );
 }

@@ -1,4 +1,10 @@
-import type { UiMessage, UiPromptSubmission } from "ohbaby-sdk";
+import {
+  listEndedTurns,
+  type UiMessage,
+  type UiPromptSubmission,
+  type UiRun,
+  type UiTurn,
+} from "ohbaby-sdk";
 import type { TuiRuntimeStatus } from "./snapshot.js";
 
 export interface TranscriptSplit {
@@ -13,7 +19,8 @@ export interface TranscriptSplit {
  * the rest of the message is still being generated.
  */
 export interface TranscriptItem {
-  readonly promptCompletion?: UiPromptSubmission;
+  /** A turn's end line; its `message` is an empty placeholder. */
+  readonly turnCompletion?: UiTurn;
   readonly id: string;
   readonly messageId: string;
   readonly message: UiMessage;
@@ -369,54 +376,57 @@ function hasPendingOrRunningTool(message: UiMessage): boolean {
   );
 }
 
-/** Terminal ledger markers are append-only during live use, just like message fragments. */
-export function appendPromptCompletions(
+/**
+ * Adds an end line for each newly ended turn (`listEndedTurns`), once per run.
+ * Lines are append-only during live use, like message fragments. When the
+ * transcript is being restored, each line goes after the last item of its run
+ * (or its prompt's user message) instead of at the end.
+ */
+export function appendTurnCompletions(
   items: readonly TranscriptItem[],
-  prompts: readonly UiPromptSubmission[],
-  sessionId: string | null,
+  session: {
+    readonly sessionId: string | null;
+    readonly runs: readonly UiRun[];
+    readonly prompts: readonly UiPromptSubmission[];
+    /** The session's messages, hidden runtime inputs included. */
+    readonly messages: readonly UiMessage[];
+  },
   restoring = false,
 ): readonly TranscriptItem[] {
   const seen = new Set(
     items.flatMap((item) =>
-      item.promptCompletion ? [item.promptCompletion.promptId] : [],
+      item.turnCompletion ? [item.turnCompletion.runId] : [],
     ),
   );
-  const pending = prompts.filter(
-    (prompt) =>
-      prompt.sessionId === sessionId &&
-      !seen.has(prompt.promptId) &&
-      prompt.endedAt !== undefined &&
-      Number.isFinite(Date.parse(prompt.createdAt)) &&
-      Number.isFinite(Date.parse(prompt.endedAt)) &&
-      ["succeeded", "failed", "cancelled", "interrupted"].includes(
-        prompt.status,
-      ),
+  const pending = listEndedTurns(session).filter(
+    (turn) => !seen.has(turn.runId),
   );
   if (pending.length === 0) return items;
   const next = [...items];
-  for (const prompt of pending) {
-    if (prompt.endedAt === undefined) continue;
-    const id = `prompt-completion:${prompt.promptId}`;
+  for (const turn of pending) {
+    const id = `turn-completion:${turn.runId}`;
     const item: TranscriptItem = {
       id,
       messageId: id,
       spacing: true,
-      promptCompletion: prompt,
-      message: { id, role: "system", createdAt: prompt.endedAt, parts: [] },
+      turnCompletion: turn,
+      message: {
+        id,
+        role: "system",
+        createdAt: turn.timing.endedAt,
+        parts: [],
+      },
     };
-    if (restoring) {
-      const index = next.findLastIndex(
-        (item) =>
-          item.messageId === prompt.userMessageId ||
-          (prompt.runId !== undefined && item.message.runId === prompt.runId),
-      );
-      if (index >= 0) {
-        next.splice(index + 1, 0, item);
-        continue;
-      }
-    }
-    next.push(item);
-    seen.add(prompt.promptId);
+    const index = restoring
+      ? next.findLastIndex(
+          (entry) =>
+            entry.message.runId === turn.runId ||
+            (turn.prompt !== undefined &&
+              entry.messageId === turn.prompt.userMessageId),
+        )
+      : -1;
+    if (index >= 0) next.splice(index + 1, 0, item);
+    else next.push(item);
   }
   return next;
 }

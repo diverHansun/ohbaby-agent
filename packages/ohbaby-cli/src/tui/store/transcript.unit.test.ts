@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { UiMessage } from "ohbaby-sdk";
+import type { UiMessage, UiPromptSubmission, UiRun } from "ohbaby-sdk";
 import type { TuiRuntimeStatus } from "./snapshot.js";
-import { advanceTranscriptCommit, splitTranscript } from "./transcript.js";
+import {
+  advanceTranscriptCommit,
+  appendTurnCompletions,
+  splitTranscript,
+} from "./transcript.js";
 
 describe("splitTranscript", () => {
   it("keeps an empty transcript fully committed", () => {
@@ -154,6 +158,133 @@ describe("splitTranscript", () => {
       committedMessages: committed,
       liveMessage: assistant,
     });
+  });
+});
+
+describe("turn end lines (turn-projection)", () => {
+  const prompt: UiPromptSubmission = {
+    promptId: "p1",
+    clientRequestId: "c1",
+    scopeKey: "s",
+    sessionId: "s",
+    userMessageId: "user",
+    text: "Ask",
+    status: "succeeded",
+    runId: "r1",
+    createdAt: "2026-06-07T00:00:00.000Z",
+    acceptedAt: "2026-06-07T00:00:00.000Z",
+    updatedAt: "2026-06-07T00:00:02.000Z",
+    endedAt: "2026-06-07T00:00:02.000Z",
+  };
+  const run = (id: string, patch: Partial<UiRun> = {}): UiRun => ({
+    id,
+    sessionId: "s",
+    status: { kind: "idle" },
+    startedAt: "2026-06-07T00:01:00.000Z",
+    endedAt: "2026-06-07T00:01:04.000Z",
+    updatedAt: "2026-06-07T00:01:04.000Z",
+    trigger: "subagent",
+    outcome: "succeeded",
+    ...patch,
+  });
+  const wakeUps = ["w1", "w2", "w3"];
+  const messages: UiMessage[] = [
+    userMessage("user", "Ask"),
+    assistantMessage("answer", "Started the subagents", { runId: "r1" }),
+    ...wakeUps.flatMap((id): UiMessage[] => [
+      {
+        ...userMessage(`${id}-status`, "status"),
+        role: "system",
+        runId: id,
+        runtimeInputKind: "subagent-status",
+      },
+      assistantMessage(`${id}-answer`, `Result ${id}`, { runId: id }),
+    ]),
+  ];
+  const runs = [
+    run("r1", {
+      trigger: "user",
+      startedAt: prompt.createdAt,
+      endedAt: prompt.endedAt,
+    }),
+    ...wakeUps.map((id) => run(id)),
+  ];
+  const restore = () =>
+    appendTurnCompletions(
+      advanceTranscriptCommit(undefined, messages, idle()).committedItems,
+      { sessionId: "s", runs, prompts: [prompt], messages },
+      true,
+    );
+
+  it("adds one end line per run, labelled when a subagent result started it (T16)", () => {
+    const items = restore();
+    expect(items.map((item) => item.id)).toEqual([
+      "user",
+      "answer",
+      "turn-completion:r1",
+      "w1-answer",
+      "turn-completion:w1",
+      "w2-answer",
+      "turn-completion:w2",
+      "w3-answer",
+      "turn-completion:w3",
+    ]);
+    expect(
+      items.flatMap((item) =>
+        item.turnCompletion ? [item.turnCompletion.trigger] : [],
+      ),
+    ).toEqual(["user", "subagent", "subagent", "subagent"]);
+  });
+
+  it("waits for the prompt before a live user turn gets its end line", () => {
+    const live = advanceTranscriptCommit(
+      undefined,
+      messages.slice(0, 2),
+      idle(),
+    ).committedItems;
+    const session = {
+      sessionId: "s",
+      runs: runs.slice(0, 1),
+      messages: messages.slice(0, 2),
+    };
+    // The run reports its end before the prompt does.
+    const early = appendTurnCompletions(live, {
+      ...session,
+      prompts: [{ ...prompt, status: "running", endedAt: undefined }],
+    });
+    expect(early).toBe(live);
+    const ended = appendTurnCompletions(early, {
+      ...session,
+      prompts: [prompt],
+    });
+    expect(ended.at(-1)?.turnCompletion?.timing).toMatchObject({
+      id: "p1",
+      startedAt: prompt.acceptedAt,
+      endedAt: prompt.endedAt,
+    });
+  });
+
+  it("never repeats a run and skips runs that wrote nothing visible (T17)", () => {
+    const items = restore();
+    const again = appendTurnCompletions(
+      items,
+      {
+        sessionId: "s",
+        runs: [...runs, run("silent"), run("hidden-only")],
+        prompts: [prompt],
+        messages: [
+          ...messages,
+          {
+            ...userMessage("hidden", "status"),
+            role: "system",
+            runId: "hidden-only",
+            runtimeInputKind: "subagent-status",
+          },
+        ],
+      },
+      true,
+    );
+    expect(again).toBe(items);
   });
 });
 

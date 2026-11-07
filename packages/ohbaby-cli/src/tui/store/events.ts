@@ -25,10 +25,11 @@ import type {
   TuiStore,
   TuiStoreState,
 } from "./snapshot.js";
+import { NO_OLDER_HISTORY } from "./snapshot.js";
 import { renderStatusPanel } from "../render/status-panel.js";
 import {
   advanceTranscriptCommit,
-  appendPromptCompletions,
+  appendTurnCompletions,
   type TranscriptCommitState,
 } from "./transcript.js";
 
@@ -62,10 +63,14 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     todos: snapshot.todos ?? [],
     resolvedPermissionIds: [],
     interactions: [],
-    committedItems: appendPromptCompletions(
+    committedItems: appendTurnCompletions(
       transcript.committedItems,
-      snapshot.prompts ?? [],
-      snapshot.activeSessionId,
+      {
+        sessionId: snapshot.activeSessionId,
+        runs: snapshot.runs,
+        prompts: snapshot.prompts ?? [],
+        messages: activeSession?.messages ?? [],
+      },
       true,
     ),
     committedPartCounts: transcript.committedPartCounts,
@@ -447,7 +452,11 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
       });
       notify();
     },
-    installSessionView(view, older = [], resetTranscript = false): void {
+    installSessionView(
+      view,
+      older = NO_OLDER_HISTORY,
+      resetTranscript = false,
+    ): void {
       state = {
         ...state,
         durationSample:
@@ -456,7 +465,7 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
             : { serverNow: view.serverNow, receivedAt: performance.now() },
       };
       const messages = new Map(
-        [...older, ...view.session.messages].map((message) => [
+        [...older.messages, ...view.session.messages].map((message) => [
           message.id,
           message,
         ]),
@@ -495,8 +504,19 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
       state = rebuildFromCollections(previous, {
         activeSessionId: session.id,
         sessions: upsertById(state.sessions, session),
-        runs,
-        prompts: view.prompts,
+        runs: [
+          ...runs,
+          ...older.runs.filter(
+            (run) => !runs.some((live) => live.id === run.id),
+          ),
+        ],
+        prompts: [
+          ...view.prompts,
+          ...older.prompts.filter(
+            (prompt) =>
+              !view.prompts.some((live) => live.promptId === prompt.promptId),
+          ),
+        ],
         runtime:
           runtimeRun?.status ??
           (state.runtime.kind === "error" ? state.runtime : { kind: "idle" }),
@@ -592,10 +612,10 @@ function preserveLocalQueues(
     ...(todos.length > 0 ? { todos } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
-  const messages = filterHiddenTodoMessages(
+  const sessionMessages =
     sessions.find((session) => session.id === next.activeSessionId)?.messages ??
-      [],
-  );
+    [];
+  const messages = filterHiddenTodoMessages(sessionMessages);
   const transcript = resolveTranscriptState(
     activeSessionChanged ? undefined : previous,
     next.activeSessionId,
@@ -614,10 +634,14 @@ function preserveLocalQueues(
     goals,
     todos,
     interactions: previous.interactions,
-    committedItems: appendPromptCompletions(
+    committedItems: appendTurnCompletions(
       transcript.committedItems,
-      next.prompts,
-      next.activeSessionId,
+      {
+        sessionId: next.activeSessionId,
+        runs,
+        prompts: next.prompts,
+        messages: sessionMessages,
+      },
       activeSessionChanged,
     ),
     committedPartCounts: transcript.committedPartCounts,
@@ -683,9 +707,9 @@ function rebuildFromCollections(
     ...(todos.length > 0 ? { todos } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
-  const messages = filterHiddenTodoMessages(
-    sessions.find((session) => session.id === activeSessionId)?.messages ?? [],
-  );
+  const sessionMessages =
+    sessions.find((session) => session.id === activeSessionId)?.messages ?? [];
+  const messages = filterHiddenTodoMessages(sessionMessages);
   const transcript = resolveTranscriptState(
     state,
     activeSessionId,
@@ -696,10 +720,14 @@ function rebuildFromCollections(
   return {
     ...state,
     activeSessionId,
-    committedItems: appendPromptCompletions(
+    committedItems: appendTurnCompletions(
       transcript.committedItems,
-      prompts,
-      activeSessionId,
+      {
+        sessionId: activeSessionId,
+        runs,
+        prompts,
+        messages: sessionMessages,
+      },
       state.activeSessionId !== activeSessionId ||
         state.committedItems.length === 0,
     ),

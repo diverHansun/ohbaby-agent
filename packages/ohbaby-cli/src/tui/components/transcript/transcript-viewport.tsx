@@ -81,7 +81,7 @@ export function TranscriptViewport({
                     committedItems
                       .filter(
                         (item) =>
-                          !item.promptCompletion &&
+                          !item.turnCompletion &&
                           item.messageId === liveMessage.id,
                       )
                       .reduce(
