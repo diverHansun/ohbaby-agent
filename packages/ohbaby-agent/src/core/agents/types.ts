@@ -29,7 +29,8 @@ export interface AgentToolCallSummary {
 }
 
 export interface AgentRunInput {
-  readonly triggerSource?: TriggerSource;
+  /** What started the run; recorded on the ledger row. */
+  readonly triggerSource: TriggerSource;
   /** Called after the run ledger admits current-run inputs, before model work. */
   readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
@@ -182,7 +183,8 @@ export interface AgentContextScope {
 }
 
 export interface AgentTurnInput {
-  readonly triggerSource?: TriggerSource;
+  /** What started the run; recorded on the ledger row. */
+  readonly triggerSource: TriggerSource;
   /** Called after the run ledger admits current-run inputs, before model work. */
   readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;

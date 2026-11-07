@@ -300,6 +300,7 @@ export class InMemoryRunLedger implements RunLedger {
             (!options?.mainOnly || record.contextScopeId === undefined) &&
             (!runIds || runIds.has(record.runId)),
         )
+        // Mirrors the SQLite ledger's ORDER BY created_at DESC, run_id DESC.
         .sort(
           (left, right) =>
             right.createdAt - left.createdAt ||

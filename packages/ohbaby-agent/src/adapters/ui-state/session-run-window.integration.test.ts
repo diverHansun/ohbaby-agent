@@ -169,13 +169,14 @@ it("keeps active runs before their first message, prunes evicted runs and restor
     runtimeEpoch: "epoch",
     messageManager: manager,
     metadata: (): Promise<typeof metadata> => Promise.resolve(metadata),
-    runs: async (id, selection): Promise<UiRun[]> =>
-      (
-        await ledger.listBySession(id, {
-          mainOnly: true,
-          ...(selection === "current" ? { limit: 1 } : { runIds: selection }),
-        })
-      ).map(runToUiRun),
+    currentRuns: async (id): Promise<UiRun[]> =>
+      (await ledger.listBySession(id, { mainOnly: true, limit: 1 })).map(
+        runToUiRun,
+      ),
+    runsByIds: async (id, runIds): Promise<UiRun[]> =>
+      (await ledger.listBySession(id, { mainOnly: true, runIds })).map(
+        runToUiRun,
+      ),
     prompts: (): Promise<UiPromptSubmission[]> => Promise.resolve([]),
     publish: (): void => undefined,
   });
@@ -246,18 +247,19 @@ it("keeps a run update that lands while a late message looks up its run", async 
     runtimeEpoch: "epoch",
     messageManager: manager,
     metadata: (): Promise<typeof metadata> => Promise.resolve(metadata),
-    runs: async (id, selection): Promise<UiRun[]> => {
+    currentRuns: async (id): Promise<UiRun[]> =>
+      (await ledger.listBySession(id, { mainOnly: true, limit: 1 })).map(
+        runToUiRun,
+      ),
+    runsByIds: async (id, runIds): Promise<UiRun[]> => {
       // Hold the late message's lookup open so a run update can land first.
-      if (selection !== "current" && selection.includes("late"))
+      if (runIds.includes("late"))
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-      return (
-        await ledger.listBySession(id, {
-          mainOnly: true,
-          ...(selection === "current" ? { limit: 1 } : { runIds: selection }),
-        })
-      ).map(runToUiRun);
+      return (await ledger.listBySession(id, { mainOnly: true, runIds })).map(
+        runToUiRun,
+      );
     },
     prompts: (): Promise<UiPromptSubmission[]> => Promise.resolve([]),
     publish: (): void => undefined,

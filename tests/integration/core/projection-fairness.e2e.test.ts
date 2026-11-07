@@ -211,7 +211,8 @@ it.each([
         createdAt: "2026-09-26",
         updatedAt: "2026-09-26",
       }),
-      runs: async () => [],
+      currentRuns: async () => [],
+      runsByIds: async () => [],
       prompts: async () => [],
       publish: (event) => {
         publications++;

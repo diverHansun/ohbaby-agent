@@ -40,7 +40,8 @@ describe("retained prompt source projection", () => {
           createdAt: "2026-01-01T00:00:00Z",
           updatedAt: "2026-01-01T00:00:00Z",
         }),
-      runs: (): Promise<readonly UiRun[]> => Promise.resolve([]),
+      currentRuns: (): Promise<readonly UiRun[]> => Promise.resolve([]),
+      runsByIds: (): Promise<readonly UiRun[]> => Promise.resolve([]),
       prompts: (): Promise<readonly UiPromptSubmission[]> =>
         Promise.resolve(prompts),
       publish: (event): void => {

@@ -121,6 +121,7 @@ it("pins child provider requests to the parent's active RunModel across session 
   });
   try {
     const first = await runtime.startSession({
+      triggerSource: "user",
       runModel: a,
       agentName: "build",
       projectRoot: process.cwd(),
@@ -137,6 +138,7 @@ it("pins child provider requests to the parent's active RunModel across session 
     });
     expect(bRequests).toHaveLength(0);
     const second = await runtime.startSession({
+      triggerSource: "user",
       runModel: b,
       agentName: "build",
       projectRoot: process.cwd(),

@@ -259,6 +259,7 @@ describe("AgentService", () => {
       });
       await expect(
         service.startSession({
+          triggerSource: "user",
           agentName: "build",
           prompt: "hello",
           projectRoot: "/repo",
@@ -292,6 +293,7 @@ describe("AgentService", () => {
       sessionManager: createSessionManager(),
     });
     const first = service.startSession({
+      triggerSource: "user",
       agentName: "build",
       prompt: "first",
       projectRoot: "D:/repo",
@@ -309,6 +311,7 @@ describe("AgentService", () => {
       },
     });
     await service.startSession({
+      triggerSource: "user",
       agentName: "build",
       prompt: "next",
       projectRoot: "D:/repo",
@@ -352,6 +355,7 @@ describe("AgentService", () => {
     });
 
     const result = await service.startSession({
+      triggerSource: "user",
       agentName: "build",
       initialUserMessageId: "message_reserved",
       prompt: "Say hello",
@@ -412,6 +416,7 @@ describe("AgentService", () => {
 
     await expect(
       service.startSession({
+        triggerSource: "user",
         agentName: "audit",
         prompt: "work",
         projectRoot: "D:/repo",

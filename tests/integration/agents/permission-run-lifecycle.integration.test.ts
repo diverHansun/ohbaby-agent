@@ -137,6 +137,7 @@ describe("permission actual run lifecycle", () => {
       });
       try {
         const run = await f.composition.startSession({
+          triggerSource: "user",
           runModel: f.runModel,
           agentName: "build",
           projectRoot: process.cwd(),
@@ -179,6 +180,7 @@ describe("permission actual run lifecycle", () => {
     f.bus.subscribe(PermissionEvent.Updated, ({ info }) => received(info));
     try {
       const run = await f.composition.startSession({
+        triggerSource: "user",
         runModel: f.runModel,
         agentName: "build",
         projectRoot: process.cwd(),
@@ -211,6 +213,7 @@ it("pauses a real child quota during pure approval waiting but still obeys its o
   f.bus.subscribe(PermissionEvent.Updated, ({ info }) => receive(info));
   try {
     const run = await f.composition.startSession({
+      triggerSource: "user",
       runModel: f.runModel,
       agentName: "build",
       projectRoot: process.cwd(),
@@ -263,6 +266,7 @@ it("cancels and revokes the actual run when the coordinator returns an unexpecte
   try {
     await expect(
       f.composition.startSession({
+        triggerSource: "user",
         runModel: f.runModel,
         agentName: "build",
         projectRoot: process.cwd(),
@@ -316,6 +320,7 @@ it("closes a child before approval or execution when child run ownership mismatc
   );
   try {
     const parent = await f.composition.startSession({
+      triggerSource: "user",
       runModel: f.runModel,
       agentName: "build",
       projectRoot: process.cwd(),

@@ -370,6 +370,7 @@ describe.each(protocols)(
           "Start the next run.",
         ].entries()) {
           const run = await composition.startSession({
+            triggerSource: "user",
             agentName: "build",
             sessionId: "instruction_parent",
             // Reopening an existing session must retain its saved project root.

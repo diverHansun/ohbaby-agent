@@ -233,7 +233,8 @@ async function fixture(
           createdAt: new Date(0).toISOString(),
           updatedAt: new Date(0).toISOString(),
         }),
-      runs: (): Promise<readonly UiRun[]> => Promise.resolve([]),
+      currentRuns: (): Promise<readonly UiRun[]> => Promise.resolve([]),
+      runsByIds: (): Promise<readonly UiRun[]> => Promise.resolve([]),
       prompts: (): Promise<readonly UiPromptSubmission[]> =>
         Promise.resolve([]),
       publish: (): void => undefined,

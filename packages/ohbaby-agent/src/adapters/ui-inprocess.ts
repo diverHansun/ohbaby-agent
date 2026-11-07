@@ -41,7 +41,10 @@ import {
 } from "../runtime/prompt-scheduler/current-run-inputs.js";
 import { createCoordinatedRunLedger } from "./ui-state/coordinated-run-ledger.js";
 import { createInMemoryRunLedger } from "../runtime/run-ledger/index.js";
-import { SourceSessionProjection } from "./ui-state/source-session-projection.js";
+import {
+  compareRunsNewestFirst,
+  SourceSessionProjection,
+} from "./ui-state/source-session-projection.js";
 import { runToUiRun, messageToUiMessage } from "./ui-state/persistent-store.js";
 import type {
   UiSessionRecoveryClient,
@@ -770,33 +773,39 @@ export function createInProcessUiBackendClient(
           unconsumedSteers: await unconsumedSteers(sessionId),
         };
       },
-      runs: async (sessionId, selection): Promise<readonly UiRun[]> => {
-        if (selection === "current") {
-          const active = (await sourceLedger.getActiveRuns(sessionId)).filter(
-            (run) => run.contextScopeId === undefined,
-          );
-          if (active.length) return active.map(runToUiRun);
-        }
-        const stored = await sourceLedger.listBySession(sessionId, {
+      currentRuns: async (sessionId): Promise<readonly UiRun[]> => {
+        const active = (await sourceLedger.getActiveRuns(sessionId)).filter(
+          (run) => run.contextScopeId === undefined,
+        );
+        if (active.length) return active.map(runToUiRun);
+        const latest = await sourceLedger.listBySession(sessionId, {
           mainOnly: true,
-          ...(selection === "current" ? { limit: 1 } : { runIds: selection }),
+          limit: 1,
         });
-        const runs = stored.map(runToUiRun);
-        if (selection === "current" && runs.length) return runs;
-        const missing =
-          selection === "current" ? undefined : new Set(selection);
-        for (const run of runs) missing?.delete(run.id);
-        if (missing?.size === 0 || initialSnapshot.runs.length === 0)
-          return runs;
-        const fallback = initialSnapshot.runs.filter(
-          (run) =>
-            run.sessionId === sessionId && (!missing || missing.has(run.id)),
-        );
-        return [...runs, ...fallback].sort(
-          (a, b) =>
-            b.startedAt.localeCompare(a.startedAt) ||
-            (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
-        );
+        if (latest.length) return latest.map(runToUiRun);
+        // A session known only from the startup snapshot has no ledger rows.
+        return initialSnapshot.runs
+          .filter((run) => run.sessionId === sessionId)
+          .sort(compareRunsNewestFirst);
+      },
+      runsByIds: async (sessionId, runIds): Promise<readonly UiRun[]> => {
+        const runs = (
+          await sourceLedger.listBySession(sessionId, {
+            mainOnly: true,
+            runIds,
+          })
+        ).map(runToUiRun);
+        const found = new Set(runs.map((run) => run.id));
+        const wanted = new Set(runIds);
+        return [
+          ...runs,
+          ...initialSnapshot.runs.filter(
+            (run) =>
+              run.sessionId === sessionId &&
+              wanted.has(run.id) &&
+              !found.has(run.id),
+          ),
+        ];
       },
       prompts: async (
         sessionId,

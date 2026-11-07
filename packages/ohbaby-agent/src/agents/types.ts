@@ -70,7 +70,8 @@ export interface RuntimeAgent {
 }
 
 export interface StartSessionParams {
-  readonly triggerSource?: TriggerSource;
+  /** What started the run; recorded on the ledger row. */
+  readonly triggerSource: TriggerSource;
   readonly onInputReady?: () => void | Promise<void>;
   /** Internal wake-up context, recorded as a runtime input rather than user intent. */
   readonly runtimeInput?: {

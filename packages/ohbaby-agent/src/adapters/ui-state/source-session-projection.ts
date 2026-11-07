@@ -52,10 +52,12 @@ export class SourceSessionProjection {
       readonly metadata: (
         sessionId: string,
       ) => Promise<Omit<UiSession, "messages">>;
-      /** "current" returns active main runs, or the most recent main run when idle. */
-      readonly runs: (
+      /** Active main runs, or the most recent main run when none is active. */
+      readonly currentRuns: (sessionId: string) => Promise<readonly UiRun[]>;
+      /** Main runs with these IDs; an empty list asks for nothing. */
+      readonly runsByIds: (
         sessionId: string,
-        selection: "current" | readonly string[],
+        runIds: readonly string[],
       ) => Promise<readonly UiRun[]>;
       readonly prompts: (
         sessionId: string,
@@ -154,7 +156,7 @@ export class SourceSessionProjection {
       sessionId,
       { scope: { contextScopeId: undefined } },
     );
-    const candidates = await this.options.runs(sessionId, "current");
+    const candidates = await this.options.currentRuns(sessionId);
     const latestRun = candidates.find(isActiveRun) ?? candidates.at(0);
     const records = new Map(
       page.messages.map((message) => [message.info.id, message]),
@@ -213,7 +215,7 @@ export class SourceSessionProjection {
     const runIds = messageRunIds(messages);
     for (const run of candidates) if (isActiveRun(run)) runIds.add(run.id);
     const runs = visibleRuns(
-      await this.options.runs(sessionId, [...runIds]),
+      await this.options.runsByIds(sessionId, [...runIds]),
       messages,
     );
     return {
@@ -340,7 +342,7 @@ export class SourceSessionProjection {
       missingRunIds.delete(run.id);
     // A late runtime input can be the first visible message of an already-ended run.
     const fetched = missingRunIds.size
-      ? await this.options.runs(change.sessionId, [...missingRunIds])
+      ? await this.options.runsByIds(change.sessionId, [...missingRunIds])
       : [];
     // `run.updated` is applied synchronously and may land during the lookup,
     // so read the view only now and keep its runs over the fetched copies.
@@ -611,9 +613,11 @@ export class SourceSessionProjection {
       const messages = page.messages
         .map((record) => this.project(record))
         .filter((message): message is UiMessage => message !== undefined);
-      const runs = await this.options.runs(sessionId, [
-        ...messageRunIds(messages),
-      ]);
+      const runs = [
+        ...(await this.options.runsByIds(sessionId, [
+          ...messageRunIds(messages),
+        ])),
+      ].sort(compareRunsNewestFirst);
       const prompts = await this.options.prompts(sessionId, messages, runs);
       return {
         version: view.version,
@@ -646,10 +650,7 @@ function visibleRuns(
   const ids = messageRunIds(messages);
   return runs
     .filter((run) => isActiveRun(run) || ids.has(run.id))
-    .sort(
-      (a, b) =>
-        b.startedAt.localeCompare(a.startedAt) || compareIds(b.id, a.id),
-    )
+    .sort(compareRunsNewestFirst)
     .map((run) => ({
       ...run,
       modelActivity: projectModelActivity(run, messages),
@@ -666,6 +667,10 @@ function reasoningPart(
     saveState: part.saveState,
     metadata: part.metadata,
   };
+}
+/** The order runs reach clients in: newest first, ties broken by ID. */
+export function compareRunsNewestFirst(a: UiRun, b: UiRun): number {
+  return b.startedAt.localeCompare(a.startedAt) || compareIds(b.id, a.id);
 }
 function compareMessages(a: UiMessage, b: UiMessage): number {
   return a.createdAt.localeCompare(b.createdAt) || compareIds(a.id, b.id);

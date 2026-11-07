@@ -436,6 +436,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     try {
       const run = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: process.cwd(),
         sessionId: "closing-parent",
@@ -551,6 +552,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     try {
       const parent = await composition.startSession({
+        triggerSource: "user",
         sessionId: "cleanup-parent",
         agentName: "build",
         projectRoot: workdir,
@@ -636,6 +638,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     try {
       const run = await composition.startSession({
+        triggerSource: "subagent",
         agentName: "build",
         projectRoot: process.cwd(),
         sessionId: "parent",
@@ -1381,6 +1384,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     composition.reserveRunId("run_primary");
 
     const result = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Say hello",
@@ -1456,6 +1460,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
 
     const result = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "new turn",
@@ -1563,6 +1568,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
 
     const result = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "new turn",
@@ -1979,6 +1985,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     for (let index = 0; index < 2; index++) {
       const result = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: workdir,
         prompt: "Continue",
@@ -2043,6 +2050,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     }
     const run = async (): Promise<void> => {
       const result = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: workdir,
         prompt: "Continue",
@@ -2113,6 +2121,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     const sessionId = "session_prompt_mode";
     const run = async (prompt: string): Promise<void> => {
       const result = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: workdir,
         prompt,
@@ -2179,6 +2188,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       });
 
     const result = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Use tools carefully",
@@ -2212,6 +2222,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       });
 
     const first = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Use the MCP tool",
@@ -2256,6 +2267,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
 
     const second = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Use the selected MCP tool",
@@ -2294,6 +2306,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       });
     const run = async (sessionId: string): Promise<void> => {
       const started = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: workdir,
         prompt: "Continue",
@@ -2423,6 +2436,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       loaded: [toolName],
     });
     const run = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Use the searched MCP tool",
@@ -2444,6 +2458,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       });
     const sessionId = "session_mcp_order";
     const initial = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Inspect available tools",
@@ -2461,6 +2476,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     for (const prompt of ["Use selected tools", "Continue with same tools"]) {
       const run = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: workdir,
         prompt,
@@ -2480,6 +2496,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       await createPromptCompositionForTest({ policyMode: "agent" });
 
     const result = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Work without MCP tools",
@@ -2505,6 +2522,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       });
 
     const first = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Prepare MCP work",
@@ -2527,6 +2545,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
 
     const second = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Continue MCP work",
@@ -2561,6 +2580,7 @@ it("prepares private session scratch before the first model request and retains 
     });
   try {
     const first = await composition.startSession({
+      triggerSource: "user",
       sessionId: "storage_parent",
       projectRoot: workdir,
       agentName: "build",
@@ -2584,6 +2604,7 @@ it("prepares private session scratch before the first model request and retains 
     const moved = await tempWorkdir();
     await composition.setSessionWorkdir("storage_parent", moved);
     const second = await composition.startSession({
+      triggerSource: "user",
       sessionId: "storage_parent",
       projectRoot: moved,
       agentName: "build",
@@ -2611,6 +2632,7 @@ it("continues conversation and replaces an available scratch reminder after cont
     await createPromptCompositionForTest({ policyMode: "agent" });
   try {
     const first = await composition.startSession({
+      triggerSource: "user",
       sessionId: "storage_failure",
       projectRoot: workdir,
       agentName: "build",
@@ -2625,6 +2647,7 @@ it("continues conversation and replaces an available scratch reminder after cont
     const moved = await tempWorkdir();
     await composition.setSessionWorkdir("storage_failure", moved);
     const second = await composition.startSession({
+      triggerSource: "user",
       sessionId: "storage_failure",
       projectRoot: moved,
       agentName: "build",
@@ -2704,6 +2727,7 @@ it("shares prepared scratch and fixed rules across actual generic, explore and r
   });
   try {
     const parent = await composition.startSession({
+      triggerSource: "user",
       sessionId: "shared_owner",
       projectRoot: workdir,
       agentName: "build",
@@ -2777,6 +2801,7 @@ it.each(["scratch-link", "invalid-id"])(
       await createPromptCompositionForTest({ policyMode: "agent", notices });
     try {
       const run = await composition.startSession({
+        triggerSource: "user",
         sessionId,
         projectRoot: workdir,
         agentName: "build",

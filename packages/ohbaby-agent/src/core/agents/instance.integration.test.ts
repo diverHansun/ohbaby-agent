@@ -464,12 +464,14 @@ describe("AgentInstance long task integration", () => {
     });
 
     await primary.turn({
+      triggerSource: "user",
       runModel: testRunModel("fake-model"),
       initialUserMessageId: "user_primary_identity",
       prompt: "primary turn",
       waitMode: "waitForCompletion",
     });
     await subagent.turn({
+      triggerSource: "user",
       runModel: testRunModel("fake-model"),
       initialUserMessageId: "user_subagent_identity",
       prompt: "subagent turn",
@@ -580,6 +582,7 @@ describe("AgentInstance long task integration", () => {
     });
 
     const result = await instance.turn({
+      triggerSource: "user",
       runModel: createRunModel("fixture", llmClient),
       prompt: "Run a long bounded subagent job.",
       waitMode: "waitForCompletion",
