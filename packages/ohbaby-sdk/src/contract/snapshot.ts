@@ -142,6 +142,8 @@ export interface UiMessage {
   readonly completedAt?: string;
   readonly status?: "streaming" | "completed" | "error";
   readonly finishReason?: string;
+  /** This step called tools the transcript does not show, such as todo_read. */
+  readonly hiddenToolCalls?: true;
 }
 
 export type UiMessagePart = {

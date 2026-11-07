@@ -1312,6 +1312,8 @@ describe("createPersistentUiBackendClient", () => {
             runId: active.runId,
             status: "error",
           });
+          // Pairs with copy improve-2 T8: plain text stays a copyable answer.
+          expect(answer).not.toHaveProperty("hiddenToolCalls");
           expect(
             answer?.parts.filter((part) => part.type === "text"),
           ).toMatchObject([
@@ -1328,6 +1330,143 @@ describe("createPersistentUiBackendClient", () => {
       await expectStoppedAnswer();
     } finally {
       release.resolve(undefined);
+      await client.dispose();
+      closeDatabase();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("marks a progress note whose hidden tool ran before a stop, live and after reopening SQLite (copy improve-2 T8)", async () => {
+    const directory = await tempDir("ohbaby-hidden-tool-stop-");
+    const note = "I will check the private task list.";
+    const abortError = Object.assign(new Error("aborted"), {
+      name: "AbortError",
+    });
+    const nextStepStarted = createDeferred<undefined>();
+    const base = createFakeLLMClient([]);
+    let steps = 0;
+    const llmClient: LLMClientInstance<FakeSdkClient> = {
+      ...base,
+      provider: {
+        ...base.provider,
+        isAbortError: (error: unknown): boolean => error === abortError,
+        streamResponse(
+          request: InterfaceProviderRequest,
+        ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+          if (isSessionTitleGenerationRequest(request))
+            return Promise.resolve(
+              createProviderStream([
+                { textDelta: "Hidden tool", finishReason: "stop" },
+              ]),
+            );
+          steps += 1;
+          if (steps === 1)
+            return Promise.resolve(
+              createProviderStream([
+                { textDelta: note },
+                {
+                  finishReason: "tool_calls",
+                  toolCallDeltas: [
+                    {
+                      argumentsDelta: "{}",
+                      id: "call_todo_read",
+                      index: 0,
+                      name: "todo_read",
+                    },
+                  ],
+                },
+              ]),
+            );
+          nextStepStarted.resolve(undefined);
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<
+              InterfaceProviderStreamEvent,
+              void,
+              unknown
+            > {
+              // The step after the tool waits until the run is stopped.
+              await new Promise<never>((_resolve, reject) => {
+                if (request.signal?.aborted) reject(abortError);
+                request.signal?.addEventListener(
+                  "abort",
+                  () => {
+                    reject(abortError);
+                  },
+                  { once: true },
+                );
+              });
+              yield { textDelta: "unreachable", finishReason: "stop" };
+            })(),
+          );
+        },
+      },
+    };
+    const options = {
+      dbPath: join(directory, "agent.db"),
+      workdir: join(directory, "workspace"),
+      llmClient,
+    };
+    let client = createPersistentUiBackendClient(options);
+    try {
+      const { sessionId, promptId } =
+        await client.submitPromptAccepted("Check the tasks");
+      const scope = { sessionId };
+      await nextStepStarted.promise;
+      const prompt = await vi.waitFor(async () => {
+        const found = (await client.getSnapshot()).prompts?.find(
+          (item) => item.promptId === promptId,
+        );
+        if (!found?.runId) throw new Error("Waiting for the run");
+        return found;
+      });
+      const runId = prompt.runId ?? "";
+      await client.abortRun(runId);
+      await expect(client.waitForPrompt(promptId)).resolves.toMatchObject({
+        prompt: { status: "interrupted" },
+      });
+      async function expectNoteMarked(): Promise<void> {
+        const view = await client.getSessionView?.(scope);
+        const history = await client.getSessionHistory?.(scope);
+        if (!view || !history)
+          throw new Error("Missing session view or history");
+        for (const messages of [view.session.messages, history.messages]) {
+          const owned = messages.filter(
+            (message) =>
+              message.runId === runId && message.role === "assistant",
+          );
+          const marked = owned.find((message) =>
+            message.parts.some(
+              (part) => part.type === "text" && part.text === note,
+            ),
+          );
+          expect(marked).toMatchObject({ hiddenToolCalls: true });
+          expect(
+            marked?.parts.some(
+              (part) =>
+                part.type === "tool-call" || part.type === "tool-result",
+            ),
+          ).toBe(false);
+          // Whatever closes the run, no step after the note has model text,
+          // so the note is the only text a client could mistake for an answer.
+          const last = owned.at(-1);
+          const lastText = last?.parts.some(
+            (part) =>
+              part.type === "text" &&
+              part.text.trim() !== "" &&
+              part.metadata?.kind !== "lifecycle-interruption",
+          );
+          expect(last?.hiddenToolCalls === true || lastText !== true).toBe(
+            true,
+          );
+        }
+      }
+      await expectNoteMarked();
+      await client.dispose();
+      closeDatabase();
+      client = createPersistentUiBackendClient(options);
+      await client.initializeSession(sessionId);
+      await expectNoteMarked();
+    } finally {
       await client.dispose();
       closeDatabase();
       await rm(directory, { recursive: true, force: true });

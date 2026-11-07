@@ -251,6 +251,11 @@ export function messageToUiMessage(
   }
 
   const parts = activeParts.flatMap(partToUiParts);
+  // Hidden tools leave no part behind, so say that this step called one:
+  // clients must not take its text for a final answer.
+  const hiddenToolCalls = activeParts.some(
+    (part) => part.type === "tool" && HIDDEN_TRANSCRIPT_TOOLS.has(part.tool),
+  );
   if (
     parts.length === 0 &&
     !(message.info.role === "assistant" && message.info.modelRequests?.length)
@@ -275,6 +280,7 @@ export function messageToUiMessage(
       ? { modelRequests: message.info.modelRequests }
       : {}),
     ...assistantCompletionFields(message.info),
+    ...(hiddenToolCalls ? { hiddenToolCalls: true as const } : {}),
   };
 }
 

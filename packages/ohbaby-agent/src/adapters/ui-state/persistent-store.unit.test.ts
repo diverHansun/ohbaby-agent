@@ -221,6 +221,39 @@ describe("messageToUiMessage", () => {
     ]);
   });
 
+  it.each(["todo_read", "todo_write", "select_tools"] as const)(
+    "marks a step that called the hidden %s tool (copy improve-2 T5)",
+    (tool) => {
+      const projected = messageToUiMessage({
+        ...assistantMessage({ time: { created: 1_000 } }),
+        parts: [
+          textPart("message_1", "I will check the private task list."),
+          todoToolPart("message_1", tool),
+        ],
+      });
+
+      expect(projected?.hiddenToolCalls).toBe(true);
+      expect(projected?.parts.map((part) => part.type)).toEqual(["text"]);
+    },
+  );
+
+  it("does not mark plain text or visible tool steps (copy improve-2 T5)", () => {
+    const plain = messageToUiMessage({
+      ...assistantMessage({ time: { created: 1_000 } }),
+      parts: [textPart("message_1", "Done.")],
+    });
+    const visible = messageToUiMessage(
+      messageWithToolState({
+        input: { command: "ls" },
+        output: "a",
+        status: "completed",
+      }),
+    );
+
+    expect(plain).not.toHaveProperty("hiddenToolCalls");
+    expect(visible).not.toHaveProperty("hiddenToolCalls");
+  });
+
   it.each([
     [{ exitCode: null, status: "failed" }, "failed"],
     [{ exitCode: null, status: "timed_out" }, "timed out"],
