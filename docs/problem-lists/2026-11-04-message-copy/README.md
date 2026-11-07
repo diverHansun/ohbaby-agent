@@ -32,6 +32,8 @@
 - `ui/conversation/MessageActions.tsx` 与 `message-text.ts`：用户消息（含 steer）和每轮最终答案下面的操作栏，只复制 `text` 片段。
 - `ui/shared/MarkdownBlock.tsx`：模块内的 `Marked` 实例给每个代码块加 `Copy` 按钮，容器统一处理点击。
 
+**收尾（2026-11-07）**：和[轮次投影议题](../2026-11-06-turn-projection/README.md)的前端部分一起完成。子代理叫醒的轮次也有自己的答案和复制按钮。失败或被停止的轮次，只要最后一条 AI 消息里有文字，也能复制；停止时追加的中断提示（`lifecycle-interruption`）不会被复制。
+
 **与 02 的三处出入**（实施时决定，请审查）：
 
 | 项 | 02 原文 | 实际 | 理由 |

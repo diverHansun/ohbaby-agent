@@ -157,7 +157,7 @@
 
 ### MessageActions 与 CopyButton
 
-- `MessageActions` 接收 `{ actions: { key, node }[]; persistent? }`，只负责排一行图标按钮和显示规则（悬停、焦点、触屏、`persistent`），不关心有哪些按钮。`ConversationStream` 决定哪条消息挂什么：用户消息（不含压缩摘要）和 `projectRunProcesses` 给出的每轮 `answerId` 挂复制；最新一条答案传 `persistent`。撤销和 fork 议题往同一个列表里加按钮。
+- `MessageActions` 接收 `{ actions: { key, node }[]; persistent? }`，只负责排一行图标按钮和显示规则（悬停、焦点、触屏、`persistent`），不关心有哪些按钮。`ConversationStream` 决定哪条消息挂什么：用户消息（不含压缩摘要）和 `projectRunProcesses` 给出的每轮 `answerId` 挂复制；最新一条答案传 `persistent`。一轮是一次已结束的主会话 run，由 SDK 的 `listEndedTurns` 列出，TUI 的耗时行用同一套规则；`PromptDuration` 接收这一轮的 `timing` 和 `turnTriggerLabel` 给出的标签。撤销和 fork 议题往同一个列表里加按钮。
 - `CopyButton`（`ui/shared/`）是全站唯一的复制按钮：入参是 `text`（字符串，或点击时才读取的函数）、`label`，可选 `copiedLabel`。经 `writeClipboard` 写入，成功显示对勾，失败显示 `Copy failed`，1.5 秒后恢复。消息、About 设置、Files 预览都用它。
 - `writeClipboard`（`ui/shared/clipboard.ts`）先用 `navigator.clipboard`，不可用或被拒绝时用隐藏的 `textarea` 加 `execCommand("copy")`，返回是否成功。
 - 代码块的复制按钮是 `MarkdownBlock` 的渲染器写进 HTML 的（`<div class="ohb-code-block">` 包住按钮和 `<pre>`），点击由 `MarkdownBlock` 的容器统一处理，复制同一块里 `<pre>` 的文字，去掉末尾换行。渲染器用模块内的 `Marked` 实例，不改全局 `marked`。

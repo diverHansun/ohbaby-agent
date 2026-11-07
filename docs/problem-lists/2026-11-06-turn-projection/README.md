@@ -10,7 +10,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-06 | 首轮 | run 的触发来源与结局、视图里的 run 覆盖范围、Web 按 run 投影轮次、TUI 按 run 显示耗时 | 后端已实现，待前端接入与验收 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-06 | 首轮 | run 的触发来源与结局、视图里的 run 覆盖范围、Web 按 run 投影轮次、TUI 按 run 显示耗时 | 后端与前端已实现，待验收 |
 
 ## 2026-11-07 后端交接
 
@@ -20,6 +20,19 @@
 - 后台子任务运行期间由程序检查状态。Goal 当前这次主 run 成功结束时，如果它派出的子任务还在排队或运行，现有 Goal 驱动会退出这次续跑循环，Goal 仍保持 active。子任务交回结果、失败或超时，主代理再按现有交付规则处理。这次等待期间用户仍可以发消息。
 
 后端验收依据为 [04 的 T1 至 T6](improve-1/04-test-and-acceptance.md)。本次全量运行通过 4,940 项单元测试、2,133 项集成测试、581 项契约测试，另有 2 项单元测试跳过。类型和格式检查通过，lint 报告 0 个错误、107 个警告。
+
+## 2026-11-07 前端实施
+
+在分支 `codex/message-copy` 上和消息复制的收尾一起实施。
+
+- 规则只写一份：SDK 新增 `util/turn.ts`，`listEndedTurns` 列出一个会话里已结束的轮次，`turnTriggerLabel` 给出标签。Web 和 TUI 都用它，所以同一轮在两边的时间、结果和标签一致。
+- Web：`run-process.ts` 按轮次找最终答案、决定能否折叠；`PromptDuration` 显示 `Subagent update · Total Xs` 这样的耗时行；翻历史时 store 把每页带回的 run 一起保留。开发用的假数据新增 `?mock=wake-up` 场景。
+- TUI：耗时行按 run 生成、按 `runId` 去重；`session-recovery` 翻历史时把那一页的 run 和 prompt 一起并入。组件名仍叫 `PromptCompletion`。
+- 两条时序规则：run 先于它的 prompt 报告结束，所以 prompt 还没结束的 run 暂不算一轮，否则 TUI 只写一次的耗时行会用错时间；轮次按 run 的开始时间排序，而不是按排队 prompt 的接收时间。
+- 翻历史时，每页都会附带会话里所有未结束的 prompt。Web 和 TUI 都不保留这些副本，TUI 也只保留消息还在的 run 和 prompt，避免已取消的 prompt 回到队列里，或耗时行落到最底下。
+- 行为变化：还没开 run 就失败的 prompt 不再有耗时行。错误仍然显示：Web 写在这条消息下，TUI 写在状态栏里。
+- 文档：`docs/ohbaby-cli/refactor/package-design.md` 里没有 `PromptCompletion` 的说明，02 Stage 4 的这一行没有可改的内容。
+- 写 05 时请注意：04 把 T6 记为契约测试，实际落在集成测试 `session-run-window.integration.test.ts` 里。
 
 ## 本轮文档地图
 
