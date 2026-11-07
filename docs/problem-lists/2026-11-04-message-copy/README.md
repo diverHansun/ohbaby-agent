@@ -9,7 +9,7 @@
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
 | [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | Web 消息操作栏、剪贴板工具、用户消息与最终答案复制、代码块复制 | 已实施并合入 `main`；用户验收时发现两处漏网，转入 improve-2 |
-| [improve-2](improve-2/00-discussion.md) | 2026-11-07 | 复发返修：用户验收 improve-1 时发现两处漏网 | 长会话旧答复丢失复制按钮；隐藏工具后中断，阶段说明被当成最终答案 | 规划定稿（2026-11-07），待实施 |
+| [improve-2](improve-2/00-discussion.md) | 2026-11-07 | 复发返修：用户验收 improve-1 时发现两处漏网 | 长会话旧答复丢失复制按钮；隐藏工具后中断，阶段说明被当成最终答案 | 已实施，待用户审查（2026-11-07，分支 `codex/copy-improve-2`） |
 
 ## improve-1 文档地图
 
@@ -33,7 +33,7 @@
 | [04 测试与验收](improve-2/04-test-and-acceptance.md) | 成对回归、浏览器走查、发布门 |
 | 05 实施验收 | 实施完成后由验收会话写入 `improve-2/05-implementation-acceptance.md` |
 
-## 实施记录（2026-11-06）
+## improve-1 实施记录（2026-11-06）
 
 在分支 `codex/message-copy` 上实施，当时没有合并或推送；后来并入 `main`（2026-11-07 的 `c0c24b4f` 已包含）。只改 Web，后端、SDK、TUI 都没动。界面参考 Claude、Codex、Cursor 的做法；这几个桌面应用不在 `code-cli/` 下，参考的是产品的实际表现。
 
@@ -67,6 +67,30 @@
 **已知限制**：右侧栏的子代理详情不传 prompt 记录，算不出“最终答案”，所以那里只有父代理派来的任务消息能复制，子代理自己的回答没有复制按钮。要补的话需要子代理视图提供轮次信息，留到以后。
 
 **验证**：Web 全部测试通过；用隔离的 daemon 加脚本模型在内置浏览器走查了 T4 到 T7、T9、T10（宽屏和 375px 手机宽度），复制结果用页面内的剪贴板记录核对过。T8（局域网 `http://`）没有实际环境，降级逻辑由 T2 的单元测试覆盖。
+
+## improve-2 实施记录（2026-11-07）
+
+在分支 `codex/copy-improve-2` 上实施，没有合并或推送。按 02 的两个 Stage 分批提交：
+
+| 提交 | 内容 |
+|---|---|
+| `0db3a9df` | 规划文档 |
+| `4292be70` | Stage 1：Web store 缓存已结束的 run 和 prompt，只取仍被显示中的消息引用的副本 |
+| `b6c87f70` | Stage 2 后端：`UiMessage.hiddenToolCalls`，`messageToUiMessage` 删掉隐藏工具片段时打上；SQLite 重开前后的成对回归 |
+| `b2cae380` | Stage 2 Web：判定答案时排除带标记的步骤；同步 `docs/tools/todo-list/architecture.md` |
+
+**与 02 的出入**：无。`installSessionHistory` 原来对 prompt 的筛选和比较抽成了 `rememberPrompt`，实时视图和历史页共用；run 对应 `rememberRun`。
+
+**自动化测试**：新增的 T1、T2、T4、T5、T6、T8 去掉修复后都会失败，加上修复后通过；T3、T7 守护已有行为。全量运行通过 4,988 项单元测试、581 项契约测试、2,135 项集成测试，另有 2 项单元测试跳过；类型检查通过，lint 报告 0 个错误。轮次投影 T13 的已有用例里，历史页消息补上了 `runId`，与真实数据一致（历史页带回的 run 一定被本页消息引用）。
+
+**浏览器走查**：用隔离的 daemon（独立数据目录）加脚本模型，编译后的 CLI 和 Web，在内置浏览器里按 04 §4.4 走查。
+
+- T12：子代理唤醒的收尾答复 `WINDOW_A_VISIBLE_50`、普通轮次的答复 `USER_ANSWER_A` 之后，一条 `E2E-BASIC` 消息让模型连走 55 步工具调用。新开标签页确认这两条答复已不在服务端最近 50 条里；原页面上两条答复的 `Copy answer` 都在，`Subagent update` 耗时行也在，复制结果分别正好是这两段正文。
+- T13：模型先写 `I will check the private task list.`，再调用 `todo_read`。确认工具结果已写盘后用 SIGKILL 结束 daemon，再用同一数据库重启：页面显示 `interrupted`，悬停这句阶段说明也没有 `Copy answer`。同样的位置改为在页面上点 Stop、不重启，结果相同。对照组纯正文流到一半点 Stop，仍有按钮，复制结果是 `Half of the plain answer`，不含中断提示。
+- T11：新标签页点 `Load earlier messages` 后，较早轮次的复制按钮和 `Subagent update` 都在。
+- T10：Web 上看不到 `todo_read` 的工具卡片。TUI 这部分没有实际打开终端检查；本轮没有改 TUI 代码。
+
+走查用的脚本只放在会话的临时目录里，没有进仓库。
 
 ## 实施契约
 
