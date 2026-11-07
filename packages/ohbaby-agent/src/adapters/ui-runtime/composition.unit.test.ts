@@ -2592,10 +2592,10 @@ it("prepares private session scratch before the first model request and retains 
     const { stat, readFile } = await import("node:fs/promises");
     expect((await stat(directory)).isDirectory()).toBe(true);
     expect(JSON.stringify(requests[0])).toContain(
-      `Session scratch directory: ${directory}`,
+      JSON.stringify(`Session scratch directory: ${directory}`).slice(1, -1),
     );
     expect(JSON.stringify(requests[0])).toContain(
-      `Current working directory: ${workdir}`,
+      JSON.stringify(`Current working directory: ${workdir}`).slice(1, -1),
     );
     expect(JSON.stringify(requests[0])).toContain(
       "temporary files, intermediate results, and reports",
@@ -2614,7 +2614,7 @@ it("prepares private session scratch before the first model request and retains 
       (await composition.runManager.waitForCompletion(second.runId)).status,
     ).toBe("succeeded");
     expect(JSON.stringify(requests.at(-1))).toContain(
-      `Session scratch directory: ${directory}`,
+      JSON.stringify(`Session scratch directory: ${directory}`).slice(1, -1),
     );
     expect(await readFile(path.join(directory, "keep.txt"), "utf8")).toBe(
       "keep",
@@ -2759,7 +2759,9 @@ it("shares prepared scratch and fixed rules across actual generic, explore and r
       );
       expect(request).toBeDefined();
       const text = JSON.stringify(request);
-      expect(text).toContain(`Session scratch directory: ${scratch}`);
+      expect(text).toContain(
+        JSON.stringify(`Session scratch directory: ${scratch}`).slice(1, -1),
+      );
       expect(text).toContain(
         "temporary files, intermediate results, and reports",
       );
