@@ -53,9 +53,8 @@ function fakeLlmClient(
                 textDelta: "child result",
               });
             } else if (
-              messages.includes("child result") ||
-              // The background spawn receipt; the result arrives later.
-              JSON.stringify(request.messages.at(-1)).includes("execution_id")
+              // The parent finishes after its background spawn returns a receipt.
+              request.messages.some((message) => message.role === "tool")
             ) {
               yield await Promise.resolve({
                 finishReason: "stop" as const,

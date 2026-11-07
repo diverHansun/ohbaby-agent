@@ -158,152 +158,135 @@ const spawn = {
 };
 
 describe("session subagent supervision integration", () => {
-  it.each([false, true])(
-    "keeps ordinary work eligible after its session Goal exhausts budget (supervision: %s)",
-    async (supervision) => {
-      if (supervision)
-        vi.useFakeTimers({
-          toFake: [
-            "Date",
-            "setTimeout",
-            "clearTimeout",
-            "setInterval",
-            "clearInterval",
-          ],
+  it("keeps ordinary results eligible after its session Goal exhausts budget", async () => {
+    vi.useFakeTimers({
+      toFake: [
+        "Date",
+        "setTimeout",
+        "clearTimeout",
+        "setInterval",
+        "clearInterval",
+      ],
+    });
+    const ordinary = deferred();
+    const goalChild = deferred();
+    const goalChildStarted = deferred();
+    const parents: InterfaceProviderRequest[] = [];
+    const children: InterfaceProviderRequest[] = [];
+    const f = createFixture((request, child) => {
+      if (child) {
+        children.push(request);
+        if (children.length === 2) goalChildStarted.resolve();
+        return held(
+          request,
+          children.length === 1 ? ordinary.promise : goalChild.promise,
+          children.length === 1 ? "ORDINARY-RESULT" : "GOAL-RESULT",
+        );
+      }
+      parents.push(request);
+      if (parents.length === 1) return tool(spawn);
+      if (parents.length === 3)
+        return tool(spawn, {
+          name: "SetGoalBudget",
+          input: { unit: "turns", value: 1 },
         });
-      const ordinary = deferred();
-      const goalChild = deferred();
-      const goalChildStarted = deferred();
-      const parents: InterfaceProviderRequest[] = [];
-      const children: InterfaceProviderRequest[] = [];
-      const f = createFixture((request, child) => {
-        if (child) {
-          children.push(request);
-          if (children.length === 2) goalChildStarted.resolve();
-          return held(
-            request,
-            children.length === 1 ? ordinary.promise : goalChild.promise,
-            children.length === 1 ? "ORDINARY-RESULT" : "GOAL-RESULT",
-          );
-        }
-        parents.push(request);
-        if (parents.length === 1) return tool(spawn);
-        if (parents.length === 3)
-          return tool(spawn, {
-            name: "SetGoalBudget",
-            input: { unit: "turns", value: 1 },
-          });
-        if (parents.length === 4)
-          return held(request, goalChildStarted.promise, "Goal round ended");
-        return text("Main round ended");
+      if (parents.length === 4)
+        return held(request, goalChildStarted.promise, "Goal round ended");
+      return text("Main round ended");
+    });
+    try {
+      const initial = f.client.submitPromptAndWait(
+        "Start ordinary background work",
+      );
+      await eventually(() => {
+        expect(parents).toHaveLength(2);
       });
-      try {
-        const initial = f.client.submitPromptAndWait(
-          "Start ordinary background work",
-        );
-        await eventually(() => {
-          expect(parents).toHaveLength(2);
-        });
-        await initial;
-        await eventually(() => {
-          expect(children).toHaveLength(1);
-        });
-        await f.client.executeCommand({
-          argv: ["Goal task"],
-          clientInvocationId: "goal",
-          commandId: "goal",
-          path: ["goal"],
-          raw: "/goal Goal task",
-          rawArgs: "Goal task",
-          sessionId: "session_1",
-          surface: "tui",
-        });
-        await eventually(async () => {
-          expect((await f.client.getSnapshot()).goals?.[0]?.goal).toMatchObject(
-            {
-              status: "blocked",
-              turnsUsed: 1,
-            },
-          );
-          expect(children).toHaveLength(2);
-          expect(children[1]?.signal?.aborted).toBe(true);
-        });
-        expect(children[0]?.signal?.aborted).toBe(false);
-        const goalExecution = (
-          await f.executions.list({ rootSessionId: "session_1" })
-        ).find((record) => record.status === "interrupted");
-        if (!goalExecution) throw new Error("Missing budget-owned child");
-        // A terminal commit can arrive after budget cleanup; retain that durable result.
-        const late = await f.executions.accept({
-          ...goalExecution,
-          executionId: "late-goal-result",
-          requestId: "late-goal-call",
-          createdAt: Date.now(),
-        });
-        await f.executions.finish(late.record, {
-          status: "completed",
-          output: "BUDGET-FENCED-GOAL-RESULT",
-          completedAt: Date.now(),
-        });
-        if (supervision) {
-          await idle(f);
-          await vi.advanceTimersByTimeAsync(2 * 60_000);
-          await eventually(() => {
-            expect(parents).toHaveLength(5);
-          });
-          expect(JSON.stringify(parents[4]?.messages)).toContain(
-            "Runtime subagent supervision",
-          );
-          expect(JSON.stringify(parents[4]?.messages)).not.toContain(
-            "BUDGET-FENCED-GOAL-RESULT",
-          );
-          await idle(f);
-        }
-        const resultIndex = supervision ? 5 : 4;
-        ordinary.resolve();
-        await eventually(async () => {
-          expect(parents).toHaveLength(resultIndex + 1);
-          const ordinaryResult = (
-            await f.executions.list({ rootSessionId: "session_1" })
-          ).find((record) => record.output === "ORDINARY-RESULT");
-          expect(ordinaryResult?.delivery.state).toBe("processed");
-        });
-        expect(JSON.stringify(parents[resultIndex]?.messages)).toContain(
-          "ORDINARY-RESULT",
-        );
-        expect(JSON.stringify(parents[resultIndex]?.messages)).not.toContain(
-          "BUDGET-FENCED-GOAL-RESULT",
-        );
-        expect((await f.executions.get(late.record))?.delivery.state).toBe(
-          "pending",
-        );
-        const manual = f.client.submitPromptAndWait(
-          "Review saved results without resuming the Goal",
-          { sessionId: "session_1" },
-        );
-        await eventually(() => {
-          expect(parents).toHaveLength(resultIndex + 2);
-        });
-        await manual;
-        expect(JSON.stringify(parents[resultIndex + 1]?.messages)).toContain(
-          "BUDGET-FENCED-GOAL-RESULT",
-        );
-        expect((await f.executions.get(late.record))?.delivery.state).toBe(
-          "processed",
-        );
+      await initial;
+      await eventually(() => {
+        expect(children).toHaveLength(1);
+      });
+      await f.client.executeCommand({
+        argv: ["Goal task"],
+        clientInvocationId: "goal",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal Goal task",
+        rawArgs: "Goal task",
+        sessionId: "session_1",
+        surface: "tui",
+      });
+      await eventually(async () => {
         expect((await f.client.getSnapshot()).goals?.[0]?.goal).toMatchObject({
           status: "blocked",
           turnsUsed: 1,
         });
-      } finally {
-        ordinary.resolve();
-        goalChild.resolve();
-        await f.client.dispose();
-        if (supervision) vi.useRealTimers();
-      }
-    },
-  );
-  it("serializes a user run, due supervision, and two terminal results through the real main gate", async () => {
+        expect(children).toHaveLength(2);
+        expect(children[1]?.signal?.aborted).toBe(true);
+      });
+      expect(children[0]?.signal?.aborted).toBe(false);
+      const goalExecution = (
+        await f.executions.list({ rootSessionId: "session_1" })
+      ).find((record) => record.status === "interrupted");
+      if (!goalExecution) throw new Error("Missing budget-owned child");
+      // A terminal commit can arrive after budget cleanup; retain that durable result.
+      const late = await f.executions.accept({
+        ...goalExecution,
+        executionId: "late-goal-result",
+        requestId: "late-goal-call",
+        createdAt: Date.now(),
+      });
+      await f.executions.finish(late.record, {
+        status: "completed",
+        output: "BUDGET-FENCED-GOAL-RESULT",
+        completedAt: Date.now(),
+      });
+      await idle(f);
+      await vi.advanceTimersByTimeAsync(7 * 60_000);
+      expect(parents).toHaveLength(4);
+      const resultIndex = 4;
+      ordinary.resolve();
+      await eventually(async () => {
+        expect(parents).toHaveLength(resultIndex + 1);
+        const ordinaryResult = (
+          await f.executions.list({ rootSessionId: "session_1" })
+        ).find((record) => record.output === "ORDINARY-RESULT");
+        expect(ordinaryResult?.delivery.state).toBe("processed");
+      });
+      expect(JSON.stringify(parents[resultIndex]?.messages)).toContain(
+        "ORDINARY-RESULT",
+      );
+      expect(JSON.stringify(parents[resultIndex]?.messages)).not.toContain(
+        "BUDGET-FENCED-GOAL-RESULT",
+      );
+      expect((await f.executions.get(late.record))?.delivery.state).toBe(
+        "pending",
+      );
+      const manual = f.client.submitPromptAndWait(
+        "Review saved results without resuming the Goal",
+        { sessionId: "session_1" },
+      );
+      await eventually(() => {
+        expect(parents).toHaveLength(resultIndex + 2);
+      });
+      await manual;
+      expect(JSON.stringify(parents[resultIndex + 1]?.messages)).toContain(
+        "BUDGET-FENCED-GOAL-RESULT",
+      );
+      expect((await f.executions.get(late.record))?.delivery.state).toBe(
+        "processed",
+      );
+      expect((await f.client.getSnapshot()).goals?.[0]?.goal).toMatchObject({
+        status: "blocked",
+        turnsUsed: 1,
+      });
+    } finally {
+      ordinary.resolve();
+      goalChild.resolve();
+      await f.client.dispose();
+      vi.useRealTimers();
+    }
+  });
+  it("delivers two terminal results in the next request of the busy user run", async () => {
     vi.useFakeTimers({
       toFake: [
         "Date",
@@ -361,6 +344,7 @@ describe("session subagent supervision integration", () => {
       await eventually(() => {
         expect(parents).toHaveLength(3);
       });
+      const busyRuns = (await f.client.getSnapshot()).runs.length;
       first.resolve();
       second.resolve();
       await vi.advanceTimersByTimeAsync(1_000);
@@ -375,6 +359,7 @@ describe("session subagent supervision integration", () => {
       user.resolve();
       await incoming;
       await vi.advanceTimersByTimeAsync(0);
+      expect((await f.client.getSnapshot()).runs).toHaveLength(busyRuns);
       expect(maximumActive).toBe(1);
       expect(parents).toHaveLength(4);
       const input = JSON.stringify(parents[3]?.messages);
@@ -394,9 +379,9 @@ describe("session subagent supervision integration", () => {
     }
   });
 
-  it.each(["result", "user"] as const)(
-    "keeps Stop supervision suppressed until %s starts a new primary round",
-    async (source) => {
+  it.each(["completed", "failed", "timed_out"] as const)(
+    "leaves a running child alone, then wakes the idle parent once for %s",
+    async (status) => {
       vi.useFakeTimers({
         toFake: [
           "Date",
@@ -406,193 +391,60 @@ describe("session subagent supervision integration", () => {
           "clearInterval",
         ],
       });
-      const first = deferred();
-      const second = deferred();
-      const parent = deferred();
+      const childGate = deferred();
       const parents: InterfaceProviderRequest[] = [];
-      const childTasks = new Set<string>();
+      let childSignal: AbortSignal | undefined;
       const f = createFixture((request, child) => {
         if (child) {
-          const task = JSON.stringify(request.messages).includes(
-            "SECOND-AFTER-RESULT",
-          )
-            ? "second"
-            : "first";
-          childTasks.add(task);
-          return held(
-            request,
-            task === "first" ? first.promise : second.promise,
-            "RESUME-AFTER-STOP",
-          );
+          childSignal = request.signal;
+          return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+            await waitForGate(request, childGate.promise);
+            if (status === "failed") throw new Error("Child operation failed");
+            yield* text("CHILD-RESULT");
+          })();
         }
         parents.push(request);
-        if (parents.length === 1) return tool(spawn);
-        if (parents.length === 3)
-          return tool({
-            ...spawn,
-            input: { ...spawn.input, prompt: "SECOND-AFTER-RESULT" },
-          });
-        if (parents.length === 2) return held(request, parent.promise, "never");
-        return text("Reviewed task");
+        return parents.length === 1 ? tool(spawn) : text("Main round ended");
       });
       try {
-        const original = f.client.submitPromptAndWait("Start child then wait");
-        await eventually(() => {
+        await f.client.submitPromptAndWait("Start long running child");
+        await idle(f);
+        const startedAt = (
+          await f.executions.list({ rootSessionId: "session_1" })
+        )[0]?.startedAt;
+        if (startedAt === undefined)
+          throw new Error("Missing child start timestamp");
+        const runCount = (await f.client.getSnapshot()).runs.length;
+        for (const minutes of [2, 5, 5]) {
+          await vi.advanceTimersByTimeAsync(minutes * 60_000);
           expect(parents).toHaveLength(2);
-        });
-        await eventually(() => {
-          expect(childTasks.size).toBe(1);
-        });
-        const run = (await f.client.getSnapshot()).runs.find(
-          (candidate) =>
-            candidate.sessionId === "session_1" &&
-            candidate.status.kind === "running",
-        );
-        if (!run) throw new Error("Missing primary run");
-        await f.client.abortRun(run.id);
-        await original;
-        await vi.advanceTimersByTimeAsync(12 * 60_000);
-        expect(parents).toHaveLength(2);
-        expect(
-          (await f.executions.list({ rootSessionId: "session_1" }))[0]?.status,
-        ).toBe("running");
-        expect(childTasks.size).toBe(1);
-        if (source === "result") {
-          first.resolve();
-          await eventually(async () => {
-            expect(
-              (await f.executions.list({ rootSessionId: "session_1" }))[0]
-                ?.status,
-            ).toBe("completed");
-          });
-        } else {
-          const resumed = f.client.submitPromptAndWait("Resume ordinary work", {
-            sessionId: "session_1",
-          });
-          await eventually(() => {
-            expect(parents).toHaveLength(4);
-          });
-          await resumed;
+          expect((await f.client.getSnapshot()).runs).toHaveLength(runCount);
         }
-        await eventually(() => {
-          expect(parents).toHaveLength(4);
+        if (status === "timed_out") {
+          await vi.advanceTimersByTimeAsync(
+            startedAt + 30 * 60_000 - Date.now() - 1,
+          );
+          expect(childSignal?.aborted).toBe(false);
+          await vi.advanceTimersByTimeAsync(1);
+          expect(childSignal?.aborted).toBe(true);
+        } else childGate.resolve();
+        await eventually(async () => {
+          expect(
+            await f.executions.list({ rootSessionId: "session_1" }),
+          ).toMatchObject([{ status, delivery: { state: "processed" } }]);
         });
         await idle(f);
-        await eventually(() => {
-          expect(childTasks.size).toBe(2);
-        });
-        await vi.advanceTimersByTimeAsync(119_000);
-        expect(parents).toHaveLength(4);
-        await vi.advanceTimersByTimeAsync(1_000);
-        await eventually(() => {
-          expect(parents).toHaveLength(5);
-        });
-        expect(JSON.stringify(parents[4]?.messages)).toContain(
-          "Runtime subagent supervision",
-        );
+        expect(JSON.stringify(parents[2]?.messages)).toContain(status);
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        expect(parents).toHaveLength(3);
+        expect((await f.client.getSnapshot()).runs).toHaveLength(runCount + 1);
       } finally {
-        first.resolve();
-        second.resolve();
-        parent.resolve();
+        childGate.resolve();
         await f.client.dispose();
         vi.useRealTimers();
       }
     },
   );
-
-  it("reviews at 2, 7, and 12 minutes then waits for the actual Host 30-minute timeout result", async () => {
-    vi.useFakeTimers({
-      toFake: [
-        "Date",
-        "setTimeout",
-        "clearTimeout",
-        "setInterval",
-        "clearInterval",
-      ],
-    });
-    const childGate = deferred();
-    const progress = [deferred(), deferred()];
-    let childRequests = 0;
-    const parents: InterfaceProviderRequest[] = [];
-    let childSignal: AbortSignal | undefined;
-    const f = createFixture((request, child) => {
-      if (child) {
-        childSignal = request.signal;
-        const step = childRequests++;
-        if (step === 0)
-          return tool({ name: "read", input: { file_path: "package.json" } });
-        const progressGate = progress.at(step - 1);
-        if (!progressGate) return held(request, childGate.promise, "never");
-        return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
-          await waitForGate(request, progressGate.promise);
-          yield* tool({ name: "read", input: { file_path: "package.json" } });
-        })();
-      }
-      parents.push(request);
-      return parents.length === 1
-        ? tool(spawn)
-        : text("Review saved facts without polling");
-    });
-    try {
-      const initial = f.client.submitPromptAndWait("Start long running child");
-      await eventually(() => {
-        expect(parents).toHaveLength(2);
-      });
-      await initial;
-      await vi.advanceTimersByTimeAsync(0);
-      expect(parents).toHaveLength(2);
-      await vi.advanceTimersByTimeAsync(2 * 60_000);
-      await eventually(() => {
-        expect(parents).toHaveLength(3);
-      });
-      await idle(f);
-      progress[0]?.resolve();
-      await eventually(() => {
-        expect(childRequests).toBe(3);
-      });
-      await vi.advanceTimersByTimeAsync(5 * 60_000);
-      await eventually(() => {
-        expect(parents).toHaveLength(4);
-      });
-      await idle(f);
-      progress[1]?.resolve();
-      await eventually(() => {
-        expect(childRequests).toBe(4);
-      });
-      await vi.advanceTimersByTimeAsync(5 * 60_000);
-      await eventually(() => {
-        expect(parents).toHaveLength(5);
-      });
-      await idle(f);
-      const startedAt = (
-        await f.executions.list({ rootSessionId: "session_1" })
-      )[0]?.startedAt;
-      if (startedAt === undefined)
-        throw new Error("Missing child start timestamp");
-      await vi.advanceTimersByTimeAsync(
-        startedAt + 30 * 60_000 - Date.now() - 1,
-      );
-      expect(parents).toHaveLength(5);
-      expect(childSignal?.aborted).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(childSignal?.aborted).toBe(true);
-      await eventually(() => {
-        expect(parents).toHaveLength(6);
-      });
-      await idle(f);
-      expect(
-        await f.executions.list({ rootSessionId: "session_1" }),
-      ).toMatchObject([
-        { status: "timed_out", delivery: { state: "processed" } },
-      ]);
-      expect(JSON.stringify(parents[5]?.messages)).toContain("timed_out");
-    } finally {
-      childGate.resolve();
-      for (const gate of progress) gate.resolve();
-      await f.client.dispose();
-      vi.useRealTimers();
-    }
-  });
   it("excludes real child approval waiting from the Host active-time deadline", async () => {
     vi.useFakeTimers({
       toFake: [
@@ -639,6 +491,7 @@ describe("session subagent supervision integration", () => {
       });
       await vi.advanceTimersByTimeAsync(35 * 60_000);
       expect(childSignal?.aborted).toBe(false);
+      expect(parents).toHaveLength(2);
       expect(
         (await f.executions.list({ rootSessionId: "session_1" }))[0]?.status,
       ).toBe("running");

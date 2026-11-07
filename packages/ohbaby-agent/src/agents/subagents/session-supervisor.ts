@@ -3,21 +3,15 @@ import type {
   SubagentExecutionStore,
 } from "./execution-store.js";
 import { listSessionExecutions } from "./continuation-coordinator.js";
-import type { ExecutionFactView } from "./execution-facts.js";
 
 export interface SessionSubagentSnapshot {
-  readonly executions: readonly SubagentExecutionRecord[];
-  readonly facts: readonly ExecutionFactView[];
+  readonly results: readonly SubagentExecutionRecord[];
   readonly signal: AbortSignal;
 }
 export interface SessionSubagentSupervisorOptions {
   readonly executions: SubagentExecutionStore;
-  readonly collectFacts: (
-    execution: SubagentExecutionRecord,
-  ) => Promise<ExecutionFactView>;
   readonly wake: (
     sessionId: string,
-    reason: "result" | "supervision",
     snapshot: SessionSubagentSnapshot,
   ) => Promise<boolean>;
   readonly isIdle: (sessionId: string) => boolean;
@@ -26,33 +20,22 @@ export interface SessionSubagentSupervisorOptions {
 }
 export interface SessionSubagentSupervisor {
   observe(sessionId: string): void;
-  active(sessionId: string, source: "user" | "result" | "supervision"): void;
-  idle(sessionId: string, options?: { readonly interrupted?: boolean }): void;
+  active(sessionId: string): void;
+  idle(sessionId: string): void;
   notify(sessionId: string): void;
   remove(sessionId: string): void;
   dispose(): void;
 }
 
-const FIRST_REVIEW_MS = 120_000;
-const LATER_REVIEW_MS = 300_000;
 const RECONCILE_MS = 5_000;
-const MAX_UNCHANGED_REVIEWS = 3;
 const MAX_ERROR_RETRIES = 3;
 
 interface SessionState {
   readonly sessionId: string;
   controller: AbortController;
-  idleAt?: number;
-  delay: number;
-  suppressed: boolean;
-  unchangedReviews: number;
-  resetVersion: number;
-  executionFacts?: Map<string, string>;
-  approvals: Set<string>;
   hasRunningBackground: boolean;
   errorRetries: number;
   retryAt?: number;
-  acknowledgedApproval?: string;
   timer?: ReturnType<typeof setTimeout>;
   timerAt?: number;
   checking: boolean;
@@ -78,22 +61,12 @@ export function createSessionSubagentSupervisor(
     state.retryAt = undefined;
     clearTimer(state);
   }
-  function resetReviews(state: SessionState): void {
-    state.unchangedReviews = 0;
-    state.resetVersion++;
-  }
   function ensure(sessionId: string): SessionState {
     const existing = sessions.get(sessionId);
     if (existing) return existing;
     const state: SessionState = {
       sessionId,
       controller: new AbortController(),
-      idleAt: options.isIdle(sessionId) ? now() : undefined,
-      delay: FIRST_REVIEW_MS,
-      suppressed: false,
-      unchangedReviews: 0,
-      resetVersion: 0,
-      approvals: new Set(),
       hasRunningBackground: false,
       errorRetries: 0,
       checking: false,
@@ -120,51 +93,6 @@ export function createSessionSubagentSupervisor(
     }, at - now());
     state.timer.unref();
   }
-  function observeFacts(
-    state: SessionState,
-    executions: readonly SubagentExecutionRecord[],
-    facts: readonly ExecutionFactView[],
-  ): void {
-    const next = new Map(
-      executions.map((record) => [
-        record.executionId,
-        `${record.status}:${record.delivery.state}`,
-      ]),
-    );
-    const previous = state.executionFacts;
-    const newlyStarted =
-      previous !== undefined &&
-      executions.some(
-        (record) =>
-          !previous.has(record.executionId) &&
-          (record.status === "queued" || record.status === "running"),
-      );
-    const changed =
-      previous !== undefined &&
-      executions.some(
-        (record) =>
-          previous.get(record.executionId) !== next.get(record.executionId),
-      );
-    state.executionFacts = next;
-    const nextApprovals = new Set<string>();
-    let newApproval = false;
-    for (const fact of facts)
-      for (const permissionId of fact.approval.permissionIds) {
-        const key = JSON.stringify([fact.executionId, permissionId]);
-        nextApprovals.add(key);
-        if (!state.approvals.has(key)) newApproval = true;
-      }
-    state.approvals = nextApprovals;
-    if (changed || newApproval) {
-      const exhausted = state.unchangedReviews >= MAX_UNCHANGED_REVIEWS;
-      resetReviews(state);
-      if (newlyStarted || exhausted || newApproval) {
-        state.delay = FIRST_REVIEW_MS;
-        if (state.idleAt !== undefined) state.idleAt = now();
-        clearTimer(state);
-      }
-    }
-  }
   async function check(state: SessionState): Promise<void> {
     const signal = state.controller.signal;
     const executions = (
@@ -175,87 +103,22 @@ export function createSessionSubagentSupervisor(
         record.parentSessionId === state.sessionId,
     );
     if (!valid(state, signal)) return;
-    const running = executions.filter(
+    state.hasRunningBackground = executions.some(
       (record) => record.status === "running" || record.status === "queued",
     );
-    state.hasRunningBackground = running.length > 0;
-    const facts = await Promise.all(running.map(options.collectFacts));
-    if (!valid(state, signal)) return;
-    observeFacts(state, executions, facts);
-    if (
-      state.idleAt === undefined ||
-      !options.isIdle(state.sessionId) ||
-      state.pendingActivation
-    ) {
-      clearTimer(state);
-      return;
-    }
-    const snapshot = { executions, facts, signal };
+    if (!options.isIdle(state.sessionId) || state.pendingActivation) return;
     const results = executions.filter(
       (record) =>
         (record.delivery.state === "pending" ||
           record.delivery.state === "delivered") &&
         record.delivery.wakeupAttemptedAt === undefined,
     );
-    if (results.length > 0) {
-      if (await options.wake(state.sessionId, "result", snapshot)) {
-        if (valid(state, signal)) {
-          state.pendingActivation = true;
-          clearTimer(state);
-        }
-        return;
-      }
-      if (!valid(state, signal) || !options.isIdle(state.sessionId)) return;
-      // Ineligible Goal results must not prevent supervision of ordinary work.
-    }
     if (
-      state.suppressed ||
-      running.length === 0 ||
-      state.unchangedReviews >= MAX_UNCHANGED_REVIEWS
-    ) {
-      clearTimer(state);
-      return;
-    }
-    const allBlocked =
-      facts.length === running.length &&
-      facts.every((fact) => fact.approval.blocked);
-    const approval = allBlocked
-      ? JSON.stringify(
-          facts
-            .map((fact) => [
-              fact.executionId,
-              [...fact.approval.permissionIds].sort(),
-            ])
-            .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-        )
-      : undefined;
-    if (!allBlocked) state.acknowledgedApproval = undefined;
-    if (approval !== undefined && approval === state.acknowledgedApproval) {
-      clearTimer(state);
-      return;
-    }
-    const dueAt = state.idleAt + state.delay;
-    if (dueAt > now()) {
-      arm(state, dueAt);
-      return;
-    }
-    const resetVersion = state.resetVersion;
-    const accepted = await options.wake(
-      state.sessionId,
-      "supervision",
-      snapshot,
-    );
-    if (!accepted || disposed || sessions.get(state.sessionId) !== state)
-      return;
-    if (state.resetVersion === resetVersion) {
-      state.unchangedReviews++;
-      state.acknowledgedApproval = approval;
-    }
-    if (valid(state, signal)) {
-      state.delay = LATER_REVIEW_MS;
+      results.length > 0 &&
+      (await options.wake(state.sessionId, { results, signal })) &&
+      valid(state, signal)
+    )
       state.pendingActivation = true;
-      clearTimer(state);
-    }
   }
   function needsCheck(state: SessionState): boolean {
     return (
@@ -320,28 +183,18 @@ export function createSessionSubagentSupervisor(
         notify(sessionId);
       }
     },
-    active(sessionId, source): void {
+    active(sessionId): void {
       if (disposed) return;
       const state = ensure(sessionId);
       invalidate(state);
-      state.idleAt = undefined;
-      state.pendingActivation = false;
-      if (source === "supervision") state.delay = LATER_REVIEW_MS;
-      else {
-        state.suppressed = false;
-        state.delay = FIRST_REVIEW_MS;
-        state.acknowledgedApproval = undefined;
-        resetReviews(state);
-      }
+      state.pendingActivation = true;
       notify(sessionId);
     },
-    idle(sessionId, input = {}): void {
+    idle(sessionId): void {
       if (disposed) return;
       const state = ensure(sessionId);
       invalidate(state);
-      state.idleAt = now();
       state.pendingActivation = false;
-      if (input.interrupted) state.suppressed = true;
       notify(sessionId);
     },
     notify,

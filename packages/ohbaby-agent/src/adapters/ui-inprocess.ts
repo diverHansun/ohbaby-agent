@@ -1,5 +1,4 @@
 import { createSessionSubagentSupervisor } from "../agents/subagents/session-supervisor.js";
-import { collectExecutionFacts } from "../agents/subagents/execution-facts.js";
 import { listSessionExecutions } from "../agents/subagents/continuation-coordinator.js";
 import { createSubagentWakeup } from "./ui-inprocess/subagent-wakeup.js";
 import { SubagentInstanceProjection } from "./ui-inprocess/subagent-instances.js";
@@ -289,7 +288,6 @@ type InternalSubmitPromptOptions = SubmitPromptOptions & {
   readonly hasModelSnapshot?: boolean;
   readonly signal?: AbortSignal;
   readonly owner?: PromptOwner;
-  readonly subagentWakeReason?: "result" | "supervision";
   readonly runtimeInput?: {
     readonly kind: "subagent-status";
     readonly sourceId: string;
@@ -1454,13 +1452,6 @@ export function createInProcessUiBackendClient(
   });
   const subagentSupervisor = createSessionSubagentSupervisor({
     executions: subagentExecutionStore,
-    collectFacts: (execution) =>
-      collectExecutionFacts({
-        execution,
-        messages: messageManager,
-        permissions: permission,
-        now: () => now().getTime(),
-      }),
     isIdle: isMainSessionIdle,
     now: () => now().getTime(),
     wake: wakeFromSubagent,
@@ -1468,7 +1459,7 @@ export function createInProcessUiBackendClient(
       publishNotice({
         key: `subagent:supervision:${getErrorMessage(error)}`,
         level: "error",
-        title: "Subagent supervision failed",
+        title: "Subagent result check failed",
         message: getErrorMessage(error),
       });
     },
@@ -3948,10 +3939,7 @@ export function createInProcessUiBackendClient(
       }
 
       observeSubagentSession(session.id);
-      subagentSupervisor.active(
-        session.id,
-        submitOptions?.subagentWakeReason ?? "user",
-      );
+      subagentSupervisor.active(session.id);
       if (submitOptions?.reservedUserMessageId) {
         messageIds.reserve(submitOptions.reservedUserMessageId);
       }
@@ -4278,8 +4266,7 @@ export function createInProcessUiBackendClient(
   ): Promise<void> {
     const runtime = await runtimeController.getRuntimeForPrompt();
     const sessionId = input.sessionId;
-    if (input.preserveBackground)
-      subagentSupervisor.idle(sessionId, { interrupted: true });
+    if (input.preserveBackground) subagentSupervisor.idle(sessionId);
     await executeGoalExecutionInterrupt(input, {
       abortPromptRun: (runId) => runtimeController.abortPromptRun(runId),
       activeRunId: () => runtimeController.getActiveRunId(sessionId),
@@ -5393,8 +5380,7 @@ export function createInProcessUiBackendClient(
       const active = [...activePromptsBySession.values()].find(
         (prompt) => prompt.runId === runId,
       );
-      if (active)
-        subagentSupervisor.idle(active.sessionId, { interrupted: true });
+      if (active) subagentSupervisor.idle(active.sessionId);
       if (!(await runtimeController.abortPromptRun(runId)))
         throw Object.assign(new Error("The requested run has already ended"), {
           code: "SESSION_SCOPE_CHANGED",

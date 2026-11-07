@@ -6,7 +6,6 @@ import type {
   GoalTurnTicket,
 } from "../../goals/index.js";
 import type { SessionSubagentSnapshot } from "../../agents/subagents/session-supervisor.js";
-import { renderExecutionFacts } from "../../agents/subagents/execution-facts.js";
 import type {
   SubagentExecutionRecord,
   SubagentExecutionStore,
@@ -14,7 +13,6 @@ import type {
 import type { SessionExecutionGate } from "../session-execution.js";
 export interface SubagentWakeupAdmission {
   readonly sessionId: string;
-  readonly reason: "result" | "supervision";
   readonly signal: AbortSignal;
   readonly candidates: readonly SubagentExecutionRecord[];
   readonly executions: Pick<SubagentExecutionStore, "claimWakeup">;
@@ -41,27 +39,24 @@ export function reserveSubagentWakeup(
       return undefined;
     const token = input.reserveToken
       ? await input.reserveToken()
-      : Symbol(`subagent ${input.reason}`);
+      : Symbol("subagent result");
     if (!token || isAborted()) return undefined;
     if (!input.gate.reserve(input.sessionId, token)) return undefined;
     let admitted = false;
     try {
-      if (input.reason === "supervision") admitted = !isAborted();
-      else
-        for (const record of input.candidates) {
-          if (isAborted()) break;
-          if (
-            record.rootSessionId !== input.sessionId ||
-            record.mode !== "background" ||
-            (record.delivery.state !== "pending" &&
-              record.delivery.state !== "delivered") ||
-            record.delivery.wakeupAttemptedAt !== undefined
-          )
-            continue;
-          admitted =
-            (await input.executions.claimWakeup(record, input.now())) ||
-            admitted;
-        }
+      for (const record of input.candidates) {
+        if (isAborted()) break;
+        if (
+          record.rootSessionId !== input.sessionId ||
+          record.mode !== "background" ||
+          (record.delivery.state !== "pending" &&
+            record.delivery.state !== "delivered") ||
+          record.delivery.wakeupAttemptedAt !== undefined
+        )
+          continue;
+        admitted =
+          (await input.executions.claimWakeup(record, input.now())) || admitted;
+      }
       return admitted ? token : undefined;
     } catch (error) {
       admitted = false;
@@ -74,7 +69,6 @@ export function reserveSubagentWakeup(
 
 export interface SubagentWakeupSubmission {
   readonly owner: "subagent";
-  readonly subagentWakeReason: "result" | "supervision";
   readonly sessionId: string;
   readonly modelEntryId?: string;
   readonly reasoning?: ReasoningConfig;
@@ -133,13 +127,9 @@ interface SubagentWakeupOptions {
 /** Admission, ownership, and result claiming share the existing session boundary. */
 export function createSubagentWakeup(
   options: SubagentWakeupOptions,
-): (
-  sessionId: string,
-  reason: "result" | "supervision",
-  snapshot: SessionSubagentSnapshot,
-) => Promise<boolean> {
+): (sessionId: string, snapshot: SessionSubagentSnapshot) => Promise<boolean> {
   const goals = options.goals;
-  return async (sessionId, reason, snapshot) => {
+  return async (sessionId, snapshot) => {
     let session: Awaited<ReturnType<SubagentWakeupOptions["prepareSession"]>>;
     let goalTicket: GoalTurnTicket | undefined;
     let goalToAdmit: string | undefined;
@@ -149,7 +139,6 @@ export function createSubagentWakeup(
     try {
       token = await reserveSubagentWakeup({
         sessionId,
-        reason,
         signal: snapshot.signal,
         candidates,
         executions: options.executions,
@@ -161,17 +150,7 @@ export function createSubagentWakeup(
           if (!session) return false;
           const goal = goals.peekSnapshot(sessionId);
           const roots = new Set(goal ? goals.getOwnedRunIds(goal.goalId) : []);
-          const eligible = snapshot.executions.filter(
-            (record) =>
-              record.rootSessionId === sessionId &&
-              record.mode === "background" &&
-              (reason === "result"
-                ? (record.delivery.state === "pending" ||
-                    record.delivery.state === "delivered") &&
-                  record.delivery.wakeupAttemptedAt === undefined
-                : record.status === "running" || record.status === "queued"),
-          );
-          const hasGoalWork = eligible.some((record) =>
+          const hasGoalWork = snapshot.results.some((record) =>
             roots.has(record.rootRunId),
           );
           const budgetExhausted =
@@ -190,12 +169,14 @@ export function createSubagentWakeup(
             excludedRoots = [...roots];
           const excluded = new Set(excludedRoots);
           candidates.push(
-            ...eligible.filter((record) => !excluded.has(record.rootRunId)),
+            ...snapshot.results.filter(
+              (record) => !excluded.has(record.rootRunId),
+            ),
           );
           return candidates.length > 0;
         },
         reserveToken: async () => {
-          if (!goalToAdmit) return Symbol(`subagent ${reason}`);
+          if (!goalToAdmit) return Symbol("subagent result");
           goalTicket =
             (await goals.admitTurnInBoundary(
               sessionId,
@@ -213,15 +194,11 @@ export function createSubagentWakeup(
         });
     }
     if (!token) return false;
-    const sourceId = `subagent-${reason}:${randomUUID()}`;
-    const allowed = new Set(candidates.map((record) => record.executionId));
+    const sourceId = `subagent-result:${randomUUID()}`;
     const body =
-      reason === "result"
-        ? "Runtime subagent result wake-up. Process the delivered child results for the existing task. This is a runtime observation, not a new user request."
-        : `Runtime subagent supervision. Review the existing task using these saved facts; use agent list/monitor only for missing details. Do not poll or repeat an unchanged approval request.\n${renderExecutionFacts(snapshot.facts.filter((fact) => allowed.has(fact.executionId)))}`;
+      "Runtime subagent result wake-up. Process the delivered child results for the existing task. This is a runtime observation, not a new user request.";
     const wakeOptions: SubagentWakeupSubmission = {
       owner: "subagent",
-      subagentWakeReason: reason,
       sessionId,
       ...session,
       hasModelSnapshot: true,
