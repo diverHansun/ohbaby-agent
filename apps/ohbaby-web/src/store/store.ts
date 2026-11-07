@@ -93,9 +93,28 @@ export function createOhbabyWebStore(): OhbabyWebStore {
   let historyLoaded = false;
   let invalidatedAt = -1;
   const deleted = new Set<string>();
+  /**
+   * Ended prompts and runs seen in live views and older pages. Messages that
+   * leave the live window stay on screen, so the turns they belong to must
+   * stay findable too (copy improve-2 Stage 1). Only ended copies are kept:
+   * an active run is always in the live view, and a stale running copy would
+   * read as a live run. The live view's copies win.
+   */
   const loadedPrompts = new Map<string, UiPromptSubmission>();
-  /** Runs of older pages; the live view's copies win (turn-projection 02 Stage 2). */
   const loadedRuns = new Map<string, UiRun>();
+  function rememberPrompt(sessionId: string, prompt: UiPromptSubmission): void {
+    if (prompt.sessionId !== sessionId || isPromptPending(prompt)) return;
+    const previous = loadedPrompts.get(prompt.promptId);
+    if (!previous || previous.updatedAt <= prompt.updatedAt)
+      loadedPrompts.set(prompt.promptId, prompt);
+  }
+  function rememberRun(sessionId: string, run: UiRun): void {
+    if (
+      run.sessionId === sessionId &&
+      (run.outcome !== undefined || run.endedAt !== undefined)
+    )
+      loadedRuns.set(run.id, run);
+  }
   const listeners = new Set<StoreListener>();
   const commands = new Map<
     string,
@@ -223,6 +242,13 @@ export function createOhbabyWebStore(): OhbabyWebStore {
               ? 1
               : 0,
     );
+    // Remembered turns count only while a shown message still belongs to them,
+    // the rule the server's view follows. A run reached only through its
+    // prompt is left out there too; that turn still comes from the prompt.
+    const shownIds = new Set(ordered.map((message) => message.id));
+    const shownRunIds = new Set(
+      ordered.flatMap((message) => (message.runId ? [message.runId] : [])),
+    );
     const active = view.runs.find(
       (run) =>
         run.status.kind === "running" ||
@@ -234,18 +260,24 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       snapshot: {
         sessions: [{ ...view.session, messages: ordered }],
         activeSessionId: view.session.id,
-        // Live runs first, as the server orders them (newest first); older
-        // pages' runs follow unless the live view already has them.
+        // Live runs first, as the server orders them (newest first); remembered
+        // runs follow unless the live view already has them.
         runs: [
           ...view.runs,
           ...[...loadedRuns.values()].filter(
-            (run) => !view.runs.some((live) => live.id === run.id),
+            (run) =>
+              shownRunIds.has(run.id) &&
+              !view.runs.some((live) => live.id === run.id),
           ),
         ],
         serverNow,
         prompts: [
           ...new Map([
-            ...loadedPrompts,
+            ...[...loadedPrompts].filter(
+              ([, prompt]) =>
+                shownIds.has(prompt.userMessageId) ||
+                (prompt.runId !== undefined && shownRunIds.has(prompt.runId)),
+            ),
             ...view.prompts.map((prompt) => [prompt.promptId, prompt] as const),
           ]).values(),
         ],
@@ -386,7 +418,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         !!previous.view &&
         view.version.viewGeneration !== previous.view.version.viewGeneration;
       if (newGeneration) invalidatedAt = -1;
-      if (view)
+      if (view) {
         for (const message of view.session.messages) {
           if (deleted.has(message.id)) continue;
           loaded.set(message.id, message);
@@ -395,6 +427,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
             revision: view.version.sessionRevision,
           });
         }
+        for (const run of view.runs) rememberRun(view.session.id, run);
+        for (const prompt of view.prompts)
+          rememberPrompt(view.session.id, prompt);
+      }
       publish({
         ...snapshot,
         sessionSync,
@@ -467,16 +503,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
             observed.delete(id);
           }
         }
-      for (const run of page.runs)
-        if (run.sessionId === view.session.id) loadedRuns.set(run.id, run);
-      for (const prompt of page.prompts) {
-        // Pages also list pending prompts, which the live view tracks.
-        if (prompt.sessionId !== view.session.id || isPromptPending(prompt))
-          continue;
-        const previous = loadedPrompts.get(prompt.promptId);
-        if (!previous || previous.updatedAt <= prompt.updatedAt)
-          loadedPrompts.set(prompt.promptId, prompt);
-      }
+      // Pages also list pending prompts and active runs, which the live view tracks.
+      for (const run of page.runs) rememberRun(view.session.id, run);
+      for (const prompt of page.prompts)
+        rememberPrompt(view.session.id, prompt);
       const hotIds = new Set(
         view.session.messages.map((message) => message.id),
       );

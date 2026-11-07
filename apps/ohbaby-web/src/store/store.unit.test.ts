@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { UiSessionView, UiMessage, SessionSyncState } from "ohbaby-sdk";
+import type {
+  UiSessionView,
+  UiMessage,
+  UiRun,
+  SessionSyncState,
+} from "ohbaby-sdk";
+import { projectRunProcesses } from "../ui/conversation/run-process.js";
 import { createOhbabyWebStore } from "./store.js";
 const message = (id: string, text = id): UiMessage => ({
   id,
@@ -79,13 +85,183 @@ describe("session view store", () => {
     store.installSessionHistory({
       runs: [old, { ...live, outcome: "failed" as const }],
       version: view().version,
-      messages: [message("1")],
+      messages: [{ ...message("1"), runId: "old" }],
       prompts: [],
       hasMore: false,
       reasoningMissing: false,
     });
     store.setSessionSync(ready({ ...view(1), runs: [live] }));
     expect(store.getSnapshot().view.snapshot?.runs).toEqual([{ ...live }, old]);
+  });
+  describe("turns of messages that left the live window (copy improve-2)", () => {
+    const at = (minute: number): string =>
+      `2026-01-01T00:${String(minute).padStart(2, "0")}:00Z`;
+    const endedRun = (id: string, trigger: "user" | "subagent") => ({
+      id,
+      sessionId: "s",
+      trigger,
+      status: { kind: "idle" as const },
+      outcome: "succeeded" as const,
+      startedAt: at(1),
+      endedAt: at(2),
+      updatedAt: at(2),
+    });
+    const runningRun = (id: string): UiRun => ({
+      id,
+      sessionId: "s",
+      trigger: "user",
+      status: { kind: "running", runId: id },
+      startedAt: at(1),
+      updatedAt: at(1),
+    });
+    const said = (
+      id: string,
+      role: "user" | "assistant",
+      runId?: string,
+    ): UiMessage => ({
+      id,
+      role,
+      createdAt: at(Number(id)),
+      parts: [{ type: "text", text: `text ${id}` }],
+      ...(runId ? { runId } : {}),
+      ...(role === "assistant" ? { status: "completed" as const } : {}),
+    });
+    const liveView = (
+      revision: number,
+      messages: UiMessage[],
+      runs: UiSessionView["runs"],
+      prompts: UiSessionView["prompts"] = [],
+    ): UiSessionView => ({
+      ...view(revision),
+      session: { ...view(revision).session, messages },
+      runs,
+      prompts,
+    });
+    const turns = (store: ReturnType<typeof createOhbabyWebStore>) => {
+      const snapshot = store.getSnapshot().view.snapshot;
+      const messages = snapshot?.sessions[0]?.messages ?? [];
+      return projectRunProcesses(
+        messages,
+        snapshot?.prompts ?? [],
+        "s",
+        {},
+        snapshot?.runs ?? [],
+      ).map(({ runId, trigger, answerId }) => ({ runId, trigger, answerId }));
+    };
+    const next = said("9", "user");
+
+    it("keeps a subagent turn's run once its answer leaves the window (T1)", () => {
+      const store = createOhbabyWebStore();
+      const run = endedRun("R", "subagent");
+      store.setSessionSync(
+        ready(liveView(0, [said("3", "assistant", "R")], [run])),
+      );
+      store.setSessionSync(ready(liveView(1, [next], [])));
+      expect(store.getSnapshot().view.snapshot?.runs).toEqual([run]);
+      expect(turns(store)).toEqual([
+        { runId: "R", trigger: "subagent", answerId: "3" },
+      ]);
+    });
+
+    it("keeps a user turn's run and prompt once they leave the window (T2)", () => {
+      const store = createOhbabyWebStore();
+      const run = endedRun("R", "user");
+      const prompt = {
+        promptId: "P",
+        clientRequestId: "c",
+        scopeKey: "k",
+        sessionId: "s",
+        userMessageId: "3",
+        text: "text 3",
+        status: "succeeded" as const,
+        runId: "R",
+        createdAt: at(1),
+        updatedAt: at(2),
+        endedAt: at(2),
+      };
+      store.setSessionSync(
+        ready(
+          liveView(
+            0,
+            [said("3", "user"), said("4", "assistant", "R")],
+            [run],
+            [prompt],
+          ),
+        ),
+      );
+      store.setSessionSync(ready(liveView(1, [next], [])));
+      const snapshot = store.getSnapshot().view.snapshot;
+      expect(snapshot?.runs).toEqual([run]);
+      expect(snapshot?.prompts).toEqual([prompt]);
+      expect(turns(store)).toEqual([
+        { runId: "R", trigger: "user", answerId: "4" },
+      ]);
+    });
+
+    it("drops remembered turns once no shown message belongs to them (T3)", () => {
+      const store = createOhbabyWebStore();
+      const prompt = {
+        promptId: "P",
+        clientRequestId: "c",
+        scopeKey: "k",
+        sessionId: "s",
+        userMessageId: "3",
+        text: "text 3",
+        status: "succeeded" as const,
+        runId: "R",
+        createdAt: at(1),
+        updatedAt: at(2),
+        endedAt: at(2),
+      };
+      const live = runningRun("L");
+      store.setSessionSync(
+        ready(
+          liveView(
+            0,
+            [said("3", "user"), said("4", "assistant", "R")],
+            [endedRun("R", "user")],
+            [prompt],
+          ),
+        ),
+      );
+      store.setSessionSync(ready(liveView(1, [next], [live])));
+      store.invalidateSessionHistory({
+        type: "session.changed",
+        version: { ...view().version, sessionRevision: 2 },
+        removedMessageIds: ["3", "4"],
+      });
+      store.setSessionSync(ready(liveView(2, [next], [live])));
+      const snapshot = store.getSnapshot().view.snapshot;
+      expect(snapshot?.runs).toEqual([live]);
+      expect(snapshot?.prompts).toEqual([]);
+      expect(turns(store)).toEqual([]);
+    });
+
+    it("never keeps a running copy, from the live view or a page (T4)", () => {
+      const store = createOhbabyWebStore();
+      const running = runningRun("R");
+      const answer = said("3", "assistant", "R");
+      store.setSessionSync(ready(liveView(0, [answer], [running])));
+      expect(store.getSnapshot().view.snapshot?.status).toEqual(running.status);
+      store.setSessionSync(ready(liveView(1, [next], [])));
+      expect(store.getSnapshot().view.snapshot?.runs).toEqual([]);
+      expect(store.getSnapshot().view.snapshot?.status).toEqual({
+        kind: "idle",
+      });
+
+      const ended = endedRun("R", "user");
+      store.setSessionSync(ready(liveView(2, [answer], [ended])));
+      store.setSessionSync(ready(liveView(3, [next], [])));
+      store.installSessionHistory({
+        runs: [running],
+        version: { ...view().version, sessionRevision: 3 },
+        messages: [answer],
+        prompts: [],
+        hasMore: false,
+        reasoningMissing: false,
+      });
+      expect(store.getSnapshot().view.snapshot?.runs).toEqual([ended]);
+    });
   });
   it("keeps loaded pages across deltas and reconnect, rejects stale page overwrites", () => {
     const store = createOhbabyWebStore();
