@@ -35,16 +35,8 @@ import {
 } from "../../runtime/stream-bridge/index.js";
 import type { PublishUiEvent } from "./types.js";
 
-interface StreamRunRecord {
-  readonly createdAt: number;
-  readonly endedAt?: number;
-  readonly error?: string;
-  readonly runId: string;
-  readonly sessionId: string;
-  readonly startedAt?: number;
-  readonly status: string;
-  readonly terminalReason?: string;
-}
+import type { RunRecord } from "../../runtime/run-manager/types.js";
+import { runToUiRun } from "../ui-state/persistent-store.js";
 
 interface ToolResultPayload {
   readonly execution?: UiToolExecution;
@@ -105,41 +97,6 @@ function nonNegativeInteger(value: unknown): number | undefined {
 
 function eventData(event: StreamBridgeEvent): Record<string, unknown> {
   return isRecord(event.data) ? event.data : {};
-}
-
-function toDateString(value: number | undefined, fallback: number): string {
-  return new Date(value ?? fallback).toISOString();
-}
-
-function toUiRunStatus(record: StreamRunRecord): UiRunStatus {
-  if (record.status === "pending" || record.status === "running") {
-    return { kind: "running", runId: record.runId };
-  }
-  if (
-    record.status === "succeeded" ||
-    record.status === "cancelled" ||
-    (record.status === "interrupted" &&
-      (record.error === "user-stop" || record.error === "service-shutdown"))
-  ) {
-    return { kind: "idle" };
-  }
-  return {
-    kind: "error",
-    message: record.error ?? `Run ${record.status}`,
-    recoverable: true,
-  };
-}
-
-function toUiRun(record: StreamRunRecord): UiRun {
-  const updatedAt = record.endedAt ?? record.startedAt ?? record.createdAt;
-  return {
-    id: record.runId,
-    sessionId: record.sessionId,
-    startedAt: toDateString(record.startedAt, record.createdAt),
-    status: toUiRunStatus(record),
-    terminalReason: record.terminalReason,
-    updatedAt: toDateString(updatedAt, record.createdAt),
-  };
 }
 
 function upsertTextPart(message: UiMessage, content: string): UiMessage {
@@ -396,7 +353,7 @@ export function startRunStreamProjection(
     if (!isRecord(run)) {
       return;
     }
-    const record = run as unknown as StreamRunRecord;
+    const record = run as unknown as RunRecord;
     if (
       record.runId !== options.runId ||
       record.sessionId !== options.sessionId
@@ -406,7 +363,10 @@ export function startRunStreamProjection(
       return;
     }
 
-    const uiRun = toUiRun(record);
+    const uiRun = {
+      ...runToUiRun(record),
+      terminalReason: record.terminalReason,
+    };
     if (record.status === "running") {
       updateStatusForActiveSession(() => uiRun.status);
       await upsertRun(uiRun);

@@ -27,7 +27,7 @@ export interface RunDefaults {
 }
 
 export interface RunDefaultsPolicy {
-  readonly defaults: Readonly<Partial<Record<TriggerSource, RunDefaults>>>;
+  readonly defaults: Readonly<Record<TriggerSource, RunDefaults>>;
 }
 
 export interface CreateRunOptions {

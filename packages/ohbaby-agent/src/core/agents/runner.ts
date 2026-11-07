@@ -236,7 +236,7 @@ export async function runAgent(
       runId: input.runId,
       sessionId: scope.sessionId,
       tools: toModelTools(tools),
-      triggerSource: "user",
+      triggerSource: input.triggerSource ?? "user",
     });
   } catch (error) {
     await preSubscribed?.close();

@@ -6,7 +6,33 @@ import type {
   ToolState,
   UserMessage,
 } from "../../core/message/index.js";
-import { messageToUiMessage } from "./persistent-store.js";
+import { messageToUiMessage, runToUiRun } from "./persistent-store.js";
+
+describe("runToUiRun", () => {
+  it.each([
+    ["pending", "running", undefined],
+    ["running", "running", undefined],
+    ["succeeded", "idle", "succeeded"],
+    ["failed", "error", "failed"],
+    ["cancelled", "idle", "cancelled"],
+    ["interrupted", "idle", "interrupted"],
+  ] as const)(
+    "preserves the ledger outcome for %s",
+    (status, kind, outcome) => {
+      const run = runToUiRun({
+        runId: "r",
+        sessionId: "s",
+        createdAt: 1,
+        triggerSource: "user",
+        status,
+        error: status === "interrupted" ? "user-stop" : undefined,
+      });
+      expect(run.trigger).toBe("user");
+      expect(run.status.kind).toBe(kind);
+      expect(run.outcome).toBe(outcome);
+    },
+  );
+});
 
 describe("messageToUiMessage", () => {
   it("never exposes persisted native state in the UI projection", () => {

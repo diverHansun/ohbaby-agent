@@ -1,3 +1,4 @@
+import type { TriggerSource } from "../runtime/run-ledger/types.js";
 import type { RunModel } from "../core/run-model.js";
 import type { SlashSkillUsage } from "../skill/usage.js";
 import type { ReasoningConfig } from "ohbaby-llm";
@@ -69,6 +70,7 @@ export interface RuntimeAgent {
 }
 
 export interface StartSessionParams {
+  readonly triggerSource?: TriggerSource;
   readonly onInputReady?: () => void | Promise<void>;
   /** Internal wake-up context, recorded as a runtime input rather than user intent. */
   readonly runtimeInput?: {

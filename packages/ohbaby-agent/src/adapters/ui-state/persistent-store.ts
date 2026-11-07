@@ -345,6 +345,10 @@ function runStatusToUiStatus(record: RunLedgerRecord): UiRunStatus {
 
 export function runToUiRun(record: RunLedgerRecord): UiRun {
   return {
+    trigger: record.triggerSource,
+    ...(record.status === "pending" || record.status === "running"
+      ? {}
+      : { outcome: record.status }),
     id: record.runId,
     sessionId: record.sessionId,
     inputsCloseReason: record.inputsCloseReason,

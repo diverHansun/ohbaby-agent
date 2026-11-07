@@ -31,7 +31,10 @@ import type {
 import type { LifecycleEvent, LifecycleResult } from "../lifecycle/index.js";
 import { createAgentInstanceFactory } from "./instance.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
-import { RunManager } from "../../runtime/run-manager/index.js";
+import {
+  DEFAULT_RUN_POLICY,
+  RunManager,
+} from "../../runtime/run-manager/index.js";
 import type {
   SandboxLease,
   SandboxManager,
@@ -422,6 +425,7 @@ describe("AgentInstance long task integration", () => {
       lifecycle: recordingLifecycle,
       policy: {
         defaults: {
+          ...DEFAULT_RUN_POLICY.defaults,
           user: {
             disconnectMode: "continue",
             multitaskStrategy: "reject",
@@ -545,6 +549,7 @@ describe("AgentInstance long task integration", () => {
       lifecycle,
       policy: {
         defaults: {
+          ...DEFAULT_RUN_POLICY.defaults,
           user: {
             disconnectMode: "continue",
             multitaskStrategy: "reject",

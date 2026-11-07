@@ -1823,6 +1823,7 @@ export class SessionSubagentHost {
       let turnPromise: Promise<AgentRunResult>;
       try {
         turnPromise = instance.turn({
+          triggerSource: "user",
           runModel,
           ...(input.reasoning === undefined
             ? {}

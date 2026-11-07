@@ -1,21 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { RunDefaultsPolicyError, mergeRunDefaults } from "./index.js";
-import type { RunDefaultsPolicy } from "./index.js";
-
-const policy: RunDefaultsPolicy = {
-  defaults: {
-    user: {
-      permissionProfileId: "interactive",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-  },
-};
+import {
+  DEFAULT_RUN_POLICY,
+  RunDefaultsPolicyError,
+  mergeRunDefaults,
+} from "./index.js";
 
 describe("mergeRunDefaults", () => {
   it("merges trigger defaults with explicit overrides", () => {
     expect(
-      mergeRunDefaults(policy, "user", {
+      mergeRunDefaults(DEFAULT_RUN_POLICY, "user", {
         permissionProfileId: "full-auto",
       }),
     ).toEqual({
@@ -25,9 +18,20 @@ describe("mergeRunDefaults", () => {
     });
   });
 
-  it("throws when policy is missing a trigger source", () => {
+  it.each(["user", "goal", "subagent"] as const)(
+    "uses interactive reject defaults for %s",
+    (source) => {
+      expect(mergeRunDefaults(DEFAULT_RUN_POLICY, source)).toEqual({
+        permissionProfileId: "interactive",
+        multitaskStrategy: "reject",
+        disconnectMode: "continue",
+      });
+    },
+  );
+
+  it("throws for an unknown trigger source", () => {
     expect(() =>
-      mergeRunDefaults({ defaults: {} }, "scheduler" as never),
+      mergeRunDefaults(DEFAULT_RUN_POLICY, "scheduler" as never),
     ).toThrow(RunDefaultsPolicyError);
   });
 });

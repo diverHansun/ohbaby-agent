@@ -18,6 +18,7 @@ import { createOpenAICompatibleProvider } from "ohbaby-llm";
 import { createOpenAIResponsesProvider } from "ohbaby-llm";
 import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 
+import { DEFAULT_RUN_POLICY } from "../../runtime/run-manager/index.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import {
   createInMemoryStreamBridge,
@@ -330,15 +331,7 @@ describe("three protocol terminal outcomes through RunManager, Worker and UI", (
         runLedger: ledger,
         sandboxManager: createHostLocalSandboxManager(process.cwd()),
         onStepUsage: observer,
-        policy: {
-          defaults: {
-            user: {
-              permissionProfileId: "interactive",
-              multitaskStrategy: "reject",
-              disconnectMode: "continue",
-            },
-          },
-        },
+        policy: DEFAULT_RUN_POLICY,
       });
       const stateStore = createInMemoryUiStateStore({
         activeSessionId: "session",

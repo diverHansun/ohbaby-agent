@@ -51,8 +51,32 @@ function createLedger(startAt?: number): RunLedger {
 }
 
 describe("InMemoryRunLedger", () => {
-  it("only accepts user-triggered runs in the MVP runtime", () => {
-    expectTypeOf<TriggerSource>().toEqualTypeOf<"user">();
+  it("filters main session run IDs before applying a history limit", async () => {
+    const ledger = createLedger();
+    for (const [runId, sessionId, contextScopeId] of [
+      ["one", "a"],
+      ["two", "a"],
+      ["child", "a", "child-scope"],
+      ["other", "b"],
+    ]) {
+      await ledger.createPending({
+        runId,
+        sessionId,
+        contextScopeId,
+        triggerSource: "goal",
+      });
+    }
+    const runs = await ledger.listBySession("a", {
+      mainOnly: true,
+      runIds: ["one", "child", "other", "two", "one"],
+      limit: 1,
+    });
+    expect(runs.map((run) => run.runId)).toEqual(["two"]);
+    expect(await ledger.listBySession("a", { runIds: [] })).toEqual([]);
+  });
+
+  it("accepts user, goal and subagent triggers", () => {
+    expectTypeOf<TriggerSource>().toEqualTypeOf<"user" | "goal" | "subagent">();
   });
 
   it("creates pending records with immutable snapshots", async () => {

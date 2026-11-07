@@ -4037,6 +4037,10 @@ export function createInProcessUiBackendClient(
       try {
         submitOptions?.signal?.throwIfAborted();
         const result = await runtime.startSession({
+          triggerSource:
+            submitOptions?.runtimeInput?.kind === "subagent-status"
+              ? "subagent"
+              : owner,
           preparationSignal: submitOptions?.goalTicket?.controller.signal,
           agentName,
           reasoning,

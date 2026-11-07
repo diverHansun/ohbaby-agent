@@ -5,7 +5,7 @@ export {
   RunFinalizationError,
 } from "./errors.js";
 export { RunManager } from "./manager.js";
-export { mergeRunDefaults } from "./policy.js";
+export { DEFAULT_RUN_POLICY, mergeRunDefaults } from "./policy.js";
 export type {
   CreateRunOptions,
   DisconnectMode,

@@ -17,7 +17,10 @@ import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
 } from "ohbaby-llm";
-import { type RunStepUsageObserver } from "../../runtime/run-manager/index.js";
+import {
+  DEFAULT_RUN_POLICY,
+  type RunStepUsageObserver,
+} from "../../runtime/run-manager/index.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import {
   createInMemoryStreamBridge,
@@ -200,15 +203,7 @@ describe("failed child scope and primary run handoff", () => {
         runLedger: ledger,
         onStepUsage: observer,
         sandboxManager: createHostLocalSandboxManager(process.cwd()),
-        policy: {
-          defaults: {
-            user: {
-              permissionProfileId: "interactive",
-              multitaskStrategy: "reject",
-              disconnectMode: "continue",
-            },
-          },
-        },
+        policy: DEFAULT_RUN_POLICY,
       });
       cancelChild = (): void => {
         runManager.cancel("child-run");
