@@ -317,6 +317,47 @@ describe("turns by run (turn-projection)", () => {
     expect(noteOnly.afterId).toBe("last");
   });
 
+  it.each(["interrupted", "cancelled"] as const)(
+    "does not answer a %s turn with a note whose hidden tool ran (copy improve-2 T6)",
+    (outcome) => {
+      const note = {
+        type: "text" as const,
+        text: "[Response cancelled by the user.]",
+        metadata: { kind: "lifecycle-interruption" },
+      };
+      const said = (patch: Partial<UiMessage>): UiMessage =>
+        msg("last", {
+          parts: [
+            { type: "text", text: "I will check the private task list." },
+            note,
+          ],
+          ...patch,
+        });
+      const turn = (last: UiMessage): ReturnType<typeof project> =>
+        projectRunProcesses([last], [], "s", {}, [run("r", { outcome })])[0];
+
+      // Paired cases: plain text stopped midway stays copyable ...
+      expect(turn(said({})).answerId).toBe("last");
+      // ... while a step that called a hidden tool is not an answer.
+      const hidden = turn(said({ hiddenToolCalls: true }));
+      expect(hidden.answerId).toBeUndefined();
+      expect(hidden.afterId).toBe("last");
+    },
+  );
+
+  it("keeps a succeeded turn's answer after a note whose hidden tool ran (copy improve-2 T7)", () => {
+    const [result] = projectRunProcesses(
+      [msg("note", { hiddenToolCalls: true }), msg("answer")],
+      [],
+      "s",
+      {},
+      [run("r")],
+    );
+    expect(result.answerId).toBe("answer");
+    expect(result.processIds).toEqual(["note"]);
+    expect(result.foldable).toBe(true);
+  });
+
   it("orders turns by run start and ignores other sessions (T12)", () => {
     const turns = projectRunProcesses(
       [msg("b", { runId: "b" }), msg("a", { runId: "a" })],

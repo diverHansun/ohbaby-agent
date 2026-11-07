@@ -54,9 +54,12 @@ export function projectRunProcesses(
     const lastAssistant = owned
       .filter((message) => message.role === "assistant")
       .at(-1);
+    // A step that called any tool, hidden ones included, is process rather
+    // than an answer (copy improve-2): the model meant to continue after it.
     const answer =
       lastAssistant &&
       lastAssistant.status !== "streaming" &&
+      lastAssistant.hiddenToolCalls !== true &&
       !lastAssistant.parts.some(
         (part) => part.type === "tool-call" || part.type === "tool-result",
       ) &&

@@ -125,6 +125,8 @@ UI key 不再拥有领域级稳定身份，但 Todo 是短列表且整体替换�
 
 在 UI projection/渲染边界隐藏，不删除核心消息。这样同时满足安静界面、Agent 错误处理和历史恢复。
 
+投影删掉 `todo_read`、`todo_write`（以及 `select_tools`）的片段时，会在这条消息上标 `hiddenToolCalls: true`，表示这一步调用过界面不显示的工具。客户端据此不把这一步的过渡文字当成最终答案，见[消息复制 improve-2](../../problem-lists/2026-11-04-message-copy/improve-2/02-optimization-plan-and-change-scope.md)。
+
 ### 稳定策略放在 base 而不是工具 description
 
 复杂任务启用、避免简单任务滥用、里程碑更新和 run 生命周期是跨 `todo_read` / `todo_write` 的 Agent 行为，集中在 primary base 能保持单一权威来源。description 只保留读、整体替换、10 项和空数组清除等接口信息，并且只经原生工具定义进入上下文。
