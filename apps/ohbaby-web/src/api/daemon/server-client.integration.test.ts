@@ -231,6 +231,7 @@ class FakeBackend implements UiBackendClient {
       bindingGeneration: input.bindingGeneration,
       messages: [],
       prompts: [],
+      runs: [],
       reasoningMissing: false,
       hasMore: false,
     };

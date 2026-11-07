@@ -85,6 +85,8 @@ ohbaby-agent adapter
 | `respondPermission(id, response, context)`          | Permission 回填         | 带 epoch/root/generation 回答指定 ID                 |
 | `subscribePermissionEvents(handler, onDisconnect?)` | Permission 增量         | 同步订阅，返回取消订阅函数                           |
 | `getPermissionSnapshot(query)`                      | Permission 基线         | 独立健康检查及每根 revision；支持 signal             |
+| `getSessionView({ sessionId })` | 打开、恢复主会话 | `runs` 包含已加载消息对应的主 run，以及仍在运行的主 run，最新在前 |
+| `getSessionHistory({ sessionId, before })` | 向前翻页 | 每页附带该页消息对应的主 run。客户端按 run ID 合并，子代理历史返回 `runs: []` |
 | `getSessionIndex()` / `getSelectedSessionId()`      | 轻量元数据              | 不读取完整历史/model                                 |
 | `createSession()` / `selectSession(id)`             | 会话绑定                | 创建/选择主会话元数据，返回绑定所需状态              |
 | `respondInteraction(id, response)`                  | Interaction 回填        | 响应语义化交互                                       |

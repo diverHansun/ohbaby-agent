@@ -49,11 +49,13 @@ describe("AgentInstance", () => {
     });
 
     await instance.turn({
+      triggerSource: "user",
       runModel: testRunModel("fake-model"),
       prompt: "first",
       waitMode: "waitForCompletion",
     });
     await instance.turn({
+      triggerSource: "user",
       runModel: testRunModel("fake-model"),
       prompt: "second",
       waitMode: "waitForCompletion",
@@ -97,6 +99,7 @@ describe("AgentInstance", () => {
     });
 
     await instance.turn({
+      triggerSource: "user",
       runModel: testRunModel("fake-model"),
       initialUserMessageId: "message_reserved",
       prompt: "hello",

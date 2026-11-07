@@ -17,6 +17,12 @@ import {
   schema,
 } from "../services/database/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
+import { createDatabaseMessageStore } from "../core/message/index.js";
+import { createSqliteGoalPersistence } from "../goals/index.js";
+import {
+  goalTodoWorkScopeId,
+  recoverTodosFromMessages,
+} from "../tools/todo.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { SnapshotService } from "../snapshot/index.js";
 import { createTemporarySessionTitle } from "../services/session/index.js";
@@ -307,6 +313,7 @@ function createConcurrentMixedOutcomeLLMClient(input: {
 function createAbortableBlockingLLMClient(input: {
   readonly release: Promise<undefined>;
   readonly startedTexts: string[];
+  readonly partialText?: string;
 }): LLMClientInstance<FakeSdkClient> {
   const abortError = Object.assign(new Error("aborted"), {
     name: "AbortError",
@@ -336,6 +343,8 @@ function createAbortableBlockingLLMClient(input: {
             void,
             unknown
           > {
+            if (input.partialText) yield { textDelta: input.partialText };
+            if (request.signal?.aborted) throw abortError;
             await Promise.race([
               input.release,
               new Promise<never>((_resolve, reject) => {
@@ -1251,6 +1260,80 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
+  it("retains a stopped partial answer in the live view and history after reopening SQLite", async () => {
+    const directory = await tempDir("ohbaby-stopped-answer-");
+    const fragment = "The first finding";
+    const release = createDeferred<undefined>();
+    const options = {
+      dbPath: join(directory, "agent.db"),
+      workdir: join(directory, "workspace"),
+      llmClient: createAbortableBlockingLLMClient({
+        partialText: fragment,
+        release: release.promise,
+        startedTexts: [],
+      }),
+    };
+    let client = createPersistentUiBackendClient(options);
+    try {
+      const { sessionId, promptId } = await client.submitPromptAccepted(
+        "Explain your findings",
+      );
+      const scope = { sessionId };
+      const active = await vi.waitFor(async () => {
+        const view = await client.getSessionView?.(scope);
+        const answer = view?.session.messages.find(
+          (message) =>
+            message.role === "assistant" &&
+            message.parts.some(
+              (part) => part.type === "text" && part.text === fragment,
+            ),
+        );
+        if (!answer?.runId)
+          throw new Error("Waiting for first answer fragment");
+        return { runId: answer.runId, messageId: answer.id };
+      });
+      await client.abortRun(active.runId);
+      await expect(client.waitForPrompt(promptId)).resolves.toMatchObject({
+        prompt: { status: "interrupted" },
+      });
+      async function expectStoppedAnswer(): Promise<void> {
+        const view = await client.getSessionView?.(scope);
+        const history = await client.getSessionHistory?.(scope);
+        if (!view || !history)
+          throw new Error("Missing session view or history");
+        const run = view.runs.find((item) => item.id === active.runId);
+        expect(run).toMatchObject({ outcome: "interrupted", trigger: "user" });
+        expect(history.runs).toContainEqual(run);
+        for (const messages of [view.session.messages, history.messages]) {
+          const answer = messages.find(
+            (message) => message.id === active.messageId,
+          );
+          expect(answer).toMatchObject({
+            runId: active.runId,
+            status: "error",
+          });
+          expect(
+            answer?.parts.filter((part) => part.type === "text"),
+          ).toMatchObject([
+            { text: fragment },
+            { metadata: { kind: "lifecycle-interruption" } },
+          ]);
+        }
+      }
+      await expectStoppedAnswer();
+      await client.dispose();
+      closeDatabase();
+      client = createPersistentUiBackendClient(options);
+      await client.initializeSession(sessionId);
+      await expectStoppedAnswer();
+    } finally {
+      release.resolve(undefined);
+      await client.dispose();
+      closeDatabase();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not advance same-session FIFO until the aborted provider settles", async () => {
     const directory = await tempDir("ohbaby-persistent-abort-barrier-");
     const abortObserved = createDeferred<undefined>();
@@ -1991,6 +2074,160 @@ describe("createPersistentUiBackendClient", () => {
       await rm(directory, { force: true, recursive: true });
     }
   });
+
+  it.each(["user", "goal"] as const)(
+    "persists the %s run and its child-result wakeup with their distinct triggers",
+    async (owner) => {
+      const directory = await tempDir("ohbaby-trigger-");
+      const releaseChild = createDeferred<undefined>();
+      const releaseWake = createDeferred<undefined>();
+      const llm = createFakeLLMClient([
+        { textDelta: "done", finishReason: "stop" },
+      ]);
+      const fallback = llm.provider.streamResponse.bind(llm.provider);
+      const wakeTodos = [
+        { content: "Review the child result", status: "completed" },
+      ];
+      let primaryRequests = 0;
+      vi.spyOn(llm.provider, "streamResponse").mockImplementation(
+        async (request) => {
+          if (isSessionTitleGenerationRequest(request))
+            return fallback(request);
+          if (isPersistentExploreSubagentRequest(request)) {
+            await releaseChild.promise;
+            return createProviderStream([
+              { textDelta: "child result", finishReason: "stop" },
+            ]);
+          }
+          primaryRequests++;
+          if (primaryRequests === 1)
+            return createProviderStream([
+              createProviderSubagentControlEvent({
+                callId: "spawn",
+                action: "spawn",
+                arguments: { prompt: "inspect files", role: "explore" },
+              }),
+            ]);
+          if (primaryRequests === 3) {
+            await releaseWake.promise;
+            return createProviderStream([
+              {
+                toolCallDeltas: [
+                  {
+                    index: 0,
+                    id: "record-result",
+                    name: "todo_write",
+                    argumentsDelta: JSON.stringify({ todos: wakeTodos }),
+                  },
+                ],
+                finishReason: "tool_calls",
+              },
+            ]);
+          }
+          if (primaryRequests === 4 && owner === "goal") {
+            return createProviderStream([
+              {
+                toolCallDeltas: [
+                  {
+                    index: 0,
+                    id: "finish-goal",
+                    name: "UpdateGoal",
+                    argumentsDelta: JSON.stringify({ status: "complete" }),
+                  },
+                ],
+                finishReason: "tool_calls",
+              },
+            ]);
+          }
+          return fallback(request);
+        },
+      );
+      const client = createPersistentUiBackendClient({
+        dbPath: join(directory, "agent.db"),
+        workdir: join(directory, "workspace"),
+        llmClient: llm,
+      });
+      const updates: UiRun[] = [];
+      client.subscribeEvents((event) => {
+        if (event.type === "run.updated") updates.push(event.run);
+      });
+      try {
+        const { id: sessionId } = await client.createSession();
+        if (owner === "goal")
+          await client.executeCommand({
+            sessionId,
+            commandId: "goal",
+            path: ["goal"],
+            argv: ["inspect files"],
+            raw: "/goal inspect files",
+            rawArgs: "inspect files",
+            surface: "tui",
+            clientInvocationId: "goal",
+          });
+        else await client.submitPromptAndWait("inspect files", { sessionId });
+        const ledger = createDatabaseRunLedger();
+        await vi.waitFor(async () => {
+          expect(
+            await ledger.listBySession(sessionId, { mainOnly: true }),
+          ).toMatchObject([{ triggerSource: owner, status: "succeeded" }]);
+        });
+        releaseChild.resolve(undefined);
+        await vi.waitFor(() => {
+          expect(primaryRequests).toBe(3);
+        });
+        expect((await client.getSessionControl?.({ sessionId }))?.driver).toBe(
+          owner === "goal" ? "goal" : "subagent",
+        );
+        releaseWake.resolve(undefined);
+        await vi.waitFor(async () => {
+          const runs = await ledger.listBySession(sessionId, {
+            mainOnly: true,
+          });
+          expect(runs).toMatchObject([
+            { triggerSource: "subagent", status: "succeeded" },
+            { triggerSource: owner, status: "succeeded" },
+          ]);
+          const view = await client.getSessionView?.({ sessionId });
+          for (const run of runs) {
+            const expected = {
+              id: run.runId,
+              trigger: run.triggerSource,
+              outcome: "succeeded",
+            };
+            expect(view?.runs).toContainEqual(
+              expect.objectContaining(expected),
+            );
+            expect(updates).toContainEqual(expect.objectContaining(expected));
+          }
+        });
+        const messages = await createDatabaseMessageStore().listBySession(
+          sessionId,
+          { contextScopeId: undefined },
+        );
+        const ordinaryTodos = recoverTodosFromMessages(messages);
+        if (owner === "goal") {
+          const [goal] =
+            await createSqliteGoalPersistence(getDatabase()).list(sessionId);
+          expect(
+            recoverTodosFromMessages(
+              messages,
+              undefined,
+              goalTodoWorkScopeId(goal.goalId),
+            ),
+          ).toEqual(wakeTodos);
+          expect(ordinaryTodos).toEqual([]);
+        } else {
+          expect(ordinaryTodos).toEqual(wakeTodos);
+        }
+      } finally {
+        releaseChild.resolve(undefined);
+        releaseWake.resolve(undefined);
+        await client.dispose();
+        closeDatabase();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("persists background subagent child sessions, transcripts, and run ledger entries", async () => {
     const directory = await tempDir("ohbaby-persistent-background-subagent-");
@@ -2890,6 +3127,14 @@ it("refreshes a seeded SQLite view only after actual orphan repair and leaves re
       triggerSource: "user",
     });
     await ledger.markRunning("late-orphan");
+    await createDatabaseMessageStore().insertMessage({
+      id: "orphan-answer",
+      agent: "default",
+      role: "assistant",
+      sessionId,
+      runId: "late-orphan",
+      time: { created: Date.now() },
+    });
     const { DatabasePromptSubmissionStore } =
       await import("../runtime/prompt-scheduler/database-store.js");
     const prompts = new DatabasePromptSubmissionStore({
@@ -2910,9 +3155,9 @@ it("refreshes a seeded SQLite view only after actual orphan repair and leaves re
     expect(repaired.version.viewGeneration).not.toBe(
       before.version.viewGeneration,
     );
-    expect(
-      repaired.runs.find((run) => run.id === "late-orphan")?.status.kind,
-    ).toBe("error");
+    expect(repaired.runs.find((run) => run.id === "late-orphan")).toMatchObject(
+      { status: { kind: "error" }, outcome: "interrupted" },
+    );
     expect(
       repaired.prompts.find((prompt) => prompt.promptId === "late-queued")
         ?.status,

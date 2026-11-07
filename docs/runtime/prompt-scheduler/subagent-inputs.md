@@ -1,15 +1,15 @@
 # 子代理消息与结果输入
 
-主会话用户输入、Goal、后台结果和监督共用 adapter 的 SessionExecutionGate。子代理运行期间接受的 send 使用 child run 的 CurrentRunInputStore；它不经过主执行门，也不新开 child execution。
+主会话用户输入、Goal 和后台结果唤醒共用 adapter 的 SessionExecutionGate。子代理运行期间接受的 send 使用 child run 的 CurrentRunInputStore，直接进入该次子执行。
 
 输入来源为 `user-steer`、`subagent-message`、`subagent-result`、`subagent-status`。数据库迁移 028 扩展 source 约束，保留原输入、索引和外键。每条输入绑定 session、scope、run、message 和稳定 source 身份，已接受的请求成员关系不得搬迁。
 
 `admitRequestAttempt` 固定当前请求输入集合；`confirmRequestSuccess` 只确认真正成功的请求。失败或中断的 runtime 消息保留审计证据，但未 processed 的子代理消息不重新混入模型历史。子代理结果由 session 级 execution 台账持有，下一轮使用新的 inputId 重投，sourceId 不变。
 
-空闲结果唤醒在共享执行门成功预留之后 claimWakeup；拒绝准入不消费唤醒机会。同一个结果已经获得过自动处理机会后，不因该轮失败再次自动开启主轮次，仍可随新用户输入、新结果或允许的监督处理。用户 Stop 使旧 timer generation 失效，不能阻止随后真正的新结果。
+空闲结果唤醒在共享执行门成功预留之后调用 `claimWakeup`。被拒绝准入的结果保留唤醒机会。已获得过自动处理机会的结果可随之后的用户输入或新结果再次交付，同一条结果只主动唤醒一次。用户停止主 run 后，仍在后台运行的子任务可以交回结果。
 
-监督提示在 RunManager 标记 running 后、第一模型请求前持久写入，并带 `subagent-status` origin。真实结果到达会撤销尚未发送的旧监督观察；用户输入与观察的并发沿用输入存储的事务检查。
+正常运行期间由程序检查执行状态。收到子任务的成功、失败或超时结果后，运行中的主 run 可接收 `subagent-result`。如果主代理空闲并获准开一个主 run，运行时会在首次模型请求前写入带 `subagent-status` 来源的唤醒消息。这条 run 在账本里的 `trigger` 为 `subagent`。
 
-Goal 沿用可观察的轮次边界：主模型先做完当前能独立推进的工作，再结束本轮；本轮自然结束且仍有该 Goal 的后台执行时 driver 等待结果或监督。程序不解析自然语言来猜测业务上是否还有独立工作。Goal 归属和预算覆盖结果处理轮及其派生执行；普通用户 Stop 不通过后台通知恢复被暂停的 Goal。
+主模型可以先做完当前能独立推进的工作。主 run 成功结束且仍有该 Goal 的后台执行时，Goal driver 等待子任务结果。Goal 接手结果时继续使用自身的预算和 Todo 作用域。用户暂停的 Goal 保留暂停状态。
 
 对应实现：`runtime/prompt-scheduler/current-run-inputs.ts`、`agents/subagents/continuation-coordinator.ts`、`agents/subagents/session-supervisor.ts`、`adapters/ui-inprocess.ts`。

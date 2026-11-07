@@ -102,7 +102,7 @@ export interface GoalTurnOutcome {
 
 /** 适配层实现：把提醒文本作为 user 消息起一轮 Run 并等待完成。 */
 export interface GoalTurnRunner {
-  /** No independent primary work remains; results and supervision own the next wake. */
+  /** No independent primary work remains; child results trigger the next wake. */
   shouldWaitForSubagents?(sessionId: string, goalId: string): Promise<boolean>;
   finishTurn?(
     sessionId: string,

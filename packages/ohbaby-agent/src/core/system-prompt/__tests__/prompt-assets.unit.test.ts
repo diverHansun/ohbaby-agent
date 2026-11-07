@@ -75,7 +75,7 @@ describe("system prompt template assets", () => {
       "Complete the work you can advance independently before ending a Goal turn",
     );
     expect(PRIMARY_BASE_PROMPT).toContain(
-      "a normally finished main turn with active Goal background executions yields until a result or scheduled supervision wakes it",
+      "a normally finished main turn with active Goal background executions yields until a child result wakes it",
     );
   });
 

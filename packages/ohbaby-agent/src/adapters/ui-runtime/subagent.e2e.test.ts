@@ -445,6 +445,7 @@ describe("subagent runtime e2e", () => {
     });
 
     const result = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Delegate subagent e2e",
@@ -572,6 +573,7 @@ describe("subagent runtime e2e", () => {
 
     try {
       const run = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: workdir,
         prompt: "Delegate empty subagent e2e",
@@ -647,6 +649,7 @@ describe("subagent runtime e2e", () => {
 
     try {
       const run = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: workdir,
         prompt: "Delegate failing subagent e2e",
@@ -725,6 +728,7 @@ describe("subagent runtime e2e", () => {
 
       try {
         const run = await composition.startSession({
+          triggerSource: "user",
           agentName: "build",
           projectRoot: workdir,
           prompt: "Delegate cancelled subagent e2e",
@@ -848,6 +852,7 @@ describe("subagent runtime e2e", () => {
     });
 
     const result = await composition.startSession({
+      triggerSource: "user",
       agentName: "build",
       projectRoot: workdir,
       prompt: "Delegate subagent e2e",
@@ -943,6 +948,7 @@ describe("subagent runtime e2e", () => {
 
     try {
       const result = await composition.startSession({
+        triggerSource: "user",
         agentName: "build",
         projectRoot: workdir,
         prompt: "Delegate subagent e2e",

@@ -54,6 +54,7 @@ describe("session view store", () => {
       endedAt: "2026-01-01T00:01:00Z",
     };
     store.installSessionHistory({
+      runs: [],
       version: view().version,
       messages: [message("1")],
       prompts: [prompt],
@@ -67,6 +68,7 @@ describe("session view store", () => {
     const store = createOhbabyWebStore();
     store.setSessionSync(ready(view()));
     store.installSessionHistory({
+      runs: [],
       version: view().version,
       messages: [message("1"), message("2", "stale")],
       prompts: [],
@@ -81,6 +83,7 @@ describe("session view store", () => {
     ).toEqual([message("1").parts, message("2", "live2").parts]);
     expect(store.getSnapshot().historyHasMore).toBe(false);
     store.installSessionHistory({
+      runs: [],
       version: { ...view().version, viewGeneration: "wrong" },
       messages: [message("0")],
       prompts: [],
@@ -95,6 +98,7 @@ describe("session view store", () => {
     const store = createOhbabyWebStore();
     store.setSessionSync(ready(view()));
     store.installSessionHistory({
+      runs: [],
       version: view().version,
       messages: [message("1")],
       prompts: [],
@@ -143,6 +147,7 @@ describe("session view store", () => {
     const store = createOhbabyWebStore();
     store.setSessionSync(ready(view()));
     store.installSessionHistory({
+      runs: [],
       version: view().version,
       messages: [message("1")],
       prompts: [],
@@ -156,6 +161,7 @@ describe("session view store", () => {
     });
     store.setSessionSync(ready(view(1)));
     store.installSessionHistory({
+      runs: [],
       version: view().version,
       messages: [message("1", "old deleted")],
       prompts: [],
@@ -170,6 +176,7 @@ describe("session view store", () => {
     const store = createOhbabyWebStore();
     store.setSessionSync(ready(view()));
     store.installSessionHistory({
+      runs: [],
       version: view().version,
       messages: [message("1")],
       prompts: [],
@@ -189,6 +196,7 @@ describe("session view store", () => {
     );
     store.setSessionSync(ready(view(3)));
     store.installSessionHistory({
+      runs: [],
       version: view(1).version,
       messages: [message("1", "old page")],
       prompts: [],
@@ -205,6 +213,7 @@ describe("session view store", () => {
     const store = createOhbabyWebStore();
     store.setSessionSync(ready(view()));
     store.installSessionHistory({
+      runs: [],
       version: view().version,
       messages: [message("1", "old")],
       prompts: [],
@@ -213,6 +222,7 @@ describe("session view store", () => {
     });
     store.setSessionSync(ready(view(2)));
     store.installSessionHistory({
+      runs: [],
       version: view(1).version,
       messages: [message("1", "updated")],
       prompts: [],
@@ -223,6 +233,7 @@ describe("session view store", () => {
       store.getSnapshot().view.snapshot?.sessions[0]?.messages[0]?.parts,
     ).toEqual(message("1", "updated").parts);
     store.installSessionHistory({
+      runs: [],
       version: view(9).version,
       messages: [message("0", "future")],
       prompts: [],
@@ -283,6 +294,7 @@ it("does not rewind the receipt anchor when loading history against a cached vie
   );
   const received = store.getSnapshot().durationSample;
   store.installSessionHistory({
+    runs: [],
     version: cached.version,
     messages: [],
     prompts: [],

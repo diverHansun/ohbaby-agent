@@ -6,7 +6,7 @@ export type RunStatus =
   | "cancelled"
   | "interrupted";
 
-export type TriggerSource = "user";
+export type TriggerSource = "user" | "goal" | "subagent";
 
 export interface RunLedgerRecord {
   readonly steerClosedAt?: number;
@@ -39,6 +39,8 @@ export interface CreatePendingRunLedgerInput {
 export type ClaimPendingRunLedgerInput = CreatePendingRunLedgerInput;
 
 export interface ListRunLedgerOptions {
+  readonly mainOnly?: boolean;
+  readonly runIds?: readonly string[];
   readonly limit?: number;
 }
 

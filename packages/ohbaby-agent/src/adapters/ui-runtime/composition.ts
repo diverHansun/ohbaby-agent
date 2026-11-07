@@ -145,7 +145,7 @@ import {
   RunManagerNotFoundError,
   type HookExecutor,
   type RunStepUsageObserver,
-  type RunDefaultsPolicy,
+  DEFAULT_RUN_POLICY,
 } from "../../runtime/run-manager/index.js";
 import {
   createInMemoryStreamBridge,
@@ -165,16 +165,6 @@ import { createStreamBridgeRunEventSource } from "./stream-bridge-run-event-sour
 import type { UiRuntimeComposition } from "./types.js";
 
 import { createPermissionSourcePort } from "./permission-source.js";
-
-const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
-  defaults: {
-    user: {
-      permissionProfileId: "interactive",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-  },
-};
 
 export interface UiRuntimeCompositionOptions {
   readonly onSubagentStateChanged?: (parentSessionId: string) => void;

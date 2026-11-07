@@ -38,7 +38,6 @@ async function fixture(): Promise<{
   let queue = Promise.resolve();
   const input: SubagentWakeupAdmission = {
     sessionId: "parent",
-    reason: "result" as const,
     executions,
     gate,
     signal: new AbortController().signal,

@@ -1,5 +1,4 @@
 import { createSessionSubagentSupervisor } from "../agents/subagents/session-supervisor.js";
-import { collectExecutionFacts } from "../agents/subagents/execution-facts.js";
 import { listSessionExecutions } from "../agents/subagents/continuation-coordinator.js";
 import { createSubagentWakeup } from "./ui-inprocess/subagent-wakeup.js";
 import { SubagentInstanceProjection } from "./ui-inprocess/subagent-instances.js";
@@ -42,7 +41,10 @@ import {
 } from "../runtime/prompt-scheduler/current-run-inputs.js";
 import { createCoordinatedRunLedger } from "./ui-state/coordinated-run-ledger.js";
 import { createInMemoryRunLedger } from "../runtime/run-ledger/index.js";
-import { SourceSessionProjection } from "./ui-state/source-session-projection.js";
+import {
+  compareRunsNewestFirst,
+  SourceSessionProjection,
+} from "./ui-state/source-session-projection.js";
 import { runToUiRun, messageToUiMessage } from "./ui-state/persistent-store.js";
 import type {
   UiSessionRecoveryClient,
@@ -289,7 +291,6 @@ type InternalSubmitPromptOptions = SubmitPromptOptions & {
   readonly hasModelSnapshot?: boolean;
   readonly signal?: AbortSignal;
   readonly owner?: PromptOwner;
-  readonly subagentWakeReason?: "result" | "supervision";
   readonly runtimeInput?: {
     readonly kind: "subagent-status";
     readonly sourceId: string;
@@ -716,11 +717,6 @@ export function createInProcessUiBackendClient(
     options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
   const sourceLedger =
     options.runLedger ?? stateStore.runLedger ?? createInMemoryRunLedger();
-  function projectRunRecord(
-    record: import("../runtime/run-ledger/index.js").RunLedgerRecord,
-  ): Promise<UiRun> {
-    return Promise.resolve(runToUiRun(record));
-  }
   async function unconsumedSteers(
     sessionId: string,
   ): Promise<readonly import("ohbaby-sdk").UiUnconsumedSteer[] | undefined> {
@@ -777,15 +773,39 @@ export function createInProcessUiBackendClient(
           unconsumedSteers: await unconsumedSteers(sessionId),
         };
       },
-      runs: async (sessionId): Promise<readonly UiRun[]> => {
-        const stored = await Promise.all(
-          (await sourceLedger.listBySession(sessionId, { limit: 50 }))
-            .filter((run) => run.contextScopeId === undefined)
-            .map(projectRunRecord),
+      currentRuns: async (sessionId): Promise<readonly UiRun[]> => {
+        const active = (await sourceLedger.getActiveRuns(sessionId)).filter(
+          (run) => run.contextScopeId === undefined,
         );
-        return stored.length
-          ? stored
-          : initialSnapshot.runs.filter((run) => run.sessionId === sessionId);
+        if (active.length) return active.map(runToUiRun);
+        const latest = await sourceLedger.listBySession(sessionId, {
+          mainOnly: true,
+          limit: 1,
+        });
+        if (latest.length) return latest.map(runToUiRun);
+        // A session known only from the startup snapshot has no ledger rows.
+        return initialSnapshot.runs
+          .filter((run) => run.sessionId === sessionId)
+          .sort(compareRunsNewestFirst);
+      },
+      runsByIds: async (sessionId, runIds): Promise<readonly UiRun[]> => {
+        const runs = (
+          await sourceLedger.listBySession(sessionId, {
+            mainOnly: true,
+            runIds,
+          })
+        ).map(runToUiRun);
+        const found = new Set(runs.map((run) => run.id));
+        const wanted = new Set(runIds);
+        return [
+          ...runs,
+          ...initialSnapshot.runs.filter(
+            (run) =>
+              run.sessionId === sessionId &&
+              wanted.has(run.id) &&
+              !found.has(run.id),
+          ),
+        ];
       },
       prompts: async (
         sessionId,
@@ -874,16 +894,13 @@ export function createInProcessUiBackendClient(
       run: (sessionId, operation) =>
         sourceProjection.owner.run(sessionId, operation),
       onCommitted: (record) => {
-        if (record.contextScopeId === undefined)
-          void projectRunRecord(record)
-            .then(async (run) => {
-              await sourceProjection.commitEvent({ type: "run.updated", run });
-              refreshSteerRecovery(record.sessionId);
-            })
-            .catch((error: unknown) => {
-              sourceProjection.owner.markUnavailable(record.sessionId, error);
-            });
-        else sourceProjection.commitScopeRun(runToUiRun(record));
+        const run = runToUiRun(record);
+        if (record.contextScopeId !== undefined) {
+          sourceProjection.commitScopeRun(run);
+          return;
+        }
+        void sourceProjection.commitEvent({ type: "run.updated", run });
+        refreshSteerRecovery(record.sessionId);
       },
       onProjectionError: (sessionId, error): void => {
         sourceProjection.owner.markUnavailable(sessionId, error);
@@ -1177,10 +1194,9 @@ export function createInProcessUiBackendClient(
   currentRunInputStore?.setMessageCommitObserver((message): void => {
     // Queue after any scheduler owner lane; never await that lane recursively.
     void sourceProjection.owner
-      .run(message.info.sessionId, () => {
-        sourceProjection.acceptRuntimeInput(message);
-        return Promise.resolve();
-      })
+      .run(message.info.sessionId, () =>
+        sourceProjection.acceptRuntimeInput(message),
+      )
       .catch((error: unknown) => {
         sourceProjection.owner.markUnavailable(message.info.sessionId, error);
       });
@@ -1445,13 +1461,6 @@ export function createInProcessUiBackendClient(
   });
   const subagentSupervisor = createSessionSubagentSupervisor({
     executions: subagentExecutionStore,
-    collectFacts: (execution) =>
-      collectExecutionFacts({
-        execution,
-        messages: messageManager,
-        permissions: permission,
-        now: () => now().getTime(),
-      }),
     isIdle: isMainSessionIdle,
     now: () => now().getTime(),
     wake: wakeFromSubagent,
@@ -1459,7 +1468,7 @@ export function createInProcessUiBackendClient(
       publishNotice({
         key: `subagent:supervision:${getErrorMessage(error)}`,
         level: "error",
-        title: "Subagent supervision failed",
+        title: "Subagent result check failed",
         message: getErrorMessage(error),
       });
     },
@@ -2462,7 +2471,7 @@ export function createInProcessUiBackendClient(
       runs: await Promise.all(
         snapshot.runs.map(async (run) => {
           const record = await sourceLedger.get(run.id);
-          return record ? { ...run, ...(await projectRunRecord(record)) } : run;
+          return record ? { ...run, ...runToUiRun(record) } : run;
         }),
       ),
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
@@ -3939,10 +3948,7 @@ export function createInProcessUiBackendClient(
       }
 
       observeSubagentSession(session.id);
-      subagentSupervisor.active(
-        session.id,
-        submitOptions?.subagentWakeReason ?? "user",
-      );
+      subagentSupervisor.active(session.id);
       if (submitOptions?.reservedUserMessageId) {
         messageIds.reserve(submitOptions.reservedUserMessageId);
       }
@@ -4037,6 +4043,10 @@ export function createInProcessUiBackendClient(
       try {
         submitOptions?.signal?.throwIfAborted();
         const result = await runtime.startSession({
+          triggerSource:
+            submitOptions?.runtimeInput?.kind === "subagent-status"
+              ? "subagent"
+              : owner,
           preparationSignal: submitOptions?.goalTicket?.controller.signal,
           agentName,
           reasoning,
@@ -4265,8 +4275,7 @@ export function createInProcessUiBackendClient(
   ): Promise<void> {
     const runtime = await runtimeController.getRuntimeForPrompt();
     const sessionId = input.sessionId;
-    if (input.preserveBackground)
-      subagentSupervisor.idle(sessionId, { interrupted: true });
+    if (input.preserveBackground) subagentSupervisor.idle(sessionId);
     await executeGoalExecutionInterrupt(input, {
       abortPromptRun: (runId) => runtimeController.abortPromptRun(runId),
       activeRunId: () => runtimeController.getActiveRunId(sessionId),
@@ -5380,8 +5389,7 @@ export function createInProcessUiBackendClient(
       const active = [...activePromptsBySession.values()].find(
         (prompt) => prompt.runId === runId,
       );
-      if (active)
-        subagentSupervisor.idle(active.sessionId, { interrupted: true });
+      if (active) subagentSupervisor.idle(active.sessionId);
       if (!(await runtimeController.abortPromptRun(runId)))
         throw Object.assign(new Error("The requested run has already ended"), {
           code: "SESSION_SCOPE_CHANGED",

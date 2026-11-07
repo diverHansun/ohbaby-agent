@@ -784,6 +784,7 @@ describe("startRunStreamProjection", () => {
       run: {
         createdAt: 1,
         endedAt: 4,
+        triggerSource: "subagent",
         runId: "run_1",
         sessionId: "session_1",
         startedAt: 2,
@@ -799,6 +800,9 @@ describe("startRunStreamProjection", () => {
       runs: [
         {
           id: "run_1",
+          trigger: "subagent",
+          outcome: "succeeded",
+          endedAt: new Date(4).toISOString(),
           status: { kind: "idle" },
         },
       ],

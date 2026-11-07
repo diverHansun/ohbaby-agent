@@ -547,10 +547,18 @@ export function createDatabaseRunLedger(
     ): Promise<RunLedgerRecord[]> {
       return withAsyncBoundary(() => {
         const limit = normalizeLimit(options);
+        const filters = ["session_id = ?"];
+        const params: (string | number)[] = [sessionId];
+        if (options?.mainOnly) filters.push("context_scope_id IS NULL");
+        if (options?.runIds !== undefined) {
+          if (options.runIds.length === 0) return [];
+          filters.push("run_id IN (SELECT value FROM json_each(?))");
+          params.push(JSON.stringify(options.runIds));
+        }
         const sql = `SELECT * FROM ${schema.runLedger.tableName}
-           WHERE session_id = ?
-           ORDER BY created_at DESC${limit === undefined ? "" : " LIMIT ?"}`;
-        const params = limit === undefined ? [sessionId] : [sessionId, limit];
+           WHERE ${filters.join(" AND ")}
+           ORDER BY created_at DESC, run_id DESC${limit === undefined ? "" : " LIMIT ?"}`;
+        if (limit !== undefined) params.push(limit);
         return db
           .prepare<RunLedgerRow>(sql)
           .all(...params)

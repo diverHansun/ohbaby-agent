@@ -29,6 +29,7 @@ class DefaultAgentInstance implements AgentInstance {
     return this.runner(this.deps, {
       ...(input.onInputReady ? { onInputReady: input.onInputReady } : {}),
       runModel: input.runModel,
+      triggerSource: input.triggerSource,
       ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
       agentName: this.identity.agentName,
       contextScope: this.contextScope,

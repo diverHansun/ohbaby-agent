@@ -292,9 +292,20 @@ export class InMemoryRunLedger implements RunLedger {
   ): Promise<RunLedgerRecord[]> {
     return this.withAsyncBoundary(() => {
       const limit = normalizeLimit(options);
+      const runIds = options?.runIds && new Set(options.runIds);
       const records = Array.from(this.records.values())
-        .filter((record) => record.sessionId === sessionId)
-        .sort((left, right) => right.createdAt - left.createdAt);
+        .filter(
+          (record) =>
+            record.sessionId === sessionId &&
+            (!options?.mainOnly || record.contextScopeId === undefined) &&
+            (!runIds || runIds.has(record.runId)),
+        )
+        // Mirrors the SQLite ledger's ORDER BY created_at DESC, run_id DESC.
+        .sort(
+          (left, right) =>
+            right.createdAt - left.createdAt ||
+            (left.runId < right.runId ? 1 : left.runId > right.runId ? -1 : 0),
+        );
 
       return records.slice(0, limit).map(cloneRecord);
     });

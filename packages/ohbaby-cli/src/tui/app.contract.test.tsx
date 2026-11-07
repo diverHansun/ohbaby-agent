@@ -6007,6 +6007,7 @@ function createFakeClient(
     getSessionHistory: vi.fn(({ sessionId }: { sessionId: string }) =>
       Promise.resolve({
         version: sourceView(sourceState.snapshot, sessionId).version,
+        runs: [],
         messages: [],
         prompts: [],
         reasoningMissing: false,

@@ -24,7 +24,8 @@ async function fixture() {
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
       }),
-    runs: () => Promise.resolve([]),
+    currentRuns: (): Promise<[]> => Promise.resolve([]),
+    runsByIds: (): Promise<[]> => Promise.resolve([]),
     prompts: () => Promise.resolve([]),
     publish: () => undefined,
   });

@@ -31,7 +31,7 @@ run-ledger 维护的 Run 状态枚举。注意：账本状态与 run-manager 内
 |---|---|
 | `runId` | Run 唯一标识，与 run-manager 的 RunRecord.runId 相同 |
 | `sessionId` | 所属 session，用于按 session 查询历史 run |
-| `triggerSource` | 触发来源（`'user' \| 'scheduler' \| 'heartbeat' \| 'channel' \| 'follow-up'`），供审计使用；scheduler 内部的 `scheduled/reminder` 是 job kind，不直接作为 Run 的 triggerSource |
+| `triggerSource` | 主会话的开轮原因：用户提交 `user`、Goal 续跑 `goal`、后台子代理结果唤醒 `subagent`。子代理自身的 run 及历史记录沿用 `user` |
 | `status` | 账本状态（见下方说明）|
 | `createdAt` | Run 创建时间戳 |
 | `startedAt` | Run 实际开始执行时间戳（`markRunning` 时写入）|

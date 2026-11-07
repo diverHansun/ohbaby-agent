@@ -3,7 +3,6 @@ import {
   InMemorySubagentExecutionStore,
   type SubagentExecutionRecord,
 } from "./execution-store.js";
-import type { ExecutionFactView } from "./execution-facts.js";
 import {
   createSessionSubagentSupervisor,
   type SessionSubagentSupervisor,
@@ -13,23 +12,20 @@ const MINUTE = 60_000;
 interface Fixture {
   executions: InMemorySubagentExecutionStore;
   supervisor: SessionSubagentSupervisor;
-  wakes: { reason: string; at: number }[];
+  wakes: number[];
   start(
     id?: string,
     mode?: "background" | "foreground",
   ): Promise<SubagentExecutionRecord>;
-  becomeIdle(interrupted?: boolean): void;
-  active(source: "user" | "result" | "supervision"): void;
-  setPermissions(ids: string[]): void;
-  setBarrier(value?: Promise<void>): void;
+  becomeIdle(): void;
+  active(): void;
   setWakeBarrier(value?: Promise<void>): void;
-  setAfterActivation(value?: Promise<void>): void;
   setAcceptWake(value: boolean): void;
   setExecutionEvents(value: boolean): void;
 }
 function fixture(): Fixture {
   const executions = new InMemorySubagentExecutionStore();
-  const wakes: { reason: string; at: number }[] = [];
+  const wakes: number[] = [];
   let emitEvents = true;
   const subscribe = executions.subscribe.bind(executions);
   vi.spyOn(executions, "subscribe").mockImplementation((listener) =>
@@ -39,53 +35,18 @@ function fixture(): Fixture {
   );
   let idle = false;
   let acceptWake = true;
-  let permissions: string[] = [];
-  let barrier: Promise<void> | undefined;
   let wakeBarrier: Promise<void> | undefined;
-  let afterActivation: Promise<void> | undefined;
-  let activity = 0;
   const supervisor = createSessionSubagentSupervisor({
     executions,
     isIdle: () => idle,
-    collectFacts: async (record): Promise<ExecutionFactView> => {
-      if (barrier) await barrier;
-      return {
-        executionId: record.executionId,
-        subagentId: record.subagentId,
-        status: record.status,
-        phase: "tool",
-        collectedAt: Date.now(),
-        lastActivityAt: ++activity,
-        currentTools: [
-          {
-            callId: `tool-${String(activity)}`,
-            name: "read",
-            phase: "executing",
-          },
-        ],
-        recentTools: [],
-        omittedTools: 0,
-        approval: {
-          blocked: permissions.length > 0,
-          permissionIds: [...permissions],
-        },
-      };
-    },
-    wake: async (sessionId, reason, snapshot) => {
+    wake: async (sessionId, snapshot) => {
       if (wakeBarrier) await wakeBarrier;
       if (!acceptWake || snapshot.signal.aborted) return false;
-      if (reason === "result")
-        for (const record of snapshot.executions) {
-          if (
-            record.delivery.state === "pending" ||
-            record.delivery.state === "delivered"
-          )
-            await executions.claimWakeup(record, Date.now());
-        }
-      wakes.push({ reason, at: Date.now() });
+      for (const record of snapshot.results)
+        await executions.claimWakeup(record, Date.now());
+      wakes.push(Date.now());
       idle = false;
-      supervisor.active(sessionId, reason);
-      if (afterActivation) await afterActivation;
+      supervisor.active(sessionId);
       return true;
     },
   });
@@ -120,13 +81,13 @@ function fixture(): Fixture {
     await vi.advanceTimersByTimeAsync(0);
     return record;
   }
-  function becomeIdle(interrupted = false): void {
+  function becomeIdle(): void {
     idle = true;
-    supervisor.idle("parent", { interrupted });
+    supervisor.idle("parent");
   }
-  function active(source: "user" | "result" | "supervision"): void {
+  function active(): void {
     idle = false;
-    supervisor.active("parent", source);
+    supervisor.active("parent");
   }
   return {
     executions,
@@ -135,18 +96,8 @@ function fixture(): Fixture {
     start,
     becomeIdle,
     active,
-    setPermissions(ids: string[]): void {
-      permissions = ids;
-      supervisor.notify("parent");
-    },
-    setBarrier(value?: Promise<void>): void {
-      barrier = value;
-    },
     setWakeBarrier(value?: Promise<void>): void {
       wakeBarrier = value;
-    },
-    setAfterActivation(value?: Promise<void>): void {
-      afterActivation = value;
     },
     setExecutionEvents(value): void {
       emitEvents = value;
@@ -191,8 +142,6 @@ async function retryFixture(
   const supervisor = createSessionSubagentSupervisor({
     executions,
     isIdle: () => true,
-    collectFacts: () =>
-      Promise.reject(new Error("No running executions should be inspected")),
     wake: async () => {
       attempts.push(Date.now());
       if (attempts.length <= failures) {
@@ -277,120 +226,13 @@ describe("session subagent supervision", () => {
     }
   });
 
-  it("starts its first deadline at real idle and uses five minutes after supervision", async () => {
-    const f = fixture();
-    try {
-      await f.start();
-      await vi.advanceTimersByTimeAsync(20 * MINUTE);
-      expect(f.wakes).toEqual([]);
-      f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(2 * MINUTE - 1);
-      expect(f.wakes).toEqual([]);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(f.wakes).toEqual([{ reason: "supervision", at: 22 * MINUTE }]);
-      await vi.advanceTimersByTimeAsync(MINUTE);
-      f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(5 * MINUTE - 1);
-      expect(f.wakes).toHaveLength(1);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(f.wakes[1]).toEqual({ reason: "supervision", at: 28 * MINUTE });
-    } finally {
-      f.supervisor.dispose();
-    }
-  });
-  it("ignores tool progress and stops after unchanged reviews at minutes two, seven and twelve", async () => {
+  it("reconciles a running child without ever requesting a model review", async () => {
     const f = fixture();
     try {
       await f.start();
       f.becomeIdle();
-      for (const interval of [2, 5, 5]) {
-        await vi.advanceTimersByTimeAsync(interval * MINUTE);
-        f.becomeIdle();
-      }
-      expect(f.wakes.map((wake) => wake.at)).toEqual([
-        2 * MINUTE,
-        7 * MINUTE,
-        12 * MINUTE,
-      ]);
-      await vi.advanceTimersByTimeAsync(30 * MINUTE);
-      expect(f.wakes).toHaveLength(3);
-      await f.start("new-child");
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes).toHaveLength(4);
-    } finally {
-      f.supervisor.dispose();
-    }
-  });
-  it("suppresses timer wakeups after Stop but accepts a later result and restarts normal idle timing", async () => {
-    const f = fixture();
-    try {
-      const first = await f.start();
-      await f.start("still-running");
-      f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(MINUTE);
-      f.becomeIdle(true);
-      f.setPermissions(["new-approval"]);
-      await f.start("new-after-stop");
-      await vi.advanceTimersByTimeAsync(10 * MINUTE);
+      await vi.advanceTimersByTimeAsync(12 * MINUTE);
       expect(f.wakes).toEqual([]);
-      await f.executions.finish(first, {
-        status: "completed",
-        output: "done",
-        completedAt: Date.now(),
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(f.wakes.map((wake) => wake.reason)).toEqual(["result"]);
-      f.setPermissions([]);
-      f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes.map((wake) => wake.reason)).toEqual([
-        "result",
-        "supervision",
-      ]);
-    } finally {
-      f.supervisor.dispose();
-    }
-  });
-  it("invalidates a due timer while its fact collection is still pending", async () => {
-    const f = fixture();
-    let release!: () => void;
-    try {
-      await f.start();
-      f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(2 * MINUTE - 1);
-      f.setBarrier(
-        new Promise<void>((resolve) => {
-          release = resolve;
-        }),
-      );
-      await vi.advanceTimersByTimeAsync(1);
-      f.becomeIdle(true);
-      release();
-      f.setBarrier();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(f.wakes).toEqual([]);
-      f.active("user");
-      f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes).toHaveLength(1);
-    } finally {
-      f.supervisor.dispose();
-    }
-  });
-  it("does not repeatedly review the same all-approval-blocked snapshot", async () => {
-    const f = fixture();
-    try {
-      await f.start();
-      f.setPermissions(["approval-1"]);
-      f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes).toHaveLength(1);
-      f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(20 * MINUTE);
-      expect(f.wakes).toHaveLength(1);
-      f.setPermissions(["approval-2"]);
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes).toHaveLength(2);
     } finally {
       f.supervisor.dispose();
     }
@@ -399,7 +241,7 @@ describe("session subagent supervision", () => {
     const f = fixture();
     try {
       const record = await f.start();
-      f.becomeIdle(true);
+      f.becomeIdle();
       f.setAcceptWake(false);
       await f.executions.finish(record, {
         status: "timed_out",
@@ -413,7 +255,7 @@ describe("session subagent supervision", () => {
       f.setAcceptWake(true);
       f.supervisor.notify("parent");
       await vi.advanceTimersByTimeAsync(0);
-      expect(f.wakes.map((wake) => wake.reason)).toEqual(["result"]);
+      expect(f.wakes).toHaveLength(1);
       f.becomeIdle();
       await vi.advanceTimersByTimeAsync(20 * MINUTE);
       expect(f.wakes).toHaveLength(1);
@@ -421,50 +263,32 @@ describe("session subagent supervision", () => {
       f.supervisor.dispose();
     }
   });
-  it("aborts a supervision wake waiting at the shared gate when the user presses Stop", async () => {
+  it("invalidates pending result admission when a user run starts", async () => {
     const f = fixture();
     let release!: () => void;
     try {
-      await f.start();
+      const record = await f.start();
       f.becomeIdle();
       f.setWakeBarrier(
         new Promise<void>((resolve) => {
           release = resolve;
         }),
       );
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      f.becomeIdle(true);
+      await f.executions.finish(record, {
+        status: "completed",
+        completedAt: Date.now(),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      f.active();
       release();
-      f.setWakeBarrier();
       await vi.advanceTimersByTimeAsync(0);
       expect(f.wakes).toEqual([]);
-      f.active("user");
+      expect(
+        (await f.executions.get(record))?.delivery.wakeupAttemptedAt,
+      ).toBeUndefined();
       f.becomeIdle();
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
+      await vi.advanceTimersByTimeAsync(0);
       expect(f.wakes).toHaveLength(1);
-    } finally {
-      f.supervisor.dispose();
-    }
-  });
-  it("does not let late supervision acceptance overwrite a newer user turn's idle deadline", async () => {
-    const f = fixture();
-    let release!: () => void;
-    try {
-      await f.start();
-      f.becomeIdle();
-      f.setAfterActivation(
-        new Promise<void>((resolve) => {
-          release = resolve;
-        }),
-      );
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes).toHaveLength(1);
-      f.active("user");
-      f.becomeIdle();
-      release();
-      f.setAfterActivation();
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes.map((wake) => wake.at)).toEqual([2 * MINUTE, 4 * MINUTE]);
     } finally {
       f.supervisor.dispose();
     }
@@ -572,36 +396,18 @@ describe("session subagent supervision", () => {
       });
       expect(f.wakes).toHaveLength(0);
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(f.wakes).toMatchObject([{ reason: "result" }]);
+      expect(f.wakes).toHaveLength(1);
     } finally {
       f.supervisor.dispose();
     }
   });
 
-  it("forgets resolved approval identities instead of retaining every historical request", async () => {
-    const f = fixture();
-    try {
-      await f.start();
-      f.becomeIdle();
-      f.setPermissions(["approval"]);
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes).toHaveLength(1);
-      f.becomeIdle();
-      f.setPermissions([]);
-      await vi.advanceTimersByTimeAsync(0);
-      f.setPermissions(["approval"]);
-      await vi.advanceTimersByTimeAsync(2 * MINUTE);
-      expect(f.wakes).toHaveLength(2);
-    } finally {
-      f.supervisor.dispose();
-    }
-  });
-  it("cancels supervision during main work and discards removed sessions and subscriptions", async () => {
+  it("discards removed sessions and subscriptions", async () => {
     const f = fixture();
     await f.start();
     f.becomeIdle();
     await vi.advanceTimersByTimeAsync(MINUTE);
-    f.active("user");
+    f.active();
     await vi.advanceTimersByTimeAsync(10 * MINUTE);
     expect(f.wakes).toEqual([]);
     f.becomeIdle();

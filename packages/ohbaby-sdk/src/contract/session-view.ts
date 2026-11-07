@@ -54,6 +54,8 @@ export interface UiSessionHistory extends UiHistoryBoundary {
   readonly version: UiSessionVersion;
   readonly bindingGeneration?: number;
   readonly messages: readonly UiMessage[];
+  /** Main runs referenced by this page. Child execution and scope history return an empty list. */
+  readonly runs: readonly UiRun[];
   readonly prompts: readonly UiPromptSubmission[];
   readonly reasoningMissing: boolean;
 }

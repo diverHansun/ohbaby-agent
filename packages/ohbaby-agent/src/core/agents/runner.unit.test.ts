@@ -253,6 +253,7 @@ function createRunCoordinator(
 
 function baseInput(patch: Partial<AgentRunInput> = {}): AgentRunInput {
   return {
+    triggerSource: "user",
     runModel: testRunModel("fake-model"),
     agentName: "build",
     initialUserPrompt: "hello",

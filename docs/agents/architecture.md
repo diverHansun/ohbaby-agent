@@ -3,7 +3,7 @@
 `agents` 管理 agent 配置与子代理编排，`core/agents` 提供统一执行原语。当前数据流和生命周期契约见 [dfd-interface.md](./dfd-interface.md)。
 
 ```text
-用户 / Goal / 后台结果 / 空闲监督
+用户 / Goal / 后台结果
             ↓
    SessionExecutionGate → AgentService → AgentInstance
                                             ↓

@@ -121,7 +121,7 @@ export function createMessageManager(
           removedMessageIds: changes.removedMessageIds,
         };
         try {
-          owner.onCommitted(change);
+          await owner.onCommitted(change);
         } catch (error) {
           owner.onProjectionError(sessionId, error);
         }

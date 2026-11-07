@@ -109,6 +109,10 @@ export interface UiSession {
 }
 
 export interface UiRun {
+  /** Event that started this run. A child result may arrive during any run. */
+  readonly trigger?: "user" | "goal" | "subagent";
+  /** Ledger result once the run has ended, independent of the session's idle status. */
+  readonly outcome?: "succeeded" | "failed" | "cancelled" | "interrupted";
   readonly inputsCloseReason?: string;
   readonly endedAt?: string;
   readonly endTimeSource?: "recovery";

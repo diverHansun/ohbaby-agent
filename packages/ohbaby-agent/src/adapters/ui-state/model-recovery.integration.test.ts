@@ -37,7 +37,8 @@ describe("model observation recovery", () => {
         createdAt: "2026",
         updatedAt: "2026",
       }),
-      runs: async () => runs,
+      currentRuns: async () => runs,
+      runsByIds: async () => runs,
       prompts: async () => [],
       publish: (
         event: Parameters<

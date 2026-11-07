@@ -35,23 +35,13 @@ import {
   ConcurrencyRejectedError,
   RunManagerNotFoundError,
   type HookExecutor,
-  type RunDefaultsPolicy,
+  DEFAULT_RUN_POLICY as policy,
   type RunHookContext,
   type RunLifecycle,
   type RunStepUsageObserver,
   type SandboxLease,
   type SandboxManager,
 } from "./index.js";
-
-const policy: RunDefaultsPolicy = {
-  defaults: {
-    user: {
-      permissionProfileId: "interactive",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-  },
-};
 
 function emptyPreflight(): PreflightResult {
   return {
@@ -1511,7 +1501,7 @@ describe("RunManager", () => {
         directory: "D:/repo",
         modelId: "fake-model",
         sessionId: "session_1",
-        triggerSource: "user",
+        triggerSource: "subagent",
       }),
     ).rejects.toBeInstanceOf(ConcurrencyRejectedError);
 

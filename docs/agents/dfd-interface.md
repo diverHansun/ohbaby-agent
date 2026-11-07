@@ -44,10 +44,10 @@ RunManager 在 durable ledger 已标记 running 后通知输入通道就绪。�
 - 主会话忙碌：continuation coordinator 在下一模型请求前接收本会话 pending 结果。
 - 主会话空闲：session supervisor 通过现有 `SessionExecutionGate` 和内部提交入口申请一轮，和用户输入共用执行门。
 - 每个结果保留稳定的 `notificationId`，每个接收 run 使用独立 `inputId`。旧请求成员关系不可改写。
-- 只有请求成功才 mark processed。失败或停止后的结果可在后续用户输入、新结果或允许的监督中重投；`wakeupAttemptedAt` 防止同一结果反复自动开启主轮次。
-- 内部唤醒输入标记为 `subagent-status`，实际结果为 `subagent-result`。未发送的旧监督快照在真实结果到达时撤销。
+- 只有请求成功才 mark processed。失败或停止后的结果可在后续用户输入、新结果中重投；`wakeupAttemptedAt` 防止同一结果反复自动开启主轮次。
+- 内部唤醒输入标记为 `subagent-status`，实际结果为 `subagent-result`。
 
-监督从主会话 idle 起计时，首次两分钟，之后每轮结束再等五分钟；连续三次无新事实后停止定时唤醒。普通工具进度不清零计数。新执行、执行终态、结果处理和新审批是状态事实；纯审批阻塞不反复唤醒。用户 Stop 撤销旧 timer generation，真实新结果仍能唤醒。每次子执行默认及最大三十分钟实际工作预算，纯审批等待不计入。
+后台子代理在运行时由程序检查执行状态。终态结果到达后，主代理忙时在当前 run 接收，空闲时申请一次结果唤醒。每次子执行默认及最大三十分钟实际工作预算，纯审批等待不计入。
 
 ## 只读检查
 
@@ -61,8 +61,8 @@ RunManager 在 durable ledger 已标记 running 后通知输入通道就绪。�
 | instance / execution stores | 实例状态、执行历史、结果交付与幂等收据 |
 | `execution-message-channel` | 运行中消息的持久受理、关闭记录和原文读取 |
 | `continuation-coordinator` | 当前 run 的结果输入与成功请求确认 |
-| `session-supervisor` | 会话空闲监督、结果发现和 timer generation |
-| `ui-inprocess` | 用户、Goal、结果和监督共用的主执行准入 |
+| `session-supervisor` | 会话状态检查、结果发现和唤醒去重 |
+| `ui-inprocess` | 用户、Goal、子代理结果共用的主执行准入 |
 | `RunManager` | run ledger、运行和终结；不依赖 agents 的具体编排 |
 | `ShellJobRegistry` | 实际执行 owner 的命令取消和物理退出证据 |
 

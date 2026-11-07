@@ -31,7 +31,10 @@ import type {
 import type { LifecycleEvent, LifecycleResult } from "../lifecycle/index.js";
 import { createAgentInstanceFactory } from "./instance.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
-import { RunManager } from "../../runtime/run-manager/index.js";
+import {
+  DEFAULT_RUN_POLICY,
+  RunManager,
+} from "../../runtime/run-manager/index.js";
 import type {
   SandboxLease,
   SandboxManager,
@@ -422,6 +425,7 @@ describe("AgentInstance long task integration", () => {
       lifecycle: recordingLifecycle,
       policy: {
         defaults: {
+          ...DEFAULT_RUN_POLICY.defaults,
           user: {
             disconnectMode: "continue",
             multitaskStrategy: "reject",
@@ -460,12 +464,14 @@ describe("AgentInstance long task integration", () => {
     });
 
     await primary.turn({
+      triggerSource: "user",
       runModel: testRunModel("fake-model"),
       initialUserMessageId: "user_primary_identity",
       prompt: "primary turn",
       waitMode: "waitForCompletion",
     });
     await subagent.turn({
+      triggerSource: "user",
       runModel: testRunModel("fake-model"),
       initialUserMessageId: "user_subagent_identity",
       prompt: "subagent turn",
@@ -545,6 +551,7 @@ describe("AgentInstance long task integration", () => {
       lifecycle,
       policy: {
         defaults: {
+          ...DEFAULT_RUN_POLICY.defaults,
           user: {
             disconnectMode: "continue",
             multitaskStrategy: "reject",
@@ -575,6 +582,7 @@ describe("AgentInstance long task integration", () => {
     });
 
     const result = await instance.turn({
+      triggerSource: "user",
       runModel: createRunModel("fixture", llmClient),
       prompt: "Run a long bounded subagent job.",
       waitMode: "waitForCompletion",

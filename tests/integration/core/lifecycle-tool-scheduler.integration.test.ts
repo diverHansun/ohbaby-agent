@@ -1836,7 +1836,8 @@ it.each(["once", "reject"] as const)(
           createdAt: "2026-09-26",
           updatedAt: "2026-09-26",
         }),
-        runs: async () => [],
+        currentRuns: async () => [],
+        runsByIds: async () => [],
         prompts: async () => [],
         publish: (event) => {
           published.push(event);
@@ -2025,7 +2026,8 @@ it.each([false, true])(
         createdAt: "2026-09-26",
         updatedAt: "2026-09-26",
       }),
-      runs: async () => [],
+      currentRuns: async () => [],
+      runsByIds: async () => [],
       prompts: async () => [],
       publish: () => undefined,
     });
@@ -2119,7 +2121,8 @@ it.each([false, true])(
           createdAt: "2026-09-26",
           updatedAt: "2026-09-26",
         }),
-        runs: async () => [],
+        currentRuns: async () => [],
+        runsByIds: async () => [],
         prompts: async () => [],
         publish: () => undefined,
       });
@@ -2227,7 +2230,8 @@ it("keeps two timed-out SQLite write owners protected and projects out-of-order 
       createdAt: "2026-09-26",
       updatedAt: "2026-09-26",
     }),
-    runs: async () => [],
+    currentRuns: async () => [],
+    runsByIds: async () => [],
     prompts: async () => [],
     publish: () => undefined,
   });
@@ -2348,7 +2352,8 @@ it("keeps two timed-out SQLite write owners protected and projects out-of-order 
         createdAt: "2026-09-26",
         updatedAt: "2026-09-26",
       }),
-      runs: async () => [],
+      currentRuns: async () => [],
+      runsByIds: async () => [],
       prompts: async () => [],
       publish: () => undefined,
     });

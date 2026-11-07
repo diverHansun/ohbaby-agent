@@ -93,7 +93,20 @@ describe("source recovery against SQLite", () => {
           createdAt: "2026-09-25",
           updatedAt: "2026-09-25",
         }),
-      runs: async (id) => (await ledger.listBySession(id)).map(runToUiRun),
+      currentRuns: async (id) => {
+        const active = (await ledger.getActiveRuns(id)).filter(
+          (run) => run.contextScopeId === undefined,
+        );
+        return (
+          active.length
+            ? active
+            : await ledger.listBySession(id, { mainOnly: true, limit: 1 })
+        ).map(runToUiRun);
+      },
+      runsByIds: async (id, runIds) =>
+        (await ledger.listBySession(id, { mainOnly: true, runIds })).map(
+          runToUiRun,
+        ),
       prompts: async (id, messages, runs) =>
         promptStore
           ? (
@@ -207,7 +220,8 @@ describe("source recovery against SQLite", () => {
           updatedAt: "2026",
         });
       },
-      runs: () => Promise.resolve([]),
+      currentRuns: () => Promise.resolve([]),
+      runsByIds: () => Promise.resolve([]),
       prompts: () => Promise.resolve([]),
       publish: (event) => {
         events.push(event);

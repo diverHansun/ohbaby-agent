@@ -52,7 +52,13 @@ export class SourceSessionProjection {
       readonly metadata: (
         sessionId: string,
       ) => Promise<Omit<UiSession, "messages">>;
-      readonly runs: (sessionId: string) => Promise<readonly UiRun[]>;
+      /** Active main runs, or the most recent main run when none is active. */
+      readonly currentRuns: (sessionId: string) => Promise<readonly UiRun[]>;
+      /** Main runs with these IDs; an empty list asks for nothing. */
+      readonly runsByIds: (
+        sessionId: string,
+        runIds: readonly string[],
+      ) => Promise<readonly UiRun[]>;
       readonly prompts: (
         sessionId: string,
         messages: readonly UiMessage[],
@@ -97,9 +103,7 @@ export class SourceSessionProjection {
     });
     options.messageManager.setCommitCoordinator({
       run: (id, operation) => this.owner.run(id, operation),
-      onCommitted: (change) => {
-        this.commitMessages(change);
-      },
+      onCommitted: (change) => this.commitMessages(change),
       onProjectionError: (id, error) => {
         this.owner.markUnavailable(id, error);
       },
@@ -152,9 +156,8 @@ export class SourceSessionProjection {
       sessionId,
       { scope: { contextScopeId: undefined } },
     );
-    const runs = await this.options.runs(sessionId);
-    const latestRun =
-      runs.find((run) => run.status.kind === "running") ?? runs.at(0);
+    const candidates = await this.options.currentRuns(sessionId);
+    const latestRun = candidates.find(isActiveRun) ?? candidates.at(0);
     const records = new Map(
       page.messages.map((message) => [message.info.id, message]),
     );
@@ -171,6 +174,8 @@ export class SourceSessionProjection {
           records.set(record.info.id, record);
         before = runPage.hasMore ? runPage.nextCursor : undefined;
       } while (before);
+    } else {
+      this.currentRuns.delete(sessionId);
     }
     this.messages.set(sessionId, records);
     for (const [id, part] of this.acceptedReasoning)
@@ -207,12 +212,15 @@ export class SourceSessionProjection {
       .map((record) => this.project(record))
       .filter((message): message is UiMessage => message !== undefined)
       .sort(compareMessages);
+    const runIds = messageRunIds(messages);
+    for (const run of candidates) if (isActiveRun(run)) runIds.add(run.id);
+    const runs = visibleRuns(
+      await this.options.runsByIds(sessionId, [...runIds]),
+      messages,
+    );
     return {
       session: { ...metadata, messages },
-      runs: runs.map((run) => ({
-        ...run,
-        modelActivity: projectModelActivity(run, messages),
-      })),
+      runs,
       prompts: await this.options.prompts(sessionId, messages, runs),
       history: { before: page.nextCursor, hasMore: page.hasMore },
       reasoningMissing: this.reasoning.snapshot(sessionId).missingCount > 0,
@@ -275,8 +283,8 @@ export class SourceSessionProjection {
   }
 
   /** Called inside the existing session owner after an atomic runtime-input commit. */
-  acceptRuntimeInput(message: MessageWithParts): void {
-    this.commitMessages({
+  acceptRuntimeInput(message: MessageWithParts): Promise<void> {
+    return this.commitMessages({
       sessionId: message.info.sessionId,
       createdMessageIds: [message.info.id],
       messages: [message.info],
@@ -285,7 +293,7 @@ export class SourceSessionProjection {
     });
   }
 
-  private commitMessages(change: MessageCommittedChange): void {
+  private async commitMessages(change: MessageCommittedChange): Promise<void> {
     const records = this.messages.get(change.sessionId);
     if (!records)
       throw new Error("Message mutation occurred before session seed");
@@ -329,7 +337,21 @@ export class SourceSessionProjection {
         return this.project(record);
       })
       .filter((message): message is UiMessage => message !== undefined);
+    const missingRunIds = messageRunIds(messages);
+    for (const run of this.owner.read(change.sessionId).runs)
+      missingRunIds.delete(run.id);
+    // A late runtime input can be the first visible message of an already-ended run.
+    const fetched = missingRunIds.size
+      ? await this.options.runsByIds(change.sessionId, [...missingRunIds])
+      : [];
+    // `run.updated` is applied synchronously and may land during the lookup,
+    // so read the view only now and keep its runs over the fetched copies.
     const current = this.owner.read(change.sessionId);
+    const known = new Set(current.runs.map((run) => run.id));
+    const runs = [
+      ...current.runs,
+      ...fetched.filter((run) => !known.has(run.id)),
+    ];
     const projectedMessages = new Map(
       current.session.messages.map((message) => [message.id, message]),
     );
@@ -337,12 +359,7 @@ export class SourceSessionProjection {
     for (const id of change.removedMessageIds ?? [])
       projectedMessages.delete(id);
     this.owner.commit(change.sessionId, {
-      runs: current.runs.map((run) => ({
-        ...run,
-        modelActivity: projectModelActivity(run, [
-          ...projectedMessages.values(),
-        ]),
-      })),
+      runs: visibleRuns(runs, [...projectedMessages.values()]),
       messages,
       removedMessageIds: change.removedMessageIds,
       historyInvalidated,
@@ -433,12 +450,9 @@ export class SourceSessionProjection {
           ...event.run,
         },
         ...current.runs.filter((run) => run.id !== event.run.id),
-      ].slice(0, 50);
+      ];
       this.owner.commit(id, {
-        runs: runs.map((run) => ({
-          ...run,
-          modelActivity: projectModelActivity(run, current.session.messages),
-        })),
+        runs: visibleRuns(runs, current.session.messages),
       });
       this.trim(id);
       this.notifyScopes({ kind: "run", run: event.run });
@@ -525,7 +539,12 @@ export class SourceSessionProjection {
       // The pagination boundary must cover the contiguous recent window, even
       // when that overlaps protected messages already included in the view.
       const first = sorted.slice(-50).at(0);
+      const current = this.owner.read(sessionId);
       this.owner.commit(sessionId, {
+        runs: visibleRuns(
+          current.runs,
+          current.session.messages.filter((message) => records.has(message.id)),
+        ),
         evictedMessageIds: remove,
         history: {
           before: first
@@ -571,6 +590,7 @@ export class SourceSessionProjection {
         version: view.version,
         serverNow: Date.now(),
         messages,
+        runs: [],
         prompts: [],
         before: page.nextCursor,
         hasMore: page.hasMore,
@@ -593,18 +613,48 @@ export class SourceSessionProjection {
       const messages = page.messages
         .map((record) => this.project(record))
         .filter((message): message is UiMessage => message !== undefined);
-      const prompts = await this.options.prompts(sessionId, messages, []);
+      const runs = [
+        ...(await this.options.runsByIds(sessionId, [
+          ...messageRunIds(messages),
+        ])),
+      ].sort(compareRunsNewestFirst);
+      const prompts = await this.options.prompts(sessionId, messages, runs);
       return {
         version: view.version,
         serverNow: Date.now(),
         messages,
         prompts,
+        runs,
         before: page.nextCursor,
         hasMore: page.hasMore,
         reasoningMissing: view.reasoningMissing,
       };
     });
   }
+}
+function isActiveRun(run: UiRun): boolean {
+  return (
+    run.status.kind === "running" ||
+    run.status.kind === "waiting-for-permission"
+  );
+}
+function messageRunIds(messages: readonly UiMessage[]): Set<string> {
+  return new Set(
+    messages.flatMap((message) => (message.runId ? [message.runId] : [])),
+  );
+}
+function visibleRuns(
+  runs: readonly UiRun[],
+  messages: readonly UiMessage[],
+): UiRun[] {
+  const ids = messageRunIds(messages);
+  return runs
+    .filter((run) => isActiveRun(run) || ids.has(run.id))
+    .sort(compareRunsNewestFirst)
+    .map((run) => ({
+      ...run,
+      modelActivity: projectModelActivity(run, messages),
+    }));
 }
 function reasoningPart(
   part: DisplayReasoningRecord,
@@ -617,6 +667,10 @@ function reasoningPart(
     saveState: part.saveState,
     metadata: part.metadata,
   };
+}
+/** The order runs reach clients in: newest first, ties broken by ID. */
+export function compareRunsNewestFirst(a: UiRun, b: UiRun): number {
+  return b.startedAt.localeCompare(a.startedAt) || compareIds(b.id, a.id);
 }
 function compareMessages(a: UiMessage, b: UiMessage): number {
   return a.createdAt.localeCompare(b.createdAt) || compareIds(a.id, b.id);

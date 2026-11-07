@@ -368,7 +368,7 @@ export interface MessageCommittedChange {
 /** Application owner serializes DB writes and projection acceptance per session. */
 export interface MessageCommitCoordinator {
   run<T>(sessionId: string, operation: () => Promise<T>): Promise<T>;
-  onCommitted(change: MessageCommittedChange): void;
+  onCommitted(change: MessageCommittedChange): void | Promise<void>;
   onProjectionError(sessionId: string, error: unknown): void;
 }
 

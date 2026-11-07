@@ -811,6 +811,7 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
         session_id: string;
         context_scope_id: string | null;
         status: RunLedgerRecord["status"];
+        trigger: RunLedgerRecord["triggerSource"];
         inputs_closed_at: number | null;
         steer_closed_at: number | null;
         inputs_close_reason: string | null;
@@ -822,7 +823,7 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
           sessionId: r.session_id,
           contextScopeId: r.context_scope_id ?? undefined,
           status: r.status,
-          triggerSource: "user",
+          triggerSource: r.trigger,
           createdAt: 0,
           inputsClosedAt: r.inputs_closed_at ?? undefined,
           steerClosedAt: r.steer_closed_at ?? undefined,

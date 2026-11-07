@@ -39,6 +39,12 @@
 
 ## 三、Key Data Fields（关键数据字段）
 
+### 主会话的 UiRun
+
+用消息的 `runId` 对应 `UiRun.id`。主会话的 `trigger` 记录开轮原因，用户提交为 `user`，Goal 续跑为 `goal`，后台子代理的结果唤醒主代理为 `subagent`。Goal 可以负责执行子代理唤醒的这一轮。旧账本里的触发来源保留原值。
+
+`status` 描述当前运行状态，`outcome` 记录已结束 run 的账本结局，取 `succeeded`、`failed`、`cancelled`、`interrupted`。主 run 结束后，最后一条 AI 消息可能保留中断前的正文。系统附加的中断提示也存为文本，用 `metadata.kind === "lifecycle-interruption"` 识别。
+
 ### 3.1 UiCommandSpec
 
 | 字段 | 含义 |

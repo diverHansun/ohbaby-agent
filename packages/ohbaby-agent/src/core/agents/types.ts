@@ -1,3 +1,4 @@
+import type { TriggerSource } from "../../runtime/run-ledger/types.js";
 import type { RunModel } from "../run-model.js";
 import type { SlashSkillUsage } from "../../skill/usage.js";
 import type { ReasoningConfig } from "ohbaby-llm";
@@ -28,6 +29,8 @@ export interface AgentToolCallSummary {
 }
 
 export interface AgentRunInput {
+  /** What started the run; recorded on the ledger row. */
+  readonly triggerSource: TriggerSource;
   /** Called after the run ledger admits current-run inputs, before model work. */
   readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
@@ -97,7 +100,7 @@ export interface AgentRunCreateOptions {
   readonly sessionId: string;
   readonly agentInstanceId?: string;
   readonly contextScopeId?: string;
-  readonly triggerSource: "user";
+  readonly triggerSource: TriggerSource;
   readonly agent?: string;
   readonly isSubagent?: boolean;
   readonly initiatingUserMessageId?: string;
@@ -180,6 +183,8 @@ export interface AgentContextScope {
 }
 
 export interface AgentTurnInput {
+  /** What started the run; recorded on the ledger row. */
+  readonly triggerSource: TriggerSource;
   /** Called after the run ledger admits current-run inputs, before model work. */
   readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
