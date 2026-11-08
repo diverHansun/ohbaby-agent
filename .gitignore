@@ -30,3 +30,6 @@ hermes-agent/
 opencode/
 
 ohbaby-e2e-test.md
+
+# Local model credentials and live test notes.
+/tests/models-4-tests.md
