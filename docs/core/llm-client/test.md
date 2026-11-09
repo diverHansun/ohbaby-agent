@@ -23,8 +23,8 @@
 ## 留在 agent 的测试
 
 - `packages/ohbaby-agent/src/core/llm-client/llm-client.test.ts` 验证 `createLLMClient` 默认项目和 `.env` 路径、显式配置选项、配置错误传播与 token normalization 诊断回调。
-- 同目录 `sdk-retry.integration.test.ts` 用安装的真实 SDK 和本地 fetch stub 验证 SDK 重试关闭、项目层重试预算与空闲行为；不调用外部模型。
-- `packages/ohbaby-agent/src/core/context/prompt-cache-wire.contract.test.ts`、`packages/ohbaby-agent/src/core/lifecycle/openai-responses.integration.test.ts` 验证依赖 agent 的 wire/配置合同，直接导入 `ohbaby-llm`。
+- `tests/integration/core/llm-client/sdk-retry.integration.test.ts` 用安装的真实 SDK 和本地 fetch stub 验证 SDK 重试关闭、项目层重试预算与空闲行为；不调用外部模型。
+- `packages/ohbaby-agent/src/core/context/prompt-cache-wire.contract.test.ts`、`tests/integration/core/lifecycle/openai-responses.integration.test.ts` 验证依赖 agent 的 wire/配置合同，直接导入 `ohbaby-llm`。
 - Lifecycle/Context、server 和 CLI 的集成测试验证结果接受、用量持久化、摘要恢复及取消。这些属于上层接线，不搬进本包。
 
 ## 维护原则

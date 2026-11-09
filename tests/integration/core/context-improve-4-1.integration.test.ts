@@ -1,7 +1,7 @@
 import {
   createTestContextManager as createContextManager,
   TestLifecycle as Lifecycle,
-} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
+} from "../../fixtures/model-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import type { UiEvent, UiSnapshot } from "ohbaby-sdk";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";

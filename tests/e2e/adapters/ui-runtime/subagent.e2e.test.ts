@@ -1,0 +1,979 @@
+import {
+  createTestUiRuntimeComposition as createUiRuntimeCompositionImpl,
+  type TestUiRuntimeCompositionOptions as UiRuntimeCompositionOptions,
+} from "../../../fixtures/runtime-model-fixtures.js";
+import { describe, expect, it, vi } from "vitest";
+import { AgentManager } from "../../../../packages/ohbaby-agent/src/agents/index.js";
+import { createBus } from "../../../../packages/ohbaby-agent/src/bus/index.js";
+import type { LLMClientInstance } from "ohbaby-llm";
+import type { Tool } from "../../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
+import {
+  createInMemoryMessageStore,
+  createMessageManager,
+} from "../../../../packages/ohbaby-agent/src/core/message/index.js";
+import { createPermissionState } from "../../../../packages/ohbaby-agent/src/permission/index.js";
+import {
+  normalizeSandboxScope,
+  type SandboxLease,
+} from "../../../../packages/ohbaby-agent/src/sandbox/index.js";
+import type {
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "ohbaby-llm";
+import { createInMemorySessionManager } from "../../../../packages/ohbaby-agent/src/services/session/index.js";
+import { SkillRegistry } from "../../../../packages/ohbaby-agent/src/skill/index.js";
+import type { SubagentExecutionRecord } from "../../../../packages/ohbaby-agent/src/agents/subagents/execution-store.js";
+
+import {
+  createHostLocalSandboxManager,
+  type HostLocalSandboxManager,
+} from "../../../../packages/ohbaby-agent/src/adapters/ui-runtime/host-local-environment.js";
+
+interface FakeSdkClient {
+  readonly kind: "fake";
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+type TestUiRuntimeCompositionOptions = Omit<
+  UiRuntimeCompositionOptions,
+  "goalExecutionControl"
+>;
+
+function createUiRuntimeComposition(
+  options: TestUiRuntimeCompositionOptions,
+): ReturnType<typeof createUiRuntimeCompositionImpl> {
+  return createUiRuntimeCompositionImpl({
+    ...options,
+    goalExecutionControl: {
+      interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+    },
+  });
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
+class ObservableSandboxManager implements HostLocalSandboxManager {
+  readonly acquired = new Map<string, SandboxLease>();
+  readonly destroyed: string[] = [];
+  readonly destroyedSessions: string[] = [];
+  readonly released: string[] = [];
+
+  constructor(private readonly delegate: HostLocalSandboxManager) {}
+
+  async acquire(
+    input: Parameters<HostLocalSandboxManager["acquire"]>[0],
+  ): Promise<SandboxLease> {
+    const lease = await this.delegate.acquire(input);
+    this.acquired.set(lease.scopeKey, lease);
+    return lease;
+  }
+
+  async release(lease: SandboxLease): Promise<void> {
+    this.released.push(lease.scopeKey);
+    await this.delegate.release(lease);
+  }
+
+  async destroyContext(
+    input: Parameters<HostLocalSandboxManager["destroyContext"]>[0],
+  ): Promise<void> {
+    this.destroyed.push(normalizeSandboxScope(input).scopeKey);
+    await this.delegate.destroyContext(input);
+  }
+
+  async destroySessionContexts(sessionId: string): Promise<void> {
+    this.destroyedSessions.push(sessionId);
+    await this.delegate.destroySessionContexts(sessionId);
+  }
+
+  dispose(): Promise<void> {
+    return this.delegate.dispose();
+  }
+
+  setSessionWorkdir(sessionId: string, workdir: string): Promise<void> {
+    return this.delegate.setSessionWorkdir(sessionId, workdir);
+  }
+}
+
+function createProviderStream(
+  events: readonly InterfaceProviderStreamEvent[],
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
+  return (async function* (): AsyncGenerator<
+    InterfaceProviderStreamEvent,
+    void,
+    unknown
+  > {
+    for (const event of events) {
+      yield await Promise.resolve(event);
+    }
+  })();
+}
+
+function subagentRunEvent(): InterfaceProviderStreamEvent {
+  return {
+    finishReason: "tool_calls",
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({
+          action: "spawn",
+          description: "Explore first e2e",
+          prompt: "Find the first e2e target",
+          role: "explore",
+        }),
+        id: "call_subagent_run_1",
+        index: 0,
+        name: "agent",
+      },
+      {
+        argumentsDelta: JSON.stringify({
+          action: "spawn",
+          description: "Explore second e2e",
+          prompt: "Find the second e2e target",
+          role: "research",
+        }),
+        id: "call_subagent_run_2",
+        index: 1,
+        name: "agent",
+      },
+    ],
+  };
+}
+
+function toolCallEvent(
+  name: string,
+  argumentsValue: Record<string, unknown>,
+  id: string,
+): InterfaceProviderStreamEvent {
+  return {
+    finishReason: "tool_calls",
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify(argumentsValue),
+        id,
+        index: 0,
+        name,
+      },
+    ],
+  };
+}
+
+function fakeLlmClient(
+  requests: InterfaceProviderRequest[],
+  options: {
+    readonly cancelExploreGate?: {
+      readonly release: Deferred<undefined>;
+      readonly started: Deferred<undefined>;
+    };
+    readonly emptyExplore?: boolean;
+    readonly exploreTimeoutMs?: number;
+    readonly failExplore?: boolean;
+    readonly exploreMcpToolName?: string;
+    readonly researchGate?: {
+      readonly release: Deferred<void>;
+      readonly started: Deferred<void>;
+    };
+  } = {},
+): LLMClientInstance<FakeSdkClient> {
+  let exploreMcpStep = 0;
+  return {
+    config: {
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://api.openai.com/v1",
+      interfaceProvider: "openai-compatible",
+      maxTokens: 128,
+      model: "fake-model",
+      provider: "openai",
+      temperature: 0,
+    },
+    provider: {
+      client: { kind: "fake" },
+      id: "fake",
+      kind: "openai-compatible",
+      isAbortError(): boolean {
+        return false;
+      },
+      streamResponse(
+        request,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        requests.push(request);
+        const messages = JSON.stringify(request.messages);
+        if (messages.includes("Task: research")) {
+          options.researchGate?.started.resolve(undefined);
+          if (options.researchGate) {
+            return options.researchGate.release.promise.then(() =>
+              createProviderStream([
+                { finishReason: "stop", textDelta: "child second result" },
+              ]),
+            );
+          }
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "child second result" },
+            ]),
+          );
+        }
+        if (messages.includes("Task: explore")) {
+          if (options.cancelExploreGate) {
+            const gate = options.cancelExploreGate;
+            return Promise.resolve(
+              (async function* (): AsyncGenerator<
+                InterfaceProviderStreamEvent,
+                void,
+                unknown
+              > {
+                yield { textDelta: "partial child report" };
+                gate.started.resolve(undefined);
+                await gate.release.promise;
+              })(),
+            );
+          }
+          if (options.failExplore) {
+            return Promise.resolve(
+              (async function* (): AsyncGenerator<
+                InterfaceProviderStreamEvent,
+                void,
+                unknown
+              > {
+                await Promise.resolve();
+                yield { textDelta: "partial child report" };
+                throw new Error("provider disconnected");
+              })(),
+            );
+          }
+          if (options.emptyExplore) {
+            return Promise.resolve(
+              createProviderStream([
+                { finishReason: "stop", reasoningTextDelta: "thinking" },
+              ]),
+            );
+          }
+          if (options.exploreMcpToolName) {
+            if (exploreMcpStep === 0) {
+              exploreMcpStep += 1;
+              return Promise.resolve(
+                createProviderStream([
+                  toolCallEvent(
+                    "select_tools",
+                    { tools: [options.exploreMcpToolName] },
+                    "call_select_tools",
+                  ),
+                ]),
+              );
+            }
+            if (exploreMcpStep === 1) {
+              exploreMcpStep += 1;
+              return Promise.resolve(
+                createProviderStream([
+                  toolCallEvent(
+                    options.exploreMcpToolName,
+                    {},
+                    "call_mcp_search",
+                  ),
+                ]),
+              );
+            }
+          }
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "child first result" },
+            ]),
+          );
+        }
+        // Agents run in the background (D54): the parent ends its turn on the receipt.
+        if (JSON.stringify(request.messages.at(-1)).includes("execution_id")) {
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "parent final result" },
+            ]),
+          );
+        }
+        if (
+          messages.includes("child first result") &&
+          messages.includes("child second result")
+        ) {
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "parent final result" },
+            ]),
+          );
+        }
+        if (messages.includes("program_note: No output.")) {
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "parent saw empty result" },
+            ]),
+          );
+        }
+        if (
+          messages.includes("<subagent_error>") ||
+          messages.includes("status: interrupted")
+        ) {
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "parent saw child failure" },
+            ]),
+          );
+        }
+        if (messages.includes("Delegate failing subagent e2e")) {
+          return Promise.resolve(
+            createProviderStream([
+              toolCallEvent(
+                "agent",
+                {
+                  action: "spawn",
+                  prompt: "Find the failing target",
+                  role: "explore",
+                },
+                "call_failing_subagent",
+              ),
+            ]),
+          );
+        }
+        if (messages.includes("Delegate cancelled subagent e2e")) {
+          return Promise.resolve(
+            createProviderStream([
+              toolCallEvent(
+                "agent",
+                {
+                  action: "spawn",
+                  prompt: "Find the cancelled target",
+                  role: "explore",
+                  ...(options.exploreTimeoutMs === undefined
+                    ? {}
+                    : { timeout_ms: options.exploreTimeoutMs }),
+                },
+                "call_cancelled_subagent",
+              ),
+            ]),
+          );
+        }
+        if (messages.includes("Delegate empty subagent e2e")) {
+          return Promise.resolve(
+            createProviderStream([
+              toolCallEvent(
+                "agent",
+                {
+                  action: "spawn",
+                  prompt: "Find the empty target",
+                  role: "explore",
+                },
+                "call_empty_subagent",
+              ),
+            ]),
+          );
+        }
+        if (messages.includes("Delegate subagent e2e")) {
+          return Promise.resolve(createProviderStream([subagentRunEvent()]));
+        }
+        return Promise.reject(new Error("No fake LLM response configured"));
+      },
+    },
+  };
+}
+
+async function settledExecutions(
+  composition: Awaited<ReturnType<typeof createUiRuntimeComposition>>,
+  count: number,
+): Promise<readonly SubagentExecutionRecord[]> {
+  let executions: readonly SubagentExecutionRecord[] = [];
+  await vi.waitFor(
+    async () => {
+      executions = (await composition.listSubagentState("session_parent"))
+        .executions;
+      expect(executions).toHaveLength(count);
+      expect(
+        executions.every(
+          (execution) =>
+            execution.status !== "queued" && execution.status !== "running",
+        ),
+      ).toBe(true);
+    },
+    { timeout: 5_000 },
+  );
+  return executions;
+}
+
+describe("subagent runtime e2e", () => {
+  it("runs different-role subagents through isolated instance contexts in one child session", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createInMemorySessionManager({
+      bus,
+      createSessionId: () => "session_child",
+      messageCleaner: {
+        removeMessages(sessionId) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: () => 1,
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: (() => {
+        let next = 1;
+        return (): string => `subagent_e2e_${String(next++)}`;
+      })(),
+      llmClient: fakeLlmClient(requests),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      permissionState: createPermissionState({ bus }),
+      sessionManager,
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    const result = await composition.startSession({
+      triggerSource: "user",
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Delegate subagent e2e",
+      sessionId: "session_parent",
+    });
+    const completion = await composition.runManager.waitForCompletion(
+      result.runId,
+    );
+    expect(completion.error).toBeUndefined();
+    expect(completion.status).toBe("succeeded");
+    expect(completion.finalResponse).toBe("parent final result");
+    expect(
+      (await settledExecutions(composition, 2)).map(
+        (execution) => execution.status,
+      ),
+    ).toEqual(["completed", "completed"]);
+
+    const parentMessages = await messageManager.listBySession("session_parent");
+    const childMessages = await messageManager.listBySession("session_child", {
+      contextScopeId: "subagent_e2e_1",
+    });
+    const secondChildMessages = await messageManager.listBySession(
+      "session_child",
+      {
+        contextScopeId: "subagent_e2e_2",
+      },
+    );
+    const allChildMessages =
+      await messageManager.listBySession("session_child");
+    const scopedOutMessages = await messageManager.listBySession(
+      "session_child",
+      {
+        contextScopeId: "missing_scope",
+      },
+    );
+    const firstChildText = JSON.stringify(childMessages);
+    const secondChildText = JSON.stringify(secondChildMessages);
+    const parentText = JSON.stringify(parentMessages);
+
+    expect(parentText).toContain("agent_id: subagent_e2e_1");
+    expect(parentText).toContain("agent_id: subagent_e2e_2");
+    expect(parentText).toContain("parent final result");
+    // Results arrive later as delivered results, not inside the spawn receipt.
+    expect(parentText).not.toContain("child first result");
+    expect(firstChildText).toContain("Find the first e2e target");
+    expect(firstChildText).toContain("child first result");
+    expect(secondChildText).toContain("Find the second e2e target");
+    expect(secondChildText).toContain("child second result");
+    expect(allChildMessages).toHaveLength(
+      childMessages.length + secondChildMessages.length,
+    );
+    expect(scopedOutMessages).toHaveLength(0);
+    expect(requests).toHaveLength(4);
+    const exploreRequests = requests.filter((request) =>
+      JSON.stringify(request.messages).includes("Task: explore"),
+    );
+    const researchRequests = requests.filter((request) =>
+      JSON.stringify(request.messages).includes("Task: research"),
+    );
+    const parentRequests = requests.filter(
+      (request) => request.contextScopeId === undefined,
+    );
+    expect(exploreRequests).toHaveLength(1);
+    expect(researchRequests).toHaveLength(1);
+    expect(parentRequests).toHaveLength(2);
+    expect(exploreRequests[0]).toMatchObject({
+      contextScopeId: "subagent_e2e_1",
+      purpose: "agent-step",
+    });
+    expect(researchRequests[0]).toMatchObject({
+      contextScopeId: "subagent_e2e_2",
+      purpose: "agent-step",
+    });
+    const parentKey = parentRequests[0]?.promptCache.key;
+    const exploreKey = exploreRequests[0]?.promptCache.key;
+    const researchKey = researchRequests[0]?.promptCache.key;
+    expect(parentRequests[1]?.promptCache.key).toBe(parentKey);
+    expect(new Set([parentKey, exploreKey, researchKey]).size).toBe(3);
+    for (const request of [exploreRequests[0], researchRequests[0]]) {
+      expect(JSON.stringify(request.messages)).toContain(
+        "Current working directory:",
+      );
+      expect(
+        JSON.stringify(request.messages).split("Current working directory:"),
+      ).toHaveLength(2);
+    }
+  });
+
+  it("records a reasoning-only child as an empty final body", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: () => "subagent_empty",
+      llmClient: fakeLlmClient(requests, { emptyExplore: true }),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      permissionState: createPermissionState({ bus }),
+      sessionManager: createInMemorySessionManager({
+        bus,
+        createSessionId: () => "session_child",
+        messageCleaner: {
+          removeMessages(sessionId) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1,
+      }),
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    try {
+      const run = await composition.startSession({
+        triggerSource: "user",
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Delegate empty subagent e2e",
+        sessionId: "session_parent",
+      });
+      const completion = await composition.runManager.waitForCompletion(
+        run.runId,
+      );
+      const [execution] = await settledExecutions(composition, 1);
+      const child = await messageManager.listBySession("session_child", {
+        contextScopeId: "subagent_empty",
+      });
+      const parent = await messageManager.listBySession("session_parent");
+      const parentText = JSON.stringify(parent);
+
+      expect(completion).toMatchObject({
+        status: "succeeded",
+        finalResponse: "parent final result",
+      });
+      expect(execution.status).toBe("completed");
+      expect(execution.output ?? "").toBe("");
+      expect(child.at(-1)?.info.role).toBe("assistant");
+      expect(
+        child
+          .at(-1)
+          ?.parts.filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join(""),
+      ).toBe("");
+      expect(parentText).not.toContain("thinking");
+      expect(requests).toHaveLength(3);
+    } finally {
+      await composition.dispose();
+    }
+  });
+
+  it("keeps a child stream fragment in history without recording it as the failed report", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: () => "subagent_failing",
+      llmClient: fakeLlmClient(requests, { failExplore: true }),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      permissionState: createPermissionState({ bus }),
+      sessionManager: createInMemorySessionManager({
+        bus,
+        createSessionId: () => "session_child",
+        messageCleaner: {
+          removeMessages(sessionId) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1,
+      }),
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    try {
+      const run = await composition.startSession({
+        triggerSource: "user",
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Delegate failing subagent e2e",
+        sessionId: "session_parent",
+      });
+      const completion = await composition.runManager.waitForCompletion(
+        run.runId,
+      );
+      const [execution] = await settledExecutions(composition, 1);
+      const child = await messageManager.listBySession("session_child", {
+        contextScopeId: "subagent_failing",
+      });
+      const parent = await messageManager.listBySession("session_parent");
+      const parentText = JSON.stringify(parent);
+
+      expect(completion).toMatchObject({
+        status: "succeeded",
+        finalResponse: "parent final result",
+      });
+      expect(JSON.stringify(child)).toContain("partial child report");
+      expect(execution.status).toBe("failed");
+      expect(execution.error).toContain(
+        "LLM provider stream was interrupted after partial output.",
+      );
+      expect(execution.output ?? "").not.toContain("partial child report");
+      expect(parentText).not.toContain("partial child report");
+    } finally {
+      await composition.dispose();
+    }
+  });
+
+  it.each(["cancelled", "interrupted", "timed_out"] as const)(
+    "keeps a %s child's stream fragment in history without recording it as the report",
+    async (terminalStatus) => {
+      const bus = createBus();
+      const workdir = process.cwd();
+      const messageManager = createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      });
+      const gate = {
+        release: createDeferred<undefined>(),
+        started: createDeferred<undefined>(),
+      };
+      const composition = await createUiRuntimeComposition({
+        agentManager: new AgentManager(),
+        bus,
+        createSubagentId: () => "subagent_cancelled",
+        llmClient: fakeLlmClient([], {
+          cancelExploreGate: gate,
+          ...(terminalStatus === "timed_out" ? { exploreTimeoutMs: 100 } : {}),
+        }),
+        mcpManager: { getAllTools: () => Promise.resolve([]) },
+        messageManager,
+        permissionState: createPermissionState({ bus }),
+        sessionManager: createInMemorySessionManager({
+          bus,
+          createSessionId: () => "session_child",
+          messageCleaner: {
+            removeMessages(sessionId) {
+              return messageManager.removeMessages(sessionId);
+            },
+          },
+          now: () => 1,
+        }),
+        skillRegistry: new SkillRegistry({
+          loader: {
+            loadContent: (): Promise<never> =>
+              Promise.reject(new Error("No skills loaded")),
+            scan: (): Promise<Map<string, never>> =>
+              Promise.resolve(new Map<string, never>()),
+          },
+        }),
+        workdir,
+      });
+
+      try {
+        const run = await composition.startSession({
+          triggerSource: "user",
+          agentName: "build",
+          projectRoot: workdir,
+          prompt: "Delegate cancelled subagent e2e",
+          sessionId: "session_parent",
+        });
+        await gate.started.promise;
+        const childRun = composition.runManager.list("session_child").at(0);
+        if (!childRun) {
+          throw new Error("Child run did not start");
+        }
+        if (terminalStatus === "cancelled") {
+          composition.runManager.cancel(
+            childRun.runId,
+            "test child cancellation",
+          );
+          gate.release.resolve(undefined);
+        } else if (terminalStatus === "interrupted") {
+          await composition.interruptSubagentsByRootRun(
+            run.runId,
+            "test child interruption",
+          );
+          gate.release.resolve(undefined);
+        }
+        const completion = await composition.runManager.waitForCompletion(
+          run.runId,
+        );
+        // The parent no longer waits, so let the child's own deadline fire first.
+        if (terminalStatus === "timed_out")
+          await composition.runManager.waitForCompletion(childRun.runId);
+        gate.release.resolve(undefined);
+        await composition.runManager.waitForCompletion(childRun.runId);
+        const [execution] = await settledExecutions(composition, 1);
+        const child = await messageManager.listBySession("session_child", {
+          contextScopeId: "subagent_cancelled",
+        });
+        const parentText = JSON.stringify(
+          await messageManager.listBySession("session_parent"),
+        );
+
+        expect(completion).toMatchObject({
+          status: "succeeded",
+          finalResponse: "parent final result",
+        });
+        expect(JSON.stringify(child)).toContain("partial child report");
+        expect(execution.status).toBe(
+          terminalStatus === "cancelled" ? "interrupted" : terminalStatus,
+        );
+        expect(JSON.stringify(execution)).toContain(
+          terminalStatus === "timed_out"
+            ? "Subagent timed out after 100ms"
+            : terminalStatus === "cancelled"
+              ? "test child cancellation"
+              : "test child interruption",
+        );
+        expect(execution.output ?? "").not.toContain("partial child report");
+        expect(parentText).not.toContain("partial child report");
+      } finally {
+        gate.release.resolve(undefined);
+        await composition.dispose();
+      }
+    },
+  );
+
+  it("lets an explore subagent load and execute an admitted MCP tool", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const toolName = "mcp_s7_example_t6_search";
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: (() => {
+        let next = 1;
+        return (): string => `subagent_e2e_${String(next++)}`;
+      })(),
+      llmClient: fakeLlmClient(requests, { exploreMcpToolName: toolName }),
+      mcpManager: {
+        getAllTools: () =>
+          Promise.resolve([
+            {
+              category: "readonly",
+              description: "Search the connected MCP server.",
+              execute: (): { output: string } => ({
+                output: "MCP search result",
+              }),
+              isTrusted: true,
+              name: toolName,
+              parametersJsonSchema: { properties: {}, type: "object" },
+              source: "mcp",
+            } satisfies Tool,
+          ]),
+      },
+      messageManager,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      sessionManager: createInMemorySessionManager({
+        bus,
+        createSessionId: () => "session_child",
+        messageCleaner: {
+          removeMessages(sessionId) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1,
+      }),
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    const result = await composition.startSession({
+      triggerSource: "user",
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Delegate subagent e2e",
+      sessionId: "session_parent",
+    });
+    await expect(
+      composition.runManager.waitForCompletion(result.runId),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    await settledExecutions(composition, 2);
+
+    const exploreRequests = requests.filter((request) =>
+      JSON.stringify(request.messages).includes("Task: explore"),
+    );
+    const firstToolNames =
+      exploreRequests[0]?.tools?.map((tool) => tool.name) ?? [];
+    const selectedToolNames =
+      exploreRequests[1]?.tools?.map((tool) => tool.name) ?? [];
+
+    expect(firstToolNames).toContain("select_tools");
+    expect(firstToolNames).not.toContain(toolName);
+    expect(selectedToolNames).toContain(toolName);
+    expect(
+      new Set(exploreRequests.map((request) => request.promptCache.key)).size,
+    ).toBe(1);
+    expect(
+      exploreRequests.every(
+        (request) => request.contextScopeId === "subagent_e2e_1",
+      ),
+    ).toBe(true);
+    expect(
+      exploreRequests.every(
+        (request) =>
+          JSON.stringify(request.messages).split("Current working directory:")
+            .length === 2,
+      ),
+    ).toBe(true);
+    expect(
+      JSON.stringify(
+        await messageManager.listBySession("session_child", {
+          contextScopeId: "subagent_e2e_1",
+        }),
+      ),
+    ).toContain("MCP search result");
+  });
+
+  it("releases one scoped sandbox lease without disrupting a sibling subagent", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createInMemorySessionManager({
+      bus,
+      createSessionId: () => "session_child",
+      messageCleaner: {
+        removeMessages(sessionId) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: () => 1,
+    });
+    const researchGate = {
+      release: createDeferred<undefined>(),
+      started: createDeferred<undefined>(),
+    };
+    const sandboxManager = new ObservableSandboxManager(
+      createHostLocalSandboxManager(workdir),
+    );
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: (() => {
+        let next = 1;
+        return (): string => `subagent_e2e_${String(next++)}`;
+      })(),
+      llmClient: fakeLlmClient([], { researchGate }),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      permissionState: createPermissionState({ bus }),
+      sandboxManager,
+      sessionManager,
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    try {
+      const result = await composition.startSession({
+        triggerSource: "user",
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Delegate subagent e2e",
+        sessionId: "session_parent",
+      });
+      await researchGate.started.promise;
+      const firstScope = "session_child::subagent_e2e_1";
+      const secondScope = "session_child::subagent_e2e_2";
+      await vi.waitUntil(() => sandboxManager.released.includes(firstScope));
+
+      expect(sandboxManager.released).not.toContain(secondScope);
+      expect(sandboxManager.destroyed).toEqual([]);
+      expect(sandboxManager.destroyedSessions).toEqual([]);
+      const secondLease = sandboxManager.acquired.get(secondScope);
+      expect(secondLease?.resolvePath("still-running.txt")).toBe(
+        `${workdir}/still-running.txt`,
+      );
+
+      researchGate.release.resolve(undefined);
+      await expect(
+        composition.runManager.waitForCompletion(result.runId),
+      ).resolves.toMatchObject({ status: "succeeded" });
+    } finally {
+      researchGate.release.resolve(undefined);
+      await composition.dispose();
+    }
+  });
+});

@@ -1,7 +1,7 @@
 import {
   createTestContextManager as createContextManager,
   type TestContextManager as ContextManager,
-} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
+} from "../../fixtures/model-fixtures.js";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";

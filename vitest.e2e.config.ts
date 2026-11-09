@@ -6,7 +6,7 @@ export default defineConfig({
     environment: "node",
     exclude: ["**/node_modules/**", "**/dist/**"],
     globals: true,
-    include: ["packages/*/src/**/*.e2e.test.ts"],
+    include: ["packages/*/src/**/*.e2e.test.ts", "tests/e2e/**/*.e2e.test.ts"],
     testTimeout: 180_000,
   },
   resolve: {

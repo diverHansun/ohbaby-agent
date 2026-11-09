@@ -1,0 +1,427 @@
+import { TestAgentService as AgentService } from "../../fixtures/runtime-model-fixtures.js";
+import { describe, expect, it, vi } from "vitest";
+
+import { AgentManager } from "../../../packages/ohbaby-agent/src/agents/manager.js";
+import { AgentRegistry } from "../../../packages/ohbaby-agent/src/agents/registry.js";
+import type { AgentsConfig } from "../../../packages/ohbaby-agent/src/agents/types.js";
+import type {
+  AgentRunCoordinator,
+  AgentRunEventSource,
+} from "../../../packages/ohbaby-agent/src/core/agents/index.js";
+import { createAgentInstanceFactory } from "../../../packages/ohbaby-agent/src/core/agents/index.js";
+import type {
+  CoreMessage,
+  MessageManager,
+  MessageWithParts,
+  Part,
+} from "../../../packages/ohbaby-agent/src/core/message/index.js";
+import type {
+  ToolDefinition,
+  ToolSchedulerInstance,
+} from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
+import type { Session } from "../../../packages/ohbaby-agent/src/services/session/index.js";
+
+async function createAgentManager(): Promise<AgentManager> {
+  const registry = new AgentRegistry({
+    configLoader: (): AgentsConfig => ({
+      agents: {
+        build: {
+          description: "Primary builder",
+          maxSteps: 1000,
+          mode: "primary",
+          name: "build",
+          tools: { include: ["read", "subagent_run", "todo_read"] },
+        },
+        audit: {
+          description: "Subagent explorer",
+          mode: "subagent",
+          name: "audit",
+        },
+      },
+    }),
+  });
+  await registry.initialize();
+  return new AgentManager({ registry });
+}
+
+function createSessionManager(): {
+  readonly create: ReturnType<typeof vi.fn>;
+  readonly get: ReturnType<typeof vi.fn>;
+} {
+  const sessions = new Map<string, Session>();
+  const create = vi.fn(
+    (
+      projectDirectory: string,
+      options: {
+        readonly agentName?: string;
+        readonly id?: string;
+        readonly parentId?: string;
+        readonly title?: string;
+      } = {},
+    ): Promise<Session> => {
+      const session: Session = {
+        agentName: options.agentName ?? "default",
+        childrenIds: [],
+        createdAt: 1,
+        id: options.id ?? "session_created",
+        isSubagent: options.parentId !== undefined,
+        parentId: options.parentId,
+        projectId: "project",
+        workingDirectory: projectDirectory,
+        stats: { messageCount: 0 },
+        status: "active",
+        title: options.title ?? "Session",
+        updatedAt: 1,
+      };
+      sessions.set(session.id, session);
+      return Promise.resolve(session);
+    },
+  );
+  const get = vi.fn(
+    (sessionId: string): Promise<Session | null> =>
+      Promise.resolve(sessions.get(sessionId) ?? null),
+  );
+  return { create, get };
+}
+
+function createMessageManager(): {
+  readonly appendPart: ReturnType<typeof vi.fn>;
+  readonly createMessage: ReturnType<typeof vi.fn>;
+  readonly manager: MessageManager;
+} {
+  const createMessage = vi.fn<MessageManager["createMessage"]>(
+    (input): Promise<CoreMessage> =>
+      Promise.resolve({
+        agent: input.role === "system" ? undefined : input.agent,
+        id: "message_user",
+        role: input.role,
+        sessionId: input.sessionId,
+        time: { created: 1 },
+      } as CoreMessage),
+  );
+  const appendPart = vi.fn<MessageManager["appendPart"]>(
+    (messageId, input): Promise<Part> =>
+      Promise.resolve({
+        id: "part_user",
+        messageId,
+        orderIndex: 0,
+        sessionId: "primary_1",
+        text:
+          input.type === "text" || input.type === "reasoning" ? input.text : "",
+        type: input.type === "reasoning" ? "reasoning" : "text",
+      }),
+  );
+  return {
+    appendPart,
+    createMessage,
+    manager: {
+      getPart: vi.fn().mockResolvedValue(undefined),
+      setCommitCoordinator: vi.fn(),
+      saveReasoningPart: vi.fn(() =>
+        Promise.reject(
+          new Error("Display persistence is not used by this fixture"),
+        ),
+      ),
+      listPageBySession: vi.fn(() =>
+        Promise.reject(
+          new Error("Recovery paging is not used by this fixture"),
+        ),
+      ),
+      listPageByRun: vi.fn(() =>
+        Promise.reject(
+          new Error("Recovery paging is not used by this fixture"),
+        ),
+      ),
+      listByIds: vi.fn(() =>
+        Promise.reject(
+          new Error("Recovery reads are not used by this fixture"),
+        ),
+      ),
+      commitModelStep: vi.fn<MessageManager["commitModelStep"]>(() =>
+        Promise.reject(new Error("Native steps are not used by this fixture")),
+      ),
+      appendPart,
+      appendModelContextPart: vi.fn<MessageManager["appendModelContextPart"]>(
+        (messageId, text) =>
+          Promise.resolve({
+            id: "part_runtime",
+            messageId,
+            metadata: { kind: "model-context:runtime:v1" },
+            orderIndex: 1,
+            sessionId: "primary_1",
+            synthetic: true,
+            text,
+            type: "text",
+          }),
+      ),
+      commitCompaction: vi.fn<MessageManager["commitCompaction"]>(() =>
+        Promise.reject(new Error("Compaction is not used by this fixture")),
+      ),
+      createMessage,
+      listBySession: vi.fn(
+        (): Promise<MessageWithParts[]> => Promise.resolve([]),
+      ),
+      removeMessage: vi.fn((): Promise<void> => Promise.resolve()),
+      removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
+      toModelMessages: vi.fn(() => Promise.resolve([])),
+      updateMessage: vi.fn(
+        (): Promise<CoreMessage> =>
+          Promise.resolve({
+            agent: "build",
+            id: "message_user",
+            role: "assistant",
+            sessionId: "primary_1",
+            time: { created: 1 },
+          }),
+      ),
+      updatePart: vi.fn(
+        (): Promise<Part> =>
+          Promise.resolve({
+            id: "part_user",
+            messageId: "message_user",
+            orderIndex: 0,
+            sessionId: "primary_1",
+            text: "updated",
+            type: "text",
+          }),
+      ),
+    },
+  };
+}
+
+function createRunCoordinator(): {
+  readonly coordinator: AgentRunCoordinator;
+  readonly create: ReturnType<typeof vi.fn>;
+} {
+  const create = vi.fn<AgentRunCoordinator["create"]>((options) =>
+    Promise.resolve({
+      runId: "run_primary",
+      sessionId: options.sessionId,
+    }),
+  );
+  return {
+    coordinator: {
+      cancel: vi.fn<AgentRunCoordinator["cancel"]>(),
+      create,
+      waitForCompletion: vi.fn(() =>
+        Promise.resolve({ status: "succeeded" as const }),
+      ),
+    },
+    create,
+  };
+}
+
+function createToolScheduler(): Pick<
+  ToolSchedulerInstance,
+  "getAvailableTools"
+> {
+  const readTool: ToolDefinition = {
+    category: "readonly",
+    description: "Read files",
+    name: "read",
+    parameters: { type: "object" },
+    source: "builtin",
+  };
+  return {
+    getAvailableTools: vi.fn(
+      (): Promise<ToolDefinition[]> => Promise.resolve([readTool]),
+    ),
+  };
+}
+
+describe("AgentService", () => {
+  it.each([
+    ["model", "provider/legacy"],
+    ["maxTokens", 100],
+    ["temperature", 0.5],
+    ["topP", 0.9],
+    ["model", undefined],
+    ["maxTokens", undefined],
+    ["temperature", undefined],
+    ["topP", undefined],
+  ] as const)(
+    "rejects custom primary runtime config %s before a model run (value %s)",
+    async (field, value) => {
+      const agentManager = await createAgentManager();
+      vi.spyOn(agentManager, "getRuntimeAgent").mockResolvedValue({
+        config: { name: "build", mode: "primary", [field]: value },
+        isSubagent: false,
+        tools: {},
+      });
+      const create = vi.fn(() => {
+        throw new Error("Model run must not start");
+      });
+      const service = new AgentService({
+        agentManager,
+        instanceFactory: { create },
+        modelId: "fake-model",
+        sessionManager: createSessionManager(),
+      });
+      await expect(
+        service.startSession({
+          triggerSource: "user",
+          agentName: "build",
+          prompt: "hello",
+          projectRoot: "/repo",
+          sessionId: "primary_1",
+        }),
+      ).rejects.toThrow(new RegExp(`build.*${field}`));
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("freezes field-wise backend overrides before startup awaits and reads fresh defaults next run", async () => {
+    const runs = createRunCoordinator();
+    const modelReasoning = { enabled: false, effort: "high" };
+    const service = new AgentService({
+      agentManager: await createAgentManager(),
+      getReasoning: (): typeof modelReasoning => modelReasoning,
+      instanceFactory: createAgentInstanceFactory({
+        deps: {
+          messageManager: createMessageManager().manager,
+          runCoordinator: runs.coordinator,
+          runEventSource: {
+            subscribeRunEvents: async function* () {
+              await Promise.resolve();
+              yield* [];
+            },
+          },
+          toolScheduler: createToolScheduler(),
+        },
+      }),
+      modelId: "fake-model",
+      sessionManager: createSessionManager(),
+    });
+    const first = service.startSession({
+      triggerSource: "user",
+      agentName: "build",
+      prompt: "first",
+      projectRoot: "D:/repo",
+      sessionId: "primary_1",
+      reasoning: { effort: "low" },
+    });
+    modelReasoning.enabled = true;
+    modelReasoning.effort = "medium";
+    await first;
+    expect(runs.create.mock.calls[0][0]).toMatchObject({
+      reasoning: {
+        enabled: false,
+        effort: "low",
+        explicit: { enabled: true, effort: true },
+      },
+    });
+    await service.startSession({
+      triggerSource: "user",
+      agentName: "build",
+      prompt: "next",
+      projectRoot: "D:/repo",
+      sessionId: "primary_1",
+    });
+    expect(runs.create.mock.calls[1][0]).toMatchObject({
+      reasoning: { enabled: true, effort: "medium" },
+    });
+  });
+  it("starts a primary session through core runAgent stream mode", async () => {
+    const messages = createMessageManager();
+    const runs = createRunCoordinator();
+    const sessionManager = createSessionManager();
+    const event = {
+      content: "hello",
+      messageSnapshot: { content: "hello" },
+      delta: "hello",
+      sessionId: "primary_1",
+      timestamp: 1,
+      type: "llm:delta",
+    } as const;
+    const subscribeRunEvents = vi.fn<AgentRunEventSource["subscribeRunEvents"]>(
+      (): AsyncIterable<typeof event> =>
+        (async function* (): AsyncIterable<typeof event> {
+          await Promise.resolve();
+          yield event;
+        })(),
+    );
+    const service = new AgentService({
+      agentManager: await createAgentManager(),
+      instanceFactory: createAgentInstanceFactory({
+        deps: {
+          messageManager: messages.manager,
+          runCoordinator: runs.coordinator,
+          runEventSource: { subscribeRunEvents },
+          toolScheduler: createToolScheduler(),
+        },
+      }),
+      modelId: "fake-model",
+      sessionManager,
+    });
+
+    const result = await service.startSession({
+      triggerSource: "user",
+      agentName: "build",
+      initialUserMessageId: "message_reserved",
+      prompt: "Say hello",
+      projectRoot: "D:/repo",
+      sessionId: "primary_1",
+      title: "Primary",
+    });
+
+    expect(result).toMatchObject({
+      mode: "stream",
+      runId: "run_primary",
+      sessionId: "primary_1",
+    });
+    expect(sessionManager.create).toHaveBeenCalledWith("D:/repo", {
+      agentName: "build",
+      id: "primary_1",
+      title: "Primary",
+    });
+    expect(messages.createMessage).toHaveBeenCalledWith({
+      agent: "build",
+      id: "message_reserved",
+      role: "user",
+      sessionId: "primary_1",
+    });
+    expect(messages.appendPart).toHaveBeenCalledWith("message_user", {
+      text: "Say hello",
+      type: "text",
+    });
+    expect(runs.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: "build",
+        directory: "D:/repo",
+        isSubagent: false,
+        maxSteps: 1000,
+        modelId: "fake-model",
+        parentMessageId: "message_user",
+        sessionId: "primary_1",
+      }),
+    );
+    expect(runs.create.mock.calls[0]?.[0]).not.toHaveProperty("contextScopeId");
+    expect(subscribeRunEvents).toHaveBeenCalledWith("run_primary");
+  });
+
+  it("rejects subagent-only agents as primary agents", async () => {
+    const service = new AgentService({
+      agentManager: await createAgentManager(),
+      instanceFactory: createAgentInstanceFactory({
+        deps: {
+          messageManager: createMessageManager().manager,
+          runCoordinator: createRunCoordinator().coordinator,
+          runEventSource: { subscribeRunEvents: vi.fn() },
+          toolScheduler: createToolScheduler(),
+        },
+      }),
+      modelId: "fake-model",
+      sessionManager: createSessionManager(),
+    });
+
+    await expect(
+      service.startSession({
+        triggerSource: "user",
+        agentName: "audit",
+        prompt: "work",
+        projectRoot: "D:/repo",
+        sessionId: "primary_1",
+      }),
+    ).rejects.toThrow(/Agent audit.*cannot be used as a primary agent/);
+  });
+});

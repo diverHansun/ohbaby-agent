@@ -2,7 +2,7 @@ import {
   createTestContextManager as createContextManager,
   type TestContextManager as ContextManager,
   TestLifecycle as Lifecycle,
-} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
+} from "../../fixtures/model-fixtures.js";
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

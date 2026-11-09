@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true },
+  "include": [
+    "fixtures/**/*.ts",
+    "unit/*/**/*.ts",
+    "contract/**/*.ts",
+    "e2e/**/*.ts",
+    "integration/adapters/**/*.ts",
+    "integration/agents/subagents/**/*.ts",
+    "integration/core/*/**/*.ts",
+    "integration/goals/**/*.ts"
+  ],
+  "references": [
+    { "path": "../packages/ohbaby-agent" },
+    { "path": "../packages/ohbaby-llm" },
+    { "path": "../packages/ohbaby-sdk" }
+  ]
+}

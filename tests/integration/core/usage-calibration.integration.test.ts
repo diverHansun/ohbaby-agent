@@ -1,7 +1,7 @@
 import {
   createTestContextManager as createContextManager,
   TestLifecycle as Lifecycle,
-} from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
+} from "../../fixtures/model-fixtures.js";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";

@@ -55,7 +55,7 @@ Subagent prompt must not include:
 Run focused prompt tests:
 
 ```powershell
-pnpm exec vitest run packages/ohbaby-agent/src/core/system-prompt packages/ohbaby-agent/src/core/agents/runner.unit.test.ts
+pnpm exec vitest run packages/ohbaby-agent/src/core/system-prompt tests/unit/core/agents/runner.unit.test.ts
 ```
 
 Expected:
@@ -69,7 +69,7 @@ Expected:
 Run runtime prompt data-flow tests:
 
 ```powershell
-pnpm vitest run packages/ohbaby-agent/src/adapters/ui-runtime/composition.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
+pnpm vitest run tests/unit/adapters/ui-runtime/composition.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
 ```
 
 Expected:

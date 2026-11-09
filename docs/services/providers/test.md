@@ -16,7 +16,7 @@
 
 ## 跨模块合同
 
-依赖 agent 配置或上下文的 `packages/ohbaby-agent/src/core/context/prompt-cache-wire.contract.test.ts`、`packages/ohbaby-agent/src/core/lifecycle/openai-responses.integration.test.ts`，从 `ohbaby-llm` 导入被测接口。agent `core/llm-client/sdk-retry.integration.test.ts` 使用真实 SDK 和本地 fetch stub 验证 SDK 重试关闭、项目层 HTTP 尝试预算、取消及原始流活动；这些文件不能搬入本包形成反向依赖。
+依赖 agent 配置或上下文的 `packages/ohbaby-agent/src/core/context/prompt-cache-wire.contract.test.ts`、`tests/integration/core/lifecycle/openai-responses.integration.test.ts`，从 `ohbaby-llm` 导入被测接口。`tests/integration/core/llm-client/sdk-retry.integration.test.ts` 使用真实 SDK 和本地 fetch stub 验证 SDK 重试关闭、项目层 HTTP 尝试预算、取消及原始流活动；这些文件不能搬入本包形成反向依赖。
 
 ## 测试边界
 

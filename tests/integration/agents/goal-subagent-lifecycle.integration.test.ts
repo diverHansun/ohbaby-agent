@@ -11,7 +11,7 @@ import {
 } from "../../../packages/ohbaby-agent/src/agents/index.js";
 import { InMemorySubagentExecutionStore } from "../../../packages/ohbaby-agent/src/agents/subagents/execution-store.js";
 import type { RuntimeAgent } from "../../../packages/ohbaby-agent/src/agents/index.js";
-import { testRunModel } from "../../../packages/ohbaby-agent/src/core/testing/model-fixtures.js";
+import { testRunModel } from "../../fixtures/model-fixtures.js";
 import {
   GoalService,
   InMemoryGoalPersistence,
