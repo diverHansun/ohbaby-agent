@@ -35,6 +35,7 @@
 6. 删除 environment 中重复的 `Available tools`；日期、cwd、platform、git repo、MCP 菜单等动态内容固定附着到发起本轮的 user 消息，不能在每个 step 尾部重新插入。
 7. improve-4.1 的 `additionalMessages` 手工双向传播在本批收拢：测量与发送只消费同一份 `{ messages, tools }`。
 8. 工具顺序按 scope 稳定；新加载 MCP 工具形成一次明确的 cache epoch，之后不得重排已有工具。
+   > 2026-11-10 注：实现方式已改为按注册顺序和历史计算，`ScopeToolSequence` 删除，见[已加载 MCP 工具从历史重建议题](../../../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)。
 9. 主代理和子代理走同一条 request、usage、cache policy、cache key、prefix 与测试链路；差异只来自各自 agent 配置、system 内容和隔离的 `contextScopeId`。
 10. Lifecycle、context summary、session title 三个生产 LLM caller 都要显式 request purpose；辅助请求先只观测，不能成为 usage/scope 旁路。
 11. run-local prompt snapshot 与 scope-owned tool sequence 分离；每个 step 导出 immutable tool snapshot，lazy MCP load 只影响下一 step/epoch。

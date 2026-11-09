@@ -34,6 +34,8 @@ MCP协议的底层通信机制，支持Stdio、HTTP、SSE三种方式。
 
 `McpToolMenu` 保存 admitted local name 与按 `sessionId + contextScopeId` 隔离的 loaded 集。`McpToolSearch` 是同一 available 快照派生的只读内存 BM25 索引；文档字段为 localName、mcpServer、mcpToolName、准入前原始 description。
 
+> 2026-11-10 注：[已加载 MCP 工具从历史重建议题](../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)实施后，loaded 集以历史里 `select_tools` 的 `mcpSelection.loaded` 为准，`McpToolMenu` 只缓存推导结果；名单不因工具暂时不可用而删减，读取时与 available 取交集；没有会话累计上限。
+
 ---
 
 ## 二、Data Types（数据类型）
@@ -168,6 +170,8 @@ interface ToolOutput {
 ```
 
 `candidates` 不含 description。精确 query 的命中项 score 为 `1`；其余归一化到 `[0, 1)`，按 score 降序、name 升序稳定排列。
+
+> 2026-11-10 注：`mcpSelection` 已成为持久化契约（从历史重建已加载名单时读 `loaded`）。同一议题删除 `limitReached`，旧数据里仍可能有这个字段。
 
 ---
 

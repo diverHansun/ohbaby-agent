@@ -283,6 +283,8 @@ snapshot 由具体 Lifecycle run 持有并显式传给 ContextManager，run 结�
 
 ## 2.7 tools 顺序与 MCP 动态加载
 
+> 2026-11-10 注：§2.7.1 的 scope tool sequence（`ScopeToolSequence`）与 §2.7.3 的“重启形成新 tool epoch”已被[已加载 MCP 工具从历史重建议题](../../../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)取代：`ScopeToolSequence` 删除，顺序按“内置工具注册顺序 + 历史里的加载顺序”计算，重启后不变。
+
 ### 2.7.1 scope tool sequence
 
 为每个 `{ sessionId, contextScopeId }` 维护 model-facing `ToolSequence`：

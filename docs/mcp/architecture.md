@@ -114,6 +114,8 @@ MCP refresh 由单一串行/合并 runner 执行。刷新期间的新 change 递
 - query 默认 `load:false`，候选只含 `{name, score}`；精确 local name 固定 rank 1 / score 1，fuzzy score 位于 `[0,1)`。
 - Builtin 与 Skill 不进入 MCP 索引。
 
+> 2026-11-10 注：已加载名单改为从历史重建、没有会话累计上限、`ScopeToolSequence` 删除，见[已加载 MCP 工具从历史重建议题](../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)。
+
 MCP adapter 将配置中的 `trust` 映射到通用 Tool 字段：`trust: false` → `requireExplicitApproval: true`，`trust: true` → `requireExplicitApproval: false`。ToolScheduler 只消费 `requireExplicitApproval`，不直接消费 MCP-local `isTrusted`。`mcp_resource` / `mcp_prompt` 作为跨 server 访问入口固定设置 `requireExplicitApproval: true`，避免绕过确认。
 
 ---

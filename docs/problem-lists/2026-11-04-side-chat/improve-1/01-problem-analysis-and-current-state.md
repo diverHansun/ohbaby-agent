@@ -15,10 +15,10 @@
 见 [00 §2](00-discussion.md)。
 
 ```
-主会话 ─(复制到最近一轮已结束的对话)─► side chat（隐藏的根会话）
+主会话 ─(复制到最近一个已结束的主 run)─► side chat（隐藏的根会话）
                                         ├─ 边界消息（模型可见、界面隐藏）
                                         └─ 用户在 side chat 里的对话（界面显示）
-关闭 → 删除；一个主会话一个；工具可用但不能建子代理；不能 fork、撤销、压缩、goal、换模型
+关闭 → 删除；一个主会话可以开多个；工具可用但不能建子代理；不能 fork、撤销、压缩、goal、换模型
 ```
 
 ## 1.3 做成子会话为什么不行
@@ -27,10 +27,10 @@
 
 | 检查 | 位置 | 影响 |
 |---|---|---|
-| `validatePermissionRoot` 拒绝非主会话 | `A/adapters/ui-inprocess.ts:2490-2498`，被视图、历史、控制（:4610-4618）、回执（:4879）、steer（:5014、:5049）、重新提交（:5134）、进入会话（:1020）调用 | 读不到、发不了、停不了 |
+| `validatePermissionRoot` 拒绝非主会话 | `A/adapters/ui-inprocess.ts:2499` 起，被视图、历史、控制（:4610-4618）、回执（:4879）、steer（:5014、:5049）、重新提交（:5134）、进入会话（:1020）调用 | 读不到、发不了、停不了 |
 | `assertCanUseAsPrimarySession` 拒绝有父会话的会话 | `ui-inprocess.ts:3355-3374`，被 prompt 提交（:1711、:3838）等调用 | 不能提交 |
 | 服务端只允许读取客户端绑定的根会话 | `S/coordination/session-access.ts:155-158`，中止也经过它（:209-217） | 读不到、停不了 |
-| 提交时把客户端绑定切到目标会话 | `S/coordination/client-view.ts:676-684`；后端也会设当前会话（`ui-inprocess.ts:1795, 4110`） | 第一次在 side chat 提问后，主会话的事件就收不到了 |
+| 提交时把客户端绑定切到目标会话 | `S/coordination/client-view.ts:676-684`；后端也会设当前会话（`ui-inprocess.ts:1804, 4120`） | 第一次在 side chat 提问后，主会话的事件就收不到了 |
 | `stateStore.getSession` 对子会话返回空 | `A/adapters/ui-state/persistent-store.ts:611-620` | 拿不到视图 |
 
 **结论**：做成子会话要在十几处开口子，放弃。
@@ -45,7 +45,7 @@
 - 每个客户端有自己的绑定，快照（`client-view.ts:210-251`）、事件（:870）、会话索引失效通知（`S/app/sse-hub.ts:527-534`）都按客户端过滤。
 - `SessionScreen` 和它的 hook 读 `runtime.store`、`runtime.client`（`W/ui/session/SessionScreen.tsx:64-99`），side chat 面板需要一个精简的同类对象。`ApprovalPanel` 完全靠 props 驱动（`W/ui/permissions/ApprovalPanel.tsx:43`），可以直接复用。
 
-后端仍有一个共用的当前会话（`persistent-store.ts:456, 623`），每次提交都会改它（`ui-inprocess.ts:1795, 4110`）。daemon 模式下这不影响其他 Web 客户端的绑定；运行状态的兜底逻辑（`client-view.ts:1062-1084`、`ui-inprocess.ts:2338`）可能受影响，多标签页本来就有同样的问题，未细查。
+后端仍有一个共用的当前会话（`persistent-store.ts:456, 623`），每次提交都会改它（`ui-inprocess.ts:1804, 4120`）。daemon 模式下这不影响其他 Web 客户端的绑定；运行状态的兜底逻辑（`client-view.ts:1062-1084`、`ui-inprocess.ts:2338`）可能受影响，多标签页本来就有同样的问题，未细查。
 
 ### 1.4.2 TUI 只有一个绑定
 
@@ -73,7 +73,7 @@
 | `ui-inprocess.ts:3112-3117` | TUI 的 `/sessions`、`/resume` |
 | `A/adapters/ui-persistent.ts:678` | TUI 启动时“继续上次会话”；`resolveStartupSession` 会忽略非主会话（`A/adapters/ui-startup-session.ts:24-27`） |
 | `client-view.ts:141-143` | daemon 的“继续上次会话” |
-| `ui-inprocess.ts:2556, 2615` | 空会话复用（主会话为空时才可能碰到） |
+| `ui-inprocess.ts:2556, 2615` | 空会话复用（P17 不允许从空会话打开 side chat，按理碰不到，仍统一过滤） |
 | `ui-inprocess.ts:3317` | 归档后挑替补会话 |
 
 ### 1.4.4 要显式拦住的操作
@@ -82,17 +82,29 @@
 
 | 操作 | 入口 |
 |---|---|
-| 压缩 | `resolveCompactTarget`（`ui-inprocess.ts:3591`），路由 `sessions.ts:379` |
+| 压缩 | `resolveCompactTarget`（`ui-inprocess.ts:3588`），路由 `sessions.ts:379` |
 | goal | `resolveGoalSessionId`（`ui-inprocess.ts:4454-4471`） |
 | 切换模型、reasoning | `sessions.ts:167, 202` → `ui-inprocess.ts:2990, 2966` |
-| 归档 | `ui-inprocess.ts:3273` |
+| 归档 | `archiveSessionInternal`（`ui-inprocess.ts:3267`） |
 | 移动工作区 | `S/runtime/daemon/server.ts:770`、`S/coordination/session-workspace-move.ts:67` |
 | 导出 | `sessions.ts:107` |
-| fork、撤销 | 由各自议题新建，需在入口加检查 |
+| fork、撤销 | 在本议题之后由各自议题新建，它们在入口加检查（00 P18） |
 | 斜杠命令 `/new`、`/resume`、`/sessions` | 会改客户端绑定（`client-view.ts:807-816`），side chat 面板不提供斜杠命令 |
-| 创建子代理 | `resolveRequester`（`A/adapters/ui-runtime/composition.ts:954-970`）只拒绝有父会话的请求方，side chat 作为根会话能通过。调度器的 `accessGuard`（`A/core/tool-scheduler/scheduler.ts:2062-2072`，实现在 `composition.ts:424-435`）可以按会话拒绝 `agent` 工具（`A/tools/subagent.ts:27-29`），不改工具列表 |
+| 创建子代理 | `resolveRequester`（`A/adapters/ui-runtime/composition.ts:954-970`）只拒绝有父会话的请求方，side chat 作为根会话能通过。调度器的 `accessGuard`（`A/core/tool-scheduler/scheduler.ts:2062-2072`，实现在 `composition.ts:414` 起）可以按会话拒绝 `agent` 工具（`A/tools/subagent.ts:27-29`），不改工具列表 |
 
 不能把这些检查放进 `assertCanUseAsPrimarySession`，它也管 prompt 提交。
+
+### 1.4.5 复制历史
+
+打开 side chat 要把主会话的历史复制进一个新会话，这和 fork 要做的事相同，函数由本议题先写（00 P18）。现状证据沿用 fork 议题 01 §1.3、§1.4 的勘测（2026-11-04 基线），要点：
+
+- 一段历史分布在 `message`、`part`、`prompt_submission`、`current_run_input`、`run_ledger` 五张表里。少了当前轮输入记录，steer 和子代理结果会从模型上下文里消失（`filterModelHistory`），它又有外键指向 run 记录。
+- ID 散落在 `data` JSON 的各个字段里，逐个字段改写容易漏；消息 ID 的现有生成器带无序随机后缀，直接用会让同一毫秒内的消息乱序。
+- 切点之后的压缩会给切点之前的片段打上“已压缩”标记，而摘要在切点之后，原样复制会丢上下文。
+- 消息存储没有批量写入，会话创建接口设不了模型和统计，所以要在一个 `runWriteTransaction` 里用 SQL 完成。
+- 模型原生状态（加密推理、thinking 签名）按工具 `callId` 回放，`callId` 不能改。
+
+轮次投影落地后（`docs/problem-lists/2026-11-06-turn-projection/`），界面上的一轮等于主会话的一个 run，子代理唤醒和 goal 续跑的 run 没有 prompt 记录，所以切点按 run 定（00 P14）。
 
 ## 1.5 边界消息
 
@@ -107,7 +119,7 @@
 ## 1.7 系统提示词与缓存
 
 - 系统提示词、工具、提醒由每一轮 run 的 `isSubagent` 参数决定（`A/core/lifecycle/lifecycle.ts:595`）。主会话的 prompt 不传这个参数（`ui-inprocess.ts:4038-4056`），side chat 作为根会话走同一条路径，系统提示词与主会话一致。
-- OpenAI 兼容接口的缓存 key 按会话 ID 计算（`packages/ohbaby-llm/src/client/prompt-cache.ts:192-209, 260-268`）。已加载的 MCP 工具按 `(sessionId, contextScopeId)` 存放和排序（`composition.ts:591-610`、`A/mcp/integration/tool-sequence.ts:16-18`），主会话加载过的 MCP 工具，side chat 一开始没有。
+- OpenAI 兼容接口的缓存 key 按会话 ID 计算（`packages/ohbaby-llm/src/client/prompt-cache.ts:192-209, 260-268`）。已加载的 MCP 工具按 `(sessionId, contextScopeId)` 存放和排序（`composition.ts:591-610`、`A/mcp/integration/tool-sequence.ts:16-18`），主会话加载过的 MCP 工具，side chat 一开始没有。2026-11-10 起改由[已加载 MCP 工具从历史重建议题](../../2026-11-09-mcp-loaded-tools-from-history/README.md)解决：该议题先实施，已加载工具从历史推导、`ScopeToolSequence` 删除，side chat 从复制来的历史得到相同的工具和顺序。
 
 ## 1.8 删除与启动清理
 
@@ -131,7 +143,7 @@
 - **顺着现有机制走**：根会话加第二个客户端，读取、推送、提交、中止、审批都不用改；代价集中在“列表过滤”和“操作拦截”这两张清单上，清单是有限的、可以逐条测。
 - **一个判断函数**：列表过滤统一用 `isUserFacingSession`，不散写条件。
 - **不动系统提示词**：说明放在边界消息里。
-- **接受小缺口**：缓存可能不命中、主会话的“总是允许”不带过去，都在 00 里写明。
+- **沿用主会话**：缓存身份、系统提示词、已加载的 MCP 工具、“总是允许”规则都沿用主会话（00 P10、P11），不另造一套。
 
 ## 1.12 与既有文档关系
 

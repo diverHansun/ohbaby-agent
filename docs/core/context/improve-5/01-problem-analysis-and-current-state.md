@@ -282,6 +282,8 @@ Lifecycle 随后会在每个 model step 把同一个局部变量更新为最新 
 
 ## 1.7 MCP tool menu 与顺序
 
+> 2026-11-10 注：本节描述的“已加载名单只在内存、重启后无法重建”由[已加载 MCP 工具从历史重建议题](../../../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)解决。
+
 `McpToolMenu` 已按 `sessionId + contextScopeId` 隔离 loaded set，这是正确基础：
 
 `packages/ohbaby-agent/src/mcp/integration/dynamic-tool-menu.ts:197-208,246-280`

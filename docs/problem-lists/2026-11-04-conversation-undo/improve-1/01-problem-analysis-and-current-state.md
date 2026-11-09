@@ -16,8 +16,9 @@
 
 ```
 选一条用户 prompt → 它和之后的全部内容标记为已撤销（不删除）
-→ 原文填回输入框 → 用户自己改、自己发
-文件不回滚；压缩点之前不能撤；会话忙时不能撤；Web 用 Edit 按钮，TUI 用 /undo
+→ Web：在气泡里改，点 Send 时撤销和发送一次做完
+→ TUI：原文填回输入框，用户自己改、自己发
+文件不回滚；压缩点之前不能撤；运行中先停再撤；Web 用 Edit 按钮，TUI 用 /rewind
 ```
 
 ## 1.3 Web 现状
@@ -29,7 +30,7 @@
 
 ### 1.3.2 输入框预填
 
-`W/ui/composer/useComposerDraft.ts:20-25` 已有 `ComposerPrefill { scopeKey, editRevision, nonce, text }`，`SessionScreen.tsx:154,360` 用它把技能名插进输入框。撤销后把原文填回输入框，可以直接复用这个机制，不需要新的状态通道。它目前是无条件覆盖草稿（`useComposerDraft.ts:249-259`），“有草稿时先确认”要在调用方做。确认框可以复用 `W/ui/shared/ConfirmDialog.tsx`。
+`W/ui/composer/useComposerDraft.ts:20-25` 已有 `ComposerPrefill { scopeKey, editRevision, nonce, text }`，`SessionScreen.tsx:154,360` 用它把技能名插进输入框。Web 改为在气泡里编辑后，只有“撤销成功但发送失败”时才用它把改过的文字放进主输入框（2026-11-09），不需要新的状态通道。它目前是无条件覆盖草稿（`useComposerDraft.ts:249-259`），所以有草稿时要由调用方把改过的文字接在草稿后面再填入，不能直接覆盖。
 
 ## 1.4 核心消息与 prompt 存储现状
 
@@ -41,7 +42,7 @@
 | `part` | `id, message_id, session_id, type, order_index, data` | 压缩通过在 `data` 里写 `time.compacted` 标记旧片段（`A/core/message/database-store.ts:667-685`） |
 | `prompt_submission` | `prompt_id, session_id, user_message_id, run_id, text, status, admission_order, ...` | 一轮对话的“入口”。Web 按它把消息分组成轮（`run-process.ts:19-36`）。`text` 正好是撤销后要填回的原文 |
 | `run_ledger` | `run_id, session_id, context_scope_id, status, ...` | 记录 run 状态，不引用消息 ID |
-| `session` | `message_count, last_message_at, data` | 会话统计，由 `syncSessionStatsBestEffort`（`A/adapters/ui-inprocess.ts:3383-3407`）按 `listBySession` 重算。“空会话复用”的实际判断是 `isAuthoritativelyEmptySession`（:2545-2575），除了 `messageCount` 还查 run 记录和 `hasForSession` |
+| `session` | `message_count, last_message_at, data` | 会话统计，由 `syncSessionStatsBestEffort`（`A/adapters/ui-inprocess.ts:3392`）按 `listBySession` 重算。“空会话复用”的实际判断是 `isAuthoritativelyEmptySession`（:2545-2575），除了 `messageCount` 还查 run 记录和 `hasForSession` |
 
 表结构定义在 `A/services/database/schema.ts:20-70, 158-184`，最新迁移是 `028_subagent_message_input`（`A/services/database/migrations.ts:662`）。
 
@@ -83,7 +84,7 @@
 |---|---|---|
 | todo | 没有表，内存缓存 `A/tools/todo.ts:160-330`，从历史重建 | 缓存还是撤销前的列表。`releaseScope`（:263）只清默认作用域，goal 的作用域（`goal:<id>`）要用 `release(sessionId)`（:248）一起清 |
 | goal | 追加写的 `goal_record`（`A/goals/persistence.ts:25`），记 `turnsUsed`、`tokensUsed`，不引用消息 ID | 计数里含被撤销的轮次。00 已确认不回退。goal 处于 `active`（`A/goals/types.ts:1`）时会自动续跑，会和撤销冲突 |
-| 后台子代理 | `subagent_execution` 记 `requester_run_id`、`root_prompt_id`（`migrations.ts:395-398`），投递状态有 none、foreground、pending、delivered、processed（`A/agents/subagents/execution-store.ts:92`） | 被撤销那几轮启动的子代理可能还在跑，也还在列表里。已完成但没投递的结果会由唤醒（`A/adapters/ui-inprocess/subagent-wakeup.ts:35-63`）开启父会话的新一轮 |
+| 后台子代理 | `subagent_execution` 记 `requester_run_id`、`root_run_id`、`root_prompt_id`（`migrations.ts:395-398`），其中 `root_prompt_id` 声明了但从没写过值，`root_run_id` 每次都写且有索引（`migrations.ts:419`）；投递状态有 none、foreground、pending、delivered、processed（`A/agents/subagents/execution-store.ts:92`） | 被撤销那几轮启动的子代理可能还在跑，也还在列表里。已完成但没投递的结果会由唤醒（`A/adapters/ui-inprocess/subagent-wakeup.ts:35-63`）开启父会话的新一轮 |
 | prompt 记录 | `prompt_submission` | 不处理的话，Web 仍会按它画出被撤销的轮次 |
 | 会话统计 | `session.message_count`、`last_message_at` | 要重算；现有的空会话判断和起标题判断（`isFirstUserMessageForTitle`，`ui-inprocess.ts:3419-3450`，只在标题仍是默认值时起标题）不会因此出错 |
 | 快照检查点 | `snapshot_checkpoint`，默认关闭（`A/adapters/ui-persistent.ts:782`） | 本轮不动 |
@@ -93,7 +94,7 @@
 - `session.changed` 已有 `removedMessageIds` 字段（`packages/ohbaby-sdk/src/contract/session-view.ts:97`），TUI 已经在用（`packages/ohbaby-cli/src/tui/session-recovery.ts:517-548`）。撤销后可以直接用它让前端移除消息。
 - prompt 只有 `prompt.submitted` 和 `prompt.updated` 两种事件（`packages/ohbaby-sdk/src/contract/events.ts:113,119`），没有移除事件。`session.changed` 另有 `prompts` 字段（`session-view.ts:102`），可以带上状态变化后的 prompt。
 - 消息管理器的提交协调器会把删除变化转成 `MessageCommittedChange.removedMessageIds`（`A/core/message/manager.ts:76-90`），视图投影据此更新并标记历史失效，最终变成 `session.changed` 的 `removedMessageIds`。撤销可以走这条现成的路。
-- Web store 收到 `removedMessageIds` 后会从已加载的历史里删掉对应消息（`W/store/store.ts:495-509`）；已加载的 prompt 按 `updatedAt` 取较新的一份（:458-463）。
+- Web store 收到 `removedMessageIds` 后会从已加载的历史里删掉对应消息（`W/store/store.ts:551`）；已加载的 prompt 按 `updatedAt` 取较新的一份（:458-463）。
 
 ### 1.4.6 忙碌判断与串行化
 
@@ -110,8 +111,8 @@
 ## 1.6 TUI 现状
 
 - 命令清单在 `A/commands/catalog.ts`，`surfaces` 控制在哪些界面出现（:8-10）。现有命令里没有 undo。
-- TUI 在本地拦截部分命令，例如 `export`（`packages/ohbaby-cli/src/tui/app.tsx:231`）。`/undo` 可以照这个方式处理。
-- 交互面板有现成的框架：`components/dialog/command-panel-state.ts` 定义交互类面板（connect、effort），`/undo` 的选择列表可以作为一种新的交互面板。
+- TUI 在本地拦截部分命令，例如 `export`（`packages/ohbaby-cli/src/tui/app.tsx:231`）。`/rewind` 可以照这个方式处理。
+- 交互面板有现成的框架：`components/dialog/command-panel-state.ts` 定义交互类面板（connect、effort），`/rewind` 的选择列表可以作为一种新的交互面板。
 - 往输入框里填文本：排队编辑的流程已有 `restoreQueuedEditInput`（`packages/ohbaby-cli/src/tui/components/prompt/index.tsx:369`）。
 - TUI 只持有视图里最近一段 prompt（`packages/ohbaby-cli/src/tui/store/events.ts:499` 附近），更早的轮次不在内存里。
 - 视图更新：`session-recovery.ts:517-548` 已经处理 `removedMessageIds`。
@@ -126,13 +127,13 @@
 
 ```
 packages/ohbaby-agent   迁移 029、消息与 prompt 存储过滤、adapter 层撤销编排、子代理与 todo 的善后
-packages/ohbaby-server  新路由 POST /v1/sessions/:id/undo
-packages/ohbaby-sdk     撤销方法、错误码、UiPromptSubmission.undoneAt
-apps/ohbaby-web         Edit 按钮、确认框、预填（依赖消息复制议题的操作栏）
-packages/ohbaby-cli     /undo 选择面板与输入框回填
+packages/ohbaby-server  新路由 POST /v1/sessions/:id/rewind
+packages/ohbaby-sdk     撤销方法、错误码、UiPromptSubmission.rewoundAt
+apps/ohbaby-web         Edit 按钮、气泡编辑框（依赖消息复制议题的操作栏）
+packages/ohbaby-cli     /rewind 选择面板与输入框回填
 ```
 
-迁移 `029` 给两张表加列，旧版本程序读新库不会报错（多出来的列会被忽略），但旧版本不会过滤已撤销的消息。
+迁移 `029` 给三张表加列，旧版本程序读新库不会报错（多出来的列会被忽略），但旧版本不会过滤已撤销的消息。
 
 ## 1.9 SWE 原则审视
 
@@ -150,5 +151,5 @@ packages/ohbaby-cli     /undo 选择面板与输入框回填
 | `docs/core/message/data-model.md` §消息生命周期（约 :560-600） | 只有创建、使用中、完成、删除 | 要加“已撤销”状态，说明它和删除的区别 |
 | `docs/core/message/architecture.md` | 存储职责只有增删改 | 补充：公共读取入口默认排除已撤销消息 |
 | `docs/services/session/` | 会话生命周期 | 补充撤销操作与“空会话复用”的规则 |
-| `docs/runtime/prompt-scheduler/` | prompt 存储 | 补 `undone_at` 与列表过滤 |
-| `docs/cli/commands/` 或 `docs/ohbaby-cli/tui-productization/slash-menu.md` | 命令清单 | 补 `/undo` |
+| `docs/runtime/prompt-scheduler/` | prompt 存储 | 补 `rewound_at` 与列表过滤 |
+| `docs/cli/commands/` 或 `docs/ohbaby-cli/tui-productization/slash-menu.md` | 命令清单 | 补 `/rewind` |

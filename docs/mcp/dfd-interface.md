@@ -86,6 +86,8 @@ select_tools({tools:[exact names]})       -> 精确 menu.select（兼容路径�
 
 只有 loaded 集中的 MCP 工具能通过 runtime access guard。搜索结果和模型可见 metadata 均不包含 server 原始 description。
 
+> 2026-11-10 注：loaded 集改为从历史里 `select_tools` 的结果重建（[已加载 MCP 工具从历史重建议题](../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)），重启、MCP 重连后不丢。
+
 ### 1.3 Resource / Prompt Flow
 
 Resources and prompts are exposed through stable read-only MCP access tools instead of registering each server item as a separate tool.

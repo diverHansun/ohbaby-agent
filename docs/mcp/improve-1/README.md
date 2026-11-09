@@ -5,6 +5,7 @@
 > 落点：`docs/mcp/improve-1/`
 > 承接：`docs/core/system-prompt/improve-3/`（MCP 精确点菜已落地）→ **本批（点菜之上加 BM25 检索）**
 > 姐妹议题：`docs/shell/improve-3/`（bash background + `task_output` / kill；**本批之后**实施）
+> 2026-11-10 注：本批里“双 8 上限”中的会话累计上限、“loaded 集语义不变（纯内存）”已被[已加载 MCP 工具从历史重建议题](../../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)取代；单次上限 8 不变。
 
 ## 1. 议题
 

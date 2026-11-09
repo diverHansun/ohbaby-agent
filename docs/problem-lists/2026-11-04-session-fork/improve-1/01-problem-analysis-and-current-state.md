@@ -31,13 +31,17 @@
 ### 1.3.3 标题
 
 - 默认标题是 `New session - <ISO 时间>`（`manager.ts:38`），判断函数是 `isDefaultSessionTitle`（`A/services/session/prompt-sanitizer.ts:38`）。
-- 下一条 prompt 是否触发起标题，由 `isFirstUserMessageForTitle`（`A/adapters/ui-inprocess.ts:3419-3451`）决定：会话已有消息就不起。
+- 下一条 prompt 是否触发起标题，由 `isFirstUserMessageForTitle`（`A/adapters/ui-inprocess.ts`，约 :3427）决定：会话已有消息就不起。
 
 **结论**：fork 出来的会话带着历史，永远不会自动起标题，必须在 fork 时直接写好。
 
 ### 1.3.4 侧栏
 
-全局列表取 `parent_id IS NULL` 的会话，按 `updated_at DESC, id DESC` 排序（`A/services/session/global-query.ts:120-141`）。fork 出来的会话只要 `parent_id` 为空、`updated_at` 是当前时间，就会作为普通会话出现在最上面。
+全局列表取 `parent_id IS NULL` 的会话，按 `updated_at DESC, id DESC` 排序（`A/services/session/global-query.ts:120-141`）。fork 出来的会话只要 `parent_id` 为空、`updated_at` 是当前时间，就会作为普通会话出现在列表里。
+
+侧栏读的条目是 `UiGlobalSession`（`packages/ohbaby-sdk/src/contract/global-sessions.ts:18-31`），由 `toUiGlobalSession`（`packages/ohbaby-server/src/protocols/global-sessions.ts:15-29`）生成，没有父会话或 fork 字段。分组在 `W/store/sidebar-groups.ts:74-144`：置顶、工作区分组、Recents，每组分页；`SessionList.tsx` 把行平铺渲染，目前没有任何嵌套行，只有置顶区和工作区分组能折叠（折叠状态存 localStorage `ohbaby.web.sidebar.collapsed.v2`）。
+
+**不能借用 `parent_id` 表示 fork**：全局列表和搜索只取 `parent_id IS NULL`（`global-query.ts:131、268`），恢复和删除要求根会话并按 `parent_id` 树级联删除（`A/services/session/archive.ts:39、70-73`），归档时子会话计入忙碌检查（`ui-inprocess.ts:3304`），客户端和服务端还有十几处把 `parentId` 当成“不是主会话”。ZCode 把 fork 挂在 `parentID` 上，后来不得不把列表过滤改成按类型（`task-list-session-membership.ts:3-14`）。
 
 ## 1.4 历史数据
 
@@ -106,10 +110,10 @@
 
 ## 1.6 现有操作放在哪里
 
-- 需要 prompt 作用域、忙碌判断和事件发布的会话操作在 adapter 层，例如归档 `archiveSessionInternal`（`ui-inprocess.ts:3258`）、压缩（:3609），对应路由在 `packages/ohbaby-server/src/protocols/web/routes/sessions.ts`（归档 :327）。
+- 需要 prompt 作用域、忙碌判断和事件发布的会话操作在 adapter 层，例如归档 `archiveSessionInternal`（`ui-inprocess.ts:3267`）、压缩（:3609），对应路由在 `packages/ohbaby-server/src/protocols/web/routes/sessions.ts`（归档 :327）。
 - 纯数据库的会话操作在 `A/services/session/*.ts`，例如 `archive.ts`、`workspace-move.ts`。
 
-**结论**：SQL 复制放进 `A/services/session/fork.ts`，由 adapter 层的一个方法调用（它知道 `promptScopeKey`，也负责发布事件），路由放在 `sessions.ts` 的归档旁边。
+**结论**（2026-11-08 更新）：SQL 复制由 side chat 议题放进 `A/services/session/copy-history.ts`，fork 由 adapter 层的一个方法调用它（它知道 `promptScopeKey`，也负责发布事件），路由放在 `sessions.ts` 的归档旁边。
 
 ## 1.7 TUI
 
@@ -125,7 +129,7 @@
 - **只复制必要的东西**：五张表各有一个“不复制就出错”的理由，其余一律不复制。
 - **一条规则代替一张字段清单**：ID 改写按值替换，减少遗漏，也不用随 JSON 结构变化去维护。
 - **不碰源会话**：fork 只读源会话，不需要占用它的执行闸门，失败也不会影响它。
-- **接受已知的小缺口**：子代理卡片打不开、大结果文件读不到，都在 00 里写明，不为它们扩大改动面。
+- **接受已知的小缺口**：子代理卡片打不开、读源会话存储区里的大结果文件要弹确认，都在 00 里写明，不为它们扩大改动面。
 
 ## 1.10 与既有文档关系
 

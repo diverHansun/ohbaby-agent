@@ -154,6 +154,8 @@ OpenAI 官方建议每个 key 的相关流量维持在约 15 requests/min；scop
 
 ## 7. 工具顺序与 MCP 动态加载
 
+> 2026-11-10 注：第 4、6、7 条的工具序列状态（代码里是 `ScopeToolSequence`）已被[已加载 MCP 工具从历史重建议题](../../../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)取代：工具顺序每次按“内置工具注册顺序 + 已加载 MCP 工具在历史里的加载顺序”计算，不再记在内存里；重启、MCP 重连后顺序与原来一致。“新加载的 MCP 工具按选择顺序追加”仍然成立。
+
 1. `Available tools` 文本从 environment 删除，正式 tools schema 是工具定义的唯一权威来源。
 2. MCP catalog 文本排序稳定，不能因为某个工具已加载就从历史快照里消失。
 3. 每个 `{ sessionId, contextScopeId }` 独立维护工具顺序；主代理与子代理不能共享可变顺序状态。

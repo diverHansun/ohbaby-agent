@@ -25,7 +25,7 @@ Web 通过右侧面板和“选中文字后在 side chat 里问”打开；TUI �
 
 - 02 是实施依据，04 是验收依据。规划会话不写代码。
 - 本议题没有要求关键改动清单，02 只写到包和文件一级。
-- **前置**：[会话 fork 议题](../2026-11-04-session-fork/README.md)的 Stage 1（`forkSessionRows`）必须先完成，side chat 用它复制主会话的历史。Stage 2（Web）另依赖[消息复制议题](../2026-11-04-message-copy/README.md)的 Stage 1（`MessageActions`）。
+- **开发顺序**（2026-11-08 用户确认）：side chat → fork → 撤销重发。side chat 不依赖 fork：复制历史的函数 `copySessionHistory` 由本议题写（02 Stage 1 第 0 步），fork 以后直接调用。Stage 2（Web）用到的[消息复制议题](../2026-11-04-message-copy/README.md) `MessageActions` 已经落地。
 - 分工在实施前与用户确认。
 - 不可逆点：无。side chat 会话关闭即删除，不留数据。
 
@@ -33,7 +33,8 @@ Web 通过右侧面板和“选中文字后在 side chat 里问”打开；TUI �
 
 | 议题 | 关系 |
 |---|---|
-| [会话 fork](../2026-11-04-session-fork/README.md) | 提供复制历史的函数；side chat 会话里不能 fork |
-| [撤销重发](../2026-11-04-conversation-undo/README.md) | side chat 会话里不能撤销；两个议题谁后落地，谁在撤销入口补上 `SIDE_CHAT_UNSUPPORTED` 检查 |
+| [会话 fork](../2026-11-04-session-fork/README.md) | 在本议题之后实施，复用本议题写的 `copySessionHistory`；fork 挂按钮时遵守 `ConversationStream` 的 `side-chat` 开关，并在 fork 入口拒绝 side chat 会话 |
+| [撤销重发](../2026-11-04-conversation-undo/README.md) | 在 fork 之后实施：在撤销入口拒绝 side chat 会话，Edit 按钮遵守 `side-chat` 开关，并在 `copySessionHistory` 的切点与选行查询里加“跳过已撤销内容”的条件 |
 | [消息复制](../2026-11-04-message-copy/README.md) | side chat 面板沿用它的 `MessageActions` 复制按钮 |
 | [会话存储区](../../services/session-storage/README.md) | side chat 用主会话的存储区，能直接读主会话写的文件；关闭 side chat 不删除这些文件 |
+| [已加载 MCP 工具从历史重建](../2026-11-09-mcp-loaded-tools-from-history/README.md) | 先于本议题实施。side chat 的已加载 MCP 工具和工具顺序由它保证，本议题不写 `copyScope` |

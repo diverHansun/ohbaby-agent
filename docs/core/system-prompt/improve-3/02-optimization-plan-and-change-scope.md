@@ -91,6 +91,7 @@ OpenAI-compatible 与 Anthropic 均消费每步 `request.tools`（现有 `conver
 5. **Provider**：lifecycle 每步 `resolveLlmTools()` → `streamChatCompletion({ tools })`；Anthropic `convertTools` 无需新协议。
 6. **防护**：MCP description/schema 文本进可见 tools 前 `scanPromptLikeContent`；description 长度 cap（建议实现时定常数，如 2k–4k chars，写入代码常量并测）。
 7. **compaction**：loaded 集由 composition 持有而非消息历史，context compaction 后保留；应用重启或状态无法恢复时清空，并重新公告当前可加载名。该策略须可测。
+   > 2026-11-10 注：第 4 条“每个 session/context scope 最多加载 8 个”、本条“loaded 集由 composition 持有而非消息历史……重启时清空”以及风险表“compaction 丢 loaded”一行，已被[已加载 MCP 工具从历史重建议题](../../../problem-lists/2026-11-09-mcp-loaded-tools-from-history/README.md)取代：去掉会话累计上限（单次上限仍是 8），已加载名单以历史里 `select_tools` 结果的 `mcpSelection.loaded` 为准，压缩后保留，重启后重建。
 
 **改动（示意）**：
 
