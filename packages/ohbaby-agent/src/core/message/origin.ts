@@ -1,7 +1,30 @@
-import type { MessageWithParts } from "./types.js";
+import type { MessageWithParts, Part, TextPart } from "./types.js";
 
 export const MODEL_CONTEXT_RUNTIME_KIND = "model-context:runtime:v1";
 export const SYSTEM_REMINDER_KIND = "system-reminder:v1";
+
+export const HIDDEN_TRANSCRIPT_TOOLS: ReadonlySet<string> = new Set([
+  "select_tools",
+  "todo_read",
+  "todo_write",
+]);
+
+export function isTranscriptPart(
+  part: Part,
+): part is Exclude<Part, { type: "model-state" }> {
+  return (
+    part.type !== "model-state" &&
+    !isModelContextPart(part) &&
+    !isSystemReminderPart(part) &&
+    (part.type !== "tool" || !HIDDEN_TRANSCRIPT_TOOLS.has(part.tool))
+  );
+}
+
+export function transcriptText(part: TextPart): string {
+  return typeof part.metadata?.displayText === "string"
+    ? part.metadata.displayText
+    : part.text;
+}
 
 /** Escape external values before inserting them into a host reminder template. */
 export function escapeReminderValue(value: string): string {

@@ -24,9 +24,10 @@ import type {
 } from "../../core/message/index.js";
 import {
   isContextSummaryPart,
-  isModelContextPart,
-  isSystemReminderPart,
-} from "../../core/message/index.js";
+  HIDDEN_TRANSCRIPT_TOOLS,
+  isTranscriptPart,
+  transcriptText,
+} from "../../core/message/origin.js";
 import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
 import { isActivePart } from "../../core/context/filters.js";
 import type {
@@ -48,11 +49,6 @@ const DEFAULT_SESSION_LIMIT = 50;
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(["pending", "running"]);
 const SESSION_TRANSACTION_ACTIVE_MESSAGE = "Session transaction is active";
 const CONTEXT_COMPACTED_TEXT = "Context compacted";
-const HIDDEN_TRANSCRIPT_TOOLS = new Set([
-  "select_tools",
-  "todo_read",
-  "todo_write",
-]);
 
 export interface PersistentUiStateStoreOptions {
   readonly sessionManager: Pick<
@@ -156,18 +152,12 @@ function toolPartToUiParts(part: ToolPart): UiMessagePart[] {
 }
 
 function partToUiParts(part: Part): UiMessagePart[] {
-  if (isModelContextPart(part) || isSystemReminderPart(part)) {
-    return [];
-  }
-  if (part.type === "model-state") return [];
+  if (!isTranscriptPart(part)) return [];
   if (part.type === "text") {
     return [
       {
         id: part.id,
-        text:
-          typeof part.metadata?.displayText === "string"
-            ? part.metadata.displayText
-            : part.text,
+        text: transcriptText(part),
         type: "text",
         metadata: part.metadata,
       },
@@ -184,9 +174,6 @@ function partToUiParts(part: Part): UiMessagePart[] {
         saveState: "saved",
       },
     ];
-  }
-  if (HIDDEN_TRANSCRIPT_TOOLS.has(part.tool)) {
-    return [];
   }
   return toolPartToUiParts(part);
 }

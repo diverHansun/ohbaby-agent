@@ -1,4 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
+import { isActivePart } from "../../core/context/filters.js";
+import {
+  isContextSummaryPart,
+  isTranscriptPart,
+  transcriptText,
+} from "../../core/message/origin.js";
+import type { Part } from "../../core/message/types.js";
 import { createMessageIdGenerator } from "../../core/message/id-generator.js";
 import type { DatabaseConnection, SqliteValue } from "../database/types.js";
 import type { SessionData, SessionRow } from "./database-store.js";
@@ -7,16 +15,15 @@ import { createSessionIdGenerator } from "./id-generator.js";
 
 const terminal = "'succeeded', 'failed', 'cancelled', 'interrupted'";
 
-/** Latest (or specified) ended main turn which actually has a history cut point. */
-export function findEndedMainRun(
+function endedMainRuns(
   db: DatabaseConnection,
   sessionId: string,
-  runId?: string,
-): string | null {
-  return (
-    db
-      .prepare<{ run_id: string }>(
-        `
+  runId: string | undefined,
+  latestOnly: boolean,
+): { run_id: string }[] {
+  return db
+    .prepare<{ run_id: string }>(
+      `
     WITH anchors AS (
       SELECT json_extract(data, '$.runId') AS run_id,
              MAX(json_extract(data, '$.runtimeInput') IS NULL) AS has_visible_message
@@ -35,16 +42,74 @@ export function findEndedMainRun(
       ${runId === undefined ? "" : "AND r.run_id = ?"}
       AND r.status IN (${terminal}) AND COALESCE(prompts.pending, 0) = 0
       AND (anchors.has_visible_message OR prompts.ended)
-    ORDER BY COALESCE(r.started_at, r.created_at) DESC, r.run_id DESC LIMIT 1
+    ORDER BY COALESCE(r.started_at, r.created_at) DESC, r.run_id DESC ${latestOnly ? "LIMIT 1" : ""}
   `,
-      )
-      .get(
-        sessionId,
-        sessionId,
-        sessionId,
-        ...(runId === undefined ? [] : [runId]),
-      )?.run_id ?? null
+    )
+    .all(
+      sessionId,
+      sessionId,
+      sessionId,
+      ...(runId === undefined ? [] : [runId]),
+    );
+}
+
+/** Latest (or specified) ended main turn which actually has a history cut point. */
+export function findEndedMainRun(
+  db: DatabaseConnection,
+  sessionId: string,
+  runId?: string,
+): string | null {
+  return endedMainRuns(db, sessionId, runId, true)[0]?.run_id ?? null;
+}
+
+/** Fork from the final answer that the transcript offers to copy. */
+export function findForkableMainRun(
+  db: DatabaseConnection,
+  sessionId: string,
+  runId?: string,
+): string | null {
+  const assistants = db.prepare<{
+    id: string;
+    agent: string;
+    request_count: number | null;
+  }>(`
+    SELECT id, json_extract(data, '$.agent') AS agent,
+           json_array_length(data, '$.modelRequests') AS request_count
+    FROM message WHERE session_id = ? AND json_extract(data, '$.runId') = ?
+      AND context_scope_id IS NULL AND role = 'assistant' AND json_extract(data, '$.runtimeInput') IS NULL
+    ORDER BY created_at DESC, id DESC
+  `);
+  const messageParts = db.prepare<{ data: string }>(
+    "SELECT data FROM part WHERE message_id = ?",
   );
+  for (const candidate of endedMainRuns(db, sessionId, runId, false)) {
+    for (const message of assistants.all(sessionId, candidate.run_id)) {
+      const parts = messageParts
+        .all(message.id)
+        .map((row) => JSON.parse(row.data) as Part);
+      if (
+        message.agent === SUMMARY_AGENT_NAME &&
+        parts.some(isContextSummaryPart)
+      )
+        continue;
+      const active = parts.filter(isActivePart);
+      const visible = active.filter(isTranscriptPart);
+      if (!visible.length && !message.request_count) continue;
+      if (
+        !active.some((part) => part.type === "tool") &&
+        visible.some(
+          (part) =>
+            part.type === "text" &&
+            part.metadata?.kind !== "lifecycle-interruption" &&
+            transcriptText(part).trim() !== "",
+        )
+      )
+        return candidate.run_id;
+      // Earlier assistant steps in this run are process messages.
+      break;
+    }
+  }
+  return null;
 }
 
 interface CopyHistoryInput {
@@ -135,7 +200,7 @@ function selectHistory(
     .prepare<RunRow>(
       `
     SELECT * FROM run_ledger WHERE session_id = ? AND context_scope_id IS NULL
-    AND status IN (${terminal}) AND run_id IN (${selectedIds})
+    AND status IN (${terminal}) AND run_id IN (${selectedIds}) ORDER BY run_id
   `,
     )
     .all(sourceSessionId, JSON.stringify([...runIds]));
@@ -204,16 +269,26 @@ export function copySessionHistory(
   const viewOrder = [...messages].sort(
     (a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : 1),
   );
-  const width = String(viewOrder.length).length;
   const nonce = randomUUID();
-  viewOrder.forEach((m, rank) =>
-    ids.set(
-      m.id,
-      `message_-copy_${String(rank).padStart(width, "0")}_${nonce}`,
-    ),
+  function mapOrderedIds(kind: "message" | "run", sourceIds: string[]): void {
+    const width = String(sourceIds.length).length;
+    sourceIds.forEach((sourceId, rank) =>
+      ids.set(
+        sourceId,
+        `${kind}_-copy_${String(rank).padStart(width, "0")}_${nonce}`,
+      ),
+    );
+  }
+  mapOrderedIds(
+    "message",
+    viewOrder.map((m) => m.id),
+  );
+  // The run ID breaks ties between equal start times in the latest-turn query.
+  mapOrderedIds(
+    "run",
+    runs.map((r) => r.run_id),
   );
   for (const p of parts) ids.set(p.id, messageIds.partId());
-  for (const r of runs) ids.set(r.run_id, `run_${randomUUID()}`);
   for (const i of inputs) ids.set(i.input_id, `input_${randomUUID()}`);
   for (const p of prompts) {
     const newPromptId = `prompt_${randomUUID()}`;

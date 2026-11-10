@@ -20,7 +20,11 @@ import {
   runWriteTransaction,
 } from "../database/index.js";
 import { HistoryCutInvalidError } from "./errors.js";
-import { copySessionHistory, findEndedMainRun } from "./copy-history.js";
+import {
+  copySessionHistory,
+  findEndedMainRun,
+  findForkableMainRun,
+} from "./copy-history.js";
 import {
   createDatabaseSessionStore,
   readSessionRow,
@@ -224,6 +228,10 @@ describe("copySessionHistory", () => {
         ...tables.map((t) => rows(t, main)),
       ];
       const before = snapshot();
+      // A completed main wake-up has no prompt record but its answer is a valid fork.
+      expect(findForkableMainRun(db, main, "old-run-b")).toBe("old-run-b");
+      expect(findForkableMainRun(db, main)).toBe("old-run-b");
+      expect(findForkableMainRun(db, main, "child-run")).toBeNull();
       const { sessionId, copiedMessageCount } = await copy("old-run-b");
       expect(snapshot()).toEqual(before);
       expect(copiedMessageCount).toBe(2);
@@ -332,6 +340,111 @@ describe("copySessionHistory", () => {
     expect(getDatabase().prepare("SELECT id FROM session").all()).toHaveLength(
       2,
     );
+  });
+
+  it("forks only at a final AI answer, and skips newer turns without one", () => {
+    const db = getDatabase();
+    run("answered", 1, "interrupted");
+    message("partial", "answered", 1, "assistant");
+    part("partial", "text", { text: "Partial reply" });
+    part(
+      "partial",
+      "text",
+      {
+        text: "Stopped",
+        synthetic: true,
+        metadata: { kind: "lifecycle-interruption" },
+      },
+      1,
+    );
+    message("summary", "answered", 2, "assistant", { agent: "context" });
+    part("summary", "text", {
+      text: "Summary",
+      metadata: { kind: "context-summary" },
+    });
+    message("compacted", "answered", 3, "assistant");
+    part("compacted", "reasoning", { text: "Retired", time: { compacted: 4 } });
+    run("user-only", 4, "cancelled");
+    message("unanswered", "user-only", 4);
+    part("unanswered", "text", { text: "Question" });
+    prompt("cancelled", "unanswered", "user-only", "cancelled");
+    run("tool", 5);
+    message("interim", "tool", 5, "assistant");
+    part("interim", "text", { text: "Previous step" });
+    message("tool-call", "tool", 6, "assistant");
+    part("tool-call", "text", { text: "I'll check" });
+    part(
+      "tool-call",
+      "tool",
+      { tool: "todo_read", state: { status: "completed", input: {} } },
+      1,
+    );
+    run("thinking", 7, "failed");
+    message("thought", "thinking", 7, "assistant");
+    part("thought", "reasoning", { text: "Thinking" });
+    part(
+      "thought",
+      "text",
+      {
+        text: "Interrupted",
+        synthetic: true,
+        metadata: { kind: "lifecycle-interruption" },
+      },
+      1,
+    );
+    part(
+      "thought",
+      "text",
+      { text: "internal", metadata: { displayText: " \n " } },
+      2,
+    );
+    run("runtime", 8, "succeeded", "subagent");
+    message("input", "runtime", 8, "user", {
+      runtimeInput: { kind: "subagent-result" },
+    });
+    part("input", "text", { text: "Child output" });
+    expect(findForkableMainRun(db, main)).toBe("answered");
+    expect(findForkableMainRun(db, main, "answered")).toBe("answered");
+    for (const id of ["user-only", "tool", "thinking", "runtime"]) {
+      expect(findForkableMainRun(db, main, id)).toBeNull();
+    }
+    expect(findEndedMainRun(db, main)).toBe("thinking");
+  });
+
+  it("retains the same latest answer across successive forks of runs that started together", async () => {
+    const db = getDatabase();
+    const turns = Array.from({ length: 12 }, (_, index) => index + 1);
+    for (const turn of turns) {
+      const id = `run-${String(turn).padStart(2, "0")}`;
+      run(id, 1);
+      const replyId = `reply-${String(turn)}`;
+      message(replyId, id, turn, "assistant");
+      part(replyId, "text", { text: `Answer ${String(turn)}` });
+    }
+
+    let sourceSessionId = main;
+    for (let generation = 0; generation < 3; generation++) {
+      const cutRunId = findForkableMainRun(db, sourceSessionId);
+      const copy = await runWriteTransaction(db, (tx) =>
+        copySessionHistory(tx, {
+          sourceSessionId,
+          cutRunId,
+          promptScopeKey: scope,
+          title: "Fork",
+        }),
+      );
+      // Join through rewritten references: every answer must retain its place in the tie.
+      const copied = db
+        .prepare<{ created_at: number }>(
+          `
+        SELECT m.created_at FROM run_ledger r JOIN message m ON json_extract(m.data, '$.runId') = r.run_id
+        WHERE r.session_id = ? AND m.session_id = ? ORDER BY r.run_id
+      `,
+        )
+        .all(copy.sessionId, copy.sessionId);
+      expect(copied.map((row) => row.created_at)).toEqual(turns);
+      sourceSessionId = copy.sessionId;
+    }
   });
 
   it("remaps runtime inputs, resend and steer receipts and preserves the assembled model request", async () => {
