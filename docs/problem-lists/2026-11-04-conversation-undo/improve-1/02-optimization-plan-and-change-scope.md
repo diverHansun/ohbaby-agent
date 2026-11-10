@@ -118,7 +118,13 @@ TUI ◄────────────────────────�
    - 实例列表 `A/adapters/ui-inprocess/subagent-instances.ts:157-169`：现在只按 `closedAt` 过滤，数据还可能来自内存里的运行时状态。改为：某个子代理的调用在执行存储里全部被撤销时，不显示这个子代理。还有未撤销调用的子代理照常显示，显示内容不改（可能是被撤销的那次最近调用，接受）。
    - 有意不做：子代理自己的对话不回退，它仍然记得被撤销的那次任务；第 1 轮启动的子代理在第 2 轮收到追加消息、再撤销第 2 轮时，它不会被停止。
 8. **与其他议题的衔接**：
-   - fork 与 side chat：开发顺序是 side chat → fork → 撤销，这两个议题落地后才有共用的复制函数 `A/services/session/copy-history.ts` 和切点查询 `findEndedMainRun`。本议题在复制函数选消息和 prompt 时加 `rewound_at IS NULL`；`run_ledger` 没有 `rewound_at` 列，`findEndedMainRun` 改为只认还有未撤销消息的 run。对应 04 的 T16c，并补 fork 04 §4.3 的用例。
+   - fork 与 side chat：开发顺序是 side chat → fork → 撤销，这两个议题落地后才有共用的复制函数 `A/services/session/copy-history.ts` 和切点查询。改动以 fork 合入后的代码为准，按 side chat 和 fork 的实现，要加 `rewound_at IS NULL` 的地方有四处：
+     1. **复制选消息**：`selectHistory` 选 `message` 的查询，以及它算切点位置的子查询。`part`、`current_run_input`、`run_ledger` 都从选中的消息推出来，不用另加条件。
+     2. **复制选 prompt**：选 `prompt_submission` 的查询。side chat 落地的复制函数会复制所有作用域的 prompt，再改写到目标作用域，这个条件对所有作用域都生效。
+     3. **已结束轮次**：`findEndedMainRun` 和 `findForkableMainRun` 共用的已结束轮次查询，在按 run 汇总消息的那一段加条件。`run_ledger` 没有 `rewound_at` 列，所以只剩已撤销消息的 run 自然被排除。
+     4. **fork 的最终回答**：`findForkableMainRun` 取每轮 AI 回答的查询，已撤销的回答不算。
+
+     对应 04 的 T16c，并补 fork 04 §4.3 的用例。
    - side chat：撤销入口对 side chat 会话返回 `SIDE_CHAT_UNSUPPORTED`，放在第 6.1 步的会话检查里。撤销在 side chat 之后落地，由本议题加这个检查和对应用例（04 的 T16b）。
 9. **路由与 SDK**：
    - `packages/ohbaby-server/src/protocols/web/routes/sessions.ts` 新增 `POST /v1/sessions/:sessionId/rewind`，校验与其他会话路由一致。现有会话路由多数只返回 400 和错误文本（例如压缩路由 :400-412），不能直接照抄；同一文件里的 Files 路由（:84-96）已经按错误码映射状态码并返回 `{ ok: false, error: { code, message } }`，可以照它的写法；状态码沿用 `packages/ohbaby-server/src/protocols/global-sessions.ts:94-120` 的 `globalSessionErrorStatus`（`SESSION_NOT_FOUND` 404，`SESSION_NOT_ROOT`、`SESSION_ARCHIVED`、`SESSION_RUNNING` 409）。这个函数遇到不认识的错误码会返回 500，所以要在里面加上两个新错误码 → 400。响应体带上 `code`。

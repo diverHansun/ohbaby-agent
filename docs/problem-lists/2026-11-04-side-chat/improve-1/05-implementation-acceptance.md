@@ -104,7 +104,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/services/session/copy-history.int
 
 ### 留给 fork 阶段
 
-- `findEndedMainRun`（`copy-history.ts:11-48`）和 SDK `listEndedTurns`（`packages/ohbaby-sdk/src/util/turn.ts:51`）判断“已结束轮次”的规则不完全一样。SDK 会列出 prompt 已结束但没有任何消息的轮次，后端要求至少有一条消息。这样界面上会出现后端拒绝的 fork 按钮。验收会话在 fork 开工前，在 fork 02 里定下按哪一边对齐。side chat 只取最近一个可用切点，不受影响，本分支不用改。
+- `findEndedMainRun`（`copy-history.ts:11-48`）和 SDK `listEndedTurns`（`packages/ohbaby-sdk/src/util/turn.ts:51`）判断“已结束轮次”的规则不完全一样。SDK 会列出 prompt 已结束但没有任何消息的轮次，后端要求至少有一条消息。这样界面上会出现后端拒绝的 fork 按钮。验收会话在 fork 开工前，在 fork 02 里定下按哪一边对齐。side chat 只取最近一个可用切点，不受影响，本分支不用改。（2026-11-10 已定：fork 新增 `findForkableMainRun`，只认最终 AI 回答有正文的轮次，和 Web 复制按钮的规则一致，见 fork 00 第 6 节。）
 - `validatePermissionRoot`（`ui-inprocess.ts` 约 2538 行）把 side chat 当作根会话放行。side chat 的审批属于它自己，这是预期行为，不用改。
 
 ## 复修记录（待用户复审）
@@ -121,3 +121,25 @@ pnpm exec vitest run packages/ohbaby-agent/src/services/session/copy-history.int
 命令行实测使用临时 SQLite 数据库和构建后的 CLI。启动前写入一条与即将启动的 daemon 同 PID、实例 ID 不同的侧聊记录，启动后确认已删除。通过 `curl` 比较打开侧聊前后的未注册 RPC 客户端快照，普通会话选择和完整消息 ID 序列相同。新侧聊的进程实例 UUID 和 PID 正确，两次 DELETE 均返回 204。主会话移动后，从目标工作区归档成功，原工作区的侧聊行已删除。
 
 复修代码提交为 `cdaa91b6` 和 `f9f1bf1d`。在后者上运行 9 个相关文件的全部测试，178 项通过。全库运行 `pnpm exec vitest run --maxWorkers=3 --minWorkers=1`，7,865 项通过，17 项跳过，0 项失败。相较首轮全库净增 5 个用例；其余断言扩展在已有用例中。构建、类型和格式检查通过，Lint 报告 0 个错误、119 个警告。交叉复核重跑了主会话和侧聊同时运行、重绑后重连两种情况，均通过。
+
+## 复审结论（2026-11-10）
+
+复审范围是 `a0bc0695..c2e46a45`，涉及 3 个提交：`cdaa91b6`、`f9f1bf1d`、`c2e46a45`。验收会话逐条核对了 V1 到 V21，并在本地复跑了以下检查：
+
+- `pnpm typecheck` 通过。
+- `pnpm format:check` 通过。
+- `pnpm lint` 报告 0 个错误、119 个警告，和首轮一样。
+- 全量 `pnpm test`：7865 项通过，17 项跳过，0 项失败。
+
+结论：**通过，可以从 `c2e46a45` 切 fork 分支。**
+
+- **V1 到 V15 都已按修法落地。** 判断 side chat 属于哪个进程，已全部改为比较 `ownerId`。没有 `ownerId` 的旧记录：PID 和本进程相同时被回收，PID 属于另一个存活进程时保留，这样处理是安全的。T5、T6、T9、T10、T11、T13 都有断言到位的测试。
+- **V2、V9 的回归面复核过。** 单个普通客户端绑定会话时，事件投递和改动前一致。有一处行为变了：后端没有选中会话时，`runtime.updated` 不再投给提交 prompt 的客户端。原来那样投其实是错投，这次属于修正。
+- **V16 只修了一部分，可以接受。** 复制消息的排序仍然依赖 ID 里 `-` 排在数字前面，但已经补了注释，并用真实分页接口加了顺序断言。
+- **V21 的修法和建议不同，可以接受。** 没有走 message store 的接口，而是从 `core/message/database-store.ts` 导出行级写入函数。普通消息写入的列、顺序、时间戳和事务都没变，属于纯重构。边界消息现在会写入 `context_scope_id`。
+
+以下几点低风险，不阻塞 fork，记下来留待以后处理：
+
+- 未绑定的快照沿用后端的 `activeSessionId`。后端当前选中的是 side chat 时，这个 ID 会指向一个已被过滤掉的会话（`client-view.ts:210-212`）。只有没绑定会话的旧 RPC 调用方会遇到。
+- 两个 prompt 同时运行时，不带 `sessionId` 的旧格式 `runtime.updated` 不会投给任何客户端。目前所有产生这个事件的地方都已带上 `sessionId`。
+- `runSessionIdsByRunId` 只在重置时清空，会一直增长。这在复修之前就存在，复修没有引入。

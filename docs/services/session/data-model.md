@@ -133,6 +133,7 @@ Session 在 TypeScript 中是一个完整领域对象，但落库时会按查询
 | `childrenIds` | `session.data.childrenIds` | 不作为主查询条件，保留结构弹性 |
 | `isSubagent` | `session.data.isSubagent` | 派生/展示字段，暂不建立索引 |
 | `sideChat` | `session.data.sideChat` | 临时侧聊的主会话 ID、边界消息 ID、创建进程 PID 和进程实例 ID |
+| `fork` | `session.data.fork` | 独立根会话的来源会话 ID（`sourceSessionId`）及其最终 AI 回答所在轮次（`sourceRunId`）；归档、改名后仍保留 |
 | 未来扩展字段 | `session.data.*` | 避免为低频字段频繁迁移 schema |
 
 **设计约束**：如果未来某个 `data` 字段开始参与高频查询或排序，应通过 database migration 提升为关系型列，而不是在 JSON 中做全表扫描。

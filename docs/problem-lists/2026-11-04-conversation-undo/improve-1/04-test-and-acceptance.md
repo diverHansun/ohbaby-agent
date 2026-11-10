@@ -42,7 +42,7 @@
 | T15c | 停下来超时、预检失败 | integration | 让当前这一轮迟迟不结束：超过 10 秒返回 `SESSION_RUNNING`，没有任何消息和 prompt 被标记，闸门未被占住。目标在压缩点之前或是 steer 时，直接返回对应错误，当前这一轮照常运行、排队不受影响 |
 | T16 | 空会话复用 | integration | 撤销到没有可见消息后，在同一目录“新建会话”得到的是新的会话 ID |
 | T16b | 拒绝条件 | integration | 按下表逐条验证 |
-| T16c | 与 fork、side chat 的衔接 | integration | 撤销后 fork 和新建 side chat 复制的历史里没有被撤销的消息和 prompt；fork 默认切点不会落在只剩被撤销消息的轮次上；fork 04 §4.3 的撤销相关用例通过 |
+| T16c | 与 fork、side chat 的衔接 | integration | 撤销后 fork 和新建 side chat 复制的历史里没有被撤销的消息和 prompt；fork 默认切点不会落在只剩被撤销消息的轮次上；新建 side chat 的切点同样跳过它们；fork 04 §4.3 的撤销相关用例通过 |
 
 T16b 的条件与错误码：
 

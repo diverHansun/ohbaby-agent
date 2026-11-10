@@ -27,7 +27,7 @@ Web 在用户消息上放 Edit 按钮，TUI 新增 `/rewind`。连 AI 的文件�
 - 本议题没有要求关键改动清单，02 只写到包和文件一级。
 - Stage 2（Web）依赖[消息复制议题](../2026-11-04-message-copy/README.md)的消息操作栏，要在它之后实施。Stage 1（后端）和 Stage 3（TUI）不依赖它。
 - 分工在实施前与用户确认。
-- 前置：Stage 1 第 8 步要改的 `copy-history.ts` 和 `findEndedMainRun` 由 side chat 和 fork 议题新建，本议题的 Stage 1 要在这两个议题的 Stage 1 之后实施。
+- 前置：Stage 1 第 8 步要改的 `copy-history.ts`（含 `findEndedMainRun`）由 side chat 议题新建，`findForkableMainRun` 由 fork 议题新增，本议题的 Stage 1 要在这两个议题的 Stage 1 之后实施。
 - 不可逆点：数据上没有。迁移 `029` 只加可空列，清空 `rewound_at` 就能恢复。但运行中撤销时，停掉的任务、取消的排队、暂停的 goal、停掉的子代理不会恢复，即使撤销最后没做成。
 
 ## 相关议题
@@ -35,7 +35,7 @@ Web 在用户消息上放 Edit 按钮，TUI 新增 `/rewind`。连 AI 的文件�
 | 议题 | 关系 |
 |---|---|
 | [消息复制](../2026-11-04-message-copy/README.md) | 提供消息操作栏 |
-| [会话 fork](../2026-11-04-session-fork/README.md) | fork 复制历史和取切点时跳过已撤销的内容；撤销最后落地，由本议题在共用的 `copy-history.ts` 和 `findEndedMainRun` 里补上这个条件 |
+| [会话 fork](../2026-11-04-session-fork/README.md) | fork 复制历史和取切点时跳过已撤销的内容；撤销最后落地，由本议题在共用的 `copy-history.ts`（复制选行、`findEndedMainRun`、`findForkableMainRun`）里补上这个条件 |
 | [side chat](../2026-11-04-side-chat/README.md) | side chat 会话里禁用撤销，返回 `SIDE_CHAT_UNSUPPORTED`；撤销最后落地，这个检查由本议题加在撤销入口 |
 | 会话存储区（`docs/services/session-storage/`） | 无直接依赖 |
 | [已加载 MCP 工具从历史重建](../2026-11-09-mcp-loaded-tools-from-history/README.md) | 先于本议题实施。撤销后调用 `mcpToolMenu.disposeSession(sessionId)`，已加载工具从撤销后的历史重建 |
