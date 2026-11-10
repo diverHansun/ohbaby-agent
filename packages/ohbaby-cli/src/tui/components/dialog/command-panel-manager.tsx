@@ -208,7 +208,7 @@ export function CommandPanelManager({
         </Text>
       ) : panel.kind === "models" ? (
         <ModelsPanel
-          key={panel.clientInvocationId}
+          key={panel.openedAt}
           client={client}
           contextWindowUsage={contextWindowUsage}
           data={panel.output?.kind === "data" ? panel.output.data : {}}

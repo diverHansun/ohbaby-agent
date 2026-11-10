@@ -585,9 +585,13 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   }
 
   getCurrentModel(
-    input?: Parameters<UiBackendClient["getCurrentModel"]>[0],
+    input?: Parameters<UiBackendClient["getCurrentModel"]>[0] | null,
   ): ReturnType<UiBackendClient["getCurrentModel"]> {
-    return this.rpc("getCurrentModel", input === undefined ? [] : [input]);
+    // The TUI's JSON-cloned positional arguments encode explicit undefined as null.
+    return this.rpc(
+      "getCurrentModel",
+      input === undefined || input === null ? [] : [input],
+    );
   }
 
   probeModelContextWindow(

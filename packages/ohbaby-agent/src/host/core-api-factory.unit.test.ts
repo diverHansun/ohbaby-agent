@@ -1,8 +1,44 @@
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { UiCommandRecord } from "./command-record.js";
 import { describe, expect, it, vi } from "vitest";
 import { createRPC, type CoreAPI } from "ohbaby-sdk";
 
 describe("buildCoreAPIImpl", () => {
+  it("invalidates a standalone host after successive atomic model file replacements", async () => {
+    vi.resetModules();
+    const home = await mkdtemp(join(tmpdir(), "ohbaby-model-watch-"));
+    vi.stubEnv("OHBABY_HOME", home);
+    const file = join(home, "model.json");
+    const notifySettingsChanged = vi.fn(() => Promise.resolve());
+    const backend = { ...createPersistentClientMock(), notifySettingsChanged };
+    vi.doMock("../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
+      createPersistentUiBackendClient: (): typeof backend => backend,
+    }));
+    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+    await writeFile(file, "{}");
+    const host = await buildCoreAPIImpl({ watchModelConfig: true });
+    try {
+      for (const revision of [1, 2]) {
+        await writeFile(file + ".tmp", JSON.stringify({ revision }));
+        await rename(file + ".tmp", file);
+        await vi.waitFor(
+          () => {
+            expect(notifySettingsChanged).toHaveBeenCalledTimes(revision);
+          },
+          { timeout: 2500 },
+        );
+      }
+      expect(notifySettingsChanged).toHaveBeenCalledWith(["model"]);
+    } finally {
+      await host.dispose();
+      vi.unstubAllEnvs();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("closes admission synchronously and bounds backend cleanup with the caller deadline", async () => {
     vi.resetModules();
     const closeAdmission = vi.fn();

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createRPC, type CoreAPI } from "ohbaby-sdk";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -974,7 +975,9 @@ describe("createRemoteUiBackendClient", () => {
       await client.listCommands(listQuery);
       await client.submitPromptAndWait("hello", { sessionId: "session_1" });
       await client.compactSession(compactOptions);
-      await client.getCurrentModel();
+      const tui = createRPC<CoreAPI>();
+      tui.connectImpl(client);
+      await tui.createProxy(client).getCurrentModel(undefined);
       await client.getCurrentModel({ modelEntryId: "entry_b" });
       await client.probeModelContextWindow(probeInput);
       await client.connectModel(connectInput);

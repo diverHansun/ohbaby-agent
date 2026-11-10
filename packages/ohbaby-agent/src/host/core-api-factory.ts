@@ -1,3 +1,5 @@
+import { unwatchFile, watchFile, type Stats } from "node:fs";
+import { getModelJsonPath } from "../config/llm/loaders.js";
 import type { UiCommandRecorder } from "./command-record.js";
 import type { CoreAPI, SDKAPI, UiSnapshot } from "ohbaby-sdk";
 import {
@@ -21,6 +23,7 @@ export interface CoreApiFactoryOptions {
   readonly commandRecorder?: UiCommandRecorder | false;
   readonly continue?: boolean;
   readonly inProcess?: boolean;
+  readonly watchModelConfig?: boolean;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
   readonly resume?: string;
@@ -98,6 +101,21 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
     entryPoint: "agent-host",
     recorder: commandRecorderFromOptions(options),
   });
+  // A standalone TUI has its own event bus. Observe the file by path so
+  // atomic replacement, deletion and later recreation all invalidate its views.
+  const modelPath = options.watchModelConfig ? getModelJsonPath() : undefined;
+  const onModelChange = (current: Stats, previous: Stats): void => {
+    if (
+      current.ino === previous.ino &&
+      current.mtimeMs === previous.mtimeMs &&
+      current.size === previous.size
+    )
+      return;
+    void rawClient.notifySettingsChanged(["model"]);
+  };
+  if (modelPath) {
+    watchFile(modelPath, { persistent: false, interval: 250 }, onModelChange);
+  }
   let disposePromise: Promise<void> | undefined;
   const admission: { closeAdmission?(): void } = rawClient;
   const closeAdmission = (): void => {
@@ -114,6 +132,7 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
     closeAdmission,
     dispose(options = createShutdownOptions()): Promise<void> {
       if (disposePromise) return disposePromise;
+      if (modelPath) unwatchFile(modelPath, onModelChange);
       closeAdmission();
       try {
         beginDatabaseShutdown(options.deadlineAt);

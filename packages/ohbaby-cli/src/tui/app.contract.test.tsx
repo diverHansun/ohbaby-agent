@@ -4803,6 +4803,56 @@ describe("OhbabyTerminalApp", () => {
     await waitForFrame(app, (nextFrame) => !nextFrame.includes("GLM 5.1"));
   });
 
+  it("refreshes an open model list and ignores an older refresh after its provider was deleted", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await openModels(app, client, 3);
+    client.emit({ type: "model.invalidated" });
+    client.emit({ type: "model.invalidated" });
+    await waitForCommandCount(client, 3);
+    const refreshes = client.executeCommand.mock.calls
+      .slice(1)
+      .map(([invocation]) => invocation as UiCommandInvocation);
+    const deliver = (invocation: UiCommandInvocation, model: string): void => {
+      client.emit({
+        type: "command.result.delivered",
+        timestamp: 2,
+        clientInvocationId: invocation.clientInvocationId,
+        commandRunId: invocation.clientInvocationId,
+        output: {
+          kind: "data",
+          subject: "models.current",
+          data: {
+            models: [
+              {
+                id: model,
+                label: model,
+                provider: "survivor",
+                active: true,
+                default: true,
+              },
+            ],
+          },
+        },
+      });
+    };
+    deliver(refreshes[1], "New default");
+    await waitForFrame(app, (frame) =>
+      frame.includes("New default ✓ survivor · default"),
+    );
+    deliver(refreshes[0], "Deleted model");
+    await flush();
+    expect(app.lastFrame()).toContain("New default ✓");
+    expect(app.lastFrame()).not.toMatch(/Deleted model|Model 1/u);
+    app.unmount();
+  });
+
   it("T25/T25b picks a model for this chat and moves the default with d", async () => {
     const client = createFakeClient(snapshot(), displayCommandCatalog);
     client.updateSessionModel.mockResolvedValue(snapshot().sessions[0]);

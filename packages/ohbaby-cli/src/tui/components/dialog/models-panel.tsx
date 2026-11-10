@@ -46,20 +46,29 @@ export function ModelsPanel({
   const rows = modelRows(data.models);
   // `d` moves the default and may move a chat that follows it.
   const [override, setOverride] = useState<{
+    readonly data?: ModelsPanelProps["data"];
     readonly defaultId?: string;
     readonly activeId?: string;
   }>({});
-  const defaultId = override.defaultId ?? rows.find((row) => row.default)?.id;
+  const currentOverride = override.data === data ? override : undefined;
+  const defaultId =
+    currentOverride?.defaultId ?? rows.find((row) => row.default)?.id;
   const activeId =
-    override.activeId ??
-    (sessionId === null ? (pendingModelEntryId ?? defaultId) : undefined) ??
+    currentOverride?.activeId ??
+    (sessionId === null
+      ? (rows.find((row) => row.id === pendingModelEntryId)?.id ?? defaultId)
+      : undefined) ??
     rows.find((row) => row.active)?.id;
-  const [selectedIndex, setSelectedIndex] = useState(() =>
-    Math.max(
-      0,
-      rows.findIndex((row) => row.id === activeId),
-    ),
-  );
+  // Keep keyboard focus on the same entry when a provider's rows disappear.
+  const [cursorId, setCursorId] = useState<string>();
+  const cursorIndex = rows.findIndex((row) => row.id === cursorId);
+  const selectedIndex =
+    cursorIndex >= 0
+      ? cursorIndex
+      : Math.max(
+          0,
+          rows.findIndex((row) => row.id === activeId),
+        );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Input handlers re-register after commit; read the latest frame's values.
@@ -107,7 +116,7 @@ export function ModelsPanel({
     if (delta !== 0) {
       const next = Math.max(0, Math.min(last, index + delta));
       latest.current = { rows: current, selectedIndex: next };
-      setSelectedIndex(next);
+      setCursorId(current[next]?.id);
       return;
     }
     const row = current.at(Math.min(index, last));
@@ -134,6 +143,7 @@ export function ModelsPanel({
           : null;
         if (!mounted.current) return;
         setOverride({
+          data,
           defaultId: next,
           ...(model ? { activeId: model.id } : {}),
         });

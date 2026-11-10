@@ -275,6 +275,7 @@ describe("runOhbabyCli", () => {
     );
     expect(buildCoreAPIImpl).toHaveBeenCalledWith({
       diagnosticsFilePath: "/logs/tui.jsonl",
+      watchModelConfig: true,
       inProcess: true,
       logger,
     });

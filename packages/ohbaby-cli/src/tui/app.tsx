@@ -34,6 +34,7 @@ import {
   parseExportFormat,
   runSessionExport,
 } from "./session-export/run-export.js";
+import { parseSlashInput, resolveCommand } from "./slash-commands/runtime.js";
 import { formatError } from "./format-error.js";
 import { DialogManager } from "./dialogs/manager.js";
 import { CommandPanelManager } from "./components/dialog/command-panel-manager.js";
@@ -253,6 +254,18 @@ export function OhbabyTerminalApp({
     subscribeEvents,
     pendingModelEntryId,
   );
+  useEffect(() => {
+    // A removed draft choice now resolves to the default. Submitting its old
+    // explicit id would fail admission even though the footer shows the fallback.
+    if (
+      activeSessionId === null &&
+      pendingModelEntryId &&
+      footerModel?.source === "default"
+    ) {
+      setPendingModelEntryId(null);
+      setPendingReasoning(null);
+    }
+  }, [activeSessionId, pendingModelEntryId, footerModel]);
   const activeSession = useTuiStoreSelector(store, (state) =>
     state.sessions.find((session) => session.id === state.activeSessionId),
   );
@@ -651,6 +664,38 @@ export function OhbabyTerminalApp({
     },
     [activeSessionId, setActiveCommandPanel],
   );
+  const refreshOpenModels = useCallback((): void => {
+    const panel = commandPanelRef.current;
+    const catalog = store.getState().catalog;
+    if (panel?.mode !== "display" || panel.kind !== "models" || !catalog)
+      return;
+    const result = resolveCommand(parseSlashInput("/models"), catalog, {
+      surface: "tui",
+      sessionId: panel.sessionId ?? undefined,
+    });
+    if (result.kind !== "resolved") return;
+    const { invocation } = result;
+    const { clientInvocationId } = invocation;
+    pendingDisplayCommandInvocationsRef.current.set(clientInvocationId, {
+      sessionId: panel.sessionId,
+    });
+    // Keep the current rows visible until the newest invocation returns.
+    setActiveCommandPanel({ ...panel, clientInvocationId });
+    void client.executeCommand(invocation).catch((error: unknown) => {
+      pendingDisplayCommandInvocationsRef.current.delete(clientInvocationId);
+      const current = commandPanelRef.current;
+      if (
+        current?.mode === "display" &&
+        current.clientInvocationId === clientInvocationId
+      ) {
+        setActiveCommandPanel({
+          ...current,
+          status: "error",
+          error: sanitizeCommandPanelError(formatError(error)),
+        });
+      }
+    });
+  }, [client, setActiveCommandPanel, store]);
   const consumeCommandPanelEvent = useCallback(
     (tuiEvent: UiEvent): boolean => {
       if (
@@ -927,6 +972,7 @@ export function OhbabyTerminalApp({
         resetTranscriptSurface("switch-session", false);
       },
       onModelInvalidated: () => {
+        refreshOpenModels();
         void loadCatalog().catch(() => undefined);
       },
     });
@@ -978,6 +1024,7 @@ export function OhbabyTerminalApp({
     client,
     consumeCommandPanelEvent,
     pendingPromptWorkspace,
+    refreshOpenModels,
     exit,
     loadCatalog,
     resetTranscriptSurface,

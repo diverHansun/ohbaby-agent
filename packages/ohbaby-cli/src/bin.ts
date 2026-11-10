@@ -125,6 +125,7 @@ interface AgentRuntimeModule {
 }
 
 type AgentCoreFactoryOptions = CliGlobalOptions & {
+  readonly watchModelConfig?: boolean;
   readonly diagnosticsFilePath?: string;
   readonly logger?: Logger;
 };
@@ -428,6 +429,7 @@ async function loadDefaultDependencies(
         }
         const host = await buildCoreAPIImpl({
           ...agentOptions,
+          watchModelConfig: true,
           ...(diagnosticsFilePath === undefined ? {} : { diagnosticsFilePath }),
           logger: handle.logger,
         });
