@@ -34,7 +34,7 @@ adapter 层：发布会话创建事件、刷新侧栏 → 返回 { sessionId, ti
 | 切点定位 | 可选的 `runId`；不给就用最近一个已有最终 AI 回答正文的已结束主 run | 一轮就是一个 run；唤醒轮、goal 续跑轮没有 prompt 记录，按 prompt 定位会漏掉 | 按 `promptId` 定位（漏掉唤醒轮）；按消息 ID 定位（要再推一次属于哪一轮） | 无 |
 | 哪些轮次能 fork | 跟着复制按钮走：最终答案有复制按钮的轮次就有 fork 按钮 | 复制按钮的显示规则已经写好、测过，直接复用；唤醒轮常常就是最新结论 | ZCode、kimi-code 只认用户开启的轮次（ohbaby 唤醒轮也单独显示，有复制没 fork 会让人困惑） | 最终答案没有正文的轮次没有按钮，用会话行菜单兜底 |
 | 来源信息 | `session.data.fork = { sourceSessionId, sourceRunId }` | 00 已确认；排查问题时有据可查。`sourceRunId` 已经唯一确定切点，不再记继承的消息数（复制函数写会话行时还不知道条数） | 不记（dsh）；用 `parent_id`（会被当成子代理） | 目前没有读取方，只用于排查问题 |
-| 标题 | 服务端计算 `基础标题 (n)`，基础标题取源会话的**显示标题**；不加时间（时间看消息下面的时间戳）；用户之后可以自己改名 | 一次请求拿到最终结果；默认标题 `New session - <时间>` 加上 `(1)` 仍会被当成默认标题、显示时丢掉序号，所以用显示标题 | dsh 那样前端再发一次改名请求 | 一次按前缀取标题、再在 JS 里精确匹配的查询 |
+| 标题 | 服务端计算 `基础标题 (n)`，基础标题取源会话的**显示标题**；不加时间（时间看消息下面的时间戳）；用户之后可以自己改名 | 一次请求拿到最终结果；使用已有的显示标题可以保留从首条提问得到的可读名称；带编号的标题也能稳定显示 | dsh 那样前端再发一次改名请求 | 一次按前缀取标题、再在 JS 里精确匹配的查询 |
 | 已加载的 MCP 工具 | 不另做处理：新会话第一次用到时从复制来的历史重建，得到切点那一刻的已加载工具和顺序。依赖[已加载 MCP 工具从历史重建议题](../../2026-11-09-mcp-loaded-tools-from-history/README.md)先落地（2026-11-10 确认，取代原来提交后 `copyScope` 的做法） | codex、kimi-code、ZCode、dsh 都把这份状态放在历史里，复制历史就带过去了。ohbaby 原来只存在内存里，该议题改为从历史推导 | 提交后 `copyScope` 复制内存状态（只是绕过问题，已放弃） | 新会话不会有切点之后才加载的工具，这正是切点那一刻的状态 |
 | “总是允许”规则 | 不带，新会话从空开始 | fork 是从此独立的新会话；codex 的 fork 也让“本会话已批准”从空开始。权限档位是全局的，本来就一致 | 像 side chat 那样复制（side chat 是主会话的临时帮手，fork 不是）；opencode 按项目存 | 用户在新会话里第一次做写操作时要重新批准一次 |
 | 侧栏显示 | 平级，和普通会话一样按更新时间排，不嵌套 | 6 个开源项目都平级；嵌套要处理分页、分组、链条断开、排序，改动面不小，收益只是“看出谁从谁来”，标题里的 `(n)` 已经够提示 | Claude app 那样嵌在源会话下面（11-09 讨论过，用户最终选平级） | 看不出 fork 来自哪个会话 |
@@ -55,11 +55,11 @@ adapter 层：发布会话创建事件、刷新侧栏 → 返回 { sessionId, ti
 1. **复用切点查询**。Side Chat 已在 `A/services/session/copy-history.ts` 提供 `findEndedMainRun(tx, sessionId, runId?)`。Fork 复用它的终态、排序和主上下文约束，并通过 `findForkableMainRun` 要求最终 AI 回答有可见正文。传入 run ID 时只检查该轮，省略时跳过空轮和只有用户提问的轮次，按 `COALESCE(started_at, created_at) DESC, run_id DESC` 选择最近可复制的已结束主轮次。查询和复制共用一个写事务。
    “最终 AI 回答有正文”的判断要和 Web 决定复制按钮的规则（`W/ui/conversation/run-process.ts:54-68`）一致：只看这一轮最后一条 AI 消息（压缩摘要消息除外），它有正文、没有工具片段、没有隐藏工具调用，就算有回答。最后一条是空消息时，这一轮就算没有回答，不再往前找上一步，否则菜单 fork 会切在用户看不到按钮的位置。
 2. **adapter 层**：新建 `A/adapters/ui-inprocess/session-fork.ts`，由 `ui-inprocess.ts` 注入依赖后暴露 `forkSession({ sessionId, runId? })`。打开 `runWriteTransaction`（`BEGIN IMMEDIATE`，跨进程也串行），在回调里依次：
-   1. **校验源会话**：在事务里读会话行。不存在返回 `SESSION_NOT_FOUND`；不是根会话返回 `SESSION_NOT_ROOT`；是 side chat（`isSideChatSession`）返回 `SIDE_CHAT_UNSUPPORTED`；不是 `active` 返回 `SESSION_ARCHIVED`。side chat 先落地，这项检查由**本议题**加（side chat 02 写明 fork、撤销的入口检查由各自议题加）。放在事务里读，和归档并发时不会 fork 出一个已归档的源会话。
+   1. **校验源会话**：在写事务中调用 `readActiveMainSession`，按顺序检查会话存在、属于根会话、状态为 active、且为普通会话。相应错误码依次为 `SESSION_NOT_FOUND`、`SESSION_NOT_ROOT`、`SESSION_ARCHIVED`、`SIDE_CHAT_UNSUPPORTED`。因此已归档的 Side Chat 返回 `SESSION_ARCHIVED`，活跃的 Side Chat 返回 `SIDE_CHAT_UNSUPPORTED`。
       校验源会话后，用 `assertSessionInWorkspace(source, promptScopeKey)` 核对目标工作区。移动后从旧目录发起请求会得到 `409 SESSION_MOVED`，包括尚未开始下一轮的待生效目录变更。
    2. **定切点**：`findForkableMainRun(tx, sessionId, runId)`，没结果返回 `FORK_TARGET_INVALID`。fork 从不传 `null` 给复制函数。复制函数复核切点时抛出的 `HistoryCutInvalidError` 在 Fork 入口映射为 `FORK_TARGET_INVALID`。
-   3. **算标题**：用 `resolveSessionDisplayTitle` 取得源会话的显示标题，去掉末尾已有的 ` (数字)`。从所有普通根会话（含已归档）中，按大小写精确匹配基础标题和左括号前缀，再从完整数字后缀中取最大值加一。编号与复制位于同一事务。
-   4. **复制**：`copySessionHistory(tx, { sourceSessionId, cutRunId, promptScopeKey, title, data: { fork: { sourceSessionId, sourceRunId: cutRunId } } })`，`promptScopeKey` 取后端的 prompt 作用域（`ui-inprocess.ts:1280-1284`）。
+   3. **算标题**：用 `resolveSessionDisplayTitle` 取得源会话的显示标题，去掉末尾已有的 ` (数字)`。从所有普通根会话（含已归档）中，按大小写精确匹配基础标题和左括号前缀，再从完整数字后缀中取最大值加一。编号与复制位于同一事务。共享的 `isDefaultSessionTitle` 对所有会话生效。旧格式标题若以空格和括号数字结尾（例如 `New session - 2026-11-10 (1)`），会作为正式标题保留。
+   4. **复制**：`copySessionHistory(tx, { sourceSessionId, cutRunId, promptScopeKey, title, data: { fork: { sourceSessionId, sourceRunId: cutRunId } } })`，`promptScopeKey` 取后端的 prompt 作用域（`ui-inprocess.ts:1280-1284`）。共享复制函数以 `ORDER BY run_id` 读取源轮次，给副本分配 `run_-copy_<定宽序号>_<本次复制的 UUID>`。这样开始时间相同的 run 在再次 Fork 时保持原有次序。Side Chat 使用相同的 ID 生成规则。
    - 提交后的顺序与 side chat 相同：在总线上发布 `SessionEvent.Created`（带新会话的 `Session` 对象，`SessionManager.create` 在 `manager.ts:146` 也这样做，adapter 靠它填充会话元数据缓存，`ui-inprocess.ts:737-739`）；再调用 `publishSessionIndexInvalidation()`（`ui-inprocess.ts:2304`）刷新侧栏。已加载的 MCP 工具不用复制，新会话第一次用到时从复制来的历史重建（见决策表）。不复制会话级的“总是允许”规则，也不设 `promptCacheSessionId`（新会话用自己的缓存身份）。
    - 返回 `{ sessionId, title }`。
 3. **会话字段**：`session.data.fork` 加进 `Session` 类型、`SessionData`、`rowToSession`、`encodeData`（`database-store.ts:196-206、212-241`，`SessionData` 在 `:44-51`）和事件的 zod 定义（00 P13）。
@@ -121,15 +121,19 @@ POST /v1/sessions/:sessionId/fork
 200：{ "sessionId": "session_...", "title": "原标题 (1)" }
 404 SESSION_NOT_FOUND     源会话不存在
 409 SESSION_NOT_ROOT      源会话是子代理会话
-409 SIDE_CHAT_UNSUPPORTED 源会话是 side chat 会话（错误码由 side chat 议题定义，fork 入口的检查由本议题加）
-409 SESSION_ARCHIVED      源会话已归档
+409 SIDE_CHAT_UNSUPPORTED 源会话是活跃的 Side Chat
+409 SESSION_ARCHIVED      源会话已归档（含已归档的 Side Chat）
 409 SESSION_MOVED         请求使用了旧的工作目录
 400 FORK_TARGET_INVALID   run 不存在、不属于该会话、不在主上下文、未结束、最终 AI 回答没有可见正文，或会话里还没有符合条件的轮次
 ```
 
 SDK：`forkSession(input: { sessionId: string; runId?: string }): Promise<{ sessionId: string; title: string }>`。
 
-复制函数由 side chat 议题定义（side chat 02 §2.5 的 `copySessionHistory`），fork 只调用，不改它的接口。
+HTTP 空请求体和 `{}` 都表示选择最近一个有效回答。JSON 解析失败、请求体不是对象、含未知字段，或显式提供 `runId: null`、空白字符串等无效值，统一返回 HTTP 400 和 `FORK_TARGET_INVALID`。超过请求体大小限制时，HTTP 层先返回 413。
+
+JSON-RPC 客户端在服务端提供时保留错误中的 `targetDirectory`，收到 `SESSION_MOVED` 后可从中读取目标目录。OpenAPI 已登记 Fork 路由的认证、客户端请求头、请求体、成功响应及错误状态。
+
+复制函数沿用 side chat 02 §2.5 的 `copySessionHistory` 接口。
 
 ## 2.6 风险与回滚
 
