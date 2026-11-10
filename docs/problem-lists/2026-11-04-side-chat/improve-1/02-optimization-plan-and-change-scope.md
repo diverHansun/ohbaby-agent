@@ -185,7 +185,7 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
 
 ```
 POST   /v1/sessions/:mainId/side-chats  → { sideChatId, title, boundaryMessageId }（每次新建一个）
-GET    /v1/sessions/:mainId/side-chats  → { sideChats: [{ sideChatId, title, createdAt }] }（只含还开着的）
+GET    /v1/sessions/:mainId/side-chats  → { sideChats: [{ sideChatId, title, createdAt, boundaryMessageId, workingDirectory }] }
 DELETE /v1/side-chats/:sideChatId      → 204（已经不存在时也返回 204）
 
 404 SESSION_NOT_FOUND        主会话不存在
@@ -196,6 +196,8 @@ DELETE /v1/side-chats/:sideChatId      → 204（已经不存在时也返回 204
 ```
 
 查看、提交、中止、审批都用现有接口，由绑定到 side chat 的客户端调用。
+
+主会话移动工作区后，调用方在新工作区列出还开着的 Side Chat，然后按每条记录的 `workingDirectory` 绑定并用 `boundaryMessageId` 恢复面板。移动前已打开的 Side Chat 留在原目录，移动后新开的使用目标目录。归档主会话时，各工作区分别终止并清理自己负责的 Side Chat。
 
 复制函数（以后 fork 也用）：
 

@@ -8,7 +8,7 @@ Web 通过右侧面板和“选中文字后在 side chat 里问”打开；TUI �
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | side chat 会话的创建、隐藏、操作拦截、删除；Web 面板（独立客户端）与选中文字入口；TUI `/btw` | 规划中 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | Side Chat 后端、Web 面板与选中文字入口、TUI `/btw` | Stage 1 后端待用户检查，Web 与 TUI 待实施 |
 
 ## 本轮文档地图
 
@@ -19,7 +19,7 @@ Web 通过右侧面板和“选中文字后在 side chat 里问”打开；TUI �
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 决策表、Stage 1 至 4、接口、风险 |
 | [03 参考项目](improve-1/03-reference-projects.md) | codex、ZCode、kimi-code、claude-code、opencode、deepseek-harness 的做法与取舍 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 场景、回归清单、发布门、对抗性审查 |
-| 05 实施验收 | 实施完成后由验收会话写入 `improve-1/05-implementation-acceptance.md` |
+| [05 后端实施与验收](improve-1/05-implementation-acceptance.md) | Stage 1 的交付范围、命令行端到端结果和恢复契约 |
 
 ## 实施契约
 
