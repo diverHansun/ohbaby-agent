@@ -41,7 +41,7 @@
 | T15b | 运行中先停再撤 | integration | 当前这一轮正在跑、后面排着两条 prompt：带 `text` 撤销正在跑的这一轮的用户消息，当前这一轮被中断，两条排队的 prompt 被取消并标记为已撤销、没有开跑，新 prompt 正常执行；撤销更早的一轮时结果相同。正在跑的分别是 goal 轮次、子代理唤醒轮次时，结果也相同；撤销中途子代理唤醒抢先开出的一轮也被中断并隐藏 |
 | T15c | 停下来超时、预检失败 | integration | 让当前这一轮迟迟不结束：超过 10 秒返回 `SESSION_RUNNING`，没有任何消息和 prompt 被标记，闸门未被占住。目标在压缩点之前或是 steer 时，直接返回对应错误，当前这一轮照常运行、排队不受影响 |
 | T16 | 空会话复用 | integration | 撤销到没有可见消息后，在同一目录“新建会话”得到的是新的会话 ID |
-| T16b | 拒绝条件 | integration | 按下表逐条验证 |
+| T16b | 拒绝条件 | integration | 按下表逐条验证。会话检查的顺序与 02 Stage 1 第 6.1 步一致（跟随已落地的 `readActiveMainSession`、`assertSessionInWorkspace`）：`SESSION_NOT_FOUND` → `SESSION_NOT_ROOT` → `SESSION_ARCHIVED` → `SIDE_CHAT_UNSUPPORTED` → `SESSION_MOVED` |
 | T16c | 与 fork、side chat 的衔接 | integration | 撤销后 fork 和新建 side chat 复制的历史里没有被撤销的消息和 prompt；fork 默认切点不会落在只剩被撤销消息的轮次上；新建 side chat 的切点同样跳过它们；fork 04 §4.3 的撤销相关用例通过 |
 
 T16b 的条件与错误码：
@@ -53,8 +53,8 @@ T16b 的条件与错误码：
 | 目标在最近一次压缩之前 | `REWIND_BEFORE_COMPACTION` |
 | 会话不存在 | `SESSION_NOT_FOUND` |
 | 子代理会话 | `SESSION_NOT_ROOT` |
-| side chat 会话 | `SIDE_CHAT_UNSUPPORTED` |
-| 已归档会话 | `SESSION_ARCHIVED` |
+| 已归档会话（包括已归档的 side chat） | `SESSION_ARCHIVED` |
+| 未归档的 side chat 会话 | `SIDE_CHAT_UNSUPPORTED` |
 | 会话已移到别的目录 | `SESSION_MOVED` |
 
 | T17 | 接口契约 | contract | 请求体校验、响应结构、错误码和状态码与 02 §2.5 一致，响应体带 `code`；进程内实现与 HTTP 实现对同一组输入给出相同结果 |
