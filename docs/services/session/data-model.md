@@ -132,7 +132,7 @@ Session 在 TypeScript 中是一个完整领域对象，但落库时会按查询
 | `stats.lastMessageAt` | `session.last_message_at` | 最近活动排序和展示 |
 | `childrenIds` | `session.data.childrenIds` | 不作为主查询条件，保留结构弹性 |
 | `isSubagent` | `session.data.isSubagent` | 派生/展示字段，暂不建立索引 |
-| `sideChat` | `session.data.sideChat` | 临时侧聊的主会话 ID、边界消息 ID 和创建进程 PID |
+| `sideChat` | `session.data.sideChat` | 临时侧聊的主会话 ID、边界消息 ID、创建进程 PID 和进程实例 ID |
 | 未来扩展字段 | `session.data.*` | 避免为低频字段频繁迁移 schema |
 
 **设计约束**：如果未来某个 `data` 字段开始参与高频查询或排序，应通过 database migration 提升为关系型列，而不是在 JSON 中做全表扫描。
@@ -143,7 +143,7 @@ Session 在 TypeScript 中是一个完整领域对象，但落库时会按查询
 
 ### Side Chat
 
-侧聊是 `parent_id` 为空的根会话。打开时，后端在一个事务里复制主会话到最近一次已结束的主 run 为止的历史，再写入边界消息。`sideChat.mainSessionId` 用于定位主会话的缓存身份和 scratch 目录，`boundaryMessageId` 标记继承历史的结束位置，`ownerPid` 标识负责它的进程。后续消息、run 和审批仍归侧聊自己。
+侧聊是 `parent_id` 为空的根会话。打开时，后端在一个事务里复制主会话到最近一次已结束的主 run 为止的历史，再写入边界消息。`sideChat.mainSessionId` 用于定位主会话的缓存身份和 scratch 目录，`boundaryMessageId` 标记继承历史的结束位置，`ownerId` 标识创建进程实例，`ownerPid` 用于启动时检查进程是否存活以及本地 PID 是否复用。后续消息、run 和审批仍归侧聊自己。
 
 普通列表通过 `isUserFacingSession` 或对应的 SQL 条件隐藏侧聊。创建进程的会话索引保留带 `isSideChat` 的条目，客户端可以显式绑定。关闭侧聊会删除它的数据库记录，主会话的历史和共享 scratch 文件会保留。恢复列表返回侧聊自己的工作目录。主会话迁移后，已有侧聊继续在原目录执行，新开的侧聊使用目标目录。
 

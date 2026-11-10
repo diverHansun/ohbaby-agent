@@ -19,7 +19,7 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
           面板自己读 side chat 的视图；审批同时同步主会话和 side chat
 
 关闭 ─► DELETE /v1/side-chats/:sideChatId → 取消排队、中止并等待（≤5 秒）→ 删除 → 清理内存（重复关闭返回 204）
-启动 ─► daemon、进程内 TUI 删除 ownerPid 已不在的 side chat
+启动 ─► daemon、进程内 TUI 清理创建进程已退出或本进程 PID 已复用的 side chat
 ```
 
 ## 2.2 设计决策表
@@ -34,7 +34,7 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
 | 给模型的说明 | 一条普通用户消息 | 打开时就能写；不改系统提示词 | 提醒类消息（只能在运行时写）；改系统提示词（缓存失效） | 无 |
 | 子代理 | `accessGuard` 在执行时拒绝 `agent` 工具 | 工具列表不变 | 从工具列表去掉 | 无 |
 | 缓存 | 沿用主会话的缓存：同一份系统提示词，用主会话的 ID 计算缓存身份，带上主会话已加载的 MCP 工具 | 三种接口都靠“前缀一致”命中，OpenAI 兼容接口还要 key 一致；codex、kimi-code 都这样做并有测试守住 | 不处理（OpenAI 兼容接口、加载过 MCP 工具的会话命中不了，原 P11） | run 多一个可选的缓存身份参数 |
-| 启动清理 | 删除 `ownerPid` 对应进程已不在的 side chat；daemon 启动和进程内 TUI 启动时都做 | 多个进程可能共用一个数据库 | 全部删除（会误删正在用的） | `data.sideChat` 多记一个进程号 |
+| 启动清理 | 删除 PID 已退出或本机当前 PID 与旧进程实例 ID 不匹配的 side chat；daemon 启动和进程内 TUI 启动时都做 | 多个进程可能共用一个数据库 | 全部删除（会误删正在用的） | `data.sideChat` 记录创建进程的 PID 和实例 ID |
 | 数量 | 一个主会话可以开多个，每次新建，标题 `Side chat N` | 临时的，可以多开（00 P2） | 一个主会话一个（原计划） | 标题取号要在事务里做 |
 | 切点 | 主会话最近一个已结束的主 run，打开时的快照 | 一轮等于一个 run（00 P14） | 按 prompt 切（漏掉唤醒轮） | 无 |
 | 审批规则 | 打开时复制主会话的“总是允许” | 审批跟主会话走（00 P10） | 不带过去（原计划） | 打开时一个循环 |
@@ -58,16 +58,16 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
 **改动**：
 
 0. **复制函数**（00 P18）：新建 `A/services/session/copy-history.ts`，导出同步函数 `copySessionHistory(tx, input)`，入参见 §2.5。`runWriteTransaction`（`A/services/database/index.ts:323-330`）要求回调同步执行，所以这个函数自己不开事务，在调用方已经打开的事务回调里执行（本议题的 `openSideChat`，以后 fork 的 adapter 也一样）。做法原写在 fork 议题 02，已搬到这里，fork 议题改为直接调用本函数（2026-11-08 确认，学 ZCode）；切点按 run 定：
-   1. **定切点**：`cutRunId` 为 `null` 时跳过第 2 至 4 步，只写会话行。否则这个 run 必须属于源会话、在主上下文（`context_scope_id` 为空）、已结束（规则见第 2.3 步）。切点消息是主上下文里 `data.runId` 等于这个 run 的最后一条消息，排序同 `listBySession`（`created_at, rowid`）。找不到时抛出错误（side chat 只传它自己查到的已结束 run，不会触发；fork 以后在自己的入口把它转成 `FORK_TARGET_INVALID`）。
+   1. **定切点**：`cutRunId` 为 `null` 时跳过第 2 至 4 步，只写会话行。否则这个 run 必须属于源会话、在主上下文（`context_scope_id` 为空）、已结束（规则见第 2.3 步）。切点消息是主上下文里 `data.runId` 等于这个 run 的最后一条消息，排序同 `listBySession`（`created_at, rowid`）。找不到时抛出 `HistoryCutInvalidError(sessionId, runId)`（side chat 只传它自己查到的已结束 run，不会触发；fork 以后在自己的入口把它转成 `FORK_TARGET_INVALID`）。
    2. **选行**：
       - 消息：主上下文、按 `created_at, rowid` 排序、到切点消息为止（含）。
       - 片段：属于上面这些消息的全部片段，按消息顺序和 `order_index`。
-      - prompt：`scope_key` 等于传入的 `promptScopeKey`、`session_id` 为源会话、`user_message_id` 或 `run_id` 落在复制范围内、状态为 `succeeded`、`failed`、`cancelled`、`interrupted` 或 `steered`。
+      - prompt：读取源会话全部工作区的记录，写副本时统一将 `scope_key` 置为目标 `promptScopeKey`。选行要求 `session_id` 为源会话、`user_message_id` 或 `run_id` 落在复制范围内、状态为 `succeeded`、`failed`、`cancelled`、`interrupted` 或 `steered`。
       - 当前轮输入：`message_id` 落在复制的消息里的行。
       - run：上面这些行引用到的主上下文 run，各列原样复制（包括 `inputs_closed_at`，`filterModelHistory` 靠它判断输入是否有效，`A/runtime/prompt-scheduler/current-run-inputs.ts:195-206`）。
       - 撤销落地后，由撤销议题在第 1、2 步加上 `rewound_at IS NULL`。
    3. **建 ID 映射**：给新会话、每条消息、每个片段、每个 run、每个 prompt、每个输入生成新值。
-      - 消息 ID 不能用现有生成器（随机后缀无序，`A/core/message/id-generator.ts:14-18`；用户消息又是 UUID 格式）。把复制的消息按源会话的 `(created_at, id)` 排名，新 ID 写成 `message_<复制时刻毫秒>_<补零的名次>`，视图分页（按 `created_at, id`，`A/core/message/database-store.ts:236-242`）因此和源会话顺序一致；插入时按源 `(created_at, rowid)` 顺序写，模型历史顺序也一致。
+      - 消息 ID 不能用现有生成器（随机后缀无序，`A/core/message/id-generator.ts:14-18`；用户消息又是 UUID 格式）。把复制的消息按源会话的 `(created_at, id)` 排名，新 ID 写成 `message_-copy_<补零的名次>_<本次复制的 UUID>`，视图分页（按 `created_at, id`，`A/core/message/database-store.ts:236-242`）因此和源会话顺序一致；插入时按源 `(created_at, rowid)` 顺序写，模型历史顺序也一致。同一毫秒内，边界 ID `message_-side_<UUID>` 排在复制消息之后，正常生成的消息 ID 排在边界之后。
       - 其他 ID 用项目现有的生成器。
       - `client_request_id` 写成 `copy:<新 prompt ID>`，`steer_receipt.clientRequestId` 写成 `copy:<新 prompt ID>:steer`：它们在同一 `scope_key` 内有唯一约束（`A/services/database/migrations.ts:536-537`），两个会话共用这个 `scope_key`。
    4. **改写**：
@@ -78,11 +78,11 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
    6. **写复制行**：消息与片段保留原来的 `created_at`、`updated_at`，按源顺序插入；run 记录的 `owner_*` 置空；prompt 的 `admission_order` 原样复制，`edit_lease_*`、`owner_*`、`title_expected` 置空，`resend_of_prompt_id` 不在映射表里时置空。
    7. 不复制：goal、排队的 prompt、正在运行的那一轮、子代理实例与执行记录、快照检查点。复制过来的子代理卡片仍显示结果文字，但打不开子代理对话（同 fork 议题 00 P11）。
 
-1. **会话字段**：`Session` 类型（`A/services/session/types.ts`）、`SessionData`、`encodeData`、`rowToSession`（`database-store.ts:176-184、191-217`）、事件的 zod 定义（`events.ts:22-24`）加可选字段 `sideChat?: { mainSessionId: string; boundaryMessageId: string; ownerPid: number }`。加一个判断函数 `isSideChatSession(session)`。SDK 的 `UiSessionIndexEntry`（`packages/ohbaby-sdk/src/contract/permission.ts:30-38`）和全局会话条目加可选的 `isSideChat`。
+1. **会话字段**：`Session` 类型（`A/services/session/types.ts`）、`SessionData`、`encodeData`、`rowToSession`（`database-store.ts:176-184、191-217`）、事件的 zod 定义（`events.ts:22-24`）加可选字段 `sideChat?: { mainSessionId: string; boundaryMessageId: string; ownerPid: number; ownerId?: string }`。新记录写入进程启动时生成的 UUID，同一进程各工作区共享。读取旧记录时允许缺少 `ownerId`。加一个判断函数 `isSideChatSession(session)`。SDK 的 `UiSessionIndexEntry`（`packages/ohbaby-sdk/src/contract/permission.ts:30-38`）和全局会话条目加可选的 `isSideChat`。
 2. **打开**：新建 `A/adapters/ui-inprocess/side-chat.ts`，由 `ui-inprocess.ts` 注入依赖后暴露 `openSideChat({ mainSessionId })`。打开一个 `runWriteTransaction`，在回调里依次：
    1. 主会话必须存在、是根会话（不是子代理会话）、状态为 `active`、本身不是 side chat、已经开始过（至少有一个主 run，或者有一个已被接收的 prompt：刚发出的第一条消息可能还在排队，没有 run 记录），否则分别返回 `SESSION_NOT_FOUND`、`SESSION_NOT_ROOT`、`SESSION_ARCHIVED`、`SIDE_CHAT_UNSUPPORTED`、`SIDE_CHAT_UNSUPPORTED`（说明 “Send a message first”，00 P17）。
-   2. 标题取 `Side chat N`：N 是这个主会话现有 side chat 里最小的空号（00 P2）。取号在这个事务里做，两个并发打开不会拿到同一个号。
-   3. 调用 `copySessionHistory(tx, { sourceSessionId: mainSessionId, cutRunId, promptScopeKey, title, data: { sideChat: { mainSessionId, boundaryMessageId, ownerPid: process.pid } } })`。`cutRunId` 取主会话最近一个已结束的主 run，在本事务里用 SQL 查，条件与 SDK `listEndedTurns`（`packages/ohbaby-sdk/src/util/turn.ts`）的含义一致（00 P14）：`run_ledger` 里 `session_id` 为主会话、`context_scope_id` 为空、结束状态为成功、失败、取消或中断（轮次投影议题给 `UiRun.outcome` 的同一来源）；有 prompt 记录（`prompt_submission.run_id` 等于它）的，prompt 也处于已结束状态；没有 prompt 的，至少有一条不带 `runtimeInput` 的消息属于它；按 `COALESCE(started_at, created_at) DESC, run_id DESC` 取第一个（`started_at` 可能为空；与 SDK `listEndedTurns` 的排序一致）。这条查询写成独立函数 `findEndedMainRun(db, sessionId, runId?)`（放在 `copy-history.ts` 旁边）：不给 `runId` 返回最近一个，给了就检查这个 run 是否已结束；fork 议题直接调用它。主会话第一轮还在跑、没有已结束的 run 时传 `null`（只建会话行，side chat 里只有边界消息）。复制函数的切点参数因此按 run 定，不再按 prompt 定。撤销落地后，由撤销议题在这条查询里加“未被撤销”的条件。`boundaryMessageId` 事先生成好。
+   2. 先用 `assertSessionInWorkspace(main, promptScopeKey)` 检查同一事务读到的主会话。目录已变更时抛 `SessionMovedError`，Fork 编排可直接复用此检查。标题取 `Side chat N`：N 是这个主会话现有 side chat 里最小的空号（00 P2）。取号在这个事务里做，两个并发打开不会拿到同一个号。
+   3. 调用 `copySessionHistory(tx, { sourceSessionId: mainSessionId, destinationSessionId: sideChatId, cutRunId, promptScopeKey, title, data: { sideChat: { mainSessionId, boundaryMessageId, ownerPid: process.pid, ownerId: processOwnerId } } })`。`cutRunId` 取主会话最近一个已结束的主 run，在本事务里用 SQL 查，切点要求至少有一条主上下文历史消息；SDK 目前也会列出空消息轮次，二者如何对齐留到 Fork 设计阶段（00 P14）：`run_ledger` 里 `session_id` 为主会话、`context_scope_id` 为空、结束状态为成功、失败、取消或中断（轮次投影议题给 `UiRun.outcome` 的同一来源）；有 prompt 记录（`prompt_submission.run_id` 等于它）的，prompt 也处于已结束状态；没有 prompt 的，至少有一条不带 `runtimeInput` 的消息属于它；按 `COALESCE(started_at, created_at) DESC, run_id DESC` 取第一个（`started_at` 可能为空；与 SDK `listEndedTurns` 的排序一致）。这条查询写成独立函数 `findEndedMainRun(db, sessionId, runId?)`（放在 `copy-history.ts` 旁边）：不给 `runId` 返回最近一个，给了就检查这个 run 是否已结束；fork 议题直接调用它。主会话第一轮还在跑、没有已结束的 run 时传 `null`（只建会话行，side chat 里只有边界消息）。复制函数的切点参数因此按 run 定，不再按 prompt 定。撤销落地后，由撤销议题在这条查询里加“未被撤销”的条件。`boundaryMessageId` 事先生成好。
    4. 写边界消息：一条 `role: "user"` 的消息，一个文本片段，不带 `runtimeInput`，ID 为上一步的 `boundaryMessageId`，`created_at` 为当前时间。`filterModelHistory` 会保留这样的消息（`A/runtime/prompt-scheduler/current-run-inputs.ts:524-526`）。正文用英文，依次写：
       - 现在在 side chat 里，不是主对话；之前的内容是从主会话继承的，只供参考；
       - 不要接着做主会话里的任务；
@@ -99,8 +99,9 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
    - 全局列表与搜索：SQL 加 `json_extract(data, '$.sideChat') IS NULL`。
    - Web 备用侧栏：按索引条目的 `isSideChat` 过滤。
    - 其余各处：调用 `isUserFacingSession`。TUI 启动“继续上次会话”时把 side chat 归为 `temporary`。
-4. **操作拦截**：在 01 §1.4.4 表里各操作的入口加一行检查，目标是 side chat 时返回 `SIDE_CHAT_UNSUPPORTED`。检查不放进 `assertCanUseAsPrimarySession`，它也管 prompt 提交。压缩只拦手动入口（`resolveCompactTarget`，`ui-inprocess.ts:3588`），上下文管理里的自动压缩不拦（00 P7）。fork、撤销在本议题之后实施，它们的入口检查由各自议题加（00 P18）。
+4. **操作拦截**：在 01 §1.4.4 表里各操作的入口加一行检查，目标是 side chat 时返回 `SIDE_CHAT_UNSUPPORTED`。检查不放进 `assertCanUseAsPrimarySession`，它也管 prompt 提交。压缩只拦手动入口（`resolveCompactTarget`，`ui-inprocess.ts:3588`），上下文管理里的自动压缩不拦（00 P7）。显式以侧聊为目标的 `executeCommand` 一律返回 `SIDE_CHAT_UNSUPPORTED`，TUI 的 `/btw` 阶段再评估是否需要开放个别命令。fork、撤销在本议题之后实施，它们的入口检查由各自议题加（00 P18）。
 5. **子代理**：在 `accessGuard`（`A/adapters/ui-runtime/composition.ts:414` 起）里，请求会话是 side chat 且工具是 `agent` 时，返回“Subagents are not available in side chat.”。这个检查要放在“不是 MCP 工具就直接放行”的早返回之前。
+   模型通过工具访问 goal 时同样在执行入口拒绝，使用 goals 模块定义的工具名。
 5a. **缓存**（00 P11）：不另写缓存逻辑，沿用主会话的请求路径。
    - 缓存身份：新增可选字段 `promptCacheSessionId`，默认等于会话自己的 ID。提交路径（`ui-inprocess.ts` 约 :4038-4056 组装 run 参数处）读会话的 `data.sideChat`，是 side chat 时设为 `mainSessionId`，经 run 管理器传进 lifecycle 参数。它只替换两处模型调用传给 LLM 客户端的 `sessionId`：agent 步骤（`A/core/lifecycle/lifecycle.ts` 传给 `streamResponse` 处，约 :1528）和自动压缩生成摘要（`A/adapters/ui-runtime/prompt-context.ts:81-90`），最终进入 `resolvePromptCacheRequest`（`packages/ohbaby-llm/src/client/prompt-cache.ts`）。这样 OpenAI 兼容接口发出的 `prompt_cache_key` 与主会话相同；Anthropic、OpenAI Responses 按前缀匹配，不需要别的处理。消息归属、run、审批、缓存用量统计仍用 side chat 自己的 ID。
    - 工具定义：不另做处理，依赖[已加载 MCP 工具从历史重建议题](../../2026-11-09-mcp-loaded-tools-from-history/README.md)先落地（2026-11-10 确认，取代原来新增 `copyScope(from, to)` 的做法）。该议题把已加载的 MCP 工具改为从历史里 `select_tools` 的结果推导，工具顺序按“内置工具注册顺序 + 历史里的加载顺序”计算，并删除 `ScopeToolSequence`。side chat 的历史复制自主会话主上下文，第一次用到时重建出的工具和顺序就与主会话一致。
@@ -115,10 +116,10 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
    - 找不到 side chat 时直接返回；
    - 取消它排队中的 prompt，对正在运行的一轮调用 `abortRun`（`ui-inprocess.ts:5388`）；`abortRun` 不保证返回时运行已经结束，所以接着每 100 毫秒检查一次 `sourceLedger.getActiveRuns(sideChatId)` 和活动 prompt，直到都为空，最多等 5 秒，超时返回 `SESSION_RUNNING`；
    - 调用删除函数，清理内存状态（参照归档 `ui-inprocess.ts:3300-3306`，另调用权限管理器的 `clearSession(sideChatId)`（`A/permission/manager.ts:556`，它清掉规则，同时取消这个会话还在等待的审批）调用 `cleanupDeletedSessionFiles`，发布会话移除事件。
-8a. **主会话归档**（00 P15）：归档主会话（`ui-inprocess.ts:3267` 的 `archiveSessionInternal`）时，在忙碌检查通过之后、把状态改成 `archived` 之前，找出 `data.sideChat.mainSessionId` 等于它的全部 side chat，逐个调用 `closeSideChat`。忙碌检查失败时不碰 side chat。永久删除只能删已归档的会话，那时它的 side chat 已经关掉，不用另外处理。
-9. **启动清理**：抽出函数 `deleteOrphanSideChats(db, isPidAlive)`：找出所有 side chat，`ownerPid` 对应进程已不存在的，调用 `deleteSideChatSession(..., { skipBusyCheck: true })` 并清理文件。在 `S/runtime/daemon/main.ts:178-186` 用全局数据库调用它（同 :558 的用法）；进程内运行的 TUI 启动时也调用一次（`A/host/core-api-factory.ts` 建好运行时之后），否则只用 TUI 的用户崩溃后留下的 side chat 永远不会被清掉。
+8a. **主会话归档**（00 P15）：归档主会话（`ui-inprocess.ts:3267` 的 `archiveSessionInternal`）时，在忙碌检查通过之后、把状态改成 `archived` 之前，找出 `data.sideChat.mainSessionId` 等于它的全部 side chat，在各侧聊原有工作区的运行实例逐个调用 `closeSideChat`。忙碌检查失败时不碰 side chat。永久删除只能删已归档的会话，那时它的 side chat 已经关掉，不用另外处理。
+9. **启动清理**：daemon 启动和持久化进程内后端初始化均在恢复工作前调用 `deleteOrphanSideChats`。创建 PID 已退出，或 PID 等于当前进程但实例 ID 不同（包括旧记录缺少 ID）时，跳过忙碌检查并删除侧聊。其他存活 PID 的旧记录保留给其创建进程。
 10. **路由与 SDK**：
-    - `S/protocols/web/routes/sessions.ts` 新增 `POST /v1/sessions/:mainId/side-chats`、`GET /v1/sessions/:mainId/side-chats` 和 `DELETE /v1/side-chats/:sideChatId`。`GET` 按 `data.sideChat.mainSessionId` 列出这个主会话当前开着、`ownerPid` 等于本进程的 side chat，按创建时间排序（00 P16）：同一个库里进程内 TUI 开的 side chat 不会出现在 Web 上。状态码沿用 `globalSessionErrorStatus`（`S/protocols/global-sessions.ts:94-120`），本议题在里面加 `SIDE_CHAT_UNSUPPORTED` → 409，响应体带 `code`；会话路由按错误码映射状态码的写法照同一文件里的 Files 路由（`S/protocols/web/routes/sessions.ts:84-96`）。fork、撤销以后复用这套写法。
+    - `S/protocols/web/routes/sessions.ts` 新增 `POST /v1/sessions/:mainId/side-chats`、`GET /v1/sessions/:mainId/side-chats` 和 `DELETE /v1/side-chats/:sideChatId`。`GET` 按 `data.sideChat.mainSessionId` 列出这个主会话当前开着、`ownerId` 等于本进程实例 ID 的 side chat，按创建时间排序（00 P16）：同一个库里进程内 TUI 开的 side chat 不会出现在 Web 上。状态码沿用 `globalSessionErrorStatus`（`S/protocols/global-sessions.ts:94-120`），本议题在里面加 `SIDE_CHAT_UNSUPPORTED` → 409，响应体带 `code`；会话路由按错误码映射状态码的写法照同一文件里的 Files 路由（`S/protocols/web/routes/sessions.ts:84-96`）。fork、撤销以后复用这套写法。
     - `packages/ohbaby-sdk/src/contract/client.ts` 加 `openSideChat`、`closeSideChat`、`listSideChats`，HTTP 与进程内实现一致；`SIDE_CHAT_UNSUPPORTED` 放进 `contract/global-sessions.ts`。
 
 **完成定义**：04 的 C1 至 C9、T1 至 T13（含 T9b、T13b）通过。
@@ -173,8 +174,8 @@ TUI ────► 进程内：提交与中止显式带 sideChatId；后端不�
 
 | 包 / 目录 | 新增 | 修改 |
 |---|---|---|
-| `packages/ohbaby-agent` | `services/session/copy-history.ts`、`adapters/ui-inprocess/side-chat.ts` | `services/session/{types,database-store,events,archive,global-query}.ts`、`adapters/ui-inprocess.ts`（打开、关闭、列表过滤、操作拦截、当前会话规则、缓存身份、归档时关闭）、`adapters/ui-inprocess/session-controller.ts`、`adapters/ui-persistent.ts`、`adapters/ui-runtime/{composition,prompt-context}.ts`、`core/lifecycle/lifecycle.ts`、`host/core-api-factory.ts`（TUI 启动清理）、`commands/catalog.ts` |
-| `packages/ohbaby-server` | 三个 side chat 路由 | `protocols/web/routes/sessions.ts`、`protocols/global-sessions.ts`、`coordination/client-view.ts`（daemon 的“继续上次会话”过滤）、`coordination/session-workspace-move.ts`、`runtime/daemon/main.ts` |
+| `packages/ohbaby-agent` | `services/session/copy-history.ts`、`adapters/ui-inprocess/side-chat.ts` | `services/session/{types,database-store,events,archive,global-query}.ts`、`adapters/ui-inprocess.ts`（打开、关闭、列表过滤、操作拦截、当前会话规则、缓存身份、归档时关闭）、`adapters/ui-inprocess/session-controller.ts`、`adapters/ui-persistent.ts`（进程内启动清理）、`adapters/ui-runtime/{composition,prompt-context}.ts`、`core/lifecycle/lifecycle.ts`、`commands/catalog.ts` |
+| `packages/ohbaby-server` | 三个 side chat 路由 | `protocols/web/routes/sessions.ts`、`protocols/global-sessions.ts`、`coordination/client-view.ts`（继续会话和快照）、`app/sse-hub.ts`、`coordination/permission-router.ts`（所有客户端按绑定分发 todo、goal、会话 notice 和审批）、`coordination/session-workspace-move.ts`、`runtime/daemon/main.ts` |
 | `packages/ohbaby-sdk` | `openSideChat`、`listSideChats`、`closeSideChat`、`SIDE_CHAT_UNSUPPORTED` | `contract/client.ts`、`contract/global-sessions.ts`、`contract/permission.ts`、HTTP 客户端 |
 | `apps/ohbaby-web` | `ui/side-chat/{SideChatPage.tsx,side-chat-runtime.ts}` | `runtime/index.ts`、`dev/mock-runtime.ts`、`ui/side-panel/{side-pages.ts,SidePanelPage.tsx,use-side-panel.ts}`、顶栏菜单所在的组件、`ui/conversation/ConversationStream.tsx` |
 | `packages/ohbaby-cli` | `tui/components/side-chat-panel.tsx` | `tui/app.tsx`、`tui/use-permission-sync.ts`（按需支持第二个实例） |
@@ -191,7 +192,8 @@ DELETE /v1/side-chats/:sideChatId      → 204（已经不存在时也返回 204
 404 SESSION_NOT_FOUND        主会话不存在
 409 SESSION_NOT_ROOT         主会话本身是子代理会话
 409 SESSION_ARCHIVED         主会话已归档
-409 SESSION_RUNNING          关闭时等待运行结束超过 5 秒
+409 SESSION_RUNNING          侧聊属于另一存活进程，或关闭时运行未能在 5 秒内停止
+409 SESSION_MOVED            请求所在目录与会话的目标目录不一致，或原工作区的运行实例不可用
 409 SIDE_CHAT_UNSUPPORTED    主会话本身是 side chat；主会话还没有消息（“Send a message first”）；或对 side chat 执行被禁用的操作
 ```
 
@@ -205,6 +207,7 @@ DELETE /v1/side-chats/:sideChatId      → 204（已经不存在时也返回 204
 // A/services/session/copy-history.ts
 copySessionHistory(tx, input: {
   sourceSessionId: string;
+  destinationSessionId?: string; // 调用方可指定目标 ID，省略时由复制函数生成
   cutRunId: string | null;      // null：不复制历史，只写会话行
   promptScopeKey: string;
   title: string;
@@ -220,7 +223,8 @@ copySessionHistory(tx, input: {
 | 漏掉某个操作的拦截 | side chat 能被 fork、归档或压缩 | 04 的 T6 逐个操作检查；以后新增会话级操作时要加检查 |
 | 第二个客户端影响主客户端 | 主会话的事件中断或绑定被改 | 客户端建在 `InstanceLayer` 之外；04 的 T11、T15 |
 | TUI 被拉到 side chat | 主界面切到 side chat | 后端规则（Stage 1 第 6 步）；04 的 T8、T21 |
-| 启动清理误删 | 别的进程正在用的 side chat 被删 | 只删 `ownerPid` 已不在的；04 的 T10 |
+| 归档与提交并发 | 对所有会话树生效，已归档节点及其后代无法再入队或创建 run | `archiveIdleRoot` 在归档事务内复查空闲状态；prompt 和 run 在各自的写事务内检查 `assertActiveSessionForWork` |
+| 启动清理误删 | 别的进程正在用的 side chat 被删 | 检查 PID 存活状态和当前进程实例 ID；04 的 T10 |
 | 主会话开着 `full-access` 时 side chat 改了文件 | 用户只想问问题，文件却被改了 | 00 第 6 节 2026-11-08 已接受：审批跟主会话档位走，靠边界消息里的“默认只读”约束模型（同 codex、ZCode） |
 | 缓存不命中 | 费用变高 | Stage 1 第 5a 步；04 的 T13b |
 

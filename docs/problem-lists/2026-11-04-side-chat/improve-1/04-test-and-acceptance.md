@@ -7,7 +7,7 @@
 | 类型 | 覆盖什么 |
 |---|---|
 | integration | 打开与边界消息、模型上下文、列表过滤、操作拦截、子代理拦截、当前会话规则、关闭与启动清理、两个客户端互不影响、存储区归属 |
-| contract | 两个 side chat 路由、新错误码；HTTP 与进程内实现一致 |
+| contract | 三个 side chat 路由、新错误码；HTTP 与进程内实现一致 |
 | unit | Web 的边界过滤、选中文字判断与引用格式 |
 | 浏览器走查 | 右侧面板、选中文字入口、审批、关闭（mock 场景和真实 daemon 各走一遍） |
 | 手工 | TUI `/btw` |
@@ -33,7 +33,7 @@
 
 | ID | 场景 | 类型 | 验证点 |
 |---|---|---|---|
-| T1 | 打开 | integration | 主会话有三轮已结束的对话：side chat 是根会话，含这三轮的历史和一条边界消息；`data.sideChat` 的三个字段正确，改名或更新会话后仍在；`data` 里没有 `fork`；标题是 `Side chat 1`；主会话的行不变 |
+| T1 | 打开 | integration | 主会话有三轮已结束的对话：side chat 是根会话，含这三轮的历史和一条边界消息；`data.sideChat` 中的主会话 ID、边界消息 ID、PID 和进程实例 ID 正确，更新会话后仍在；`data` 里没有 `fork`；标题是 `Side chat 1`；主会话的行不变 |
 | T2 | 模型上下文与系统提示词 | integration | side chat 第一次提问时发给假 LLM 的请求：主会话三轮历史、边界消息、用户问题依次排列；系统提示词与主会话下一轮逐字相同 |
 | T3 | 切点、运行中、快照 | integration | 主会话第三轮之后有一个子代理唤醒的 run 已结束：side chat 的历史包含这个唤醒 run。主会话第四轮（用户触发）正在运行时打开：历史只到前一个已结束的 run，边界消息里有第四轮的用户输入原文，主会话的运行不受影响；正在运行的是 goal 续跑或子代理唤醒时，边界消息写对应的说明。打开后主会话又结束一轮，side chat 的历史不变。主会话第一轮还在跑、没有已结束的 run 时，side chat 只有边界消息，边界消息里有这一轮的用户输入 |
 | T4 | 列表过滤 | integration | 打开 side chat 后：全局列表（活跃、归档）、搜索、TUI 的 `/sessions` 与 `/resume`、TUI 与 daemon 的“继续上次会话”、归档后的替补会话、Web 备用侧栏都没有它；它仍在会话索引和会话快照里，能被绑定 |
@@ -42,7 +42,7 @@
 | T7 | 子代理 | integration | side chat 里模型调用 `agent` 工具，得到“Subagents are not available in side chat.”，没有创建子代理记录；其他工具照常执行并走审批 |
 | T8 | 不改当前会话 | integration | 进程内后端：向 side chat 提交后，后端的当前会话仍是主会话；之后的会话索引失效通知里 `selectedSessionId` 仍是主会话 |
 | T9 | 关闭 | integration | side chat 正在运行时关闭：排队的 prompt 被取消，运行被中止并等到结束；会话、消息、片段、prompt、run 行都被删除；内存里的视图、todo、权限规则被清掉；主会话不受影响；再次关闭返回 204。运行 5 秒内没结束时返回 `SESSION_RUNNING`，数据不删 |
-| T10 | 启动清理 | integration | daemon 启动和进程内 TUI 启动都会调用 `deleteOrphanSideChats(db, isPidAlive)`：`ownerPid` 已不在的两个 side chat（其中一个有标着运行中的 run 记录）被删除；`ownerPid` 还在的不删；主会话不受影响 |
+| T10 | 启动清理 | integration | daemon 启动和进程内 TUI 启动都会调用 `deleteOrphanSideChats(db, isPidAlive)`：`ownerPid` 已不在的两个 side chat（其中一个有标着运行中的 run 记录）被删除；当前 PID 与旧实例 ID 不匹配时同样回收；其他活进程的记录以及本进程自己的侧聊保留；主会话不受影响 |
 | T11 | 两个客户端 | integration | 客户端 A 绑定主会话，客户端 B 绑定 side chat：A 只收到主会话的事件和审批，B 只收到 side chat 的；B 提交后 A 的绑定不变 |
 | T12 | 存储区归属 | integration | side chat 的可信路径和环境提醒里是主会话的 `sessions/<mainId>`，不会建出 `sessions/<sideChatId>`；能免确认读取主会话 scratch 里的文件；side chat 往 scratch 写的文件也落在主会话的目录里；关闭 side chat（以及启动清理）后，主会话的目录和这些文件都还在 |
 | T9b | 审批规则与关闭 | integration | 主会话对某条命令点过“总是允许”后打开 side chat：side chat 执行同一命令不再请求审批；side chat 新加的规则不出现在主会话里。side chat 正在等审批时关闭它、或归档主会话：审批请求被取消，side chat 被删除，没有残留的待处理审批 |
