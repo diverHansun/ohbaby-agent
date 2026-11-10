@@ -331,7 +331,22 @@ export async function createUiRuntimeComposition(
   const streamBridge =
     options.streamBridge ??
     createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
-  const mcpToolMenu = new McpToolMenu();
+  const mcpToolMenu = new McpToolMenu({
+    history: options.messageManager,
+    onError(error): void {
+      const detail =
+        error instanceof Error
+          ? `Loaded MCP tools could not be read from history: ${error.message}`
+          : "Loaded MCP tools could not be read from history";
+      options.onNotice?.({
+        key: `mcp:loaded-tools:${detail}`,
+        level: "warning",
+        message: detail,
+        source: "mcp",
+        title: "MCP tool recovery warning",
+      });
+    },
+  });
   const scopeToolSequence = new ScopeToolSequence();
   let registeredMcpToolNames = new Set<string>();
   const sessionManager =
@@ -411,14 +426,16 @@ export async function createUiRuntimeComposition(
     },
   });
   const toolScheduler = createToolScheduler({
-    accessGuard({ request, tool }) {
+    async accessGuard({ request, tool }) {
       if (tool.source !== "mcp" || !registeredMcpToolNames.has(tool.name)) {
         return undefined;
       }
-      const loaded = mcpToolMenu.loadedNames({
+      const scope = {
         contextScopeId: request.contextScopeId,
         sessionId: request.sessionId,
-      });
+      };
+      await mcpToolMenu.ensureLoaded(scope);
+      const loaded = mcpToolMenu.loadedNames(scope);
       return loaded.has(tool.name)
         ? undefined
         : "MCP tool is not loaded. Use select_tools to search or load it first.";
@@ -578,13 +595,12 @@ export async function createUiRuntimeComposition(
       agentName,
       isSubagent: input.isSubagent,
     });
-    const loadedMcpTools = mcpToolMenu.loadedNames(
-      {
-        contextScopeId: input.contextScopeId,
-        sessionId: input.sessionId,
-      },
-      tools,
-    );
+    const scope = {
+      contextScopeId: input.contextScopeId,
+      sessionId: input.sessionId,
+    };
+    await mcpToolMenu.ensureLoaded(scope);
+    const loadedMcpTools = mcpToolMenu.loadedNames(scope, tools);
     const staticTools = tools.filter(
       (tool) => !registeredMcpToolNames.has(tool.name),
     );
@@ -593,13 +609,10 @@ export async function createUiRuntimeComposition(
       const tool = toolsByName.get(toolName);
       return tool === undefined ? [] : [tool];
     });
-    return scopeToolSequence.snapshot(
-      {
-        contextScopeId: input.contextScopeId,
-        sessionId: input.sessionId,
-      },
-      [...staticTools, ...loadedDefinitions],
-    ).tools;
+    return scopeToolSequence.snapshot(scope, [
+      ...staticTools,
+      ...loadedDefinitions,
+    ]).tools;
   }
 
   async function resolvePrimaryContextTools(input: {
@@ -642,13 +655,12 @@ export async function createUiRuntimeComposition(
       agentName,
       isSubagent: input.isSubagent,
     });
-    const loadedMcpTools = mcpToolMenu.loadedNames(
-      {
-        contextScopeId: input.contextScopeId,
-        sessionId: input.sessionId,
-      },
-      tools,
-    );
+    const scope = {
+      contextScopeId: input.contextScopeId,
+      sessionId: input.sessionId,
+    };
+    await mcpToolMenu.ensureLoaded(scope);
+    const loadedMcpTools = mcpToolMenu.loadedNames(scope, tools);
     return mcpToolMenu
       .selectableNames(tools)
       .filter((toolName) => !loadedMcpTools.has(toolName));

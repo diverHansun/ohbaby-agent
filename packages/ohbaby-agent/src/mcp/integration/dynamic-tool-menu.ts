@@ -5,6 +5,10 @@ import {
 } from "../../core/tool-scheduler/tool-admission.js";
 import { scanPromptLikeContent } from "../../core/system-prompt/security/index.js";
 import type {
+  MessageScopeFilter,
+  MessageWithParts,
+} from "../../core/message/types.js";
+import type {
   Tool,
   ToolDefinition,
   ToolExecutionContext,
@@ -21,7 +25,6 @@ export const MAX_MCP_TOOL_NAME_CHARS = 256;
 export const MAX_MCP_TOOL_SCHEMA_CHARS = 32_768;
 export const MAX_MCP_TOOL_SCHEMA_DEPTH = 64;
 export const MAX_MCP_TOOLS_PER_SELECTION = 8;
-export const MAX_MCP_TOOLS_PER_SESSION = 8;
 
 const FIXED_MCP_TOOL_DESCRIPTION =
   "MCP tool loaded on demand. Use its schema to perform the requested operation.";
@@ -55,9 +58,22 @@ export interface McpToolMenuScope {
 
 export interface McpToolSelection {
   readonly alreadyLoaded: readonly string[];
-  readonly limitReached: readonly string[];
   readonly loaded: readonly string[];
   readonly unknown: readonly string[];
+}
+
+/** Read-only history source the menu rebuilds loaded tool names from. */
+export interface McpToolMenuHistory {
+  listBySession(
+    sessionId: string,
+    filter?: MessageScopeFilter,
+  ): Promise<MessageWithParts[]>;
+}
+
+export interface McpToolMenuOptions {
+  /** Omitted means the history is empty (unit tests, ephemeral menus). */
+  readonly history?: McpToolMenuHistory;
+  readonly onError?: (error: unknown) => void;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -210,10 +226,58 @@ function uniqueNames(value: readonly string[]): string[] {
   return [...new Set(value.filter((name) => name.trim() !== ""))];
 }
 
+/**
+ * Loaded MCP tool names recorded in history, in first-loaded order.
+ *
+ * Only completed `select_tools` parts count, and only their
+ * `state.metadata.mcpSelection.loaded` names. Compacted parts still count so
+ * the tool list survives compaction. This shape is a persisted contract: older
+ * rows may also carry `limitReached`, which is ignored.
+ */
+export function collectLoadedMcpToolNames(
+  messages: readonly MessageWithParts[],
+): string[] {
+  const names = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (
+        part.type !== "tool" ||
+        part.tool !== "select_tools" ||
+        part.state.status !== "completed"
+      ) {
+        continue;
+      }
+      const selection = part.state.metadata?.mcpSelection;
+      if (!isPlainRecord(selection) || !Array.isArray(selection.loaded)) {
+        continue;
+      }
+      for (const name of selection.loaded) {
+        if (typeof name === "string" && name.trim() !== "") {
+          names.add(name);
+        }
+      }
+    }
+  }
+  return [...names];
+}
+
+/**
+ * Per-scope loaded MCP tool names. History is the source of truth; the map
+ * below only caches what `collectLoadedMcpToolNames` derives from it, plus
+ * names selected since. Names are never removed when a tool becomes
+ * unavailable: reads intersect them with the currently available tools.
+ */
 export class McpToolMenu {
   private available = new Set<string>();
   private readonly loadedByScope = new Map<string, Set<string>>();
+  /** In-flight history reads; the entry object identifies one read. */
+  private readonly loadingByScope = new Map<
+    string,
+    { promise: Promise<void> }
+  >();
   private searchIndex = new McpToolSearch([]);
+
+  constructor(private readonly options: McpToolMenuOptions = {}) {}
 
   setAvailable(
     names: readonly string[],
@@ -225,13 +289,6 @@ export class McpToolMenu {
         this.available.has(document.localName),
       ),
     );
-    for (const loaded of this.loadedByScope.values()) {
-      for (const name of loaded) {
-        if (!this.available.has(name)) {
-          loaded.delete(name);
-        }
-      }
-    }
   }
 
   search(query: string, limit: number): McpToolSearchResult[] {
@@ -251,6 +308,29 @@ export class McpToolMenu {
       .sort((left, right) => left.localeCompare(right));
   }
 
+  /**
+   * Rebuilds the scope's names from history once, then serves the cache.
+   * Concurrent callers share one read. A history error is reported and leaves
+   * the scope uncached so the next call retries.
+   */
+  ensureLoaded(scope: McpToolMenuScope): Promise<void> {
+    const key = scopeKey(scope);
+    if (this.loadedByScope.has(key)) {
+      return Promise.resolve();
+    }
+    const existing = this.loadingByScope.get(key);
+    if (existing !== undefined) {
+      return existing.promise;
+    }
+    // Register the entry before the read starts so the read can tell whether
+    // a dispose replaced it while it was waiting.
+    const entry = { promise: Promise.resolve() };
+    this.loadingByScope.set(key, entry);
+    entry.promise = this.loadFromHistory(scope, key, entry);
+    return entry.promise;
+  }
+
+  /** Call `ensureLoaded` first; an unloaded scope reads as empty. */
   loadedNames(
     scope: McpToolMenuScope,
     candidates?: readonly ToolDefinition[],
@@ -267,11 +347,23 @@ export class McpToolMenu {
     );
   }
 
-  select(scope: McpToolMenuScope, names: readonly string[]): McpToolSelection {
-    const loaded = this.loadedByScope.get(scopeKey(scope)) ?? new Set<string>();
-    this.loadedByScope.set(scopeKey(scope), loaded);
+  async select(
+    scope: McpToolMenuScope,
+    names: readonly string[],
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<McpToolSelection> {
+    await this.ensureLoaded(scope);
+    if (options.signal?.aborted === true) {
+      throw new Error("select_tools was aborted before loading MCP tools.");
+    }
+    // Everything below is synchronous, so concurrent selects never interleave.
+    const loaded = this.loadedByScope.get(scopeKey(scope));
+    if (loaded === undefined) {
+      throw new Error(
+        "MCP tools cannot be loaded for this context scope: it was released or its history could not be read.",
+      );
+    }
     const alreadyLoaded: string[] = [];
-    const limitReached: string[] = [];
     const newlyLoaded: string[] = [];
     const unknown: string[] = [];
     for (const name of uniqueNames(names)) {
@@ -279,26 +371,61 @@ export class McpToolMenu {
         unknown.push(name);
       } else if (loaded.has(name)) {
         alreadyLoaded.push(name);
-      } else if (loaded.size >= MAX_MCP_TOOLS_PER_SESSION) {
-        limitReached.push(name);
       } else {
         loaded.add(name);
         newlyLoaded.push(name);
       }
     }
-    return { alreadyLoaded, limitReached, loaded: newlyLoaded, unknown };
+    return { alreadyLoaded, loaded: newlyLoaded, unknown };
   }
 
   disposeSession(sessionId: string): void {
-    for (const key of this.loadedByScope.keys()) {
-      if (key.startsWith(`${sessionId}\u0000`)) {
-        this.loadedByScope.delete(key);
+    const prefix = `${sessionId}\u0000`;
+    for (const map of [this.loadedByScope, this.loadingByScope]) {
+      for (const key of map.keys()) {
+        if (key.startsWith(prefix)) {
+          map.delete(key);
+        }
       }
     }
   }
 
   disposeScope(sessionId: string, contextScopeId: string): void {
-    this.loadedByScope.delete(scopeKey({ sessionId, contextScopeId }));
+    const key = scopeKey({ sessionId, contextScopeId });
+    this.loadedByScope.delete(key);
+    this.loadingByScope.delete(key);
+  }
+
+  private async loadFromHistory(
+    scope: McpToolMenuScope,
+    key: string,
+    entry: { promise: Promise<void> },
+  ): Promise<void> {
+    let names: string[] | undefined;
+    try {
+      // The filter object is required: omitting it reads every scope.
+      names = this.options.history
+        ? collectLoadedMcpToolNames(
+            await this.options.history.listBySession(scope.sessionId, {
+              contextScopeId: scope.contextScopeId,
+            }),
+          )
+        : [];
+    } catch (error) {
+      try {
+        this.options.onError?.(error);
+      } catch {
+        // A failing reporter must not leave this read stuck in loadingByScope.
+      }
+    }
+    // A dispose (or a newer read after it) during this read wins: drop the result.
+    if (this.loadingByScope.get(key) !== entry) {
+      return;
+    }
+    this.loadingByScope.delete(key);
+    if (names !== undefined && !this.loadedByScope.has(key)) {
+      this.loadedByScope.set(key, new Set(names));
+    }
   }
 }
 
@@ -376,7 +503,7 @@ function selectToolsRequest(
 }
 
 function emptySelection(): McpToolSelection {
-  return { alreadyLoaded: [], limitReached: [], loaded: [], unknown: [] };
+  return { alreadyLoaded: [], loaded: [], unknown: [] };
 }
 
 function selectionOutput(selection: McpToolSelection): string {
@@ -386,11 +513,6 @@ function selectionOutput(selection: McpToolSelection): string {
   }
   if (selection.alreadyLoaded.length > 0) {
     lines.push(`Already loaded: ${selection.alreadyLoaded.join(", ")}.`);
-  }
-  if (selection.limitReached.length > 0) {
-    lines.push(
-      `Session/context scope tool limit reached: ${selection.limitReached.join(", ")}.`,
-    );
   }
   if (selection.unknown.length > 0) {
     lines.push(`Unavailable MCP tools: ${selection.unknown.join(", ")}.`);
@@ -425,10 +547,10 @@ export function createSelectToolsTool(menu: McpToolMenu): Tool {
         type: "object",
       },
       source: "builtin",
-      execute(
+      async execute(
         params: Record<string, unknown>,
         context: ToolExecutionContext,
-      ): ToolExecutionResult {
+      ): Promise<ToolExecutionResult> {
         const request = selectToolsRequest(params);
         const scope = {
           contextScopeId: context.contextScopeId,
@@ -438,13 +560,17 @@ export function createSelectToolsTool(menu: McpToolMenu): Tool {
           request.kind === "query"
             ? menu.search(request.query, request.limit)
             : [];
+        // select checks the signal after its history read and before it
+        // changes the cache, so an aborted call never loads tools.
+        const selectOptions = { signal: context.signal };
         const selection =
           request.kind === "exact"
-            ? menu.select(scope, request.tools)
+            ? await menu.select(scope, request.tools, selectOptions)
             : request.load
-              ? menu.select(
+              ? await menu.select(
                   scope,
                   candidates.map((candidate) => candidate.name),
+                  selectOptions,
                 )
               : emptySelection();
         const candidateOutput =

@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
-import type { Tool } from "../../core/tool-scheduler/index.js";
+import { describe, expect, it, vi } from "vitest";
+import type { MessageWithParts } from "../../core/message/types.js";
+import type {
+  Tool,
+  ToolExecutionContext,
+} from "../../core/tool-scheduler/index.js";
 import {
   admitMcpTool,
+  collectLoadedMcpToolNames,
   createSelectToolsTool,
   MAX_MCP_TOOL_DESCRIPTION_CHARS,
   MAX_MCP_TOOLS_PER_SELECTION,
-  MAX_MCP_TOOLS_PER_SESSION,
   MAX_MCP_TOOL_NAME_CHARS,
   MAX_MCP_TOOL_SCHEMA_DEPTH,
   McpToolMenu,
@@ -19,6 +23,26 @@ function mcpTool(input: Partial<Tool> = {}): Tool {
     name: "mcp_s7_example_t6_search",
     parametersJsonSchema: { properties: {}, type: "object" },
     source: "mcp",
+    ...input,
+  };
+}
+
+function toolNamesFor(count: number): string[] {
+  return Array.from(
+    { length: count },
+    (_, index) => `mcp_s7_example_t${String(index)}_search`,
+  );
+}
+
+function toolContext(
+  callId: string,
+  input: Partial<ToolExecutionContext> = {},
+): ToolExecutionContext {
+  return {
+    callId,
+    messageId: "message_1",
+    sessionId: "session_1",
+    signal: new AbortController().signal,
     ...input,
   };
 }
@@ -111,12 +135,12 @@ describe("MCP dynamic tool menu", () => {
     });
   });
 
-  it("keeps loaded tools across compaction-equivalent reads but isolates scopes", () => {
+  it("keeps loaded tools across compaction-equivalent reads but isolates scopes", async () => {
     const menu = new McpToolMenu();
     const toolName = "mcp_s7_example_t6_search";
     menu.setAvailable([toolName]);
 
-    menu.select({ sessionId: "session_1" }, [toolName]);
+    await menu.select({ sessionId: "session_1" }, [toolName]);
 
     expect(menu.loadedNames({ sessionId: "session_1" })).toEqual(
       new Set([toolName]),
@@ -130,15 +154,16 @@ describe("MCP dynamic tool menu", () => {
     expect(menu.loadedNames({ sessionId: "session_2" })).toEqual(new Set());
   });
 
-  it("disposes every tool scope owned by one session", () => {
+  it("disposes every tool scope owned by one session", async () => {
     const menu = new McpToolMenu();
     const toolName = "mcp_s7_example_t6_search";
     menu.setAvailable([toolName]);
-    menu.select({ sessionId: "session_1" }, [toolName]);
-    menu.select({ contextScopeId: "subagent_1", sessionId: "session_1" }, [
-      toolName,
-    ]);
-    menu.select({ sessionId: "session_2" }, [toolName]);
+    await menu.select({ sessionId: "session_1" }, [toolName]);
+    await menu.select(
+      { contextScopeId: "subagent_1", sessionId: "session_1" },
+      [toolName],
+    );
+    await menu.select({ sessionId: "session_2" }, [toolName]);
 
     menu.disposeSession("session_1");
 
@@ -154,7 +179,7 @@ describe("MCP dynamic tool menu", () => {
     );
   });
 
-  it("disposes only the selected context scope and remains idempotent", () => {
+  it("disposes only the selected context scope and remains idempotent", async () => {
     const menu = new McpToolMenu();
     const toolName = "mcp_s7_example_t6_search";
     const firstScope = {
@@ -166,8 +191,8 @@ describe("MCP dynamic tool menu", () => {
       sessionId: "session_1",
     };
     menu.setAvailable([toolName]);
-    menu.select(firstScope, [toolName]);
-    menu.select(secondScope, [toolName]);
+    await menu.select(firstScope, [toolName]);
+    await menu.select(secondScope, [toolName]);
 
     menu.disposeScope("session_1", "subagent_1");
     menu.disposeScope("session_1", "subagent_1");
@@ -176,44 +201,40 @@ describe("MCP dynamic tool menu", () => {
     expect(menu.loadedNames(secondScope)).toEqual(new Set([toolName]));
   });
 
-  it("applies the eight-tool limit independently to each session/context scope", () => {
+  it("has no cumulative per-scope limit but keeps the per-selection limit", async () => {
     const menu = new McpToolMenu();
-    const toolNames = Array.from(
-      { length: MAX_MCP_TOOLS_PER_SESSION + 1 },
-      (_, index) => `mcp_s7_example_t${String(index)}_search`,
-    );
-    const firstScope = {
-      contextScopeId: "subagent_1",
-      sessionId: "session_1",
-    };
-    const secondScope = {
-      contextScopeId: "subagent_2",
-      sessionId: "session_1",
-    };
+    const toolNames = toolNamesFor(MAX_MCP_TOOLS_PER_SELECTION * 2);
+    const scope = { sessionId: "session_1" };
     menu.setAvailable(toolNames);
+    const tool = createSelectToolsTool(menu);
 
-    const firstSelection = menu.select(firstScope, toolNames);
-    const secondSelection = menu.select(secondScope, toolNames);
+    await tool.execute(
+      { tools: toolNames.slice(0, MAX_MCP_TOOLS_PER_SELECTION) },
+      toolContext("call_1"),
+    );
+    const second = await tool.execute(
+      { tools: toolNames.slice(MAX_MCP_TOOLS_PER_SELECTION) },
+      toolContext("call_2"),
+    );
 
-    expect(firstSelection.loaded).toHaveLength(MAX_MCP_TOOLS_PER_SESSION);
-    expect(firstSelection.limitReached).toEqual([toolNames.at(-1)]);
-    expect(menu.loadedNames(firstScope)).toHaveLength(
-      MAX_MCP_TOOLS_PER_SESSION,
-    );
-    expect(secondSelection.loaded).toHaveLength(MAX_MCP_TOOLS_PER_SESSION);
-    expect(secondSelection.limitReached).toEqual([toolNames.at(-1)]);
-    expect(menu.loadedNames(secondScope)).toHaveLength(
-      MAX_MCP_TOOLS_PER_SESSION,
-    );
+    expect([...menu.loadedNames(scope)]).toEqual(toolNames);
+    expect(second.output).not.toMatch(/limit/i);
+    expect(second.metadata?.mcpSelection).not.toHaveProperty("limitReached");
+    await expect(
+      tool.execute(
+        { tools: toolNamesFor(MAX_MCP_TOOLS_PER_SELECTION + 1) },
+        toolContext("call_3"),
+      ),
+    ).rejects.toThrow(/at most/);
   });
 
-  it("limits selection requests and reports unavailable exact names", () => {
+  it("limits selection requests and reports unavailable exact names", async () => {
     const menu = new McpToolMenu();
     const toolName = "mcp_s7_example_t6_search";
     menu.setAvailable([toolName]);
     const tool = createSelectToolsTool(menu);
 
-    expect(() =>
+    await expect(
       tool.execute(
         {
           tools: Array.from(
@@ -221,31 +242,20 @@ describe("MCP dynamic tool menu", () => {
             () => toolName,
           ),
         },
-        {
-          callId: "call_1",
-          messageId: "message_1",
-          sessionId: "session_1",
-          signal: new AbortController().signal,
-        },
+        toolContext("call_1"),
       ),
-    ).toThrow(/at most/);
+    ).rejects.toThrow(/at most/);
 
     expect(
-      tool.execute(
+      await tool.execute(
         { tools: [toolName, "mcp_s7_example_t7_missing"] },
-        {
-          callId: "call_2",
-          messageId: "message_1",
-          sessionId: "session_1",
-          signal: new AbortController().signal,
-        },
+        toolContext("call_2"),
       ),
     ).toEqual({
       metadata: {
         mcpSelection: {
           alreadyLoaded: [],
           candidates: [],
-          limitReached: [],
           loaded: [toolName],
           unknown: ["mcp_s7_example_t7_missing"],
         },
@@ -294,7 +304,6 @@ describe("MCP dynamic tool menu", () => {
         mcpSelection: {
           alreadyLoaded: [],
           candidates,
-          limitReached: [],
           loaded: [],
           unknown: [],
         },
@@ -377,7 +386,7 @@ describe("MCP dynamic tool menu", () => {
     expect(candidates[1]?.score).toBeLessThan(1);
   });
 
-  it("rejects every unsupported select_tools parameter combination", () => {
+  it("rejects every unsupported select_tools parameter combination", async () => {
     const tool = createSelectToolsTool(new McpToolMenu());
     const context = {
       callId: "call_invalid",
@@ -398,43 +407,326 @@ describe("MCP dynamic tool menu", () => {
       { query: "search", limit: 0 },
       { query: "search", limit: 9 },
     ]) {
-      expect(() => tool.execute(params, context)).toThrow(/select_tools/);
+      await expect(tool.execute(params, context)).rejects.toThrow(
+        /select_tools/,
+      );
     }
   });
+});
 
-  it("keeps the session/context scope selection limit atomic across concurrent requests", async () => {
-    const menu = new McpToolMenu();
-    const toolNames = Array.from(
-      { length: MAX_MCP_TOOLS_PER_SESSION + 1 },
-      (_, index) => `mcp_s7_example_t${String(index)}_search`,
+type ToolPartState = Extract<
+  MessageWithParts["parts"][number],
+  { readonly type: "tool" }
+>["state"];
+
+let partCounter = 0;
+
+function assistantMessage(
+  parts: readonly {
+    readonly compacted?: boolean;
+    readonly state: ToolPartState;
+    readonly tool?: string;
+  }[],
+  contextScopeId?: string,
+): MessageWithParts {
+  const messageId = `message_${String((partCounter += 1))}`;
+  return {
+    info: {
+      agent: "default",
+      ...(contextScopeId === undefined ? {} : { contextScopeId }),
+      id: messageId,
+      role: "assistant",
+      sessionId: "session_1",
+      time: { created: partCounter },
+    },
+    parts: parts.map((part, orderIndex) => ({
+      callId: `call_${String((partCounter += 1))}`,
+      id: `part_${String(partCounter)}`,
+      input: {},
+      messageId,
+      orderIndex,
+      sessionId: "session_1",
+      state: part.state,
+      ...(part.compacted === true ? { time: { compacted: 1 } } : {}),
+      tool: part.tool ?? "select_tools",
+      type: "tool" as const,
+    })),
+  };
+}
+
+function selected(
+  mcpSelection: unknown,
+  status: "completed" | "error" = "completed",
+): ToolPartState {
+  return status === "completed"
+    ? { input: {}, metadata: { mcpSelection }, output: "", status }
+    : { error: "failed", input: {}, metadata: { mcpSelection }, status };
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, reject, resolve };
+}
+
+describe("MCP loaded tools rebuilt from history", () => {
+  const [a, b, c, d] = toolNamesFor(4) as [string, string, string, string];
+
+  it("collects completed select_tools loads in first-loaded order (T1, T9)", () => {
+    const messages = [
+      assistantMessage([
+        { state: selected({ loaded: [c, a] }) },
+        // Legacy rows may still carry limitReached; only loaded counts.
+        {
+          state: selected({
+            alreadyLoaded: [d],
+            candidates: [{ name: d, score: 1 }],
+            limitReached: [d],
+            loaded: [a, b],
+            unknown: [d],
+          }),
+        },
+      ]),
+      assistantMessage([
+        { compacted: true, state: selected({ loaded: ["mcp_compacted"] }) },
+        { state: selected({ loaded: ["mcp_errored"] }, "error") },
+        {
+          state: {
+            input: {},
+            output: "",
+            status: "aborted",
+          } as unknown as ToolPartState,
+        },
+        { state: selected({ loaded: ["mcp_other_tool"] }), tool: "todo_write" },
+        { state: selected({ loaded: "not-an-array" }) },
+        { state: selected(["not-a-record"]) },
+        { state: selected({ loaded: [42, "", "mcp_valid"] }) },
+        { state: { input: {}, output: "", status: "completed" } },
+      ]),
+    ];
+
+    expect(collectLoadedMcpToolNames(messages)).toEqual([
+      c,
+      a,
+      b,
+      "mcp_compacted",
+      "mcp_valid",
+    ]);
+  });
+
+  it("rebuilds a scope once from its own history and keeps history order (T2, T8)", async () => {
+    const listBySession = vi.fn(
+      (_sessionId: string, filter?: { contextScopeId: string | undefined }) =>
+        Promise.resolve(
+          filter?.contextScopeId === undefined
+            ? [assistantMessage([{ state: selected({ loaded: [c, a] }) }])]
+            : [
+                assistantMessage(
+                  [{ state: selected({ loaded: [b] }) }],
+                  filter.contextScopeId,
+                ),
+              ],
+        ),
     );
+    const menu = new McpToolMenu({ history: { listBySession } });
+    menu.setAvailable([a, b, c]);
+    const primary = { sessionId: "session_1" };
+    const subagent = { contextScopeId: "subagent_1", sessionId: "session_1" };
+
+    await menu.ensureLoaded(primary);
+    await menu.ensureLoaded(primary);
+    await menu.ensureLoaded(subagent);
+
+    expect([...menu.loadedNames(primary)]).toEqual([c, a]);
+    expect([...menu.loadedNames(subagent)]).toEqual([b]);
+    expect(listBySession).toHaveBeenCalledTimes(2);
+    // The primary scope must pass the filter object, not omit it.
+    expect(listBySession).toHaveBeenNthCalledWith(1, "session_1", {
+      contextScopeId: undefined,
+    });
+    expect(listBySession).toHaveBeenNthCalledWith(2, "session_1", {
+      contextScopeId: "subagent_1",
+    });
+  });
+
+  it("keeps names while a tool is unavailable and restores its position (T4)", async () => {
+    const menu = new McpToolMenu();
+    const scope = { sessionId: "session_1" };
+    menu.setAvailable([a, b, c]);
+    await menu.select(scope, [a, b, c]);
+
+    menu.setAvailable([a, c]);
+    expect([...menu.loadedNames(scope)]).toEqual([a, c]);
+
+    menu.setAvailable([]);
+    expect([...menu.loadedNames(scope)]).toEqual([]);
+
+    menu.setAvailable([c, b, a]);
+    expect([...menu.loadedNames(scope)]).toEqual([a, b, c]);
+  });
+
+  it("shares one history read across concurrent selections and loads every name (T5)", async () => {
+    const read = deferred<MessageWithParts[]>();
+    const listBySession = vi.fn(() => read.promise);
+    const menu = new McpToolMenu({ history: { listBySession } });
+    const toolNames = toolNamesFor(MAX_MCP_TOOLS_PER_SELECTION + 1);
     menu.setAvailable(toolNames);
     const tool = createSelectToolsTool(menu);
-    const context = {
-      callId: "call_1",
-      messageId: "message_1",
-      sessionId: "session_1",
-      signal: new AbortController().signal,
-    };
 
-    const [first, second] = await Promise.all([
-      Promise.resolve().then(() =>
-        tool.execute({ tools: toolNames.slice(0, 4) }, context),
-      ),
-      Promise.resolve().then(() =>
-        tool.execute(
-          { tools: toolNames.slice(4) },
-          { ...context, callId: "call_2" },
-        ),
-      ),
-    ]);
+    const first = tool.execute(
+      { tools: toolNames.slice(0, 4) },
+      toolContext("call_1"),
+    );
+    const second = tool.execute(
+      { tools: toolNames.slice(4) },
+      toolContext("call_2"),
+    );
+    read.resolve([]);
+    const outputs = await Promise.all([first, second]);
 
-    expect(menu.loadedNames({ sessionId: "session_1" })).toHaveLength(
-      MAX_MCP_TOOLS_PER_SESSION,
+    expect(listBySession).toHaveBeenCalledTimes(1);
+    expect([...menu.loadedNames({ sessionId: "session_1" })]).toEqual(
+      toolNames,
     );
-    const rejectedName = toolNames[MAX_MCP_TOOLS_PER_SESSION];
-    expect(`${first.output ?? ""}\n${second.output ?? ""}`).toContain(
-      `Session/context scope tool limit reached: ${rejectedName}.`,
+    expect(outputs.map((result) => result.output).join("\n")).not.toMatch(
+      /limit/i,
     );
+  });
+
+  it("drops a history read that finishes after the session was disposed (T6)", async () => {
+    const stale = deferred<MessageWithParts[]>();
+    const listBySession = vi
+      .fn<() => Promise<MessageWithParts[]>>()
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce([
+        assistantMessage([{ state: selected({ loaded: [b] }) }]),
+      ]);
+    const menu = new McpToolMenu({ history: { listBySession } });
+    menu.setAvailable([a, b]);
+    const scope = { sessionId: "session_1" };
+
+    const loading = menu.ensureLoaded(scope);
+    menu.disposeSession("session_1");
+    stale.resolve([assistantMessage([{ state: selected({ loaded: [a] }) }])]);
+    await loading;
+
+    expect([...menu.loadedNames(scope)]).toEqual([]);
+    await menu.ensureLoaded(scope);
+    expect([...menu.loadedNames(scope)]).toEqual([b]);
+    expect(listBySession).toHaveBeenCalledTimes(2);
+  });
+
+  it("rebuilds from the current history after disposeSession, as undo does (T10)", async () => {
+    let history = [
+      assistantMessage([{ state: selected({ loaded: [a] }) }]),
+      assistantMessage([{ state: selected({ loaded: [b] }) }]),
+    ];
+    const menu = new McpToolMenu({
+      history: { listBySession: () => Promise.resolve(history) },
+    });
+    menu.setAvailable([a, b]);
+    const scope = { sessionId: "session_1" };
+    await menu.ensureLoaded(scope);
+    expect([...menu.loadedNames(scope)]).toEqual([a, b]);
+
+    history = history.slice(0, 1);
+    menu.disposeSession("session_1");
+    await menu.ensureLoaded(scope);
+
+    expect([...menu.loadedNames(scope)]).toEqual([a]);
+  });
+
+  it("reports a history error, reads as empty, and retries next time (T15)", async () => {
+    const onError = vi.fn();
+    const listBySession = vi
+      .fn<() => Promise<MessageWithParts[]>>()
+      .mockRejectedValueOnce(new Error("database busy"))
+      .mockResolvedValueOnce([
+        assistantMessage([{ state: selected({ loaded: [a] }) }]),
+      ]);
+    const menu = new McpToolMenu({ history: { listBySession }, onError });
+    menu.setAvailable([a, b]);
+    const scope = { sessionId: "session_1" };
+
+    await menu.ensureLoaded(scope);
+    expect(onError).toHaveBeenCalledWith(new Error("database busy"));
+    expect([...menu.loadedNames(scope)]).toEqual([]);
+
+    await menu.ensureLoaded(scope);
+    expect([...menu.loadedNames(scope)]).toEqual([a]);
+  });
+
+  it("retries after a history error even when the error reporter throws", async () => {
+    const listBySession = vi
+      .fn<() => Promise<MessageWithParts[]>>()
+      .mockRejectedValueOnce(new Error("database busy"))
+      .mockResolvedValueOnce([
+        assistantMessage([{ state: selected({ loaded: [a] }) }]),
+      ]);
+    const menu = new McpToolMenu({
+      history: { listBySession },
+      onError: () => {
+        throw new Error("notice sink failed");
+      },
+    });
+    menu.setAvailable([a]);
+    const scope = { sessionId: "session_1" };
+
+    await menu.ensureLoaded(scope);
+    await menu.ensureLoaded(scope);
+
+    expect([...menu.loadedNames(scope)]).toEqual([a]);
+  });
+
+  it("refuses to select when the history read failed instead of caching a partial list", async () => {
+    const menu = new McpToolMenu({
+      history: { listBySession: () => Promise.reject(new Error("boom")) },
+    });
+    menu.setAvailable([a]);
+
+    await expect(menu.select({ sessionId: "session_1" }, [a])).rejects.toThrow(
+      /released or its history could not be read/,
+    );
+    expect([...menu.loadedNames({ sessionId: "session_1" })]).toEqual([]);
+  });
+
+  it("does not load tools when aborted or released while waiting for history (T16)", async () => {
+    const read = deferred<MessageWithParts[]>();
+    const menu = new McpToolMenu({
+      history: { listBySession: () => read.promise },
+    });
+    menu.setAvailable([a, b]);
+    const tool = createSelectToolsTool(menu);
+    const controller = new AbortController();
+    const scope = { sessionId: "session_1" };
+
+    const aborted = tool.execute(
+      { tools: [a] },
+      toolContext("call_1", { signal: controller.signal }),
+    );
+    controller.abort();
+    read.resolve([]);
+    await expect(aborted).rejects.toThrow(/aborted/);
+    expect([...menu.loadedNames(scope)]).toEqual([]);
+
+    const releasedRead = deferred<MessageWithParts[]>();
+    const releasedMenu = new McpToolMenu({
+      history: { listBySession: () => releasedRead.promise },
+    });
+    releasedMenu.setAvailable([a]);
+    const released = releasedMenu.select(scope, [a]);
+    releasedMenu.disposeSession("session_1");
+    releasedRead.resolve([]);
+
+    await expect(released).rejects.toThrow(/released/);
+    expect([...releasedMenu.loadedNames(scope)]).toEqual([]);
   });
 });

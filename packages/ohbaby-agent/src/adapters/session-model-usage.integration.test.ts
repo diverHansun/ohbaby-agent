@@ -269,6 +269,11 @@ it("does not cache a stale static window query after switching models", async ()
   let switchB: ReturnType<typeof client.updateSessionModel> | undefined;
   try {
     await client.initialize();
+    // The loaded-MCP-tools rebuild also reads history once per session. This
+    // test gates listBySession by call order for the model-switch race, so
+    // keep that unrelated read out of the count (the session has no MCP tools).
+    const { McpToolMenu } = await import("../mcp/index.js");
+    vi.spyOn(McpToolMenu.prototype, "ensureLoaded").mockResolvedValue();
     const list = messages.listBySession.bind(messages);
     let calls = 0;
     vi.spyOn(messages, "listBySession").mockImplementation(async (...args) => {
