@@ -44,6 +44,8 @@ export interface UiRuntimeUpdatedEvent {
 
 export interface UiPermissionUpdatedEvent {
   readonly type: "permission.updated";
+  /** A remembered-rule change belongs to this session; mode/level changes are global. */
+  readonly sessionId?: string;
   readonly permission: UiPermissionState;
   readonly previousPermission?: UiPermissionState;
   readonly timestamp?: number;
@@ -143,6 +145,8 @@ export interface UiTodoUpdatedEvent {
 }
 
 export interface UiNotice {
+  /** Present when only clients viewing this session should receive the notice. */
+  readonly sessionId?: string;
   readonly id: string;
   readonly key?: string;
   readonly level: "info" | "warning" | "error";

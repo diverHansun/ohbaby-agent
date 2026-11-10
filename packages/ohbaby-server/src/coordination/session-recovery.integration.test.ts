@@ -604,6 +604,27 @@ describe("source session recovery HTTP/RPC/SSE", () => {
         ],
       }),
     });
+    emit({
+      type: "permission.updated",
+      sessionId: "root",
+      permission: {
+        mode: "auto",
+        level: "default",
+        sessionRules: [
+          {
+            sessionId: "root",
+            rules: [
+              {
+                tool: "bash",
+                pattern: "private rule",
+                scope: "session",
+                decision: "allow",
+              },
+            ],
+          },
+        ],
+      },
+    });
     await originalReader.cancel();
     await request("/v1/sessions/other/select", { method: "PATCH" });
     const late: UiEvent = {
@@ -627,6 +648,7 @@ describe("source session recovery HTTP/RPC/SSE", () => {
       let frames = "";
       while (!frames.includes('"model.invalidated"'))
         frames += new TextDecoder().decode((await reader.read()).value);
+      expect(frames).not.toContain("private rule");
       const events = frames
         .split("\n")
         .filter((line) => line.startsWith("data: "))

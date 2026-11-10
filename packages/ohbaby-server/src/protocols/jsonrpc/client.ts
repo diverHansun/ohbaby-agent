@@ -545,6 +545,24 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("exportSession", [input]);
   }
 
+  openSideChat(
+    input: Parameters<UiBackendClient["openSideChat"]>[0],
+  ): ReturnType<UiBackendClient["openSideChat"]> {
+    return this.rpc("openSideChat", [input]);
+  }
+
+  listSideChats(
+    input: Parameters<UiBackendClient["listSideChats"]>[0],
+  ): ReturnType<UiBackendClient["listSideChats"]> {
+    return this.rpc("listSideChats", [input]);
+  }
+
+  closeSideChat(
+    input: Parameters<UiBackendClient["closeSideChat"]>[0],
+  ): ReturnType<UiBackendClient["closeSideChat"]> {
+    return this.rpc("closeSideChat", [input]);
+  }
+
   archiveSession(
     input: Parameters<UiBackendClient["archiveSession"]>[0],
   ): ReturnType<UiBackendClient["archiveSession"]> {

@@ -466,6 +466,23 @@ describe("DaemonClientViewCoordinator", () => {
     coordinator.initializeClient("client_fresh", snapshot, {
       startupSessionMode: { type: "fresh" },
     });
+    const notice: UiEvent = {
+      type: "notice.emitted",
+      notice: {
+        sessionId: "session_1",
+        id: "warning",
+        title: "Context compact warning",
+        level: "warning",
+        message: "private model response",
+        createdAt: timestamp,
+      },
+    };
+    expect(coordinator.routeEventForClient(notice, "client_active")).toEqual(
+      notice,
+    );
+    expect(
+      coordinator.routeEventForClient(notice, "client_fresh"),
+    ).toBeUndefined();
 
     expect(
       coordinator.routeEventForClient(

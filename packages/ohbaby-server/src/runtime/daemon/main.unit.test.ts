@@ -16,9 +16,11 @@ import type { PersistentUiBackendOptions } from "ohbaby-agent";
 const noopLogger = { emit: (): void => undefined };
 
 function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
+  initialize(): Promise<void>;
   dispose(): Promise<void>;
 } {
   return {
+    initialize: () => Promise.resolve(),
     exportSession: () => Promise.reject(new Error("Not implemented")),
     getSessionIndex: () => Promise.resolve([]),
     getSelectedSessionId: () => Promise.resolve(null),
@@ -54,6 +56,9 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
+    openSideChat: vi.fn(() => Promise.reject(new Error("unused"))),
+    listSideChats: vi.fn(() => Promise.resolve({ sideChats: [] })),
+    closeSideChat: vi.fn(() => Promise.resolve()),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() =>
       Promise.resolve({

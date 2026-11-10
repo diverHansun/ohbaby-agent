@@ -1,3 +1,4 @@
+import { globalSessionErrorStatus } from "../global-sessions.js";
 import type { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import {
@@ -30,7 +31,10 @@ import {
   respondPermissionForClient,
   selectPermissionSession,
 } from "../../coordination/permission-access.js";
-import { PermissionRouter } from "../../coordination/permission-router.js";
+import {
+  PermissionRouter,
+  permissionStateForRoot,
+} from "../../coordination/permission-router.js";
 import {
   acceptDaemonPrompt,
   acquirePromptEditLeaseForClient,
@@ -236,6 +240,25 @@ export async function callDaemonBackend(input: {
       return request.method === "stopSubagent"
         ? stopSubagentForClient(access)
         : subagentInstancesForClient(access);
+    }
+    case "openSideChat":
+    case "listSideChats":
+    case "closeSideChat": {
+      if (!clientViews.isRegistered(request.clientId))
+        throw Object.assign(new Error("client is not registered"), {
+          code: "CLIENT_NOT_REGISTERED",
+        });
+      const raw = request.params[0];
+      const key =
+        request.method === "closeSideChat" ? "sideChatId" : "mainSessionId";
+      const id = isRecord(raw) ? raw[key] : undefined;
+      if (typeof id !== "string" || !id.trim())
+        throw Object.assign(new Error(`${key} is required`), {
+          code: "INVALID_SESSION_QUERY",
+        });
+      if (request.method === "closeSideChat")
+        return backend.closeSideChat({ sideChatId: id });
+      return backend[request.method]({ mainSessionId: id });
     }
     case "exportSession": {
       if (!clientViews.isRegistered(request.clientId)) {
@@ -635,10 +658,16 @@ export async function callDaemonBackend(input: {
       return backend.setSearchApiKey(
         request.params[0] as Parameters<UiBackendClient["setSearchApiKey"]>[0],
       );
-    case "setPermission":
-      return backend.setPermission(
+    case "setPermission": {
+      const state = await backend.setPermission(
         request.params[0] as Parameters<UiBackendClient["setPermission"]>[0],
       );
+      return permissionStateForRoot(
+        state,
+        clientViews.binding(request.clientId, input.permissionEpoch)
+          .rootSessionId,
+      );
+    }
     case "executeCommand": {
       const invocation = clientViews.prepareCommandInvocation(
         request.clientId,
@@ -945,13 +974,21 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
         ctx.waitControllers.delete(controller);
       }
     } catch (error) {
+      const sessionOperation = [
+        "openSideChat",
+        "listSideChats",
+        "closeSideChat",
+      ].includes(parsed.request.method);
       const status =
         parsed.request.method === "archiveSession" &&
         error instanceof SessionRunBusyError
           ? 409
           : parsed.request.method === "exportSession"
             ? sessionExportErrorStatus(error)
-            : isRecord(error) && error.code === "SESSION_SCOPE_CHANGED"
+            : isRecord(error) &&
+                (error.code === "SIDE_CHAT_UNSUPPORTED" ||
+                  error.code === "CLIENT_NOT_REGISTERED" ||
+                  error.code === "SESSION_SCOPE_CHANGED")
               ? 409
               : isRecord(error) && error.code === "SESSION_RECOVERY_UNSUPPORTED"
                 ? 426
@@ -962,7 +999,9 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
                     : isRecord(error) &&
                         error.code === "INVALID_CLIENT_REQUEST_ID"
                       ? 400
-                      : 500;
+                      : sessionOperation
+                        ? globalSessionErrorStatus(error)
+                        : 500;
       return context.json(
         createDaemonRpcFailure(parsed.request.id, error),
         status,

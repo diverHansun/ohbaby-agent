@@ -164,6 +164,15 @@ describe("context window UI contract", () => {
       exportSession(): ReturnType<CoreAPI["exportSession"]> {
         return Promise.reject(new Error("Not implemented"));
       },
+      openSideChat(): Promise<never> {
+        throw new Error("unused");
+      },
+      listSideChats(): Promise<never> {
+        throw new Error("unused");
+      },
+      closeSideChat(): Promise<never> {
+        throw new Error("unused");
+      },
       archiveSession(): ReturnType<CoreAPI["archiveSession"]> {
         return Promise.resolve();
       },

@@ -4,10 +4,12 @@ import {
   type DatabaseConnection,
 } from "../database/index.js";
 import { SessionRunBusyError } from "../../runtime/run-ledger/errors.js";
+import { SideChatUnsupportedError } from "./errors.js";
 import { readSessionRow } from "./database-store.js";
 import type { Session } from "./types.js";
 
 export type SessionArchiveErrorCode =
+  | "SESSION_ARCHIVED"
   | "SESSION_NOT_FOUND"
   | "SESSION_NOT_ROOT"
   | "SESSION_NOT_ARCHIVED";
@@ -80,48 +82,118 @@ export function deleteArchivedSession(
 ): Promise<DeletedSessionData> {
   return runWriteTransaction(db, () => {
     archivedRoot(db, sessionId);
-    // Older versions allowed archiving busy sessions. Do not destroy their work.
-    const activeRuns = db
-      .prepare<{
-        run_id: string;
-      }>(
-        `${SESSION_TREE} SELECT run_id FROM run_ledger WHERE session_id IN (SELECT id FROM tree) AND status IN ('pending', 'running')`,
-      )
-      .all(sessionId);
-    const pendingPrompt = db
-      .prepare(
-        `${SESSION_TREE} SELECT 1 FROM prompt_submission WHERE session_id IN (SELECT id FROM tree) AND status IN ('queued', 'starting', 'running') LIMIT 1`,
-      )
-      .get(sessionId);
-    if (activeRuns.length > 0 || pendingPrompt)
-      throw new SessionRunBusyError(
-        sessionId,
-        activeRuns.map((run) => run.run_id),
-      );
-    const sessionIds = db
-      .prepare<{ id: string }>(`${SESSION_TREE} SELECT id FROM tree`)
-      .all(sessionId)
-      .map((row) => row.id);
-    const checkpoints = db
-      .prepare<{
-        checkpointId: string;
-        workdir: string;
-      }>(
-        `${SESSION_TREE} SELECT checkpoint_id AS checkpointId, workdir FROM snapshot_checkpoint WHERE session_id IN (SELECT id FROM tree)`,
-      )
-      .all(sessionId);
-    db.prepare(
-      `${SESSION_TREE} DELETE FROM goal_record WHERE session_id IN (SELECT id FROM tree)`,
-    ).run(sessionId);
-    db.prepare(
-      `${SESSION_TREE} DELETE FROM subagent_execution WHERE parent_session_id IN (SELECT id FROM tree) OR root_session_id IN (SELECT id FROM tree) OR child_session_id IN (SELECT id FROM tree)`,
-    ).run(sessionId);
-    db.prepare(
-      `${SESSION_TREE} DELETE FROM subagent_instance WHERE parent_session_id IN (SELECT id FROM tree)`,
-    ).run(sessionId);
-    db.prepare(
-      `${SESSION_TREE} DELETE FROM session WHERE id IN (SELECT id FROM tree)`,
-    ).run(sessionId);
-    return { sessionIds, checkpoints };
+    assertTreeIdle(db, sessionId);
+    return deleteTree(db, sessionId);
   });
+}
+
+/** Recheck after asynchronous side-chat shutdown, while no other process can admit work. */
+export function archiveIdleRoot(
+  db: DatabaseConnection,
+  sessionId: string,
+  now: number,
+): Promise<Session> {
+  return runWriteTransaction(db, (tx) => {
+    const session = readSessionRow(tx, sessionId);
+    if (!session) throw new SessionArchiveError("SESSION_NOT_FOUND", sessionId);
+    if (session.sideChat) throw new SideChatUnsupportedError();
+    if (session.isSubagent || session.parentId !== undefined)
+      throw new SessionArchiveError("SESSION_NOT_ROOT", sessionId);
+    if (
+      tx
+        .prepare(
+          "SELECT 1 FROM session WHERE json_extract(data, '$.sideChat.mainSessionId') = ? LIMIT 1",
+        )
+        .get(sessionId)
+    )
+      throw new SessionRunBusyError(sessionId, []);
+    assertTreeIdle(tx, sessionId);
+    tx.prepare(
+      "UPDATE session SET status = 'archived', updated_at = ? WHERE id = ?",
+    ).run(now, sessionId);
+    return { ...session, status: "archived", updatedAt: now };
+  });
+}
+
+/** The actual durable admission must not follow a concurrent archive commit. */
+export function assertActiveSessionForWork(
+  db: DatabaseConnection,
+  sessionId: string,
+): void {
+  const archived = db
+    .prepare<{ id: string }>(
+      `WITH RECURSIVE ancestors(id, parent_id, status) AS (
+      SELECT id, parent_id, status FROM session WHERE id = ?
+      UNION SELECT s.id, s.parent_id, s.status FROM session s JOIN ancestors a ON s.id = a.parent_id
+    ) SELECT id FROM ancestors WHERE status = 'archived' LIMIT 1`,
+    )
+    .get(sessionId);
+  if (archived) throw new SessionArchiveError("SESSION_ARCHIVED", archived.id);
+}
+
+export function deleteSideChatSession(
+  db: DatabaseConnection,
+  sessionId: string,
+  options: { readonly skipBusyCheck?: boolean } = {},
+): Promise<DeletedSessionData> {
+  return runWriteTransaction(db, (tx) => {
+    const session = readSessionRow(tx, sessionId);
+    if (!session) return { sessionIds: [], checkpoints: [] };
+    if (!session.sideChat)
+      throw new SideChatUnsupportedError("Only a side chat can be closed");
+    if (!options.skipBusyCheck) assertTreeIdle(tx, sessionId);
+    return deleteTree(tx, sessionId);
+  });
+}
+
+function assertTreeIdle(db: DatabaseConnection, sessionId: string): void {
+  // Older versions allowed archiving busy sessions. Do not destroy their work.
+  const activeRuns = db
+    .prepare<{
+      run_id: string;
+    }>(
+      `${SESSION_TREE} SELECT run_id FROM run_ledger WHERE session_id IN (SELECT id FROM tree) AND status IN ('pending', 'running')`,
+    )
+    .all(sessionId);
+  const pendingPrompt = db
+    .prepare(
+      `${SESSION_TREE} SELECT 1 FROM prompt_submission WHERE session_id IN (SELECT id FROM tree) AND status IN ('queued', 'starting', 'running') LIMIT 1`,
+    )
+    .get(sessionId);
+  if (activeRuns.length > 0 || pendingPrompt)
+    throw new SessionRunBusyError(
+      sessionId,
+      activeRuns.map((run) => run.run_id),
+    );
+}
+
+function deleteTree(
+  db: DatabaseConnection,
+  sessionId: string,
+): DeletedSessionData {
+  const sessionIds = db
+    .prepare<{ id: string }>(`${SESSION_TREE} SELECT id FROM tree`)
+    .all(sessionId)
+    .map((row) => row.id);
+  const checkpoints = db
+    .prepare<{
+      checkpointId: string;
+      workdir: string;
+    }>(
+      `${SESSION_TREE} SELECT checkpoint_id AS checkpointId, workdir FROM snapshot_checkpoint WHERE session_id IN (SELECT id FROM tree)`,
+    )
+    .all(sessionId);
+  db.prepare(
+    `${SESSION_TREE} DELETE FROM goal_record WHERE session_id IN (SELECT id FROM tree)`,
+  ).run(sessionId);
+  db.prepare(
+    `${SESSION_TREE} DELETE FROM subagent_execution WHERE parent_session_id IN (SELECT id FROM tree) OR root_session_id IN (SELECT id FROM tree) OR child_session_id IN (SELECT id FROM tree)`,
+  ).run(sessionId);
+  db.prepare(
+    `${SESSION_TREE} DELETE FROM subagent_instance WHERE parent_session_id IN (SELECT id FROM tree)`,
+  ).run(sessionId);
+  db.prepare(
+    `${SESSION_TREE} DELETE FROM session WHERE id IN (SELECT id FROM tree)`,
+  ).run(sessionId);
+  return { sessionIds, checkpoints };
 }

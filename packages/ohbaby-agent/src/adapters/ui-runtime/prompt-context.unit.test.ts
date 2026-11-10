@@ -184,11 +184,13 @@ describe("noticeFromCompactResult", () => {
     );
 
     expect(failedNotice).toMatchObject({
+      sessionId: "session_1",
       key: "context:compact:session_1",
       level: "warning",
       title: "Context compact warning",
     });
     expect(inflatedNotice).toMatchObject({
+      sessionId: "session_1",
       key: "context:compact:session_1",
       level: "warning",
       title: "Context compact warning",

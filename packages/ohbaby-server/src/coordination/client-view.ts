@@ -139,7 +139,10 @@ function resolveStartupActiveSessionId(
       return null;
     }
     const latest = snapshot.sessions
-      .filter((session) => !session.parentId && !session.isSubagent)
+      .filter(
+        (session) =>
+          !session.parentId && !session.isSubagent && !session.isSideChat,
+      )
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .at(0);
     return latest?.id ?? null;
@@ -211,10 +214,11 @@ function projectSnapshotForClient(
   snapshot: UiSnapshot,
   view: ClientView | undefined,
 ): UiSnapshot {
-  if (!view) {
+  // Legacy RPC callers may read an unbound snapshot. Preserve their existing
+  // response for ordinary sessions; temporary transcripts require an explicit binding.
+  if (!view && !snapshot.sessions.some((session) => session.isSideChat))
     return snapshot;
-  }
-  const activeSessionId = view.activeSessionId ?? null;
+  const activeSessionId = view?.activeSessionId ?? null;
   return {
     ...snapshot,
     activeSessionId,
@@ -238,7 +242,17 @@ function projectSnapshotForClient(
       session.id === activeSessionId ? session : { ...session, messages: [] },
     ),
     status: statusForClientSnapshot(snapshot, activeSessionId),
-    ...(view.initialPermission === undefined
+    ...(snapshot.todos && {
+      todos: snapshot.todos.filter(
+        (entry) => entry.sessionId === activeSessionId,
+      ),
+    }),
+    ...(snapshot.goals && {
+      goals: snapshot.goals.filter(
+        (entry) => entry.sessionId === activeSessionId,
+      ),
+    }),
+    ...(view?.initialPermission === undefined
       ? {}
       : {
           permission: {
@@ -295,8 +309,10 @@ function selectedSessionIdFromCommandAction(
     : undefined;
 }
 
-function sessionIdForEvent(event: UiEvent): string | undefined {
+export function sessionIdForEvent(event: UiEvent): string | undefined {
   switch (event.type) {
+    case "notice.emitted":
+      return event.notice.sessionId;
     case "session.changed":
       return event.version.sessionId;
     case "session.unavailable":
@@ -308,6 +324,8 @@ function sessionIdForEvent(event: UiEvent): string | undefined {
     case "message.part.delta":
     case "message.reasoning.delta":
     case "message.reasoning.end":
+    case "todo.updated":
+    case "goal.updated":
     case "run.interrupted":
       return event.sessionId;
     case "run.updated":

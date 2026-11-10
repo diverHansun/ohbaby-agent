@@ -75,9 +75,10 @@ export async function moveSessionWorkspace(
     if (deps.isDefaultDirectory(workspaceDirectory)) {
       throw new DefaultDirectoryNotWorkspaceError();
     }
-    await deps.discoverWorkspace?.(workspaceDirectory);
   }
   const plan = deps.catalog.planMove(sessionId, workspaceDirectory);
+  if (workspaceDirectory !== null)
+    await deps.discoverWorkspace?.(workspaceDirectory);
   if (!plan.needsQueueHandover) {
     return deps.catalog.commitMove(plan);
   }

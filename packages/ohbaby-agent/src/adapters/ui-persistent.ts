@@ -1,3 +1,7 @@
+import {
+  isLocalPrimarySession,
+  isUserFacingSession,
+} from "../services/session/types.js";
 import type {
   InstanceSettingsReader,
   InstanceSettingsControl,
@@ -9,6 +13,8 @@ import {
   type CleanupResult,
 } from "../runtime/shutdown.js";
 import { createSessionExecutionRecovery } from "../runtime/execution-recovery/session.js";
+import { deleteOrphanSideChats } from "../services/session/orphan-side-chats.js";
+import { sessionFilesCleanupFailed } from "../observability/index.js";
 import { randomUUID } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
@@ -552,6 +558,18 @@ function withStartupRecovery(
       await ready();
       return client.selectDefaultModel(entryId);
     },
+    async openSideChat(input): ReturnType<UiBackendClient["openSideChat"]> {
+      await ready();
+      return client.openSideChat(input);
+    },
+    async listSideChats(input): ReturnType<UiBackendClient["listSideChats"]> {
+      await ready();
+      return client.listSideChats(input);
+    },
+    async closeSideChat(input): ReturnType<UiBackendClient["closeSideChat"]> {
+      await ready();
+      return client.closeSideChat(input);
+    },
     async archiveSession(input): ReturnType<UiBackendClient["archiveSession"]> {
       await ready();
       return client.archiveSession(input);
@@ -676,7 +694,9 @@ async function resolvePersistentStartupSession(input: {
     })
   ).map((session) => ({
     id: session.id,
-    kind: session.isSubagent ? ("temporary" as const) : ("primary" as const),
+    kind: isUserFacingSession(session)
+      ? ("primary" as const)
+      : ("temporary" as const),
     updatedAt: session.updatedAt,
   }));
   const sessionId = resolveStartupSession(input.mode, candidates);
@@ -817,7 +837,13 @@ export function createPersistentUiBackendClient(
       throw error;
     }
   }
+  const deletedSessionFiles = {
+    snapshotRoot: resolveSnapshotRoot(options.storageRoot),
+    log: (error: unknown): void =>
+      options.logger?.emit(sessionFilesCleanupFailed, { error }),
+  };
   const startupReady = Promise.resolve().then(async () => {
+    await deleteOrphanSideChats(db, undefined, deletedSessionFiles);
     const sessions = await sessionManager.listByWorkingDirectory(
       await projectRoot,
       {
@@ -827,7 +853,7 @@ export function createPersistentUiBackendClient(
     // Recover roots independently. Explicit entry retries failed scopes; reads stay pure.
     await Promise.allSettled(
       sessions
-        .filter((session) => !session.isSubagent)
+        .filter(isLocalPrimarySession)
         .map((session) => recoverExecutionSession(session.id)),
     );
     await resolvePersistentStartupSession({
@@ -839,6 +865,8 @@ export function createPersistentUiBackendClient(
   });
 
   const inProcessClient = createInProcessUiBackendClient({
+    sideChatStorage: { db, deletedSessionFiles },
+    closeSideChatInWorkspace: options.closeSideChatInWorkspace,
     agentManager: options.agentManager,
     bus,
     ...(options.createSubagentId

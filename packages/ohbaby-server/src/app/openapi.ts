@@ -1135,6 +1135,40 @@ export function createOpenApiDocument(
           summary: "Compact a session",
         },
       },
+      "/v1/sessions/{id}/side-chats": {
+        post: {
+          summary:
+            "Open a temporary side chat from completed main-session turns",
+          responses: {
+            "200": {
+              description: "New sideChatId, title and boundaryMessageId",
+            },
+            "404": { description: "SESSION_NOT_FOUND" },
+            "409": {
+              description:
+                "SESSION_NOT_ROOT, SESSION_ARCHIVED or SIDE_CHAT_UNSUPPORTED",
+            },
+          },
+        },
+        get: {
+          summary: "List this process's open side chats for a main session",
+          responses: {
+            "200": {
+              description:
+                "sideChats in creation order, including each boundaryMessageId and workingDirectory",
+            },
+          },
+        },
+      },
+      "/v1/side-chats/{id}": {
+        delete: {
+          summary: "Stop and delete a temporary side chat",
+          responses: {
+            "204": { description: "Side chat is absent" },
+            "409": { description: "SESSION_RUNNING or SIDE_CHAT_UNSUPPORTED" },
+          },
+        },
+      },
       "/v1/sessions/{id}/select": {
         patch: {
           responses: {

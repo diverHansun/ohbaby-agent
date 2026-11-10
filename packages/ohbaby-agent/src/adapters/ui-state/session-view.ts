@@ -238,6 +238,10 @@ export class SessionViewOwner {
     return pending;
   }
 
+  removeSession(sessionId: string): void {
+    this.partitions.delete(sessionId);
+  }
+
   dispose(): void {
     this.disposed = true;
     this.partitions.clear();

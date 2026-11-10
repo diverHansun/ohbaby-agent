@@ -97,6 +97,7 @@ export interface UiUnconsumedSteer {
 }
 
 export interface UiSession {
+  readonly isSideChat?: boolean;
   readonly modelEntryId?: string;
   readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly reasoning?: UiReasoningConfig;

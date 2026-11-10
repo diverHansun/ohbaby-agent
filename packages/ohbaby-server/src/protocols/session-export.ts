@@ -35,6 +35,7 @@ export function sessionExportErrorStatus(
       return 400;
     case "SESSION_NOT_FOUND":
       return 404;
+    case "SIDE_CHAT_UNSUPPORTED":
     case "CLIENT_NOT_REGISTERED":
       return 409;
     default:

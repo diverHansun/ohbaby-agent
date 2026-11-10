@@ -1,3 +1,4 @@
+import { permissionStateForRoot } from "../../../coordination/permission-router.js";
 import { Hono } from "hono";
 import {
   parsePermissionBinding,
@@ -63,7 +64,13 @@ export function registerPermissionRoutes(
         ...(level === undefined ? {} : { level }),
         ...(mode === undefined ? {} : { mode }),
       });
-    return context.json({ ok: true, permission });
+    return context.json({
+      ok: true,
+      permission: permissionStateForRoot(
+        permission,
+        ctx.clientViews.binding(clientId, ctx.permissionEpoch).rootSessionId,
+      ),
+    });
   });
 
   app.get("/v1/permissions", async (context) => {

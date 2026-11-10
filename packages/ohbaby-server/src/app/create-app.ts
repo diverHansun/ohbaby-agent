@@ -271,7 +271,8 @@ class DaemonServerAppRuntime implements DaemonRouteContext {
           ? 410
           : code === "SUBAGENT_NOT_FOUND"
             ? 404
-            : code === "SUBAGENT_SNAPSHOT_CHANGED"
+            : code === "SIDE_CHAT_UNSUPPORTED" ||
+                code === "SUBAGENT_SNAPSHOT_CHANGED"
               ? 409
               : code === "INVALID_SESSION_QUERY"
                 ? 400

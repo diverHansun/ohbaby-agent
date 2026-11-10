@@ -1,3 +1,4 @@
+import { isLocalPrimarySession } from "../../services/session/types.js";
 import { projectToolResultDetails } from "./tool-result-details.js";
 import {
   projectToolExecution,
@@ -316,6 +317,7 @@ function sessionToUiSession(input: {
   return {
     createdAt: toIsoString(input.session.createdAt),
     id: input.session.id,
+    ...(input.session.sideChat ? { isSideChat: true } : {}),
     messages: input.messages
       .map(messageToUiMessage)
       .filter((message): message is UiMessage => message !== undefined),
@@ -406,10 +408,6 @@ function clonePermission(request: UiPermissionRequest): UiPermissionRequest {
 
 function isActiveRun(record: RunLedgerRecord): boolean {
   return ACTIVE_RUN_STATUSES.has(record.status);
-}
-
-function isPrimarySession(session: Session): boolean {
-  return !session.isSubagent;
 }
 
 function isSessionTransactionActiveError(error: unknown): boolean {
@@ -508,7 +506,7 @@ export function createPersistentUiStateStore(
           status: "active",
         }),
       )
-    ).filter(isPrimarySession);
+    ).filter(isLocalPrimarySession);
     if (
       selectedActiveSessionId === null ||
       recentSessions.some((session) => session.id === selectedActiveSessionId)
@@ -524,7 +522,7 @@ export function createPersistentUiStateStore(
     );
     if (
       activeSession?.status !== "active" ||
-      !isPrimarySession(activeSession) ||
+      !isLocalPrimarySession(activeSession) ||
       !isInCurrentProject(activeSession, projectRoot)
     ) {
       return {
@@ -577,10 +575,11 @@ export function createPersistentUiStateStore(
             status: "active",
           }),
         )
-      ).filter(isPrimarySession);
+      ).filter(isLocalPrimarySession);
       return sessions.map((session) => ({
         id: session.id,
         title: session.title,
+        ...(session.sideChat ? { isSideChat: true } : {}),
         workingDirectory: session.workingDirectory,
         createdAt: new Date(session.createdAt).toISOString(),
         updatedAt: new Date(session.updatedAt).toISOString(),
@@ -618,7 +617,7 @@ export function createPersistentUiStateStore(
       );
       const projectRoot = await currentProjectRoot();
       return session &&
-        isPrimarySession(session) &&
+        isLocalPrimarySession(session) &&
         isInCurrentProject(session, projectRoot)
         ? readUiSession(session)
         : undefined;

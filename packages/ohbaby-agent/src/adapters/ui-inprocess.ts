@@ -1,3 +1,4 @@
+import { isUserFacingSession } from "../services/session/types.js";
 import { createSessionSubagentSupervisor } from "../agents/subagents/session-supervisor.js";
 import { listSessionExecutions } from "../agents/subagents/continuation-coordinator.js";
 import { createSubagentWakeup } from "./ui-inprocess/subagent-wakeup.js";
@@ -28,6 +29,23 @@ import {
   type CleanupResult,
 } from "../runtime/shutdown.js";
 import { SessionExecutionGate } from "./session-execution.js";
+import {
+  openSideChat,
+  listSideChats,
+  sideChatsForMain,
+  stopSideChatWork,
+  SIDE_CHAT_ID_PREFIX,
+} from "./ui-inprocess/side-chat.js";
+
+import {
+  archiveIdleRoot,
+  SessionArchiveError,
+  deleteSideChatSession,
+} from "../services/session/archive.js";
+import { cleanupDeletedSessionFiles } from "../services/session/archive-files.js";
+import { readSessionRow } from "../services/session/database-store.js";
+import type { DatabaseConnection } from "../services/database/index.js";
+import { SideChatUnsupportedError } from "../services/session/errors.js";
 import { exportSession } from "../services/session-export/index.js";
 import { getAgentPackageVersion } from "../package-version.js";
 import { projectUnconsumedSteers } from "./ui-inprocess/steer-recovery.js";
@@ -315,6 +333,17 @@ interface ActivePromptState {
 }
 
 export interface InProcessUiBackendOptions {
+  /** Archive uses the owning workspace's scheduler and permission state. */
+  readonly closeSideChatInWorkspace?: (
+    directory: string,
+    sideChatId: string,
+  ) => Promise<void>;
+  readonly sideChatStorage?: {
+    readonly db: DatabaseConnection;
+    readonly deletedSessionFiles: Parameters<
+      typeof cleanupDeletedSessionFiles
+    >[1];
+  };
   readonly afterPromptSubmitSettled?: () => Promise<void> | void;
   readonly agentManager?: AgentManager;
   readonly beforePromptSubmit?: () => Promise<void> | void;
@@ -1751,6 +1780,11 @@ export function createInProcessUiBackendClient(
       sessionManager: options.sessionManager,
       snapshot,
     });
+    if (
+      resolved.coreSession?.sideChat &&
+      (submitOptions?.modelEntryId || submitOptions?.reasoning)
+    )
+      throw new SideChatUnsupportedError();
     await initializeSessionView(resolved.session.id, resolved.session);
     const isFirstPrompt =
       resolved.isNewSession ||
@@ -1801,7 +1835,8 @@ export function createInProcessUiBackendClient(
         session: cloneSession(session),
       });
     }
-    await stateStore.setActiveSessionId(resolved.session.id);
+    if (!resolved.coreSession?.sideChat)
+      await stateStore.setActiveSessionId(resolved.session.id);
     return resolved.session.id;
   }
 
@@ -2562,7 +2597,7 @@ export function createInProcessUiBackendClient(
       return false;
     if ("stats" in candidate) {
       if (
-        !isPrimarySession(candidate) ||
+        !isUserFacingSession(candidate) ||
         candidate.status !== "active" ||
         candidate.stats.messageCount !== 0
       )
@@ -2621,7 +2656,8 @@ export function createInProcessUiBackendClient(
       if (
         excluded.has(candidate.id) ||
         ("stats" in candidate &&
-          (!isPrimarySession(candidate) || candidate.stats.messageCount !== 0))
+          (!isUserFacingSession(candidate) ||
+            candidate.stats.messageCount !== 0))
       )
         continue;
       if (await isAuthoritativelyEmptySession(candidate, projectRoot))
@@ -2976,6 +3012,7 @@ export function createInProcessUiBackendClient(
     input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
   ): ReturnType<UiBackendClient["updateSessionReasoning"]> {
     const session = await requireOwnedSession(input.sessionId);
+    if (session.isSideChat) throw new SideChatUnsupportedError();
     const preference = input.reasoning ?? undefined;
     validateReasoningConfig(preference);
     if (preference)
@@ -3000,6 +3037,7 @@ export function createInProcessUiBackendClient(
     input: Parameters<UiBackendClient["updateSessionModel"]>[0],
   ): ReturnType<UiBackendClient["updateSessionModel"]> {
     const session = await requireOwnedSession(input.sessionId);
+    if (session.isSideChat) throw new SideChatUnsupportedError();
     if (input.modelEntryId !== null)
       await assertModelEntrySelectable(input.modelEntryId);
     let reasoning = session.reasoning;
@@ -3122,7 +3160,7 @@ export function createInProcessUiBackendClient(
         sessions
           .filter(
             (session) =>
-              isPrimarySession(session) &&
+              isUserFacingSession(session) &&
               isSessionInWorkingDirectory(session, projectRoot),
           )
           .sort(sortCoreSessionsByUpdatedAtDesc)
@@ -3136,6 +3174,7 @@ export function createInProcessUiBackendClient(
     }
     const snapshot = await stateStore.readSnapshot();
     return snapshot.sessions
+      .filter((session) => !session.isSideChat)
       .filter(
         (session) =>
           session.workingDirectory === undefined ||
@@ -3264,6 +3303,62 @@ export function createInProcessUiBackendClient(
     return { created: true, id: session.id, title: session.title };
   }
 
+  function sideChatStorage(): NonNullable<
+    InProcessUiBackendOptions["sideChatStorage"]
+  > {
+    if (!options.sideChatStorage)
+      throw new SideChatUnsupportedError(
+        "Side chat requires persistent session storage",
+      );
+    return options.sideChatStorage;
+  }
+
+  const closingSideChats = new Map<string, Promise<void>>();
+  function closeSideChatInternal(sessionId: string): Promise<void> {
+    const existing = closingSideChats.get(sessionId);
+    if (existing) return existing;
+    const closing = close().finally(() => closingSideChats.delete(sessionId));
+    closingSideChats.set(sessionId, closing);
+    return closing;
+
+    async function close(): Promise<void> {
+      const storage = sideChatStorage();
+      // Drain submissions admitted before close. Other sessions may submit during shutdown.
+      await withSessionAdmission("write", () => Promise.resolve());
+      const session = readSessionRow(storage.db, sessionId);
+      if (!session) return;
+      if (!session.sideChat)
+        throw new SideChatUnsupportedError("Only a side chat can be closed");
+      if (session.sideChat.ownerPid !== process.pid)
+        throw new SessionRunBusyError(sessionId, []);
+      await stopSideChatWork(storage.db, sessionId, {
+        abort: (runId) => runtimeController.abortPromptRun(runId),
+        cancel: (promptId, leaseId) =>
+          promptScheduler.cancelQueued(promptId, leaseId),
+        hasLocalWork: () =>
+          activePromptsBySession.has(sessionId) ||
+          pendingRuntimePromptsBySession.has(sessionId),
+      });
+      const deleted = await deleteSideChatSession(storage.db, sessionId);
+      permission.clearSession(sessionId);
+      await stateStore.removeSession?.(sessionId);
+      await sessionInitializationById.get(sessionId)?.catch(() => undefined);
+      sourceProjection.removeSession(sessionId);
+      sessionMetadataById.delete(sessionId);
+      sessionInitializationById.delete(sessionId);
+      sessionSubviewFailures.delete(sessionId);
+      contextWindowUsage.clearSession(sessionId);
+      uiTodosBySession.delete(sessionId);
+      todoProjectionScopesBySession.delete(sessionId);
+      goalSnapshotsBySession.delete(sessionId);
+      uiGoalsBySession.delete(sessionId);
+      bus.publish(SessionEvent.Removed, { sessionId });
+      await cleanupDeletedSessionFiles(deleted, storage.deletedSessionFiles);
+      await publishSessionIndexInvalidation();
+    }
+  }
+
+  const archivingSessions = new Set<string>();
   async function archiveSessionInternal(
     input: UiArchiveSessionInput,
   ): Promise<void> {
@@ -3279,6 +3374,7 @@ export function createInProcessUiBackendClient(
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
+    if (session.sideChat) throw new SideChatUnsupportedError();
     if (!isPrimarySession(session)) {
       throw new Error(`Cannot archive subagent session: ${sessionId}`);
     }
@@ -3305,7 +3401,30 @@ export function createInProcessUiBackendClient(
       pending.push(...children.map((child) => child.id));
     }
 
-    await options.sessionManager.update(sessionId, { status: "archived" });
+    if (options.sideChatStorage) {
+      const children = sideChatsForMain(options.sideChatStorage.db, sessionId);
+      if (children.some((child) => child.ownerPid !== process.pid))
+        throw new SessionRunBusyError(sessionId, []);
+      for (const child of children) {
+        if (sameSessionDirectory(child.workingDirectory, promptScopeKey))
+          await closeSideChatInternal(child.sideChatId);
+        else if (options.closeSideChatInWorkspace)
+          await options.closeSideChatInWorkspace(
+            child.workingDirectory,
+            child.sideChatId,
+          );
+        else
+          throw new SessionMovedError(child.sideChatId, child.workingDirectory);
+      }
+      const archived = await archiveIdleRoot(
+        options.sideChatStorage.db,
+        sessionId,
+        now().getTime(),
+      );
+      bus.publish(SessionEvent.Updated, { session: archived });
+    } else {
+      await options.sessionManager.update(sessionId, { status: "archived" });
+    }
     retirePromptCacheSession(sessionId);
     removeSubagentSession(sessionId);
     await stateStore.removeSession?.(sessionId);
@@ -3323,7 +3442,7 @@ export function createInProcessUiBackendClient(
           },
         )
       )
-        .filter(isPrimarySession)
+        .filter(isUserFacingSession)
         .filter((candidate) =>
           sameSessionDirectory(
             candidate.workingDirectory,
@@ -3369,6 +3488,14 @@ export function createInProcessUiBackendClient(
       return;
     }
     const session = await options.sessionManager.get(sessionId);
+    if (session?.sideChat && session.sideChat.ownerPid !== process.pid)
+      throw new SessionArchiveError("SESSION_NOT_FOUND", sessionId);
+    if (operation !== "view" && archivingSessions.has(sessionId))
+      throw new SessionRunBusyError(sessionId, []);
+    if (!session && sessionId.startsWith(SIDE_CHAT_ID_PREFIX))
+      throw new SessionArchiveError("SESSION_NOT_FOUND", sessionId);
+    if (operation !== "view" && closingSideChats.has(sessionId))
+      throw new SessionRunBusyError(sessionId, []);
     if (operation !== "view") {
       await assertSessionRoutable(sessionId);
     } else if (
@@ -3602,6 +3729,7 @@ export function createInProcessUiBackendClient(
       stateStore.getSession(sessionId),
       options.sessionManager?.get(sessionId),
     ]);
+    if (coreSession?.sideChat) throw new SideChatUnsupportedError();
     if (!uiSession && !coreSession) {
       throw new Error(`Session not found: ${sessionId}`);
     }
@@ -4116,7 +4244,7 @@ export function createInProcessUiBackendClient(
         publish({ type: "session.updated", session: cloneSession(session) });
       }
 
-      if (!submitOptions?.runtimeInput)
+      if (!submitOptions?.runtimeInput && !existingCoreSession?.sideChat)
         await stateStore.setActiveSessionId(session.id);
 
       session = {
@@ -4463,21 +4591,17 @@ export function createInProcessUiBackendClient(
   async function resolveGoalSessionId(
     explicit?: string,
   ): Promise<string | undefined> {
-    const explicitSessionId = explicit?.trim();
-    if (explicitSessionId) {
-      await ready;
-      await assertCanUseAsPrimarySession(explicitSessionId);
-      await initializeSessionView(explicitSessionId);
-      return explicitSessionId;
-    }
-    const snapshot = await stateStore.readSnapshot();
-    if (!snapshot.activeSessionId) {
-      return undefined;
-    }
-    await assertCanUseAsPrimarySession(snapshot.activeSessionId);
-    // Goal state controls remain available while execution finalization is blocked.
-    await initializeSessionView(snapshot.activeSessionId);
-    return snapshot.activeSessionId;
+    await ready;
+    const requested = explicit?.trim();
+    const sessionId = requested
+      ? requested
+      : (await stateStore.readSnapshot()).activeSessionId;
+    if (!sessionId) return undefined;
+    await assertCanUseAsPrimarySession(sessionId);
+    if ((await options.sessionManager?.get(sessionId))?.sideChat)
+      throw new SideChatUnsupportedError();
+    await initializeSessionView(sessionId);
+    return sessionId;
   }
 
   async function goalService(): Promise<UiRuntimeComposition["goals"]> {
@@ -5271,8 +5395,52 @@ export function createInProcessUiBackendClient(
       return { ...result, ok: true };
     },
 
+    async openSideChat({
+      mainSessionId,
+    }): ReturnType<UiBackendClient["openSideChat"]> {
+      await ready;
+      if (archivingSessions.has(mainSessionId))
+        throw new SessionRunBusyError(mainSessionId, []);
+      await assertSessionRoutable(mainSessionId);
+      const session = await openSideChat(
+        sideChatStorage().db,
+        mainSessionId,
+        promptScopeKey,
+        () => now().getTime(),
+      );
+      for (const rule of permissionState.getSessionRules(mainSessionId))
+        permissionState.addSessionRule(session.id, rule);
+      bus.publish(SessionEvent.Created, { session });
+      await publishSessionIndexInvalidation();
+      return {
+        sideChatId: session.id,
+        title: session.title,
+        boundaryMessageId: session.sideChat.boundaryMessageId,
+      };
+    },
+    async listSideChats({
+      mainSessionId,
+    }): ReturnType<UiBackendClient["listSideChats"]> {
+      await ready;
+      await assertSessionRoutable(mainSessionId);
+      return listSideChats(sideChatStorage().db, mainSessionId);
+    },
+    async closeSideChat({
+      sideChatId,
+    }): ReturnType<UiBackendClient["closeSideChat"]> {
+      await ready;
+      await assertSessionRoutable(sideChatId);
+      return closeSideChatInternal(sideChatId);
+    },
+
     archiveSession(input: UiArchiveSessionInput): Promise<void> {
-      return archiveSessionInternal(input);
+      const sessionId = input.sessionId.trim();
+      if (archivingSessions.has(sessionId))
+        return Promise.reject(new SessionRunBusyError(sessionId, []));
+      archivingSessions.add(sessionId);
+      return withSessionAdmission("write", () => Promise.resolve())
+        .then(() => archiveSessionInternal(input))
+        .finally(() => archivingSessions.delete(sessionId));
     },
 
     async exportSession(input): ReturnType<UiBackendClient["exportSession"]> {
@@ -5323,10 +5491,15 @@ export function createInProcessUiBackendClient(
       );
     },
 
-    executeCommand(
+    async executeCommand(
       invocation: UiCommandInvocation,
       execution?: { readonly signal?: AbortSignal },
     ): ReturnType<UiBackendClient["executeCommand"]> {
+      if (
+        invocation.sessionId &&
+        (await options.sessionManager?.get(invocation.sessionId))?.sideChat
+      )
+        throw new SideChatUnsupportedError();
       return commandService.executeCommand(invocation, execution);
     },
 

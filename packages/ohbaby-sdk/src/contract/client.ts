@@ -96,6 +96,18 @@ export async function submitPromptAndWait(
   return client.waitForPrompt(receipt.promptId, { signal });
 }
 
+export interface UiOpenedSideChat {
+  readonly sideChatId: string;
+  readonly title: string;
+  readonly boundaryMessageId: string;
+}
+
+export interface UiSideChatEntry extends UiOpenedSideChat {
+  readonly createdAt: string;
+  /** Workspace to use when reconnecting to this side chat. */
+  readonly workingDirectory: string;
+}
+
 export interface UiArchiveSessionInput {
   readonly sessionId: string;
 }
@@ -129,6 +141,9 @@ export interface UiQueryClient
     Partial<UiSessionRecoveryClient>,
     Partial<UiSubagentReadClient>,
     Partial<Pick<UiSubagentInstanceClient, "listSubagentInstances">> {
+  listSideChats(input: { readonly mainSessionId: string }): Promise<{
+    readonly sideChats: readonly UiSideChatEntry[];
+  }>;
   exportSession(input: UiExportSessionInput): Promise<UiSessionExport>;
   /** Explicit selection/startup barrier; never called by read endpoints. */
   initializeSession?(sessionId: string): Promise<void>;
@@ -224,6 +239,10 @@ export interface UiCommandClient
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
+  openSideChat(input: {
+    readonly mainSessionId: string;
+  }): Promise<UiOpenedSideChat>;
+  closeSideChat(input: { readonly sideChatId: string }): Promise<void>;
   archiveSession(input: UiArchiveSessionInput): Promise<void>;
   updateSessionModel(input: {
     readonly sessionId: string;

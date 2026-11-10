@@ -110,6 +110,16 @@ export class SourceSessionProjection {
     });
   }
 
+  removeSession(sessionId: string): void {
+    this.owner.removeSession(sessionId);
+    this.messages.delete(sessionId);
+    this.currentRuns.delete(sessionId);
+    this.seededSavedIds.delete(sessionId);
+    this.reasoning.removeSession(sessionId);
+    for (const [id, part] of this.acceptedReasoning)
+      if (part.sessionId === sessionId) this.acceptedReasoning.delete(id);
+  }
+
   commitScopeRun(run: UiRun): void {
     this.notifyScopes({ kind: "run", run });
   }

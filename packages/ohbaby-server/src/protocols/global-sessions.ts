@@ -15,6 +15,7 @@ import type {
 export function toUiGlobalSession(session: CoreSession): UiGlobalSession {
   return {
     id: session.id,
+    ...(session.sideChat ? { isSideChat: true } : {}),
     title: session.title,
     status: session.status,
     createdAt: new Date(session.createdAt).toISOString(),
@@ -110,6 +111,8 @@ export function globalSessionErrorStatus(
       return 400;
     case "SESSION_NOT_FOUND":
       return 404;
+    case "SESSION_MOVED":
+    case "SIDE_CHAT_UNSUPPORTED":
     case "SESSION_NOT_ROOT":
     case "SESSION_ARCHIVED":
     case "SESSION_NOT_ARCHIVED":

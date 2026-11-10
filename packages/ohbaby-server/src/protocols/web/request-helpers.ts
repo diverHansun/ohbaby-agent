@@ -2,6 +2,7 @@ import {
   inferConnectModelInterfaceProvider,
   isConnectModelInterfaceProvider,
   SESSION_MOVED_ERROR_CODE,
+  SIDE_CHAT_UNSUPPORTED_ERROR_CODE,
   type UiBackendClient,
   type UiPermissionResponse,
   type UiSlashCommandInvocation,
@@ -45,7 +46,11 @@ export function promptRejectionBody(message: string): unknown {
 export function promptAdmissionStatus(error: unknown): 400 | 409 | 429 | 500 {
   const code = isRecord(error) ? error.code : undefined;
   if (code === "QUEUE_FULL") return 429;
-  if (code === "IDEMPOTENCY_CONFLICT" || code === SESSION_MOVED_ERROR_CODE)
+  if (
+    code === "IDEMPOTENCY_CONFLICT" ||
+    code === SIDE_CHAT_UNSUPPORTED_ERROR_CODE ||
+    code === SESSION_MOVED_ERROR_CODE
+  )
     return 409;
   if (
     code === "PROMPT_SUBMISSION_REJECTED" ||

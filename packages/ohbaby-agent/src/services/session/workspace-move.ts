@@ -1,3 +1,4 @@
+import { SideChatUnsupportedError } from "./errors.js";
 import {
   getDatabase,
   runWriteTransaction,
@@ -98,6 +99,7 @@ export function commitSessionWorkspaceMove(
 }
 
 function assertMovable(session: Session): void {
+  if (session.sideChat) throw new SideChatUnsupportedError();
   if (session.parentId !== undefined || session.isSubagent) {
     throw new SessionWorkspaceMoveError(
       "SESSION_NOT_ROOT",

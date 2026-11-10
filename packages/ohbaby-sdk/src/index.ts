@@ -1,6 +1,8 @@
 export type { DaemonStartupIntent } from "./contract/daemon-startup-intent.js";
 export type {
   UiSessionCreationResult,
+  UiOpenedSideChat,
+  UiSideChatEntry,
   SubmitPromptOptions,
   UiCommandClient,
   UiPromptCommandClient,
@@ -21,6 +23,7 @@ export { submitPromptAndWait } from "./contract/client.js";
 export {
   SESSION_MOVED_ERROR_CODE,
   SESSION_RUNNING_ERROR_CODE,
+  SIDE_CHAT_UNSUPPORTED_ERROR_CODE,
   SESSION_NOT_ARCHIVED_ERROR_CODE,
   globalSessionRequestDirectory,
 } from "./contract/global-sessions.js";

@@ -1,3 +1,4 @@
+import { SideChatUnsupportedError } from "../session/errors.js";
 import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
 import {
   isContextSummaryPart,
@@ -200,6 +201,7 @@ export async function collectExportDocument(
   const session = await deps.sessionManager.get(sessionId);
   if (!session)
     throw new SessionExportError("SESSION_NOT_FOUND", "Session not found");
+  if (session.sideChat) throw new SideChatUnsupportedError();
   if (session.isSubagent)
     throw new SessionExportError(
       "SUBAGENT_SESSION",

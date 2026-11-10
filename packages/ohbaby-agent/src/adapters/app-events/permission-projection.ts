@@ -315,17 +315,24 @@ export function createPermissionProjection(
 export function startPermissionEventProjection(
   options: StartPermissionEventProjectionOptions,
 ): BusUnsubscribe {
-  const publish = (): void => {
+  const publish = (sessionId?: string): void => {
     options.publish({
+      ...(sessionId === undefined ? {} : { sessionId }),
       permission: options.currentPermissionState(),
       timestamp: (options.now ?? Date.now)(),
       type: "permission.updated",
     });
   };
   const unsubscribers = [
-    options.bus.subscribe(PermissionEvent.ModeChanged, publish),
-    options.bus.subscribe(PermissionEvent.LevelChanged, publish),
-    options.bus.subscribe(PermissionEvent.RuleAdded, publish),
+    options.bus.subscribe(PermissionEvent.ModeChanged, () => {
+      publish();
+    }),
+    options.bus.subscribe(PermissionEvent.LevelChanged, () => {
+      publish();
+    }),
+    options.bus.subscribe(PermissionEvent.RuleAdded, ({ sessionId }) => {
+      publish(sessionId);
+    }),
   ];
   return () => {
     for (const unsubscribe of unsubscribers.splice(0)) unsubscribe();

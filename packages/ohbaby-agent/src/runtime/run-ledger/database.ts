@@ -1,3 +1,4 @@
+import { assertActiveSessionForWork } from "../../services/session/archive.js";
 import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   getDatabase,
@@ -191,6 +192,7 @@ export function createDatabaseRunLedger(
     if (getRowInConnection(connection, input.runId)) {
       throw new InvalidRunTransitionError(input.runId, undefined, "pending");
     }
+    assertActiveSessionForWork(connection, input.sessionId);
     const ownerId = input.ownerId ?? options.ownerId;
     const ownerPid = input.ownerPid ?? options.ownerPid;
     const record: RunLedgerRecord = {

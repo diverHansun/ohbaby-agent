@@ -117,6 +117,10 @@ export interface DaemonHttpServerHandle {
   readonly port: number;
   readonly url: string;
   start(): Promise<void>;
+  closeSideChatInWorkspace(
+    directory: string,
+    sideChatId: string,
+  ): Promise<void>;
   closeAdmission?(): void;
   stop(options?: ShutdownOptions): Promise<CleanupTaskResult>;
   loadWorkspaceScopes?(scopeKeys: readonly string[]): Promise<void>;
@@ -921,6 +925,17 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       const canonical = await resolveWorkspaceScope(scopeKey);
       await this.instanceStore.loadScope(canonical);
     }
+  }
+
+  async closeSideChatInWorkspace(
+    directory: string,
+    sideChatId: string,
+  ): Promise<void> {
+    // Side chat directories are persisted workspace scope keys.
+    const instance = await this.instanceStore?.loadScope(directory);
+    await (instance?.backend ?? this.options.backend).closeSideChat({
+      sideChatId,
+    });
   }
 
   closeAdmission(): void {

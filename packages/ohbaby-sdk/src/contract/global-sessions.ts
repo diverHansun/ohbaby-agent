@@ -3,6 +3,7 @@
 /** The next turn of a moved session must run in `targetDirectory`. */
 export const SESSION_MOVED_ERROR_CODE = "SESSION_MOVED";
 
+export const SIDE_CHAT_UNSUPPORTED_ERROR_CODE = "SIDE_CHAT_UNSUPPORTED";
 export const SESSION_RUNNING_ERROR_CODE = "SESSION_RUNNING";
 export const SESSION_NOT_ARCHIVED_ERROR_CODE = "SESSION_NOT_ARCHIVED";
 export type UiGlobalSessionStatus = "active" | "archived";
@@ -16,6 +17,7 @@ export interface UiDefaultDirectory {
 }
 
 export interface UiGlobalSession {
+  readonly isSideChat?: boolean;
   readonly id: string;
   readonly title: string;
   readonly status: UiGlobalSessionStatus;

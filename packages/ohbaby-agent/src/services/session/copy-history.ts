@@ -51,6 +51,7 @@ interface CopyHistoryInput {
   readonly sourceSessionId: string;
   readonly destinationSessionId?: string;
   readonly cutRunId: string | null;
+  /** Destination scope. A moved source session can have history in several scopes. */
   readonly promptScopeKey: string;
   readonly title: string;
   readonly data?: Partial<SessionData>;
@@ -123,17 +124,12 @@ function selectHistory(
   const prompts = db
     .prepare<PromptRow>(
       `
-    SELECT * FROM prompt_submission WHERE session_id = ? AND scope_key = ?
+    SELECT * FROM prompt_submission WHERE session_id = ?
     AND status IN (${terminal}, 'steered')
     AND (user_message_id IN (${selectedIds}) OR run_id IN (${selectedIds}))
   `,
     )
-    .all(
-      sourceSessionId,
-      input.promptScopeKey,
-      messageIds,
-      JSON.stringify([...runIds]),
-    );
+    .all(sourceSessionId, messageIds, JSON.stringify([...runIds]));
   for (const prompt of prompts) if (prompt.run_id) runIds.add(prompt.run_id);
   const runs = db
     .prepare<RunRow>(
@@ -212,7 +208,7 @@ export function copySessionHistory(
   viewOrder.forEach((m, rank) =>
     ids.set(
       m.id,
-      `message_${String(now)}_${String(rank).padStart(width, "0")}_${nonce}`,
+      `message_-copy_${String(rank).padStart(width, "0")}_${nonce}`,
     ),
   );
   for (const p of parts) ids.set(p.id, messageIds.partId());
@@ -270,6 +266,7 @@ export function copySessionHistory(
       });
     }
     Object.assign(prompt, {
+      scope_key: input.promptScopeKey,
       owner_id: null,
       owner_pid: null,
       edit_lease_id: null,

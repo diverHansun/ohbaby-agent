@@ -176,6 +176,9 @@ function createServerRuntime(input: {
       };
     },
     async start(): Promise<void> {
+      // The root backend cleans dead side-chat owners across the shared database.
+      // Finish its startup before recovering or opening another workspace queue.
+      await input.backend.initialize();
       let queuedScopes: readonly string[] = [];
       let promptStore:
         | InstanceType<typeof AgentRuntime.DatabasePromptSubmissionStore>
@@ -538,13 +541,15 @@ async function startFreshDaemon(input: {
             : { llmClient: input.options.llmClient }),
           workdir,
           logger,
+          closeSideChatInWorkspace: (directory, sideChatId) =>
+            daemon.closeSideChatInWorkspace(directory, sideChatId),
         });
       const backend = createBackend(input.scopeRoot);
       const releaseDatabase = retainLocalDaemonDatabase();
       const workspaceRegistry = createWorkspaceRegistryIfAvailable();
       if (!isDefaultDirectory(input.scopeRoot))
         await workspaceRegistry?.open(input.scopeRoot);
-      server = createDaemonHttpServer({
+      const daemon = createDaemonHttpServer({
         authToken: input.authToken,
         backend,
         createWorkspaceBackend: createBackend,
@@ -587,6 +592,7 @@ async function startFreshDaemon(input: {
         scopeRoot: input.scopeRoot,
         webAssetsDir: input.options.webAssetsDir,
       });
+      server = daemon;
       return createServerRuntime({
         authToken: input.authToken,
         backend,

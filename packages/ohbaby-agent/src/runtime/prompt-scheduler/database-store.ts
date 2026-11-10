@@ -1,3 +1,4 @@
+import { assertActiveSessionForWork } from "../../services/session/archive.js";
 import { sameReasoning } from "./types.js";
 /* eslint-disable @typescript-eslint/require-await -- SQLite operations are synchronous behind the shared async store contract. */
 import { randomUUID } from "node:crypto";
@@ -226,6 +227,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
           `Prompt session was not persisted before admission: ${input.sessionId}`,
         );
       }
+      assertActiveSessionForWork(db, input.sessionId);
       const count = db
         .prepare<{ readonly count: number }>(
           `SELECT COUNT(*) AS count FROM ${this.tableName}

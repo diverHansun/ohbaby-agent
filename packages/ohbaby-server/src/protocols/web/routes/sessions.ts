@@ -25,14 +25,29 @@ import { CLIENT_ID_HEADER } from "../request-helpers.js";
 
 import {
   asNonEmptyString,
-  errorMessage,
   isRecord,
   mutationErrorStatus,
   readJsonWithLimit,
   webErrorBody,
 } from "../request-helpers.js";
 
+import { globalSessionErrorStatus } from "../../global-sessions.js";
+import type { Context } from "hono";
 import type { DaemonRouteContext } from "./context.js";
+
+function sessionFailure(
+  context: Context,
+  error: unknown,
+  fallback: 400 | 404 | 409 | 500 = 500,
+): Response {
+  const status = globalSessionErrorStatus(error);
+  const failure = createDaemonRpcFailure("http", error);
+  if (failure.ok) throw new Error("Expected session failure");
+  return context.json(
+    { ok: false, error: failure.error },
+    status === 500 ? fallback : status,
+  );
+}
 
 export function registerSessionReadRoutes(
   app: Hono,
@@ -95,6 +110,19 @@ export function registerSessionReadRoutes(
       }
     });
   }
+  app.get("/v1/sessions/:id/side-chats", async (context) => {
+    const authorization = ctx.authorizePromptMutation(context);
+    if ("response" in authorization) return authorization.response;
+    try {
+      return context.json(
+        await ctx.options.backend.listSideChats({
+          mainSessionId: context.req.param("id"),
+        }),
+      );
+    } catch (error) {
+      return sessionFailure(context, error);
+    }
+  });
   app.get("/v1/sessions/index", async (context) => {
     const authorization = ctx.authorizePromptMutation(context);
     if ("response" in authorization) return authorization.response;
@@ -164,6 +192,31 @@ export function registerSessionMutationRoutes(
   app: Hono,
   ctx: DaemonRouteContext,
 ): void {
+  app.post("/v1/sessions/:id/side-chats", async (context) => {
+    const authorization = ctx.authorizePromptMutation(context);
+    if ("response" in authorization) return authorization.response;
+    try {
+      return context.json(
+        await ctx.options.backend.openSideChat({
+          mainSessionId: context.req.param("id"),
+        }),
+      );
+    } catch (error) {
+      return sessionFailure(context, error);
+    }
+  });
+  app.delete("/v1/side-chats/:id", async (context) => {
+    const authorization = ctx.authorizePromptMutation(context);
+    if ("response" in authorization) return authorization.response;
+    try {
+      await ctx.options.backend.closeSideChat({
+        sideChatId: context.req.param("id"),
+      });
+      return context.body(null, 204);
+    } catch (error) {
+      return sessionFailure(context, error);
+    }
+  });
   app.patch("/v1/sessions/:id/model", async (context) => {
     if (!ctx.isAuthorized(context.req.header("authorization")))
       return context.json(webErrorBody("Unauthorized"), 401);
@@ -193,9 +246,7 @@ export function registerSessionMutationRoutes(
         });
       return context.json({ ok: true, session });
     } catch (error) {
-      const failure = createDaemonRpcFailure("http", error);
-      if (failure.ok) throw new Error("Expected model selection failure");
-      return context.json({ ok: false, error: failure.error }, 400);
+      return sessionFailure(context, error, 400);
     }
   });
 
@@ -227,7 +278,7 @@ export function registerSessionMutationRoutes(
         });
       return context.json({ ok: true, session });
     } catch (error) {
-      return context.json(webErrorBody(errorMessage(error)), 400);
+      return sessionFailure(context, error, 400);
     }
   });
 
@@ -351,10 +402,7 @@ export function registerSessionMutationRoutes(
           { ok: false, error: { code: error.code, message: error.message } },
           409,
         );
-      return context.json(
-        webErrorBody(errorMessage(error)),
-        mutationErrorStatus(error),
-      );
+      return sessionFailure(context, error, mutationErrorStatus(error));
     }
   });
 
@@ -409,7 +457,7 @@ export function registerSessionMutationRoutes(
         });
       return context.json({ compact, ok: true });
     } catch (error) {
-      return context.json(webErrorBody(errorMessage(error)), 400);
+      return sessionFailure(context, error, 400);
     }
   });
 }

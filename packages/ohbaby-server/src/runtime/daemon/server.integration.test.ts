@@ -621,6 +621,16 @@ class FakeBackend implements UiBackendClient {
     });
   }
 
+  openSideChat(): Promise<never> {
+    throw new Error("unused");
+  }
+  listSideChats(): Promise<never> {
+    throw new Error("unused");
+  }
+  closeSideChat(): Promise<never> {
+    throw new Error("unused");
+  }
+
   archiveSession(): ReturnType<UiBackendClient["archiveSession"]> {
     return Promise.resolve();
   }

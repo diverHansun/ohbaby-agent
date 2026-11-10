@@ -5895,6 +5895,9 @@ function createFakeClient(
   readonly updateSessionModel: ReturnType<typeof vi.fn>;
   readonly selectDefaultModel: ReturnType<typeof vi.fn>;
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
+  readonly openSideChat: ReturnType<typeof vi.fn>;
+  readonly listSideChats: ReturnType<typeof vi.fn>;
+  readonly closeSideChat: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly steerQueuedPrompt: ReturnType<typeof vi.fn>;
@@ -6094,6 +6097,9 @@ function createFakeClient(
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
     exportSession: vi.fn(() => Promise.reject(new Error("Not implemented"))),
+    openSideChat: vi.fn(() => Promise.reject(new Error("unused"))),
+    listSideChats: vi.fn(() => Promise.resolve({ sideChats: [] })),
+    closeSideChat: vi.fn(() => Promise.resolve()),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() =>
       Promise.resolve({

@@ -1,3 +1,4 @@
+import { isUserFacingSession } from "../../services/session/types.js";
 import type { UiSession, UiSnapshot } from "ohbaby-sdk";
 import type {
   Session as CoreSession,
@@ -44,6 +45,7 @@ export function sessionMetadataToUiSession(session: CoreSession): UiSession {
     createdAt: new Date(session.createdAt).toISOString(),
     id: session.id,
     messages: [],
+    ...(session.sideChat ? { isSideChat: true } : {}),
     reasoning: session.reasoning,
     modelEntryId: session.modelEntryId,
     workingDirectory: session.workingDirectory,
@@ -91,6 +93,7 @@ export function isReusableUiSession(
   projectRoot: string,
 ): boolean {
   return (
+    !session.isSideChat &&
     session.messages.length === 0 &&
     sameSessionDirectory(session.workingDirectory, projectRoot)
   );
@@ -103,7 +106,7 @@ function isReusableCoreSession(
   return (
     session !== null &&
     session !== undefined &&
-    isPrimarySession(session) &&
+    isUserFacingSession(session) &&
     session.status === "active" &&
     session.stats.messageCount === 0 &&
     sameSessionDirectory(session.workingDirectory, projectRoot)

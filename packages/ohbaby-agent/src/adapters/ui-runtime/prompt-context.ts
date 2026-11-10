@@ -48,6 +48,7 @@ export function noticeFromCompactResult(
 
   if (result.status === "failed") {
     return {
+      sessionId,
       key: `context:compact:${sessionId}`,
       level: "warning",
       message: `Context compact failed: ${
@@ -57,6 +58,7 @@ export function noticeFromCompactResult(
     };
   }
   return {
+    sessionId,
     key: `context:compact:${sessionId}`,
     level: "warning",
     message: "Context compact failed because the summary was not smaller.",

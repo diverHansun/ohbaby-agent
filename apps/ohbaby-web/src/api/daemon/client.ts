@@ -444,6 +444,35 @@ export class BrowserDaemonClient implements UiBackendClient {
     return this.commands.exportSession(input);
   }
 
+  openSideChat({
+    mainSessionId,
+  }: Parameters<UiBackendClient["openSideChat"]>[0]): ReturnType<
+    UiBackendClient["openSideChat"]
+  > {
+    return this.http.request(
+      `/v1/sessions/${encodeURIComponent(mainSessionId)}/side-chats`,
+      { method: "POST" },
+    );
+  }
+
+  listSideChats({
+    mainSessionId,
+  }: Parameters<UiBackendClient["listSideChats"]>[0]): ReturnType<
+    UiBackendClient["listSideChats"]
+  > {
+    return this.http.request(
+      `/v1/sessions/${encodeURIComponent(mainSessionId)}/side-chats`,
+    );
+  }
+
+  async closeSideChat({
+    sideChatId,
+  }: Parameters<UiBackendClient["closeSideChat"]>[0]): Promise<void> {
+    await this.http.send(`/v1/side-chats/${encodeURIComponent(sideChatId)}`, {
+      method: "DELETE",
+    });
+  }
+
   archiveSession(
     input: Parameters<UiBackendClient["archiveSession"]>[0],
   ): ReturnType<UiBackendClient["archiveSession"]> {

@@ -4,6 +4,7 @@ import {
   type Logger,
 } from "ohbaby-agent";
 import { type UiBackendClient, type UiEvent } from "ohbaby-sdk";
+import { sessionIdForEvent } from "../coordination/client-view.js";
 import { type EventEnvelope } from "../coordination/event-bus.js";
 import { sessionRecoveryCapability } from "../coordination/session-access.js";
 import { emitDiagnosticSafely } from "../observability/emit.js";
@@ -561,10 +562,21 @@ export class DaemonSseHub {
         this.context.clientViews.currentSubagentWatchId(client.clientId)
     )
       return;
-    if (routed) {
+    if (!routed) return;
+    const root = this.context.clientViews.binding(
+      client.clientId,
+      this.context.permissionEpoch,
+    ).rootSessionId;
+    const sessionId = sessionIdForEvent(routed);
+    if (sessionId !== undefined && sessionId !== root) return;
+    const event = this.context.permissionRouter.filterEventForClient(
+      routed,
+      root,
+    );
+    if (event) {
       client.write(
         {
-          event: this.projectSelectionForBinding(routed, client.clientId, true),
+          event: this.projectSelectionForBinding(event, client.clientId, true),
           type: "ui.event",
         },
         envelope.seqNum,

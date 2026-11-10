@@ -28,6 +28,7 @@ export interface UiPermissionResponseContext {
 }
 
 export interface UiSessionIndexEntry {
+  readonly isSideChat?: boolean;
   readonly id: string;
   readonly title: string;
   readonly workingDirectory?: string;

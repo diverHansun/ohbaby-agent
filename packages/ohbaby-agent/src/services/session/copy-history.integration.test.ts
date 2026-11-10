@@ -7,6 +7,11 @@ import {
   createMessageManager,
 } from "../../core/message/index.js";
 import { DatabaseCurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
+import { DatabasePromptSubmissionStore } from "../../runtime/prompt-scheduler/database-store.js";
+import {
+  planSessionWorkspaceMove,
+  commitSessionWorkspaceMove,
+} from "./workspace-move.js";
 import { recoverTodosFromMessages } from "../../tools/todo.js";
 import {
   initDatabase,
@@ -187,7 +192,14 @@ describe("copySessionHistory", () => {
       run("old-run-a", 1);
       message("z-old-message", "old-run-a", 1);
       part("z-old-message", "text", { text: "first" });
-      prompt("old-prompt-a", "z-old-message", "old-run-a");
+      prompt(
+        "old-prompt-a",
+        "z-old-message",
+        "old-run-a",
+        "succeeded",
+        "/work",
+      );
+      await commitSessionWorkspaceMove(planSessionWorkspaceMove(main, scope));
       run("old-run-b", 2, "succeeded", "subagent");
       message("a-old-message", "old-run-b", 1, "assistant");
       part("a-old-message", "text", { text: "second" });
@@ -221,7 +233,7 @@ describe("copySessionHistory", () => {
         projectId: "project",
         workingDirectory: "/work",
         workspaceDirectory: scope,
-        pendingWorkingDirectory: "/next",
+        pendingWorkingDirectory: scope,
         agentName: "editor",
         stats: { messageCount: 2, lastMessageAt: 1 },
         childrenIds: [],
@@ -233,6 +245,25 @@ describe("copySessionHistory", () => {
       expect(tables.map((t) => rows(t, sessionId).length)).toEqual([
         2, 2, 2, 1, 0,
       ]);
+      const historyWindow = {
+        runIds: rows("run_ledger", sessionId).map((row) => String(row.run_id)),
+      };
+      const prompts = new DatabasePromptSubmissionStore();
+      const inDestination = await prompts.listForSession(
+        scope,
+        sessionId,
+        historyWindow,
+      );
+      expect(inDestination).toHaveLength(1);
+      expect(inDestination[0]).toMatchObject({
+        scopeKey: scope,
+        status: "succeeded",
+        sessionId,
+      });
+      expect(
+        await prompts.listForSession("/work", sessionId, historyWindow),
+      ).toEqual([]);
+      expect(rows("prompt_submission", main)[0].scope_key).toBe("/work");
       const store = createDatabaseMessageStore();
       const labels = (
         records: Awaited<ReturnType<typeof store.listBySession>>,

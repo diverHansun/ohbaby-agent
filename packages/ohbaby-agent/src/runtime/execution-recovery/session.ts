@@ -1,4 +1,7 @@
-import { isValidOwnerPid } from "../../utils/process-owner.js";
+import {
+  isOwnerProcessAlive,
+  isValidOwnerPid,
+} from "../../utils/process-owner.js";
 import {
   createDatabaseWriteBudget,
   withDatabaseWriteBudget,
@@ -27,16 +30,6 @@ interface SessionRecoveryOptions {
   readonly isOwnerAlive?: (pid: number) => boolean;
 }
 
-function ownerAlive(pid: number): boolean {
-  if (!isValidOwnerPid(pid)) return true;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-}
-
 function active(run: RunLedgerRecord): boolean {
   return run.status === "pending" || run.status === "running";
 }
@@ -52,7 +45,7 @@ export function createSessionExecutionRecovery(
   // Only inputs/history of this exact terminal snapshot are checked. Every entry
   // still reads current owners and child eligibility; this is not a session gate cache.
   const checkedHistories = new Map<string, string>();
-  const alive = options.isOwnerAlive ?? ownerAlive;
+  const alive = options.isOwnerAlive ?? isOwnerProcessAlive;
   const now = options.now ?? Date.now;
   const recoverable = (run: RunLedgerRecord): boolean =>
     run.endTimeSource === "recovery" ||

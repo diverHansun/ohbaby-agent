@@ -115,6 +115,17 @@ export class DisplayReasoningOwner {
     }
   }
 
+  removeSession(sessionId: string): void {
+    for (const [id, entry] of this.entries) {
+      if (entry.part.sessionId !== sessionId) continue;
+      entry.evicted = true;
+      if (entry.timer) clearTimeout(entry.timer);
+      this.entries.delete(id);
+      this.removeEnded(entry);
+    }
+    this.missing.delete(sessionId);
+  }
+
   dispose(): void {
     this.disposed = true;
     for (const entry of this.entries.values())

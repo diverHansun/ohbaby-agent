@@ -795,7 +795,10 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       if (directory !== null)
         this.catalog.replaceSessions(
           index
-            .filter((entry) => !entry.parentId && !entry.isSubagent)
+            .filter(
+              (entry) =>
+                !entry.parentId && !entry.isSubagent && !entry.isSideChat,
+            )
             .map((entry) => ({
               id: entry.id,
               title: entry.title,
