@@ -36,7 +36,10 @@ function isTerminal(
 
 /** RPC acceptance and authoritative completion deliberately have separate lifetimes. */
 export function useStopRequest(
-  runtime: OhbabyWebRuntime,
+  // A side chat's connection has the same three parts as the main runtime.
+  runtime: Pick<OhbabyWebRuntime, "store" | "abortSession"> & {
+    readonly client: unknown;
+  },
   sessionId: string | undefined,
   runId: string | undefined,
   onError: (error: string) => void,

@@ -52,6 +52,7 @@ export function SessionConversation(props: {
     readonly subagentId: string;
     readonly executionId: string;
   }) => void;
+  readonly onAskInSideChat?: (selection: string) => void;
 }): ReactElement {
   const { runtime, view, storeSnapshot, interactions } = props;
   const sessionId = view.activeSession?.id ?? null;
@@ -134,6 +135,7 @@ export function SessionConversation(props: {
             compacting={props.compacting}
             compactNotice={props.compactNotice}
             followToken={props.followToken}
+            onAskInSideChat={props.onAskInSideChat}
             commandNotices={
               <CommandNoticeList
                 notices={view.commandNotices.filter(

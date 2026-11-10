@@ -44,6 +44,7 @@ export function SessionScreen({
   onError,
   subagentInstances,
   onOpenSubagent,
+  onAskInSideChat,
 }: {
   readonly runtime: OhbabyWebRuntime;
   readonly client: UiBackendClient;
@@ -60,6 +61,8 @@ export function SessionScreen({
     readonly subagentId: string;
     readonly executionId: string;
   }) => void;
+  /** Quotes selected message text into a side chat. */
+  readonly onAskInSideChat?: (selection: string) => void;
 }): ReactElement {
   const {
     storeSnapshot,
@@ -336,6 +339,7 @@ export function SessionScreen({
           followToken={followToken}
           subagentInstances={subagentInstances}
           onOpenSubagent={onOpenSubagent}
+          onAskInSideChat={onAskInSideChat}
         />
       ) : (
         <DraftHero

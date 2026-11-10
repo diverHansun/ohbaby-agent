@@ -22,6 +22,7 @@ import {
   SidePanelPage,
 } from "../side-panel/SidePanelPage.js";
 import { useSidePanel } from "../side-panel/use-side-panel.js";
+import { useSideChats } from "../side-chat/use-side-chats.js";
 import { useTerminalTabs } from "../side-panel/terminal/use-terminal-tabs.js";
 import { ConfirmDialog } from "../shared/ConfirmDialog.js";
 import { Sidebar } from "../sidebar/Sidebar.js";
@@ -221,6 +222,42 @@ export function AppController(props: {
     directory: terminalDirectory,
     onError: pushError,
   });
+  // A side chat reads the main chat's history, so that chat must have begun:
+  // a message on screen, or a first prompt already accepted (side chat 00 P17).
+  const mainStarted =
+    activeId !== undefined &&
+    (!view.isEmpty ||
+      (view.snapshot?.prompts ?? []).some(
+        (prompt) => prompt.sessionId === activeId,
+      ));
+  const sideChats = useSideChats({
+    runtime,
+    panel: sidePanel,
+    mainSessionId: activeId,
+    started: mainStarted,
+    onError: pushError,
+  });
+  const openSideChat = sideChats.open;
+  const sideChatAvailable = sideChats.unavailable === undefined;
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent): void => {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.key !== ";" ||
+        event.altKey ||
+        event.shiftKey ||
+        event.repeat
+      )
+        return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      if (sideChatAvailable) openSideChat();
+    };
+    document.addEventListener("keydown", shortcut);
+    return (): void => {
+      document.removeEventListener("keydown", shortcut);
+    };
+  }, [openSideChat, sideChatAvailable]);
   const sidePageContext: SidePageContext = {
     client,
     rootSessionId: activeId,
@@ -231,6 +268,7 @@ export function AppController(props: {
     terminals: runtime.terminals,
     onTerminalExit: terminalTabs.markExited,
     onTerminalMissing: terminalTabs.sync,
+    sideChat: sideChats.connection,
   };
   const { revealPage } = sidePanel;
   const anchorToken = useRef(0);
@@ -330,6 +368,11 @@ export function AppController(props: {
             setPanelOpenedByUser(true);
             sidePanel.setOpen(true);
           }}
+          sideChat={
+            client
+              ? { onOpen: openSideChat, unavailable: sideChats.unavailable }
+              : undefined
+          }
         />
       )}
       main={
@@ -342,6 +385,7 @@ export function AppController(props: {
             onError={pushError}
             subagentInstances={subagentInstances.state}
             onOpenSubagent={openSubagent}
+            onAskInSideChat={sideChats.quote}
           />
         ) : (
           <DraftFallback
@@ -364,6 +408,9 @@ export function AppController(props: {
             onCloseTerminal={(tab, remove) => {
               terminalTabs.closeTerminal(tab, false, remove);
             }}
+            onNewSideChat={openSideChat}
+            sideChatUnavailable={sideChats.unavailable}
+            onCloseSideChat={sideChats.close}
             onClosed={() => {
               setPanelOpenedByUser(false);
               requestAnimationFrame(() => {

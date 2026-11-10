@@ -107,6 +107,7 @@ it("starts closed with an entry page, opens Subagents tabs and offers only worki
     "Subagents",
     "Files",
     "Terminal",
+    "Side chat",
   ]);
   click(items[0] ?? null);
   // A page kind is not a unique key (D36): the menu adds a second tab and selects it.

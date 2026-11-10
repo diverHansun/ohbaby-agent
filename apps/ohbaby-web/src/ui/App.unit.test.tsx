@@ -5269,6 +5269,12 @@ function createFakeRuntime(input: {
       abortSession,
       archiveSession,
       moveSession: () => Promise.resolve(),
+      openSideChat: () => Promise.reject(new Error("no side chat")),
+      listSideChats: () => Promise.resolve([]),
+      closeSideChat: () => Promise.resolve(),
+      connectSideChat: (): never => {
+        throw new Error("no side chat");
+      },
       listArchivedSessions: () => Promise.resolve({ sessions: [] }),
       unarchiveSession: () => Promise.resolve(),
       deleteSession: () => Promise.resolve(),

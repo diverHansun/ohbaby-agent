@@ -1,5 +1,12 @@
-import { Bot, FolderOpen, SquareTerminal, type LucideIcon } from "lucide-react";
+import {
+  Bot,
+  FolderOpen,
+  MessageCircleQuestion,
+  SquareTerminal,
+  type LucideIcon,
+} from "lucide-react";
 import type { TerminalInfo } from "ohbaby-sdk";
+import type { SideChatEntry } from "../../runtime/side-chat.js";
 
 /**
  * Each page kind's own tab state. A new page (file preview, terminal, built-in
@@ -27,6 +34,14 @@ export interface SidePageStates {
     /** The shell exited while shown; the tab keeps saying so after it is gone. */
     readonly exitCode?: number;
   };
+  readonly sideChat: {
+    /** The main chat it was opened from; its tab shows only beside that chat. */
+    readonly mainSessionId: string;
+    /** Always a real side chat; tabs open only after the server made one. */
+    readonly entry: SideChatEntry;
+    /** An approval is waiting in this side chat. */
+    readonly awaitingApproval?: boolean;
+  };
 }
 
 /** One delegation to scroll to; a new `token` repeats the request. */
@@ -46,6 +61,14 @@ export type SidePanelTab = {
   };
 }[SidePageKind];
 
+export interface SideTabLabel {
+  readonly title: string;
+  /** The tab's tooltip. */
+  readonly detail?: string;
+  /** A small dot after the title, explained by this text. */
+  readonly attention?: string;
+}
+
 export interface SidePageDefinition<K extends SidePageKind> {
   readonly title: string;
   /** One line for the entry page. */
@@ -57,10 +80,7 @@ export interface SidePageDefinition<K extends SidePageKind> {
    */
   readonly initialState?: SidePageStates[K];
   /** A per-tab label; without it the tab shows `title`. */
-  readonly tabLabel?: (state: SidePageStates[K]) => {
-    readonly title: string;
-    readonly detail?: string;
-  };
+  readonly tabLabel?: (state: SidePageStates[K]) => SideTabLabel;
   /**
    * Pages about the open chat (Subagents) return to `initialState` when the
    * primary session changes; pages about the workspace or the web (terminal,
@@ -97,6 +117,31 @@ export const SIDE_PAGES: {
     }),
     sessionScoped: false,
   },
+  sideChat: {
+    title: "Side chat",
+    description: "Ask about this chat without changing it",
+    icon: MessageCircleQuestion,
+    tabLabel: ({ entry, awaitingApproval }) => ({
+      title: entry.title,
+      ...(awaitingApproval ? { attention: "Waiting for approval" } : {}),
+    }),
+    // Tabs belong to their main chat; `useSidePanel` hides the others.
+    sessionScoped: false,
+  },
 };
+
+/** The label of one tab: its page's own, else the page title. */
+export function sideTabLabel(tab: SidePanelTab): SideTabLabel {
+  switch (tab.kind) {
+    case "terminal":
+      return SIDE_PAGES.terminal.tabLabel?.(tab.state) ?? { title: "Terminal" };
+    case "sideChat":
+      return (
+        SIDE_PAGES.sideChat.tabLabel?.(tab.state) ?? { title: "Side chat" }
+      );
+    default:
+      return { title: SIDE_PAGES[tab.kind].title };
+  }
+}
 
 export const SIDE_PAGE_KINDS = Object.keys(SIDE_PAGES) as SidePageKind[];

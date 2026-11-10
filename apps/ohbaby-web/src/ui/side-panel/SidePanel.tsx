@@ -17,6 +17,7 @@ import {
 import {
   SIDE_PAGE_KINDS,
   SIDE_PAGES,
+  sideTabLabel,
   type SidePageKind,
   type SidePanelTab,
 } from "./side-pages.js";
@@ -45,6 +46,15 @@ export function SidePanel(props: {
   /** Terminal tabs close through the server and may ask first (D7). */
   readonly onCloseTerminal?: (
     tab: Extract<SidePanelTab, { kind: "terminal" }>,
+    remove: (id: string) => void,
+  ) => void;
+  /** Side chats open only once the server made one. */
+  readonly onNewSideChat?: () => void;
+  /** Why a side chat cannot be opened now; its entries are dimmed. */
+  readonly sideChatUnavailable?: string;
+  /** Closing a side chat deletes it; the tab leaves at once. */
+  readonly onCloseSideChat?: (
+    tab: Extract<SidePanelTab, { kind: "sideChat" }>,
     remove: (id: string) => void,
   ) => void;
 }): ReactElement {
@@ -106,12 +116,17 @@ export function SidePanel(props: {
   const requestClose = (tab: SidePanelTab): void => {
     if (tab.kind === "terminal" && props.onCloseTerminal)
       props.onCloseTerminal(tab, closeTabAndFocus);
+    else if (tab.kind === "sideChat" && props.onCloseSideChat)
+      props.onCloseSideChat(tab, closeTabAndFocus);
     else closeTabAndFocus(tab.id);
   };
   const open = (kind: SidePageKind): void => {
     if (kind === "terminal") props.onNewTerminal?.();
+    else if (kind === "sideChat") props.onNewSideChat?.();
     else openPage(kind);
   };
+  const unavailable = (kind: SidePageKind): string | undefined =>
+    kind === "sideChat" ? props.sideChatUnavailable : undefined;
   const closePanel = (): void => {
     setOpen(false);
     props.onClosed?.();
@@ -225,11 +240,8 @@ export function SidePanel(props: {
           }}
         >
           {state.tabs.map((tab) => {
-            const { title, icon: Icon } = SIDE_PAGES[tab.kind];
-            const label =
-              tab.kind === "terminal"
-                ? SIDE_PAGES.terminal.tabLabel?.(tab.state)
-                : undefined;
+            const { icon: Icon } = SIDE_PAGES[tab.kind];
+            const label = sideTabLabel(tab);
             const closing = tab.kind === "terminal" && tab.state.closing;
             const selected = tab.id === state.activeTabId;
             return (
@@ -247,13 +259,21 @@ export function SidePanel(props: {
                   }
                   id={`ohb-side-tab-${tab.id}`}
                   tabIndex={selected ? 0 : -1}
-                  title={label?.detail}
+                  title={label.detail}
                   onClick={() => {
                     selectTab(tab.id);
                   }}
                 >
                   <Icon aria-hidden="true" size={14} />
-                  <span>{label?.title ?? title}</span>
+                  <span>{label.title}</span>
+                  {label.attention ? (
+                    <span
+                      className="ohb-side-panel-tab-attention"
+                      role="img"
+                      aria-label={label.attention}
+                      title={label.attention}
+                    />
+                  ) : null}
                 </button>
                 {/* Mouse shortcut only; keyboard users close the selected tab with Delete. */}
                 <button
@@ -261,7 +281,7 @@ export function SidePanel(props: {
                   className="ohb-side-panel-tab-close"
                   aria-hidden="true"
                   tabIndex={-1}
-                  title={`Close ${label?.title ?? title}`}
+                  title={`Close ${label.title}`}
                   disabled={closing}
                   onClick={() => {
                     requestClose(tab);
@@ -330,6 +350,8 @@ export function SidePanel(props: {
               <button
                 key={kind}
                 type="button"
+                disabled={unavailable(kind) !== undefined}
+                title={unavailable(kind)}
                 onClick={() => {
                   open(kind);
                 }}
@@ -364,6 +386,8 @@ export function SidePanel(props: {
                 key={kind}
                 role="menuitem"
                 type="button"
+                disabled={unavailable(kind) !== undefined}
+                title={unavailable(kind)}
                 onClick={() => {
                   setAddMenu(null);
                   open(kind);

@@ -23,7 +23,9 @@ import {
   ModelWaiting,
   PromptDuration,
 } from "./ExecutionProgress.js";
+import { MessageCircleQuestion } from "lucide-react";
 import { CopyButton } from "../shared/CopyButton.js";
+import { SelectionAction } from "./SelectionAction.js";
 import { MessageActions } from "./MessageActions.js";
 import { isCompactionMessage, messageBodyText } from "./message-text.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
@@ -75,6 +77,13 @@ export function ConversationStream(props: {
   readonly compactNotice?: string;
   /** Changes when the user sends a prompt; following resumes even after reading up. */
   readonly followToken?: number;
+  /**
+   * A side chat panel: its messages keep only Copy, and selected text offers
+   * nothing. Edit and fork must respect this switch (side chat 00 P18).
+   */
+  readonly variant?: "side-chat";
+  /** Main chat only: selected message text can be quoted into a side chat. */
+  readonly onAskInSideChat?: (selection: string) => void;
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamInnerRef = useRef<HTMLDivElement | null>(null);
@@ -671,6 +680,14 @@ export function ConversationStream(props: {
           </div>
         ) : null}
       </div>
+      {props.onAskInSideChat && props.variant !== "side-chat" ? (
+        <SelectionAction
+          container={streamRef}
+          label="Ask in side chat"
+          icon={MessageCircleQuestion}
+          onAction={props.onAskInSideChat}
+        />
+      ) : null}
     </section>
   );
 }

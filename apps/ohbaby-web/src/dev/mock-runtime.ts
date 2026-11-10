@@ -371,6 +371,14 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
       });
     },
     exportSession: () => Promise.reject(new Error("mock runtime: export")),
+    // The mock has no daemon to copy a chat or answer in one.
+    openSideChat: () =>
+      Promise.reject(new Error("Side chats need a running ohbaby serve")),
+    listSideChats: () => Promise.resolve([]),
+    closeSideChat: resolved,
+    connectSideChat: (): never => {
+      throw new Error("Side chats need a running ohbaby serve");
+    },
     createSession: resolved,
     dispose: resolved,
     executeSlashCommand: () =>

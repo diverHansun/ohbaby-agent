@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   clampSidePanelWidth,
   initialSidePanel,
@@ -21,6 +21,7 @@ export interface SidePanelState {
 }
 
 export interface SidePanelControls {
+  /** What the panel shows: side chats of other main chats are left out. */
   readonly state: SidePanelState;
   readonly setOpen: (open: boolean) => void;
   readonly setWidth: (width: number) => void;
@@ -248,8 +249,21 @@ export function useSidePanel(
     },
     [],
   );
+  // A side chat tab shows only beside its main chat. The others stay open
+  // (their clients too) and come back when that chat is opened again.
+  const visible = useMemo((): SidePanelState => {
+    const tabs = state.tabs.filter(
+      (tab) =>
+        tab.kind !== "sideChat" || tab.state.mainSessionId === rootSessionId,
+    );
+    if (tabs.length === state.tabs.length) return state;
+    const activeTabId = tabs.some((tab) => tab.id === state.activeTabId)
+      ? state.activeTabId
+      : tabs.at(-1)?.id;
+    return { ...state, tabs, activeTabId };
+  }, [state, rootSessionId]);
   return {
-    state,
+    state: visible,
     setOpen,
     setWidth,
     setExpanded,

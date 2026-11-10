@@ -21,4 +21,5 @@
 @import "./side-panel/subagents/subagents-page.css";
 @import "./side-panel/files/files-page.css";
 @import "./side-panel/terminal/terminal-page.css";
+@import "./side-chat/side-chat.css";
 @import "./settings/settings.css";

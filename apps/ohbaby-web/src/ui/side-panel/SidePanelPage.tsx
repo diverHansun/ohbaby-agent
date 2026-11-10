@@ -7,6 +7,8 @@ import type { SidePanelTab } from "./side-pages.js";
 import { FilesPage } from "./files/FilesPage.js";
 import { SubagentsPage } from "./subagents/SubagentsPage.js";
 import { TerminalPage } from "./terminal/TerminalPage.js";
+import type { SideChatConnection } from "../../runtime/side-chat.js";
+import { SideChatPage } from "../side-chat/SideChatPage.js";
 import type { SubagentInstances } from "../shared/subagent-instances.js";
 import type { SidePanelControls } from "./use-side-panel.js";
 
@@ -26,6 +28,8 @@ export interface SidePageContext {
   ) => void;
   /** Re-reads the terminal list after a socket says its terminal is gone. */
   readonly onTerminalMissing: () => void;
+  /** The side chat's own client; absent only until it is created. */
+  readonly sideChat: (sideChatId: string) => SideChatConnection | undefined;
 }
 
 /** Renders one tab's page. A new page kind adds its case here. */
@@ -82,5 +86,15 @@ export function SidePanelPage(props: {
           onMissing={context.onTerminalMissing}
         />
       );
+    case "sideChat": {
+      const connection = context.sideChat(tab.state.entry.sideChatId);
+      return connection ? (
+        <SideChatPage connection={connection} entry={tab.state.entry} />
+      ) : (
+        <p className="ohb-side-notice" role="status">
+          Connecting…
+        </p>
+      );
+    }
   }
 }

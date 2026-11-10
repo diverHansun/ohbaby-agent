@@ -1,0 +1,124 @@
+/* Side chat page (frontend design §3.1): the main chat's look in the right
+   panel. Only the layout differs: the input sits under the stream instead of
+   floating over it, and both follow the panel's width. */
+.ohb-side-chat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.ohb-side-chat .ohb-stream {
+  padding: 16px 0 24px;
+}
+
+.ohb-side-chat .ohb-stream-inner {
+  padding: 0 16px;
+}
+
+.ohb-side-chat.has-approval .ohb-stream {
+  padding-bottom: 240px;
+}
+
+.ohb-side-chat-empty {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+  padding: 0 24px;
+  text-align: center;
+}
+
+.ohb-side-chat-empty p {
+  color: var(--text-muted);
+  font-size: 13.5px;
+  margin: 0;
+}
+
+.ohb-side-chat-empty small {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.ohb-composer.ohb-side-chat-composer {
+  background: none;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
+  position: static;
+}
+
+.ohb-composer.ohb-side-chat-composer[hidden] {
+  display: none;
+}
+
+/* One row: the text, then the round Send or Stop button. */
+.ohb-side-chat-composer .ohb-composer-input {
+  align-items: flex-end;
+  border-radius: 20px;
+  box-shadow: none;
+  flex-direction: row;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+}
+
+.ohb-side-chat-composer .ohb-composer-input:focus-within {
+  box-shadow: var(--ring-soft);
+}
+
+.ohb-side-chat-composer .ohb-composer-text {
+  min-height: 30px;
+}
+
+.ohb-side-chat-composer textarea {
+  font-size: 14px;
+  line-height: 22px;
+  max-height: 132px;
+  min-height: 22px;
+}
+
+/* A tab whose side chat waits for an approval. */
+.ohb-side-panel-tab-attention {
+  background: var(--warning);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+
+/* The button over selected message text. */
+.ohb-selection-action {
+  align-items: center;
+  animation: ohb-fade var(--duration-fast) var(--ease);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  color: var(--text);
+  display: inline-flex;
+  font-size: 12.5px;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  position: fixed;
+  white-space: nowrap;
+  z-index: 140;
+}
+
+.ohb-selection-action svg {
+  color: var(--text-dim);
+}
+
+.ohb-selection-action:hover {
+  background: var(--bg-panel);
+}
+
+/* Entries that cannot open a side chat yet. */
+.ohb-side-panel-entry > button:disabled:hover {
+  background: none;
+}

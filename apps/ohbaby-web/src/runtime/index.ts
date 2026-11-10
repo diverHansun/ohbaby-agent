@@ -31,6 +31,11 @@ import type { SessionFilesApi } from "../api/daemon/session-files.js";
 import { GlobalLayer } from "./global-layer.js";
 import { InstanceLayer } from "./instance-layer.js";
 import { SettingsLayer } from "./settings-layer.js";
+import {
+  connectSideChat,
+  type SideChatConnection,
+  type SideChatEntry,
+} from "./side-chat.js";
 
 /** A prompt is resent at most twice after `SESSION_MOVED` (three tries in all). */
 const MAX_MOVED_RESENDS = 2;
@@ -81,6 +86,17 @@ export interface OhbabyWebRuntime {
     format: "html" | "jsonl",
     directory?: string,
   ): Promise<UiSessionExport>;
+  /**
+   * Opens a new side chat of the open main chat. Its history is a snapshot of
+   * that chat up to the last finished turn (side chat 02 §2.1).
+   */
+  openSideChat(mainSessionId: string): Promise<SideChatEntry>;
+  /** The main chat's side chats still open in this daemon, oldest first. */
+  listSideChats(mainSessionId: string): Promise<readonly SideChatEntry[]>;
+  /** Aborts and deletes a side chat, in the directory it was opened in. */
+  closeSideChat(entry: SideChatEntry): Promise<void>;
+  /** A separate client bound to the side chat; the caller closes it. */
+  connectSideChat(entry: SideChatEntry): SideChatConnection;
   /** Creates or reuses an empty session in the connected instance. */
   createSession(): Promise<void>;
   /** A new-chat draft; `null` is No workspace and runs in the default directory. */
@@ -150,7 +166,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   constructor(
     private readonly config: OhbabyBootstrapConfig,
-    fetchImpl: typeof fetch | undefined,
+    private readonly fetchImpl: typeof fetch | undefined,
   ) {
     this.global = new GlobalLayer(config, fetchImpl);
     this.terminals = new TerminalClient(config, fetchImpl);
@@ -355,6 +371,38 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       return this.instance.client.exportSession({ sessionId, format });
     const http = await this.global.scopedHttp(target);
     return (await http.exportSession({ sessionId, format })).export;
+  }
+
+  async openSideChat(mainSessionId: string): Promise<SideChatEntry> {
+    const client = this.instance.requireClient();
+    const workingDirectory = this.instance.directory;
+    if (workingDirectory === null) throw new Error("No workspace is selected");
+    const opened = await client.openSideChat({ mainSessionId });
+    return { ...opened, workingDirectory };
+  }
+
+  async listSideChats(
+    mainSessionId: string,
+  ): Promise<readonly SideChatEntry[]> {
+    const client = this.instance.requireClient();
+    return (await client.listSideChats({ mainSessionId })).sideChats;
+  }
+
+  async closeSideChat(entry: SideChatEntry): Promise<void> {
+    // A side chat stays in the directory it was opened in, even after its
+    // main chat moved (side chat 02 §2.5), so the request goes there.
+    const http = await this.global.scopedHttp(entry.workingDirectory);
+    await http.send(`/v1/side-chats/${encodeURIComponent(entry.sideChatId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  connectSideChat(entry: SideChatEntry): SideChatConnection {
+    return connectSideChat({
+      config: this.config,
+      ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
+      entry,
+    });
   }
 
   async abortSession(sessionId: string, runId?: string): Promise<void> {
