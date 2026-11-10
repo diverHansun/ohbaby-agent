@@ -8,7 +8,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-09 | 首轮 | 从历史重建已加载工具（含压缩、各上下文作用域）；工具顺序按规则计算、删除 `ScopeToolSequence`；去掉会话累计上限；side chat、fork 不再需要 `copyScope` | 规划完成，待实施 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-09 | 首轮 | 从历史重建已加载工具（含压缩、各上下文作用域）；工具顺序按规则计算、删除 `ScopeToolSequence`；去掉会话累计上限；side chat、fork 不再需要 `copyScope` | 已实施（分支 `fix/mcp-loaded-tools-from-history`），待验收 |
 
 ## 本轮文档地图
 
