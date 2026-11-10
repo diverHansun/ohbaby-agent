@@ -42,6 +42,7 @@ import {
 } from "./ui-persistent.js";
 
 import * as uiInProcess from "./ui-inprocess.js";
+import { SessionViewOwner } from "./ui-state/session-view.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -4048,7 +4049,7 @@ describe("persistent conversation rewind", () => {
     },
   );
 
-  it("keeps history visible while another backend is summarizing it", async () => {
+  it("lets a rewind win over another backend's unfinished summary and rejects cuts before a committed one", async () => {
     const entered = createDeferred<undefined>();
     const finish = createDeferred<undefined>();
     const fallback = model.provider.streamResponse.bind(model.provider);
@@ -4068,18 +4069,12 @@ describe("persistent conversation rewind", () => {
       const { prompt } = await client.submitPromptAndWait(
         "Keep the blue lantern. ".repeat(6000),
       );
-      const { sessionId, promptId } = prompt;
-      await client.submitPromptAndWait("Continue with the lantern.", {
-        sessionId,
-      });
-      const db = getDatabase();
-      // A stale marker left by a previous process with this PID may be reclaimed.
-      db.prepare(
-        "INSERT INTO app_state(scope,key,value,updated_at) VALUES('session-history-operation',?,?,0)",
-      ).run(
-        sessionId,
-        JSON.stringify({ pid: process.pid, processId: "previous-process" }),
+      const { sessionId } = prompt;
+      const second = await client.submitPromptAndWait(
+        "Continue with the lantern.",
+        { sessionId },
       );
+      const db = getDatabase();
       const compact = peer.compactSession({ sessionId, force: true });
       try {
         await withTimeout(
@@ -4087,36 +4082,113 @@ describe("persistent conversation rewind", () => {
           3000,
           "summary request did not enter",
         );
-        await expect(
-          client.rewindSession({ sessionId, promptId }),
-        ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
-        expect(
-          db
-            .prepare(
-              "SELECT id FROM message WHERE session_id=? AND rewound_at IS NOT NULL",
-            )
-            .all(sessionId),
-        ).toEqual([]);
+        // No cross-process marker: the rewind commits first.
+        await client.rewindSession({
+          sessionId,
+          promptId: second.prompt.promptId,
+        });
       } finally {
         finish.resolve(undefined);
-        expect((await compact).status).toBe("compacted");
       }
-      db.exec(`CREATE TEMP TRIGGER fail_history_release BEFORE DELETE ON app_state
-        WHEN OLD.scope='session-history-operation' BEGIN SELECT RAISE(ABORT, 'history release failed'); END`);
-      try {
-        await expect(
-          client.rewindSession({ sessionId, promptId }),
-        ).rejects.toThrow("history release failed");
-      } finally {
-        db.exec("DROP TRIGGER fail_history_release");
-      }
+      // The summary saw text that is now rewound, so its transaction rejects it.
+      expect((await compact).status).toBe("failed");
+      expect(
+        db
+          .prepare(
+            "SELECT count(*) AS n FROM part WHERE session_id=? AND data LIKE '%The lantern is blue.%'",
+          )
+          .get(sessionId),
+      ).toEqual({ n: 0 });
+      // A summary that does commit moves the cut: older targets are refused.
+      expect(
+        (await client.compactSession({ sessionId, force: true })).status,
+      ).toBe("compacted");
       await expect(
-        client.rewindSession({ sessionId, promptId }),
+        client.rewindSession({ sessionId, promptId: prompt.promptId }),
       ).rejects.toMatchObject({ code: "REWIND_BEFORE_COMPACTION" });
     } finally {
       finish.resolve(undefined);
       await peer.dispose();
     }
+  });
+
+  it("returns the rewind result even when refreshing this view fails afterwards", async () => {
+    client = open();
+    const first = await client.submitPromptAndWait("first question");
+    const { sessionId } = first.prompt;
+    const second = await client.submitPromptAndWait("second question", {
+      sessionId,
+    });
+    // Called below with the spied instance as `this`.
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const rebuild = SessionViewOwner.prototype.rebuild;
+    let failed = false;
+    const spy = vi
+      .spyOn(SessionViewOwner.prototype, "rebuild")
+      .mockImplementation(function (this: SessionViewOwner, id: string) {
+        const rewound = getDatabase()
+          .prepare(
+            "SELECT 1 FROM message WHERE session_id=? AND rewound_at IS NOT NULL LIMIT 1",
+          )
+          .get(id);
+        if (rewound && !failed) {
+          failed = true;
+          return Promise.reject(new Error("view refresh failed"));
+        }
+        return rebuild.call(this, id);
+      });
+    try {
+      const result = await client.rewindSession({
+        sessionId,
+        promptId: second.prompt.promptId,
+        text: "edited second question",
+      });
+      expect(failed).toBe(true);
+      expect(result).toMatchObject({
+        sessionId,
+        restoredText: "second question",
+        prompt: { sessionId },
+      });
+      expect(result.sendError).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    // The next read rebuilds the view from the durable cut.
+    const messages = (await client.getSessionView?.({ sessionId }))?.session
+      .messages;
+    expect(messages?.map((m) => m.id)).not.toContain(
+      second.prompt.userMessageId,
+    );
+  });
+
+  it("reports SESSION_RUNNING and marks nothing when rewound background work cannot be stopped", async () => {
+    client = open();
+    const first = await client.submitPromptAndWait("first question");
+    const { sessionId } = first.prompt;
+    const second = await client.submitPromptAndWait("second question", {
+      sessionId,
+    });
+    const stop = vi
+      .spyOn(SessionSubagentHost.prototype, "stopRewoundRoot")
+      .mockRejectedValueOnce(new Error("Subagent cleanup is unconfirmed"));
+    try {
+      await expect(
+        client.rewindSession({ sessionId, promptId: second.prompt.promptId }),
+      ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+    } finally {
+      stop.mockRestore();
+    }
+    const db = getDatabase();
+    for (const table of ["message", "prompt_submission", "subagent_execution"])
+      expect(
+        db
+          .prepare(
+            `SELECT count(*) AS n FROM ${table} WHERE rewound_at IS NOT NULL`,
+          )
+          .get(),
+      ).toEqual({ n: 0 });
+    // Once stopping succeeds the same rewind goes through.
+    await client.rewindSession({ sessionId, promptId: second.prompt.promptId });
   });
 
   it("rejects inaccessible sessions, foreign prompts and cuts before compaction without marking any history", async () => {

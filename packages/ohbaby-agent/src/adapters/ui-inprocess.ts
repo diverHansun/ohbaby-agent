@@ -37,7 +37,6 @@ import {
   rewindQueue,
   stopForRewind,
 } from "./ui-inprocess/session-rewind.js";
-import { acquireSessionHistoryOperation } from "../services/session/history-operation.js";
 import { assertRewindShellOwners } from "../services/session/rewind-shell.js";
 import { forkSession } from "./ui-inprocess/session-fork.js";
 import { KeyLockManager } from "../services/storage/lock-manager.js";
@@ -3923,7 +3922,6 @@ export function createInProcessUiBackendClient(
         throw busy();
     };
     const token = Symbol("rewind");
-    const releaseHistory = await acquireSessionHistoryOperation(db, sessionId);
     try {
       const before = readRewindCut(db, input, promptScopeKey);
       assertReady();
@@ -3963,7 +3961,15 @@ export function createInProcessUiBackendClient(
       const admission = await runtimeController.acquireRuntime();
       try {
         const runtime = admission.runtime;
-        for (const runId of cut.runIds) await runtime.stopRewoundRunWork(runId);
+        // Work that cannot be confirmed stopped keeps the history visible:
+        // report it as busy so the caller retries instead of seeing a 500.
+        try {
+          for (const runId of cut.runIds)
+            await runtime.stopRewoundRunWork(runId);
+        } catch (error) {
+          if (error instanceof SessionRunBusyError) throw error;
+          throw Object.assign(busy(), { cause: error });
+        }
         const changed = await commitRewind(
           db,
           input,
@@ -3974,6 +3980,8 @@ export function createInProcessUiBackendClient(
           timestamp(),
           assertNoPeerWork,
         );
+        // The rewind is durable from here. A failed refresh must not turn it into
+        // an error: the cleared revision entry makes the next read rebuild again.
         await queueRewindRefresh(sessionId, changed.revision, async () => {
           await messageManager.notifyRewound(sessionId, changed.messageIds);
           for (const prompt of changed.removedPrompts)
@@ -3991,6 +3999,14 @@ export function createInProcessUiBackendClient(
             session: cloneSession(
               sourceProjection.owner.read(sessionId).session,
             ),
+          });
+        }).catch((error: unknown) => {
+          const message = getErrorMessage(error);
+          publishNotice({
+            key: `session:rewind-refresh:${sessionId}:${message}`,
+            level: "warning",
+            message: `The conversation was rewound, but this view could not refresh: ${message}`,
+            title: "Session warning",
           });
         });
       } finally {
@@ -4025,7 +4041,6 @@ export function createInProcessUiBackendClient(
       }
     } finally {
       sessionExecution.release(token);
-      await releaseHistory();
     }
   }
 
@@ -4053,14 +4068,9 @@ export function createInProcessUiBackendClient(
     let admission:
       | Awaited<ReturnType<typeof runtimeController.acquireRuntime>>
       | undefined;
-    let releaseHistory: (() => Promise<void>) | undefined;
     try {
-      if (options.sideChatStorage) {
-        releaseHistory = await acquireSessionHistoryOperation(
-          options.sideChatStorage.db,
-          target.sessionId,
-        );
-      }
+      // Another runtime's rewind is caught when the summary commits: the
+      // compaction transaction rejects source messages that changed meanwhile.
       await refreshRewoundSessionIfNeeded(target.sessionId);
       admission = await runtimeController.acquireRuntime();
       const runtime = admission.runtime;
@@ -4101,7 +4111,6 @@ export function createInProcessUiBackendClient(
       compactingSessions.delete(target.sessionId);
       sessionExecution.release(token);
       admission?.release();
-      await releaseHistory?.();
     }
   }
 

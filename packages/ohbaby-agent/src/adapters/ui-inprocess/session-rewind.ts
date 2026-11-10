@@ -226,13 +226,16 @@ async function withRewindDeadline<T>(
   ) => Promise<T>,
 ): Promise<T> {
   const busy = new SessionRunBusyError(sessionId, []);
-  const expires = performance.now() + 10_000;
+  // One clock decides expiry. A separate wall-clock check could still pass
+  // after the timer fired, letting a late callback reserve the released gate.
+  let expired = false;
   const check = (): void => {
-    if (performance.now() >= expires) throw busy;
+    if (expired) throw busy;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
+      expired = true;
       reject(busy);
     }, 10_000);
   });
