@@ -182,6 +182,7 @@ describe("daemon protocol", () => {
       "waitForPrompt",
       "compactSession",
       "archiveSession",
+      "forkSession",
       "openSideChat",
       "listSideChats",
       "closeSideChat",

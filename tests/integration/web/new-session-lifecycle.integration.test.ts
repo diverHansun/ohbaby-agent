@@ -76,6 +76,97 @@ afterEach(() => {
 });
 
 describe("New session real server lifecycle and SQLite", () => {
+  it("forks from unselected roots and preserves typed failures and client binding on both transports", async () => {
+    const f = await fixture();
+    try {
+      const clientId = "web-regression";
+      const selected = (await create(f, clientId)).session.id;
+      const source = (await f.backend.createSession()).id;
+      const turn = await f.backend.submitPromptAndWait("fork this answer", {
+        sessionId: source,
+      });
+      const { runId, userMessageId } = turn.prompt;
+      expect(runId).toEqual(expect.any(String));
+      const rpc = (method: string, params: unknown[]) =>
+        f.server.app.request("/api/rpc", {
+          headers: headers(clientId),
+          method: "POST",
+          body: JSON.stringify({ id: "fork-test", clientId, method, params }),
+        });
+      const rest = (sessionId: string, target?: Record<string, unknown>) =>
+        f.server.app.request(`/v1/sessions/${sessionId}/fork`, {
+          headers: headers(clientId),
+          method: "POST",
+          body: JSON.stringify(target),
+        });
+      const rpcFork = (sessionId: string, target?: Record<string, unknown>) =>
+        rpc("forkSession", [{ sessionId, ...target }]);
+
+      const implicit = await rest(source);
+      const first = await implicit.json();
+      expect(implicit.status, JSON.stringify(first)).toBe(200);
+      expect(first).toEqual({
+        sessionId: expect.any(String),
+        title: expect.any(String),
+      });
+      const explicit = await rpcFork(source, { runId });
+      expect(explicit.status).toBe(200);
+      const second = await explicit.json();
+      expect(second).toMatchObject({
+        ok: true,
+        result: { sessionId: expect.any(String), title: expect.any(String) },
+      });
+      expect(
+        new Set([source, first.sessionId, second.result.sessionId]).size,
+      ).toBe(3);
+      expect(
+        await (await rpc("getSelectedSessionId", [])).json(),
+      ).toMatchObject({ result: selected });
+
+      const child = await f.backend.createSession();
+      getDatabase()
+        .prepare("UPDATE session SET parent_id=? WHERE id=?")
+        .run(source, child.id);
+      const side = await f.backend.openSideChat({ mainSessionId: source });
+      const archived = await f.backend.createSession();
+      await f.backend.archiveSession({ sessionId: archived.id });
+      const before = f.count();
+      const rejected = async (
+        id: string,
+        target: Record<string, unknown> | undefined,
+        status: number,
+        code: string,
+      ) => {
+        for (const call of [rest, rpcFork]) {
+          const response = await call(id, target);
+          expect(response.status).toBe(status);
+          expect(await response.json()).toMatchObject({
+            ok: false,
+            error: { code },
+          });
+        }
+      };
+      await rejected("missing-session", undefined, 404, "SESSION_NOT_FOUND");
+      await rejected(child.id, undefined, 409, "SESSION_NOT_ROOT");
+      await rejected(side.sideChatId, undefined, 409, "SIDE_CHAT_UNSUPPORTED");
+      await rejected(archived.id, undefined, 409, "SESSION_ARCHIVED");
+      await rejected(selected, { runId }, 400, "FORK_TARGET_INVALID");
+      for (const target of [
+        { runId: null },
+        { runId: "missing-run" },
+        { messageId: userMessageId },
+      ])
+        await rejected(source, target, 400, "FORK_TARGET_INVALID");
+      await commitSessionWorkspaceMove(
+        planSessionWorkspaceMove(source, f.workdir + "-moved"),
+      );
+      await rejected(source, undefined, 409, "SESSION_MOVED");
+      expect(f.count()).toBe(before);
+    } finally {
+      await f.dispose();
+    }
+  });
+
   it("exposes side chat lifecycle, typed errors and idempotent close over REST and JSON-RPC", async () => {
     const f = await fixture();
     try {

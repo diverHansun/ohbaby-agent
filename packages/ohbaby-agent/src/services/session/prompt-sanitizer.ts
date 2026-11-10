@@ -42,7 +42,9 @@ export function isDefaultSessionTitle(title: string): boolean {
     normalized === "New session" ||
     normalized === "Untitled session" ||
     normalized === "(Empty response)" ||
-    LEGACY_NEW_SESSION_TITLE_PATTERN.test(normalized)
+    // A numbered fork title remains visible even when its base is a legacy default title.
+    (LEGACY_NEW_SESSION_TITLE_PATTERN.test(normalized) &&
+      !/ \(\d+\)$/u.test(normalized))
   );
 }
 

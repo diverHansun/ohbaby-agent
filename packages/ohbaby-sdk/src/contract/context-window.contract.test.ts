@@ -164,6 +164,9 @@ describe("context window UI contract", () => {
       exportSession(): ReturnType<CoreAPI["exportSession"]> {
         return Promise.reject(new Error("Not implemented"));
       },
+      forkSession(): Promise<never> {
+        throw new Error("unused");
+      },
       openSideChat(): Promise<never> {
         throw new Error("unused");
       },

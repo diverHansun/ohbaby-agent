@@ -139,6 +139,41 @@ export function insertPartRow(
   );
 }
 
+/** Ordered message reads can also participate in a caller's synchronous transaction. */
+export function* readSessionMessages(
+  db: DatabaseConnection,
+  sessionId: string,
+  scope?: MessageScopeFilter,
+  role?: Message["role"],
+): Generator<MessageWithParts> {
+  const clauses = ["session_id = ?"];
+  const params = [sessionId];
+  if (scope !== undefined) {
+    if (scope.contextScopeId === undefined) {
+      clauses.push("context_scope_id IS NULL");
+    } else {
+      clauses.push("context_scope_id = ?");
+      params.push(scope.contextScopeId);
+    }
+  }
+  if (role !== undefined) {
+    clauses.push("role = ?");
+    params.push(role);
+  }
+  const rows = db
+    .prepare<MessageRow>(
+      `SELECT * FROM ${schema.message.tableName} WHERE ${clauses.join(" AND ")}
+     ORDER BY created_at, rowid`,
+    )
+    .all(...params);
+  const parts = db.prepare<PartRow>(
+    `SELECT * FROM ${schema.part.tableName} WHERE message_id = ? ORDER BY order_index`,
+  );
+  for (const row of rows) {
+    yield { info: rowToMessage(row), parts: parts.all(row.id).map(rowToPart) };
+  }
+}
+
 export function createDatabaseMessageStore(
   options: DatabaseMessageStoreOptions = {},
 ): MessageStore {
@@ -667,53 +702,9 @@ export function createDatabaseMessageStore(
       sessionId: string,
       options?: MessageScopeFilter,
     ): Promise<MessageWithParts[]> {
-      return withAsyncBoundary(() => {
-        const contextScopeId = options?.contextScopeId;
-        const query =
-          options === undefined
-            ? {
-                params: [sessionId],
-                sql: `SELECT * FROM ${schema.message.tableName}
-              WHERE session_id = ?
-              ORDER BY created_at ASC, rowid ASC`,
-              }
-            : contextScopeId === undefined
-              ? {
-                  params: [sessionId],
-                  sql: `SELECT * FROM ${schema.message.tableName}
-              WHERE session_id = ? AND context_scope_id IS NULL
-              ORDER BY created_at ASC, rowid ASC`,
-                }
-              : {
-                  params: [sessionId, contextScopeId],
-                  sql: `SELECT * FROM ${schema.message.tableName}
-              WHERE session_id = ? AND context_scope_id = ?
-              ORDER BY created_at ASC, rowid ASC`,
-                };
-        const messageRows = db
-          .prepare<MessageRow>(query.sql)
-          .all(...query.params);
-        return messageRows
-          .map((messageRow) => ({
-            message: rowToMessage(messageRow),
-            row: messageRow,
-          }))
-          .map(({ message, row }) => {
-            const parts = db
-              .prepare<PartRow>(
-                `SELECT * FROM ${schema.part.tableName}
-                 WHERE message_id = ?
-                 ORDER BY order_index ASC`,
-              )
-              .all(row.id)
-              .map(rowToPart)
-              .map(clone);
-            return {
-              info: clone(message),
-              parts,
-            };
-          });
-      });
+      return withAsyncBoundary(() => [
+        ...readSessionMessages(db, sessionId, options),
+      ]);
     },
 
     deleteMessage(messageId: string): Promise<void> {

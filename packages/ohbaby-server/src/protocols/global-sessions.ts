@@ -1,3 +1,4 @@
+import { FORK_TARGET_INVALID_ERROR_CODE } from "ohbaby-sdk";
 import type {
   UiGlobalSession,
   UiGlobalSessionStatus,
@@ -100,6 +101,7 @@ export function globalSessionErrorStatus(
       ? error.code
       : undefined;
   switch (code) {
+    case FORK_TARGET_INVALID_ERROR_CODE:
     case "INVALID_QUERY":
     case "INVALID_CURSOR":
     case "INVALID_DIRECTORY":

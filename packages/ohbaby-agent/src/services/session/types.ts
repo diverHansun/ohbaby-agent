@@ -34,6 +34,10 @@ export function isUserFacingSession(session: Session): boolean {
 }
 
 export interface Session {
+  readonly fork?: {
+    readonly sourceSessionId: string;
+    readonly sourceRunId: string;
+  };
   readonly sideChat?: SideChatMetadata;
   readonly reasoning?: ReasoningConfig;
   readonly modelEntryId?: string;

@@ -8,6 +8,8 @@ import {
 import {
   DuplicateSessionError,
   InvalidSessionLimitError,
+  SessionArchiveError,
+  SideChatUnsupportedError,
   SessionNotFoundError,
 } from "./errors.js";
 import {
@@ -40,6 +42,7 @@ export interface SessionRow {
 }
 
 export interface SessionData {
+  readonly fork?: Session["fork"];
   readonly sideChat?: Session["sideChat"];
   readonly reasoning?: Session["reasoning"];
   readonly modelEntryId?: string;
@@ -154,6 +157,21 @@ export function readSessionRow(
   return row ? rowToSession(row) : null;
 }
 
+/** History can only be copied from an active, ordinary root session. */
+export function readActiveMainSession(
+  db: DatabaseConnection,
+  id: string,
+): Session {
+  const session = readSessionRow(db, id);
+  if (!session) throw new SessionArchiveError("SESSION_NOT_FOUND", id);
+  if (session.parentId !== undefined || session.isSubagent)
+    throw new SessionArchiveError("SESSION_NOT_ROOT", id);
+  if (session.status !== "active")
+    throw new SessionArchiveError("SESSION_ARCHIVED", id);
+  if (session.sideChat) throw new SideChatUnsupportedError();
+  return session;
+}
+
 interface DatabaseSessionStoreOptions {
   readonly db?: DatabaseConnection;
 }
@@ -177,6 +195,7 @@ function normalizeLimit(limit: number | undefined): number | undefined {
 
 function encodeData(session: Session): string {
   const data: SessionData = {
+    fork: session.fork,
     sideChat: session.sideChat,
     reasoning: session.reasoning,
     modelEntryId: session.modelEntryId,
@@ -212,6 +231,7 @@ export function rowToSession(row: SessionRow): Session {
       lastMessageAt: row.last_message_at ?? undefined,
     },
     parentId: row.parent_id ?? undefined,
+    ...(data.fork ? { fork: data.fork } : {}),
     ...(data.sideChat ? { sideChat: data.sideChat } : {}),
     reasoning: data.reasoning,
     modelEntryId: data.modelEntryId,

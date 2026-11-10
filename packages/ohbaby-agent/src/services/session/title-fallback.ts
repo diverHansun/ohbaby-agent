@@ -8,7 +8,7 @@ import {
 } from "./prompt-sanitizer.js";
 
 export function createFallbackSessionTitleFromMessages(
-  messages: readonly MessageWithParts[],
+  messages: Iterable<MessageWithParts>,
 ): string | null {
   for (const message of messages) {
     if (message.info.role !== "user") {
@@ -34,7 +34,7 @@ export function createFallbackSessionTitleFromMessages(
 }
 
 export function resolveSessionDisplayTitle(input: {
-  readonly messages: readonly MessageWithParts[];
+  readonly messages: Iterable<MessageWithParts>;
   readonly title: string;
 }): string {
   if (!isDefaultSessionTitle(input.title)) {

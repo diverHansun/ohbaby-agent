@@ -444,6 +444,12 @@ export class BrowserDaemonClient implements UiBackendClient {
     return this.commands.exportSession(input);
   }
 
+  forkSession(
+    input: Parameters<UiBackendClient["forkSession"]>[0],
+  ): ReturnType<UiBackendClient["forkSession"]> {
+    return this.http.forkSession(input);
+  }
+
   openSideChat({
     mainSessionId,
   }: Parameters<UiBackendClient["openSideChat"]>[0]): ReturnType<

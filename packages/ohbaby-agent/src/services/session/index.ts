@@ -1,5 +1,6 @@
 export {
   DuplicateSessionError,
+  ForkTargetInvalidError,
   HistoryCutInvalidError,
   SessionMovedError,
   SessionNotFoundError,

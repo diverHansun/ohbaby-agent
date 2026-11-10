@@ -23,7 +23,10 @@ import {
   copySessionHistory,
   findEndedMainRun,
 } from "../../services/session/copy-history.js";
-import { readSessionRow } from "../../services/session/database-store.js";
+import {
+  readActiveMainSession,
+  readSessionRow,
+} from "../../services/session/database-store.js";
 import { assertSessionInWorkspace } from "../../services/session/working-directory.js";
 import { SideChatUnsupportedError } from "../../services/session/errors.js";
 import type {
@@ -38,17 +41,6 @@ const boundary = [
   "Do not continue tasks from the main conversation. Do not change files, Git, or configuration unless the user explicitly asks after this boundary.",
   "Subagents are not available in side chat.",
 ].join("\n");
-
-function mainSession(db: DatabaseConnection, id: string): Session {
-  const session = readSessionRow(db, id);
-  if (!session) throw new SessionArchiveError("SESSION_NOT_FOUND", id);
-  if (session.parentId !== undefined || session.isSubagent)
-    throw new SessionArchiveError("SESSION_NOT_ROOT", id);
-  if (session.status !== "active")
-    throw new SessionArchiveError("SESSION_ARCHIVED", id);
-  if (session.sideChat) throw new SideChatUnsupportedError();
-  return session;
-}
 
 interface SideChatRow {
   ownerId: string | null;
@@ -81,7 +73,7 @@ export function listSideChats(
   db: DatabaseConnection,
   mainSessionId: string,
 ): Awaited<ReturnType<UiBackendClient["listSideChats"]>> {
-  mainSession(db, mainSessionId);
+  readActiveMainSession(db, mainSessionId);
   return {
     sideChats: sideChatsForMain(db, mainSessionId, processOwnerId).map(
       (row) => ({
@@ -153,7 +145,7 @@ export function openSideChat(
   now: () => number,
 ): Promise<Session & { sideChat: SideChatMetadata }> {
   return runWriteTransaction(db, (tx) => {
-    const main = mainSession(tx, mainId);
+    const main = readActiveMainSession(tx, mainId);
     assertSessionInWorkspace(main, promptScopeKey);
     const cutRunId = findEndedMainRun(tx, mainId);
     if (

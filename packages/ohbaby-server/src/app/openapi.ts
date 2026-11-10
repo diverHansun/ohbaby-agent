@@ -1135,6 +1135,59 @@ export function createOpenApiDocument(
           summary: "Compact a session",
         },
       },
+      "/v1/sessions/{id}/fork": {
+        post: {
+          summary:
+            "Fork through a completed main run with a nonempty assistant answer",
+          security: [{ daemonBearer: [] }],
+          parameters: [
+            pathParameter("id", "Source session ID"),
+            {
+              in: "header",
+              name: "x-ohbaby-client-id",
+              required: true,
+              schema: string,
+            },
+          ],
+          requestBody: {
+            description: "Omit runId to use the latest eligible answer.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: { runId: { type: "string", minLength: 1 } },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "New session ID and allocated title",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["sessionId", "title"],
+                    properties: {
+                      sessionId: { type: "string" },
+                      title: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { description: "FORK_TARGET_INVALID or missing client ID" },
+            "401": { description: "Unauthorized" },
+            "413": { description: "Request body too large" },
+            "404": { description: "SESSION_NOT_FOUND" },
+            "409": {
+              description:
+                "SESSION_NOT_ROOT, SESSION_ARCHIVED, SIDE_CHAT_UNSUPPORTED, SESSION_MOVED or unregistered client",
+            },
+          },
+        },
+      },
       "/v1/sessions/{id}/side-chats": {
         post: {
           summary:

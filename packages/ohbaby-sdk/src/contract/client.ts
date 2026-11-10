@@ -96,6 +96,17 @@ export async function submitPromptAndWait(
   return client.waitForPrompt(receipt.promptId, { signal });
 }
 
+export interface UiForkSessionInput {
+  readonly sessionId: string;
+  /** Omit to fork from the most recent eligible answer. */
+  readonly runId?: string;
+}
+
+export interface UiForkSessionResult {
+  readonly sessionId: string;
+  readonly title: string;
+}
+
 export interface UiOpenedSideChat {
   readonly sideChatId: string;
   readonly title: string;
@@ -239,6 +250,7 @@ export interface UiCommandClient
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
+  forkSession(input: UiForkSessionInput): Promise<UiForkSessionResult>;
   openSideChat(input: {
     readonly mainSessionId: string;
   }): Promise<UiOpenedSideChat>;

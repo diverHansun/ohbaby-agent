@@ -2,6 +2,8 @@ export type { DaemonStartupIntent } from "./contract/daemon-startup-intent.js";
 export type {
   UiSessionCreationResult,
   UiOpenedSideChat,
+  UiForkSessionInput,
+  UiForkSessionResult,
   UiSideChatEntry,
   SubmitPromptOptions,
   UiCommandClient,
@@ -21,6 +23,8 @@ export type {
 } from "./contract/client.js";
 export { submitPromptAndWait } from "./contract/client.js";
 export {
+  FORK_TARGET_INVALID_ERROR_CODE,
+  parseForkSessionInput,
   SESSION_MOVED_ERROR_CODE,
   SESSION_RUNNING_ERROR_CODE,
   SIDE_CHAT_UNSUPPORTED_ERROR_CODE,

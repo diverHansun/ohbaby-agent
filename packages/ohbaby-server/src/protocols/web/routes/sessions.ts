@@ -5,7 +5,12 @@ import {
   SessionRunBusyError,
 } from "ohbaby-agent";
 import { Hono } from "hono";
-import { isUiReasoningConfig, type UiBackendClient } from "ohbaby-sdk";
+import {
+  FORK_TARGET_INVALID_ERROR_CODE,
+  isUiReasoningConfig,
+  parseForkSessionInput,
+  type UiBackendClient,
+} from "ohbaby-sdk";
 import { selectPermissionSession } from "../../../coordination/permission-access.js";
 import {
   abortForClient,
@@ -192,6 +197,34 @@ export function registerSessionMutationRoutes(
   app: Hono,
   ctx: DaemonRouteContext,
 ): void {
+  app.post("/v1/sessions/:id/fork", async (context) => {
+    const authorization = ctx.authorizePromptMutation(context);
+    if ("response" in authorization) return authorization.response;
+    const parsed = await readJsonWithLimit(context.req.raw);
+    if (!parsed.ok) {
+      if (parsed.status === 413)
+        return context.json(webErrorBody(parsed.message), 413);
+      return context.json(
+        {
+          ok: false,
+          error: {
+            code: FORK_TARGET_INVALID_ERROR_CODE,
+            message: parsed.message,
+          },
+        },
+        400,
+      );
+    }
+    try {
+      const input = parseForkSessionInput(
+        parsed.value,
+        context.req.param("id"),
+      );
+      return context.json(await ctx.options.backend.forkSession(input));
+    } catch (error) {
+      return sessionFailure(context, error);
+    }
+  });
   app.post("/v1/sessions/:id/side-chats", async (context) => {
     const authorization = ctx.authorizePromptMutation(context);
     if ("response" in authorization) return authorization.response;

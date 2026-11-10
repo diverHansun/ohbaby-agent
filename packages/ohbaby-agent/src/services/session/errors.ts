@@ -1,9 +1,20 @@
+import { FORK_TARGET_INVALID_ERROR_CODE } from "ohbaby-sdk";
+
 export class SideChatUnsupportedError extends Error {
   readonly code = "SIDE_CHAT_UNSUPPORTED";
 
   constructor(message = "This operation is unavailable in side chat.") {
     super(message);
     this.name = "SideChatUnsupportedError";
+  }
+}
+
+export class ForkTargetInvalidError extends Error {
+  readonly code = FORK_TARGET_INVALID_ERROR_CODE;
+
+  constructor() {
+    super("No completed main turn with an AI answer to fork from.");
+    this.name = "ForkTargetInvalidError";
   }
 }
 

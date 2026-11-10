@@ -19,6 +19,9 @@ const SessionSchema: z.ZodType<Session> = z.object({
   updatedAt: z.number(),
   status: z.union([z.literal("active"), z.literal("archived")]),
   stats: SessionStatsSchema,
+  fork: z
+    .object({ sourceSessionId: z.string(), sourceRunId: z.string() })
+    .optional(),
   sideChat: z
     .object({
       mainSessionId: z.string(),

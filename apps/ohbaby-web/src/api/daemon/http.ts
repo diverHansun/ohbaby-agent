@@ -50,7 +50,7 @@ import type {
   WorkspaceScopesResponse,
   WorkspaceOpenResponse,
 } from "./wire.js";
-import { requestDirectoryHeaders } from "ohbaby-sdk";
+import { parseForkSessionInput, requestDirectoryHeaders } from "ohbaby-sdk";
 import type { SessionFileEntry } from "./session-files.js";
 import type {
   UiInteractionResponse,
@@ -377,6 +377,16 @@ export class DaemonHttpClient {
     return this.request("/v1/sessions", {
       body: options === undefined ? { reuseEmpty: false } : { options },
       method: "POST",
+    });
+  }
+
+  async forkSession(
+    input: Parameters<UiBackendClient["forkSession"]>[0],
+  ): ReturnType<UiBackendClient["forkSession"]> {
+    const { sessionId, runId } = parseForkSessionInput(input);
+    return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/fork`, {
+      method: "POST",
+      body: { runId },
     });
   }
 

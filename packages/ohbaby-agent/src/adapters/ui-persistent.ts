@@ -558,6 +558,10 @@ function withStartupRecovery(
       await ready();
       return client.selectDefaultModel(entryId);
     },
+    async forkSession(input): ReturnType<UiBackendClient["forkSession"]> {
+      await ready();
+      return client.forkSession(input);
+    },
     async openSideChat(input): ReturnType<UiBackendClient["openSideChat"]> {
       await ready();
       return client.openSideChat(input);

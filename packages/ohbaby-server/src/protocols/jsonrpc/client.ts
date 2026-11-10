@@ -84,6 +84,9 @@ function parseRpcResponse(value: unknown): DaemonRpcResponse {
         message: error.message,
         ...(typeof error.name === "string" ? { name: error.name } : {}),
         ...(typeof error.code === "string" ? { code: error.code } : {}),
+        ...(typeof error.targetDirectory === "string"
+          ? { targetDirectory: error.targetDirectory }
+          : {}),
         ...(error.source === "provider" ||
         error.source === "runtime" ||
         error.source === "scheduler" ||
@@ -543,6 +546,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     input: Parameters<UiBackendClient["exportSession"]>[0],
   ): ReturnType<UiBackendClient["exportSession"]> {
     return this.rpc("exportSession", [input]);
+  }
+
+  forkSession(
+    input: Parameters<UiBackendClient["forkSession"]>[0],
+  ): ReturnType<UiBackendClient["forkSession"]> {
+    return this.rpc("forkSession", [input]);
   }
 
   openSideChat(

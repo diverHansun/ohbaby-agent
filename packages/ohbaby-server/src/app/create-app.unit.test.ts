@@ -662,6 +662,9 @@ class FakeBackend implements UiBackendClient {
     });
   }
 
+  forkSession(): Promise<never> {
+    throw new Error("unused");
+  }
   openSideChat(): Promise<never> {
     throw new Error("unused");
   }

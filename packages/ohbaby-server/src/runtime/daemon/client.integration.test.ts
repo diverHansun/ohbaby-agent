@@ -460,6 +460,9 @@ class FakeBackend implements UiBackendClient {
     });
   }
 
+  forkSession(): Promise<never> {
+    throw new Error("unused");
+  }
   openSideChat(): Promise<never> {
     throw new Error("unused");
   }
@@ -1056,14 +1059,21 @@ describe("createRemoteUiBackendClient", () => {
     });
   });
 
-  it("rejects failed rpc responses with the server error message", async () => {
+  it("preserves the server error message and structured fork redirection", async () => {
     const backend = new FakeBackend();
     backend.submitError = new Error("backend exploded");
+    const moved = { code: "SESSION_MOVED", targetDirectory: "/new-workspace" };
+    vi.spyOn(backend, "forkSession").mockRejectedValue(
+      Object.assign(new Error("Session moved"), moved),
+    );
 
     await withRemoteClient(backend, async (client) => {
       await expect(client.submitPromptAndWait("boom")).rejects.toThrow(
         "backend exploded",
       );
+      await expect(
+        client.forkSession({ sessionId: "moved" }),
+      ).rejects.toMatchObject(moved);
     });
   });
 

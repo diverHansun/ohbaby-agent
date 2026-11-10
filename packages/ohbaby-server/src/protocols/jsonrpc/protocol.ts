@@ -34,6 +34,7 @@ export const DAEMON_RPC_METHODS = [
   "waitForPrompt",
   "compactSession",
   "archiveSession",
+  "forkSession",
   "openSideChat",
   "listSideChats",
   "closeSideChat",

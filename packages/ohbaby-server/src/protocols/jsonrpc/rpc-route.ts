@@ -17,7 +17,12 @@ import type {
   UiRenewPromptEditLeaseInput,
   UiResubmitRetainedPromptInput,
 } from "ohbaby-sdk";
-import { isUiPromptNamingSource, isUiReasoningConfig } from "ohbaby-sdk";
+import {
+  FORK_TARGET_INVALID_ERROR_CODE,
+  isUiPromptNamingSource,
+  isUiReasoningConfig,
+  parseForkSessionInput,
+} from "ohbaby-sdk";
 import {
   DaemonForbiddenError,
   isDaemonForbiddenError,
@@ -241,6 +246,7 @@ export async function callDaemonBackend(input: {
         ? stopSubagentForClient(access)
         : subagentInstancesForClient(access);
     }
+    case "forkSession":
     case "openSideChat":
     case "listSideChats":
     case "closeSideChat": {
@@ -248,6 +254,16 @@ export async function callDaemonBackend(input: {
         throw Object.assign(new Error("client is not registered"), {
           code: "CLIENT_NOT_REGISTERED",
         });
+      if (request.method === "forkSession") {
+        if (request.params.length !== 1)
+          throw Object.assign(
+            new Error("forkSession expects one input object"),
+            {
+              code: FORK_TARGET_INVALID_ERROR_CODE,
+            },
+          );
+        return backend.forkSession(parseForkSessionInput(request.params[0]));
+      }
       const raw = request.params[0];
       const key =
         request.method === "closeSideChat" ? "sideChatId" : "mainSessionId";
@@ -975,6 +991,7 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
       }
     } catch (error) {
       const sessionOperation = [
+        "forkSession",
         "openSideChat",
         "listSideChats",
         "closeSideChat",

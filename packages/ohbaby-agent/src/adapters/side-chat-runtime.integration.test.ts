@@ -9,7 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   InterfaceProviderRequest,
@@ -36,7 +36,8 @@ interface ToolCall {
   args: Record<string, unknown>;
 }
 
-describe("side chat through the persistent backend", () => {
+describe("conversation copies through the persistent backend", () => {
+  let fixtureRoot: string;
   let directory: string;
   let client: PersistentUiBackendClient;
   const requests: InterfaceProviderRequest[] = [];
@@ -45,8 +46,10 @@ describe("side chat through the persistent backend", () => {
   let overflowNext = false;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), "side-chat-runtime-"));
-    vi.stubEnv("OHBABY_HOME", join(directory, "home"));
+    fixtureRoot = await mkdtemp(join(tmpdir(), "session-copy-runtime-"));
+    directory = join(fixtureRoot, "work");
+    await mkdir(directory);
+    vi.stubEnv("OHBABY_HOME", join(fixtureRoot, "home"));
     calls.length = 0;
     summaries.length = 0;
     overflowNext = false;
@@ -131,7 +134,7 @@ describe("side chat through the persistent backend", () => {
     closeDatabase();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
-    await rm(directory, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   });
 
   it("replays the same model prefix, MCP tools and cache key while keeping writes and selection scoped", async () => {
@@ -216,6 +219,159 @@ describe("side chat through the persistent backend", () => {
     expect(result?.output).toMatchObject({
       data: { sessions: [{ id: mainSessionId }] },
     });
+  });
+
+  it("forks at the selected answer and rebuilds tools, cache and scratch for the new session", async () => {
+    client.subscribePermissionEvents((event) => {
+      if (event.type === "permission.requested") {
+        void client.respondPermission(
+          event.request.id,
+          { choiceId: "allow_once" },
+          {
+            permissionEpoch: event.permissionEpoch,
+            rootSessionId: event.rootSessionId,
+          },
+        );
+      }
+    });
+    const [baseTool] = await McpManager.prototype.getAllTools();
+    const before = "mcp_s7_example_t6_before";
+    const after = "mcp_s7_example_t5_after";
+    vi.spyOn(McpManager.prototype, "getAllTools").mockResolvedValue([
+      baseTool,
+      { ...baseTool, name: before, mcpToolName: "before" },
+      { ...baseTool, name: after, mcpToolName: "after" },
+    ]);
+    calls.push(
+      { name: "select_tools", args: { tools: [lookup, before] } },
+      { name: lookup, args: {} },
+      { name: before, args: {} },
+    );
+    const source = (await client.submitPromptAndWait("first question")).prompt
+      .sessionId;
+    const second = await client.submitPromptAndWait("second question", {
+      sessionId: source,
+    });
+    const atCut = requests.at(-1);
+    if (!atCut) throw new Error("Expected a request for the second turn");
+    calls.push({ name: "select_tools", args: { tools: [after] } });
+    await client.submitPromptAndWait("third question", { sessionId: source });
+    expect(requests.at(-1)?.tools?.map((t) => t.name)).toContain(after);
+
+    expect(second.prompt.runId).toBeTruthy();
+    const fork = await client.forkSession({
+      sessionId: source,
+      runId: second.prompt.runId,
+    });
+    expect(await client.getSelectedSessionId()).toBe(source);
+    const snapshot = await client.getSnapshot();
+    const original = snapshot.sessions.find((s) => s.id === source);
+    const copied = snapshot.sessions.find((s) => s.id === fork.sessionId);
+    if (!original || !copied)
+      throw new Error("Expected both sessions in the snapshot");
+    expect(
+      copied.messages
+        .map((m) => m.id)
+        .some((id) => original.messages.some((m) => m.id === id)),
+    ).toBe(false);
+    expect(
+      copied.messages
+        .filter((m) => m.role === "user")
+        .map((m) =>
+          m.parts
+            .filter((p) => p.type === "text")
+            .map((p) => p.text)
+            .join(""),
+        ),
+    ).toEqual(["first question", "second question"]);
+    calls.push({ name: lookup, args: {} });
+    const start = requests.length;
+    expect(
+      (
+        await client.submitPromptAndWait("fork follow-up", {
+          sessionId: fork.sessionId,
+        })
+      ).prompt.status,
+    ).toBe("succeeded");
+    const initial = requests[start];
+    expect(initial.tools?.map((t) => t.name)).toEqual(
+      atCut.tools?.map((t) => t.name),
+    );
+    expect(initial.promptCache.key).toBeTypeOf("string");
+    expect(initial.promptCache.key).not.toBe(atCut.promptCache.key);
+    const sent = JSON.stringify(initial.messages);
+    expect(sent).not.toContain("third question");
+    const inheritedScratch = sent.indexOf(
+      join(resolveSessionStorageDir(source), "scratch"),
+    );
+    expect(inheritedScratch).toBeGreaterThanOrEqual(0);
+    expect(
+      sent.lastIndexOf(
+        join(resolveSessionStorageDir(fork.sessionId), "scratch"),
+      ),
+    ).toBeGreaterThan(inheritedScratch);
+    expect(JSON.stringify(requests.at(-1)?.messages.at(-1))).toContain("ok");
+    expect(
+      (await client.getSessionIndex()).find((s) => s.id === fork.sessionId)
+        ?.title,
+    ).toBe(fork.title);
+  });
+
+  it("keeps fork approvals and storage independent while preserving paths in copied history", async () => {
+    const shared = join(directory, "shared");
+    await mkdir(shared);
+    const approvals: string[] = [];
+    let allowSourceWrites = true;
+    client.subscribePermissionEvents((event) => {
+      if (event.type !== "permission.requested") return;
+      approvals.push(event.request.callId.split("-")[0]);
+      void client.respondPermission(
+        event.request.id,
+        { choiceId: allowSourceWrites ? "allow_always" : "reject" },
+        {
+          permissionEpoch: event.permissionEpoch,
+          rootSessionId: event.rootSessionId,
+        },
+      );
+    });
+    const write = {
+      name: "write",
+      args: { file_path: join(shared, "shared.txt"), content: "from source" },
+    };
+    calls.push(write);
+    const source = (await client.submitPromptAndWait("allow this write")).prompt
+      .sessionId;
+    expect(approvals).toEqual(["write"]);
+    const files = ["subagents", "tool-results"].map((dir) =>
+      join(resolveSessionStorageDir(source), dir, "result.txt"),
+    );
+    for (const file of files) {
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, "private source output ".repeat(3000));
+    }
+    await client.submitPromptAndWait(files.join(" "), { sessionId: source });
+    const { sessionId } = await client.forkSession({ sessionId: source });
+    allowSourceWrites = false;
+    approvals.length = 0;
+    calls.push(
+      { ...write, args: { ...write.args, content: "from fork" } },
+      ...files.map((file_path) => ({ name: "read", args: { file_path } })),
+    );
+    await client.submitPromptAndWait(
+      "try the same write and read the source results",
+      { sessionId },
+    );
+    expect(approvals).toEqual(["write", "read", "read"]);
+    const sent = JSON.stringify(requests.at(-1)?.messages);
+    for (const file of files) expect(sent).toContain(file);
+    expect(sent).not.toContain("private source output");
+    expect(await readFile(write.args.file_path, "utf8")).toBe("from source");
+    approvals.length = 0;
+    calls.push(write);
+    await client.submitPromptAndWait("reuse source approval", {
+      sessionId: source,
+    });
+    expect(approvals).toEqual([]);
   });
 
   it("automatically compacts the side chat with the main cache identity", async () => {

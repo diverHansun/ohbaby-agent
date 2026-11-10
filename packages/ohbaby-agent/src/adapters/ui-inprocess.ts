@@ -29,6 +29,7 @@ import {
   type ShutdownOptions,
   type CleanupResult,
 } from "../runtime/shutdown.js";
+import { forkSession } from "./ui-inprocess/session-fork.js";
 import { SessionExecutionGate } from "./session-execution.js";
 import {
   openSideChat,
@@ -96,7 +97,10 @@ import { selectModelEntry } from "../config/llm/writer.js";
 import { createPermissionProjection } from "./app-events/permission-projection.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { submitPromptAndWait as composeSubmitPromptAndWait } from "ohbaby-sdk";
+import {
+  parseForkSessionInput,
+  submitPromptAndWait as composeSubmitPromptAndWait,
+} from "ohbaby-sdk";
 import type {
   SubmitPromptOptions,
   UiSubmitPromptAndWaitOptions,
@@ -5397,6 +5401,16 @@ export function createInProcessUiBackendClient(
       return { ...result, ok: true };
     },
 
+    async forkSession(input): ReturnType<UiBackendClient["forkSession"]> {
+      await ready;
+      const parsed = parseForkSessionInput(input);
+      const db = options.sideChatStorage?.db;
+      if (!db) throw new Error("Fork requires persistent session storage");
+      const session = await forkSession(db, parsed, promptScopeKey);
+      bus.publish(SessionEvent.Created, { session });
+      await publishSessionIndexInvalidation();
+      return { sessionId: session.id, title: session.title };
+    },
     async openSideChat({
       mainSessionId,
     }): ReturnType<UiBackendClient["openSideChat"]> {
