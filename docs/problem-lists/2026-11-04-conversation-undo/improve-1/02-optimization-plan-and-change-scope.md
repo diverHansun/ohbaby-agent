@@ -35,7 +35,7 @@ TUI ◄────────────────────────�
 |---|---|---|---|---|
 | 已撤销的表达方式 | `message`、`prompt_submission` 各加 `rewound_at` 列（子代理调用表同样加，见“子代理与后台任务”行） | SQL 过滤直接；可逆，清空列就能恢复 | 真删除（不可逆，和 00 冲突）；写进 `data` JSON（每次过滤都要 `json_extract`）；单独的切点表（每个读取方都要连表） | 一次迁移；旧版本程序读新库会看到已撤销的消息 |
 | 过滤放在哪 | 消息与 prompt 的列表入口默认排除；按 ID 读取不过滤 | 覆盖绝大多数读取方；按 ID 读取服务于 steer 和空会话判断 | 每个读取方各自过滤（一定会漏）；所有入口都过滤（会弄坏 steer） | 以后需要“包含已撤销”的列表调用方要加显式选项 |
-| 撤销放在哪一层 | adapter 层，照 `compactSessionInternal` 独占会话 | 同一后端负责安排新提问、goal 续跑和子代理唤醒的执行顺序。独立运行时的占用情况通过 SQLite 检查 | 在 `services/session` 里写服务并另造锁 | `ui-inprocess.ts` 又多一个接入点；为了不让它继续变长，编排逻辑单独放进 `A/adapters/ui-inprocess/session-rewind.ts` |
+| 撤销放在哪一层 | adapter 层，照 `compactSessionInternal` 独占会话 | 同一后端负责安排新提问、goal 续跑和子代理唤醒的执行顺序。独立后端正在跑的轮次通过 `run_ledger` 发现；和独立后端的手动压缩谁先提交谁生效，后提交的一方在自己的事务里复查失败（2026-11-10 确认，不另加跨进程标记） | 在 `services/session` 里写服务并另造锁；跨进程的“历史操作”标记（实施时加过，验收时去掉：标记只看 PID 时可能残留，正确性已由两边的事务内复查保证） | `ui-inprocess.ts` 又多一个接入点；为了不让它继续变长，编排逻辑单独放进 `A/adapters/ui-inprocess/session-rewind.ts` |
 | 界面怎么更新 | 走消息管理器的提交流程，发出 `Removed` 变化 | 视图投影有缓存，只认提交流程；现成路径会转成 `removedMessageIds` | 直接改库再手写 `session.changed`（`GET /view` 会返回旧消息） | 消息存储接口多一个 `markRewound`，SQLite 和内存实现都要有 |
 | 撤销定位 | 目标 `promptId` | 用户点的就是一条消息；并发时不会撤错 | kimi-code 的“撤销 N 轮” | 前端要知道每条用户消息对应的 `promptId`（`prompt_submission.user_message_id` 已有） |
 | 撤销范围 | 按模型历史的排序，主上下文里从目标用户消息开始的全部消息；从目标 prompt 到后台开始撤销时已接收的 prompt。goal 续跑、子代理唤醒、提醒不按来源单独处理（目标之后有压缩摘要时目标本身就不能撤销，见 P10 与 Stage 1 第 6.2 步），一起隐藏 | 规则简单，不漏 steer 和提醒；有撤销功能的五个参考项目都是从撤销点往后一刀切 | 只按 `runId` 圈消息（会漏掉没有 `runId` 的消息） | 无 |
@@ -92,7 +92,7 @@ TUI ◄────────────────────────�
       - 目标用户消息在最近一条 `context-summary` 消息之后，否则返回 `REWIND_BEFORE_COMPACTION`。
       - 没在压缩、恢复已就绪；独立 TUI 未占用本会话，排队区里没有 `retained` 的 prompt，也没有被别的窗口持有编辑锁的 prompt（取消它会抛 `PromptEditLeaseHeldError`，见 `A/runtime/prompt-scheduler/database-store.ts` 的 `cancelQueued`，:449-463）。否则返回 `SESSION_RUNNING`。
       - 带 `text` 时，确认要用的模型仍可选（`assertModelEntrySelectable`），不可选就原样返回这个错误。这样第 8 步的接收几乎不会再失败。
-      - 手动压缩和撤销都在 SQLite 的 `app_state` 按会话登记正在修改历史的操作。独立后端已持有该标记时返回 `SESSION_RUNNING`。压缩提交摘要前复查源消息仍可见，避免把已撤销的文字写回历史。
+      - 不另加跨进程标记。压缩在写摘要的同一个事务里复查源消息仍未撤销、内容没变（`A/core/message/database-store.ts` 的 `commitCompaction`）；撤销在提交事务里复查切点仍在最近一次摘要之后，并检查 `run_ledger`。和独立后端的手动压缩同时发生时，后提交的一方失败，用户重试即可。自动压缩一直只靠这处复查。
    3. 停下来并占住闸门（学 ZCode）。总时限 10 秒（参照 codex），下面所有等待都算在内：
       - goal 处于 `active` 时先暂停。现有的 `pauseGoal`（`A/goals/service.ts:411-423`）调用内部的 `pauseActiveGoal`（:606-645）时没有传 `preserveBackground`，会停掉 goal 名下所有轮次的后台子代理，包括撤销点之前要保留的轮次。`pauseActiveGoal` 本身已经支持这个参数，所以只需给 `pauseGoal` 加一个 `preserveBackground` 选项并透传下去，撤销时传 `true`，后台子代理留给第 5 步按轮次处理。暂停原因记为“编辑消息”，事件照常推给界面。暂停会顺带中断正在跑的 goal 轮次。
       - 同一会话已经开始办理的提交先办完，后到的提交按收到的顺序等待。同一后台收到其他窗口发给这个会话的新提问时，以后台开始处理撤销的时刻为界。之后到达的提问等此次操作结束后执行。带修改稿的请求先安排修改稿，再放行这些提问。
@@ -100,7 +100,7 @@ TUI ◄────────────────────────�
         1. 取消后台开始撤销前本会话已排队的 prompt（`promptScheduler.cancelQueued`，`ui-inprocess.ts:5306-5316` 的 `cancelQueuedPromptForOwner`）。它们排在撤销点之后，本来就要移除（学 opencode）。要先取消排队，再中断当前这一轮，否则这一轮一结束，调度器就会把下一条排队的 prompt 跑起来。
         2. 有活动 prompt 时，先用 `waitForPromptRunReadyOrIdle`（`ui-inprocess.ts:4435-4458`）拿到它的 runId，再调用 `abortPromptRun`（`A/adapters/ui-inprocess/runtime-controller.ts:312-318`，经 `cancelPromptRun`（:303）调用 `interruptRunTree`，会顺带取消这一轮的后台 shell 任务），然后等 `runManager.waitForCompletion(runId)`。
         3. 照搬 `compactSessionInternal`（`ui-inprocess.ts:3752-3771`）的写法：`sourceProjection.owner.runControl(sessionId)` 的回调里**只做**忙碌检查和占闸门。忙碌指闸门被占、恢复状态不是 `ready`、正在压缩、有排队 prompt、有活动 prompt、有待处理的运行时 prompt、goal 仍是 `active`。都不成立时 `sessionExecution.reserve`，退出循环。
-        4. 仍然忙时，像 `runGoalTurn`（`ui-inprocess.ts:1555-1615`）那样订阅闸门变化，等闸门放开后回到第 1 小步。调度器可能还在给刚中断的轮次写最终状态，或子代理唤醒已抢先开了一轮。这些工作按原规则收尾。若独立 TUI 占用同一会话，返回 `SESSION_RUNNING`，该 TUI 的提问与执行照常保留。
+        4. 仍然忙时，像 `runGoalTurn`（`ui-inprocess.ts:1555-1615`）那样订阅闸门变化，等闸门放开后回到第 1 小步。调度器可能还在给刚中断的轮次写最终状态，这些工作按原规则收尾。撤销期间子代理唤醒不会开新一轮：唤醒的认领在撤销进行中暂停（`ui-inprocess.ts` 里 `isClaimPaused` 和 `runGoalTurn` 前的检查），撤销结束后再按原规则处理，被撤销轮次的子代理结果已改为不投递。若独立 TUI 占用同一会话，返回 `SESSION_RUNNING`，该 TUI 的提问与执行照常保留。
       - 超时返回 `SESSION_RUNNING`。已暂停的 goal、已取消的排队、已中断的轮次都不恢复：用户点 Send 本来就是要停下来改消息，可以接受。
       - 不处理客户端中途断开请求的情况，最多 10 秒后自然结束。
       - 后面第 4 至 8 步放在 `try` 里，`finally` 释放闸门。
@@ -236,6 +236,16 @@ POST /v1/sessions/:sessionId/rewind
 ### 迁移
 
 - `029_message_rewind`：三张表加可空列，会话表另记录撤销修订号。向前兼容；旧版本程序读新库不报错，但会把已撤销的消息当作普通消息显示并发给模型。发布说明里要写明“升级后不要降级到旧版本继续使用撤销过的会话”。
+
+### 实施时新增、对所有会话生效的改动（2026-11-10 验收补记）
+
+| 改动 | 位置 | 影响 |
+|---|---|---|
+| goal 驱动者归属 | `A/goals/persistence.ts`，`app_state` 里按会话登记驱动 goal 的后端（进程实例 ID 加 PID） | 修掉 main 上已有的问题：另一个后端打开会话时，会把别人正在驱动的 goal 改成 `paused`。现在只有驱动者能暂停或清除 goal，其他后端返回 `SESSION_RUNNING`；驱动者不在了，才按崩溃残留改成 `paused`。对所有用 goal 的会话生效（00 第 6 节 D2） |
+| `KeyLockManager` 没有前驱时同步启动 | `A/services/storage/lock-manager.ts` | 原来至少等一个 microtask。全局存储锁也用它，排队语义不变，只是时序提前 |
+| 准入序号 | `A/runtime/prompt-scheduler/database-store.ts`、`in-memory-store.ts` | `admission_order` 和 `accepted_at` 取工作区和会话两者中的较大值，会话移动工作区后仍可比较，序号会跳号。同一工作区内仍单调递增 |
+| 撤销期间隐式提交 | `A/runtime/prompt-scheduler/scheduler.ts` 的 `accept` | 没带 `sessionId` 的提交解析到正在撤销的会话时，排队等撤销结束，最多被拖住约 10 秒。新建会话不受影响 |
+| 复制 prompt 的条件 | `A/services/session/copy-history.ts` 的 prompts 汇总 | 除第 8 步的四处外，这里也加了 `rewound_at IS NULL`，效果相同 |
 
 ## 2.6 风险与回滚
 
