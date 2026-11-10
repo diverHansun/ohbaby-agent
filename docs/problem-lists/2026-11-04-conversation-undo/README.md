@@ -8,7 +8,7 @@ Web 在用户消息上放 Edit 按钮，TUI 新增 `/rewind`。连 AI 的文件�
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | 撤销的后端、SDK、Web 气泡编辑、TUI `/rewind` | Stage 1 后端已实现，待用户复核（本地分支 `codex/session-rewind-backend`） |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | 撤销的后端、SDK、Web 气泡编辑、TUI `/rewind` | Stage 1 后端已验收，Web 与 TUI 待实施 |
 
 ## 本轮文档地图
 

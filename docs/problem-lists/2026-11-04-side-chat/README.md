@@ -8,7 +8,7 @@ Web 通过右侧面板和“选中文字后在 side chat 里问”打开；TUI �
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | Side Chat 后端、Web 面板与选中文字入口、TUI `/btw` | Stage 1 后端待用户检查，Web 与 TUI 待实施 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | Side Chat 后端、Web 面板与选中文字入口、TUI `/btw` | Stage 1 后端已验收（`c2e46a45`），Web 与 TUI 待实施 |
 
 ## 本轮文档地图
 
