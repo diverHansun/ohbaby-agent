@@ -25,7 +25,7 @@ import {
   insertMessageRow,
   insertPartRow,
 } from "../core/message/database-store.js";
-import { createSqliteGoalPersistence } from "../goals/index.js";
+import { createSqliteGoalPersistence, GoalService } from "../goals/index.js";
 import {
   goalTodoWorkScopeId,
   recoverTodosFromMessages,
@@ -505,7 +505,7 @@ function createPermissionSlotLLMClient(input: {
 function createProviderSubagentControlEvent(input: {
   readonly arguments: Record<string, unknown>;
   readonly callId: string;
-  readonly action: "spawn" | "list";
+  readonly action: "spawn" | "send" | "list";
 }): InterfaceProviderStreamEvent {
   return {
     finishReason: "tool_calls",
@@ -4575,5 +4575,430 @@ describe("persistent conversation rewind", () => {
       (await client.submitPromptAndWait("next prompt", { sessionId })).prompt
         .status,
     ).toBe("succeeded");
+  });
+
+  function countRewoundRows(): number {
+    const db = getDatabase();
+    return ["message", "prompt_submission", "subagent_execution"].reduce(
+      (total, table) =>
+        total +
+        (db
+          .prepare<{
+            n: number;
+          }>(`SELECT count(*) AS n FROM ${table} WHERE rewound_at IS NOT NULL`)
+          .get()?.n ?? 0),
+      0,
+    );
+  }
+
+  it("orders session checks NOT_FOUND, NOT_ROOT, ARCHIVED, SIDE_CHAT_UNSUPPORTED, MOVED when several apply", async () => {
+    client = open();
+    const { prompt } = await client.submitPromptAndWait("main question");
+    const { promptId } = prompt;
+    const db = getDatabase();
+    const update = (sql: string, id: string): void => {
+      db.prepare(sql).run(id);
+    };
+    const archive = "UPDATE session SET status='archived' WHERE id=?";
+    const move =
+      "UPDATE session SET pending_working_directory='/moved-elsewhere' WHERE id=?";
+    const archivedChild = await client.createSession();
+    db.prepare("UPDATE session SET parent_id=? WHERE id=?").run(
+      prompt.sessionId,
+      archivedChild.id,
+    );
+    update(archive, archivedChild.id);
+    update(move, archivedChild.id);
+    const archivedMoved = await client.createSession();
+    update(archive, archivedMoved.id);
+    update(move, archivedMoved.id);
+    const movedSide = await client.openSideChat({
+      mainSessionId: prompt.sessionId,
+    });
+    update(move, movedSide.sideChatId);
+    const archivedMovedSide = await client.openSideChat({
+      mainSessionId: prompt.sessionId,
+    });
+    update(archive, archivedMovedSide.sideChatId);
+    update(move, archivedMovedSide.sideChatId);
+    const moved = await client.createSession();
+    update(move, moved.id);
+    for (const [id, code] of [
+      [archivedChild.id, "SESSION_NOT_ROOT"],
+      [archivedMoved.id, "SESSION_ARCHIVED"],
+      [archivedMovedSide.sideChatId, "SESSION_ARCHIVED"],
+      [movedSide.sideChatId, "SIDE_CHAT_UNSUPPORTED"],
+      [moved.id, "SESSION_MOVED"],
+    ]) {
+      await expect(
+        client.rewindSession({ sessionId: id, promptId }),
+      ).rejects.toMatchObject({ code });
+    }
+    expect(countRewoundRows()).toBe(0);
+  });
+
+  it("refuses a cut before compaction while a turn runs, leaving that turn and its queue untouched", async () => {
+    const release = createDeferred<undefined>();
+    const startedTexts: string[] = [];
+    const blocking = createAbortableBlockingLLMClient({
+      release: release.promise,
+      startedTexts,
+    });
+    const fallback = model.provider.streamResponse.bind(model.provider);
+    let block = false;
+    vi.spyOn(model.provider, "streamResponse").mockImplementation((request) =>
+      block ? blocking.provider.streamResponse(request) : fallback(request),
+    );
+    client = open();
+    try {
+      const { prompt: old } = await client.submitPromptAndWait("old question");
+      const { sessionId } = old;
+      block = true;
+      const running = await client.submitPromptAccepted("running question", {
+        sessionId,
+      });
+      await vi.waitFor(() => {
+        expect(startedTexts).toEqual(["running question"]);
+      });
+      const queued = await client.submitPromptAccepted("queued question", {
+        sessionId,
+      });
+      expect(queued.status).toBe("queued");
+      const db = getDatabase();
+      const at = Date.now() + 1;
+      insertMessageRow(db, {
+        id: "running-summary",
+        sessionId,
+        role: "assistant",
+        agent: "context",
+        time: { created: at },
+      });
+      insertPartRow(
+        db,
+        {
+          id: "running-summary-part",
+          messageId: "running-summary",
+          sessionId,
+          type: "text",
+          text: "compacted history",
+          orderIndex: 0,
+          metadata: { kind: "context-summary" },
+        },
+        at,
+      );
+      await expect(
+        withTimeout(
+          client.rewindSession({
+            sessionId,
+            promptId: old.promptId,
+            text: "edited",
+          }),
+          3_000,
+          "the precheck waited for the running turn",
+        ),
+      ).rejects.toMatchObject({ code: "REWIND_BEFORE_COMPACTION" });
+      const status = db.prepare<{ status: string }>(
+        "SELECT status FROM prompt_submission WHERE prompt_id=?",
+      );
+      expect(status.get(running.promptId)).toEqual({ status: "running" });
+      expect(status.get(queued.promptId)).toEqual({ status: "queued" });
+      expect(countRewoundRows()).toBe(0);
+      expect(
+        db
+          .prepare("SELECT rewind_revision FROM session WHERE id=?")
+          .get(sessionId),
+      ).toEqual({ rewind_revision: 0 });
+      release.resolve(undefined);
+      for (const id of [running.promptId, queued.promptId])
+        expect((await client.waitForPrompt(id)).prompt.status).toBe(
+          "succeeded",
+        );
+      expect(startedTexts).toEqual(["running question", "queued question"]);
+      expect(
+        db
+          .prepare(
+            "SELECT count(*) AS n FROM prompt_submission WHERE session_id=?",
+          )
+          .get(sessionId),
+      ).toEqual({ n: 3 });
+    } finally {
+      release.resolve(undefined);
+    }
+  });
+
+  it("drops reminders recorded by a rewound turn from the view and the next model request", async () => {
+    client = open();
+    if (!client.getSessionView)
+      throw new Error("Expected persistent session recovery support");
+    const { prompt: first } = await client.submitPromptAndWait("auto turn");
+    const { sessionId } = first;
+    await client.setPermission({ mode: "plan" });
+    const { prompt: second } = await client.submitPromptAndWait("plan turn", {
+      sessionId,
+    });
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain(
+      "Current mode: plan.",
+    );
+    const reminderRuns = getDatabase().prepare<{
+      id: string;
+      run_id: string;
+      rewound: number;
+    }>(
+      `SELECT DISTINCT m.id, json_extract(m.data,'$.runId') AS run_id, m.rewound_at IS NOT NULL AS rewound
+       FROM message m JOIN part p ON p.message_id=m.id
+       WHERE m.session_id=? AND json_extract(p.data,'$.metadata.kind')='system-reminder:v1'
+       ORDER BY m.created_at, m.rowid`,
+    );
+    const planReminder = reminderRuns
+      .all(sessionId)
+      .find((row) => row.run_id === second.runId);
+    if (!planReminder) throw new Error("Expected the plan turn's reminder");
+    await client.rewindSession({ sessionId, promptId: second.promptId });
+    expect(reminderRuns.all(sessionId)).toEqual([
+      expect.objectContaining({ run_id: first.runId, rewound: 0 }),
+      { ...planReminder, rewound: 1 },
+    ]);
+    const view = await client.getSessionView({ sessionId });
+    expect(view.session.messages.map((m) => m.id)).not.toContain(
+      planReminder.id,
+    );
+    // The visible history last reported auto mode. A surviving plan reminder
+    // would make the next turn announce that plan mode has ended.
+    await client.setPermission({ mode: "auto" });
+    await client.submitPromptAndWait("auto again", { sessionId });
+    const sent = JSON.stringify(requests.at(-1)?.messages);
+    expect(sent).toContain("Current mode: auto.");
+    expect(sent).not.toContain("Current mode: plan");
+    expect(sent).not.toContain("plan-mode constraints have ended");
+    expect(sent).not.toContain("plan turn");
+  });
+
+  it("hides rewound subagents from the execution and instance lists that clients read", async () => {
+    const fallback = model.provider.streamResponse.bind(model.provider);
+    const script: InterfaceProviderStreamEvent[][] = [];
+    vi.spyOn(model.provider, "streamResponse").mockImplementation(
+      async (request) => {
+        if (isSessionTitleGenerationRequest(request)) return fallback(request);
+        if (isPersistentExploreSubagentRequest(request))
+          return createProviderStream([
+            { textDelta: "child result", finishReason: "stop" },
+          ]);
+        return createProviderStream(
+          script.shift() ?? [{ textDelta: "Reply", finishReason: "stop" }],
+        );
+      },
+    );
+    client = open();
+    const executions = new DatabaseSubagentExecutionStore();
+    const ledger = createDatabaseRunLedger();
+    const settle = async (sessionId: string, count: number): Promise<void> => {
+      await vi.waitFor(async () => {
+        const records = await executions.list({
+          rootSessionId: sessionId,
+          limit: 20,
+        });
+        expect(records).toHaveLength(count);
+        for (const record of records)
+          expect(record).toMatchObject({
+            status: "completed",
+            delivery: { state: "processed" },
+          });
+        expect(
+          (await ledger.listBySession(sessionId, { mainOnly: true })).filter(
+            (run) => run.status === "pending" || run.status === "running",
+          ),
+        ).toEqual([]);
+      });
+    };
+    script.push([
+      createProviderSubagentControlEvent({
+        callId: "spawn-alpha",
+        action: "spawn",
+        arguments: { prompt: "inspect alpha", role: "explore" },
+      }),
+    ]);
+    const { prompt: first } = await client.submitPromptAndWait("spawn alpha");
+    const { sessionId } = first;
+    await settle(sessionId, 1);
+    const [alpha] = await executions.list({ rootSessionId: sessionId });
+    expect(alpha.rootRunId).toBe(first.runId);
+    script.push(
+      [
+        createProviderSubagentControlEvent({
+          callId: "send-alpha",
+          action: "send",
+          arguments: { agent_id: alpha.subagentId, message: "alpha again" },
+        }),
+      ],
+      [
+        createProviderSubagentControlEvent({
+          callId: "spawn-beta",
+          action: "spawn",
+          arguments: { prompt: "inspect beta", role: "explore" },
+        }),
+      ],
+    );
+    const { prompt: second } = await client.submitPromptAndWait(
+      "reuse alpha and spawn beta",
+      { sessionId },
+    );
+    await settle(sessionId, 3);
+    expect(script).toEqual([]);
+    const all = await executions.list({ rootSessionId: sessionId });
+    const rewound = all.filter((r) => r.rootRunId === second.runId);
+    expect(rewound).toHaveLength(2);
+    const beta = rewound.find((r) => r.subagentId !== alpha.subagentId);
+    if (!beta) throw new Error("Expected beta to be spawned by turn two");
+    const listed = async (): Promise<{
+      executions: string[];
+      instances: { subagentId: string; latestExecutionId?: string }[];
+    }> => ({
+      executions: (
+        await client.listSubagentExecutions({ rootSessionId: sessionId })
+      ).executions.map((e) => e.executionId),
+      instances: (
+        await client.listSubagentInstances({ rootSessionId: sessionId })
+      ).instances
+        .map(({ subagentId, latestExecutionId }) => ({
+          subagentId,
+          latestExecutionId,
+        }))
+        .sort((a, b) => a.subagentId.localeCompare(b.subagentId)),
+    });
+    const before = await listed();
+    expect(before.executions).toHaveLength(3);
+    expect(before.instances.map((i) => i.subagentId).sort()).toEqual(
+      [alpha.subagentId, beta.subagentId].sort(),
+    );
+    expect(
+      before.instances.find((i) => i.subagentId === alpha.subagentId)
+        ?.latestExecutionId,
+    ).not.toBe(alpha.executionId);
+
+    await client.rewindSession({ sessionId, promptId: second.promptId });
+    expect(await listed()).toEqual({
+      executions: [alpha.executionId],
+      instances: [
+        {
+          subagentId: alpha.subagentId,
+          latestExecutionId: alpha.executionId,
+        },
+      ],
+    });
+    // Filtering is a read rule: the rows stay, marked.
+    expect(
+      (await executions.list({ rootSessionId: sessionId, limit: 20 })).map(
+        (r) => [r.executionId, r.rewoundAt !== undefined],
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        [alpha.executionId, false],
+        ...rewound.map((r) => [r.executionId, true]),
+      ]),
+    );
+  });
+
+  it("holds subagent wakes while a rewind waits and then wakes only for kept turns", async () => {
+    const releaseAlpha = createDeferred<undefined>();
+    const releaseBeta = createDeferred<undefined>();
+    const fallback = model.provider.streamResponse.bind(model.provider);
+    const script: InterfaceProviderStreamEvent[][] = [];
+    const wakeRequests: string[] = [];
+    vi.spyOn(model.provider, "streamResponse").mockImplementation(
+      async (request) => {
+        if (isSessionTitleGenerationRequest(request)) return fallback(request);
+        const text = JSON.stringify(request.messages);
+        if (isPersistentExploreSubagentRequest(request)) {
+          const alpha = text.includes("inspect alpha");
+          await (alpha ? releaseAlpha : releaseBeta).promise;
+          return createProviderStream([
+            {
+              textDelta: alpha ? "alpha-result" : "beta-result",
+              finishReason: "stop",
+            },
+          ]);
+        }
+        if (text.includes("alpha-result") || text.includes("beta-result"))
+          wakeRequests.push(text);
+        return createProviderStream(
+          script.shift() ?? [{ textDelta: "Reply", finishReason: "stop" }],
+        );
+      },
+    );
+    client = open();
+    const executions = new DatabaseSubagentExecutionStore();
+    const ledger = createDatabaseRunLedger();
+    const spawnChild = (name: string): InterfaceProviderStreamEvent =>
+      createProviderSubagentControlEvent({
+        callId: `spawn-${name}`,
+        action: "spawn",
+        arguments: { prompt: `inspect ${name}`, role: "explore" },
+      });
+    const held = createDeferred<undefined>();
+    const resume = createDeferred<undefined>();
+    try {
+      script.push([spawnChild("alpha")]);
+      const { prompt: first } = await client.submitPromptAndWait("spawn alpha");
+      const { sessionId } = first;
+      script.push([spawnChild("beta")]);
+      const { prompt: second } = await client.submitPromptAndWait(
+        "spawn beta",
+        { sessionId },
+      );
+      const mainRuns = async (): Promise<string[]> =>
+        (await ledger.listBySession(sessionId, { mainOnly: true })).map(
+          (run) => `${run.triggerSource}:${run.status}`,
+        );
+      expect(await mainRuns()).toEqual(["user:succeeded", "user:succeeded"]);
+      // Hold the rewind in its stop phase: it is registered, but owns no gate yet.
+      vi.spyOn(GoalService.prototype, "getSnapshot").mockImplementationOnce(
+        async function (this: GoalService, id: string) {
+          held.resolve(undefined);
+          await resume.promise;
+          return GoalService.prototype.getSnapshot.call(this, id);
+        },
+      );
+      const rewind = client.rewindSession({
+        sessionId,
+        promptId: second.promptId,
+      });
+      await held.promise;
+      releaseAlpha.resolve(undefined);
+      releaseBeta.resolve(undefined);
+      await vi.waitFor(async () => {
+        expect(
+          (await executions.list({ rootSessionId: sessionId })).map(
+            (r) => r.status,
+          ),
+        ).toEqual(["completed", "completed"]);
+      });
+      // Give the idle supervisor time to try a wake.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await mainRuns()).toEqual(["user:succeeded", "user:succeeded"]);
+      expect(wakeRequests).toEqual([]);
+      resume.resolve(undefined);
+      await rewind;
+      await vi.waitFor(async () => {
+        expect(await mainRuns()).toEqual([
+          "subagent:succeeded",
+          "user:succeeded",
+          "user:succeeded",
+        ]);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await mainRuns()).toHaveLength(3);
+      expect(wakeRequests).toHaveLength(1);
+      expect(wakeRequests[0]).toContain("alpha-result");
+      expect(wakeRequests[0]).not.toContain("beta-result");
+      const beta = (await executions.list({ rootSessionId: sessionId })).find(
+        (r) => r.rootRunId === second.runId,
+      );
+      expect(beta).toMatchObject({ delivery: { state: "none" } });
+      expect(beta?.rewoundAt).toBeDefined();
+    } finally {
+      releaseAlpha.resolve(undefined);
+      releaseBeta.resolve(undefined);
+      resume.resolve(undefined);
+    }
   });
 });

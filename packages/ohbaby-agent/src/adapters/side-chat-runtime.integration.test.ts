@@ -437,7 +437,10 @@ describe("conversation copies through the persistent backend", () => {
       ).mockResolvedValueOnce({ confirmed: false });
       await expect(
         client.rewindSession({ sessionId, promptId }),
-      ).rejects.toThrow(/shell cleanup is unconfirmed/i);
+      ).rejects.toMatchObject({
+        code: "SESSION_RUNNING",
+        cause: { message: "Shell cleanup is unconfirmed" },
+      });
       for (const table of [
         "message",
         "prompt_submission",

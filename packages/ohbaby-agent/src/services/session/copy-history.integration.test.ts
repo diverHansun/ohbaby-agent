@@ -509,6 +509,28 @@ describe("copySessionHistory", () => {
     expect(findEndedMainRun(db, main)).toBe("thinking");
   });
 
+  it("skips a run whose only rewound message is its final AI answer", () => {
+    const db = getDatabase();
+    run("earlier", 1);
+    message("earlier-question", "earlier", 1);
+    message("earlier-answer", "earlier", 2, "assistant");
+    part("earlier-answer", "text", { text: "Earlier answer" });
+    run("later", 3);
+    message("later-question", "later", 3);
+    part("later-question", "text", { text: "Later question" });
+    prompt("later-prompt", "later-question", "later");
+    message("later-answer", "later", 4, "assistant");
+    part("later-answer", "text", { text: "Later answer" });
+    expect(findForkableMainRun(db, main)).toBe("later");
+    // Mark only the answer: the run keeps a visible user anchor and prompt.
+    db.prepare("UPDATE message SET rewound_at='rewound' WHERE id=?").run(
+      "later-answer",
+    );
+    expect(findEndedMainRun(db, main)).toBe("later");
+    expect(findForkableMainRun(db, main, "later")).toBeNull();
+    expect(findForkableMainRun(db, main)).toBe("earlier");
+  });
+
   it("retains the same latest answer across successive forks of runs that started together", async () => {
     const db = getDatabase();
     const turns = Array.from({ length: 12 }, (_, index) => index + 1);
