@@ -677,4 +677,13 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       CREATE INDEX idx_current_run_input_run ON current_run_input(run_id,accepted_at,input_id);
     `,
   },
+  {
+    version: "029_message_rewind",
+    sql: `
+      ALTER TABLE session ADD COLUMN rewind_revision INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE message ADD COLUMN rewound_at TEXT;
+      ALTER TABLE prompt_submission ADD COLUMN rewound_at TEXT;
+      ALTER TABLE subagent_execution ADD COLUMN rewound_at TEXT;
+    `,
+  },
 ];

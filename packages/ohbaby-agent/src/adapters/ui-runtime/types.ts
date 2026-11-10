@@ -79,6 +79,8 @@ export interface UiRuntimeComposition {
     rootRunId: string,
     reason?: string,
   ): Promise<void>;
+  resetRewoundSessionState(sessionId: string): void;
+  stopRewoundRunWork(rootRunId: string): Promise<void>;
   getActivityReasons(): readonly string[];
   closeAdmission?(): void;
   dispose(options?: ShutdownOptions): Promise<CleanupTaskResult>;

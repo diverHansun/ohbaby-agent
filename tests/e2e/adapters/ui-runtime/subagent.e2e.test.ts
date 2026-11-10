@@ -681,7 +681,7 @@ describe("subagent runtime e2e", () => {
     }
   });
 
-  it.each(["cancelled", "interrupted", "timed_out"] as const)(
+  it.each(["cancelled", "interrupted", "timed_out", "rewound"] as const)(
     "keeps a %s child's stream fragment in history without recording it as the report",
     async (terminalStatus) => {
       const bus = createBus();
@@ -751,6 +751,17 @@ describe("subagent runtime e2e", () => {
             "test child interruption",
           );
           gate.release.resolve(undefined);
+        } else if (terminalStatus === "rewound") {
+          const stopping = composition.stopRewoundRunWork(run.runId);
+          await vi.waitFor(async () => {
+            expect(
+              (
+                await composition.listSubagentState("session_parent")
+              ).executions.at(0)?.status,
+            ).toBe("interrupted");
+          });
+          gate.release.resolve(undefined);
+          await stopping;
         }
         const completion = await composition.runManager.waitForCompletion(
           run.runId,
@@ -774,14 +785,18 @@ describe("subagent runtime e2e", () => {
         });
         expect(JSON.stringify(child)).toContain("partial child report");
         expect(execution.status).toBe(
-          terminalStatus === "cancelled" ? "interrupted" : terminalStatus,
+          terminalStatus === "cancelled" || terminalStatus === "rewound"
+            ? "interrupted"
+            : terminalStatus,
         );
         expect(JSON.stringify(execution)).toContain(
           terminalStatus === "timed_out"
             ? "Subagent timed out after 100ms"
             : terminalStatus === "cancelled"
               ? "test child cancellation"
-              : "test child interruption",
+              : terminalStatus === "rewound"
+                ? "conversation rewound"
+                : "test child interruption",
         );
         expect(execution.output ?? "").not.toContain("partial child report");
         expect(parentText).not.toContain("partial child report");

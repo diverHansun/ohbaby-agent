@@ -162,6 +162,8 @@ function createMessageManager(): {
         (): Promise<MessageWithParts[]> => Promise.resolve([]),
       ),
       removeMessage: vi.fn((): Promise<void> => Promise.resolve()),
+      markRewound: vi.fn((): Promise<string[]> => Promise.resolve([])),
+      notifyRewound: vi.fn((): Promise<void> => Promise.resolve()),
       removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
       toModelMessages: vi.fn(() => Promise.resolve([])),
       updateMessage: vi.fn(

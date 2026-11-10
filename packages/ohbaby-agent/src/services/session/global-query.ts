@@ -114,7 +114,7 @@ const NOT_IN_HIDDEN_WORKSPACE = `(workspace_directory IS NULL OR workspace_direc
 ))`;
 
 /** Runtime inputs (subagent notices, etc.) render as system text; only steering is user-visible. */
-const VISIBLE_MESSAGE = `(json_extract(m.data, '$.runtimeInput.kind') IS NULL
+const VISIBLE_MESSAGE = `m.rewound_at IS NULL AND (json_extract(m.data, '$.runtimeInput.kind') IS NULL
   OR json_extract(m.data, '$.runtimeInput.kind') = 'user-steer')`;
 
 /** Root sessions of the requested status, newest first. */

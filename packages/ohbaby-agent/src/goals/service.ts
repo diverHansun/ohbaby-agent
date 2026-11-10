@@ -411,11 +411,13 @@ export class GoalService {
   async pauseGoal(
     sessionId: string,
     reason = "Paused by user",
+    options: { readonly preserveBackground?: boolean } = {},
   ): Promise<GoalSnapshot> {
     const snapshot = await this.pauseActiveGoal({
       sessionId,
       reason,
       actor: "user",
+      preserveBackground: options.preserveBackground,
     });
     if (snapshot === null)
       throw new GoalError("no_goal", "No goal is currently set.");

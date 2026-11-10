@@ -77,6 +77,7 @@ export function createSubagentViewReader(options: {
       const records = await options.executions.list({
         rootSessionId: input.rootSessionId,
         before,
+        visibleOnly: true,
         limit: limit + 1,
       });
       if (
@@ -85,7 +86,9 @@ export function createSubagentViewReader(options: {
         throw new Error("Execution root mismatch");
       const runId = await options.activeRootRun?.(input.rootSessionId);
       const current = runId
-        ? await options.executions.listByRootRun(runId)
+        ? (await options.executions.listByRootRun(runId)).filter(
+            (r) => r.rewoundAt === undefined,
+          )
         : [];
       input.signal?.throwIfAborted();
       const page = records.slice(0, limit);

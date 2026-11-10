@@ -1,7 +1,10 @@
 import { SUBAGENT_RESULT_SOURCE_PREFIX } from "./execution-store.js";
 import type { LifecycleRunInputPort } from "../../core/lifecycle/types.js";
 import { buildRuntimeInputMessage } from "../../core/message/index.js";
-import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
+import {
+  CurrentRunInputConflictError,
+  type CurrentRunInputStore,
+} from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import type {
   SubagentExecutionStore,
   SubagentExecutionRecord,
@@ -123,15 +126,24 @@ export function createSubagentContinuationCoordinator(options: {
             },
             text: result.body,
           });
-          await options.inputs.acceptRuntimeInput({
-            inputId,
-            sourceId,
-            source: "subagent-result",
-            runId: identity.runId,
-            sessionId: identity.sessionId,
-            contextScopeId: identity.contextScopeId,
-            message,
-          });
+          try {
+            await options.inputs.acceptRuntimeInput({
+              inputId,
+              sourceId,
+              source: "subagent-result",
+              runId: identity.runId,
+              sessionId: identity.sessionId,
+              contextScopeId: identity.contextScopeId,
+              message,
+            });
+          } catch (error) {
+            if (
+              error instanceof CurrentRunInputConflictError &&
+              error.reason === "source-rewound"
+            )
+              continue;
+            throw error;
+          }
         }
         await options.executions.markDelivered(
           execution,

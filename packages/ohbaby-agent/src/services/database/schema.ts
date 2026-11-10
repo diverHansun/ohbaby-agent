@@ -19,10 +19,12 @@ export const schema = {
     createdAt: "created_at",
     updatedAt: "updated_at",
     messageCount: "message_count",
+    rewindRevision: "rewind_revision",
     lastMessageAt: "last_message_at",
     data: "data",
   }),
   message: table("message", {
+    rewoundAt: "rewound_at",
     id: "id",
     sessionId: "session_id",
     contextScopeId: "context_scope_id",
@@ -92,6 +94,7 @@ export const schema = {
     data: "data",
   }),
   subagentExecution: table("subagent_execution", {
+    rewoundAt: "rewound_at",
     executionId: "execution_id",
     requestId: "request_id",
     parentSessionId: "parent_session_id",
@@ -156,6 +159,7 @@ export const schema = {
     lastOpenedAt: "last_opened_at",
   }),
   promptSubmission: table("prompt_submission", {
+    rewoundAt: "rewound_at",
     resendOfPromptId: "resend_of_prompt_id",
     acceptedAt: "accepted_at",
     admissionOrder: "admission_order",

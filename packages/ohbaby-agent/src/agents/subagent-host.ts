@@ -1,3 +1,4 @@
+import { waitForCleanup } from "../core/tool-scheduler/run-cleanup.js";
 import { closeLegacySubagentInputs } from "./subagents/types.js";
 import { subagentAccessError } from "./subagents/access-error.js";
 import {
@@ -826,23 +827,8 @@ export class SessionSubagentHost {
     });
   }
 
-  private async waitForCleanup(cleaned: Promise<void>): Promise<boolean> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        cleaned.then(
-          () => true,
-          () => false,
-        ),
-        new Promise<false>((resolve) => {
-          timer = setTimeout(() => {
-            resolve(false);
-          }, this.options.cleanupWaitMs ?? 2000);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
+  private waitForCleanup(cleaned: Promise<void>): Promise<boolean> {
+    return waitForCleanup(cleaned, this.options.cleanupWaitMs);
   }
 
   async stop(input: SubagentStopInput): Promise<SubagentStopResult> {
@@ -1007,6 +993,43 @@ export class SessionSubagentHost {
       this.options.onFatal?.(failure, execution.rootRunId);
       throw failure;
     }
+  }
+
+  /** Rewind cannot hide work while its execution lease is still held here or by another host. */
+  async stopRewoundRoot(rootRunId: string): Promise<readonly string[]> {
+    const executions =
+      await this.options.executionStore.listByRootRun(rootRunId);
+    if (
+      executions.some(
+        (record) =>
+          (record.status === "running" || record.status === "queued") &&
+          !this.leases.has(record.executionId),
+      )
+    )
+      throw new Error(
+        "Cannot confirm cleanup of a subagent owned by another backend",
+      );
+    await this.interruptByRootRun(rootRunId, "conversation rewound");
+    const leases = [...this.leases.values()].filter(
+      (lease) => lease.execution?.rootRunId === rootRunId,
+    );
+    if (
+      leases.length &&
+      !(await this.waitForCleanup(
+        Promise.all(leases.map((lease) => lease.cleaned)).then(() => undefined),
+      ))
+    )
+      throw new Error("Subagent cleanup is unconfirmed");
+    if (
+      [...this.admissions].some(
+        (admission) => admission.rootRunId === rootRunId,
+      )
+    )
+      throw new Error("Subagent admission is still settling");
+    // A child can finish while its explicitly detached shell continues.
+    return executions.flatMap((record) =>
+      record.childRunId ? [record.childRunId] : [],
+    );
   }
 
   async interruptByRootRun(

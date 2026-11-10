@@ -208,6 +208,7 @@ describe("services/database", () => {
       { version: "026_session_workspace_naming" },
       { version: "027_prompt_submission_model_entry" },
       { version: "028_subagent_message_input" },
+      { version: "029_message_rewind" },
     ]);
   });
 

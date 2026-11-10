@@ -91,7 +91,10 @@ import {
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
-import type { RunCleanupSnapshot } from "../../core/tool-scheduler/run-cleanup.js";
+import {
+  waitForCleanup,
+  type RunCleanupSnapshot,
+} from "../../core/tool-scheduler/run-cleanup.js";
 import {
   TodoService,
   TodoWorkScopeRegistry,
@@ -1013,6 +1016,13 @@ export async function createUiRuntimeComposition(
   });
   // Persistent recovery is gated per root session before execution admission.
 
+  function resetRewoundSessionState(sessionId: string): void {
+    contextManager.disposeSession(sessionId);
+    mcpToolMenu.disposeSession(sessionId);
+    todoService.release(sessionId);
+    todoWorkScopes.release(sessionId);
+  }
+
   const interruptRunTree = async (
     runId: string,
     reason?: string,
@@ -1043,10 +1053,7 @@ export async function createUiRuntimeComposition(
     SessionEvent.Removed,
     (payload) => {
       trackLifecycleCleanup(resultArtifacts.deleteSession(payload.sessionId));
-      contextManager.disposeSession(payload.sessionId);
-      mcpToolMenu.disposeSession(payload.sessionId);
-      todoService.release(payload.sessionId);
-      todoWorkScopes.release(payload.sessionId);
+      resetRewoundSessionState(payload.sessionId);
       trackLifecycleCleanup(
         (async (): Promise<void> => {
           const activeRuns = runManager.list(payload.sessionId);
@@ -1490,6 +1497,21 @@ export async function createUiRuntimeComposition(
 
     async interruptSubagentsByRootRun(rootRunId, reason): Promise<void> {
       await subagentHost.interruptByRootRun(rootRunId, reason);
+    },
+
+    resetRewoundSessionState,
+
+    async stopRewoundRunWork(rootRunId): Promise<void> {
+      const childRunIds = await subagentHost.stopRewoundRoot(rootRunId);
+      for (const id of [rootRunId, ...childRunIds]) {
+        if (!shellJobRegistry.hasActiveWork(id)) continue;
+        const cleanup = await shellJobRegistry.cleanupRootRun(id);
+        if (
+          !cleanup.confirmed &&
+          (!cleanup.settled || !(await waitForCleanup(cleanup.settled)))
+        )
+          throw new Error("Shell cleanup is unconfirmed");
+      }
     },
 
     getActivityReasons(): readonly string[] {

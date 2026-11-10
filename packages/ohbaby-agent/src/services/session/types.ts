@@ -101,7 +101,8 @@ export interface SessionWorkingDirectoryInput {
 
 export interface SessionStatsDelta {
   readonly messageCountDelta?: number;
-  readonly lastMessageAt?: number;
+  /** Null explicitly clears the timestamp when history is empty. */
+  readonly lastMessageAt?: number | null;
 }
 
 export interface RemoveSessionOptions {

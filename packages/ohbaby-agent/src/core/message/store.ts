@@ -38,6 +38,7 @@ import {
 
 export function createInMemoryMessageStore(): MessageStore {
   const messages = new Map<string, Message>();
+  const rewoundMessages = new Map<string, string>();
   const parts = new Map<string, Part>();
 
   function clone<T>(value: T): T {
@@ -84,6 +85,20 @@ export function createInMemoryMessageStore(): MessageStore {
     };
   }
 
+  function visibleHistory(
+    sessionId: string,
+    scope?: MessageScopeFilter,
+  ): Message[] {
+    return [...messages.values()]
+      .filter(
+        (m) =>
+          m.sessionId === sessionId &&
+          !rewoundMessages.has(m.id) &&
+          (scope === undefined || scope.contextScopeId === m.contextScopeId),
+      )
+      .sort((a, b) => a.time.created - b.time.created);
+  }
+
   function listPage(
     sessionId: string,
     options: MessagePageOptions = {},
@@ -98,6 +113,7 @@ export function createInMemoryMessageStore(): MessageStore {
       .filter(
         (message) =>
           message.sessionId === sessionId &&
+          !rewoundMessages.has(message.id) &&
           (options.scope === undefined ||
             message.contextScopeId === options.scope.contextScopeId) &&
           (runId === undefined ||
@@ -194,7 +210,10 @@ export function createInMemoryMessageStore(): MessageStore {
       const ids = new Set(messageIds);
       return [...messages.values()]
         .filter(
-          (message) => message.sessionId === sessionId && ids.has(message.id),
+          (message) =>
+            message.sessionId === sessionId &&
+            !rewoundMessages.has(message.id) &&
+            ids.has(message.id),
         )
         .sort(compareMessages)
         .map((message) => ({
@@ -479,15 +498,7 @@ export function createInMemoryMessageStore(): MessageStore {
       sessionId: string,
       options?: MessageScopeFilter,
     ): Promise<MessageWithParts[]> {
-      const sessionMessages = Array.from(messages.values())
-        .filter((message) => message.sessionId === sessionId)
-        .filter(
-          (message) =>
-            options === undefined ||
-            message.contextScopeId === options.contextScopeId,
-        )
-        .sort((left, right) => left.time.created - right.time.created);
-
+      const sessionMessages = visibleHistory(sessionId, options);
       return Promise.resolve(
         sessionMessages.map((message) => ({
           info: clone(message),
@@ -496,11 +507,22 @@ export function createInMemoryMessageStore(): MessageStore {
       );
     },
 
+    markRewound(sessionId, fromMessageId, rewoundAt): Promise<string[]> {
+      const history = visibleHistory(sessionId, { contextScopeId: undefined });
+      const start = history.findIndex(
+        (message) => message.id === fromMessageId,
+      );
+      const ids =
+        start < 0 ? [] : history.slice(start).map((message) => message.id);
+      for (const id of ids) rewoundMessages.set(id, rewoundAt);
+      return Promise.resolve(ids);
+    },
     deleteMessage(messageId: string): Promise<void> {
       const message = messages.get(messageId);
       if (!message) {
         return Promise.resolve();
       }
+      rewoundMessages.delete(messageId);
       messages.delete(messageId);
       for (const [partId, part] of parts.entries()) {
         if (part.messageId === messageId) {
@@ -513,6 +535,7 @@ export function createInMemoryMessageStore(): MessageStore {
     deleteBySession(sessionId: string): Promise<void> {
       for (const [messageId, message] of messages.entries()) {
         if (message.sessionId === sessionId) {
+          rewoundMessages.delete(messageId);
           messages.delete(messageId);
         }
       }

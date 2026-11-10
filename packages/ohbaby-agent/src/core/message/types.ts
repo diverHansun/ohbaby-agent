@@ -378,6 +378,16 @@ export interface UpdatePartCondition {
 }
 
 export interface MessageManager {
+  markRewound(
+    sessionId: string,
+    fromMessageId: string,
+    rewoundAt: string,
+  ): Promise<readonly string[]>;
+  /** Publish removals after a compound rewind transaction has committed. */
+  notifyRewound(
+    sessionId: string,
+    messageIds: readonly string[],
+  ): Promise<void>;
   readonly runtimeInputMemory?: RuntimeInputMemoryParticipant;
   getPart(partId: string): Promise<Part | undefined>;
   setCommitCoordinator(coordinator: MessageCommitCoordinator | undefined): void;
@@ -423,6 +433,11 @@ export interface MessageManager {
 }
 
 export interface MessageStore {
+  markRewound(
+    sessionId: string,
+    fromMessageId: string,
+    rewoundAt: string,
+  ): Promise<readonly string[]>;
   readonly runtimeInputMemory?: RuntimeInputMemoryParticipant;
   getPart(partId: string): Promise<Part | undefined>;
   saveReasoningPart(

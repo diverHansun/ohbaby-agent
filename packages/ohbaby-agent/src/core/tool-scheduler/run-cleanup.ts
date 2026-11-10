@@ -5,6 +5,28 @@ export interface RunCleanupSnapshot {
   readonly settled?: Promise<void>;
 }
 
+export async function waitForCleanup(
+  cleaned: Promise<void>,
+  timeoutMs = 2000,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      cleaned.then(
+        () => true,
+        () => false,
+      ),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(false);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Physical tool ownership can outlive the result returned to the model. */
 export class RunCleanupTracker {
   private readonly pending = new Map<string, Set<Promise<void>>>();

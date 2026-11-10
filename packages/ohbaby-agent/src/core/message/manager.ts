@@ -331,6 +331,24 @@ export function createMessageManager(
       return options.store.listBySession(sessionId, filter);
     },
 
+    async markRewound(
+      sessionId,
+      fromMessageId,
+      rewoundAt,
+    ): Promise<readonly string[]> {
+      const ids = await options.store.markRewound(
+        sessionId,
+        fromMessageId,
+        rewoundAt,
+      );
+      await manager.notifyRewound(sessionId, ids);
+      return ids;
+    },
+    notifyRewound(sessionId, messageIds): Promise<void> {
+      for (const messageId of messageIds)
+        publish(MessageEvent.Removed, { sessionId, messageId });
+      return Promise.resolve();
+    },
     async removeMessage(messageId: string): Promise<void> {
       const message = await getExistingMessage(messageId);
       await options.store.deleteMessage(messageId);
@@ -384,6 +402,12 @@ export function createMessageManager(
       ),
     commitCompaction: (input) =>
       commit(input.sessionId, () => manager.commitCompaction(input)),
+    markRewound: (sessionId, fromMessageId, rewoundAt) =>
+      commit(sessionId, () =>
+        manager.markRewound(sessionId, fromMessageId, rewoundAt),
+      ),
+    notifyRewound: (sessionId, messageIds) =>
+      commit(sessionId, () => manager.notifyRewound(sessionId, messageIds)),
     removeMessage: (id) => commitMessage(id, () => manager.removeMessage(id)),
     removeMessages: (id) => commit(id, () => manager.removeMessages(id)),
   };

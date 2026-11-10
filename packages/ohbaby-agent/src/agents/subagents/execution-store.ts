@@ -8,6 +8,7 @@ import {
   type SqliteValue,
 } from "../../services/database/index.js";
 import { randomUUID } from "node:crypto";
+import { SessionRunBusyError } from "../../runtime/run-ledger/errors.js";
 
 export class SubagentExecutionConflictError extends Error {}
 
@@ -57,6 +58,8 @@ export type ExecutionHistory = (
   readonly legacyOnly?: boolean;
   /** Exclude executions without both a start time and child run before pagination. */
   readonly startedOnly?: boolean;
+  /** Presentation reads omit rewound calls before paginating. */
+  readonly visibleOnly?: boolean;
   readonly ascending?: boolean;
   readonly limit?: number;
   readonly before?: {
@@ -99,6 +102,7 @@ export interface ExecutionDelivery {
   readonly wakeupAttemptedAt?: number;
 }
 export interface SubagentExecutionRecord extends AcceptSubagentExecution {
+  readonly rewoundAt?: string;
   /** Reserved on acceptance; absent only for legacy persisted executions. */
   readonly childUserMessageId?: string;
   /** Acceptance order within a root session and logical subagent. */
@@ -533,6 +537,7 @@ abstract class ExecutionStore implements SubagentExecutionStore {
   ): Promise<SubagentExecutionRecord> {
     required(inputId);
     return this.mutate(input, (r) => {
+      if (r.rewoundAt !== undefined) return r;
       if (!terminal(r) || r.mode === "foreground")
         throw new SubagentExecutionConflictError(
           "No background delivery intent",
@@ -561,6 +566,7 @@ abstract class ExecutionStore implements SubagentExecutionStore {
     let claimed = false;
     await this.mutate(input, (r) => {
       if (
+        r.rewoundAt !== undefined ||
         !terminal(r) ||
         r.mode !== "background" ||
         r.delivery.state === "none" ||
@@ -580,6 +586,7 @@ abstract class ExecutionStore implements SubagentExecutionStore {
   ): Promise<SubagentExecutionRecord> {
     required(requestId);
     return this.mutate(input, (r) => {
+      if (r.rewoundAt !== undefined) return r;
       if (!r.delivery.inputId)
         throw new SubagentExecutionConflictError(
           "Delivery must be recorded before processing opportunity",
@@ -687,6 +694,7 @@ export class InMemorySubagentExecutionStore extends ExecutionStore {
     return [...this.records.values()]
       .filter(
         (r) =>
+          (!input.visibleOnly || r.rewoundAt === undefined) &&
           (input.parentSessionId === undefined ||
             r.parentSessionId === input.parentSessionId) &&
           (input.rootSessionId === undefined ||
@@ -761,6 +769,33 @@ export class InMemorySubagentExecutionStore extends ExecutionStore {
       )
       .map((r) => structuredClone(r));
   }
+}
+
+/** Runs inside the history rewind transaction, after the affected runs have stopped. */
+export function markRewoundByRootRuns(
+  tx: DatabaseConnection,
+  sessionId: string,
+  runIds: readonly string[],
+  rewoundAt: string,
+): void {
+  if (!runIds.length) return;
+  const roots = JSON.stringify(runIds);
+  const affected =
+    "root_session_id = ? AND rewound_at IS NULL AND root_run_id IN (SELECT value FROM json_each(?))";
+  if (
+    tx
+      .prepare(
+        `SELECT 1 FROM subagent_execution WHERE ${affected} AND status IN ('queued','running') LIMIT 1`,
+      )
+      .get(sessionId, roots)
+  )
+    throw new SessionRunBusyError(sessionId, runIds);
+  tx.prepare(
+    `UPDATE subagent_execution SET rewound_at = ?,
+    delivery = CASE WHEN json_extract(delivery, '$.state') IN ('pending','delivered')
+      THEN json_object('state','none') ELSE delivery END
+    WHERE ${affected}`,
+  ).run(rewoundAt, sessionId, roots);
 }
 
 const columns = schema.subagentExecution.columns;
@@ -917,6 +952,7 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
         input.after.executionId,
       );
     }
+    if (input.visibleOnly) where.push("rewound_at IS NULL");
     if (input.legacyOnly) where.push("delegation_sequence IS NULL");
     if (input.startedOnly)
       where.push("started_at IS NOT NULL AND child_run_id IS NOT NULL");

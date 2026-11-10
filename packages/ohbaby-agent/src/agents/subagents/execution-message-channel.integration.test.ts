@@ -367,7 +367,21 @@ for (const backend of ["memory", "sqlite"] as const)
     if (backend === "sqlite")
       it("upgrades old input constraints without changing existing persisted receipts", async () => {
         const f = await fixture(true);
-        const execution = await f.execution("first");
+        // Seed a pre-028 record with the historical schema, before loading today's store.
+        getDatabase().exec(`INSERT INTO subagent_execution
+          (execution_id,request_id,parent_session_id,requester_scope_id,requester_run_id,
+           root_session_id,root_run_id,subagent_id,mode,prompt,created_at,status,
+           child_session_id,child_scope_id,child_run_id,started_at,updated_at,artifact,delivery)
+          VALUES ('first','first','root','primary','root-run','root','root-run','agent',
+           'background','Work',1,'running','child','agent','first-run',3,3,
+           '{"state":"none"}','{"state":"none"}')`);
+        await f.ledger.createPending({
+          runId: "first-run",
+          sessionId: "child",
+          contextScopeId: "agent",
+          triggerSource: "user",
+        });
+        await f.ledger.markRunning("first-run");
         await f.inputs.acceptRuntimeInput({
           inputId: "old-result",
           source: "subagent-result",
@@ -421,9 +435,17 @@ for (const backend of ["memory", "sqlite"] as const)
             .prepare("UPDATE current_run_input SET source = 'unknown'")
             .run(),
         ).toThrow(/CHECK/);
+        const executions = new DatabaseSubagentExecutionStore({
+          db: getDatabase(),
+        });
+        const execution = await executions.get({
+          executionId: "first",
+          parentSessionId: "root",
+        });
+        if (!execution) throw new Error("Missing migrated execution");
         const channel = createExecutionMessageChannel({
           inputs: new DatabaseCurrentRunInputStore({ db: getDatabase() }),
-          executions: new DatabaseSubagentExecutionStore({ db: getDatabase() }),
+          executions,
           messages: createMessageManager({
             bus: createBus(),
             store: createDatabaseMessageStore(),

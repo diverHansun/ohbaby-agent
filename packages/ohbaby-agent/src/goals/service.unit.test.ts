@@ -77,6 +77,14 @@ describe("GoalService", () => {
       preserveBackground: true,
       goalId: goal.goalId,
     });
+    await service.resumeGoal("s1");
+    await service.pauseGoal("s1", "Editing a message", {
+      preserveBackground: true,
+    });
+    expect(interruptions.at(-1)).toMatchObject({
+      preserveBackground: true,
+      reason: "Editing a message",
+    });
     await service.cancelGoal("s1");
     expect(interruptions.at(-1)).toMatchObject({
       rootRunIds: ["goal-root-1", "goal-root-2"],

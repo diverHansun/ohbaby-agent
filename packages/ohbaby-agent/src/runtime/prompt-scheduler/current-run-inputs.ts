@@ -1,3 +1,4 @@
+import { SUBAGENT_RESULT_SOURCE_PREFIX } from "../../agents/subagents/execution-store.js";
 import { slashSkillUsage } from "../../skill/usage.js";
 import { RuntimeInputSnapshotChangedError } from "../../core/lifecycle/runtime-input-error.js";
 /* eslint-disable @typescript-eslint/require-await -- Synchronous domain transitions implement an async persistence contract. */
@@ -123,7 +124,7 @@ export class CurrentRunInputConflictError extends Error {
   readonly code = "CURRENT_RUN_INPUT_CONFLICT";
   constructor(
     message: string,
-    readonly reason?: "target-closed",
+    readonly reason?: "target-closed" | "source-rewound",
   ) {
     super(message);
     this.name = "CurrentRunInputConflictError";
@@ -174,6 +175,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
   protected abstract run(runId: string): RunLedgerRecord | undefined;
   protected abstract closeRun(runId: string, reason: string, at: number): void;
   protected abstract sealSteerRun(runId: string, at: number): void;
+  protected isRewoundResult?(input: AcceptRuntimeInput): boolean;
   protected abstract readInput(id: string): CurrentRunInputRecord | undefined;
   protected abstract inputs(runId: string): readonly CurrentRunInputRecord[];
   protected abstract sessionInputs(
@@ -367,6 +369,11 @@ abstract class CurrentInputs implements CurrentRunInputStore {
     input: AcceptRuntimeInput,
   ): Promise<CurrentRunInputRecord> {
     const { result, created } = await this.transaction(() => {
+      if (input.source === "subagent-result" && this.isRewoundResult?.(input))
+        throw new CurrentRunInputConflictError(
+          "Subagent result was rewound",
+          "source-rewound",
+        );
       const created = !this.readInput(input.inputId);
       return { result: this.acceptSync(input), created };
     });
@@ -800,6 +807,18 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
   constructor(options: { db?: DatabaseConnection; now?: () => number } = {}) {
     super(options.now);
     this.db = options.db ?? getDatabase();
+  }
+  /** Check inside the input/message write transaction: preparing result text can overlap rewind. */
+  protected override isRewoundResult(input: AcceptRuntimeInput): boolean {
+    if (!input.sourceId.startsWith(SUBAGENT_RESULT_SOURCE_PREFIX)) return false;
+    return !!this.db
+      .prepare(
+        "SELECT 1 FROM subagent_execution WHERE execution_id = ? AND root_session_id = ? AND rewound_at IS NOT NULL",
+      )
+      .get(
+        input.sourceId.slice(SUBAGENT_RESULT_SOURCE_PREFIX.length),
+        input.sessionId,
+      );
   }
   protected transaction<T>(operation: () => T): Promise<T> {
     return runWriteTransaction(this.db, operation);

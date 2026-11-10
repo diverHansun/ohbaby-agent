@@ -6,13 +6,17 @@ import {
   closeDatabase,
   getDatabase,
   initDatabase,
+  runWriteTransaction,
 } from "../../services/database/index.js";
 import {
   DatabaseSubagentExecutionStore,
   InMemorySubagentExecutionStore,
+  markRewoundByRootRuns,
   type AcceptSubagentExecution,
   type SubagentExecutionStore,
 } from "./execution-store.js";
+
+import { DatabaseCurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -519,4 +523,52 @@ it("reserves an ID when a legacy queued execution starts without changing comple
   expect(started.delegationSequence).toBeUndefined();
   await s.finish(lookup, { status: "completed", completedAt: 4 });
   expect((await s.get(lookup))?.delegationSequence).toBeUndefined();
+});
+
+it("rewinds only stopped calls in range and refuses a late delivery from an already-read result", async () => {
+  await database();
+  const db = getDatabase();
+  const s = new DatabaseSubagentExecutionStore({ db });
+  await s.accept(input({ rootRunId: "kept" }));
+  const cut = input({ executionId: "cut", requestId: "cut", createdAt: 2 });
+  await s.accept(cut);
+  const rewind = (): Promise<void> =>
+    runWriteTransaction(db, (tx) => {
+      markRewoundByRootRuns(tx, "parent", ["root-run"], "rewound");
+    });
+  await expect(rewind()).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+  await s.finish(cut, { status: "completed", completedAt: 3 });
+  await s.markDelivered(cut, "delivered-input", 4);
+  await rewind();
+  expect(
+    (await s.list({ rootSessionId: "parent", visibleOnly: true, limit: 1 }))[0]
+      ?.executionId,
+  ).toBe("exec-1");
+  await s.markDelivered(cut, "stale-input", 5);
+  await s.markProcessed(cut, "stale-request", 6);
+  expect(await s.get(cut)).toMatchObject({
+    rewoundAt: "rewound",
+    delivery: { state: "none" },
+  });
+  expect(await s.claimWakeup(cut, 7)).toBe(false);
+  const inputs = new DatabaseCurrentRunInputStore({ db });
+  await expect(
+    inputs.acceptRuntimeInput({
+      inputId: "new-input",
+      runId: "replacement",
+      sessionId: "parent",
+      source: "subagent-result",
+      sourceId: "subagent-result:cut",
+      message: {
+        info: {
+          id: "stale",
+          role: "user",
+          agent: "default",
+          sessionId: "parent",
+          time: { created: 7 },
+        },
+        parts: [],
+      },
+    }),
+  ).rejects.toMatchObject({ reason: "source-rewound" });
 });

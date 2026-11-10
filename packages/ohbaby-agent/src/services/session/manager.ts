@@ -254,7 +254,10 @@ export function createSessionManager(
       const updated = await options.store.update(sessionId, {
         stats: {
           messageCount,
-          lastMessageAt: delta.lastMessageAt ?? updatedAt,
+          lastMessageAt:
+            delta.lastMessageAt === null
+              ? undefined
+              : (delta.lastMessageAt ?? updatedAt),
         },
         updatedAt,
       });

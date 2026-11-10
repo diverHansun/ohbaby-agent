@@ -146,7 +146,7 @@ export function* readSessionMessages(
   scope?: MessageScopeFilter,
   role?: Message["role"],
 ): Generator<MessageWithParts> {
-  const clauses = ["session_id = ?"];
+  const clauses = ["session_id = ?", "rewound_at IS NULL"];
   const params = [sessionId];
   if (scope !== undefined) {
     if (scope.contextScopeId === undefined) {
@@ -172,6 +172,27 @@ export function* readSessionMessages(
   for (const row of rows) {
     yield { info: rowToMessage(row), parts: parts.all(row.id).map(rowToPart) };
   }
+}
+
+/** Mark only the still-visible main history; rowid breaks timestamp ties just as model history does. */
+export function markMessagesRewound(
+  tx: DatabaseConnection,
+  sessionId: string,
+  fromMessageId: string,
+  rewoundAt: string,
+): string[] {
+  return tx
+    .prepare<{ id: string; created_at: number; position: number }>(
+      `UPDATE message SET rewound_at = ?
+     WHERE session_id = ? AND context_scope_id IS NULL AND rewound_at IS NULL
+       AND (created_at, rowid) >= (
+         SELECT created_at, rowid FROM message
+         WHERE session_id = ? AND id = ? AND context_scope_id IS NULL AND rewound_at IS NULL)
+     RETURNING id, created_at, rowid AS position`,
+    )
+    .all(rewoundAt, sessionId, sessionId, fromMessageId)
+    .sort((a, b) => a.created_at - b.created_at || a.position - b.position)
+    .map((row) => row.id);
 }
 
 export function createDatabaseMessageStore(
@@ -270,7 +291,7 @@ export function createDatabaseMessageStore(
         options,
         runId,
       );
-      const clauses = ["session_id = ?"];
+      const clauses = ["session_id = ?", "rewound_at IS NULL"];
       const params: (string | number)[] = [sessionId];
       if (options.scope !== undefined) {
         if (options.scope.contextScopeId === undefined)
@@ -329,6 +350,11 @@ export function createDatabaseMessageStore(
   }
 
   return {
+    markRewound(sessionId, fromMessageId, rewoundAt): Promise<string[]> {
+      return runWriteTransaction(db, (tx) =>
+        markMessagesRewound(tx, sessionId, fromMessageId, rewoundAt),
+      );
+    },
     listPageBySession: listPage,
     listPageByRun(sessionId, runId, options): Promise<MessagePage> {
       return listPage(sessionId, options, runId);
@@ -340,7 +366,7 @@ export function createDatabaseMessageStore(
         return hydrateRows(
           db
             .prepare<MessageRow>(
-              `SELECT * FROM ${schema.message.tableName} WHERE session_id = ? AND id IN (${messageIds.map(() => "?").join(",")}) ORDER BY created_at ASC, id ASC`,
+              `SELECT * FROM ${schema.message.tableName} WHERE session_id = ? AND rewound_at IS NULL AND id IN (${messageIds.map(() => "?").join(",")}) ORDER BY created_at ASC, id ASC`,
             )
             .all(sessionId, ...messageIds),
         );

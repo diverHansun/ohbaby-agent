@@ -97,11 +97,11 @@ export class SubagentInstanceProjection {
     item: SubagentInstanceRecord,
     input: UiSubagentInstanceQuery,
     runtime: SubagentStatusResult | undefined,
-  ): Promise<UiSubagentInstance> {
+  ): Promise<UiSubagentInstance | undefined> {
     if (item.parentSessionId !== input.rootSessionId)
       throw subagentAccessError("SUBAGENT_NOT_FOUND");
     this.rootsByChild.set(item.sessionId, input.rootSessionId);
-    const execution =
+    const latest =
       runtime?.executions.find(
         (entry) => entry.subagentId === item.subagentId,
       ) ??
@@ -112,6 +112,20 @@ export class SubagentInstanceProjection {
           limit: 1,
         })
       ).at(0);
+    // Legacy instances can have no execution history. Hide only instances known to
+    // have been created exclusively by rewound work.
+    const execution =
+      latest?.rewoundAt === undefined
+        ? latest
+        : (
+            await this.options.executions.list({
+              rootSessionId: input.rootSessionId,
+              subagentId: item.subagentId,
+              visibleOnly: true,
+              limit: 1,
+            })
+          ).at(0);
+    if (latest && !execution) return undefined;
     const state = runtime?.runtime?.find(
       (entry) => entry.subagentId === item.subagentId,
     );
@@ -178,7 +192,7 @@ export class SubagentInstanceProjection {
         bindingGeneration: input.bindingGeneration,
         revision,
         complete: true,
-        instances,
+        instances: instances.filter((item) => item !== undefined),
       };
     }
     throw Object.assign(
@@ -220,6 +234,7 @@ export class SubagentInstanceProjection {
     if (current.closedAt !== undefined)
       throw subagentAccessError("SUBAGENT_CLOSED");
     const instance = await this.projectRow(current, input, runtime);
+    if (!instance) throw subagentAccessError("SUBAGENT_NOT_FOUND");
     await this.options.validateRoot(input);
     input.signal?.throwIfAborted();
     return {
