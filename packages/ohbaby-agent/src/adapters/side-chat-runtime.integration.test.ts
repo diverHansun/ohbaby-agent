@@ -16,7 +16,7 @@ import type {
   InterfaceProviderStreamEvent,
   LLMClientInstance,
 } from "ohbaby-llm";
-import { McpManager } from "../mcp/index.js";
+import { McpManager, type McpTool } from "../mcp/index.js";
 import { resolveSessionStorageDir } from "../paths/session-storage.js";
 import { closeDatabase, getDatabase } from "../services/database/index.js";
 import {
@@ -237,14 +237,27 @@ describe("conversation copies through the persistent backend", () => {
     const [baseTool] = await McpManager.prototype.getAllTools();
     const before = "mcp_s7_example_t6_before";
     const after = "mcp_s7_example_t5_after";
+    const executeLookup = vi.fn<McpTool["execute"]>((args, context) =>
+      Promise.resolve({
+        output: `Lookup result from ${context.sessionId}: ${String(args.query)}`,
+      }),
+    );
     vi.spyOn(McpManager.prototype, "getAllTools").mockResolvedValue([
-      baseTool,
+      {
+        ...baseTool,
+        parametersJsonSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+        execute: executeLookup,
+      },
       { ...baseTool, name: before, mcpToolName: "before" },
       { ...baseTool, name: after, mcpToolName: "after" },
     ]);
     calls.push(
       { name: "select_tools", args: { tools: [lookup, before] } },
-      { name: lookup, args: {} },
+      { name: lookup, args: { query: "source lookup" } },
       { name: before, args: {} },
     );
     const source = (await client.submitPromptAndWait("first question")).prompt
@@ -256,13 +269,23 @@ describe("conversation copies through the persistent backend", () => {
     if (!atCut) throw new Error("Expected a request for the second turn");
     calls.push({ name: "select_tools", args: { tools: [after] } });
     await client.submitPromptAndWait("third question", { sessionId: source });
-    expect(requests.at(-1)?.tools?.map((t) => t.name)).toContain(after);
+    const sourceTools = requests.at(-1)?.tools?.map((tool) => tool.name);
+    expect(sourceTools).toEqual(
+      expect.arrayContaining([lookup, before, after]),
+    );
 
     expect(second.prompt.runId).toBeTruthy();
     const fork = await client.forkSession({
       sessionId: source,
       runId: second.prompt.runId,
     });
+    expect(
+      getDatabase()
+        .prepare(
+          "SELECT json_type(data, '$.sideChat') AS sideChat FROM session WHERE id=?",
+        )
+        .get(fork.sessionId),
+    ).toEqual({ sideChat: null });
     expect(await client.getSelectedSessionId()).toBe(source);
     const snapshot = await client.getSnapshot();
     const original = snapshot.sessions.find((s) => s.id === source);
@@ -284,7 +307,8 @@ describe("conversation copies through the persistent backend", () => {
             .join(""),
         ),
     ).toEqual(["first question", "second question"]);
-    calls.push({ name: lookup, args: {} });
+    const forkQuery = { query: "fork lookup" };
+    calls.push({ name: lookup, args: forkQuery });
     const start = requests.length;
     expect(
       (
@@ -294,9 +318,10 @@ describe("conversation copies through the persistent backend", () => {
       ).prompt.status,
     ).toBe("succeeded");
     const initial = requests[start];
-    expect(initial.tools?.map((t) => t.name)).toEqual(
-      atCut.tools?.map((t) => t.name),
-    );
+    const forkTools = initial.tools?.map((t) => t.name);
+    expect(forkTools).toEqual(atCut.tools?.map((t) => t.name));
+    expect(forkTools).toEqual(expect.arrayContaining([lookup, before]));
+    expect(forkTools).not.toContain(after);
     expect(initial.promptCache.key).toBeTypeOf("string");
     expect(initial.promptCache.key).not.toBe(atCut.promptCache.key);
     const sent = JSON.stringify(initial.messages);
@@ -310,7 +335,21 @@ describe("conversation copies through the persistent backend", () => {
         join(resolveSessionStorageDir(fork.sessionId), "scratch"),
       ),
     ).toBeGreaterThan(inheritedScratch);
-    expect(JSON.stringify(requests.at(-1)?.messages.at(-1))).toContain("ok");
+    expect(executeLookup).toHaveBeenCalledWith(
+      forkQuery,
+      expect.objectContaining({ sessionId: fork.sessionId }),
+    );
+    const result = requests.at(-1)?.messages.at(-1);
+    expect(result?.role).toBe("tool");
+    expect(result?.content).toContain(
+      `Lookup result from ${fork.sessionId}: fork lookup`,
+    );
+    await client.submitPromptAndWait("list source tools after the fork", {
+      sessionId: source,
+    });
+    expect(requests.at(-1)?.tools?.map((tool) => tool.name)).toEqual(
+      sourceTools,
+    );
     expect(
       (await client.getSessionIndex()).find((s) => s.id === fork.sessionId)
         ?.title,
@@ -321,13 +360,13 @@ describe("conversation copies through the persistent backend", () => {
     const shared = join(directory, "shared");
     await mkdir(shared);
     const approvals: string[] = [];
-    let allowSourceWrites = true;
+    let choiceId: "allow_always" | "allow_once" | "reject" = "allow_always";
     client.subscribePermissionEvents((event) => {
       if (event.type !== "permission.requested") return;
-      approvals.push(event.request.callId.split("-")[0]);
+      approvals.push(event.request.description.split("(")[0]);
       void client.respondPermission(
         event.request.id,
-        { choiceId: allowSourceWrites ? "allow_always" : "reject" },
+        { choiceId },
         {
           permissionEpoch: event.permissionEpoch,
           rootSessionId: event.rootSessionId,
@@ -341,7 +380,38 @@ describe("conversation copies through the persistent backend", () => {
     calls.push(write);
     const source = (await client.submitPromptAndWait("allow this write")).prompt
       .sessionId;
-    expect(approvals).toEqual(["write"]);
+    expect(approvals.splice(0)).toEqual(["write"]);
+    const writeAndReadScratch = async (
+      sessionId: string,
+      content: string,
+    ): Promise<string> => {
+      const file_path = join(
+        resolveSessionStorageDir(sessionId),
+        "scratch",
+        "local.txt",
+      );
+      calls.push(
+        { name: "write", args: { file_path, content } },
+        { name: "read", args: { file_path } },
+      );
+      const turn = await client.submitPromptAndWait(
+        "write and read my scratch file",
+        { sessionId },
+      );
+      expect(turn.prompt.status).toBe("succeeded");
+      // The normal write-tool confirmation applies. Trusted scratch adds no external path request.
+      expect(approvals.splice(0)).toEqual(["write"]);
+      expect(await readFile(file_path, "utf8")).toBe(content);
+      const readResult = requests.at(-1)?.messages.at(-1);
+      expect(readResult?.role).toBe("tool");
+      expect(readResult?.content).toContain(content);
+      return file_path;
+    };
+    choiceId = "allow_once";
+    const sourceScratch = await writeAndReadScratch(
+      source,
+      "source-only scratch",
+    );
     const files = ["subagents", "tool-results"].map((dir) =>
       join(resolveSessionStorageDir(source), dir, "result.txt"),
     );
@@ -351,8 +421,7 @@ describe("conversation copies through the persistent backend", () => {
     }
     await client.submitPromptAndWait(files.join(" "), { sessionId: source });
     const { sessionId } = await client.forkSession({ sessionId: source });
-    allowSourceWrites = false;
-    approvals.length = 0;
+    choiceId = "reject";
     calls.push(
       { ...write, args: { ...write.args, content: "from fork" } },
       ...files.map((file_path) => ({ name: "read", args: { file_path } })),
@@ -361,12 +430,19 @@ describe("conversation copies through the persistent backend", () => {
       "try the same write and read the source results",
       { sessionId },
     );
-    expect(approvals).toEqual(["write", "read", "read"]);
+    expect(approvals.splice(0)).toEqual([
+      "write",
+      "external_directory_read",
+      "external_directory_read",
+    ]);
     const sent = JSON.stringify(requests.at(-1)?.messages);
     for (const file of files) expect(sent).toContain(file);
     expect(sent).not.toContain("private source output");
     expect(await readFile(write.args.file_path, "utf8")).toBe("from source");
-    approvals.length = 0;
+    choiceId = "allow_once";
+    await writeAndReadScratch(sessionId, "fork-only scratch");
+    expect(await readFile(sourceScratch, "utf8")).toBe("source-only scratch");
+    choiceId = "reject";
     calls.push(write);
     await client.submitPromptAndWait("reuse source approval", {
       sessionId: source,

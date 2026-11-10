@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   createDatabaseMessageStore,
   insertMessageRow,
@@ -9,6 +9,8 @@ import {
   getDatabase,
   initDatabase,
 } from "../../services/database/index.js";
+import { DatabaseCurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
+import * as history from "../../services/session/copy-history.js";
 import { createDatabaseSessionStore } from "../../services/session/database-store.js";
 import { SessionEvent } from "../../services/session/events.js";
 import { resolveSessionDisplayTitle } from "../../services/session/title-fallback.js";
@@ -43,43 +45,163 @@ function createSession(
   });
 }
 
-function writeTurn(sessionId: string, question: string): void {
+async function writeTurn(
+  sessionId: string,
+  question: string,
+  {
+    runId = "done",
+    start = 1,
+    trigger = "user",
+    running = false,
+    contextScopeId,
+  }: {
+    runId?: string;
+    start?: number;
+    trigger?: "user" | "subagent";
+    running?: boolean;
+    contextScopeId?: string;
+  } = {},
+): Promise<void> {
   const db = getDatabase();
   db.prepare(
-    "INSERT INTO run_ledger(run_id,session_id,trigger,status,created_at,ended_at) VALUES ('done', ?, 'user','succeeded',1,2)",
-  ).run(sessionId);
+    "INSERT INTO run_ledger(run_id,session_id,context_scope_id,trigger,status,created_at,started_at) VALUES (?, ?, ?, ?, 'running', ?, ?)",
+  ).run(runId, sessionId, contextScopeId ?? null, trigger, start, start);
   for (const role of ["user", "assistant"] as const) {
-    const messageId = `message_${role}`;
-    const at = role === "user" ? 1 : 2;
-    insertMessageRow(db, {
+    const messageId = `message_${runId}_${role}`;
+    const at = role === "user" ? start : start + 1;
+    const info = {
       id: messageId,
       role,
       agent: "build",
       sessionId,
-      runId: "done",
+      contextScopeId,
+      runId,
       time: { created: at },
-    });
-    insertPartRow(
-      db,
-      {
-        id: "part-" + messageId,
+    };
+    const part = {
+      id: "part-" + messageId,
+      sessionId,
+      messageId,
+      contextScopeId,
+      type: "text" as const,
+      text: role === "user" ? question : `Answer to ${question}`,
+      orderIndex: 0,
+    };
+    if (trigger === "subagent" && role === "user") {
+      await new DatabaseCurrentRunInputStore({
+        db,
+        now: (): number => at,
+      }).acceptRuntimeInput({
         sessionId,
-        messageId,
-        type: "text",
-        text: role === "user" ? question : "Answer",
-        orderIndex: 0,
-      },
-      at,
+        runId,
+        source: "subagent-status",
+        sourceId: "child-report",
+        inputId: `input_${runId}`,
+        message: { info, parts: [part] },
+      });
+    } else {
+      insertMessageRow(db, info);
+      insertPartRow(db, part, at);
+    }
+  }
+  if (!running) {
+    db.prepare(
+      "UPDATE run_ledger SET status='succeeded', ended_at=? WHERE run_id=?",
+    ).run(start + 1, runId);
+  }
+  if (trigger === "user" && contextScopeId === undefined) {
+    db.prepare(
+      `INSERT INTO prompt_submission(prompt_id,scope_key,session_id,run_id,user_message_id,text,status,
+      accepted_at,admission_order,created_at,updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "prompt_" + runId,
+      directory,
+      sessionId,
+      runId,
+      `message_${runId}_user`,
+      question,
+      running ? "running" : "succeeded",
+      start,
+      start,
+      start,
+      start + 1,
     );
   }
 }
+
+it("copies the source through a promptless wake-up answer while a later turn is running", async () => {
+  const db = getDatabase();
+  await createSession("main", "Main");
+  await writeTurn("main", "First question");
+  await writeTurn("main", "Child finished", {
+    runId: "wake",
+    start: 3,
+    trigger: "subagent",
+  });
+  const counts = (id: string): (number | undefined)[] =>
+    ["prompt_submission", "run_ledger", "current_run_input"].map(
+      (table) =>
+        db
+          .prepare<{
+            n: number;
+          }>(`SELECT count(*) AS n FROM ${table} WHERE session_id=?`)
+          .get(id)?.n,
+    );
+  const messages = db.prepare<{
+    role: string;
+    created_at: number;
+    input_kind: string | null;
+    type: string;
+    text: string;
+  }>(`SELECT m.role, m.created_at, json_extract(m.data,'$.runtimeInput.kind') AS input_kind,
+       p.type, json_extract(p.data,'$.text') AS text FROM message m
+       LEFT JOIN part p ON p.message_id=m.id WHERE m.session_id=? ORDER BY m.created_at, m.rowid, p.order_index`);
+  const prefixCounts = counts("main");
+  const prefix = messages.all("main");
+  expect(prefixCounts).toEqual([1, 2, 1]);
+  expect(prefix.map((row) => row.text)).toEqual([
+    "First question",
+    "Answer to First question",
+    "Child finished",
+    "Answer to Child finished",
+  ]);
+  expect(prefix[2].input_kind).toBe("subagent-status");
+
+  await writeTurn("main", "Third question", {
+    runId: "third",
+    start: 5,
+    running: true,
+  });
+  const latest = await forkSession(db, { sessionId: "main" }, directory);
+  // Once the third answer finishes, only the explicit cut should still select the second.
+  db.prepare(
+    "UPDATE run_ledger SET status='succeeded', ended_at=6 WHERE run_id='third'",
+  ).run();
+  db.prepare(
+    "UPDATE prompt_submission SET status='succeeded', ended_at=6 WHERE run_id='third'",
+  ).run();
+  const explicit = await forkSession(
+    db,
+    { sessionId: "main", runId: "wake" },
+    directory,
+  );
+  for (const copy of [explicit, latest]) {
+    expect(copy.fork).toEqual({ sourceSessionId: "main", sourceRunId: "wake" });
+    expect(copy.stats).toEqual({
+      messageCount: prefix.length,
+      lastMessageAt: prefix.at(-1)?.created_at,
+    });
+    expect(counts(copy.id)).toEqual(prefixCounts);
+    expect(messages.all(copy.id)).toEqual(prefix);
+  }
+});
 
 it("numbers forks from the source display title across roots and persists the immediate source", async () => {
   const db = getDatabase();
   // This prefix was historically reserved for default session titles.
   const base = "New session - 🌿Flow_%[a]";
   await createSession("main", "New session - 2026-11-11T00:00:00.000Z");
-  writeTurn("main", base);
+  await writeTurn("main", base);
   await createSession("archived", base + " (2)", {
     status: "archived",
     workingDirectory: "/elsewhere",
@@ -124,7 +246,17 @@ it("numbers forks from the source display title across roots and persists the im
 it("rejects invalid sources without copying and rolls back on a partial history write", async () => {
   const db = getDatabase();
   await createSession("main", "Main");
-  writeTurn("main", "Question");
+  await writeTurn("main", "Question");
+  await writeTurn("main", "Working", {
+    runId: "active",
+    start: 3,
+    running: true,
+  });
+  await writeTurn("main", "Child work", {
+    runId: "scoped",
+    start: 5,
+    contextScopeId: "child",
+  });
   await createSession("empty", "Empty");
   await createSession("archived", "Archived", { status: "archived" });
   await createSession("child", "Child", { parentId: "main", isSubagent: true });
@@ -156,6 +288,22 @@ it("rejects invalid sources without copying and rolls back on a partial history 
     await expect(
       forkSession(db, { sessionId }, directory),
     ).rejects.toMatchObject({ code });
+  }
+  for (const runId of ["active", "scoped"]) {
+    await expect(
+      forkSession(db, { sessionId: "main", runId }, directory),
+    ).rejects.toMatchObject({ code: "FORK_TARGET_INVALID" });
+  }
+  // Force a stale selection so the real history copier raises HistoryCutInvalidError on revalidation.
+  const selection = vi
+    .spyOn(history, "findForkableMainRun")
+    .mockReturnValueOnce("stale-run");
+  try {
+    await expect(
+      forkSession(db, { sessionId: "main", runId: "done" }, directory),
+    ).rejects.toMatchObject({ code: "FORK_TARGET_INVALID" });
+  } finally {
+    selection.mockRestore();
   }
   db.exec(
     "CREATE TRIGGER block_copy BEFORE INSERT ON part BEGIN SELECT RAISE(ABORT, 'blocked part write'); END",
