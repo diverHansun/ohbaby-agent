@@ -72,6 +72,7 @@ export interface SidebarProps {
   readonly onNewChat: (workspaceDirectory: string | null) => void;
   readonly onSelectSession: (session: SidebarSessionItem) => void;
   readonly onArchiveSession: (session: SidebarSessionItem) => Promise<boolean>;
+  readonly onForkSession: (session: SidebarSessionItem) => void;
   readonly onExportSession: (
     session: SidebarSessionItem,
     format: SessionExportFormat,
@@ -224,6 +225,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
         onSelectSession={props.onSelectSession}
         onArchiveSession={props.onArchiveSession}
         onExportSession={props.onExportSession}
+        onForkSession={props.onForkSession}
       />
       <GroupFooter
         group={group}

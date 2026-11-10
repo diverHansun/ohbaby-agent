@@ -91,6 +91,7 @@ function render(overrides: Partial<SidebarProps> = {}): void {
         onNewChat={newChat}
         onSelectSession={select}
         onArchiveSession={archive}
+        onForkSession={() => undefined}
         onExportSession={exportSession}
         onMoveSession={() => Promise.resolve(true)}
         onHideWorkspace={() => undefined}

@@ -23,10 +23,11 @@ import {
   ModelWaiting,
   PromptDuration,
 } from "./ExecutionProgress.js";
-import { MessageCircleQuestion } from "lucide-react";
+import { LoaderCircle, MessageCircleQuestion, Split } from "lucide-react";
+import { IconButton } from "../shared/IconButton.js";
 import { CopyButton } from "../shared/CopyButton.js";
 import { SelectionAction } from "./SelectionAction.js";
-import { MessageActions } from "./MessageActions.js";
+import { type MessageAction, MessageActions } from "./MessageActions.js";
 import { isCompactionMessage, messageBodyText } from "./message-text.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
 import { projectRunProcesses, type RunProcess } from "./run-process.js";
@@ -84,6 +85,11 @@ export function ConversationStream(props: {
   readonly variant?: "side-chat";
   /** Main chat only: selected message text can be quoted into a side chat. */
   readonly onAskInSideChat?: (selection: string) => void;
+  /**
+   * Main chat only: forks from a turn's final answer (fork 02 Stage 2 step 1).
+   * The button shows wherever Copy shows on an answer.
+   */
+  readonly onFork?: (runId: string) => Promise<unknown>;
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamInnerRef = useRef<HTMLDivElement | null>(null);
@@ -175,19 +181,49 @@ export function ConversationStream(props: {
   // message the folded view shows (copy topic 02 §2.2). The newest finished
   // turn's answer keeps its row visible, as in Claude; none does while a turn
   // runs or when the newest turn ended without an answer.
-  const answerIds = new Set(
+  const answerRuns = new Map(
     processes.flatMap((process) =>
-      process.answerId ? [process.answerId] : [],
+      process.answerId ? [[process.answerId, process.runId] as const] : [],
     ),
   );
+  const [forkingRunId, setForkingRunId] = useState<string | null>(null);
+  const onFork = props.variant === "side-chat" ? undefined : props.onFork;
+  const forkAction = (runId: string): MessageAction => ({
+    key: "fork",
+    node: (
+      <IconButton
+        label="Fork from here"
+        // Two lines in the native tooltip: the name, then what it does.
+        title={
+          "Fork from here\nStarts a new session from this point. This one stays as it is."
+        }
+        className={forkingRunId === runId ? "is-spinning" : undefined}
+        aria-busy={forkingRunId === runId}
+        disabled={forkingRunId !== null}
+        onClick={() => {
+          setForkingRunId(runId);
+          void onFork?.(runId).finally(() => {
+            setForkingRunId(null);
+          });
+        }}
+      >
+        {forkingRunId === runId ? (
+          <LoaderCircle aria-hidden="true" size={14} />
+        ) : (
+          <Split aria-hidden="true" size={14} />
+        )}
+      </IconButton>
+    ),
+  });
   const latestAnswerId = props.isRunning
     ? undefined
     : processes.at(-1)?.answerId;
   const messageActions = (message: UiMessage): ReactNode => {
     const copyable =
       (message.role === "user" && !isCompactionMessage(message)) ||
-      answerIds.has(message.id);
+      answerRuns.has(message.id);
     if (!copyable || messageBodyText(message) === "") return null;
+    const forkRunId = answerRuns.get(message.id);
     return (
       <MessageActions
         persistent={message.id === latestAnswerId}
@@ -201,6 +237,7 @@ export function ConversationStream(props: {
               />
             ),
           },
+          ...(onFork && forkRunId !== undefined ? [forkAction(forkRunId)] : []),
         ]}
       />
     );

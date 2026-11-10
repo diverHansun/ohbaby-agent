@@ -97,6 +97,14 @@ export interface OhbabyWebRuntime {
   closeSideChat(entry: SideChatEntry): Promise<void>;
   /** A separate client bound to the side chat; the caller closes it. */
   connectSideChat(entry: SideChatEntry): SideChatConnection;
+  /**
+   * Copies a chat up to one answer (`runId`), or up to its latest answer, into
+   * a new chat and opens it. The source chat is left as it is.
+   */
+  forkSession(
+    sessionId: string,
+    options?: { readonly runId?: string; readonly directory?: string },
+  ): Promise<void>;
   /** Creates or reuses an empty session in the connected instance. */
   createSession(): Promise<void>;
   /** A new-chat draft; `null` is No workspace and runs in the default directory. */
@@ -371,6 +379,27 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       return this.instance.client.exportSession({ sessionId, format });
     const http = await this.global.scopedHttp(target);
     return (await http.exportSession({ sessionId, format })).export;
+  }
+
+  async forkSession(
+    sessionId: string,
+    options: { readonly runId?: string; readonly directory?: string } = {},
+  ): Promise<void> {
+    const target = options.directory ?? this.sessionDirectory(sessionId);
+    const input = {
+      sessionId,
+      ...(options.runId === undefined ? {} : { runId: options.runId }),
+    };
+    // The request goes to the source chat's directory, so the copy keeps its
+    // prompt records (fork 02 Stage 2 step 3).
+    const forked =
+      this.boundSessionId() === sessionId &&
+      target === this.instance.directory &&
+      this.instance.client
+        ? await this.instance.client.forkSession(input)
+        : await (await this.global.scopedHttp(target)).forkSession(input);
+    void this.global.refresh();
+    await this.openSession(forked.sessionId, target);
   }
 
   async openSideChat(mainSessionId: string): Promise<SideChatEntry> {

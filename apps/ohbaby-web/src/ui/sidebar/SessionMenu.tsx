@@ -7,6 +7,7 @@ import {
   FolderMinus,
   Check,
   Pin,
+  Split,
 } from "lucide-react";
 import { type ReactElement, useState } from "react";
 import type { SidebarWorkspace } from "../../store/sidebar-groups.js";
@@ -32,6 +33,8 @@ export function SessionMenu(props: {
   readonly onClose: (restoreFocus: boolean) => void;
   readonly onPin: () => void;
   readonly onArchive: () => void;
+  /** Starts a new chat from this one's latest answer. */
+  readonly onFork: () => void;
   readonly onExport: (format: SessionExportFormat) => void;
 }): ReactElement {
   const [level, setLevel] = useState<"main" | "export" | "workspace">("main");
@@ -211,6 +214,15 @@ export function SessionMenu(props: {
         <Download aria-hidden="true" size={13} />
         <span>Export…</span>
         <ChevronRight aria-hidden="true" className="ohb-menu-arrow" size={13} />
+      </button>
+      <button
+        role="menuitem"
+        type="button"
+        data-menu-shortcut="f"
+        onClick={props.onFork}
+      >
+        <Split aria-hidden="true" size={13} />
+        <span>Fork</span>
       </button>
       <div className="ohb-menu-separator" role="separator" />
       <button

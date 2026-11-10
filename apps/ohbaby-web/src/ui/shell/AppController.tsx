@@ -23,6 +23,7 @@ import {
 } from "../side-panel/SidePanelPage.js";
 import { useSidePanel } from "../side-panel/use-side-panel.js";
 import { useSideChats } from "../side-chat/use-side-chats.js";
+import { sessionActionError } from "../session/session-action-errors.js";
 import { useTerminalTabs } from "../side-panel/terminal/use-terminal-tabs.js";
 import { ConfirmDialog } from "../shared/ConfirmDialog.js";
 import { Sidebar } from "../sidebar/Sidebar.js";
@@ -163,6 +164,22 @@ export function AppController(props: {
         }
       });
     },
+    [runAction, runtime],
+  );
+
+  // Fork switches to the new chat; a refusal says why in a notice (design §4.1).
+  const forkSession = useCallback(
+    (
+      sessionId: string,
+      options?: { readonly runId?: string; readonly directory?: string },
+    ): Promise<boolean> =>
+      runAction(async () => {
+        try {
+          await runtime.forkSession(sessionId, options);
+        } catch (error) {
+          throw new Error(sessionActionError("fork", error), { cause: error });
+        }
+      }),
     [runAction, runtime],
   );
 
@@ -337,6 +354,11 @@ export function AppController(props: {
             )
           }
           onExportSession={exportSession}
+          onForkSession={(session) => {
+            void forkSession(session.id, {
+              directory: session.requestDirectory,
+            });
+          }}
           onMoveSession={(session, directory) =>
             runAction(() => runtime.moveSession(session.id, directory))
           }
@@ -386,6 +408,11 @@ export function AppController(props: {
             subagentInstances={subagentInstances.state}
             onOpenSubagent={openSubagent}
             onAskInSideChat={sideChats.quote}
+            onFork={
+              activeId === undefined
+                ? undefined
+                : (runId): Promise<boolean> => forkSession(activeId, { runId })
+            }
           />
         ) : (
           <DraftFallback

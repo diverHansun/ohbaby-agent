@@ -34,6 +34,7 @@ export interface SessionListProps {
     session: SidebarSessionItem,
     format: SessionExportFormat,
   ) => void;
+  readonly onForkSession: (session: SidebarSessionItem) => void;
   readonly onSelectSession: (session: SidebarSessionItem) => void;
   /** Where focus goes when an archived row leaves no next row behind. */
   readonly fallbackFocus: () => HTMLElement | null;
@@ -194,6 +195,10 @@ export function SessionList(props: SessionListProps): ReactElement {
           }}
           onArchive={() => {
             archive(menuSession, menu.trigger);
+          }}
+          onFork={() => {
+            closeMenu(true);
+            props.onForkSession(menuSession);
           }}
           onExport={(format) => {
             closeMenu(true);
