@@ -127,6 +127,7 @@ type CommittableSummaryCandidate = Extract<
 >;
 
 interface CompactionRequest {
+  readonly promptCacheSessionId?: string;
   readonly request: PreparedModelRequest;
   readonly reasoning?: PrepareTurnInput["reasoning"];
   readonly tailDirectives?: readonly ModelMessage[];
@@ -997,6 +998,7 @@ function bindModel(
       });
       try {
         const result = await runModel.summaryClient.generateSummary({
+          promptCacheSessionId: req.promptCacheSessionId,
           ...scopedEventIdentity(req.sessionId, req.contextScopeId),
           request: candidate.preparedRequest,
           summaryMessageId: candidate.summaryMessageId,
@@ -1759,6 +1761,7 @@ function bindModel(
       assembled,
       contextScopeId: input.contextScopeId,
       force: input.force === true,
+      promptCacheSessionId: input.promptCacheSessionId,
       isSubagent,
       modelId: input.modelId,
       onCompactionStarted: input.onCompactionStarted,

@@ -423,6 +423,7 @@ export class RunManager {
         maxSteps: record.options.maxSteps,
         modelId: record.options.modelId,
         runModel: record.options.runModel,
+        promptCacheSessionId: record.options.promptCacheSessionId,
         ...(record.options.reasoning === undefined
           ? {}
           : { reasoning: mergeReasoningIntent(record.options.reasoning) }),

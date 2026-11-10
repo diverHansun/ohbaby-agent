@@ -423,8 +423,22 @@ export async function createUiRuntimeComposition(
       );
     },
   });
+  const goalTools = new Set([
+    "CreateGoal",
+    "GetGoal",
+    "UpdateGoal",
+    "SetGoalBudget",
+  ]);
   const toolScheduler = createToolScheduler({
     async accessGuard({ request, tool }) {
+      if (
+        (tool.name === "agent" || goalTools.has(tool.name)) &&
+        (await sessionManager.get(request.sessionId))?.sideChat
+      ) {
+        return tool.name === "agent"
+          ? "Subagents are not available in side chat."
+          : "Goals are not available in side chat.";
+      }
       if (tool.source !== "mcp" || !registeredMcpToolNames.has(tool.name)) {
         return undefined;
       }
@@ -485,7 +499,10 @@ export async function createUiRuntimeComposition(
     createHostLocalSandboxManager(options.workdir, {
       initialTrustedRoots: async (scope) => {
         const session = await sessionManager.get(scope.sessionId);
-        const ownerId = session?.parentId ?? scope.sessionId;
+        const ownerId =
+          session?.sideChat?.mainSessionId ??
+          session?.parentId ??
+          scope.sessionId;
         const directory = await ensureSessionStorage(ownerId);
         const scratch = await fs.realpath(path.join(directory, SCRATCH_DIR));
         return [

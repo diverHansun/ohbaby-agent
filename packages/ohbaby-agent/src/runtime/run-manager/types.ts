@@ -34,6 +34,7 @@ export interface CreateRunOptions {
   /** Called synchronously once input admission is durable and preparation passed. */
   readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
+  readonly promptCacheSessionId?: string;
   readonly preparationSignal?: AbortSignal;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly runId?: string;
@@ -94,6 +95,7 @@ export type SandboxManager = SandboxManagerPort;
 
 export interface RunContext {
   readonly runModel: RunModel;
+  readonly promptCacheSessionId?: string;
   readonly reasoning?: ReasoningIntent;
   readonly runId: string;
   readonly sessionId: string;

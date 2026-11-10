@@ -87,7 +87,7 @@ export function createContextSummaryClient(
             purpose: "context-summary",
             maxTokens: settings.maxTokens,
             retry: { maxRetriesPerStep: 0 },
-            sessionId: input.sessionId,
+            sessionId: input.promptCacheSessionId ?? input.sessionId,
             contextScopeId: input.contextScopeId,
             signal: input.signal,
             // Only the finished attempt is kept; the summary owns its identity.

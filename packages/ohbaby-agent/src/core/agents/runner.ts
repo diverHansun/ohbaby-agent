@@ -211,6 +211,7 @@ export async function runAgent(
     record = await deps.runCoordinator.create({
       ...(input.onInputReady ? { onInputReady: input.onInputReady } : {}),
       runModel: input.runModel,
+      promptCacheSessionId: input.promptCacheSessionId,
       preparationSignal: input.preparationSignal,
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(scope.agentInstanceId === undefined

@@ -34,6 +34,7 @@ export interface AgentRunInput {
   /** Called after the run ledger admits current-run inputs, before model work. */
   readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
+  readonly promptCacheSessionId?: string;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly sessionId: string;
   readonly contextScope?: AgentContextScope;
@@ -94,6 +95,7 @@ export interface AgentRunEventSource {
 export interface AgentRunCreateOptions {
   readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
+  readonly promptCacheSessionId?: string;
   readonly preparationSignal?: AbortSignal;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly runId?: string;
@@ -188,6 +190,7 @@ export interface AgentTurnInput {
   /** Called after the run ledger admits current-run inputs, before model work. */
   readonly onInputReady?: () => void | Promise<void>;
   readonly runModel: RunModel;
+  readonly promptCacheSessionId?: string;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly initialUserMessageId?: string;
   /** Original user text when model input includes execution-only context. */

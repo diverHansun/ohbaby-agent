@@ -61,6 +61,7 @@ export interface StepUsageObservation {
 
 export interface LifecycleSessionParams {
   readonly runModel: RunModel;
+  readonly promptCacheSessionId?: string;
   readonly currentRunInputs?: LifecycleRunInputPort;
   readonly runId?: string;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;

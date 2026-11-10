@@ -271,6 +271,7 @@ export class RunWorker {
       runId: this.context.runId,
       modelId: this.context.modelId,
       runModel: this.context.runModel,
+      promptCacheSessionId: this.context.promptCacheSessionId,
       ...(this.context.reasoning === undefined
         ? {}
         : { reasoning: this.context.reasoning }),

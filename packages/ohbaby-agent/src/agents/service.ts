@@ -56,6 +56,7 @@ export class AgentService {
       triggerSource: params.triggerSource,
       onInputReady: params.onInputReady,
       runModel: params.runModel,
+      promptCacheSessionId: session.sideChat?.mainSessionId,
       reasoning,
       environment: params.environment,
       initialUserMessageId: params.initialUserMessageId,

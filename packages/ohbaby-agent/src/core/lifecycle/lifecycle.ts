@@ -87,6 +87,7 @@ interface StepResult {
 }
 
 interface ModelStepParams {
+  readonly promptCacheSessionId?: string;
   readonly runModel: LifecycleSessionParams["runModel"];
   readonly currentRunInputs?: LifecycleSessionParams["currentRunInputs"];
   readonly runId?: string;
@@ -603,6 +604,7 @@ export class Lifecycle {
         : undefined;
       let assistantMessageId = randomUUID();
       let prepared = yield* this.prepareTurnWithProgress({
+        promptCacheSessionId: params.promptCacheSessionId,
         runModel: params.runModel,
         reminderAnchorId: assistantMessageId,
         runId: params.runId,
@@ -674,6 +676,7 @@ export class Lifecycle {
       }
 
       const runParams: ModelStepParams = {
+        promptCacheSessionId: params.promptCacheSessionId,
         runModel: params.runModel,
         currentRunInputs: params.currentRunInputs,
         runId: params.runId,
@@ -750,6 +753,7 @@ export class Lifecycle {
 
         assistantMessageId = randomUUID();
         prepared = yield* this.prepareTurnWithProgress({
+          promptCacheSessionId: params.promptCacheSessionId,
           runModel: params.runModel,
           reminderAnchorId: assistantMessageId,
           runId: params.runId,
@@ -1526,7 +1530,7 @@ export class Lifecycle {
                 },
               }),
           reasoning: mergeReasoningIntent(params.reasoning),
-          sessionId: params.sessionId,
+          sessionId: params.promptCacheSessionId ?? params.sessionId,
           ...(params.contextScopeId === undefined
             ? {}
             : { contextScopeId: params.contextScopeId }),

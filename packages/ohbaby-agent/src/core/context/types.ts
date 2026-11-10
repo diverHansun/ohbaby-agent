@@ -61,6 +61,7 @@ export interface SummaryRequestResult {
 
 export interface ContextLLMClient {
   generateSummary(input: {
+    readonly promptCacheSessionId?: string;
     readonly request: PreparedModelRequest;
     readonly sessionId: string;
     readonly contextScopeId?: string;
@@ -198,6 +199,7 @@ export interface CompactResult {
 }
 
 export interface PrepareTurnInput {
+  readonly promptCacheSessionId?: string;
   readonly sessionScratchDirectory?: string;
   readonly runModel: ContextModel;
   readonly requestSettings?: PreparedRequestSettings;
