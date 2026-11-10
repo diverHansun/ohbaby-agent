@@ -1,3 +1,4 @@
+import { isUserFacingSession } from "./types.js";
 import {
   getDatabase,
   runWriteTransaction,
@@ -38,7 +39,8 @@ export interface SessionRow {
   readonly data: string;
 }
 
-interface SessionData {
+export interface SessionData {
+  readonly sideChat?: Session["sideChat"];
   readonly reasoning?: Session["reasoning"];
   readonly modelEntryId?: string;
   readonly childrenIds?: readonly string[];
@@ -175,6 +177,7 @@ function normalizeLimit(limit: number | undefined): number | undefined {
 
 function encodeData(session: Session): string {
   const data: SessionData = {
+    sideChat: session.sideChat,
     reasoning: session.reasoning,
     modelEntryId: session.modelEntryId,
     childrenIds: session.childrenIds,
@@ -209,6 +212,7 @@ export function rowToSession(row: SessionRow): Session {
       lastMessageAt: row.last_message_at ?? undefined,
     },
     parentId: row.parent_id ?? undefined,
+    ...(data.sideChat ? { sideChat: data.sideChat } : {}),
     reasoning: data.reasoning,
     modelEntryId: data.modelEntryId,
     childrenIds: data.childrenIds ?? [],
@@ -586,7 +590,7 @@ export function createDatabaseSessionStore(
           const normalizedLimit = normalizeLimit(limit) ?? 0;
           if (transaction) {
             return listTransactionSessions(transaction)
-              .filter((session) => !session.isSubagent)
+              .filter(isUserFacingSession)
               .sort(sortByUpdatedAtDesc)
               .slice(0, normalizedLimit)
               .map(cloneSession);
@@ -594,7 +598,7 @@ export function createDatabaseSessionStore(
           const rows = db
             .prepare<SessionRow>(
               `SELECT * FROM ${schema.session.tableName}
-             WHERE parent_id IS NULL
+             WHERE parent_id IS NULL AND json_extract(data, '$.sideChat') IS NULL
              ORDER BY updated_at DESC, created_at DESC
              LIMIT ?`,
             )

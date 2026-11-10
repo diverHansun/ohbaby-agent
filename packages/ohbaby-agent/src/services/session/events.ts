@@ -19,6 +19,13 @@ const SessionSchema: z.ZodType<Session> = z.object({
   updatedAt: z.number(),
   status: z.union([z.literal("active"), z.literal("archived")]),
   stats: SessionStatsSchema,
+  sideChat: z
+    .object({
+      mainSessionId: z.string(),
+      boundaryMessageId: z.string(),
+      ownerPid: z.number().int().positive(),
+    })
+    .optional(),
   parentId: z.string().optional(),
   childrenIds: z.array(z.string()),
   isSubagent: z.boolean(),

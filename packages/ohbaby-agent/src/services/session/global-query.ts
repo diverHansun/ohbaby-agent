@@ -128,7 +128,7 @@ export function listGlobalSessions(
   const rows = db
     .prepare<SessionRow>(
       `SELECT * FROM ${schema.session.tableName}
-       WHERE parent_id IS NULL AND status = ?
+       WHERE parent_id IS NULL AND json_extract(data, '$.sideChat') IS NULL AND status = ?
          ${status === "active" ? `AND ${NOT_IN_HIDDEN_WORKSPACE}` : ""}
          AND (? IS NULL OR updated_at < ? OR (updated_at = ? AND id < ?))
        ORDER BY updated_at DESC, id DESC
@@ -265,7 +265,7 @@ export function searchGlobalSessions(
                 h.message_id AS hit_message_id
          FROM ${schema.session.tableName} s
          LEFT JOIN latest_hit h ON h.session_id = s.id
-         WHERE s.parent_id IS NULL AND s.status = 'active'
+         WHERE s.parent_id IS NULL AND json_extract(s.data, '$.sideChat') IS NULL AND s.status = 'active'
            AND ((${titleMatch}) OR h.session_id IS NOT NULL)
        )
        SELECT * FROM candidates

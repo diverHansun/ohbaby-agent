@@ -1,3 +1,4 @@
+import { isUserFacingSession } from "./types.js";
 import { createBus, type BusInstance } from "../../bus/index.js";
 import { isDefaultDirectory } from "../../paths/index.js";
 import { createSessionIdGenerator } from "./id-generator.js";
@@ -165,7 +166,7 @@ export function createSessionManager(
       return (
         sessions.find(
           (session) =>
-            !session.isSubagent &&
+            isUserFacingSession(session) &&
             session.stats.messageCount === 0 &&
             sameSessionDirectory(session.workingDirectory, project.rootPath),
         ) ?? null

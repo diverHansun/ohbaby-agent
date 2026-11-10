@@ -1,3 +1,4 @@
+import { isUserFacingSession } from "./types.js";
 import {
   DuplicateSessionError,
   InvalidSessionLimitError,
@@ -121,7 +122,7 @@ export function createInMemorySessionStore(): SessionStore {
     getRecent(limit: number): Promise<Session[]> {
       const normalizedLimit = normalizeLimit(limit) ?? 0;
       const items = Array.from(sessions.values())
-        .filter((session) => !session.isSubagent)
+        .filter(isUserFacingSession)
         .sort(sortByUpdatedAtDesc)
         .slice(0, normalizedLimit)
         .map(cloneSession);

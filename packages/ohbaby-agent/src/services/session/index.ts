@@ -64,6 +64,7 @@ export {
 } from "./working-directory.js";
 export type { GenerateSessionTitleInput } from "./title-generator.js";
 export type { SessionDirectoryCompareOptions } from "./working-directory.js";
+export { isSideChatSession } from "./types.js";
 export type {
   CreateSessionOptions,
   ListSessionOptions,

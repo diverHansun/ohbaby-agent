@@ -1,3 +1,12 @@
+export class SideChatUnsupportedError extends Error {
+  readonly code = "SIDE_CHAT_UNSUPPORTED";
+
+  constructor(message = "This operation is unavailable in side chat.") {
+    super(message);
+    this.name = "SideChatUnsupportedError";
+  }
+}
+
 export class SessionNotFoundError extends Error {
   constructor(readonly sessionId: string) {
     super(`Session not found: ${sessionId}`);

@@ -8,7 +8,30 @@ export interface SessionStats {
   readonly lastMessageAt?: number;
 }
 
+export interface SideChatMetadata {
+  readonly mainSessionId: string;
+  readonly boundaryMessageId: string;
+  readonly ownerPid: number;
+}
+
+export function isSideChatSession(session: Pick<Session, "sideChat">): boolean {
+  return session.sideChat !== undefined;
+}
+
+/** Other live processes own their temporary conversations and permission state. */
+export function isLocalPrimarySession(session: Session): boolean {
+  return (
+    !session.isSubagent &&
+    (!session.sideChat || session.sideChat.ownerPid === process.pid)
+  );
+}
+
+export function isUserFacingSession(session: Session): boolean {
+  return !session.isSubagent && !isSideChatSession(session);
+}
+
 export interface Session {
+  readonly sideChat?: SideChatMetadata;
   readonly reasoning?: ReasoningConfig;
   readonly modelEntryId?: string;
   readonly id: string;
