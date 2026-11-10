@@ -224,6 +224,35 @@ describe.each(["memory", "database"] as const)(
       },
     );
 
+    it("discards summary and retirement candidates whose source message was rewound", async () => {
+      const { messageId } = await seedToolMessage();
+      const expectedMessages = await manager.listBySession("session_1");
+      await manager.markRewound(
+        "session_1",
+        messageId,
+        new Date().toISOString(),
+      );
+      const input = {
+        sessionId: "session_1",
+        compactedAt: 200,
+        summary: { agent: "context-summary", text: "Stale summary" },
+      };
+      await expect(
+        manager.commitCompaction({
+          ...input,
+          expectedMessages,
+          expectedParts: [],
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        manager.commitCompaction({
+          ...input,
+          expectedParts: expectedMessages[0].parts,
+        }),
+      ).resolves.toBeUndefined();
+      expect(await store.listBySession("session_1")).toEqual([]);
+    });
+
     it("does not write when Stop arrives while compaction waits in the commit queue", async () => {
       await seedToolMessage();
       const expectedMessages = await manager.listBySession("session_1");

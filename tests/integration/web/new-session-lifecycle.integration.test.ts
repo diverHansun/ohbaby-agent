@@ -159,6 +159,101 @@ describe("New session real server lifecycle and SQLite", () => {
     }
   });
 
+  it("validates rewind requests on REST and RPC and returns the optional replacement receipt", async () => {
+    const f = await fixture();
+    try {
+      const clientId = "web-regression";
+      const sessionId = (await create(f, clientId)).session.id;
+      const { prompt } = await f.backend.submitPromptAndWait("original text", {
+        sessionId,
+      });
+      const rest = (id: string, body: Record<string, unknown>) =>
+        f.server.app.request(`/v1/sessions/${id}/rewind`, {
+          method: "POST",
+          headers: headers(clientId),
+          body: JSON.stringify(body),
+        });
+      const rpc = (id: string, body: Record<string, unknown>) =>
+        f.server.app.request("/api/rpc", {
+          method: "POST",
+          headers: headers(clientId),
+          body: JSON.stringify({
+            id: "rewind",
+            clientId,
+            method: "rewindSession",
+            params: [{ sessionId: id, ...body }],
+          }),
+        });
+      for (const request of [rest, rpc]) {
+        for (const target of [
+          {},
+          { promptId: prompt.promptId, text: " " },
+          { promptId: prompt.promptId, files: true },
+        ]) {
+          const response = await request(sessionId, target);
+          expect(response.status).toBe(400);
+          expect(await response.json()).toMatchObject({
+            ok: false,
+            error: { code: "REWIND_TARGET_INVALID" },
+          });
+        }
+        const missing = await request("missing-session", {
+          promptId: prompt.promptId,
+        });
+        expect(missing.status).toBe(404);
+        expect(await missing.json()).toMatchObject({
+          error: { code: "SESSION_NOT_FOUND" },
+        });
+      }
+      const rewind = vi.spyOn(f.backend, "rewindSessionForOwner");
+      const browser = f.runtime.client;
+      if (!browser) throw new Error("Expected an initialized browser client");
+      const result = await browser.rewindSession({
+        sessionId,
+        promptId: prompt.promptId,
+        text: "replacement text",
+      });
+      expect(result).toMatchObject({
+        sessionId,
+        restoredText: "original text",
+        prompt: { sessionId, promptId: expect.any(String) },
+      });
+      expect(rewind).toHaveBeenLastCalledWith(
+        { sessionId, promptId: prompt.promptId, text: "replacement text" },
+        clientId,
+      );
+      expect(result.sendError).toBeUndefined();
+      if (!result.prompt) throw new Error("Expected a replacement receipt");
+      await f.backend.waitForPrompt(result.prompt.promptId);
+      const undo = await rpc(sessionId, { promptId: result.prompt.promptId });
+      expect(undo.status).toBe(200);
+      expect(rewind).toHaveBeenLastCalledWith(
+        { sessionId, promptId: result.prompt.promptId },
+        clientId,
+      );
+      expect(await undo.json()).toMatchObject({
+        ok: true,
+        result: { sessionId, restoredText: "replacement text" },
+      });
+      await expect(
+        f.backend.rewindSession({ sessionId, promptId: prompt.promptId }),
+      ).rejects.toMatchObject({ code: "REWIND_TARGET_INVALID" });
+      const targetDirectory = f.workdir + "-moved";
+      await commitSessionWorkspaceMove(
+        planSessionWorkspaceMove(sessionId, targetDirectory),
+      );
+      for (const request of [rest, rpc]) {
+        const moved = await request(sessionId, { promptId: prompt.promptId });
+        expect(moved.status).toBe(409);
+        expect(await moved.json()).toMatchObject({
+          error: { code: "SESSION_MOVED", targetDirectory },
+        });
+      }
+    } finally {
+      await f.dispose();
+    }
+  });
+
   it("forks from unselected roots and preserves typed failures and client binding on both transports", async () => {
     const f = await fixture();
     try {

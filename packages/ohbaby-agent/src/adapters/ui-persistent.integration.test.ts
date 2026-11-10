@@ -1,10 +1,13 @@
+import { SessionSubagentHost } from "../agents/subagent-host.js";
+import { DatabasePromptSubmissionStore } from "../runtime/prompt-scheduler/database-store.js";
+import { DatabaseCurrentRunInputStore } from "../runtime/prompt-scheduler/current-run-inputs.js";
 import { DatabaseSubagentExecutionStore } from "../agents/subagents/execution-store.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UiEvent, UiPromptReceipt, UiRun } from "ohbaby-sdk";
 import type {
   InterfaceProviderRequest,
@@ -17,7 +20,11 @@ import {
   schema,
 } from "../services/database/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
-import { createDatabaseMessageStore } from "../core/message/index.js";
+import {
+  createDatabaseMessageStore,
+  insertMessageRow,
+  insertPartRow,
+} from "../core/message/database-store.js";
 import { createSqliteGoalPersistence } from "../goals/index.js";
 import {
   goalTodoWorkScopeId,
@@ -25,7 +32,10 @@ import {
 } from "../tools/todo.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { SnapshotService } from "../snapshot/index.js";
-import { createTemporarySessionTitle } from "../services/session/index.js";
+import {
+  createTemporarySessionTitle,
+  searchGlobalSessions,
+} from "../services/session/index.js";
 import {
   createPersistentUiBackendClient,
   type PersistentUiBackendClient,
@@ -3524,4 +3534,974 @@ it("S4-10 isolates failed recovery from healthy sessions and readable history un
     closeDatabase();
     await rm(directory, { force: true, recursive: true });
   }
+});
+
+describe("persistent conversation rewind", () => {
+  let directory: string;
+  let client: PersistentUiBackendClient;
+  const requests: InterfaceProviderRequest[] = [];
+  let model: LLMClientInstance<FakeSdkClient>;
+  function open(hookExecutor?: HookExecutor): PersistentUiBackendClient {
+    return createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      workdir: join(directory, "workspace"),
+      llmClient: model,
+      enableSnapshots: false,
+      hookExecutor,
+    });
+  }
+  beforeEach(async () => {
+    directory = await tempDir("ohbaby-rewind-");
+    vi.stubEnv("OHBABY_HOME", join(directory, "home"));
+    requests.length = 0;
+    model = createSequentialFakeLLMClient(
+      Array.from({ length: 8 }, () => [
+        { textDelta: "Reply", finishReason: "stop" },
+      ]),
+      requests,
+    );
+  });
+  afterEach(async () => {
+    await client.dispose();
+    vi.unstubAllEnvs();
+    await rm(directory, { force: true, recursive: true });
+  });
+
+  it("rewinds a suffix across saved history, open views, exports, model input and restart", async () => {
+    client = open();
+    if (!client.getSessionView || !client.getSessionHistory)
+      throw new Error("Expected persistent session recovery support");
+    const first = (await client.submitPromptAndWait("keep the first turn"))
+      .prompt;
+    const sessionId = first.sessionId;
+    const input = { sessionId };
+    const second = (
+      await client.submitPromptAndWait("second-rewind-needle", input)
+    ).prompt;
+    const third = (
+      await client.submitPromptAndWait(
+        "third-rewind-needle " + "discard ".repeat(600),
+        input,
+      )
+    ).prompt;
+    const before = await client.getSessionView(input);
+    const cutoff = before.session.messages.findIndex(
+      (message) => message.id === second.userMessageId,
+    );
+    expect(cutoff).toBeGreaterThan(0);
+    const removed = before.session.messages
+      .slice(cutoff)
+      .map((message) => message.id);
+    const previousUsage = await client.getContextWindowUsage(input);
+    expect(
+      searchGlobalSessions({ query: "second-rewind-needle" }).hits.some(
+        (hit) => hit.session.id === sessionId,
+      ),
+    ).toBe(true);
+    const db = getDatabase();
+    const messageRows = db.prepare<{ id: string; rewound_at: string | null }>(
+      "SELECT id,rewound_at FROM message WHERE session_id=? ORDER BY created_at,rowid",
+    );
+    const originalRows = messageRows.all(sessionId);
+    const firstRemoved = originalRows.findIndex(
+      (row) => row.id === second.userMessageId,
+    );
+    expect(firstRemoved).toBeGreaterThan(0);
+    const changes: UiEvent[] = [];
+    client.subscribeEvents((event) => changes.push(event));
+    const result = await client.rewindSession({
+      sessionId,
+      promptId: second.promptId,
+    });
+    expect(result).toEqual({ sessionId, restoredText: second.text });
+
+    const snapshot = await client.getSnapshot();
+    expect(
+      snapshot.runs.some(
+        (run) => run.id === second.runId || run.id === third.runId,
+      ),
+    ).toBe(false);
+    const warm = await client.getSessionView(input);
+    expect(warm.prompts.map((p) => p.promptId)).toEqual([first.promptId]);
+    expect(warm.runs.map((r) => r.id)).toEqual([first.runId]);
+    const retained = warm.session.messages.map((m) => m.id);
+    expect(retained).toContain(first.userMessageId);
+    expect(removed).toContain(second.userMessageId);
+    expect(removed).toContain(third.userMessageId);
+    const deltas = changes.filter((e) => e.type === "session.changed");
+    const removedIds = deltas.flatMap((e) => e.removedMessageIds ?? []);
+    for (const id of removed) expect(removedIds).toContain(id);
+    const stamps = deltas
+      .flatMap((e) => e.prompts ?? [])
+      .filter((p) => p.rewoundAt);
+    for (const target of [second, third]) {
+      expect(
+        stamps.some(
+          (p) => p.promptId === target.promptId && p.updatedAt === p.rewoundAt,
+        ),
+      ).toBe(true);
+    }
+    const marks = getDatabase()
+      .prepare<{
+        rewound_at: string;
+      }>(
+        "SELECT DISTINCT rewound_at FROM message WHERE session_id=? AND rewound_at IS NOT NULL UNION SELECT DISTINCT rewound_at FROM prompt_submission WHERE session_id=? AND rewound_at IS NOT NULL",
+      )
+      .all(sessionId, sessionId);
+    expect(marks).toEqual([{ rewound_at: stamps[0].rewoundAt }]);
+    expect(messageRows.all(sessionId)).toEqual(
+      originalRows.map((row, index) => ({
+        id: row.id,
+        rewound_at: index < firstRemoved ? null : stamps[0].rewoundAt,
+      })),
+    );
+    const lastPage = await client.getSessionHistory({ sessionId, limit: 1 });
+    expect(lastPage.hasMore).toBe(true);
+    const earlier = await client.getSessionHistory({
+      sessionId,
+      before: lastPage.before,
+    });
+    expect(
+      [...earlier.messages, ...lastPage.messages].map((m) => m.id),
+    ).toEqual(retained);
+    for (const format of ["html", "jsonl"] as const) {
+      const exported = await client.exportSession({ sessionId, format });
+      const contents =
+        format === "html"
+          ? Buffer.from(
+              /<script[^>]*id="session-data"[^>]*>([^<]*)<\/script>/.exec(
+                exported.content,
+              )?.[1] ?? "",
+              "base64",
+            ).toString("utf8")
+          : exported.content;
+      expect(contents).toContain(first.text);
+      expect(contents).not.toContain("rewind-needle");
+    }
+    expect(
+      searchGlobalSessions({ query: "second-rewind-needle" }).hits,
+    ).toEqual([]);
+    const usage = await client.getContextWindowUsage(input);
+    if (!usage || !previousUsage)
+      throw new Error("Expected context usage on both sides of rewind");
+    expect(usage.currentTokens).toBeLessThan(previousUsage.currentTokens);
+    await client.dispose();
+    client = open();
+    if (!client.getSessionView || !client.getSessionHistory)
+      throw new Error("Expected persistent session recovery support");
+    await client.initializeSession(sessionId);
+    const cold = await client.getSessionView(input);
+    expect(cold.session.messages.map((m) => m.id)).toEqual(retained);
+    expect(cold.runs.map((r) => r.id)).toEqual([first.runId]);
+    const follow = (
+      await client.submitPromptAndWait("next visible turn", input)
+    ).prompt;
+    const sent = JSON.stringify(requests.at(-1)?.messages);
+    expect(sent).toContain(first.text);
+    expect(sent).toContain(follow.text);
+    expect(sent).not.toContain("rewind-needle");
+    await client.rewindSession({ sessionId, promptId: follow.promptId });
+    expect(
+      (await client.getSessionView(input)).session.messages.map((m) => m.id),
+    ).toEqual(retained);
+    const stats = db.prepare("SELECT message_count FROM session WHERE id=?");
+    expect(stats.get(sessionId)).toEqual({ message_count: firstRemoved });
+    await client.rewindSession({ sessionId, promptId: first.promptId });
+    expect(stats.get(sessionId)).toEqual({ message_count: 0 });
+    const empty = (await client.getSessionView(input)).session;
+    expect(empty.messages).toEqual([]);
+    expect(empty.title).toBe(before.session.title);
+    const neverReuse = await client.createSession({
+      reuseSessionId: sessionId,
+    });
+    expect(neverReuse.id).not.toBe(sessionId);
+    await client.submitPromptAndWait("a different title would be wrong", input);
+    expect((await client.getSessionView(input)).session.title).toBe(
+      before.session.title,
+    );
+  });
+
+  it.each(["resubmitted", "earlier"] as const)(
+    "rewinds the %s turn by message order after a retained retry and a queued steer",
+    async (cut) => {
+      const release = createDeferred<undefined>();
+      const started = createDeferred<undefined>();
+      model = createBlockingLLMClient({
+        started,
+        release: release.promise,
+        text: "reply",
+      });
+      client = open();
+      const { id: sessionId } = await client.createSession();
+      const scope = join(directory, "workspace");
+      const fixedTime = Date.now() + 60000;
+      const store = new DatabasePromptSubmissionStore({
+        now: (): number => fixedTime,
+      });
+      const admit = (
+        id: string,
+        scopeKey = scope,
+      ): ReturnType<typeof store.accept> =>
+        store.accept({
+          sessionId,
+          scopeKey,
+          promptId: id,
+          userMessageId: id + "-message",
+          clientRequestId: id,
+          text: id,
+          maxQueuedPrompts: 20,
+        });
+      await admit("A");
+      await store.retainOwnedQueued(scope);
+      // A and the future steer exist before B, but they materialize on opposite sides of the cut.
+      await admit("steer");
+      const b = await client.submitPromptAccepted("B", { sessionId });
+      try {
+        await started.promise;
+        const runId = (await store.get(b.promptId))?.runId;
+        if (!runId) throw new Error("Expected B to be running");
+        expect(
+          await client.steerQueuedPrompt({
+            promptId: "steer",
+            expectedRunId: runId,
+            clientRequestId: "steer-into-B",
+          }),
+        ).toMatchObject({ status: "steered" });
+      } finally {
+        release.resolve(undefined);
+      }
+      await client.waitForPrompt(b.promptId);
+      await admit("between", "/old-workspace");
+      await store.cancelQueued("between");
+      const lease = await client.acquirePromptEditLease({ promptId: "A" });
+      await client.resubmitRetainedPrompt({
+        promptId: "A",
+        operationId: "retry-A",
+        editLeaseId: lease.editLeaseId,
+        text: "A again",
+      });
+      const { prompt: a } = await client.waitForPrompt("A");
+      await admit("after", "/other-workspace");
+      await store.cancelQueued("after");
+      // Already cancelled prompts have no message. All three admissions tie on time, across scopes.
+      expect((await store.get("between"))?.acceptedAt).toBe(
+        (await store.get("A"))?.acceptedAt,
+      );
+      expect((await store.get("after"))?.acceptedAt).toBe(
+        (await store.get("A"))?.acceptedAt,
+      );
+      const stop = vi.spyOn(SessionSubagentHost.prototype, "stopRewoundRoot");
+      try {
+        await client.rewindSession({
+          sessionId,
+          promptId: cut === "resubmitted" ? a.promptId : b.promptId,
+        });
+        const retained = cut === "resubmitted";
+        for (const id of [b.promptId, "steer", "between"])
+          expect(Boolean((await store.get(id))?.rewoundAt)).toBe(!retained);
+        for (const id of ["A", "after"])
+          expect((await store.get(id))?.rewoundAt).toBeTruthy();
+        const messages = (
+          await client.getSessionView?.({ sessionId })
+        )?.session.messages.map((m) => m.id);
+        expect(messages?.includes(b.userMessageId)).toBe(retained);
+        expect(messages?.includes("steer-message")).toBe(retained);
+        expect(messages).not.toContain(a.userMessageId);
+        const bRun = (await store.get(b.promptId))?.runId;
+        expect(stop.mock.calls.map(([runId]) => runId)).toEqual(
+          expect.arrayContaining([a.runId]),
+        );
+        expect(stop.mock.calls.some(([runId]) => runId === bRun)).toBe(
+          !retained,
+        );
+      } finally {
+        stop.mockRestore();
+      }
+    },
+  );
+
+  it("checks a running target before stopping and cancels its owner's queued drafts before admitting a replacement", async () => {
+    const release = createDeferred<undefined>();
+    const startedTexts: string[] = [];
+    model = createAbortableBlockingLLMClient({
+      release: release.promise,
+      startedTexts,
+      partialText: "streaming",
+    });
+    client = open();
+    if (!client.getSessionView || !client.getSessionHistory)
+      throw new Error("Expected persistent session recovery support");
+    try {
+      const running = await client.submitPromptAccepted("running question", {
+        modelEntryId: "injected",
+        reasoning: { enabled: false },
+      });
+      const { sessionId, promptId } = running;
+      await vi.waitFor(() => {
+        expect(startedTexts).toContain("running question");
+      });
+      const db = getDatabase();
+      const run = db
+        .prepare<{
+          run_id: string;
+        }>("SELECT run_id FROM run_ledger WHERE session_id=?")
+        .get(sessionId);
+      if (!run) throw new Error("Expected a running turn");
+      const steer = await client.submitPromptAccepted("inline steer", {
+        sessionId,
+      });
+      const steered = await client.steerQueuedPrompt({
+        promptId: steer.promptId,
+        expectedRunId: run.run_id,
+        clientRequestId: "apply-steer",
+      });
+      expect(steered.status).toBe("steered");
+      await expect(
+        client.rewindSession({ sessionId, promptId: steer.promptId }),
+      ).rejects.toMatchObject({ code: "REWIND_TARGET_INVALID" });
+      const draft = await client.submitPromptAccepted("first queued", {
+        sessionId,
+      });
+      const other = await client.submitPromptAccepted("second queued", {
+        sessionId,
+      });
+      await expect(
+        client.rewindSession({ sessionId, promptId: draft.promptId }),
+      ).rejects.toMatchObject({ code: "REWIND_TARGET_INVALID" });
+      const setModel = db.prepare(
+        "UPDATE prompt_submission SET model_entry_id=? WHERE prompt_id=?",
+      );
+      setModel.run("deleted-model", promptId);
+      await expect(
+        client.rewindSession({ sessionId, promptId, text: "wrong model" }),
+      ).rejects.toMatchObject({ code: "MODEL_NOT_FOUND" });
+      setModel.run("injected", promptId);
+      const setStatus = db.prepare(
+        "UPDATE prompt_submission SET status=? WHERE prompt_id=?",
+      );
+      setStatus.run("retained", other.promptId);
+      await expect(
+        client.rewindSession({ sessionId, promptId }),
+      ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+      setStatus.run("queued", other.promptId);
+      await client.acquirePromptEditLeaseForOwner(
+        { promptId: draft.promptId },
+        "editor",
+      );
+      await expect(
+        client.rewindSessionForOwner({ sessionId, promptId }, "other"),
+      ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+      const stillRunning = await client.getSessionView({ sessionId });
+      expect(
+        stillRunning.prompts.find((p) => p.promptId === promptId)?.status,
+      ).toBe("running");
+      const response = await client.rewindSessionForOwner(
+        { sessionId, promptId, text: "replacement" },
+        "editor",
+      );
+      expect(response.restoredText).toBe("running question");
+      if (!response.prompt) throw new Error("Expected replacement receipt");
+      release.resolve(undefined);
+      expect(
+        (await client.waitForPrompt(response.prompt.promptId)).prompt.status,
+      ).toBe("succeeded");
+      expect(startedTexts).toEqual(["running question", "replacement"]);
+      const states = getDatabase()
+        .prepare<{
+          prompt_id: string;
+          status: string;
+          rewound_at: string | null;
+        }>(
+          "SELECT prompt_id,status,rewound_at FROM prompt_submission WHERE session_id=? ORDER BY admission_order",
+        )
+        .all(sessionId);
+      expect(
+        states.map((p) => [p.prompt_id, p.status, Boolean(p.rewound_at)]),
+      ).toEqual([
+        [promptId, "interrupted", true],
+        [steer.promptId, "steered", true],
+        [draft.promptId, "cancelled", true],
+        [other.promptId, "cancelled", true],
+        [response.prompt.promptId, "succeeded", false],
+      ]);
+      const settings = db.prepare(
+        "SELECT model_entry_id,reasoning_data FROM prompt_submission WHERE prompt_id=?",
+      );
+      expect(settings.get(response.prompt.promptId)).toEqual({
+        model_entry_id: "injected",
+        reasoning_data: JSON.stringify({ enabled: false }),
+      });
+    } finally {
+      release.resolve(undefined);
+    }
+  });
+
+  it.each([
+    { mode: "explicit with replacement", replacement: "edited" },
+    { mode: "implicit without replacement", replacement: undefined },
+  ])(
+    "preserves a new window's question behind a rewind ($mode)",
+    async ({ replacement }) => {
+      const finalizing = createDeferred<undefined>();
+      const releaseModel = createDeferred<undefined>();
+      const settle = createDeferred<undefined>();
+      const startedTexts: string[] = [];
+      model = createAbortableBlockingLLMClient({
+        release: releaseModel.promise,
+        startedTexts,
+      });
+      client = open({
+        async execute(point, { status }) {
+          if (point === "post-run" && status === "cancelled") {
+            releaseModel.resolve(undefined);
+            finalizing.resolve(undefined);
+            await settle.promise;
+          }
+        },
+      });
+      const independent = open();
+      try {
+        const target = await client.submitPromptAccepted("original");
+        const { sessionId } = target;
+        await vi.waitFor(() => {
+          expect(startedTexts).toEqual(["original"]);
+        });
+        const old = await client.submitPromptAccepted("queued before rewind", {
+          sessionId,
+        });
+        const input = {
+          sessionId,
+          promptId: target.promptId,
+          text: replacement,
+        };
+        await expect(independent.rewindSession(input)).rejects.toMatchObject({
+          code: "SESSION_RUNNING",
+        });
+
+        const rewind = client.rewindSessionForOwner(input, "window-a");
+        // Same-tick explicit requests must observe invocation order, even before preflight finishes.
+        const immediate = replacement
+          ? client.submitPromptAccepted("sent during rewind", { sessionId })
+          : undefined;
+        await finalizing.promise;
+        await expect(
+          independent.compactSession({ sessionId, force: true }),
+        ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+        const incoming =
+          immediate ?? client.submitPromptAccepted("sent during rewind");
+        const followUp = client.submitPromptAccepted("second late question", {
+          sessionId,
+        });
+        // Waiting on this rewind must also leave workspace-wide session creation available.
+        const otherSession = await withTimeout(
+          client.createSession(),
+          3_000,
+          "waiting on rewind blocked the creation of an unrelated session",
+        );
+        await client.submitPromptAndWait("unrelated", {
+          sessionId: otherSession.id,
+        });
+        expect(startedTexts).toEqual(["original", "unrelated"]);
+        settle.resolve(undefined);
+        const [result, late, last] = await Promise.all([
+          rewind,
+          incoming,
+          followUp,
+        ]);
+        expect(result.restoredText).toBe("original");
+        expect(late.sessionId).toBe(sessionId);
+        expect((await client.waitForPrompt(last.promptId)).prompt.status).toBe(
+          "succeeded",
+        );
+        expect(startedTexts).toEqual([
+          "original",
+          "unrelated",
+          ...(replacement ? [replacement] : []),
+          "sent during rewind",
+          "second late question",
+        ]);
+        const rows = getDatabase()
+          .prepare(
+            "SELECT prompt_id,status,rewound_at IS NOT NULL AS hidden FROM prompt_submission WHERE session_id=? ORDER BY admission_order",
+          )
+          .all(sessionId);
+        expect(rows).toEqual([
+          { prompt_id: target.promptId, status: "interrupted", hidden: 1 },
+          { prompt_id: old.promptId, status: "cancelled", hidden: 1 },
+          ...(replacement
+            ? [
+                {
+                  prompt_id: result.prompt?.promptId,
+                  status: "succeeded",
+                  hidden: 0,
+                },
+              ]
+            : []),
+          { prompt_id: late.promptId, status: "succeeded", hidden: 0 },
+          { prompt_id: last.promptId, status: "succeeded", hidden: 0 },
+        ]);
+      } finally {
+        releaseModel.resolve(undefined);
+        settle.resolve(undefined);
+        await independent.dispose();
+      }
+    },
+  );
+
+  it("keeps history visible while another backend is summarizing it", async () => {
+    const entered = createDeferred<undefined>();
+    const finish = createDeferred<undefined>();
+    const fallback = model.provider.streamResponse.bind(model.provider);
+    vi.spyOn(model.provider, "streamResponse").mockImplementation(
+      async (request) => {
+        if (request.purpose !== "context-summary") return fallback(request);
+        entered.resolve(undefined);
+        await finish.promise;
+        return createProviderStream([
+          { textDelta: "The lantern is blue.", finishReason: "stop" },
+        ]);
+      },
+    );
+    client = open();
+    const peer = open();
+    try {
+      const { prompt } = await client.submitPromptAndWait(
+        "Keep the blue lantern. ".repeat(6000),
+      );
+      const { sessionId, promptId } = prompt;
+      await client.submitPromptAndWait("Continue with the lantern.", {
+        sessionId,
+      });
+      const db = getDatabase();
+      // A stale marker left by a previous process with this PID may be reclaimed.
+      db.prepare(
+        "INSERT INTO app_state(scope,key,value,updated_at) VALUES('session-history-operation',?,?,0)",
+      ).run(
+        sessionId,
+        JSON.stringify({ pid: process.pid, processId: "previous-process" }),
+      );
+      const compact = peer.compactSession({ sessionId, force: true });
+      try {
+        await withTimeout(
+          entered.promise,
+          3000,
+          "summary request did not enter",
+        );
+        await expect(
+          client.rewindSession({ sessionId, promptId }),
+        ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+        expect(
+          db
+            .prepare(
+              "SELECT id FROM message WHERE session_id=? AND rewound_at IS NOT NULL",
+            )
+            .all(sessionId),
+        ).toEqual([]);
+      } finally {
+        finish.resolve(undefined);
+        expect((await compact).status).toBe("compacted");
+      }
+      db.exec(`CREATE TEMP TRIGGER fail_history_release BEFORE DELETE ON app_state
+        WHEN OLD.scope='session-history-operation' BEGIN SELECT RAISE(ABORT, 'history release failed'); END`);
+      try {
+        await expect(
+          client.rewindSession({ sessionId, promptId }),
+        ).rejects.toThrow("history release failed");
+      } finally {
+        db.exec("DROP TRIGGER fail_history_release");
+      }
+      await expect(
+        client.rewindSession({ sessionId, promptId }),
+      ).rejects.toMatchObject({ code: "REWIND_BEFORE_COMPACTION" });
+    } finally {
+      finish.resolve(undefined);
+      await peer.dispose();
+    }
+  });
+
+  it("rejects inaccessible sessions, foreign prompts and cuts before compaction without marking any history", async () => {
+    client = open();
+    const { prompt } = await client.submitPromptAndWait("an old user question");
+    const { sessionId, promptId } = prompt;
+    const other = await client.createSession();
+    const archived = await client.createSession();
+    await client.archiveSession({ sessionId: archived.id });
+    const side = await client.openSideChat({ mainSessionId: sessionId });
+    const child = await client.createSession();
+    const db = getDatabase();
+    db.prepare("UPDATE session SET parent_id=? WHERE id=?").run(
+      sessionId,
+      child.id,
+    );
+    for (const [id, code] of [
+      ["missing", "SESSION_NOT_FOUND"],
+      [child.id, "SESSION_NOT_ROOT"],
+      [archived.id, "SESSION_ARCHIVED"],
+      [side.sideChatId, "SIDE_CHAT_UNSUPPORTED"],
+      [other.id, "REWIND_TARGET_INVALID"],
+    ]) {
+      await expect(
+        client.rewindSession({ sessionId: id, promptId }),
+      ).rejects.toMatchObject({ code });
+    }
+    db.prepare("UPDATE session SET status='archived' WHERE id=?").run(
+      side.sideChatId,
+    );
+    await expect(
+      client.rewindSession({ sessionId: side.sideChatId, promptId }),
+    ).rejects.toMatchObject({ code: "SESSION_ARCHIVED" });
+    const at = Date.now() + 1;
+    insertMessageRow(db, {
+      id: "rewind-summary",
+      sessionId,
+      role: "assistant",
+      agent: "context",
+      time: { created: at },
+    });
+    insertPartRow(
+      db,
+      {
+        id: "rewind-summary-part",
+        messageId: "rewind-summary",
+        sessionId,
+        type: "text",
+        text: "compacted history",
+        orderIndex: 0,
+        metadata: { kind: "context-summary" },
+      },
+      at,
+    );
+    await expect(
+      client.rewindSession({ sessionId, promptId }),
+    ).rejects.toMatchObject({ code: "REWIND_BEFORE_COMPACTION" });
+    expect(
+      db.prepare("SELECT 1 FROM message WHERE rewound_at IS NOT NULL").all(),
+    ).toEqual([]);
+    expect(
+      db
+        .prepare("SELECT 1 FROM prompt_submission WHERE rewound_at IS NOT NULL")
+        .all(),
+    ).toEqual([]);
+  });
+
+  function startRewindTestGoal(
+    sessionId: string,
+  ): ReturnType<PersistentUiBackendClient["executeCommand"]> {
+    return client.executeCommand({
+      sessionId,
+      commandId: "goal",
+      path: ["goal"],
+      argv: ["inspect files"],
+      raw: "/goal inspect files",
+      rawArgs: "inspect files",
+      surface: "tui",
+      clientInvocationId: "goal",
+    });
+  }
+
+  function backgroundChildCall(): InterfaceProviderStreamEvent {
+    return createProviderSubagentControlEvent({
+      callId: "spawn",
+      action: "spawn",
+      arguments: { prompt: "inspect files", role: "explore" },
+    });
+  }
+
+  it("pauses an idle goal and defers its retained child's wake until rewind releases the gate", async () => {
+    const releaseChild = createDeferred<undefined>();
+    const inCleanup = createDeferred<undefined>();
+    const releaseCleanup = createDeferred<undefined>();
+    const fallback = model.provider.streamResponse.bind(model.provider);
+    let spawn = true;
+    vi.spyOn(model.provider, "streamResponse").mockImplementation(
+      async (request) => {
+        if (isSessionTitleGenerationRequest(request)) return fallback(request);
+        if (isPersistentExploreSubagentRequest(request)) {
+          await releaseChild.promise;
+          return createProviderStream([
+            { textDelta: "child result", finishReason: "stop" },
+          ]);
+        }
+        if (spawn) {
+          spawn = false;
+          return createProviderStream([backgroundChildCall()]);
+        }
+        return fallback(request);
+      },
+    );
+    client = open();
+    const { id: sessionId } = await client.createSession();
+    const ledger = createDatabaseRunLedger();
+    const mainRuns = (): ReturnType<typeof ledger.listBySession> =>
+      ledger.listBySession(sessionId, { mainOnly: true });
+    const child = (): Record<string, unknown> | undefined =>
+      getDatabase()
+        .prepare(
+          "SELECT status,rewound_at FROM subagent_execution WHERE root_session_id=?",
+        )
+        .get(sessionId);
+    let observer: PersistentUiBackendClient | undefined;
+    try {
+      await startRewindTestGoal(sessionId);
+      await vi.waitFor(async () => {
+        expect(await mainRuns()).toMatchObject([
+          { triggerSource: "goal", status: "succeeded" },
+        ]);
+      });
+      const { prompt } = await client.submitPromptAndWait("later user turn", {
+        sessionId,
+      });
+      expect(
+        (await client.getSessionView?.({ sessionId }))?.goal,
+      ).toMatchObject({ status: "ready", value: { status: "active" } });
+      observer = open();
+      await observer.initializeSession(sessionId);
+      expect(
+        (await observer.getSessionView?.({ sessionId }))?.goal,
+      ).toMatchObject({
+        value: { status: "active" },
+      });
+      await expect(
+        observer.rewindSession({ sessionId, promptId: prompt.promptId }),
+      ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+      const barrier = vi.spyOn(
+        SessionSubagentHost.prototype,
+        "stopRewoundRoot",
+      );
+      barrier.mockImplementationOnce(async function (
+        this: SessionSubagentHost,
+        runId,
+      ) {
+        inCleanup.resolve(undefined);
+        await releaseCleanup.promise;
+        barrier.mockRestore();
+        return this.stopRewoundRoot(runId);
+      });
+      try {
+        const rewind = client.rewindSession({
+          sessionId,
+          promptId: prompt.promptId,
+        });
+        await inCleanup.promise;
+        expect(child()).toMatchObject({ status: "running", rewound_at: null });
+        releaseChild.resolve(undefined);
+        await vi.waitFor(() => {
+          expect(child()).toMatchObject({
+            status: "completed",
+            rewound_at: null,
+          });
+        });
+        expect((await mainRuns()).map((run) => run.triggerSource)).toEqual([
+          "user",
+          "goal",
+        ]);
+        releaseCleanup.resolve(undefined);
+        await rewind;
+        expect(
+          (await observer.getSessionView?.({ sessionId }))?.goal,
+        ).toMatchObject({ value: { status: "paused" } });
+      } finally {
+        releaseCleanup.resolve(undefined);
+        barrier.mockRestore();
+      }
+      await vi.waitFor(async () => {
+        expect(await mainRuns()).toMatchObject([
+          { triggerSource: "subagent", status: "succeeded" },
+          { triggerSource: "user" },
+          { triggerSource: "goal" },
+        ]);
+      });
+      expect(
+        (await client.getSessionView?.({ sessionId }))?.goal,
+      ).toMatchObject({
+        status: "ready",
+        value: { status: "paused", turnsUsed: 1 },
+      });
+    } finally {
+      releaseCleanup.resolve(undefined);
+      releaseChild.resolve(undefined);
+      await observer?.dispose();
+    }
+  });
+
+  it.each(["goal", "subagent"] as const)(
+    "interrupts a running %s turn when rewinding an earlier user prompt",
+    async (driver) => {
+      client = open();
+      const { prompt: target } =
+        await client.submitPromptAndWait("old question");
+      const { sessionId, promptId } = target;
+      const releaseChild = createDeferred<undefined>();
+      const release = createDeferred<undefined>();
+      const startedTexts: string[] = [];
+      const blocking = createAbortableBlockingLLMClient({
+        release: release.promise,
+        startedTexts,
+      });
+      const fallback = model.provider.streamResponse.bind(model.provider);
+      let spawn = driver === "subagent";
+      let block = driver === "goal";
+      vi.spyOn(model.provider, "streamResponse").mockImplementation(
+        async (request) => {
+          if (isSessionTitleGenerationRequest(request))
+            return fallback(request);
+          if (isPersistentExploreSubagentRequest(request)) {
+            await releaseChild.promise;
+            return createProviderStream([
+              { textDelta: "child result", finishReason: "stop" },
+            ]);
+          }
+          if (spawn) {
+            spawn = false;
+            return createProviderStream([backgroundChildCall()]);
+          }
+          if (block) return blocking.provider.streamResponse(request);
+          return fallback(request);
+        },
+      );
+      try {
+        if (driver === "goal") {
+          await startRewindTestGoal(sessionId);
+        } else {
+          await client.submitPromptAndWait("spawn child", { sessionId });
+          block = true;
+          releaseChild.resolve(undefined);
+        }
+        await vi.waitFor(() => {
+          expect(startedTexts).toHaveLength(1);
+        });
+        block = false;
+        const ledger = createDatabaseRunLedger();
+        const [active] = await ledger.listBySession(sessionId, {
+          mainOnly: true,
+        });
+        expect(active).toMatchObject({
+          triggerSource: driver,
+          status: "running",
+        });
+        // At a goal run's steering cutoff, new prompts queue for the next turn.
+        if (driver === "goal")
+          await new DatabaseCurrentRunInputStore().sealSteer(active.runId);
+        const drafts = await Promise.all(
+          ["draft one", "draft two"].map((text) =>
+            client.submitPromptAccepted(text, { sessionId }),
+          ),
+        );
+        expect(drafts.map((p) => p.status)).toEqual(["queued", "queued"]);
+        const result = await client.rewindSession({
+          sessionId,
+          promptId,
+          text: "updated",
+        });
+        if (!result.prompt) throw new Error("Expected replacement prompt");
+        expect(
+          (await client.waitForPrompt(result.prompt.promptId)).prompt.status,
+        ).toBe("succeeded");
+        const view = await client.getSessionView?.({ sessionId });
+        expect(view?.prompts.map((p) => p.promptId)).toEqual([
+          result.prompt.promptId,
+        ]);
+        expect(view?.runs.map((r) => r.id)).not.toContain(active.runId);
+        expect((await ledger.get(active.runId))?.status).toBe("interrupted");
+        for (const draft of drafts)
+          expect(
+            getDatabase()
+              .prepare(
+                "SELECT status,rewound_at IS NOT NULL AS hidden FROM prompt_submission WHERE prompt_id=?",
+              )
+              .get(draft.promptId),
+          ).toMatchObject({
+            status: "cancelled",
+            hidden: 1,
+          });
+        if (driver === "goal")
+          expect(view?.goal).toMatchObject({
+            status: "ready",
+            value: { status: "paused" },
+          });
+      } finally {
+        releaseChild.resolve(undefined);
+        release.resolve(undefined);
+      }
+    },
+  );
+
+  it("times out after ten seconds without marking history, then admits a retry when the stopped run settles", async () => {
+    const finalizing = createDeferred<undefined>();
+    const release = createDeferred<undefined>();
+    client = open({
+      async execute(point) {
+        if (point === "post-run") {
+          finalizing.resolve(undefined);
+          await release.promise;
+        }
+      },
+    });
+    const { promptId, sessionId } =
+      await client.submitPromptAccepted("held run");
+    try {
+      await finalizing.promise;
+      const started = performance.now();
+      await expect(
+        client.rewindSession({ sessionId, promptId, text: "not sent" }),
+      ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+      expect(performance.now() - started).toBeGreaterThanOrEqual(9_900);
+      for (const table of ["message", "prompt_submission"]) {
+        expect(
+          getDatabase()
+            .prepare(
+              `SELECT 1 FROM ${table} WHERE session_id=? AND rewound_at IS NOT NULL`,
+            )
+            .all(sessionId),
+        ).toHaveLength(0);
+      }
+      expect(
+        getDatabase()
+          .prepare("SELECT text FROM prompt_submission WHERE session_id=?")
+          .all(sessionId),
+      ).toEqual([{ text: "held run" }]);
+    } finally {
+      release.resolve(undefined);
+    }
+    await client.waitForPrompt(promptId);
+    const retry = await client.rewindSession({
+      sessionId,
+      promptId,
+      text: "retry",
+    });
+    if (!retry.prompt) throw new Error("Expected replacement after timeout");
+    expect(
+      (await client.waitForPrompt(retry.prompt.promptId)).prompt.status,
+    ).toBe("succeeded");
+  }, 20_000);
+
+  it("commits a rewind when replacement admission fails and keeps its gate reusable", async () => {
+    client = open();
+    if (!client.getSessionView || !client.getSessionHistory)
+      throw new Error("Expected persistent session recovery support");
+    const { prompt: target } = await client.submitPromptAndWait(
+      "rewind but fail to replace",
+    );
+    const { sessionId, promptId } = target;
+    const db = getDatabase();
+    db.exec(
+      "CREATE TEMP TRIGGER fail_replacement BEFORE INSERT ON prompt_submission WHEN NEW.text='cannot send' BEGIN SELECT RAISE(ABORT,'forced admission error'); END",
+    );
+    const result = await client.rewindSession({
+      sessionId,
+      promptId,
+      text: "cannot send",
+    });
+    expect(result.prompt).toBeUndefined();
+    expect(result.sendError?.message).toContain("forced admission error");
+    expect(result.sendError?.code).toEqual(expect.any(String));
+    expect((await client.getSessionView({ sessionId })).prompts).toEqual([]);
+    await expect(
+      client.rewindSession({ sessionId, promptId }),
+    ).rejects.toMatchObject({ code: "REWIND_TARGET_INVALID" });
+    expect(
+      (await client.submitPromptAndWait("next prompt", { sessionId })).prompt
+        .status,
+    ).toBe("succeeded");
+  });
 });

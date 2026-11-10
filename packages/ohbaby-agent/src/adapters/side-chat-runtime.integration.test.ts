@@ -1,4 +1,6 @@
-import { processOwnerId } from "../utils/process-owner.js";
+import { ShellJobRegistry } from "../tools/shell-job-registry.js";
+import { DatabaseSubagentExecutionStore } from "../agents/subagents/execution-store.js";
+import { isOwnerProcessAlive, processOwnerId } from "../utils/process-owner.js";
 import { SideChatUnsupportedError } from "../services/session/errors.js";
 import {
   mkdir,
@@ -16,6 +18,7 @@ import type {
   InterfaceProviderStreamEvent,
   LLMClientInstance,
 } from "ohbaby-llm";
+import { TodoWorkScopeRegistry } from "../tools/todo.js";
 import { McpManager, type McpTool } from "../mcp/index.js";
 import { resolveSessionStorageDir } from "../paths/session-storage.js";
 import { closeDatabase, getDatabase } from "../services/database/index.js";
@@ -40,10 +43,13 @@ describe("conversation copies through the persistent backend", () => {
   let fixtureRoot: string;
   let directory: string;
   let client: PersistentUiBackendClient;
+  let peer: PersistentUiBackendClient | undefined;
+  let open: () => PersistentUiBackendClient;
   const requests: InterfaceProviderRequest[] = [];
   const calls: ToolCall[] = [];
   const summaries: InterfaceProviderRequest[] = [];
   let overflowNext = false;
+  let titleRequests = 0;
 
   beforeEach(async () => {
     fixtureRoot = await mkdtemp(join(tmpdir(), "session-copy-runtime-"));
@@ -53,6 +59,7 @@ describe("conversation copies through the persistent backend", () => {
     calls.length = 0;
     summaries.length = 0;
     overflowNext = false;
+    titleRequests = 0;
     requests.length = 0;
     vi.spyOn(McpManager.prototype, "getAllTools").mockResolvedValue([
       {
@@ -84,6 +91,7 @@ describe("conversation copies through the persistent backend", () => {
         streamResponse(request) {
           const call =
             request.purpose === "agent-step" ? calls.shift() : undefined;
+          if (request.purpose === "session-title") titleRequests++;
           if (request.purpose === "context-summary") summaries.push(request);
           if (request.purpose === "agent-step") {
             requests.push(request);
@@ -121,15 +129,19 @@ describe("conversation copies through the persistent backend", () => {
         },
       },
     };
-    client = createPersistentUiBackendClient({
-      dbPath: join(directory, "agent.db"),
-      workdir: directory,
-      llmClient,
-      enableSnapshots: false,
-    });
+    open = (): PersistentUiBackendClient =>
+      createPersistentUiBackendClient({
+        dbPath: join(directory, "agent.db"),
+        workdir: directory,
+        llmClient,
+        enableSnapshots: false,
+      });
+    client = open();
   });
 
   afterEach(async () => {
+    await peer?.dispose();
+    peer = undefined;
     await client.dispose();
     closeDatabase();
     vi.restoreAllMocks();
@@ -220,6 +232,229 @@ describe("conversation copies through the persistent backend", () => {
       data: { sessions: [{ id: mainSessionId }] },
     });
   });
+
+  it("rebuilds a second backend's view, usage, loaded MCP tools and both todo scopes after rewind", async () => {
+    const [keptTool] = await McpManager.prototype.getAllTools();
+    const dropped = "mcp_s7_example_t5_later";
+    let finishLookup!: () => void;
+    const lookupDone = new Promise<void>((resolve) => {
+      finishLookup = resolve;
+    });
+    const lookupExecution = vi.fn<McpTool["execute"]>(async () => {
+      await lookupDone;
+      return { output: "lookup complete" };
+    });
+    const executeLater = vi.fn<McpTool["execute"]>(() =>
+      Promise.resolve({ output: "later result" }),
+    );
+    vi.spyOn(McpManager.prototype, "getAllTools").mockResolvedValue([
+      { ...keptTool, execute: lookupExecution },
+      {
+        ...keptTool,
+        name: dropped,
+        mcpToolName: "later",
+        execute: executeLater,
+      },
+    ]);
+    client.subscribePermissionEvents((event) => {
+      if (event.type === "permission.requested")
+        void client.respondPermission(
+          event.request.id,
+          { choiceId: "allow_once" },
+          {
+            permissionEpoch: event.permissionEpoch,
+            rootSessionId: event.rootSessionId,
+          },
+        );
+    });
+    const scope = vi.spyOn(TodoWorkScopeRegistry.prototype, "resolve");
+    function writeTodo(content: string): ToolCall {
+      return {
+        name: "todo_write",
+        args: { todos: [{ content, status: "pending" }] },
+      };
+    }
+    calls.push(writeTodo("kept default"));
+    // The fixture's generated title equals the first prompt's temporary title.
+    const first = (await client.submitPromptAndWait("Backend fixture reply"))
+      .prompt;
+    const { sessionId } = first;
+    scope.mockReturnValue("goal:rewind-test");
+    calls.push(
+      { name: "select_tools", args: { tools: [lookup] } },
+      writeTodo("kept goal"),
+    );
+    await client.submitPromptAndWait("second question", { sessionId });
+    scope.mockReturnValue(undefined);
+    calls.push(
+      { name: "select_tools", args: { tools: [dropped] } },
+      { name: dropped, args: {} },
+      writeTodo("dropped default"),
+    );
+    const third = (
+      await client.submitPromptAndWait("discarded-user-text ".repeat(800), {
+        sessionId,
+      })
+    ).prompt;
+    scope.mockReturnValue("goal:rewind-test");
+    calls.push(writeTodo("dropped goal"));
+    await client.submitPromptAndWait("fourth question", { sessionId });
+    const usageBefore = await client.getContextWindowUsage({ sessionId });
+    expect(executeLater).toHaveBeenCalledTimes(1);
+    expect(requests.at(-1)?.tools?.map((t) => t.name)).toEqual(
+      expect.arrayContaining([lookup, dropped]),
+    );
+
+    peer = open();
+    await client.initializeSession(sessionId);
+    const beforeView = await client.getSessionView?.({ sessionId });
+    expect(beforeView?.session.messages.map((m) => m.id)).toContain(
+      third.userMessageId,
+    );
+    calls.push({ name: lookup, args: {} });
+    const live = client.submitPromptAndWait(
+      "lookup while the peer attempts rewind",
+      { sessionId },
+    );
+    try {
+      await vi.waitFor(() => {
+        expect(lookupExecution).toHaveBeenCalled();
+      });
+      await expect(
+        peer.rewindSession({ sessionId, promptId: third.promptId }),
+      ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+    } finally {
+      finishLookup();
+      expect((await live).prompt.status).toBe("succeeded");
+    }
+    await peer.rewindSession({ sessionId, promptId: third.promptId });
+    const [view, history, usageAfter, snapshot] = await Promise.all([
+      client.getSessionView?.({ sessionId }),
+      client.getSessionHistory?.({ sessionId }),
+      client.getContextWindowUsage({ sessionId }),
+      client.getSnapshot(),
+    ]);
+    expect(view?.session.messages.map((m) => m.id)).toEqual(
+      history?.messages.map((m) => m.id),
+    );
+    expect(view?.session.messages.map((m) => m.id)).not.toContain(
+      third.userMessageId,
+    );
+    expect(view?.prompts.map((p) => p.promptId)).not.toContain(third.promptId);
+    expect(view?.runs.map((r) => r.id)).not.toContain(third.runId);
+    expect(
+      snapshot.sessions
+        .find((s) => s.id === sessionId)
+        ?.messages.map((m) => m.id),
+    ).not.toContain(third.userMessageId);
+    expect(usageAfter?.currentTokens).toBeLessThan(
+      usageBefore?.currentTokens ?? 0,
+    );
+    expect(
+      snapshot.todos?.find((t) => t.sessionId === sessionId)?.todos,
+    ).toEqual([{ content: "kept default", status: "pending" }]);
+    calls.push({ name: "todo_read", args: {} }, { name: dropped, args: {} });
+    await client.submitPromptAndWait("read the surviving goal list", {
+      sessionId,
+    });
+    const sent = requests.at(-1);
+    expect(sent?.tools?.map((t) => t.name)).toContain(lookup);
+    expect(sent?.tools?.map((t) => t.name)).not.toContain(dropped);
+    const sentMessages = JSON.stringify(sent?.messages);
+    expect(sentMessages).toContain("kept goal");
+    expect(sentMessages).not.toMatch(
+      /discarded-user-text|dropped goal|dropped default/,
+    );
+    expect(sentMessages).toContain("MCP tool is not loaded");
+    expect(executeLater).toHaveBeenCalledTimes(1);
+    // The goal-scoped tool actually read the rebuilt cache, in addition to the retained history.
+    const todoResult = sent?.messages.find(
+      (m) => m.role === "tool" && m.callId.startsWith("todo_read-"),
+    );
+    expect(JSON.stringify(todoResult)).toContain("kept goal");
+
+    await peer.rewindSession({ sessionId, promptId: first.promptId });
+    expect(
+      getDatabase()
+        .prepare(
+          "SELECT title, message_count, last_message_at FROM session WHERE id=?",
+        )
+        .get(sessionId),
+    ).toEqual({
+      title: "Backend fixture reply",
+      message_count: 0,
+      last_message_at: null,
+    });
+    const oldTitles = titleRequests;
+    // Execute directly on the still-open backend without an intervening view read.
+    calls.push({ name: "todo_read", args: {} });
+    await client.submitPromptAndWait("a new subject", { sessionId });
+    expect(titleRequests).toBe(oldTitles);
+    expect(requests.at(-1)?.tools?.map((t) => t.name)).not.toContain(lookup);
+    expect(JSON.stringify(requests.at(-1)?.messages)).not.toMatch(
+      /kept goal|second question/,
+    );
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "leaves history visible on cleanup failure and stops the detached process on retry",
+    async () => {
+      await client.setPermission({ level: "full-access" });
+      calls.push({
+        name: "bash",
+        args: {
+          command: "echo $$ > rewind-shell.pid; exec sleep 30",
+          run_in_background: true,
+        },
+      });
+      const { prompt } = await client.submitPromptAndWait(
+        "start a background process",
+      );
+      const { runId, promptId, sessionId } = prompt;
+      if (!runId) throw new Error("Expected a completed turn");
+      const readPid = async (): Promise<number> =>
+        Number(await readFile(join(directory, "rewind-shell.pid"), "utf8"));
+      await expect.poll(readPid).toBeGreaterThan(1);
+      const pid = await readPid();
+      const executions = new DatabaseSubagentExecutionStore();
+      const { record } = await executions.accept({
+        executionId: "cut-execution",
+        requestId: "call",
+        parentSessionId: sessionId,
+        requesterScopeId: "primary",
+        requesterRunId: runId,
+        rootSessionId: sessionId,
+        rootRunId: runId,
+        subagentId: "worker",
+        mode: "foreground",
+        prompt: "work",
+        createdAt: 1,
+      });
+      await executions.finish(record, { status: "completed", completedAt: 2 });
+      vi.spyOn(
+        ShellJobRegistry.prototype,
+        "cleanupRootRun",
+      ).mockResolvedValueOnce({ confirmed: false });
+      await expect(
+        client.rewindSession({ sessionId, promptId }),
+      ).rejects.toThrow(/shell cleanup is unconfirmed/i);
+      for (const table of [
+        "message",
+        "prompt_submission",
+        "subagent_execution",
+      ]) {
+        expect(
+          getDatabase()
+            .prepare(`SELECT 1 FROM ${table} WHERE rewound_at IS NOT NULL`)
+            .get(),
+        ).toBeUndefined();
+      }
+      expect(isOwnerProcessAlive(pid)).toBe(true);
+      await client.rewindSession({ sessionId, promptId });
+      expect(isOwnerProcessAlive(pid)).toBe(false);
+      expect((await executions.get(record))?.rewoundAt).toBeDefined();
+    },
+  );
 
   it("forks at the selected answer and rebuilds tools, cache and scratch for the new session", async () => {
     client.subscribePermissionEvents((event) => {

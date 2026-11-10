@@ -212,11 +212,17 @@ describe("copySessionHistory", () => {
     part("discard", "text", { text: "discarded answer" });
     message("child", "child-run", 2, "assistant", { contextScopeId: "child" });
     prompt("keep-prompt", "keep", "first", "succeeded", "/original");
+    prompt("old-cancelled", "no-old-message", null, "cancelled", "/original");
     prompt("target-prompt", "a-target", "second");
     // Associated with a retained run, so filtering copied messages alone cannot hide this prompt.
     prompt("later-steer", "discard", "first", "steered", "/moved");
+    prompt("new-cancelled", "no-new-message", null, "cancelled", "/moved");
+    // Old workspace clocks could go backwards across a move. First admissions retained their insert order.
     db.prepare(
-      "UPDATE prompt_submission SET accepted_at = 0 WHERE prompt_id='later-steer'",
+      "UPDATE prompt_submission SET accepted_at = 9 WHERE prompt_id='old-cancelled'",
+    ).run();
+    db.prepare(
+      "UPDATE prompt_submission SET accepted_at = 0 WHERE prompt_id IN ('later-steer', 'new-cancelled')",
     ).run();
     const at = new Date(100).toISOString();
     expect(
@@ -226,7 +232,11 @@ describe("copySessionHistory", () => {
       const promptIds = listRewindPrompts(tx, main, "target-prompt").map(
         (p) => p.promptId,
       );
-      expect(promptIds).toEqual(["target-prompt", "later-steer"]);
+      expect(promptIds).toEqual([
+        "target-prompt",
+        "later-steer",
+        "new-cancelled",
+      ]);
       expect(markMessagesRewound(tx, main, "a-target", at).sort()).toEqual([
         "a-target",
         "discard",
