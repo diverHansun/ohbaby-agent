@@ -250,6 +250,7 @@ function createSnapshotExecutor(input: {
 function withStartupRecovery(
   client: InProcessUiBackendClient,
   recovery: Promise<unknown>,
+  releaseGoalOwner: () => Promise<void>,
 ): Omit<PersistentUiBackendClient, "adoptSessionWorkspaceMove"> {
   let recovered = false;
   let startupFailureReported = false;
@@ -353,7 +354,11 @@ function withStartupRecovery(
             if (!startupFailureReported) throw error;
           }
         },
-        backend: () => client.dispose(shutdown),
+        backend: async () => {
+          const result = await client.dispose(shutdown);
+          if (result.status === "confirmed") await releaseGoalOwner();
+          return result;
+        },
       });
     },
     async getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
@@ -868,6 +873,7 @@ export function createPersistentUiBackendClient(
     });
   });
 
+  const goalPersistence = createSqliteGoalPersistence(db, now, backendOwnerId);
   const inProcessClient = createInProcessUiBackendClient({
     sideChatStorage: { db, deletedSessionFiles },
     closeSideChatInWorkspace: options.closeSideChatInWorkspace,
@@ -879,7 +885,7 @@ export function createPersistentUiBackendClient(
     createLLMClient: options.createLLMClient,
     createRunId: options.createRunId,
     createPromptUserMessageId: () => `message_${randomUUID()}`,
-    goalPersistence: createSqliteGoalPersistence(db, now),
+    goalPersistence,
     hookExecutor,
     initialSnapshot: options.initialSnapshot,
     startupReady,
@@ -908,7 +914,9 @@ export function createPersistentUiBackendClient(
     subagentOwnerPid: process.pid,
     workdir: options.workdir,
   });
-  const client = withStartupRecovery(inProcessClient, startupReady);
+  const client = withStartupRecovery(inProcessClient, startupReady, () =>
+    goalPersistence.releaseOwner(),
+  );
   return Object.assign(client, {
     async adoptSessionWorkspaceMove(
       plan: SessionWorkspaceMovePlan,

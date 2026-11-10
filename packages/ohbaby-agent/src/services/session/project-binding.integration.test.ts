@@ -1,3 +1,4 @@
+import { createSqliteGoalPersistence } from "../../goals/persistence.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -225,6 +226,16 @@ describe("session project binding", () => {
       createdAt: 5,
     });
 
+    const goals = createSqliteGoalPersistence(
+      getDatabase(),
+      Date.now,
+      "source-owner",
+    );
+    await goals.append(session.id, {
+      type: "create",
+      goalId: "pending-goal",
+      objective: "finish",
+    });
     const plan = planSessionWorkspaceMove(session.id, "/repo/b");
     expect(plan.needsQueueHandover).toBe(true);
 
@@ -245,6 +256,7 @@ describe("session project binding", () => {
       },
     });
 
+    expect(goals.activeOwner?.(session.id)).toBeUndefined();
     const queued = await target.listQueued("/repo/b");
     expect(queued.map((prompt) => prompt.promptId)).toEqual(["p1", "p2"]);
     await expect(target.get("running")).resolves.toMatchObject({

@@ -98,6 +98,12 @@ export function writeSessionWorkspaceBinding(
   binding: SessionWorkspaceBinding,
   updatedAt: number,
 ): Session {
+  // When the execution workspace changes, its next backend recovers the goal on entry.
+  db.prepare(
+    `DELETE FROM app_state WHERE scope='goal-driver' AND key=? AND EXISTS (
+    SELECT 1 FROM session WHERE id=? AND COALESCE(pending_working_directory, working_directory)
+      <> COALESCE(?, working_directory))`,
+  ).run(sessionId, sessionId, binding.pendingWorkingDirectory ?? null);
   const result = db
     .prepare(
       `UPDATE ${schema.session.tableName}

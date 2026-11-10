@@ -155,6 +155,9 @@ function deleteTree(
     )
     .all(sessionId);
   db.prepare(
+    `${SESSION_TREE} DELETE FROM app_state WHERE scope='goal-driver' AND key IN (SELECT id FROM tree)`,
+  ).run(sessionId);
+  db.prepare(
     `${SESSION_TREE} DELETE FROM goal_record WHERE session_id IN (SELECT id FROM tree)`,
   ).run(sessionId);
   db.prepare(

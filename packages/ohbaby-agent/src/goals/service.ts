@@ -84,6 +84,20 @@ export class GoalService {
     await this.storeFor(sessionId);
   }
 
+  /** A peer rewind can pause the observed goal while this backend keeps its session open. */
+  async refreshAfterRewind(sessionId: string): Promise<void> {
+    await this.mutate(sessionId, async () => {
+      if (
+        !this.initializedStores.has(sessionId) ||
+        this.deps.persistence.activeOwner?.(sessionId)?.local
+      )
+        return;
+      this.stores.delete(sessionId);
+      this.initializedStores.delete(sessionId);
+      await this.storeFor(sessionId);
+    });
+  }
+
   /** Undefined means recovery has not completed; null means an initialized empty goal. */
   peekSnapshot(sessionId: string): GoalSnapshot | null | undefined {
     return this.initializedStores.get(sessionId)?.getSnapshot();
@@ -125,12 +139,19 @@ export class GoalService {
     goalId: string,
     epoch: number,
   ): boolean {
-    const snapshot = this.peekSnapshot(sessionId);
     return (
-      snapshot?.goalId === goalId &&
-      snapshot.status === "active" &&
-      this.currentExecutionEpoch(sessionId) === epoch
+      this.currentExecutionEpoch(sessionId) === epoch &&
+      this.ownsActiveGoal(sessionId, goalId)
     );
+  }
+
+  ownsActiveGoal(sessionId: string, goalId: string): boolean {
+    const snapshot = this.peekSnapshot(sessionId);
+    if (snapshot?.goalId !== goalId || snapshot.status !== "active")
+      return false;
+    if (!this.deps.persistence.activeOwner) return true;
+    const owner = this.deps.persistence.activeOwner(sessionId);
+    return owner?.goalId === goalId && owner.local;
   }
 
   getTicketForRun(

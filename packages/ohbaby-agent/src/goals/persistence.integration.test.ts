@@ -252,6 +252,32 @@ describe("goal persistence", () => {
     });
   };
 
+  it("recovers an active goal after PID reuse and after the owning backend closes", async () => {
+    const db = getDatabase();
+    const first = createSqliteGoalPersistence(db, Date.now, "runtime-A");
+    const observer = createSqliteGoalPersistence(db, Date.now, "runtime-B");
+    await first.append("s1", {
+      type: "create",
+      goalId: "g",
+      objective: "test",
+    });
+    expect(observer.activeOwner?.("s1")).toEqual({ local: false, goalId: "g" });
+    db.prepare(
+      "UPDATE app_state SET value=json_set(value,'$.processId','former-process') WHERE scope='goal-driver' AND key=?",
+    ).run("s1");
+    const recovered = await GoalStore.rebuild({
+      sessionId: "s1",
+      persistence: observer,
+    });
+    expect(recovered.getSnapshot()?.status).toBe("paused");
+    await recovered.resume("user");
+    await observer.releaseOwner();
+    expect(
+      (
+        await GoalStore.rebuild({ sessionId: "s1", persistence: first })
+      ).getSnapshot()?.status,
+    ).toBe("paused");
+  });
   suite("sqlite", () => createSqliteGoalPersistence(getDatabase()));
   suite("in-memory", () => new InMemoryGoalPersistence());
 });

@@ -361,6 +361,8 @@ export class GoalStore {
     if (state === undefined) return;
     state.wallClockResumedAt = undefined;
     if (state.status === "active") {
+      const owner = this.deps.persistence.activeOwner?.(this.deps.sessionId);
+      if (owner?.goalId === state.goalId) return;
       await this.applyUpdate(
         { pauseReason: RESUME_NORMALIZE_REASON, status: "paused" },
         "runtime",

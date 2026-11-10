@@ -83,6 +83,10 @@ export interface GoalRecord extends GoalRecordData {
 
 /** 持久化端口：追加记录 + 按 session 顺序读取（重建用）。 */
 export interface GoalPersistencePort {
+  /** The live backend driving the active goal. Older records may have no owner. */
+  activeOwner?(
+    sessionId: string,
+  ): { goalId: string; local: boolean } | undefined;
   append(sessionId: string, data: GoalRecordData): Promise<void>;
   list(sessionId: string): Promise<readonly GoalRecord[]>;
 }
