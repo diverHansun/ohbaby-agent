@@ -249,25 +249,30 @@ describe("side chat through the persistent backend", () => {
     await expect(
       client.exportSession({ sessionId, format: "jsonl" }),
     ).rejects.toMatchObject(unsupported);
-    const restrictedActions: (() => Promise<unknown>)[] = [
-      () => client.updateSessionModel({ sessionId, modelEntryId: null }),
-      () => client.updateSessionReasoning({ sessionId, reasoning: null }),
-      () => client.archiveSession({ sessionId }),
-      () => client.openSideChat({ mainSessionId: sessionId }),
-      () =>
-        client.executeCommand({
-          commandId: "goal",
-          argv: [],
-          clientInvocationId: crypto.randomUUID(),
-          path: ["goal"],
-          raw: "/goal",
-          rawArgs: "",
-          sessionId,
-          surface: "headless",
-        }),
-    ];
-    for (const action of restrictedActions)
-      await expect(action()).rejects.toMatchObject(unsupported);
+    await expect(
+      client.updateSessionModel({ sessionId, modelEntryId: null }),
+    ).rejects.toMatchObject(unsupported);
+    await expect(
+      client.updateSessionReasoning({ sessionId, reasoning: null }),
+    ).rejects.toMatchObject(unsupported);
+    await expect(client.archiveSession({ sessionId })).rejects.toMatchObject(
+      unsupported,
+    );
+    await expect(
+      client.openSideChat({ mainSessionId: sessionId }),
+    ).rejects.toMatchObject(unsupported);
+    await expect(
+      client.executeCommand({
+        commandId: "goal",
+        argv: [],
+        clientInvocationId: crypto.randomUUID(),
+        path: ["goal"],
+        raw: "/goal",
+        rawArgs: "",
+        sessionId,
+        surface: "headless",
+      }),
+    ).rejects.toMatchObject(unsupported);
     expect(() => planSessionWorkspaceMove(sessionId, directory)).toThrow(
       SideChatUnsupportedError,
     );

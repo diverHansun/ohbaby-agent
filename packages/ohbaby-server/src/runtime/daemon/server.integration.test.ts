@@ -1487,6 +1487,26 @@ describe("createDaemonHttpServer", () => {
           "Timed out",
         );
         await resumedReader.cancel();
+        const switched = await postRpc(url, {
+          id: "select-side",
+          clientId: "client_a",
+          method: "selectSession",
+          params: ["session_2"],
+        });
+        expect(switched.status).toBe(200);
+        const rebound = createSseFrameReader(
+          await fetchEvents(url, "client_a", { "last-event-id": "0" }),
+        );
+        try {
+          await expect(rebound.read()).resolves.toMatchObject({
+            data: { type: "hello", rootSessionId: "session_2" },
+          });
+          await expect(readSseFrameWithTimeout(rebound)).rejects.toThrow(
+            "Timed out",
+          );
+        } finally {
+          await rebound.cancel();
+        }
       } finally {
         backend.resolveHeldSubmits();
         await submitted?.catch(() => undefined);

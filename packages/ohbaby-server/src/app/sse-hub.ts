@@ -17,6 +17,11 @@ import type { DaemonRouteContext } from "../protocols/web/routes/context.js";
 const encoder = new TextEncoder();
 const DEFAULT_CLIENT_DISCONNECT_RETENTION_MS = 5_000;
 
+interface RoutedEvent {
+  readonly event: UiEvent;
+  readonly sessionId: string | null | undefined;
+}
+
 interface SseClient {
   readonly clientId: string;
   close(): void;
@@ -90,7 +95,7 @@ export class DaemonSseHub {
   private readonly expiredClientIds = new Set<string>();
   private readonly replayEventsBySeqNum = new Map<
     number,
-    Map<string, UiEvent>
+    Map<string, RoutedEvent>
   >();
   private readonly clientDisconnectRetentionMs: number;
 
@@ -433,7 +438,10 @@ export class DaemonSseHub {
       const routed = replayEvents.get(client.clientId);
       if (routed) {
         try {
-          client.write({ event: routed, type: "ui.event" }, envelope.seqNum);
+          client.write(
+            { event: routed.event, type: "ui.event" },
+            envelope.seqNum,
+          );
         } catch {
           this.disconnectClient(client);
         }
@@ -461,12 +469,21 @@ export class DaemonSseHub {
 
   private routeEnvelopeForKnownClients(
     envelope: EventEnvelope,
-  ): Map<string, UiEvent> {
-    const replayEvents = new Map<string, UiEvent>();
+  ): Map<string, RoutedEvent> {
+    const replayEvents = new Map<string, RoutedEvent>();
     for (const clientId of this.context.knownClientIds) {
       const routed = this.routeEnvelopeForClient(envelope, clientId);
       if (routed) {
-        replayEvents.set(clientId, routed);
+        // Legacy runtime events have no scope on the wire. Keep the root that
+        // received them so a reconnected client cannot replay them in another root.
+        const sessionId =
+          routed.type === "runtime.updated" && routed.sessionId === undefined
+            ? this.context.clientViews.binding(
+                clientId,
+                this.context.permissionEpoch,
+              ).rootSessionId
+            : sessionIdForEvent(routed);
+        replayEvents.set(clientId, { event: routed, sessionId });
       }
     }
     return replayEvents;
@@ -552,23 +569,23 @@ export class DaemonSseHub {
     envelope: EventEnvelope,
     client: SseClient,
   ): void {
-    const routed = this.replayEventsBySeqNum
+    const cached = this.replayEventsBySeqNum
       .get(envelope.seqNum)
       ?.get(client.clientId);
+    if (!cached) return;
+    const routed = cached.event;
     if (
-      (routed?.type === "subagent.conversation.changed" ||
-        routed?.type === "subagent.conversation.unavailable") &&
+      (routed.type === "subagent.conversation.changed" ||
+        routed.type === "subagent.conversation.unavailable") &&
       routed.watchId !==
         this.context.clientViews.currentSubagentWatchId(client.clientId)
     )
       return;
-    if (!routed) return;
     const root = this.context.clientViews.binding(
       client.clientId,
       this.context.permissionEpoch,
     ).rootSessionId;
-    const sessionId = sessionIdForEvent(routed);
-    if (sessionId !== undefined && sessionId !== root) return;
+    if (cached.sessionId !== undefined && cached.sessionId !== root) return;
     const event = this.context.permissionRouter.filterEventForClient(
       routed,
       root,

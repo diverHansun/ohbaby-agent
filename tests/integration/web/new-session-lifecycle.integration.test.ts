@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { closeDatabase } from "../../../packages/ohbaby-agent/src/services/database/index.js";
+import {
+  commitSessionWorkspaceMove,
+  planSessionWorkspaceMove,
+} from "ohbaby-agent";
+import {
+  closeDatabase,
+  getDatabase,
+} from "../../../packages/ohbaby-agent/src/services/database/index.js";
 import {
   fixture,
   type NewSessionFixture,
@@ -69,6 +76,142 @@ afterEach(() => {
 });
 
 describe("New session real server lifecycle and SQLite", () => {
+  it("exposes side chat lifecycle, typed errors and idempotent close over REST and JSON-RPC", async () => {
+    const f = await fixture();
+    try {
+      const clientId = "web-regression";
+      const root = (await create(f, clientId)).session.id;
+      type Method = "openSideChat" | "listSideChats" | "closeSideChat";
+      const rest = async (method: Method, id: string): Promise<Response> => {
+        const closing = method === "closeSideChat";
+        return f.server.app.request(
+          closing ? `/v1/side-chats/${id}` : `/v1/sessions/${id}/side-chats`,
+          {
+            headers: headers(clientId),
+            method: closing
+              ? "DELETE"
+              : method === "listSideChats"
+                ? "GET"
+                : "POST",
+          },
+        );
+      };
+      const rpc = async (method: Method, id: string): Promise<Response> =>
+        f.server.app.request("/api/rpc", {
+          headers: headers(clientId),
+          method: "POST",
+          body: JSON.stringify({
+            id: "side-chat",
+            clientId,
+            method,
+            params: [
+              method === "closeSideChat"
+                ? { sideChatId: id }
+                : { mainSessionId: id },
+            ],
+          }),
+        });
+      const rejected = async (
+        method: Method,
+        id: string,
+        status: number,
+        code: string,
+      ): Promise<void> => {
+        for (const request of [rest, rpc]) {
+          const response = await request(method, id);
+          expect(response.status).toBe(status);
+          expect(await response.json()).toMatchObject({
+            ok: false,
+            error: { code },
+          });
+        }
+      };
+
+      await rejected("listSideChats", "unknown", 404, "SESSION_NOT_FOUND");
+      await rejected("openSideChat", root, 409, "SIDE_CHAT_UNSUPPORTED");
+      const initial = await f.backend.submitPromptAndWait("main context", {
+        sessionId: root,
+      });
+      expect(initial.prompt.status).toBe("succeeded");
+      const opened = await rest("openSideChat", root);
+      expect(opened.status).toBe(200);
+      const entry = (await opened.json()) as {
+        sideChatId: string;
+        boundaryMessageId: string;
+        title: string;
+      };
+      expect(entry).toEqual({
+        sideChatId: expect.any(String),
+        title: "Side chat 1",
+        boundaryMessageId: expect.any(String),
+      });
+      const list = await rest("listSideChats", root);
+      expect(list.status).toBe(200);
+      const listed = await list.json();
+      expect(listed).toMatchObject({
+        sideChats: [
+          {
+            ...entry,
+            workingDirectory: expect.any(String),
+            createdAt: expect.any(String),
+          },
+        ],
+      });
+      expect(await (await rpc("listSideChats", root)).json()).toMatchObject({
+        ok: true,
+        result: listed,
+      });
+      await rejected(
+        "openSideChat",
+        entry.sideChatId,
+        409,
+        "SIDE_CHAT_UNSUPPORTED",
+      );
+
+      // An open side chat owned by another live process cannot be drained here.
+      const db = getDatabase();
+      const saved = db
+        .prepare<{ data: string }>("SELECT data FROM session WHERE id=?")
+        .get(entry.sideChatId);
+      if (!saved) throw new Error("Expected an open side chat");
+      db.prepare(
+        "UPDATE session SET data=json_set(data,'$.sideChat.ownerPid',?,'$.sideChat.ownerId','another-owner') WHERE id=?",
+      ).run(process.ppid, entry.sideChatId);
+      await rejected("closeSideChat", entry.sideChatId, 409, "SESSION_RUNNING");
+      db.prepare("UPDATE session SET data=? WHERE id=?").run(
+        saved.data,
+        entry.sideChatId,
+      );
+      for (let call = 0; call < 2; call++) {
+        expect((await rest("closeSideChat", entry.sideChatId)).status).toBe(
+          204,
+        );
+        expect(
+          await (await rpc("closeSideChat", entry.sideChatId)).json(),
+        ).toMatchObject({ ok: true });
+      }
+      expect(await (await rest("listSideChats", root)).json()).toEqual({
+        sideChats: [],
+      });
+
+      const child = await f.backend.createSession();
+      db.prepare("UPDATE session SET parent_id=? WHERE id=?").run(
+        root,
+        child.id,
+      );
+      await rejected("openSideChat", child.id, 409, "SESSION_NOT_ROOT");
+      const archived = await f.backend.createSession();
+      await f.backend.archiveSession({ sessionId: archived.id });
+      await rejected("openSideChat", archived.id, 409, "SESSION_ARCHIVED");
+      await commitSessionWorkspaceMove(
+        planSessionWorkspaceMove(root, f.workdir + "-moved"),
+      );
+      await rejected("openSideChat", root, 409, "SESSION_MOVED");
+    } finally {
+      await f.dispose();
+    }
+  });
+
   it("remote /new reports current versus created and honors force-new", async () => {
     const f = await fixture();
     try {

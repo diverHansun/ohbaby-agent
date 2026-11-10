@@ -5624,11 +5624,12 @@ describe("createInProcessUiBackendClient", () => {
       kind: "running",
       runId: "run_newer",
     });
-    expect(events).not.toContainEqual({
-      type: "runtime.updated",
-      status: { kind: "idle" },
-      timestamp: expect.any(Number) as number,
-    });
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: "runtime.updated",
+        status: { kind: "idle" },
+      }),
+    );
   });
 
   it("reconciles compaction progress when switching to a running session", async () => {

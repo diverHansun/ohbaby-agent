@@ -2422,6 +2422,7 @@ export function createInProcessUiBackendClient(
     if (updated) {
       publish({
         type: "runtime.updated",
+        sessionId: selectedSessionId,
         status: updated,
         timestamp: Date.now(),
       });

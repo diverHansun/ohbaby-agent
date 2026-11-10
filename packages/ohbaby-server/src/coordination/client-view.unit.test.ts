@@ -48,7 +48,8 @@ function emptySnapshot(): UiSnapshot {
   };
 }
 
-function snapshotWithSessions(): UiSnapshot {
+function snapshotWithSessions(): UiSnapshot &
+  Required<Pick<UiSnapshot, "prompts" | "contextWindowUsages">> {
   return {
     ...emptySnapshot(),
     activeSessionId: "session_1",
@@ -265,6 +266,66 @@ function commandInvocation(commandId = "status"): ExecuteCommandInvocation {
 }
 
 describe("DaemonClientViewCoordinator", () => {
+  it("preserves ordinary transcripts and selection for legacy snapshot readers when a side chat opens", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    const base = snapshotWithSessions();
+    const side = {
+      ...sessionWithMessages("side", [textMessage("private", "side question")]),
+      isSideChat: true,
+      unconsumedSteers: [
+        {
+          inputId: "i",
+          promptId: "p",
+          messageId: "m",
+          text: "private reminder",
+          state: "unconsumed" as const,
+        },
+      ],
+    };
+    const todo = { sessionId: "session_2", todos: [], visible: true };
+    const goal = {
+      sessionId: "session_1",
+      goal: {
+        status: "active",
+        objective: "normal",
+        turnsUsed: 0,
+        wallClockMs: 0,
+      },
+    } as const;
+    const snapshot: UiSnapshot = {
+      ...base,
+      sessions: [...base.sessions, side],
+      todos: [todo, { ...todo, sessionId: side.id }],
+      goals: [goal, { ...goal, sessionId: side.id }],
+      prompts: [
+        ...base.prompts,
+        { ...base.prompts[0], sessionId: side.id, text: "private prompt" },
+      ],
+      runs: [...base.runs, { ...base.runs[0], sessionId: side.id }],
+      permissions: [
+        ...base.permissions,
+        { ...base.permissions[0], rootSessionId: side.id },
+      ],
+      contextWindowUsages: [
+        ...base.contextWindowUsages,
+        { ...base.contextWindowUsages[0], sessionId: side.id },
+      ],
+    };
+    expect(coordinator.projectSnapshot("legacy", snapshot)).toEqual({
+      ...base,
+      todos: [todo],
+      goals: [goal],
+    });
+    coordinator.initializeClient("main", snapshot, {
+      resumeSessionId: "session_1",
+    });
+    const sideMetadata = coordinator
+      .projectSnapshot("main", snapshot)
+      .sessions.find((s) => s.id === side.id);
+    expect(sideMetadata).toMatchObject({ id: side.id, messages: [] });
+    expect(sideMetadata?.unconsumedSteers).toBeUndefined();
+  });
+
   it("only grants prompt access within the client's selected session", () => {
     const coordinator = new DaemonClientViewCoordinator();
     const snapshot = snapshotWithSessions();
@@ -687,13 +748,48 @@ describe("DaemonClientViewCoordinator", () => {
       sessionId: "session_1",
       text: "hello",
     });
+    const status = runtimeRunning("run_1");
     coordinator.observeEvent(runUpdated("run_1", "session_1"));
-
     expect(
-      coordinator.routeEventForClient(runtimeRunning("run_1"), "client_active"),
-    ).toEqual(runtimeRunning("run_1"));
+      coordinator.routeEventForClient(
+        { type: "runtime.updated", status: { kind: "idle" } },
+        "client_active",
+      ),
+    ).toBeDefined();
+    coordinator.initializeClient(
+      "panel",
+      { sessions: [sessionWithMessages("side")] },
+      { resumeSessionId: "side" },
+    );
+    coordinator.promptStarted({
+      clientId: "panel",
+      sessionId: "side",
+      text: "question",
+    });
+    coordinator.observeEvent(status);
+    expect(coordinator.routeEventForClient(status, "client_active")).toEqual(
+      status,
+    );
+    expect(coordinator.routeEventForClient(status, "panel")).toBeUndefined();
     expect(
-      coordinator.routeEventForClient(runtimeRunning("run_1"), "client_fresh"),
+      coordinator.routeEventForClient(status, "client_fresh"),
+    ).toBeUndefined();
+    const waiting = {
+      type: "runtime.updated",
+      status: { kind: "waiting-for-permission", requestId: "main-only" },
+    } as const;
+    expect(coordinator.routeEventForClient(waiting, "panel")).toBeUndefined();
+    expect(
+      coordinator.routeEventForClient(
+        { ...waiting, sessionId: "session_1" },
+        "client_active",
+      ),
+    ).toBeDefined();
+    expect(
+      coordinator.routeEventForClient(
+        { ...waiting, sessionId: "session_1" },
+        "panel",
+      ),
     ).toBeUndefined();
   });
 

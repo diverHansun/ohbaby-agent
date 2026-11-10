@@ -575,6 +575,7 @@ async function withRemoteClient<T>(
   backend: FakeBackend,
   callback: (
     client: ReturnType<typeof createRemoteUiBackendClient>,
+    port: number,
   ) => Promise<T>,
   options: {
     readonly client?: Partial<Omit<RemoteDaemonClientOptions, "port">>;
@@ -599,7 +600,7 @@ async function withRemoteClient<T>(
     ...options.client,
   });
   try {
-    return await callback(client);
+    return await callback(client, server.port);
   } finally {
     await client.dispose();
     await server.stop();
@@ -622,6 +623,129 @@ describe("createRemoteUiBackendClient", () => {
       {
         client: { startupIntent: { resumeSessionId: "session_1" } },
       },
+    );
+  });
+
+  it("routes main and side chat updates and approvals to their own remote clients", async () => {
+    const mainId = "session_1";
+    const sideId = "session_side_test";
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: mainId,
+      sessions: [
+        sessionUpdated(mainId).session,
+        { ...sessionUpdated(sideId).session, isSideChat: true },
+      ],
+    });
+    await withRemoteClient(
+      backend,
+      async (main, port) => {
+        const side = createRemoteUiBackendClient({
+          authToken,
+          clientId: "panel",
+          host: "127.0.0.1",
+          port,
+          startupIntent: { resumeSessionId: sideId },
+        });
+        try {
+          const observe = (
+            client: typeof main,
+          ): {
+            received: UiEvent[];
+            approvals: string[];
+            ready: Promise<void>;
+          } => {
+            const received: UiEvent[] = [];
+            const approvals: string[] = [];
+            client.subscribeEvents((event) => received.push(event));
+            const ready = new Promise<void>((resolve) =>
+              client.subscribePermissionEvents((event) => {
+                if (event.type === "permission.resync-required") resolve();
+                if (event.type === "permission.requested")
+                  approvals.push(event.rootSessionId);
+              }),
+            );
+            return { received, approvals, ready };
+          };
+          const observers = [observe(main), observe(side)];
+          await Promise.all(observers.map((observer) => observer.ready));
+          const receipt = await side.submitPromptAccepted("panel question");
+          expect(receipt.sessionId).toBe(sideId);
+          expect(await main.getSelectedSessionId()).toBe(mainId);
+          const roots = [mainId, sideId];
+          const batches = roots.map((sessionId) => {
+            const events: UiEvent[] = [
+              {
+                type: "message.appended",
+                sessionId,
+                message: {
+                  id: sessionId,
+                  role: "assistant",
+                  createdAt: timestamp,
+                  parts: [],
+                },
+              },
+              { type: "todo.updated", sessionId, todos: [], visible: false },
+              { type: "goal.updated", sessionId, goal: null },
+              {
+                type: "runtime.updated",
+                sessionId,
+                status: {
+                  kind: "waiting-for-permission",
+                  requestId: sessionId,
+                },
+              },
+              {
+                type: "notice.emitted",
+                notice: {
+                  id: sessionId,
+                  sessionId,
+                  createdAt: timestamp,
+                  level: "info",
+                  title: "Tool",
+                  message: sessionId,
+                },
+              },
+            ];
+            for (const event of events) backend.emit(event);
+            backend.emit({
+              type: "permission.requested",
+              rootSessionId: sessionId,
+              permissionEpoch: "test-epoch",
+              permissionRevision: 1,
+              request: {
+                id: sessionId,
+                rootSessionId: sessionId,
+                sessionId,
+                title: "Approval",
+                description: "",
+                choices: [],
+                createdAt: 1,
+                callId: "call",
+                messageId: "msg",
+                runId: "run",
+              },
+            });
+            return events;
+          });
+          const end = noticeEmitted("finished");
+          backend.emit(end);
+          await vi.waitFor(() => {
+            for (const { received } of observers)
+              expect(received).toContainEqual(end);
+          });
+          for (const [i, observer] of observers.entries()) {
+            const updates = observer.received.filter((event) =>
+              batches[i].some((expected) => expected.type === event.type),
+            );
+            expect(updates).toEqual([...batches[i], end]);
+            expect(observer.approvals).toEqual([roots[i]]);
+          }
+        } finally {
+          await side.dispose();
+        }
+      },
+      { client: { startupIntent: { resumeSessionId: mainId } } },
     );
   });
 

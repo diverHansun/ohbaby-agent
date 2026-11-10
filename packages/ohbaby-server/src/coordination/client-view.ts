@@ -150,18 +150,6 @@ function resolveStartupActiveSessionId(
   return null;
 }
 
-function permissionsForClientSnapshot(
-  snapshot: UiSnapshot,
-  activeSessionId: string | null,
-): UiSnapshot["permissions"] {
-  if (activeSessionId === null) {
-    return [];
-  }
-  return snapshot.permissions.filter(
-    (permission) => permission.rootSessionId === activeSessionId,
-  );
-}
-
 function statusForClientSnapshot(
   snapshot: UiSnapshot,
   activeSessionId: string | null,
@@ -214,43 +202,58 @@ function projectSnapshotForClient(
   snapshot: UiSnapshot,
   view: ClientView | undefined,
 ): UiSnapshot {
-  // Legacy RPC callers may read an unbound snapshot. Preserve their existing
-  // response for ordinary sessions; temporary transcripts require an explicit binding.
-  if (!view && !snapshot.sessions.some((session) => session.isSideChat))
-    return snapshot;
-  const activeSessionId = view?.activeSessionId ?? null;
+  const sideChatIds = view
+    ? undefined
+    : new Set(snapshot.sessions.filter((s) => s.isSideChat).map((s) => s.id));
+  if (sideChatIds?.size === 0) return snapshot;
+  // Legacy RPC readers retain the selection and full transcripts of ordinary sessions.
+  const activeSessionId = view
+    ? (view.activeSessionId ?? null)
+    : snapshot.activeSessionId;
+  const visible = (id: string): boolean =>
+    sideChatIds ? !sideChatIds.has(id) : id === activeSessionId;
+  const viewingSideChat =
+    view &&
+    snapshot.sessions.some(
+      (session) => session.isSideChat && session.id === activeSessionId,
+    );
+  const sessions = sideChatIds
+    ? snapshot.sessions.filter((s) => visible(s.id))
+    : snapshot.sessions.map((session) => {
+        if (visible(session.id)) return session;
+        if (
+          session.unconsumedSteers &&
+          (session.isSideChat || viewingSideChat)
+        ) {
+          const { unconsumedSteers: _steers, ...metadata } = session;
+          return { ...metadata, messages: [] };
+        }
+        return { ...session, messages: [] };
+      });
   return {
     ...snapshot,
     activeSessionId,
-    ...(snapshot.contextWindowUsages === undefined
-      ? {}
-      : {
-          contextWindowUsages: snapshot.contextWindowUsages.filter(
-            (usage) => usage.sessionId === activeSessionId,
-          ),
-        }),
-    permissions: permissionsForClientSnapshot(snapshot, activeSessionId),
-    ...(snapshot.prompts === undefined
-      ? {}
-      : {
-          prompts: snapshot.prompts.filter(
-            (prompt) => prompt.sessionId === activeSessionId,
-          ),
-        }),
-    runs: snapshot.runs.filter((run) => run.sessionId === activeSessionId),
-    sessions: snapshot.sessions.map((session) =>
-      session.id === activeSessionId ? session : { ...session, messages: [] },
-    ),
-    status: statusForClientSnapshot(snapshot, activeSessionId),
-    ...(snapshot.todos && {
-      todos: snapshot.todos.filter(
-        (entry) => entry.sessionId === activeSessionId,
+    sessions,
+    ...(snapshot.contextWindowUsages && {
+      contextWindowUsages: snapshot.contextWindowUsages.filter((usage) =>
+        visible(usage.sessionId),
       ),
     }),
+    permissions: snapshot.permissions.filter((request) =>
+      visible(request.rootSessionId),
+    ),
+    ...(snapshot.prompts && {
+      prompts: snapshot.prompts.filter((prompt) => visible(prompt.sessionId)),
+    }),
+    runs: snapshot.runs.filter((run) => visible(run.sessionId)),
+    status: view
+      ? statusForClientSnapshot(snapshot, activeSessionId)
+      : snapshot.status,
+    ...(snapshot.todos && {
+      todos: snapshot.todos.filter((entry) => visible(entry.sessionId)),
+    }),
     ...(snapshot.goals && {
-      goals: snapshot.goals.filter(
-        (entry) => entry.sessionId === activeSessionId,
-      ),
+      goals: snapshot.goals.filter((entry) => visible(entry.sessionId)),
     }),
     ...(view?.initialPermission === undefined
       ? {}
@@ -309,13 +312,14 @@ function selectedSessionIdFromCommandAction(
     : undefined;
 }
 
-export function sessionIdForEvent(event: UiEvent): string | undefined {
+export function sessionIdForEvent(event: UiEvent): string | null | undefined {
   switch (event.type) {
     case "notice.emitted":
       return event.notice.sessionId;
     case "session.changed":
       return event.version.sessionId;
     case "session.unavailable":
+    case "runtime.updated":
       return event.sessionId;
     case "session.updated":
       return event.session.id;
@@ -356,8 +360,7 @@ export class DaemonClientViewCoordinator {
   >();
   private readonly runOwnersByRunId = new Map<string, string>();
   private readonly runSessionIdsByRunId = new Map<string, string>();
-  private readonly activePromptsBySession = new Map<string, DaemonPromptItem>();
-  private activePrompt: DaemonPromptItem | undefined;
+  private readonly activePrompts = new Set<DaemonPromptItem>();
   private readonly provisionalPromptBindings = new Map<
     string,
     ProvisionalPromptBinding
@@ -780,22 +783,17 @@ export class DaemonClientViewCoordinator {
   }
 
   promptStarted(item: DaemonPromptItem): void {
-    this.activePrompt = item;
-    if (item.sessionId !== undefined) {
-      this.activePromptsBySession.set(item.sessionId, item);
-    }
+    this.activePrompts.add(item);
   }
 
   promptSettled(item: DaemonPromptItem): void {
-    if (this.activePrompt === item) {
-      this.activePrompt = undefined;
-    }
-    if (
-      item.sessionId !== undefined &&
-      this.activePromptsBySession.get(item.sessionId) === item
-    ) {
-      this.activePromptsBySession.delete(item.sessionId);
-    }
+    this.activePrompts.delete(item);
+  }
+
+  private soleActivePrompt(): DaemonPromptItem | undefined {
+    return this.activePrompts.size === 1
+      ? this.activePrompts.values().next().value
+      : undefined;
   }
 
   observeEvent(event: UiEvent): void {
@@ -851,27 +849,26 @@ export class DaemonClientViewCoordinator {
         this.interactionResponseStates.delete(event.interactionId);
         return;
       case "runtime.updated": {
-        const runId =
-          event.status.kind === "running" ? event.status.runId : undefined;
-        if (runId !== undefined && this.activePrompt !== undefined) {
-          this.runOwnersByRunId.set(runId, this.activePrompt.clientId);
-          if (this.activePrompt.sessionId !== undefined) {
-            this.runSessionIdsByRunId.set(runId, this.activePrompt.sessionId);
+        // A legacy producer may publish status before its first run.updated.
+        // Infer an owner only while exactly one prompt can account for that run.
+        if (event.status.kind === "running") {
+          const runId = event.status.runId;
+          if (event.sessionId)
+            this.runSessionIdsByRunId.set(runId, event.sessionId);
+          else if (
+            event.sessionId === undefined &&
+            !this.runSessionIdsByRunId.has(runId)
+          ) {
+            const prompt = this.soleActivePrompt();
+            if (prompt?.sessionId)
+              this.runSessionIdsByRunId.set(runId, prompt.sessionId);
+            if (prompt) this.runOwnersByRunId.set(runId, prompt.clientId);
           }
         }
         return;
       }
       case "run.updated": {
         this.runSessionIdsByRunId.set(event.run.id, event.run.sessionId);
-        const activePrompt =
-          this.activePromptsBySession.get(event.run.sessionId) ??
-          this.activePrompt;
-        if (
-          activePrompt?.sessionId === event.run.sessionId ||
-          (activePrompt?.sessionId === undefined && activePrompt !== undefined)
-        ) {
-          this.runOwnersByRunId.set(event.run.id, activePrompt.clientId);
-        }
         if (
           event.run.status.kind !== "running" &&
           event.run.status.kind !== "waiting-for-permission"
@@ -1000,8 +997,7 @@ export class DaemonClientViewCoordinator {
     this.commandRunsByInvocationId.clear();
     this.commandBindingGenerations.clear();
     this.provisionalPromptBindings.clear();
-    this.activePrompt = undefined;
-    this.activePromptsBySession.clear();
+    this.activePrompts.clear();
     this.runOwnersByRunId.clear();
     this.runSessionIdsByRunId.clear();
     this.interactionResponseStates.clear();
@@ -1069,36 +1065,19 @@ export class DaemonClientViewCoordinator {
     event: Extract<UiEvent, { type: "runtime.updated" }>,
     clientId: string,
   ): boolean {
-    const sessionId = this.runtimeEventSessionId(event);
-    if (sessionId !== undefined) {
+    let sessionId = event.sessionId;
+    const runId =
+      event.status.kind === "running" ? event.status.runId : undefined;
+    if (sessionId === undefined && runId)
+      sessionId = this.runSessionIdsByRunId.get(runId);
+    if (sessionId !== undefined)
       return this.clientViews.get(clientId)?.activeSessionId === sessionId;
-    }
-
-    return this.runtimeEventOwner(event) === clientId;
-  }
-
-  private runtimeEventOwner(
-    event: Extract<UiEvent, { type: "runtime.updated" }>,
-  ): string | undefined {
-    if (event.status.kind === "running") {
-      return (
-        this.runOwnersByRunId.get(event.status.runId) ??
-        this.activePrompt?.clientId
-      );
-    }
-    return this.activePrompt?.clientId;
-  }
-
-  private runtimeEventSessionId(
-    event: Extract<UiEvent, { type: "runtime.updated" }>,
-  ): string | undefined {
-    if (event.status.kind === "running") {
-      return (
-        this.runSessionIdsByRunId.get(event.status.runId) ??
-        this.activePrompt?.sessionId
-      );
-    }
-    return this.activePrompt?.sessionId;
+    const owner = runId && this.runOwnersByRunId.get(runId);
+    if (owner) return owner === clientId;
+    const prompt = this.soleActivePrompt();
+    return prompt?.sessionId
+      ? this.clientViews.get(clientId)?.activeSessionId === prompt.sessionId
+      : prompt?.clientId === clientId;
   }
 
   private interactionEventBelongsToClient(

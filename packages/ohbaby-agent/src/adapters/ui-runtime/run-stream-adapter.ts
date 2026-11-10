@@ -240,6 +240,7 @@ export function startRunStreamProjection(
     }
     options.publish({
       type: "runtime.updated",
+      sessionId: options.sessionId,
       status,
       timestamp: Date.now(),
     });

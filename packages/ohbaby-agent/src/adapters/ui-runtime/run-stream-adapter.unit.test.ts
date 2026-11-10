@@ -157,11 +157,13 @@ describe("startRunStreamProjection", () => {
         title: "Compacting...",
       },
       timestamp: expect.any(Number) as number,
+      sessionId: "session_1",
       type: "runtime.updated",
     });
     expect(publish).toHaveBeenNthCalledWith(2, {
       status: { kind: "running", runId: "run_1" },
       timestamp: expect.any(Number) as number,
+      sessionId: "session_1",
       type: "runtime.updated",
     });
     await expect(stateStore.readSnapshot()).resolves.toMatchObject({

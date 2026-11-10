@@ -38,6 +38,8 @@ export interface UiSnapshotReplacedEvent {
 
 export interface UiRuntimeUpdatedEvent {
   readonly type: "runtime.updated";
+  /** Root whose status changed. Legacy producers may omit the scope. */
+  readonly sessionId?: string | null;
   readonly status: UiRunStatus;
   readonly timestamp?: number;
 }
