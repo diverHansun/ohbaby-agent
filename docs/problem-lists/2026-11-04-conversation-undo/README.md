@@ -8,7 +8,7 @@ Web 在用户消息上放 Edit 按钮，TUI 新增 `/rewind`。连 AI 的文件�
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | 撤销的后端、SDK、Web 气泡编辑、TUI `/rewind` | 规划中 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | 撤销的后端、SDK、Web 气泡编辑、TUI `/rewind` | Stage 1 后端已实现，待用户复核（本地分支 `codex/session-rewind-backend`） |
 
 ## 本轮文档地图
 
@@ -19,7 +19,7 @@ Web 在用户消息上放 Edit 按钮，TUI 新增 `/rewind`。连 AI 的文件�
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 决策表、Stage 1 至 4、接口与迁移、风险 |
 | [03 参考项目](improve-1/03-reference-projects.md) | kimi-code、codex、ZCode、deepseek-harness、opencode、claude-code 的做法与取舍 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 场景、回归清单、发布门、对抗性审查 |
-| 05 实施验收 | 实施完成后由验收会话写入 `improve-1/05-implementation-acceptance.md` |
+| [05 后端实施验收](improve-1/05-implementation-acceptance.md) | 实测范围、命令行端到端与复审记录 |
 
 ## 实施契约
 
@@ -27,8 +27,9 @@ Web 在用户消息上放 Edit 按钮，TUI 新增 `/rewind`。连 AI 的文件�
 - 本议题没有要求关键改动清单，02 只写到包和文件一级。
 - Stage 2（Web）依赖[消息复制议题](../2026-11-04-message-copy/README.md)的消息操作栏，要在它之后实施。Stage 1（后端）和 Stage 3（TUI）不依赖它。
 - 分工在实施前与用户确认。
-- 前置：Stage 1 第 8 步要改的 `copy-history.ts`（含 `findEndedMainRun`）由 side chat 议题新建，`findForkableMainRun` 由 fork 议题新增，本议题的 Stage 1 要在这两个议题的 Stage 1 之后实施。
-- 不可逆点：数据上没有。迁移 `029` 只加可空列，清空 `rewound_at` 就能恢复。但运行中撤销时，停掉的任务、取消的排队、暂停的 goal、停掉的子代理不会恢复，即使撤销最后没做成。
+- 前置：Stage 1 第 8 步要改的 `copy-history.ts`（含 `findEndedMainRun`）由 side chat 议题新建，`findForkableMainRun` 由 fork 议题新增，两项后端均已验收，Rewind 从 Fork 的交接提交 `224eaf7d` 开始实施。
+- 两个窗口共用后台时，撤销前已排队的提问一起撤掉，此后收到的提问等撤销结束再执行。独立 TUI 正占用同一会话时，撤销提示忙。
+- 迁移 `029` 保留原消息并记录会话的撤销修订号。停止的任务和子代理、取消的排队项、暂停的 goal 都需要用户重新发起或恢复，即使撤销最终没有完成。
 
 ## 相关议题
 

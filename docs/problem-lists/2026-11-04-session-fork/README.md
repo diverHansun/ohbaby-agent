@@ -8,7 +8,7 @@ Web 在每轮最终答案下面和会话行菜单里提供 fork，TUI 新增 `/f
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | fork 的后端、SDK、Web 两个入口、TUI `/fork` | Stage 1 后端待复核（分支 `codex/session-fork-backend`），Web 与 TUI 待三个后端完成后实施 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-04 | 首轮 | fork 的后端、SDK、Web 两个入口、TUI `/fork` | Stage 1 后端已验收（交接提交 `224eaf7d`），Web 与 TUI 待三个后端完成后实施 |
 
 ## 本轮文档地图
 

@@ -652,3 +652,7 @@ AssistantMessage.agent: string  // 响应时使用的 Agent
 ## 会话 Fork 的消息副本
 
 Fork 在同一事务内复制主上下文，直到目标 AI 回答所在轮次的末尾。副本里的消息、片段、轮次和输入各获新 ID，彼此的引用随之更新；工具调用的 callId、原始时间和消息次序保留。若某片段在切点之后才被压缩，复制时移除该片段的压缩时间，使新会话可以读取当时的原文。
+
+## 撤销后的消息
+
+迁移 `029_message_rewind` 在 `message`、`prompt_submission`、`subagent_execution` 增加可空的 `rewound_at`。撤销以用户消息的 `(created_at, rowid)` 为起点，覆盖同会话主上下文中该消息及其之后的可见消息。子代理自己的对话单独保留。历史分页、模型输入、搜索和历史复制读取可见消息，按消息 ID 仍可定位原始记录。
