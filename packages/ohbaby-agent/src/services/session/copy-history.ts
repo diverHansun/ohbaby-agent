@@ -71,10 +71,8 @@ export function findForkableMainRun(
   const assistants = db.prepare<{
     id: string;
     agent: string;
-    request_count: number | null;
   }>(`
-    SELECT id, json_extract(data, '$.agent') AS agent,
-           json_array_length(data, '$.modelRequests') AS request_count
+    SELECT id, json_extract(data, '$.agent') AS agent
     FROM message WHERE session_id = ? AND json_extract(data, '$.runId') = ?
       AND context_scope_id IS NULL AND role = 'assistant' AND json_extract(data, '$.runtimeInput') IS NULL
     ORDER BY created_at DESC, id DESC
@@ -94,7 +92,6 @@ export function findForkableMainRun(
         continue;
       const active = parts.filter(isActivePart);
       const visible = active.filter(isTranscriptPart);
-      if (!visible.length && !message.request_count) continue;
       if (
         !active.some((part) => part.type === "tool") &&
         visible.some(
@@ -105,7 +102,7 @@ export function findForkableMainRun(
         )
       )
         return candidate.run_id;
-      // Earlier assistant steps in this run are process messages.
+      // Even an empty final assistant ends the search within this run.
       break;
     }
   }

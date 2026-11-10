@@ -1,4 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { projectRunProcesses } from "../../../apps/ohbaby-web/src/ui/conversation/run-process.js";
+import {
+  insertMessageRow,
+  insertPartRow,
+} from "../../../packages/ohbaby-agent/src/core/message/database-store.js";
+import { findForkableMainRun } from "../../../packages/ohbaby-agent/src/services/session/copy-history.js";
 import {
   commitSessionWorkspaceMove,
   planSessionWorkspaceMove,
@@ -76,6 +82,83 @@ afterEach(() => {
 });
 
 describe("New session real server lifecycle and SQLite", () => {
+  it("matches Web final answers when reading stored main turns with a summary or an empty last step", async () => {
+    const f = await fixture();
+    try {
+      const { id: sessionId } = await f.backend.createSession();
+      const send = async (text: string) => {
+        const { prompt } = await f.backend.submitPromptAndWait(text, {
+          sessionId,
+        });
+        if (!prompt.runId) throw new Error("Expected a completed main run");
+        return prompt.runId;
+      };
+      const answered = await send("First question");
+      const emptyLast = await send("Second question");
+      const db = getDatabase();
+      const at = Date.now() + 1;
+      for (const [id, runId, agent] of [
+        ["summary", answered, "context"],
+        ["empty", emptyLast, "build"],
+      ]) {
+        insertMessageRow(db, {
+          id,
+          sessionId,
+          runId,
+          agent,
+          role: "assistant",
+          time: { created: at, completed: at },
+        });
+      }
+      insertPartRow(
+        db,
+        {
+          id: "summary-part",
+          messageId: "summary",
+          sessionId,
+          type: "text",
+          orderIndex: 0,
+          text: "Internal summary",
+          metadata: { kind: "context-summary" },
+        },
+        at,
+      );
+
+      const { messages, prompts, runs } = await f.backend.getSessionHistory({
+        sessionId,
+      });
+      expect(
+        messages.some(
+          (message) =>
+            message.runId === emptyLast &&
+            message.parts.some(
+              (part) => part.type === "text" && part.text === "done",
+            ),
+        ),
+      ).toBe(true);
+      expect(messages.find((message) => message.id === "empty")).toMatchObject({
+        role: "assistant",
+        runId: emptyLast,
+        parts: [],
+      });
+      expect(messages.find((message) => message.id === "summary")?.role).toBe(
+        "system",
+      );
+      const turns = projectRunProcesses(messages, prompts, sessionId, {}, runs);
+      expect(turns.map((turn) => [turn.runId, turn.answerId])).toEqual([
+        [answered, expect.any(String)],
+        [emptyLast, undefined],
+      ]);
+      for (const { runId, answerId } of turns)
+        expect(findForkableMainRun(db, sessionId, runId)).toBe(
+          answerId ? runId : null,
+        );
+      expect(findForkableMainRun(db, sessionId)).toBe(answered);
+    } finally {
+      await f.dispose();
+    }
+  });
+
   it("forks from unselected roots and preserves typed failures and client binding on both transports", async () => {
     const f = await fixture();
     try {

@@ -362,7 +362,14 @@ describe("copySessionHistory", () => {
       text: "Summary",
       metadata: { kind: "context-summary" },
     });
-    message("compacted", "answered", 3, "assistant");
+    run("empty-final", 3);
+    message("step-before-empty", "empty-final", 2, "assistant");
+    part("step-before-empty", "text", { text: "I will check" });
+    message("empty", "empty-final", 3, "assistant");
+    run("compacted-final", 3);
+    message("step-before-compaction", "compacted-final", 2, "assistant");
+    part("step-before-compaction", "text", { text: "Earlier step" });
+    message("compacted", "compacted-final", 3, "assistant");
     part("compacted", "reasoning", { text: "Retired", time: { compacted: 4 } });
     run("user-only", 4, "cancelled");
     message("unanswered", "user-only", 4);
@@ -405,7 +412,14 @@ describe("copySessionHistory", () => {
     part("input", "text", { text: "Child output" });
     expect(findForkableMainRun(db, main)).toBe("answered");
     expect(findForkableMainRun(db, main, "answered")).toBe("answered");
-    for (const id of ["user-only", "tool", "thinking", "runtime"]) {
+    for (const id of [
+      "empty-final",
+      "compacted-final",
+      "user-only",
+      "tool",
+      "thinking",
+      "runtime",
+    ]) {
       expect(findForkableMainRun(db, main, id)).toBeNull();
     }
     expect(findEndedMainRun(db, main)).toBe("thinking");
