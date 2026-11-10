@@ -183,6 +183,7 @@ describe("daemon protocol", () => {
       "compactSession",
       "archiveSession",
       "forkSession",
+      "rewindSession",
       "openSideChat",
       "listSideChats",
       "closeSideChat",

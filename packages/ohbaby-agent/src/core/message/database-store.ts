@@ -33,6 +33,7 @@ import type {
 import { isModelContextPart, MODEL_CONTEXT_RUNTIME_KIND } from "./origin.js";
 
 interface MessageRow {
+  readonly rewound_at: string | null;
   readonly id: string;
   readonly session_id: string;
   readonly context_scope_id: string | null;
@@ -622,7 +623,10 @@ export function createDatabaseMessageStore(
             );
           }
           const row = getMessageRow(expected.info.id);
-          if (row?.data !== messageToRowData(expected.info)) {
+          if (
+            row?.rewound_at !== null ||
+            row.data !== messageToRowData(expected.info)
+          ) {
             return undefined;
           }
           const currentParts = db
@@ -652,7 +656,8 @@ export function createDatabaseMessageStore(
           }
           const row = db
             .prepare<PartRow>(
-              `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
+              `SELECT p.* FROM ${schema.part.tableName} p JOIN ${schema.message.tableName} m ON m.id=p.message_id
+               WHERE p.id=? AND m.rewound_at IS NULL`,
             )
             .get(expectedPart.id);
           if (!row) {

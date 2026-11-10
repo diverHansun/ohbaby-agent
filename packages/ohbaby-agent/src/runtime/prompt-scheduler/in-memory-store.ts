@@ -148,16 +148,8 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     if (queuedCount >= input.maxQueuedPrompts) {
       throw new PromptQueueFullError(input.scopeKey, input.maxQueuedPrompts);
     }
-    const at = Math.max(
-      this.now(),
-      this.lastCreatedAt + 1,
-      ...[...this.records.values()]
-        .filter(
-          (r) =>
-            r.scopeKey === input.scopeKey || r.sessionId === input.sessionId,
-        )
-        .map((r) => r.acceptedAt ?? r.createdAt),
-    );
+    const admission = this.nextAdmission(input.scopeKey, input.sessionId);
+    const at = Math.max(admission.acceptedAt, this.lastCreatedAt + 1);
     this.lastCreatedAt = at;
     const record: PromptSubmissionRecord = {
       promptId: input.promptId,
@@ -175,7 +167,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       ownerId: this.ownerId,
       ownerPid: this.ownerPid,
       acceptedAt: at,
-      admissionOrder: this.nextAdmissionOrder(input.scopeKey, input.sessionId),
+      admissionOrder: admission.order,
       createdAt: at,
       updatedAt: at,
     };
@@ -450,11 +442,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     const records: PromptSubmissionRecord[] = [];
     for (const id of promptIds) {
       const record = this.records.get(id);
-      if (
-        !record ||
-        record.sessionId !== sessionId ||
-        record.rewoundAt !== undefined
-      )
+      if (record?.sessionId !== sessionId || record.rewoundAt !== undefined)
         continue;
       const updated = {
         ...record,
@@ -615,14 +603,9 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     ).length;
     if (count >= input.maxQueuedPrompts)
       throw new PromptQueueFullError(input.scopeKey, input.maxQueuedPrompts);
-    const acceptedAt = Math.max(
-      this.now(),
-      ...[...this.records.values()]
-        .filter(
-          (r) =>
-            r.scopeKey === input.scopeKey || r.sessionId === current.sessionId,
-        )
-        .map((r) => r.acceptedAt ?? r.createdAt),
+    const { acceptedAt, order } = this.nextAdmission(
+      input.scopeKey,
+      current.sessionId,
     );
     const record: PromptSubmissionRecord = {
       ...current,
@@ -631,10 +614,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
         input.text === current.text ? current.namingSource : undefined,
       status: "queued",
       acceptedAt,
-      admissionOrder: this.nextAdmissionOrder(
-        input.scopeKey,
-        current.sessionId,
-      ),
+      admissionOrder: order,
       ownerId: this.ownerId,
       ownerPid: this.ownerPid,
       updatedAt: this.nextTime(current),
@@ -748,15 +728,18 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     if (!this.owns(record))
       throw new PromptVersionConflictError(record.promptId);
   }
-  private nextAdmissionOrder(scopeKey: string, sessionId: string): number {
-    return (
-      Math.max(
-        0,
-        ...[...this.records.values()]
-          .filter((r) => r.scopeKey === scopeKey || r.sessionId === sessionId)
-          .map((r) => r.admissionOrder ?? 0),
-      ) + 1
-    );
+  private nextAdmission(
+    scopeKey: string,
+    sessionId: string,
+  ): { acceptedAt: number; order: number } {
+    let acceptedAt = this.now();
+    let highest = 0;
+    for (const row of this.records.values()) {
+      if (row.scopeKey !== scopeKey && row.sessionId !== sessionId) continue;
+      acceptedAt = Math.max(acceptedAt, row.acceptedAt ?? row.createdAt);
+      highest = Math.max(highest, row.admissionOrder ?? 0);
+    }
+    return { acceptedAt, order: highest + 1 };
   }
 
   private require(promptId: string): PromptSubmissionRecord {

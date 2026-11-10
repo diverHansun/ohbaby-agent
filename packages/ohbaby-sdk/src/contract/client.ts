@@ -96,6 +96,21 @@ export async function submitPromptAndWait(
   return client.waitForPrompt(receipt.promptId, { signal });
 }
 
+export interface UiRewindSessionInput {
+  readonly sessionId: string;
+  readonly promptId: string;
+  /** If present, admit a replacement prompt after rewinding. */
+  readonly text?: string;
+}
+
+export interface UiRewindSessionResult {
+  readonly sessionId: string;
+  readonly restoredText: string;
+  readonly prompt?: UiPromptReceipt;
+  /** Admission failed after the rewind committed. */
+  readonly sendError?: { readonly code: string; readonly message: string };
+}
+
 export interface UiForkSessionInput {
   readonly sessionId: string;
   /** Omit to fork from the most recent eligible answer. */
@@ -250,6 +265,7 @@ export interface UiCommandClient
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
+  rewindSession(input: UiRewindSessionInput): Promise<UiRewindSessionResult>;
   forkSession(input: UiForkSessionInput): Promise<UiForkSessionResult>;
   openSideChat(input: {
     readonly mainSessionId: string;

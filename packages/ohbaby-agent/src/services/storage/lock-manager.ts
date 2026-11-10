@@ -2,20 +2,20 @@ export class KeyLockManager {
   private readonly tails = new Map<string, Promise<void>>();
 
   async exclusive<T>(key: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.tails.get(key) ?? Promise.resolve();
+    const previous = this.tails.get(key);
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const tail = previous.catch(() => undefined).then(() => current);
-    this.tails.set(key, tail);
+    this.tails.set(key, current);
 
-    await previous.catch(() => undefined);
+    // Start the first operation immediately. Each successor waits for its predecessor's release.
+    if (previous) await previous;
     try {
       return await operation();
     } finally {
       release();
-      if (this.tails.get(key) === tail) {
+      if (this.tails.get(key) === current) {
         this.tails.delete(key);
       }
     }

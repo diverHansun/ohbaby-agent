@@ -58,6 +58,7 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
     forkSession: vi.fn(() => Promise.reject(new Error("unused"))),
+    rewindSession: vi.fn(() => Promise.reject(new Error("unused"))),
     openSideChat: vi.fn(() => Promise.reject(new Error("unused"))),
     listSideChats: vi.fn(() => Promise.resolve({ sideChats: [] })),
     closeSideChat: vi.fn(() => Promise.resolve()),

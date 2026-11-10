@@ -167,6 +167,9 @@ describe("context window UI contract", () => {
       forkSession(): Promise<never> {
         throw new Error("unused");
       },
+      rewindSession(): Promise<never> {
+        throw new Error("unused");
+      },
       openSideChat(): Promise<never> {
         throw new Error("unused");
       },

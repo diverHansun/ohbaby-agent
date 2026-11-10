@@ -33,6 +33,8 @@ import type {
 } from "./types.js";
 
 export interface WorkspacePromptSchedulerOptions {
+  /** Suspend claims while the current session is being stopped for rewind. */
+  readonly isClaimPaused?: (sessionId: string) => boolean;
   readonly executionGate?: {
     isHeld(sessionId: string): boolean;
     reserve(sessionId: string, token: symbol): boolean;
@@ -223,6 +225,10 @@ export class WorkspacePromptScheduler {
 
   async accept(
     input: AcceptWorkspacePromptInput,
+    admitResolved?: (
+      sessionId: string,
+      persist: () => Promise<AcceptedWorkspacePrompt>,
+    ) => Promise<AcceptedWorkspacePrompt>,
   ): Promise<AcceptedWorkspacePrompt> {
     this.assertOpen();
     await this.init();
@@ -304,39 +310,47 @@ export class WorkspacePromptScheduler {
         typeof input.reasoning === "function"
           ? await input.reasoning(sessionId)
           : input.reasoning;
-      const prompt = await this.commit(sessionId, async () => {
-        this.assertOpen();
-        const blocked =
-          this.pendingFinalizations.get(sessionId)?.error ??
-          this.entryFailures.get(sessionId);
-        if (blocked) throw blocked;
-        knownUnaccepted = false;
-        const accepted = await this.options.store.accept({
-          clientRequestId,
-          maxQueuedPrompts: this.maxQueuedPrompts,
-          promptId: this.options.createPromptId?.() ?? `prompt_${randomUUID()}`,
-          scopeKey: this.options.scopeKey,
-          sessionId,
-          text: input.text,
-          resendOfPromptId: input.resendOfPromptId,
-          namingSource: input.namingSource,
-          titleExpected: input.titleExpected?.(sessionId),
-          reasoning,
-          reasoningExplicit:
-            input.reasoning !== undefined &&
-            typeof input.reasoning !== "function",
-          modelEntryId,
-          modelEntryIdExplicit: typeof input.modelEntryId === "string",
-          userMessageId:
-            input.userMessageId ??
-            this.options.createUserMessageId?.() ??
-            `message_${randomUUID()}`,
+      const persist = (): Promise<AcceptedWorkspacePrompt> =>
+        this.commit(sessionId, async () => {
+          this.assertOpen();
+          const blocked =
+            this.pendingFinalizations.get(sessionId)?.error ??
+            this.entryFailures.get(sessionId);
+          if (blocked) throw blocked;
+          knownUnaccepted = false;
+          const accepted = await this.options.store.accept({
+            clientRequestId,
+            maxQueuedPrompts: this.maxQueuedPrompts,
+            promptId:
+              this.options.createPromptId?.() ?? `prompt_${randomUUID()}`,
+            scopeKey: this.options.scopeKey,
+            sessionId,
+            text: input.text,
+            resendOfPromptId: input.resendOfPromptId,
+            namingSource: input.namingSource,
+            titleExpected: input.titleExpected?.(sessionId),
+            reasoning,
+            reasoningExplicit:
+              input.reasoning !== undefined &&
+              typeof input.reasoning !== "function",
+            modelEntryId,
+            modelEntryIdExplicit: typeof input.modelEntryId === "string",
+            userMessageId:
+              input.userMessageId ??
+              this.options.createUserMessageId?.() ??
+              `message_${randomUUID()}`,
+          });
+          // The durable receipt survives projection failures and shutdown races.
+          if (!accepted.inserted)
+            return this.existingAcceptance(accepted.record);
+          this.notify(accepted.record, this.options.onSubmitted);
+          return this.steerAccepted(accepted.record);
         });
-        // The durable receipt survives projection failures and shutdown races.
-        if (!accepted.inserted) return this.existingAcceptance(accepted.record);
-        this.notify(accepted.record, this.options.onSubmitted);
-        return this.steerAccepted(accepted.record);
-      });
+      // An implicit submission only learns its destination during session resolution.
+      // Its workspace admission barrier is already released before it waits here.
+      const prompt = await (admitResolved
+        ? admitResolved(sessionId, persist)
+        : persist());
       this.requestDrain();
       return prompt;
     } catch (error) {
@@ -1079,6 +1093,7 @@ export class WorkspacePromptScheduler {
         }
         const candidate = [...laneHeads.values()].find(
           (prompt) =>
+            !this.options.isClaimPaused?.(prompt.sessionId) &&
             !this.options.executionGate?.isHeld(prompt.sessionId) &&
             !this.activeBySession.has(prompt.sessionId) &&
             !this.pendingFinalizations.has(prompt.sessionId) &&
@@ -1127,7 +1142,10 @@ export class WorkspacePromptScheduler {
         let handedOff = false;
         try {
           const claimed = await this.commit(candidate.sessionId, async () => {
-            if (this.options.executionGate?.isHeld(candidate.sessionId))
+            if (
+              this.options.isClaimPaused?.(candidate.sessionId) ||
+              this.options.executionGate?.isHeld(candidate.sessionId)
+            )
               return null;
             const result = await this.options.store.claim(candidate.promptId);
             if (result) this.notify(result, this.options.onUpdated);

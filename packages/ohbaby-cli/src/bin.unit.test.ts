@@ -1303,6 +1303,7 @@ function createCore(): {
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
   readonly exportSession: ReturnType<typeof vi.fn>;
   readonly forkSession: ReturnType<typeof vi.fn>;
+  readonly rewindSession: ReturnType<typeof vi.fn>;
   readonly openSideChat: ReturnType<typeof vi.fn>;
   readonly listSideChats: ReturnType<typeof vi.fn>;
   readonly closeSideChat: ReturnType<typeof vi.fn>;
@@ -1356,6 +1357,7 @@ function createCore(): {
     ),
     exportSession: vi.fn(() => Promise.reject(new Error("Not implemented"))),
     forkSession: vi.fn(() => Promise.reject(new Error("unused"))),
+    rewindSession: vi.fn(() => Promise.reject(new Error("unused"))),
     openSideChat: vi.fn(() => Promise.reject(new Error("unused"))),
     listSideChats: vi.fn(() => Promise.resolve({ sideChats: [] })),
     closeSideChat: vi.fn(() => Promise.resolve()),

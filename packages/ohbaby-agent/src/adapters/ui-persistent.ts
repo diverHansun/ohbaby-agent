@@ -567,6 +567,18 @@ function withStartupRecovery(
       await ready();
       return client.forkSession(input);
     },
+
+    async rewindSession(input): ReturnType<UiBackendClient["rewindSession"]> {
+      await ready();
+      return client.rewindSession(input);
+    },
+    async rewindSessionForOwner(
+      input,
+      trustedOwnerClientId,
+    ): ReturnType<UiPromptQueueExecutionPort["rewindSessionForOwner"]> {
+      await ready();
+      return client.rewindSessionForOwner(input, trustedOwnerClientId);
+    },
     async openSideChat(input): ReturnType<UiBackendClient["openSideChat"]> {
       await ready();
       return client.openSideChat(input);

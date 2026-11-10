@@ -554,6 +554,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("forkSession", [input]);
   }
 
+  rewindSession(
+    input: Parameters<UiBackendClient["rewindSession"]>[0],
+  ): ReturnType<UiBackendClient["rewindSession"]> {
+    return this.rpc("rewindSession", [input]);
+  }
+
   openSideChat(
     input: Parameters<UiBackendClient["openSideChat"]>[0],
   ): ReturnType<UiBackendClient["openSideChat"]> {

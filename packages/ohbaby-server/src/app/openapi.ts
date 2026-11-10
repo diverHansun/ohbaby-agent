@@ -1135,6 +1135,95 @@ export function createOpenApiDocument(
           summary: "Compact a session",
         },
       },
+      "/v1/sessions/{id}/rewind": {
+        post: {
+          summary:
+            "Rewind a conversation to a user prompt and optionally admit a replacement",
+          security: [{ daemonBearer: [] }],
+          parameters: [
+            pathParameter("id", "Source session ID"),
+            {
+              in: "header",
+              name: "x-ohbaby-client-id",
+              required: true,
+              schema: string,
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["promptId"],
+                  additionalProperties: false,
+                  properties: {
+                    promptId: { type: "string", minLength: 1 },
+                    text: { type: "string", pattern: "\\S" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description:
+                "Rewind committed. When text was supplied, prompt is the admission receipt or sendError describes why admission failed.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["sessionId", "restoredText"],
+                    not: { required: ["prompt", "sendError"] },
+                    properties: {
+                      sessionId: string,
+                      restoredText: string,
+                      prompt: {
+                        type: "object",
+                        description:
+                          "UiPromptReceipt for the replacement prompt",
+                        required: [
+                          "promptId",
+                          "clientRequestId",
+                          "userMessageId",
+                          "sessionId",
+                          "status",
+                          "createdAt",
+                        ],
+                        properties: {
+                          promptId: string,
+                          clientRequestId: string,
+                          userMessageId: string,
+                          sessionId: string,
+                          status: string,
+                          createdAt: string,
+                        },
+                      },
+                      sendError: {
+                        type: "object",
+                        required: ["code", "message"],
+                        properties: { code: string, message: string },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "400": {
+              description:
+                "REWIND_TARGET_INVALID, REWIND_BEFORE_COMPACTION or missing client ID",
+            },
+            "401": { description: "Unauthorized" },
+            "404": { description: "SESSION_NOT_FOUND" },
+            "409": {
+              description:
+                "SESSION_RUNNING, SESSION_MOVED, SESSION_NOT_ROOT, SESSION_ARCHIVED, SIDE_CHAT_UNSUPPORTED or unregistered client",
+            },
+            "413": { description: "Request body too large" },
+            "500": { description: "Unexpected rewind failure" },
+          },
+        },
+      },
       "/v1/sessions/{id}/fork": {
         post: {
           summary:

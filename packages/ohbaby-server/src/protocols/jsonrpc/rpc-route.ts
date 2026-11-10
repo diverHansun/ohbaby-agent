@@ -22,6 +22,8 @@ import {
   isUiPromptNamingSource,
   isUiReasoningConfig,
   parseForkSessionInput,
+  parseRewindSessionInput,
+  REWIND_TARGET_INVALID_ERROR_CODE,
 } from "ohbaby-sdk";
 import {
   DaemonForbiddenError,
@@ -246,6 +248,7 @@ export async function callDaemonBackend(input: {
         ? stopSubagentForClient(access)
         : subagentInstancesForClient(access);
     }
+    case "rewindSession":
     case "forkSession":
     case "openSideChat":
     case "listSideChats":
@@ -254,15 +257,26 @@ export async function callDaemonBackend(input: {
         throw Object.assign(new Error("client is not registered"), {
           code: "CLIENT_NOT_REGISTERED",
         });
-      if (request.method === "forkSession") {
+      if (
+        request.method === "forkSession" ||
+        request.method === "rewindSession"
+      ) {
         if (request.params.length !== 1)
           throw Object.assign(
-            new Error("forkSession expects one input object"),
+            new Error(`${request.method} expects one input object`),
             {
-              code: FORK_TARGET_INVALID_ERROR_CODE,
+              code:
+                request.method === "rewindSession"
+                  ? REWIND_TARGET_INVALID_ERROR_CODE
+                  : FORK_TARGET_INVALID_ERROR_CODE,
             },
           );
-        return backend.forkSession(parseForkSessionInput(request.params[0]));
+        return request.method === "rewindSession"
+          ? backend.rewindSessionForOwner(
+              parseRewindSessionInput(request.params[0]),
+              request.clientId,
+            )
+          : backend.forkSession(parseForkSessionInput(request.params[0]));
       }
       const raw = request.params[0];
       const key =
@@ -991,6 +1005,7 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
       }
     } catch (error) {
       const sessionOperation = [
+        "rewindSession",
         "forkSession",
         "openSideChat",
         "listSideChats",

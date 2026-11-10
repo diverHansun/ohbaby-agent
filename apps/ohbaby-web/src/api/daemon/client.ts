@@ -450,6 +450,12 @@ export class BrowserDaemonClient implements UiBackendClient {
     return this.http.forkSession(input);
   }
 
+  rewindSession(
+    input: Parameters<UiBackendClient["rewindSession"]>[0],
+  ): ReturnType<UiBackendClient["rewindSession"]> {
+    return this.http.rewindSession(input);
+  }
+
   openSideChat({
     mainSessionId,
   }: Parameters<UiBackendClient["openSideChat"]>[0]): ReturnType<

@@ -411,6 +411,7 @@ export function createInMemoryMessageStore(): MessageStore {
         const message = messages.get(expected.info.id);
         if (
           !message ||
+          rewoundMessages.has(message.id) ||
           JSON.stringify(message) !== JSON.stringify(expected.info) ||
           JSON.stringify(listPartsForMessage(expected.info.id)) !==
             JSON.stringify(expected.parts)
@@ -429,7 +430,7 @@ export function createInMemoryMessageStore(): MessageStore {
           );
         }
         const part = parts.get(expectedPart.id);
-        if (!part) {
+        if (!part || rewoundMessages.has(part.messageId)) {
           return Promise.resolve(undefined);
         }
         if (

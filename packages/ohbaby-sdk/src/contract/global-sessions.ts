@@ -1,4 +1,4 @@
-import type { UiForkSessionInput } from "./client.js";
+import type { UiForkSessionInput, UiRewindSessionInput } from "./client.js";
 
 /** Cross-workspace session catalog served by the daemon's global routes. */
 
@@ -7,33 +7,77 @@ export const SESSION_MOVED_ERROR_CODE = "SESSION_MOVED";
 
 export const FORK_TARGET_INVALID_ERROR_CODE = "FORK_TARGET_INVALID";
 
-/** REST supplies the source session in its path. RPC and in-process calls include it in the input. */
+export const REWIND_TARGET_INVALID_ERROR_CODE = "REWIND_TARGET_INVALID";
+export const REWIND_BEFORE_COMPACTION_ERROR_CODE = "REWIND_BEFORE_COMPACTION";
+
+function invalidSessionInput(code: string, message: string): never {
+  throw Object.assign(new Error(message), { code });
+}
+
+/** REST supplies the source in its path. RPC and in-process calls include it in the input. */
+function parseSessionCommand(
+  value: unknown,
+  pathSessionId: string | undefined,
+  fields: readonly string[],
+  code: string,
+): { sessionId: string; body: Record<string, unknown> } {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return invalidSessionInput(code, "Session command input must be an object");
+  const body = value as Record<string, unknown>;
+  for (const key of Object.keys(body)) {
+    if (
+      !fields.includes(key) &&
+      !(key === "sessionId" && pathSessionId === undefined)
+    )
+      return invalidSessionInput(code, `Unknown session command field: ${key}`);
+  }
+  const sessionId = pathSessionId ?? body.sessionId;
+  if (typeof sessionId !== "string" || !sessionId.trim())
+    return invalidSessionInput(code, "sessionId must be a nonempty string");
+  return { sessionId, body };
+}
+
 export function parseForkSessionInput(
   value: unknown,
   pathSessionId?: string,
 ): UiForkSessionInput {
-  function invalid(message: string): never {
-    throw Object.assign(new Error(message), {
-      code: FORK_TARGET_INVALID_ERROR_CODE,
-    });
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return invalid("Fork input must be an object");
-  const input = value as Record<string, unknown>;
-  for (const key of Object.keys(input)) {
-    if (
-      key !== "runId" &&
-      !(key === "sessionId" && pathSessionId === undefined)
-    )
-      return invalid(`Unknown fork input field: ${key}`);
-  }
-  const sessionId = pathSessionId ?? input.sessionId;
-  if (typeof sessionId !== "string" || !sessionId.trim())
-    return invalid("sessionId must be a nonempty string");
-  if (input.runId === undefined) return { sessionId };
-  if (typeof input.runId !== "string" || !input.runId.trim())
-    return invalid("runId must be a nonempty string");
-  return { sessionId, runId: input.runId };
+  const { sessionId, body } = parseSessionCommand(
+    value,
+    pathSessionId,
+    ["runId"],
+    FORK_TARGET_INVALID_ERROR_CODE,
+  );
+  if (body.runId === undefined) return { sessionId };
+  if (typeof body.runId !== "string" || !body.runId.trim())
+    return invalidSessionInput(
+      FORK_TARGET_INVALID_ERROR_CODE,
+      "runId must be a nonempty string",
+    );
+  return { sessionId, runId: body.runId };
+}
+
+export function parseRewindSessionInput(
+  value: unknown,
+  pathSessionId?: string,
+): UiRewindSessionInput {
+  const { sessionId, body } = parseSessionCommand(
+    value,
+    pathSessionId,
+    ["promptId", "text"],
+    REWIND_TARGET_INVALID_ERROR_CODE,
+  );
+  if (typeof body.promptId !== "string" || !body.promptId.trim())
+    return invalidSessionInput(
+      REWIND_TARGET_INVALID_ERROR_CODE,
+      "promptId must be a nonempty string",
+    );
+  if (body.text === undefined) return { sessionId, promptId: body.promptId };
+  if (typeof body.text !== "string" || !body.text.trim())
+    return invalidSessionInput(
+      REWIND_TARGET_INVALID_ERROR_CODE,
+      "text must be a nonempty string",
+    );
+  return { sessionId, promptId: body.promptId, text: body.text };
 }
 
 export const SIDE_CHAT_UNSUPPORTED_ERROR_CODE = "SIDE_CHAT_UNSUPPORTED";

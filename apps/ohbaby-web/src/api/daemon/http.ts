@@ -50,7 +50,11 @@ import type {
   WorkspaceScopesResponse,
   WorkspaceOpenResponse,
 } from "./wire.js";
-import { parseForkSessionInput, requestDirectoryHeaders } from "ohbaby-sdk";
+import {
+  parseForkSessionInput,
+  parseRewindSessionInput,
+  requestDirectoryHeaders,
+} from "ohbaby-sdk";
 import type { SessionFileEntry } from "./session-files.js";
 import type {
   UiInteractionResponse,
@@ -388,6 +392,19 @@ export class DaemonHttpClient {
       method: "POST",
       body: { runId },
     });
+  }
+
+  async rewindSession(
+    input: Parameters<UiBackendClient["rewindSession"]>[0],
+  ): ReturnType<UiBackendClient["rewindSession"]> {
+    const { sessionId, promptId, text } = parseRewindSessionInput(input);
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/rewind`,
+      {
+        method: "POST",
+        body: { promptId, text },
+      },
+    );
   }
 
   selectSession(sessionId: string): Promise<BindingResponse> {

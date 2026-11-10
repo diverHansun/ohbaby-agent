@@ -29,7 +29,18 @@ import {
   type ShutdownOptions,
   type CleanupResult,
 } from "../runtime/shutdown.js";
+import {
+  captureRewindPeerGuard,
+  readRewindCut,
+  fullyRewoundRuns,
+  commitRewind,
+  rewindQueue,
+  stopForRewind,
+} from "./ui-inprocess/session-rewind.js";
+import { acquireSessionHistoryOperation } from "../services/session/history-operation.js";
+import { assertRewindShellOwners } from "../services/session/rewind-shell.js";
 import { forkSession } from "./ui-inprocess/session-fork.js";
+import { KeyLockManager } from "../services/storage/lock-manager.js";
 import { SessionExecutionGate } from "./session-execution.js";
 import {
   openSideChat,
@@ -99,6 +110,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   parseForkSessionInput,
+  parseRewindSessionInput,
   submitPromptAndWait as composeSubmitPromptAndWait,
 } from "ohbaby-sdk";
 import type {
@@ -158,6 +170,7 @@ import type {
   CommandModelSummary,
   CommandSessionSummary,
 } from "../commands/index.js";
+import { readActiveGoalId } from "../goals/persistence.js";
 import { GoalService, InMemoryGoalPersistence } from "../goals/index.js";
 import { executeGoalExecutionInterrupt } from "./goal-execution-control.js";
 import type {
@@ -389,6 +402,10 @@ export interface InProcessUiBackendOptions {
 }
 
 export interface UiPromptQueueExecutionPort {
+  rewindSessionForOwner(
+    input: Parameters<UiBackendClient["rewindSession"]>[0],
+    trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["rewindSession"]>;
   resubmitRetainedPromptForOwner(
     input: UiResubmitRetainedPromptInput,
     trustedOwnerClientId: string,
@@ -671,6 +688,8 @@ export function createInProcessUiBackendClient(
     options.promptQueueOwnerClientId ?? `inprocess_${randomUUID()}`;
   const sessionExecution = new SessionExecutionGate();
   const activePromptsBySession = new Map<string, ActivePromptState>();
+  const rewindingSessions = new Set<string>();
+  const promptAdmissions = new KeyLockManager();
   const compactingSessions = new Set<string>();
   const pendingRuntimePromptsBySession = new Map<string, number>();
   const acceptedNewSessionIds = new Set<string>();
@@ -943,6 +962,66 @@ export function createInProcessUiBackendClient(
   });
   const sessionInitializationById = new Map<string, Promise<void>>();
   const sessionEntries = new Map<string, Promise<void>>();
+  const readRewindRevision = options.sideChatStorage?.db.prepare<{
+    rewind_revision: number;
+  }>("SELECT rewind_revision FROM session WHERE id = ?");
+  const appliedRewinds = new Map<
+    string,
+    { revision: number; ready: Promise<void> }
+  >();
+
+  function clearRewoundSessionCaches(
+    sessionId: string,
+    runtime?: UiRuntimeComposition,
+  ): void {
+    runtime?.resetRewoundSessionState(sessionId);
+    contextWindowUsage.clearSession(sessionId);
+    promptCacheUsage.clearSession(sessionId);
+    subagentInstances.invalidate(sessionId);
+  }
+
+  function queueRewindRefresh(
+    sessionId: string,
+    revision: number,
+    refresh: () => Promise<void>,
+  ): Promise<void> {
+    const previous = appliedRewinds.get(sessionId);
+    const ready = (previous?.ready ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(refresh)
+      .catch((error: unknown) => {
+        if (appliedRewinds.get(sessionId)?.ready === ready)
+          appliedRewinds.delete(sessionId);
+        throw error;
+      });
+    appliedRewinds.set(sessionId, {
+      revision: Math.max(previous?.revision ?? 0, revision),
+      ready,
+    });
+    return ready;
+  }
+
+  // Check the durable cut only on demand. Concurrent reads and execution share
+  // a rebuild; a newer cut queues behind it. Never join the owner from inside its queue.
+  function refreshRewoundSessionIfNeeded(
+    sessionId: string,
+  ): Promise<void> | undefined {
+    const revision = readRewindRevision?.get(sessionId)?.rewind_revision ?? 0;
+    if (revision === 0) return;
+    const previous = appliedRewinds.get(sessionId);
+    if (previous && previous.revision >= revision) return previous.ready;
+    return queueRewindRefresh(sessionId, revision, async () => {
+      const runtime = await runtimeController.getRuntimeIfStarted();
+      clearRewoundSessionCaches(sessionId, runtime);
+      await sharedGoalService.refreshAfterRewind(sessionId);
+      const goal = sharedGoalService.peekSnapshot(sessionId);
+      if (goal !== undefined) setGoalProjection(sessionId, goal);
+      if (sourceProjection.owner.hasViewOrPendingSeed(sessionId)) {
+        await syncTodoProjectionsFromSource([{ id: sessionId }]);
+        await sourceProjection.owner.rebuild(sessionId);
+      }
+    });
+  }
   const sharedGoalService: GoalService = new GoalService({
     persistence: goalPersistence,
     now: (): number => now().getTime(),
@@ -1304,6 +1383,7 @@ export function createInProcessUiBackendClient(
   const promptScheduler: WorkspacePromptScheduler =
     new WorkspacePromptScheduler({
       executionGate: sessionExecution,
+      isClaimPaused: (id) => rewindingSessions.has(id),
       currentRunInputs: currentRunInputStore,
       resolveSteerTarget: getActiveGoalRunForSteer,
       now: () => now().getTime(),
@@ -1355,6 +1435,7 @@ export function createInProcessUiBackendClient(
           });
       },
       async beforeExecution(sessionId): Promise<void> {
+        await refreshRewoundSessionIfNeeded(sessionId);
         const changed = await options.recoverExecutionSession?.(sessionId);
         if (sourceProjection.owner.hasViewOrPendingSeed(sessionId)) {
           await sourceProjection.owner.ready(sessionId).catch(() => undefined);
@@ -1470,6 +1551,7 @@ export function createInProcessUiBackendClient(
       if (
         disposed ||
         !currentRunInputStore ||
+        rewindingSessions.has(sessionId) ||
         !isMainSessionIdle(sessionId) ||
         promptScheduler.getRecoveryState(sessionId).status !== "ready" ||
         (await movedSessionTarget(sessionId)) !== undefined
@@ -1581,6 +1663,7 @@ export function createInProcessUiBackendClient(
             const queued =
               await promptSubmissionStore.listQueued(promptScopeKey);
             const available =
+              !rewindingSessions.has(sessionId) &&
               !sessionExecution.isHeld(sessionId) &&
               promptScheduler.getRecoveryState(sessionId).status === "ready" &&
               !queued.some((prompt) => prompt.sessionId === sessionId);
@@ -1845,19 +1928,46 @@ export function createInProcessUiBackendClient(
     return resolved.session.id;
   }
 
+  function withPromptAdmission<T>(
+    sessionId: string | undefined,
+    submit: () => Promise<T>,
+  ): Promise<T> {
+    const admit = (): Promise<T> => withSessionAdmission("read", submit);
+    // A submit waiting for a rewind must not hold the workspace reader needed by New.
+    return sessionId ? promptAdmissions.exclusive(sessionId, admit) : admit();
+  }
+
   function submitPromptAcceptedInternal(
     text: string,
     submitOptions?: SubmitPromptOptions,
   ): Promise<UiPromptReceipt> {
-    return withSessionAdmission("read", () =>
-      submitPromptAcceptedWork(text, submitOptions),
-    );
+    const sessionId = submitOptions?.sessionId ?? implicitAdmissionSessionId;
+    // Capture the destination of an implicit follow-up before rewind can empty its session.
+    const pending =
+      !submitOptions?.sessionId && sessionId && rewindingSessions.has(sessionId)
+        ? promptScheduler.hasPendingSession(sessionId)
+        : undefined;
+    // Observe lookup failures while waiting for admission; the caller receives the original error below.
+    void pending?.catch(() => undefined);
+    return withPromptAdmission(sessionId, async () => {
+      const options =
+        pending && (await pending)
+          ? { ...submitOptions, sessionId }
+          : submitOptions;
+      return submitPromptAcceptedWork(text, options, {
+        admittedSessionId: sessionId,
+      });
+    });
   }
 
   async function submitPromptAcceptedWork(
     text: string,
     submitOptions?: SubmitPromptOptions,
-    resendOfPromptId?: string,
+    admission: {
+      admittedSessionId?: string;
+      resendOfPromptId?: string;
+      rewindReplacement?: boolean;
+    } = {},
   ): Promise<UiPromptReceipt> {
     await ready;
     if (
@@ -1875,52 +1985,64 @@ export function createInProcessUiBackendClient(
     let submissionSession: Promise<UiSession> | undefined;
     const snapshotSession = (sessionId: string): Promise<UiSession> =>
       (submissionSession ??= requireOwnedSession(sessionId));
-    const { record: accepted, steer } = await promptScheduler.accept({
-      resendOfPromptId,
-      reasoning:
-        submitOptions?.reasoning ??
-        (async (sessionId) => {
-          const session = await snapshotSession(sessionId);
-          if (!session.reasoning) return undefined;
-          const selected = submitOptions?.modelEntryId ?? session.modelEntryId;
-          const { config } = await modelClients.read(
-            await resolveProjectRoot(),
-            selected,
-          );
-          return filterReasoningPreference(
-            sessionId,
-            session.reasoning,
-            config,
-          );
-        }),
-      modelEntryId:
-        submitOptions?.modelEntryId ??
-        (async (sessionId) => (await snapshotSession(sessionId)).modelEntryId),
-      namingSource: submitOptions?.namingSource,
-      titleExpected: (sessionId) =>
-        acceptedNewSessionIds.has(sessionId)
-          ? createTemporarySessionTitle(
-              sessionTitleIntent(text, submitOptions?.namingSource),
-            )
-          : undefined,
-      clientRequestId: submitOptions?.clientRequestId,
-      expectedSessionId: submitOptions?.sessionId,
-      sessionId:
-        submitOptions?.sessionId !== undefined
-          ? async (): Promise<string> =>
-              resolveSubmissionSession(text, submitOptions)
-          : (implicitAdmissionSessionId ??
-            (async (): Promise<string> => {
-              const sessionId = await resolveSubmissionSession(
-                text,
-                submitOptions,
-              );
-              implicitAdmissionSessionId = sessionId;
-              return sessionId;
-            })),
-      text,
-      userMessageId: options.createPromptUserMessageId?.() ?? messageIds.next(),
-    });
+    const { record: accepted, steer } = await promptScheduler.accept(
+      {
+        resendOfPromptId: admission.resendOfPromptId,
+        reasoning:
+          submitOptions?.reasoning ??
+          (async (sessionId) => {
+            const session = await snapshotSession(sessionId);
+            if (admission.rewindReplacement || !session.reasoning)
+              return undefined;
+            const selected =
+              submitOptions?.modelEntryId ?? session.modelEntryId;
+            const { config } = await modelClients.read(
+              await resolveProjectRoot(),
+              selected,
+            );
+            return filterReasoningPreference(
+              sessionId,
+              session.reasoning,
+              config,
+            );
+          }),
+        modelEntryId:
+          submitOptions?.modelEntryId ??
+          (async (sessionId) =>
+            (await snapshotSession(sessionId)).modelEntryId),
+        namingSource: submitOptions?.namingSource,
+        titleExpected: (sessionId) =>
+          acceptedNewSessionIds.has(sessionId)
+            ? createTemporarySessionTitle(
+                sessionTitleIntent(text, submitOptions?.namingSource),
+              )
+            : undefined,
+        clientRequestId: submitOptions?.clientRequestId,
+        expectedSessionId: submitOptions?.sessionId,
+        sessionId:
+          submitOptions?.sessionId !== undefined
+            ? async (): Promise<string> =>
+                resolveSubmissionSession(text, submitOptions)
+            : (implicitAdmissionSessionId ??
+              (async (): Promise<string> => {
+                const sessionId = await resolveSubmissionSession(
+                  text,
+                  submitOptions,
+                );
+                implicitAdmissionSessionId = sessionId;
+                return sessionId;
+              })),
+        text,
+        userMessageId:
+          options.createPromptUserMessageId?.() ?? messageIds.next(),
+      },
+      submitOptions?.sessionId
+        ? undefined
+        : (sessionId, persist): ReturnType<typeof persist> =>
+            sessionId === admission.admittedSessionId
+              ? persist()
+              : promptAdmissions.exclusive(sessionId, persist),
+    );
     acceptedNewSessionIds.delete(accepted.sessionId);
     return {
       promptId: accepted.promptId,
@@ -2464,6 +2586,7 @@ export function createInProcessUiBackendClient(
     // Explicit legacy reads retain their full-history shape; recovery clients use the bounded view.
     const sessions = await Promise.all(
       snapshot.sessions.map(async (session) => {
+        await refreshRewoundSessionIfNeeded(session.id);
         const messages = new Map(
           session.messages.map((message) => [message.id, message]),
         );
@@ -2506,14 +2629,22 @@ export function createInProcessUiBackendClient(
     syncGoalProjectionsFromSource(snapshot.sessions);
     const goals = snapshotGoalsFor(snapshot.sessions);
     const todos = snapshotTodosFor(snapshot.sessions);
+    const hiddenRuns = options.sideChatStorage
+      ? fullyRewoundRuns(
+          options.sideChatStorage.db,
+          sessions.map((s) => s.id),
+        )
+      : new Set<string>();
     return {
       ...snapshot,
       sessions,
       runs: await Promise.all(
-        snapshot.runs.map(async (run) => {
-          const record = await sourceLedger.get(run.id);
-          return record ? { ...run, ...runToUiRun(record) } : run;
-        }),
+        snapshot.runs
+          .filter((run) => !hiddenRuns.has(run.id))
+          .map(async (run) => {
+            const record = await sourceLedger.get(run.id);
+            return record ? { ...run, ...runToUiRun(record) } : run;
+          }),
       ),
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
       ...(goals.length > 0 || snapshot.goals !== undefined ? { goals } : {}),
@@ -3321,6 +3452,7 @@ export function createInProcessUiBackendClient(
 
   async function forgetSessionState(sessionId: string): Promise<void> {
     await stateStore.removeSession?.(sessionId);
+    appliedRewinds.delete(sessionId);
     goalSnapshotsBySession.delete(sessionId);
     uiGoalsBySession.delete(sessionId);
     uiTodosBySession.delete(sessionId);
@@ -3544,7 +3676,7 @@ export function createInProcessUiBackendClient(
         return;
       }
       await options.sessionManager.incrementStats(sessionId, {
-        lastMessageAt,
+        lastMessageAt: lastMessageAt ?? null,
         messageCountDelta,
       });
     } catch (error) {
@@ -3569,6 +3701,9 @@ export function createInProcessUiBackendClient(
       input.uiSession.messages.length > 0 ||
       (input.coreSession?.stats.messageCount ?? 0) > 0
     ) {
+      return false;
+    }
+    if (await promptSubmissionStore.hasRewoundForSession(input.uiSession.id)) {
       return false;
     }
     const expectedTitle =
@@ -3749,6 +3884,151 @@ export function createInProcessUiBackendClient(
     };
   }
 
+  async function rewindSessionInternal(
+    input: Parameters<UiBackendClient["rewindSession"]>[0],
+    clientId: string,
+    db: DatabaseConnection,
+    assertNoPeerWork: () => void,
+  ): ReturnType<UiBackendClient["rewindSession"]> {
+    const { sessionId, text } = input;
+    const busy = (): SessionRunBusyError =>
+      new SessionRunBusyError(sessionId, []);
+    const queue = (): ReturnType<typeof rewindQueue> =>
+      rewindQueue(
+        db,
+        sessionId,
+        options.subagentOwnerId,
+        clientId,
+        now().getTime(),
+      );
+    const assertReady = (): void => {
+      assertNoPeerWork();
+      try {
+        options.assertExecutionRecoveryReady?.(sessionId);
+      } catch {
+        throw busy();
+      }
+      const durableGoal = readActiveGoalId(db, sessionId);
+      if (
+        durableGoal &&
+        !sharedGoalService.ownsActiveGoal(sessionId, durableGoal)
+      )
+        throw busy();
+      if (
+        disposed ||
+        compactingSessions.has(sessionId) ||
+        archivingSessions.has(sessionId) ||
+        executionRecoveryFor(sessionId).status !== "ready"
+      )
+        throw busy();
+    };
+    const token = Symbol("rewind");
+    const releaseHistory = await acquireSessionHistoryOperation(db, sessionId);
+    try {
+      const before = readRewindCut(db, input, promptScopeKey);
+      assertReady();
+      queue();
+      if (text !== undefined) {
+        const model =
+          before.target.modelEntryId ?? (await sessionModelEntryId(sessionId));
+        if (model !== undefined) await assertModelEntrySelectable(model);
+        else await resolveSessionModel(sessionId);
+      }
+      await initializeSessionView(sessionId);
+      await stopForRewind({
+        sessionId,
+        token,
+        clientId,
+        queue,
+        assertReady,
+        gate: sessionExecution,
+        goals: sharedGoalService,
+        scheduler: promptScheduler,
+        control: sourceProjection.owner,
+        runtime: runtimeController,
+        waitForRun: async () => {
+          await waitForPromptRunReadyOrIdle(sessionId);
+          return activePromptsBySession.get(sessionId)?.runId;
+        },
+        idle: () => isMainSessionIdle(sessionId),
+      });
+      assertNoPeerWork();
+      const cut = readRewindCut(db, input, promptScopeKey, true);
+      assertRewindShellOwners(
+        db,
+        sessionId,
+        [...cut.runIds],
+        options.subagentOwnerId,
+      );
+      const admission = await runtimeController.acquireRuntime();
+      try {
+        const runtime = admission.runtime;
+        for (const runId of cut.runIds) await runtime.stopRewoundRunWork(runId);
+        const changed = await commitRewind(
+          db,
+          input,
+          promptScopeKey,
+          cut.runIds,
+          new Set(cut.prompts.map((p) => p.promptId)),
+          options.subagentOwnerId,
+          timestamp(),
+          assertNoPeerWork,
+        );
+        await queueRewindRefresh(sessionId, changed.revision, async () => {
+          await messageManager.notifyRewound(sessionId, changed.messageIds);
+          for (const prompt of changed.removedPrompts)
+            publish({
+              type: "prompt.updated",
+              prompt: promptRecordToUi(prompt),
+              timestamp: Date.now(),
+            });
+          clearRewoundSessionCaches(sessionId, runtime);
+          await refreshTodoProjectionAfterRun(sessionId, runtime);
+          await syncSessionStatsBestEffort(sessionId);
+          await sourceProjection.owner.rebuild(sessionId);
+          publish({
+            type: "session.updated",
+            session: cloneSession(
+              sourceProjection.owner.read(sessionId).session,
+            ),
+          });
+        });
+      } finally {
+        admission.release();
+      }
+      const result = { sessionId, restoredText: cut.target.text };
+      if (text === undefined) return result;
+      try {
+        const prompt = await submitPromptAcceptedWork(
+          text,
+          {
+            sessionId,
+            modelEntryId: cut.target.modelEntryId,
+            reasoning: cut.target.reasoning,
+          },
+          { rewindReplacement: true },
+        );
+        return { ...result, prompt };
+      } catch (error) {
+        return {
+          ...result,
+          sendError: {
+            code:
+              error instanceof Error &&
+              "code" in error &&
+              typeof error.code === "string"
+                ? error.code
+                : "PROMPT_SUBMISSION_REJECTED",
+            message: getErrorMessage(error),
+          },
+        };
+      }
+    } finally {
+      sessionExecution.release(token);
+      await releaseHistory();
+    }
+  }
+
   async function compactSessionInternal(
     compactOptions: UiCompactSessionOptions = {},
   ): Promise<UiCompactSessionResult> {
@@ -3758,6 +4038,7 @@ export function createInProcessUiBackendClient(
     await sourceProjection.owner.runControl(target.sessionId, async () => {
       const queued = await promptSubmissionStore.listQueued(promptScopeKey);
       if (
+        rewindingSessions.has(target.sessionId) ||
         sessionExecution.isHeld(target.sessionId) ||
         promptScheduler.getRecoveryState(target.sessionId).status !== "ready" ||
         queued.some((prompt) => prompt.sessionId === target.sessionId) ||
@@ -3772,7 +4053,15 @@ export function createInProcessUiBackendClient(
     let admission:
       | Awaited<ReturnType<typeof runtimeController.acquireRuntime>>
       | undefined;
+    let releaseHistory: (() => Promise<void>) | undefined;
     try {
+      if (options.sideChatStorage) {
+        releaseHistory = await acquireSessionHistoryOperation(
+          options.sideChatStorage.db,
+          target.sessionId,
+        );
+      }
+      await refreshRewoundSessionIfNeeded(target.sessionId);
       admission = await runtimeController.acquireRuntime();
       const runtime = admission.runtime;
       compactOptions.signal?.throwIfAborted();
@@ -3812,12 +4101,15 @@ export function createInProcessUiBackendClient(
       compactingSessions.delete(target.sessionId);
       sessionExecution.release(token);
       admission?.release();
+      await releaseHistory?.();
     }
   }
 
   async function getContextWindowUsageInternal(input: {
     readonly sessionId: string;
   }): Promise<UiContextWindowUsage | null> {
+    await refreshRewoundSessionIfNeeded(input.sessionId);
+    const measuredRevision = appliedRewinds.get(input.sessionId);
     const [coreSession, uiSession] = await Promise.all([
       options.sessionManager?.get(input.sessionId),
       stateStore
@@ -3855,8 +4147,11 @@ export function createInProcessUiBackendClient(
       projectRoot,
       sessionId: input.sessionId,
     });
-    // A model switch can finish while the history query is still pending.
-    if (!matchesSelectedModel(input.sessionId, runModel))
+    // A rewind or model switch can finish while the history query is pending.
+    if (
+      appliedRewinds.get(input.sessionId) !== measuredRevision ||
+      !matchesSelectedModel(input.sessionId, runModel)
+    )
       return contextWindowUsage.get(input.sessionId) ?? null;
     // A live preparation or compact may have published newer context while
     // this static read was awaiting assembly. Keep that committed value.
@@ -3878,6 +4173,7 @@ export function createInProcessUiBackendClient(
   async function getPromptCacheUsageInternal(input: {
     readonly sessionId: string;
   }): Promise<UiPromptCacheUsage | null> {
+    await refreshRewoundSessionIfNeeded(input.sessionId);
     const [coreSession, uiSession] = await Promise.all([
       options.sessionManager?.get(input.sessionId),
       stateStore
@@ -4755,6 +5051,7 @@ export function createInProcessUiBackendClient(
     )
       throw permissionError("SESSION_SCOPE_CHANGED", "Backend runtime changed");
     await validatePermissionRoot(input.sessionId);
+    await refreshRewoundSessionIfNeeded(input.sessionId);
     input.signal?.throwIfAborted();
   }
   async function subagentViews(): Promise<
@@ -5164,27 +5461,27 @@ export function createInProcessUiBackendClient(
     resendSteerInput(input): Promise<UiPromptReceipt> {
       return this.resendSteerInputForOwner(input, promptQueueOwnerClientId);
     },
-    resendSteerInputForOwner(
+    async resendSteerInputForOwner(
       input,
       _trustedOwnerClientId,
       expectedSessionId,
     ): Promise<UiPromptReceipt> {
-      return withSessionAdmission("read", async () => {
-        await ready;
-        if (!input.operationId.trim())
-          throw permissionError(
-            "INVALID_OPERATION_ID",
-            "Resend operationId must not be empty",
-          );
-        const source = await currentRunInputStore?.getInput(input.inputId);
-        if (
-          source?.source !== "user-steer" ||
-          source.contextScopeId !== undefined
-        )
-          throw permissionError(
-            "STEER_INPUT_NOT_FOUND",
-            "Steered input not found",
-          );
+      await ready;
+      if (!input.operationId.trim())
+        throw permissionError(
+          "INVALID_OPERATION_ID",
+          "Resend operationId must not be empty",
+        );
+      const source = await currentRunInputStore?.getInput(input.inputId);
+      if (
+        source?.source !== "user-steer" ||
+        source.contextScopeId !== undefined
+      )
+        throw permissionError(
+          "STEER_INPUT_NOT_FOUND",
+          "Steered input not found",
+        );
+      return withPromptAdmission(source.sessionId, async () => {
         await validatePermissionRoot(source.sessionId);
         if (
           expectedSessionId !== undefined &&
@@ -5198,6 +5495,7 @@ export function createInProcessUiBackendClient(
         const original = await promptScheduler.get(source.sourceId);
         if (
           original?.scopeKey !== promptScopeKey ||
+          original.rewoundAt !== undefined ||
           original.sessionId !== source.sessionId
         )
           throw permissionError(
@@ -5249,7 +5547,7 @@ export function createInProcessUiBackendClient(
               ? { namingSource: original.namingSource }
               : {}),
           },
-          source.sourceId,
+          { resendOfPromptId: source.sourceId },
         );
       });
     },
@@ -5271,10 +5569,12 @@ export function createInProcessUiBackendClient(
           code: "PROMPT_NOT_FOUND",
         });
       await validatePermissionRoot(prompt.sessionId);
-      return promptScheduler.resubmitRetained({
-        ...input,
-        ownerClientId: trustedOwnerClientId,
-      });
+      return promptAdmissions.exclusive(prompt.sessionId, () =>
+        promptScheduler.resubmitRetained({
+          ...input,
+          ownerClientId: trustedOwnerClientId,
+        }),
+      );
     },
 
     async editQueuedPrompt(
@@ -5401,6 +5701,36 @@ export function createInProcessUiBackendClient(
       return { ...result, ok: true };
     },
 
+    rewindSession(input): ReturnType<UiBackendClient["rewindSession"]> {
+      return this.rewindSessionForOwner(input, promptQueueOwnerClientId);
+    },
+    async rewindSessionForOwner(
+      raw,
+      clientId,
+    ): ReturnType<UiBackendClient["rewindSession"]> {
+      const input = parseRewindSessionInput(raw);
+      if (rewindingSessions.has(input.sessionId))
+        throw new SessionRunBusyError(input.sessionId, []);
+      const db = options.sideChatStorage?.db;
+      if (!db) throw new Error("Rewind requires persistent session storage");
+      // Capture the peer boundary before waiting behind any in-flight local admission.
+      const assertNoPeerWork = captureRewindPeerGuard(
+        db,
+        input.sessionId,
+        options.subagentOwnerId,
+      );
+      rewindingSessions.add(input.sessionId);
+      try {
+        // Keep ordinary submissions outside the queue until the cut and its replacement are durable.
+        return await promptAdmissions.exclusive(input.sessionId, async () => {
+          await ready;
+          return rewindSessionInternal(input, clientId, db, assertNoPeerWork);
+        });
+      } finally {
+        rewindingSessions.delete(input.sessionId);
+        sessionExecution.notify(input.sessionId);
+      }
+    },
     async forkSession(input): ReturnType<UiBackendClient["forkSession"]> {
       await ready;
       const parsed = parseForkSessionInput(input);
@@ -5451,7 +5781,7 @@ export function createInProcessUiBackendClient(
 
     archiveSession(input: UiArchiveSessionInput): Promise<void> {
       const sessionId = input.sessionId.trim();
-      if (archivingSessions.has(sessionId))
+      if (archivingSessions.has(sessionId) || rewindingSessions.has(sessionId))
         return Promise.reject(new SessionRunBusyError(sessionId, []));
       archivingSessions.add(sessionId);
       return withSessionAdmission("write", () => Promise.resolve())

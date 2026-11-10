@@ -295,11 +295,8 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
            WHERE scope_key = ?`,
         )
         .get(input.scopeKey)?.created_at;
-      const at = Math.max(
-        this.now(),
-        (latestCreatedAt ?? 0) + 1,
-        this.latestAcceptedAt(db, input.scopeKey, input.sessionId),
-      );
+      const admission = this.nextAdmission(db, input.scopeKey, input.sessionId);
+      const at = Math.max(admission.acceptedAt, (latestCreatedAt ?? 0) + 1);
       db.prepare(
         `INSERT INTO ${this.tableName}
           (prompt_id, client_request_id, scope_key, session_id,
@@ -323,7 +320,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         this.ownerId,
         this.ownerPid,
         at,
-        this.nextAdmissionOrder(db, input.scopeKey, input.sessionId),
+        admission.order,
       );
       return { record: this.requireFrom(db, input.promptId), inserted: true };
     });
@@ -868,11 +865,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
           .get(input.scopeKey)?.count ?? 0;
       if (count >= input.maxQueuedPrompts)
         throw new PromptQueueFullError(input.scopeKey, input.maxQueuedPrompts);
-      const acceptedAt = Math.max(
-        this.now(),
-        this.latestAcceptedAt(db, input.scopeKey, current.sessionId),
-      );
-      const order = this.nextAdmissionOrder(
+      const { acceptedAt, order } = this.nextAdmission(
         db,
         input.scopeKey,
         current.sessionId,
@@ -1050,35 +1043,22 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     if (!this.owns(record))
       throw new PromptVersionConflictError(record.promptId);
   }
-  private nextAdmissionOrder(
+  // A workspace move must preserve both this session's order and the workspace queue's order.
+  private nextAdmission(
     db: DatabaseConnection,
     scopeKey: string,
     sessionId: string,
-  ): number {
-    return (
-      db
-        .prepare<{
-          value: number;
-        }>(
-          `SELECT COALESCE(MAX(admission_order),0)+1 AS value FROM ${this.tableName} WHERE scope_key=? OR session_id=?`,
-        )
-        .get(scopeKey, sessionId)?.value ?? 1
-    );
-  }
-  private latestAcceptedAt(
-    db: DatabaseConnection,
-    scopeKey: string,
-    sessionId: string,
-  ): number {
-    return (
-      db
-        .prepare<{
-          value: number;
-        }>(
-          `SELECT COALESCE(MAX(accepted_at),0) AS value FROM ${this.tableName} WHERE scope_key=? OR session_id=?`,
-        )
-        .get(scopeKey, sessionId)?.value ?? 0
-    );
+  ): { acceptedAt: number; order: number } {
+    const row = db
+      .prepare<{ latest: number; highest: number }>(
+        `SELECT COALESCE(MAX(accepted_at), 0) AS latest, COALESCE(MAX(admission_order), 0) AS highest
+       FROM ${this.tableName} WHERE scope_key = ? OR session_id = ?`,
+      )
+      .get(scopeKey, sessionId);
+    return {
+      acceptedAt: Math.max(this.now(), row?.latest ?? 0),
+      order: (row?.highest ?? 0) + 1,
+    };
   }
 
   private row(promptId: string): PromptSubmissionRecord | undefined {
