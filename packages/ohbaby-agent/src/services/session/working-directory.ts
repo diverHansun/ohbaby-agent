@@ -1,3 +1,5 @@
+import { SessionMovedError } from "./errors.js";
+
 export interface SessionDirectoryCompareOptions {
   readonly caseInsensitive?: boolean;
 }
@@ -29,6 +31,16 @@ export function sessionTargetWorkingDirectory(
   session: SessionRootFields,
 ): string {
   return session.pendingWorkingDirectory ?? session.workingDirectory;
+}
+
+/** Check the source read inside the caller's transaction before copying its history. */
+export function assertSessionInWorkspace(
+  session: SessionRootFields & { readonly id: string },
+  workingDirectory: string,
+): void {
+  const target = sessionTargetWorkingDirectory(session);
+  if (!sameSessionDirectory(workingDirectory, target))
+    throw new SessionMovedError(session.id, target);
 }
 
 /**

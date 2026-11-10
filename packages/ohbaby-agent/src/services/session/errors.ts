@@ -7,6 +7,17 @@ export class SideChatUnsupportedError extends Error {
   }
 }
 
+/** The requested run cannot serve as a history-copy cut. */
+export class HistoryCutInvalidError extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly runId: string,
+  ) {
+    super(`No ended main turn with messages: ${runId}`);
+    this.name = "HistoryCutInvalidError";
+  }
+}
+
 export class SessionNotFoundError extends Error {
   constructor(readonly sessionId: string) {
     super(`Session not found: ${sessionId}`);
@@ -45,5 +56,20 @@ export class InvalidSessionStatsDeltaError extends RangeError {
   constructor() {
     super("Session message count delta must keep messageCount non-negative");
     this.name = "InvalidSessionStatsDeltaError";
+  }
+}
+
+export type SessionArchiveErrorCode =
+  | "SESSION_ARCHIVED"
+  | "SESSION_NOT_FOUND"
+  | "SESSION_NOT_ROOT"
+  | "SESSION_NOT_ARCHIVED";
+export class SessionArchiveError extends Error {
+  constructor(
+    readonly code: SessionArchiveErrorCode,
+    readonly sessionId: string,
+  ) {
+    super(`${code}: ${sessionId}`);
+    this.name = "SessionArchiveError";
   }
 }

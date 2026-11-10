@@ -23,6 +23,7 @@ const SessionSchema: z.ZodType<Session> = z.object({
     .object({
       mainSessionId: z.string(),
       boundaryMessageId: z.string(),
+      ownerId: z.string().optional(),
       ownerPid: z.number().int().positive(),
     })
     .optional(),

@@ -1,3 +1,4 @@
+import { processOwnerId } from "../../utils/process-owner.js";
 import type { ReasoningConfig } from "ohbaby-llm";
 import type { BusInstance } from "../../bus/index.js";
 
@@ -11,6 +12,8 @@ export interface SessionStats {
 export interface SideChatMetadata {
   readonly mainSessionId: string;
   readonly boundaryMessageId: string;
+  /** Older records only stored a PID. */
+  readonly ownerId?: string;
   readonly ownerPid: number;
 }
 
@@ -22,7 +25,7 @@ export function isSideChatSession(session: Pick<Session, "sideChat">): boolean {
 export function isLocalPrimarySession(session: Session): boolean {
   return (
     !session.isSubagent &&
-    (!session.sideChat || session.sideChat.ownerPid === process.pid)
+    (!session.sideChat || session.sideChat.ownerId === processOwnerId)
   );
 }
 

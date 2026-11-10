@@ -24,7 +24,11 @@ export {
   InMemoryGoalPersistence,
 } from "./persistence.js";
 export { GoalService, type GoalServiceDeps } from "./service.js";
-export { createGoalTools, type GoalToolBackend } from "./tools.js";
+export {
+  GOAL_TOOL_NAMES,
+  createGoalTools,
+  type GoalToolBackend,
+} from "./tools.js";
 export { GoalStore, type GoalStoreDeps } from "./store.js";
 export type {
   CreateGoalInput,

@@ -1,3 +1,4 @@
+import { processOwnerId } from "../utils/process-owner.js";
 import { SideChatUnsupportedError } from "../services/session/errors.js";
 import {
   mkdir,
@@ -248,6 +249,25 @@ describe("side chat through the persistent backend", () => {
     await expect(
       client.exportSession({ sessionId, format: "jsonl" }),
     ).rejects.toMatchObject(unsupported);
+    const restrictedActions: (() => Promise<unknown>)[] = [
+      () => client.updateSessionModel({ sessionId, modelEntryId: null }),
+      () => client.updateSessionReasoning({ sessionId, reasoning: null }),
+      () => client.archiveSession({ sessionId }),
+      () => client.openSideChat({ mainSessionId: sessionId }),
+      () =>
+        client.executeCommand({
+          commandId: "goal",
+          argv: [],
+          clientInvocationId: crypto.randomUUID(),
+          path: ["goal"],
+          raw: "/goal",
+          rawArgs: "",
+          sessionId,
+          surface: "headless",
+        }),
+    ];
+    for (const action of restrictedActions)
+      await expect(action()).rejects.toMatchObject(unsupported);
     expect(() => planSessionWorkspaceMove(sessionId, directory)).toThrow(
       SideChatUnsupportedError,
     );
@@ -302,6 +322,68 @@ describe("side chat through the persistent backend", () => {
     expect(await readFile(join(scratch, "side.txt"), "utf8")).toBe(
       "written by side",
     );
+  });
+
+  it("closes a running side chat and clears its view, todos and approvals", async () => {
+    const mainSessionId = (await client.submitPromptAndWait("start")).prompt
+      .sessionId;
+    const { sideChatId: sessionId } = await client.openSideChat({
+      mainSessionId,
+    });
+    for (const subdir of ["allowed", "pending"])
+      await mkdir(join(directory, subdir));
+    calls.push(
+      {
+        name: "todo_write",
+        args: { todos: [{ content: "side task", status: "in_progress" }] },
+      },
+      ...["allowed", "pending"].map((dir) => ({
+        name: "write",
+        args: { file_path: dir + "/out", content: "test" },
+      })),
+    );
+    const receipt = await client.submitPromptAccepted("use tools", {
+      sessionId,
+    });
+    const completion = client.waitForPrompt(receipt.promptId);
+    const approval = (
+      await vi.waitFor(async () => {
+        const pending = (
+          await client.getPermissionSnapshot({ rootSessionId: sessionId })
+        ).requests;
+        expect(pending).toHaveLength(1);
+        return pending;
+      })
+    )[0];
+    await client.respondPermission(approval.id, { choiceId: "allow_always" });
+    await vi.waitFor(async () => {
+      const view = await client.getSnapshot();
+      expect(
+        view.permissions.some(
+          (p) => p.sessionId === sessionId && p.id !== approval.id,
+        ),
+      ).toBe(true);
+      expect(view.todos).toContainEqual(expect.objectContaining({ sessionId }));
+      expect(view.permission?.sessionRules).toContainEqual(
+        expect.objectContaining({ sessionId }),
+      );
+      expect(
+        view.sessions.some((s) => s.id === sessionId && s.messages.length > 0),
+      ).toBe(true);
+    });
+    await client.closeSideChat({ sideChatId: sessionId });
+    expect((await completion).prompt.status).toBe("interrupted");
+    const view = await client.getSnapshot();
+    expect(view.sessions.map((s) => s.id)).toContain(mainSessionId);
+    expect(view.sessions.map((s) => s.id)).not.toContain(sessionId);
+    for (const entries of [
+      view.permissions,
+      view.todos,
+      view.permission?.sessionRules,
+    ])
+      expect(entries ?? []).not.toContainEqual(
+        expect.objectContaining({ sessionId }),
+      );
   });
 
   it("inherits approvals and archives open side chats in their owning workspaces after a move", async () => {
@@ -380,21 +462,64 @@ describe("side chat through the persistent backend", () => {
     ).rejects.toThrow();
   });
 
-  it("retains foreign-owned side chats and times out safely for a run it cannot abort", async () => {
+  it("reuses a closed side chat number and archives only the selected main session's side chats", async () => {
+    const mainSessionId = (await client.submitPromptAndWait("first main"))
+      .prompt.sessionId;
+    const input = { mainSessionId };
+    const first = await client.openSideChat(input);
+    const second = await client.openSideChat(input);
+    const more = await Promise.all([
+      client.openSideChat(input),
+      client.openSideChat(input),
+    ]);
+    const opened = [first, second, ...more];
+    expect(new Set(opened.map((s) => s.sideChatId)).size).toBe(4);
+    expect(opened.map((s) => s.title).sort()).toEqual([
+      "Side chat 1",
+      "Side chat 2",
+      "Side chat 3",
+      "Side chat 4",
+    ]);
+    await client.closeSideChat(second);
+    expect(await client.openSideChat(input)).toMatchObject({
+      title: "Side chat 2",
+    });
+
+    const otherMain = await client.createSession();
+    await client.submitPromptAndWait("second main", {
+      sessionId: otherMain.id,
+    });
+    const other = await client.openSideChat({ mainSessionId: otherMain.id });
+    await client.archiveSession({ sessionId: mainSessionId });
+    expect(
+      (
+        await client.listSideChats({ mainSessionId: otherMain.id })
+      ).sideChats.map((s) => s.sideChatId),
+    ).toEqual([other.sideChatId]);
+    expect(
+      getDatabase()
+        .prepare(
+          "SELECT id FROM session WHERE json_extract(data, '$.sideChat.mainSessionId')=?",
+        )
+        .all(mainSessionId),
+    ).toEqual([]);
+  });
+
+  it("retains foreign-owned side chats, times out for a busy run and recovers it on next startup", async () => {
     const mainSessionId = (await client.submitPromptAndWait("hello")).prompt
       .sessionId;
     const side = await client.openSideChat({ mainSessionId });
     const db = getDatabase();
     const owner = db.prepare(
-      "UPDATE session SET data = json_set(data, '$.sideChat.ownerPid', ?) WHERE id = ?",
+      "UPDATE session SET data = json_set(data, '$.sideChat.ownerId', ?) WHERE id = ?",
     );
-    owner.run(process.pid + 1, side.sideChatId);
+    owner.run("previous-process", side.sideChatId);
     const busy = { code: "SESSION_RUNNING" };
     await expect(client.closeSideChat(side)).rejects.toMatchObject(busy);
     await expect(
       client.archiveSession({ sessionId: mainSessionId }),
     ).rejects.toMatchObject(busy);
-    owner.run(process.pid, side.sideChatId);
+    owner.run(processOwnerId, side.sideChatId);
     db.prepare(
       "INSERT INTO run_ledger(run_id,session_id,trigger,status,created_at) VALUES ('busy',?,'user','running',1)",
     ).run(side.sideChatId);
@@ -402,5 +527,22 @@ describe("side chat through the persistent backend", () => {
     expect(
       (await client.listSideChats({ mainSessionId })).sideChats,
     ).toHaveLength(1);
+    // The previous process has exited; the next process received its PID.
+    owner.run("previous-process", side.sideChatId);
+    await client.dispose();
+    client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      workdir: directory,
+    });
+    await client.initialize();
+    expect(
+      db.prepare("SELECT id FROM session WHERE id=?").get(side.sideChatId),
+    ).toBeUndefined();
+    expect(
+      db.prepare("SELECT run_id FROM run_ledger WHERE run_id='busy'").get(),
+    ).toBeUndefined();
+    expect(
+      db.prepare("SELECT id FROM session WHERE id=?").get(mainSessionId),
+    ).toBeDefined();
   }, 15000);
 });

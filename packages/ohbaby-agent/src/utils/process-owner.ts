@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+
+/** Shared by every workspace runtime hosted by this process. */
+export const processOwnerId = randomUUID();
+
 /** Invalid process identities are unknown; never pass them to a liveness probe. */
 export function isValidOwnerPid(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;

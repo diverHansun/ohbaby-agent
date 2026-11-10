@@ -1,5 +1,6 @@
 export {
   DuplicateSessionError,
+  HistoryCutInvalidError,
   SessionMovedError,
   SessionNotFoundError,
 } from "./errors.js";
@@ -54,6 +55,7 @@ export {
   generateSessionTitle,
 } from "./title-generator.js";
 export {
+  assertSessionInWorkspace,
   isSessionInWorkingDirectory,
   isSessionDirectoryCaseInsensitivePlatform,
   normalizeSessionDirectory,

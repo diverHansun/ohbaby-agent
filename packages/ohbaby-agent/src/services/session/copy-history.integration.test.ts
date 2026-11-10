@@ -19,6 +19,7 @@ import {
   getDatabase,
   runWriteTransaction,
 } from "../database/index.js";
+import { HistoryCutInvalidError } from "./errors.js";
 import { copySessionHistory, findEndedMainRun } from "./copy-history.js";
 import {
   createDatabaseSessionStore,
@@ -323,7 +324,7 @@ describe("copySessionHistory", () => {
     expect(findEndedMainRun(getDatabase(), main)).toBe("finish");
     for (const id of ["pending", "silent", "hidden", "child", "missing"]) {
       expect(findEndedMainRun(getDatabase(), main, id)).toBeNull();
-      await expect(copy(id)).rejects.toThrow("No ended main turn");
+      await expect(copy(id)).rejects.toBeInstanceOf(HistoryCutInvalidError);
     }
     const { sessionId, copiedMessageCount } = await copy(null);
     expect(copiedMessageCount).toBe(0);

@@ -98,6 +98,7 @@ import {
   type TodoWriteEvent,
 } from "../../tools/todo.js";
 import {
+  GOAL_TOOL_NAMES,
   GoalService,
   InMemoryGoalPersistence,
   type GoalExecutionControlPort,
@@ -423,12 +424,7 @@ export async function createUiRuntimeComposition(
       );
     },
   });
-  const goalTools = new Set([
-    "CreateGoal",
-    "GetGoal",
-    "UpdateGoal",
-    "SetGoalBudget",
-  ]);
+  const goalTools = new Set<string>(Object.values(GOAL_TOOL_NAMES));
   const toolScheduler = createToolScheduler({
     async accessGuard({ request, tool }) {
       if (

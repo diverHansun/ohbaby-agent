@@ -4,24 +4,11 @@ import {
   type DatabaseConnection,
 } from "../database/index.js";
 import { SessionRunBusyError } from "../../runtime/run-ledger/errors.js";
-import { SideChatUnsupportedError } from "./errors.js";
+import { SessionArchiveError, SideChatUnsupportedError } from "./errors.js";
 import { readSessionRow } from "./database-store.js";
 import type { Session } from "./types.js";
 
-export type SessionArchiveErrorCode =
-  | "SESSION_ARCHIVED"
-  | "SESSION_NOT_FOUND"
-  | "SESSION_NOT_ROOT"
-  | "SESSION_NOT_ARCHIVED";
-export class SessionArchiveError extends Error {
-  constructor(
-    readonly code: SessionArchiveErrorCode,
-    readonly sessionId: string,
-  ) {
-    super(`${code}: ${sessionId}`);
-    this.name = "SessionArchiveError";
-  }
-}
+export { SessionArchiveError, type SessionArchiveErrorCode } from "./errors.js";
 export interface RestoreArchivedSessionInput {
   readonly workspaceAvailable: boolean;
   readonly nextDirectoryExists: boolean;
@@ -113,22 +100,6 @@ export function archiveIdleRoot(
     ).run(now, sessionId);
     return { ...session, status: "archived", updatedAt: now };
   });
-}
-
-/** The actual durable admission must not follow a concurrent archive commit. */
-export function assertActiveSessionForWork(
-  db: DatabaseConnection,
-  sessionId: string,
-): void {
-  const archived = db
-    .prepare<{ id: string }>(
-      `WITH RECURSIVE ancestors(id, parent_id, status) AS (
-      SELECT id, parent_id, status FROM session WHERE id = ?
-      UNION SELECT s.id, s.parent_id, s.status FROM session s JOIN ancestors a ON s.id = a.parent_id
-    ) SELECT id FROM ancestors WHERE status = 'archived' LIMIT 1`,
-    )
-    .get(sessionId);
-  if (archived) throw new SessionArchiveError("SESSION_ARCHIVED", archived.id);
 }
 
 export function deleteSideChatSession(

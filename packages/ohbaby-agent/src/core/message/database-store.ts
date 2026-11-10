@@ -96,6 +96,49 @@ function messageContextScope(message: Message): string | null {
   return message.contextScopeId ?? null;
 }
 
+/** Append within the caller's write transaction, including compound history operations. */
+export function insertMessageRow(
+  db: DatabaseConnection,
+  message: Message,
+): void {
+  const { createdAt, updatedAt } = messageTimestamps(message);
+  db.prepare(
+    `INSERT INTO ${schema.message.tableName}
+     (id, session_id, context_scope_id, role, agent, created_at, updated_at, data)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    message.id,
+    message.sessionId,
+    messageContextScope(message),
+    message.role,
+    messageAgent(message),
+    createdAt,
+    updatedAt,
+    messageToRowData(message),
+  );
+}
+
+export function insertPartRow(
+  db: DatabaseConnection,
+  part: Part,
+  at: number,
+): void {
+  db.prepare(
+    `INSERT INTO ${schema.part.tableName}
+     (id, message_id, session_id, type, order_index, created_at, updated_at, data)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    part.id,
+    part.messageId,
+    part.sessionId,
+    part.type,
+    part.orderIndex,
+    at,
+    at,
+    partToRowData(part),
+  );
+}
+
 export function createDatabaseMessageStore(
   options: DatabaseMessageStoreOptions = {},
 ): MessageStore {
@@ -358,18 +401,7 @@ export function createDatabaseMessageStore(
           ).run(partToRowData(part), input.completedAt, part.id);
         }
         for (const part of prepared.insertedParts) {
-          db.prepare(
-            `INSERT INTO ${schema.part.tableName} (id,message_id,session_id,type,order_index,created_at,updated_at,data) VALUES (?,?,?,?,?,?,?,?)`,
-          ).run(
-            part.id,
-            part.messageId,
-            part.sessionId,
-            part.type,
-            part.orderIndex,
-            input.completedAt,
-            input.completedAt,
-            partToRowData(part),
-          );
+          insertPartRow(db, part, input.completedAt);
         }
         updateMessageRow(prepared.result.message);
         return clone(prepared.result);
@@ -377,21 +409,7 @@ export function createDatabaseMessageStore(
     },
     insertMessage(message: Message): Promise<void> {
       return withImmediateTransaction(() => {
-        const timestamps = messageTimestamps(message);
-        db.prepare(
-          `INSERT INTO ${schema.message.tableName}
-            (id, session_id, context_scope_id, role, agent, created_at, updated_at, data)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          message.id,
-          message.sessionId,
-          messageContextScope(message),
-          message.role,
-          messageAgent(message),
-          timestamps.createdAt,
-          timestamps.updatedAt,
-          messageToRowData(message),
-        );
+        insertMessageRow(db, message);
       });
     },
 
@@ -436,20 +454,7 @@ export function createDatabaseMessageStore(
           orderIndex: nextOrderIndex(input.message.id),
           ...input.data,
         } as Part;
-        db.prepare(
-          `INSERT INTO ${schema.part.tableName}
-            (id, message_id, session_id, type, order_index, created_at, updated_at, data)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          part.id,
-          part.messageId,
-          part.sessionId,
-          part.type,
-          part.orderIndex,
-          input.updatedAt,
-          input.updatedAt,
-          partToRowData(part),
-        );
+        insertPartRow(db, part, input.updatedAt);
         touchMessage(input.message.id, input.updatedAt);
         return clone(part);
       });
@@ -489,20 +494,7 @@ export function createDatabaseMessageStore(
           text: input.text,
           type: "text",
         };
-        db.prepare(
-          `INSERT INTO ${schema.part.tableName}
-              (id, message_id, session_id, type, order_index, created_at, updated_at, data)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          part.id,
-          part.messageId,
-          part.sessionId,
-          part.type,
-          part.orderIndex,
-          input.updatedAt,
-          input.updatedAt,
-          partToRowData(part),
-        );
+        insertPartRow(db, part, input.updatedAt);
         touchMessage(input.messageId, input.updatedAt);
         return { inserted: true, part: clone(part) };
       });
@@ -625,21 +617,7 @@ export function createDatabaseMessageStore(
 
         let summaryPart: TextPart | undefined;
         if (input.summary !== undefined) {
-          const timestamps = messageTimestamps(input.summary.message);
-          db.prepare(
-            `INSERT INTO ${schema.message.tableName}
-                (id, session_id, context_scope_id, role, agent, created_at, updated_at, data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).run(
-            input.summary.message.id,
-            input.summary.message.sessionId,
-            messageContextScope(input.summary.message),
-            input.summary.message.role,
-            messageAgent(input.summary.message),
-            timestamps.createdAt,
-            timestamps.updatedAt,
-            messageToRowData(input.summary.message),
-          );
+          insertMessageRow(db, input.summary.message);
           summaryPart = {
             contextScopeId: input.summary.message.contextScopeId,
             id: input.summary.partId,
@@ -648,20 +626,7 @@ export function createDatabaseMessageStore(
             sessionId: input.summary.message.sessionId,
             ...input.summary.data,
           };
-          db.prepare(
-            `INSERT INTO ${schema.part.tableName}
-                (id, message_id, session_id, type, order_index, created_at, updated_at, data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).run(
-            summaryPart.id,
-            summaryPart.messageId,
-            summaryPart.sessionId,
-            summaryPart.type,
-            summaryPart.orderIndex,
-            input.updatedAt,
-            input.updatedAt,
-            partToRowData(summaryPart),
-          );
+          insertPartRow(db, summaryPart, input.updatedAt);
         }
 
         const updatedParts = targets.map((part) => {

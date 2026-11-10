@@ -1,4 +1,4 @@
-import { assertActiveSessionForWork } from "../../services/session/archive.js";
+import { assertActiveSessionForWork } from "../../services/session/work-admission.js";
 import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   getDatabase,

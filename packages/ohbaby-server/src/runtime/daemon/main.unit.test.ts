@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { NodeSqliteConnection } from "../../../../ohbaby-agent/src/services/database/connection.js";
 import { describe, expect, it, vi } from "vitest";
 import type { UiBackendClient } from "ohbaby-sdk";
 import type { PersistentUiBackendOptions } from "ohbaby-agent";
@@ -1273,7 +1274,7 @@ describe("startDaemonServer", () => {
     }
   });
 
-  it("keeps explicitly isolated test daemons separated with one sqlite database", async () => {
+  it("cleans orphan side chats on daemon startup and keeps workspaces isolated in one database", async () => {
     vi.resetModules();
     const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-sqlite-"));
     const repoA = join(tempDir, "repo-a");
@@ -1301,6 +1302,7 @@ describe("startDaemonServer", () => {
         >
       | undefined;
 
+    const database = new NodeSqliteConnection(dbPath);
     try {
       const { startDaemonServer } = await import("./main.js");
       const { createRemoteUiBackendClient } =
@@ -1314,6 +1316,21 @@ describe("startDaemonServer", () => {
         stateFilePath: join(tempDir, "daemon-a-state.json"),
         workdir: repoA,
       });
+      database
+        .prepare(
+          "INSERT INTO session(id, project_id, working_directory, created_at, updated_at, data) VALUES ('orphan', 'p', ?, 1, 1, ?)",
+        )
+        .run(
+          repoA,
+          JSON.stringify({
+            sideChat: {
+              mainSessionId: "main",
+              boundaryMessageId: "boundary",
+              ownerId: "previous-process",
+              ownerPid: process.pid,
+            },
+          }),
+        );
       daemonB = await startDaemonServer({
         authToken: authTokenB,
         dbPath,
@@ -1323,6 +1340,9 @@ describe("startDaemonServer", () => {
         stateFilePath: join(tempDir, "daemon-b-state.json"),
         workdir: repoB,
       });
+      expect(
+        database.prepare("SELECT id FROM session WHERE id='orphan'").get(),
+      ).toBeUndefined();
       clientA = createRemoteUiBackendClient({
         authToken: authTokenA,
         directory: repoA,
@@ -1353,6 +1373,7 @@ describe("startDaemonServer", () => {
       expect(serializedB).toContain("Prompt for project B");
       expect(serializedB).not.toContain("Prompt for project A");
     } finally {
+      database.close();
       await clientA?.dispose();
       await clientB?.dispose();
       await daemonB?.stop();

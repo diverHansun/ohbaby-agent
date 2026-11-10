@@ -14,6 +14,13 @@ import type {
 } from "./types.js";
 import { budgetLimitsFromInput, GOAL_BUDGET_UNITS } from "./budget-input.js";
 
+export const GOAL_TOOL_NAMES = {
+  create: "CreateGoal",
+  get: "GetGoal",
+  update: "UpdateGoal",
+  setBudget: "SetGoalBudget",
+} as const;
+
 /** goal 工具的后端子集；GoalService 天然满足。 */
 export interface GoalToolBackend {
   createGoal(
@@ -56,7 +63,7 @@ function truncate(text: string, max = 120): string {
 
 function createCreateGoalTool(backend: GoalToolBackend): Tool {
   return {
-    name: "CreateGoal",
+    name: GOAL_TOOL_NAMES.create,
     description:
       "Create a durable goal the runtime will pursue autonomously across multiple turns. " +
       "Call this only when the user explicitly asks you to work autonomously toward an outcome " +
@@ -124,7 +131,7 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
 
 function createUpdateGoalTool(backend: GoalToolBackend): Tool {
   return {
-    name: "UpdateGoal",
+    name: GOAL_TOOL_NAMES.update,
     description:
       "Update the current goal's lifecycle status after your self-audit. Call with `complete` " +
       "only when delegated work has settled, current evidence covers every requirement and any " +
@@ -186,7 +193,7 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
 
 function createGetGoalTool(backend: GoalToolBackend): Tool {
   return {
-    name: "GetGoal",
+    name: GOAL_TOOL_NAMES.get,
     description:
       "Read the current goal for this session: objective, status, progress and budget.",
     parametersJsonSchema: {
@@ -212,7 +219,7 @@ function createGetGoalTool(backend: GoalToolBackend): Tool {
 
 function createSetGoalBudgetTool(backend: GoalToolBackend): Tool {
   return {
-    name: "SetGoalBudget",
+    name: GOAL_TOOL_NAMES.setBudget,
     description:
       "Translate one explicit hard limit from the user, system, or developer into a structured " +
       "budget for the current goal. Never estimate, infer, recommend, or invent a budget. Set " +

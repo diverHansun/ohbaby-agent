@@ -16,6 +16,7 @@ import {
 import {
   createSessionIdGenerator,
   SessionArchiveError,
+  SessionMovedError,
   createShutdownOptions,
   collectCleanup,
   ensureDefaultDirectory,
@@ -931,9 +932,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     directory: string,
     sideChatId: string,
   ): Promise<void> {
-    // Side chat directories are persisted workspace scope keys.
-    const instance = await this.instanceStore?.loadScope(directory);
-    await (instance?.backend ?? this.options.backend).closeSideChat({
+    // Pending approvals and runs belong to the instance that opened the side chat.
+    const instance = await this.instanceStore?.get(directory);
+    if (!instance) throw new SessionMovedError(sideChatId, directory);
+    await instance.backend.closeSideChat({
       sideChatId,
     });
   }

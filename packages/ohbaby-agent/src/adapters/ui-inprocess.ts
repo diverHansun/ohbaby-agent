@@ -1,3 +1,4 @@
+import { processOwnerId } from "../utils/process-owner.js";
 import { isUserFacingSession } from "../services/session/types.js";
 import { createSessionSubagentSupervisor } from "../agents/subagents/session-supervisor.js";
 import { listSessionExecutions } from "../agents/subagents/continuation-coordinator.js";
@@ -3313,6 +3314,14 @@ export function createInProcessUiBackendClient(
     return options.sideChatStorage;
   }
 
+  async function forgetSessionState(sessionId: string): Promise<void> {
+    await stateStore.removeSession?.(sessionId);
+    goalSnapshotsBySession.delete(sessionId);
+    uiGoalsBySession.delete(sessionId);
+    uiTodosBySession.delete(sessionId);
+    todoProjectionScopesBySession.delete(sessionId);
+  }
+
   const closingSideChats = new Map<string, Promise<void>>();
   function closeSideChatInternal(sessionId: string): Promise<void> {
     const existing = closingSideChats.get(sessionId);
@@ -3329,7 +3338,7 @@ export function createInProcessUiBackendClient(
       if (!session) return;
       if (!session.sideChat)
         throw new SideChatUnsupportedError("Only a side chat can be closed");
-      if (session.sideChat.ownerPid !== process.pid)
+      if (session.sideChat.ownerId !== processOwnerId)
         throw new SessionRunBusyError(sessionId, []);
       await stopSideChatWork(storage.db, sessionId, {
         abort: (runId) => runtimeController.abortPromptRun(runId),
@@ -3341,17 +3350,13 @@ export function createInProcessUiBackendClient(
       });
       const deleted = await deleteSideChatSession(storage.db, sessionId);
       permission.clearSession(sessionId);
-      await stateStore.removeSession?.(sessionId);
       await sessionInitializationById.get(sessionId)?.catch(() => undefined);
+      await forgetSessionState(sessionId);
       sourceProjection.removeSession(sessionId);
       sessionMetadataById.delete(sessionId);
       sessionInitializationById.delete(sessionId);
       sessionSubviewFailures.delete(sessionId);
       contextWindowUsage.clearSession(sessionId);
-      uiTodosBySession.delete(sessionId);
-      todoProjectionScopesBySession.delete(sessionId);
-      goalSnapshotsBySession.delete(sessionId);
-      uiGoalsBySession.delete(sessionId);
       bus.publish(SessionEvent.Removed, { sessionId });
       await cleanupDeletedSessionFiles(deleted, storage.deletedSessionFiles);
       await publishSessionIndexInvalidation();
@@ -3403,7 +3408,7 @@ export function createInProcessUiBackendClient(
 
     if (options.sideChatStorage) {
       const children = sideChatsForMain(options.sideChatStorage.db, sessionId);
-      if (children.some((child) => child.ownerPid !== process.pid))
+      if (children.some((child) => child.ownerId !== processOwnerId))
         throw new SessionRunBusyError(sessionId, []);
       for (const child of children) {
         if (sameSessionDirectory(child.workingDirectory, promptScopeKey))
@@ -3427,11 +3432,7 @@ export function createInProcessUiBackendClient(
     }
     retirePromptCacheSession(sessionId);
     removeSubagentSession(sessionId);
-    await stateStore.removeSession?.(sessionId);
-    goalSnapshotsBySession.delete(sessionId);
-    uiGoalsBySession.delete(sessionId);
-    uiTodosBySession.delete(sessionId);
-    todoProjectionScopesBySession.delete(sessionId);
+    await forgetSessionState(sessionId);
 
     if (snapshot.activeSessionId === sessionId) {
       const remainingSessions = (
@@ -3488,7 +3489,7 @@ export function createInProcessUiBackendClient(
       return;
     }
     const session = await options.sessionManager.get(sessionId);
-    if (session?.sideChat && session.sideChat.ownerPid !== process.pid)
+    if (session?.sideChat && session.sideChat.ownerId !== processOwnerId)
       throw new SessionArchiveError("SESSION_NOT_FOUND", sessionId);
     if (operation !== "view" && archivingSessions.has(sessionId))
       throw new SessionRunBusyError(sessionId, []);

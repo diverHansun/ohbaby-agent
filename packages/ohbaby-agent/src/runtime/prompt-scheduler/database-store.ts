@@ -1,4 +1,4 @@
-import { assertActiveSessionForWork } from "../../services/session/archive.js";
+import { assertActiveSessionForWork } from "../../services/session/work-admission.js";
 import { sameReasoning } from "./types.js";
 /* eslint-disable @typescript-eslint/require-await -- SQLite operations are synchronous behind the shared async store contract. */
 import { randomUUID } from "node:crypto";

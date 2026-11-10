@@ -1,3 +1,4 @@
+import { processOwnerId } from "../../utils/process-owner.js";
 import { randomUUID } from "node:crypto";
 import { SessionRunBusyError } from "../../runtime/run-ledger/errors.js";
 import {
@@ -6,6 +7,10 @@ import {
   PromptEditLeaseLostError,
 } from "../../runtime/prompt-scheduler/errors.js";
 import type { UiBackendClient } from "ohbaby-sdk";
+import {
+  insertMessageRow,
+  insertPartRow,
+} from "../../core/message/database-store.js";
 import { createMessage, createPart } from "../../core/message/factory.js";
 import { createMessageIdGenerator } from "../../core/message/id-generator.js";
 import type { TriggerSource } from "../../runtime/run-ledger/types.js";
@@ -19,14 +24,8 @@ import {
   findEndedMainRun,
 } from "../../services/session/copy-history.js";
 import { readSessionRow } from "../../services/session/database-store.js";
-import {
-  sameSessionDirectory,
-  sessionTargetWorkingDirectory,
-} from "../../services/session/working-directory.js";
-import {
-  SessionMovedError,
-  SideChatUnsupportedError,
-} from "../../services/session/errors.js";
+import { assertSessionInWorkspace } from "../../services/session/working-directory.js";
+import { SideChatUnsupportedError } from "../../services/session/errors.js";
 import type {
   Session,
   SideChatMetadata,
@@ -52,7 +51,7 @@ function mainSession(db: DatabaseConnection, id: string): Session {
 }
 
 interface SideChatRow {
-  ownerPid: number;
+  ownerId: string | null;
   sideChatId: string;
   title: string;
   createdAt: number;
@@ -63,19 +62,19 @@ interface SideChatRow {
 export function sideChatsForMain(
   db: DatabaseConnection,
   mainSessionId: string,
-  ownerPid?: number,
+  ownerId?: string,
 ): SideChatRow[] {
   return db
     .prepare<SideChatRow>(
       `SELECT id AS sideChatId, title, created_at AS createdAt,
             COALESCE(pending_working_directory, working_directory) AS workingDirectory,
-            json_extract(data, '$.sideChat.ownerPid') AS ownerPid,
+            json_extract(data, '$.sideChat.ownerId') AS ownerId,
             json_extract(data, '$.sideChat.boundaryMessageId') AS boundaryMessageId
      FROM session WHERE json_extract(data, '$.sideChat.mainSessionId') = ?
-       AND (? IS NULL OR json_extract(data, '$.sideChat.ownerPid') = ?)
+       AND (? IS NULL OR json_extract(data, '$.sideChat.ownerId') = ?)
      ORDER BY created_at, rowid`,
     )
-    .all(mainSessionId, ownerPid ?? null, ownerPid ?? null);
+    .all(mainSessionId, ownerId ?? null, ownerId ?? null);
 }
 
 export function listSideChats(
@@ -84,13 +83,15 @@ export function listSideChats(
 ): Awaited<ReturnType<UiBackendClient["listSideChats"]>> {
   mainSession(db, mainSessionId);
   return {
-    sideChats: sideChatsForMain(db, mainSessionId, process.pid).map((row) => ({
-      sideChatId: row.sideChatId,
-      title: row.title,
-      boundaryMessageId: row.boundaryMessageId,
-      workingDirectory: row.workingDirectory,
-      createdAt: new Date(row.createdAt).toISOString(),
-    })),
+    sideChats: sideChatsForMain(db, mainSessionId, processOwnerId).map(
+      (row) => ({
+        sideChatId: row.sideChatId,
+        title: row.title,
+        boundaryMessageId: row.boundaryMessageId,
+        workingDirectory: row.workingDirectory,
+        createdAt: new Date(row.createdAt).toISOString(),
+      }),
+    ),
   };
 }
 
@@ -153,9 +154,7 @@ export function openSideChat(
 ): Promise<Session & { sideChat: SideChatMetadata }> {
   return runWriteTransaction(db, (tx) => {
     const main = mainSession(tx, mainId);
-    const target = sessionTargetWorkingDirectory(main);
-    if (!sameSessionDirectory(promptScopeKey, target))
-      throw new SessionMovedError(mainId, target);
+    assertSessionInWorkspace(main, promptScopeKey);
     const cutRunId = findEndedMainRun(tx, mainId);
     if (
       !cutRunId &&
@@ -180,6 +179,7 @@ export function openSideChat(
         sideChat: {
           mainSessionId: mainId,
           boundaryMessageId,
+          ownerId: processOwnerId,
           ownerPid: process.pid,
         },
       },
@@ -207,28 +207,8 @@ export function openSideChat(
       orderIndex: 0,
       data: { type: "text", text: boundaryText(tx, mainId, cutRunId !== null) },
     });
-    tx.prepare(
-      "INSERT INTO message (id,session_id,role,agent,created_at,updated_at,data) VALUES (?,?,?,?,?,?,?)",
-    ).run(
-      message.id,
-      sessionId,
-      message.role,
-      main.agentName,
-      at,
-      at,
-      JSON.stringify(message),
-    );
-    tx.prepare(
-      "INSERT INTO part (id,message_id,session_id,type,order_index,created_at,updated_at,data) VALUES (?,?,?,?,0,?,?,?)",
-    ).run(
-      part.id,
-      message.id,
-      sessionId,
-      part.type,
-      at,
-      at,
-      JSON.stringify(part),
-    );
+    insertMessageRow(tx, message);
+    insertPartRow(tx, part, at);
     tx.prepare(
       "UPDATE session SET message_count = message_count + 1, last_message_at = ?, updated_at = ? WHERE id = ?",
     ).run(at, at, sessionId);
@@ -249,16 +229,17 @@ export async function stopSideChatWork(
     hasLocalWork: () => boolean;
   },
 ): Promise<void> {
-  const deadline = performance.now() + 5000;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       reject(new SessionRunBusyError(sessionId, []));
     }, 5000);
   });
-  const stop = async (): Promise<void> => {
+  const withinDeadline = <T>(operation: Promise<T>): Promise<T> =>
+    Promise.race([operation, timeout]);
+  try {
     const aborted = new Set<string>();
-    while (performance.now() < deadline) {
+    for (;;) {
       const prompts = db
         .prepare<{
           prompt_id: string;
@@ -271,9 +252,11 @@ export async function stopSideChatWork(
       for (const prompt of prompts) {
         if (prompt.status === "running") continue;
         try {
-          await controls.cancel(
-            prompt.prompt_id,
-            prompt.edit_lease_id ?? undefined,
+          await withinDeadline(
+            controls.cancel(
+              prompt.prompt_id,
+              prompt.edit_lease_id ?? undefined,
+            ),
           );
         } catch (error) {
           if (
@@ -294,15 +277,14 @@ export async function stopSideChatWork(
         )
         .all(sessionId);
       for (const { run_id: id } of runs) {
-        if (!aborted.has(id) && (await controls.abort(id))) aborted.add(id);
+        if (!aborted.has(id) && (await withinDeadline(controls.abort(id))))
+          aborted.add(id);
       }
       if (!runs.length && !prompts.length && !controls.hasLocalWork()) return;
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      await withinDeadline(
+        new Promise<void>((resolve) => setTimeout(resolve, 100)),
+      );
     }
-    throw new SessionRunBusyError(sessionId, []);
-  };
-  try {
-    await Promise.race([stop(), timeout]);
   } finally {
     clearTimeout(timer);
   }

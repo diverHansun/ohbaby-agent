@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createMessageIdGenerator } from "../../core/message/id-generator.js";
 import type { DatabaseConnection, SqliteValue } from "../database/types.js";
 import type { SessionData, SessionRow } from "./database-store.js";
-import { SessionNotFoundError } from "./errors.js";
+import { HistoryCutInvalidError, SessionNotFoundError } from "./errors.js";
 import { createSessionIdGenerator } from "./id-generator.js";
 
 const terminal = "'succeeded', 'failed', 'cancelled', 'interrupted'";
@@ -88,7 +88,7 @@ function selectHistory(
   if (cutRunId === null)
     return { messages: [], parts: [], prompts: [], inputs: [], runs: [] };
   if (!findEndedMainRun(db, sourceSessionId, cutRunId))
-    throw new Error(`No ended main turn with messages: ${cutRunId}`);
+    throw new HistoryCutInvalidError(sourceSessionId, cutRunId);
   const messages = db
     .prepare<MessageRow>(
       `
@@ -198,8 +198,9 @@ export function copySessionHistory(
   const ids = new Map([[input.sourceSessionId, sessionId]]);
   const now = Date.now();
   const lastMessageAt = messages.at(-1)?.created_at ?? null;
-  // SQL view pagination breaks equal-time ties by id. Model history breaks them by
-  // rowid instead, so assign ranks separately and insert in the original row order.
+  // Page cursors compare (created_at, id). At equal times the ranked "-copy_"
+  // suffixes must sort before the side chat's "-side_" boundary and before
+  // normal UUID/timestamp suffixes. Model history retains insertion order.
   const viewOrder = [...messages].sort(
     (a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : 1),
   );
