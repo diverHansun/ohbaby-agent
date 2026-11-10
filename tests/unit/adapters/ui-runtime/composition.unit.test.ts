@@ -36,7 +36,6 @@ import {
 } from "../../../../packages/ohbaby-agent/src/services/session/index.js";
 import { createPermissionState } from "../../../../packages/ohbaby-agent/src/permission/index.js";
 import { McpToolMenu } from "../../../../packages/ohbaby-agent/src/mcp/integration/dynamic-tool-menu.js";
-import { ScopeToolSequence } from "../../../../packages/ohbaby-agent/src/mcp/integration/tool-sequence.js";
 import { createInMemoryRunLedger } from "../../../../packages/ohbaby-agent/src/runtime/run-ledger/index.js";
 import { InMemoryCurrentRunInputStore } from "../../../../packages/ohbaby-agent/src/runtime/prompt-scheduler/current-run-inputs.js";
 import { InMemoryPromptSubmissionStore } from "../../../../packages/ohbaby-agent/src/runtime/prompt-scheduler/in-memory-store.js";
@@ -835,10 +834,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       "disposeScope",
     );
     const disposeMcpSession = vi.spyOn(McpToolMenu.prototype, "disposeSession");
-    const disposeToolSequenceSession = vi.spyOn(
-      ScopeToolSequence.prototype,
-      "disposeSession",
-    );
     const inactiveSubagent = {
       contextScopeId: "subagent_1",
       createdAt: 1,
@@ -890,7 +885,6 @@ describe("createUiRuntimeComposition skill tools", () => {
 
     expect(disposeSession).toHaveBeenCalledWith("session_1");
     expect(disposeMcpSession).toHaveBeenCalledWith("session_1");
-    expect(disposeToolSequenceSession).toHaveBeenCalledWith("session_1");
     await vi.waitFor(() => {
       expect(interruptByParent).toHaveBeenCalledWith(
         "session_1",
@@ -1166,10 +1160,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       "cleanupScope",
     );
     const disposeMcpScope = vi.spyOn(McpToolMenu.prototype, "disposeScope");
-    const disposeToolSequenceScope = vi.spyOn(
-      ScopeToolSequence.prototype,
-      "disposeScope",
-    );
     const disposeContextScope = vi.fn<ContextManager["disposeScope"]>();
     const contextManager = {
       assemble: vi.fn<ContextManager["assemble"]>(),
@@ -1255,10 +1245,6 @@ describe("createUiRuntimeComposition skill tools", () => {
     await vi.waitFor(() => {
       expect(disposeShellScope).toHaveBeenCalledWith("child_1", "subagent_1");
       expect(disposeMcpScope).toHaveBeenCalledWith("child_1", "subagent_1");
-      expect(disposeToolSequenceScope).toHaveBeenCalledWith(
-        "child_1",
-        "subagent_1",
-      );
       expect(disposeContextScope).toHaveBeenCalledWith("child_1", "subagent_1");
       expect(destroyContext).toHaveBeenCalledWith({
         contextScopeId: "subagent_1",

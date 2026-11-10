@@ -51,7 +51,6 @@ import {
   initDatabase,
   schema,
 } from "../../../packages/ohbaby-agent/src/services/database/index.js";
-import { ScopeToolSequence } from "../../../packages/ohbaby-agent/src/mcp/integration/tool-sequence.js";
 import { SourceSessionProjection } from "../../../packages/ohbaby-agent/src/adapters/ui-state/source-session-projection.js";
 import type {
   InterfaceProviderRequest as ProviderRequest,
@@ -1168,7 +1167,6 @@ describe("lifecycle tool scheduler integration", () => {
   it("keeps a prepared request immutable when a lazy tool loads before send and exposes it next step", async () => {
     const requests: ProviderRequest[] = [];
     const measurements: PreparedModelRequest[] = [];
-    const epochs: number[] = [];
     const bus = createBus();
     const scheduler = createToolScheduler({
       bus,
@@ -1228,7 +1226,6 @@ describe("lifecycle tool scheduler integration", () => {
       systemPromptProvider: createEmptySystemPromptProvider(),
       tokenCounter: createTokenCounter(),
     });
-    const sequence = new ScopeToolSequence();
     let lazyLoaded = false;
     let firstPreparedRequest: PreparedModelRequest | undefined;
     let firstPreparedJson = "";
@@ -1259,14 +1256,9 @@ describe("lifecycle tool scheduler integration", () => {
         const visible = definitions.filter(
           (tool) => lazyLoaded || !tool.name.startsWith("mcp_"),
         );
-        const snapshot = sequence.snapshot(
-          { sessionId: "session_lazy" },
-          visible,
-        );
-        epochs.push(snapshot.epoch);
         return {
-          definitions: snapshot.tools,
-          requestTools: toModelTools(snapshot.tools),
+          definitions: visible,
+          requestTools: toModelTools(visible),
         };
       },
       toolScheduler: scheduler,
@@ -1295,7 +1287,6 @@ describe("lifecycle tool scheduler integration", () => {
     const secondNames = requests[1]?.tools?.map((tool) => tool.name) ?? [];
     expect(firstNames).toEqual(["read"]);
     expect(secondNames).toEqual(["read", "mcp_s6_server_t6_search"]);
-    expect(epochs).toEqual([0, 1]);
     expect(firstPreparedRequest).toMatchObject({
       messages: requests[0]?.messages,
       tools: requests[0]?.tools,

@@ -129,7 +129,6 @@ import {
   createSelectToolsTool,
   McpManager,
   McpToolMenu,
-  ScopeToolSequence,
   type McpClientStatus,
 } from "../../mcp/index.js";
 import type { McpServerConfig } from "../../config/mcp/types.js";
@@ -347,7 +346,6 @@ export async function createUiRuntimeComposition(
       });
     },
   });
-  const scopeToolSequence = new ScopeToolSequence();
   let registeredMcpToolNames = new Set<string>();
   const sessionManager =
     options.sessionManager ??
@@ -601,6 +599,9 @@ export async function createUiRuntimeComposition(
     };
     await mcpToolMenu.ensureLoaded(scope);
     const loadedMcpTools = mcpToolMenu.loadedNames(scope, tools);
+    // Order is computed, never remembered: fixed tools in registration order
+    // (mcp_resource / mcp_prompt are fixed even though their source is "mcp"),
+    // then loaded MCP tools in first-loaded order from history.
     const staticTools = tools.filter(
       (tool) => !registeredMcpToolNames.has(tool.name),
     );
@@ -609,10 +610,7 @@ export async function createUiRuntimeComposition(
       const tool = toolsByName.get(toolName);
       return tool === undefined ? [] : [tool];
     });
-    return scopeToolSequence.snapshot(scope, [
-      ...staticTools,
-      ...loadedDefinitions,
-    ]).tools;
+    return [...staticTools, ...loadedDefinitions];
   }
 
   async function resolvePrimaryContextTools(input: {
@@ -901,7 +899,6 @@ export async function createUiRuntimeComposition(
       });
       contextManager.disposeScope(input.sessionId, input.contextScopeId);
       mcpToolMenu.disposeScope(input.sessionId, input.contextScopeId);
-      scopeToolSequence.disposeScope(input.sessionId, input.contextScopeId);
       todoService.releaseScope(input.sessionId, input.contextScopeId);
     };
     if (!cleanup.confirmed)
@@ -1035,7 +1032,6 @@ export async function createUiRuntimeComposition(
       trackLifecycleCleanup(resultArtifacts.deleteSession(payload.sessionId));
       contextManager.disposeSession(payload.sessionId);
       mcpToolMenu.disposeSession(payload.sessionId);
-      scopeToolSequence.disposeSession(payload.sessionId);
       todoService.release(payload.sessionId);
       todoWorkScopes.release(payload.sessionId);
       trackLifecycleCleanup(

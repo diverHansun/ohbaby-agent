@@ -31,7 +31,6 @@ import {
   McpClient,
   McpManager,
   McpToolMenu,
-  ScopeToolSequence,
   type McpTransport,
 } from "../../packages/ohbaby-agent/src/mcp/index.js";
 import { createPermissionState } from "../../packages/ohbaby-agent/src/permission/index.js";
@@ -576,8 +575,9 @@ export async function createRealCacheHarness(
   scheduler.register(admittedMcp);
   menu.setAvailable([admittedMcp.name]);
 
-  const sequence = new ScopeToolSequence();
+  // Tool epoch: bumps each time a scope's visible tool list changes.
   const latestEpochs = new Map<string, number>();
+  const latestToolNames = new Map<string, string>();
   const projections: SanitizedRequestProjection[] = [];
   const usageEvidence: {
     readonly contextScopeId?: string;
@@ -628,14 +628,16 @@ export async function createRealCacheHarness(
       const visible = definitions.filter(
         (tool) => tool.source !== "mcp" || loaded.has(tool.name),
       );
-      const snapshot = sequence.snapshot(
-        { contextScopeId, sessionId },
-        visible,
-      );
-      latestEpochs.set(scopeKey(sessionId, contextScopeId), snapshot.epoch);
+      const key = scopeKey(sessionId, contextScopeId);
+      const toolNames = JSON.stringify(visible.map((tool) => tool.name));
+      const previousNames = latestToolNames.get(key);
+      if (previousNames !== undefined && previousNames !== toolNames) {
+        latestEpochs.set(key, (latestEpochs.get(key) ?? 0) + 1);
+      }
+      latestToolNames.set(key, toolNames);
       return {
-        definitions: snapshot.tools,
-        requestTools: toModelTools(snapshot.tools),
+        definitions: visible,
+        requestTools: toModelTools(visible),
       };
     },
     toolScheduler: scheduler,
