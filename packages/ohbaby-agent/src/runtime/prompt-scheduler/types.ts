@@ -13,6 +13,7 @@ export type PromptSubmissionStatus =
   | "interrupted";
 
 export interface PromptSubmissionRecord {
+  readonly rewoundAt?: string;
   readonly resendOfPromptId?: string;
   readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
   /** Admission-created temporary title; preserved when the queued text changes. */
@@ -140,6 +141,11 @@ export interface RecoverPromptSubmissionsOptions {
 }
 
 export interface PromptSubmissionStore {
+  markRewound(
+    sessionId: string,
+    promptIds: readonly string[],
+    rewoundAt: string,
+  ): Promise<readonly PromptSubmissionRecord[]>;
   resubmitRetained(
     input: ResubmitRetainedPromptInput,
   ): Promise<ResubmitRetainedPromptResult>;
@@ -201,6 +207,8 @@ export interface PromptSubmissionStore {
   hasUnfinishedForSession(sessionId: string): Promise<boolean>;
   /** Durable receipt existence, including terminal history without message/run associations. */
   hasForSession(scopeKey: string, sessionId: string): Promise<boolean>;
+  /** A session with fully rewound history still owns its existing title. */
+  hasRewoundForSession(sessionId: string): Promise<boolean>;
   /** Original admission title remains recoverable even when its prompt was cancelled. */
   getSessionTitleExpected(
     scopeKey: string,

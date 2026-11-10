@@ -101,7 +101,11 @@ export async function projectUnconsumedSteers(options: {
   const candidates = await inputs.listUnconsumedSteers(sessionId);
   if (candidates.length) options.assertRecoveryReady?.();
   for (const input of candidates) {
-    if (input.contextScopeId !== undefined) continue;
+    if (
+      input.contextScopeId !== undefined ||
+      (await prompts.get(input.sourceId))?.rewoundAt !== undefined
+    )
+      continue;
     const run = await runs.get(input.runId);
     if (run?.sessionId !== sessionId)
       throw new Error("Steered input run missing or out of scope");

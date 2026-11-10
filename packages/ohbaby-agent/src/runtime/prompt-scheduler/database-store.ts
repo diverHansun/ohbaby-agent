@@ -37,6 +37,7 @@ import type {
 } from "./types.js";
 
 export interface PromptSubmissionRow {
+  readonly rewound_at: string | null;
   readonly resend_of_prompt_id: string | null;
   readonly steer_receipt: string | null;
   readonly prompt_id: string;
@@ -119,6 +120,7 @@ export function promptSubmissionRowToRecord(
   row: PromptSubmissionRow,
 ): PromptSubmissionRecord {
   return {
+    ...(row.rewound_at ? { rewoundAt: row.rewound_at } : {}),
     promptId: row.prompt_id,
     resendOfPromptId: row.resend_of_prompt_id ?? undefined,
     steerReceipt: row.steer_receipt
@@ -157,6 +159,56 @@ export function promptSubmissionRowToRecord(
     startedAt: row.started_at ?? undefined,
     endedAt: row.ended_at ?? undefined,
   };
+}
+
+/** Materialized prompts follow the model's message order, including queued steers.
+ * A cancelled or queued prompt may only have a reserved message ID. Use its
+ * latest admission (including retained resubmission) in that case.
+ */
+export function listRewindPrompts(
+  db: DatabaseConnection,
+  sessionId: string,
+  fromPromptId: string,
+): PromptSubmissionRecord[] {
+  return db
+    .prepare<PromptSubmissionRow>(
+      `WITH readmitted(id) AS (SELECT DISTINCT prompt_id FROM prompt_resubmission),
+      target AS (
+        SELECT p.*, p.rowid AS position, m.created_at AS message_time, m.rowid AS message_position
+        FROM prompt_submission p JOIN message m ON m.id = p.user_message_id AND m.session_id = p.session_id
+        WHERE p.session_id = ? AND p.prompt_id = ? AND p.rewound_at IS NULL
+          AND m.context_scope_id IS NULL AND m.rewound_at IS NULL
+      )
+      SELECT p.* FROM target t JOIN prompt_submission p ON p.session_id = t.session_id
+      LEFT JOIN message m ON m.id = p.user_message_id AND m.session_id = p.session_id
+      WHERE p.rewound_at IS NULL AND CASE
+        WHEN m.id IS NOT NULL THEN m.context_scope_id IS NULL AND m.rewound_at IS NULL
+          AND (m.created_at, m.rowid) >= (t.message_time, t.message_position)
+        -- Historical clocks and counters were workspace-local. First admissions have a global insert order.
+        WHEN p.scope_key <> t.scope_key AND p.prompt_id NOT IN readmitted AND t.prompt_id NOT IN readmitted
+          THEN p.rowid >= t.position
+        ELSE (p.accepted_at, p.admission_order, p.rowid) >= (t.accepted_at, t.admission_order, t.position)
+      END
+      ORDER BY (p.prompt_id = t.prompt_id) DESC, p.accepted_at, p.admission_order, p.rowid`,
+    )
+    .all(sessionId, fromPromptId)
+    .map(promptSubmissionRowToRecord);
+}
+
+export function markPromptsRewound(
+  tx: DatabaseConnection,
+  sessionId: string,
+  promptIds: readonly string[],
+  rewoundAt: string,
+): PromptSubmissionRecord[] {
+  return tx
+    .prepare<PromptSubmissionRow>(
+      `UPDATE prompt_submission SET rewound_at = ?, updated_at = MAX(updated_at + 1, ?)
+       WHERE session_id = ? AND rewound_at IS NULL
+         AND prompt_id IN (SELECT value FROM json_each(?)) RETURNING *`,
+    )
+    .all(rewoundAt, Date.parse(rewoundAt), sessionId, JSON.stringify(promptIds))
+    .map(promptSubmissionRowToRecord);
 }
 
 export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
@@ -246,7 +298,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       const at = Math.max(
         this.now(),
         (latestCreatedAt ?? 0) + 1,
-        this.latestAcceptedAt(db, input.scopeKey),
+        this.latestAcceptedAt(db, input.scopeKey, input.sessionId),
       );
       db.prepare(
         `INSERT INTO ${this.tableName}
@@ -271,7 +323,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         this.ownerId,
         this.ownerPid,
         at,
-        this.nextAdmissionOrder(db, input.scopeKey),
+        this.nextAdmissionOrder(db, input.scopeKey, input.sessionId),
       );
       return { record: this.requireFrom(db, input.promptId), inserted: true };
     });
@@ -630,17 +682,37 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       .map(promptSubmissionRowToRecord);
   }
 
+  markRewound(
+    sessionId: string,
+    promptIds: readonly string[],
+    rewoundAt: string,
+  ): Promise<PromptSubmissionRecord[]> {
+    return this.transaction((tx) =>
+      markPromptsRewound(tx, sessionId, promptIds, rewoundAt),
+    );
+  }
+
   async listVisible(
     scopeKey: string,
   ): Promise<readonly PromptSubmissionRecord[]> {
     return this.db
       .prepare<PromptSubmissionRow>(
         `SELECT * FROM ${this.tableName}
-         WHERE scope_key = ?
+         WHERE scope_key = ? AND rewound_at IS NULL
          ORDER BY created_at ASC, prompt_id ASC`,
       )
       .all(scopeKey)
       .map(promptSubmissionRowToRecord);
+  }
+
+  async hasRewoundForSession(sessionId: string): Promise<boolean> {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM prompt_submission WHERE session_id = ? AND rewound_at IS NOT NULL LIMIT 1",
+        )
+        .get(sessionId) !== undefined
+    );
   }
 
   async getSessionTitleExpected(
@@ -684,7 +756,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   ): Promise<readonly PromptSubmissionRecord[]> {
     return this.db
       .prepare<PromptSubmissionRow>(
-        `SELECT * FROM ${this.tableName} WHERE scope_key = ? AND resend_of_prompt_id = ? ORDER BY created_at, prompt_id`,
+        `SELECT * FROM ${this.tableName} WHERE rewound_at IS NULL AND scope_key = ? AND resend_of_prompt_id = ? ORDER BY created_at, prompt_id`,
       )
       .all(scopeKey, parentPromptId)
       .map(promptSubmissionRowToRecord);
@@ -714,7 +786,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     return this.db
       .prepare<PromptSubmissionRow>(
         `SELECT * FROM ${this.tableName}
-       WHERE scope_key = ? AND session_id = ? AND (${associations.join(" OR ")})
+       WHERE scope_key = ? AND session_id = ? AND rewound_at IS NULL AND (${associations.join(" OR ")})
        ORDER BY created_at ASC, prompt_id ASC`,
       )
       .all(...values)
@@ -798,9 +870,13 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         throw new PromptQueueFullError(input.scopeKey, input.maxQueuedPrompts);
       const acceptedAt = Math.max(
         this.now(),
-        this.latestAcceptedAt(db, input.scopeKey),
+        this.latestAcceptedAt(db, input.scopeKey, current.sessionId),
       );
-      const order = this.nextAdmissionOrder(db, input.scopeKey);
+      const order = this.nextAdmissionOrder(
+        db,
+        input.scopeKey,
+        current.sessionId,
+      );
       const result = db
         .prepare(
           `UPDATE ${this.tableName} SET naming_source=CASE WHEN text=? THEN naming_source ELSE NULL END, text=?, status='queued', owner_id=?, owner_pid=?,
@@ -974,26 +1050,34 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     if (!this.owns(record))
       throw new PromptVersionConflictError(record.promptId);
   }
-  private nextAdmissionOrder(db: DatabaseConnection, scopeKey: string): number {
+  private nextAdmissionOrder(
+    db: DatabaseConnection,
+    scopeKey: string,
+    sessionId: string,
+  ): number {
     return (
       db
         .prepare<{
           value: number;
         }>(
-          `SELECT COALESCE(MAX(admission_order),0)+1 AS value FROM ${this.tableName} WHERE scope_key=?`,
+          `SELECT COALESCE(MAX(admission_order),0)+1 AS value FROM ${this.tableName} WHERE scope_key=? OR session_id=?`,
         )
-        .get(scopeKey)?.value ?? 1
+        .get(scopeKey, sessionId)?.value ?? 1
     );
   }
-  private latestAcceptedAt(db: DatabaseConnection, scopeKey: string): number {
+  private latestAcceptedAt(
+    db: DatabaseConnection,
+    scopeKey: string,
+    sessionId: string,
+  ): number {
     return (
       db
         .prepare<{
           value: number;
         }>(
-          `SELECT COALESCE(MAX(accepted_at),0) AS value FROM ${this.tableName} WHERE scope_key=?`,
+          `SELECT COALESCE(MAX(accepted_at),0) AS value FROM ${this.tableName} WHERE scope_key=? OR session_id=?`,
         )
-        .get(scopeKey)?.value ?? 0
+        .get(scopeKey, sessionId)?.value ?? 0
     );
   }
 

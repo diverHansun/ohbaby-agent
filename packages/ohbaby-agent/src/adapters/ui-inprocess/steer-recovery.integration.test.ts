@@ -109,6 +109,62 @@ for (const backend of ["memory", "sqlite"] as const)
       };
       return { ...options, options, inputId: steered.receipt.inputId };
     }
+    it("hides rewound inputs from paging and recovery while retaining their durable receipts", async () => {
+      const f = await fixture();
+      await f.inputs.close("old", "completed");
+      const original = (
+        await f.messages.listByIds("session", ["original-message"])
+      )[0];
+      expect(await projectUnconsumedSteers(f.options)).toHaveLength(1);
+      await f.prompts.accept({
+        promptId: "queued-after-move",
+        userMessageId: "reserved",
+        clientRequestId: "queued-after-move",
+        text: "queued",
+        sessionId: "session",
+        scopeKey: "workspace-2",
+        maxQueuedPrompts: 10,
+      });
+      await f.prompts.cancelQueued("queued-after-move");
+      const at = new Date(Date.now() + 5000).toISOString();
+      expect(
+        await f.messages.markRewound("session", "original-message", at),
+      ).toEqual(["original-message"]);
+      expect(
+        (
+          await f.prompts.markRewound(
+            "session",
+            ["original", "queued-after-move"],
+            at,
+          )
+        ).map((p) => [p.promptId, p.rewoundAt, p.updatedAt]),
+      ).toEqual([
+        ["original", at, Date.parse(at)],
+        ["queued-after-move", at, Date.parse(at)],
+      ]);
+      expect(
+        await f.messages.listByIds("session", ["original-message"]),
+      ).toEqual([]);
+      expect(await f.messages.listBySession("session")).toEqual([]);
+      expect((await f.messages.listPageBySession("session")).messages).toEqual(
+        [],
+      );
+      expect(
+        (await f.messages.listPageByRun("session", "old")).messages,
+      ).toEqual([]);
+      expect(await f.messages.getPart(original.parts[0].id)).toEqual(
+        original.parts[0],
+      );
+      expect(await f.prompts.listVisible("workspace")).toEqual([]);
+      expect(
+        await f.prompts.listForSession("workspace", "session", {
+          messageIds: ["original-message"],
+        }),
+      ).toEqual([]);
+      expect(await f.prompts.get("original")).toMatchObject({ rewoundAt: at });
+      expect(await f.prompts.hasForSession("workspace", "session")).toBe(true);
+      expect(await projectUnconsumedSteers(f.options)).toEqual([]);
+    });
     it.each(["completed", "failed", "interrupted", "process-interrupted"])(
       "projects %s closures independently of transcript pagination",
       async (reason) => {

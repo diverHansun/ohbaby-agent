@@ -43,6 +43,7 @@ export interface UiPromptError {
 }
 
 export interface UiPromptSubmission {
+  readonly rewoundAt?: string;
   readonly resendOfPromptId?: string;
   readonly steerReceipt?: UiSteerQueuedPromptReceipt;
   readonly reasoning?: UiReasoningConfig;

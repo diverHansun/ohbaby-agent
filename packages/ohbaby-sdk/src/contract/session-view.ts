@@ -213,7 +213,9 @@ export function applySessionChange(
     },
     runs: event.runs ?? view.runs,
     history: event.history ?? view.history,
-    prompts: event.prompts ?? view.prompts,
+    prompts:
+      event.prompts?.filter((prompt) => prompt.rewoundAt === undefined) ??
+      view.prompts,
     reasoningMissing: event.reasoningMissing ?? view.reasoningMissing,
     todo: event.todo ?? view.todo,
     goal: event.goal ?? view.goal,

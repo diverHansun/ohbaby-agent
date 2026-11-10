@@ -27,13 +27,13 @@ function endedMainRuns(
     WITH anchors AS (
       SELECT json_extract(data, '$.runId') AS run_id,
              MAX(json_extract(data, '$.runtimeInput') IS NULL) AS has_visible_message
-      FROM message WHERE session_id = ? AND context_scope_id IS NULL
+      FROM message WHERE session_id = ? AND rewound_at IS NULL AND context_scope_id IS NULL
       GROUP BY json_extract(data, '$.runId')
     ), prompts AS (
       SELECT run_id,
              MAX(status IN ('queued','retained','starting','running')) AS pending,
              MAX(status IN (${terminal})) AS ended
-      FROM prompt_submission WHERE session_id = ? AND run_id IS NOT NULL GROUP BY run_id
+      FROM prompt_submission WHERE session_id = ? AND rewound_at IS NULL AND run_id IS NOT NULL GROUP BY run_id
     )
     SELECT r.run_id FROM run_ledger r
     JOIN anchors ON anchors.run_id = r.run_id
@@ -73,7 +73,7 @@ export function findForkableMainRun(
     agent: string;
   }>(`
     SELECT id, json_extract(data, '$.agent') AS agent
-    FROM message WHERE session_id = ? AND json_extract(data, '$.runId') = ?
+    FROM message WHERE session_id = ? AND rewound_at IS NULL AND json_extract(data, '$.runId') = ?
       AND context_scope_id IS NULL AND role = 'assistant' AND json_extract(data, '$.runtimeInput') IS NULL
     ORDER BY created_at DESC, id DESC
   `);
@@ -154,9 +154,9 @@ function selectHistory(
   const messages = db
     .prepare<MessageRow>(
       `
-    SELECT * FROM message WHERE session_id = ? AND context_scope_id IS NULL
+    SELECT * FROM message WHERE session_id = ? AND rewound_at IS NULL AND context_scope_id IS NULL
     AND (created_at, rowid) <= (
-      SELECT created_at, rowid FROM message WHERE session_id = ? AND context_scope_id IS NULL
+      SELECT created_at, rowid FROM message WHERE session_id = ? AND rewound_at IS NULL AND context_scope_id IS NULL
         AND json_extract(data, '$.runId') = ? ORDER BY created_at DESC, rowid DESC LIMIT 1
     ) ORDER BY created_at, rowid
   `,
@@ -186,9 +186,9 @@ function selectHistory(
   const prompts = db
     .prepare<PromptRow>(
       `
-    SELECT * FROM prompt_submission WHERE session_id = ?
+    SELECT * FROM prompt_submission WHERE session_id = ? AND rewound_at IS NULL
     AND status IN (${terminal}, 'steered')
-    AND (user_message_id IN (${selectedIds}) OR run_id IN (${selectedIds}))
+    AND (user_message_id IN (${selectedIds}) OR run_id IN (${selectedIds})) ORDER BY rowid
   `,
     )
     .all(sourceSessionId, messageIds, JSON.stringify([...runIds]));

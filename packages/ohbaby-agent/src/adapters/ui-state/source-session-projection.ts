@@ -483,6 +483,7 @@ export class SourceSessionProjection {
         event.prompt,
       ].filter(
         (prompt) =>
+          prompt.rewoundAt !== undefined ||
           prompt.status === "queued" ||
           prompt.status === "retained" ||
           prompt.status === "starting" ||

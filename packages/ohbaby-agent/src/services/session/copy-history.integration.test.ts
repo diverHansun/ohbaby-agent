@@ -19,6 +19,14 @@ import {
   getDatabase,
   runWriteTransaction,
 } from "../database/index.js";
+import { forkSession } from "../../adapters/ui-inprocess/session-fork.js";
+import { openSideChat } from "../../adapters/ui-inprocess/side-chat.js";
+import { markMessagesRewound } from "../../core/message/database-store.js";
+import {
+  listRewindPrompts,
+  markPromptsRewound,
+} from "../../runtime/prompt-scheduler/database-store.js";
+import { searchGlobalSessions } from "./global-query.js";
 import { HistoryCutInvalidError } from "./errors.js";
 import {
   copySessionHistory,
@@ -191,6 +199,72 @@ async function modelMessages(
 }
 
 describe("copySessionHistory", () => {
+  it("copies only visible history and prompts into a fork and side chat after a rewind", async () => {
+    const db = getDatabase();
+    run("first", 1);
+    message("keep", "first", 1, "assistant");
+    part("keep", "text", { text: "kept answer" });
+    run("second", 2);
+    // Same timestamp as the preceding answer. Model order is insertion order, not the message ID.
+    message("a-target", "second", 1);
+    part("a-target", "text", { text: "discarded question" });
+    message("discard", "second", 2, "assistant");
+    part("discard", "text", { text: "discarded answer" });
+    message("child", "child-run", 2, "assistant", { contextScopeId: "child" });
+    prompt("keep-prompt", "keep", "first", "succeeded", "/original");
+    prompt("target-prompt", "a-target", "second");
+    // Associated with a retained run, so filtering copied messages alone cannot hide this prompt.
+    prompt("later-steer", "discard", "first", "steered", "/moved");
+    db.prepare(
+      "UPDATE prompt_submission SET accepted_at = 0 WHERE prompt_id='later-steer'",
+    ).run();
+    const at = new Date(100).toISOString();
+    expect(
+      searchGlobalSessions({ query: "discarded answer" }, db).hits,
+    ).toHaveLength(1);
+    await runWriteTransaction(db, (tx) => {
+      const promptIds = listRewindPrompts(tx, main, "target-prompt").map(
+        (p) => p.promptId,
+      );
+      expect(promptIds).toEqual(["target-prompt", "later-steer"]);
+      expect(markMessagesRewound(tx, main, "a-target", at).sort()).toEqual([
+        "a-target",
+        "discard",
+      ]);
+      markPromptsRewound(tx, main, promptIds, at);
+    });
+    expect(listRewindPrompts(db, main, "target-prompt")).toEqual([]);
+    expect(
+      searchGlobalSessions({ query: "discarded answer" }, db).hits,
+    ).toEqual([]);
+    expect(findEndedMainRun(db, main)).toBe("first");
+    expect(findForkableMainRun(db, main)).toBe("first");
+    await expect(
+      forkSession(db, { sessionId: main, runId: "second" }, "/next"),
+    ).rejects.toMatchObject({ code: "FORK_TARGET_INVALID" });
+
+    // A later visible cut spans both the retained and the hidden rows.
+    run("new-turn", 3);
+    message("new-answer", "new-turn", 3, "assistant");
+    part("new-answer", "text", { text: "replacement" });
+    const fork = await forkSession(db, { sessionId: main }, "/next");
+    const side = await openSideChat(db, main, "/next", Date.now);
+    for (const copy of [fork, side]) {
+      const history = await createDatabaseMessageStore({ db }).listBySession(
+        copy.id,
+      );
+      expect(
+        history
+          .filter(({ info }) => info.id !== side.sideChat.boundaryMessageId)
+          .flatMap(({ parts }) =>
+            parts.map((p) => p.type === "text" && p.text),
+          ),
+      ).toEqual(["kept answer", "replacement"]);
+      expect(rows("prompt_submission", copy.id)).toHaveLength(1);
+      expect(rows("run_ledger", copy.id)).toHaveLength(2);
+    }
+  });
+
   it.each(["succeeded", "running"])(
     "cuts before a later %s turn and keeps view and model ordering across timestamp ties",
     async (status) => {

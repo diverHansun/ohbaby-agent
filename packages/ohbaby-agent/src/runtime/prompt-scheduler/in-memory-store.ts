@@ -152,7 +152,10 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       this.now(),
       this.lastCreatedAt + 1,
       ...[...this.records.values()]
-        .filter((r) => r.scopeKey === input.scopeKey)
+        .filter(
+          (r) =>
+            r.scopeKey === input.scopeKey || r.sessionId === input.sessionId,
+        )
         .map((r) => r.acceptedAt ?? r.createdAt),
     );
     this.lastCreatedAt = at;
@@ -172,7 +175,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       ownerId: this.ownerId,
       ownerPid: this.ownerPid,
       acceptedAt: at,
-      admissionOrder: this.nextAdmissionOrder(input.scopeKey),
+      admissionOrder: this.nextAdmissionOrder(input.scopeKey, input.sessionId),
       createdAt: at,
       updatedAt: at,
     };
@@ -439,13 +442,48 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       .map(clone);
   }
 
+  async markRewound(
+    sessionId: string,
+    promptIds: readonly string[],
+    rewoundAt: string,
+  ): Promise<PromptSubmissionRecord[]> {
+    const records: PromptSubmissionRecord[] = [];
+    for (const id of promptIds) {
+      const record = this.records.get(id);
+      if (
+        !record ||
+        record.sessionId !== sessionId ||
+        record.rewoundAt !== undefined
+      )
+        continue;
+      const updated = {
+        ...record,
+        rewoundAt,
+        updatedAt: Math.max(record.updatedAt + 1, Date.parse(rewoundAt)),
+      };
+      this.records.set(record.promptId, updated);
+      records.push(clone(updated));
+    }
+    return records;
+  }
+
   async listVisible(
     scopeKey: string,
   ): Promise<readonly PromptSubmissionRecord[]> {
     return [...this.records.values()]
-      .filter((record) => record.scopeKey === scopeKey)
+      .filter(
+        (record) =>
+          record.scopeKey === scopeKey && record.rewoundAt === undefined,
+      )
       .sort(compareOrder)
       .map(clone);
+  }
+
+  async hasRewoundForSession(sessionId: string): Promise<boolean> {
+    return [...this.records.values()].some(
+      (record) =>
+        record.sessionId === sessionId && record.rewoundAt !== undefined,
+    );
   }
 
   async getSessionTitleExpected(
@@ -486,6 +524,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       .filter(
         (record) =>
           record.scopeKey === scopeKey &&
+          record.rewoundAt === undefined &&
           record.resendOfPromptId === parentPromptId,
       )
       .sort(compareOrder)
@@ -504,6 +543,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
         (record) =>
           record.scopeKey === scopeKey &&
           record.sessionId === sessionId &&
+          record.rewoundAt === undefined &&
           (record.status === "queued" ||
             record.status === "retained" ||
             record.status === "starting" ||
@@ -578,7 +618,10 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     const acceptedAt = Math.max(
       this.now(),
       ...[...this.records.values()]
-        .filter((r) => r.scopeKey === input.scopeKey)
+        .filter(
+          (r) =>
+            r.scopeKey === input.scopeKey || r.sessionId === current.sessionId,
+        )
         .map((r) => r.acceptedAt ?? r.createdAt),
     );
     const record: PromptSubmissionRecord = {
@@ -588,7 +631,10 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
         input.text === current.text ? current.namingSource : undefined,
       status: "queued",
       acceptedAt,
-      admissionOrder: this.nextAdmissionOrder(input.scopeKey),
+      admissionOrder: this.nextAdmissionOrder(
+        input.scopeKey,
+        current.sessionId,
+      ),
       ownerId: this.ownerId,
       ownerPid: this.ownerPid,
       updatedAt: this.nextTime(current),
@@ -702,12 +748,12 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     if (!this.owns(record))
       throw new PromptVersionConflictError(record.promptId);
   }
-  private nextAdmissionOrder(scopeKey: string): number {
+  private nextAdmissionOrder(scopeKey: string, sessionId: string): number {
     return (
       Math.max(
         0,
         ...[...this.records.values()]
-          .filter((r) => r.scopeKey === scopeKey)
+          .filter((r) => r.scopeKey === scopeKey || r.sessionId === sessionId)
           .map((r) => r.admissionOrder ?? 0),
       ) + 1
     );

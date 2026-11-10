@@ -34,6 +34,7 @@ export function promptRecordToUi(
   record: PromptSubmissionRecord,
 ): UiPromptSubmission {
   return {
+    ...(record.rewoundAt === undefined ? {} : { rewoundAt: record.rewoundAt }),
     promptId: record.promptId,
     resendOfPromptId: record.resendOfPromptId,
     steerReceipt: record.steerReceipt,
