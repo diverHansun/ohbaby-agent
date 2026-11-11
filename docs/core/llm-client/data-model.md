@@ -49,7 +49,7 @@ Lifecycle 等生成器耗尽之后再发布一次 `llm:complete`。length/filter
 
 ## 请求尝试观测（2026-10-21，llm 包去 agent 概念）
 
-包只描述一次请求尝试本身，类型是 `ModelRequestAttempt`，字段为 `requestId`、`attempt`、`startedAt`、`firstTextAt?`、`endedAt?`、`usage?` 和 `outcome`。`ModelRequestObservation` 携带这个类型，不再带 run、step 或 compaction 字段。
+包只描述一次请求尝试本身，类型是 `ModelRequestAttempt`，字段为 `requestId`、`attempt`、`startedAt`、`firstTextAt?`、`endedAt?`、`usage?`、`retryScheduled?: true` 和 `outcome`。`ModelRequestObservation` 携带这个类型，不再带 run、step 或 compaction 字段。
 
 调用方传入 `beforeRequestAttempt` 或 `onRequestObservation` 时，包才会记录尝试。观测会被等待保存，并在流里以 `requestObservation` 原样产出。
 
@@ -58,4 +58,16 @@ Lifecycle 等生成器耗尽之后再发布一次 `llm:complete`。length/filter
 - lifecycle 在回调里补 `runId`、`messageId`、`step` 和 `purpose: "agent-step"`；
 - 摘要请求只保留 `request-ended`，补 `compactionId`、摘要 `messageId`、压缩层的 `attempt`、`inputIds` 和 `purpose: "context-summary"`。
 
-落库格式与改动前一致。
+沿用原有 JSON 存储，不新增表或 SQL 列。
+
+`retryScheduled` 是失败 attempt 首次结束时已决定安排重试的历史事实。它与 `endedAt/outcome` 一起保存，不能事后补写；不证明下一次请求已发生。取消先封口时不带这个字段；安排后取消保留历史，但不再发送。保存失败仍以 `ModelObservationError` 阻断，诊断失败不影响模型结果。
+
+`ModelRequestObservation.failure?` 只携带当次失败的安全诊断：有限类别、状态码、筛选后的上游 code/type、网络错误码、请求 ID 和本次退避时间。它不属于 `ModelRequestAttempt`，不进入消息 JSON 或模型输入。agent 在既有日志中以稳定指纹关联请求、run、消息、会话和模型。
+
+`providerErrorDetail` 是 core 和 runtime 共用的安全原因提取入口。它保留重试耗尽/流中断包装下的原因，只生成固定说明；未知上游正文不透传。已识别的 Chat＋工具＋推理协议限制提示切换 Responses，认证、余额、限流和连接错误分别说明。`retryable` 沿用重试资格语义，不授权部分输出重放。
+
+未知的终态 provider 异常用 `ProviderRequestError` 标记边界，原异常保留为直接 `cause`，既有 prompt-cache 策略标记继续保留。公开说明只经过安全提取；取消、观测保存失败、本地请求校验、工具参数解析和 context overflow 不转成这种通用错误。
+
+运行时映射优先保留 `ModelObservationError` 与 `ToolDeliveryError` 的内部归属；其 cause 即使带 HTTP 状态或网络码，也不据此标为模型服务失败。沿用 `RUNTIME_ERROR` 与原 terminalReason，不改变真实 provider 错误的分类。
+
+适配器本地请求校验使用 `ModelRequestValidationError`，保留可诊断的本地说明，归 runtime 且不重试。响应流中的上游未知错误仍走安全 provider 包装。保存失败终态的公开文字使用 lifecycle 摘要，与 run 状态一致。
