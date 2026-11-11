@@ -751,6 +751,7 @@ export async function createUiRuntimeComposition(
       systemPromptProvider,
     });
   const lifecycle = new Lifecycle({
+    logger: options.logger,
     displayReasoning: options.displayReasoning,
     contextManager,
     messageManager: options.messageManager,

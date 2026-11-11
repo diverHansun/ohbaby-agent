@@ -478,7 +478,9 @@ describe("CLI prompt process smoke", () => {
 
       expect(result.code).not.toBe(0);
       expect(result.stderr).not.toContain(missingKeyName);
-      expect(result.stderr).toContain("401");
+      expect(result.stderr).toContain(
+        "Authentication failed. Check the model configuration.",
+      );
       expect(result.stderr).not.toContain("unauthorized smoke");
       expect(result.stdout).toBe("");
       expect(

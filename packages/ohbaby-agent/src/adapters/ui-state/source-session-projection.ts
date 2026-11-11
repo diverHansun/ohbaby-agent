@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { projectModelActivity } from "ohbaby-sdk";
 import type {
   UiEvent,
@@ -368,8 +369,11 @@ export class SourceSessionProjection {
     for (const message of messages) projectedMessages.set(message.id, message);
     for (const id of change.removedMessageIds ?? [])
       projectedMessages.delete(id);
+    const projectedRuns = visibleRuns(runs, [...projectedMessages.values()]);
     this.owner.commit(change.sessionId, {
-      runs: visibleRuns(runs, [...projectedMessages.values()]),
+      ...(!isDeepStrictEqual(current.runs, projectedRuns)
+        ? { runs: projectedRuns }
+        : {}),
       messages,
       removedMessageIds: change.removedMessageIds,
       historyInvalidated,
@@ -382,9 +386,10 @@ export class SourceSessionProjection {
     const { part } = change;
     const records = this.messages.get(part.sessionId);
     const record = records?.get(part.messageId);
-    const current = this.owner
-      .read(part.sessionId)
-      .session.messages.find((message) => message.id === part.messageId);
+    const view = this.owner.read(part.sessionId);
+    const current = view.session.messages.find(
+      (message) => message.id === part.messageId,
+    );
     let messages: UiMessage[] | undefined;
     if (current) {
       const parts = current.parts.filter((value) => value.id !== part.partId);
@@ -405,7 +410,17 @@ export class SourceSessionProjection {
       });
       records.set(part.messageId, { ...record, parts });
     }
+    const updatedMessage = messages?.[0];
+    const runs = updatedMessage
+      ? visibleRuns(
+          view.runs,
+          view.session.messages.map((message) =>
+            message.id === part.messageId ? updatedMessage : message,
+          ),
+        )
+      : view.runs;
     this.owner.commit(part.sessionId, {
+      ...(!isDeepStrictEqual(view.runs, runs) ? { runs } : {}),
       messages,
       reasoningMissing: change.missingCount > 0,
       historyInvalidated: change.kind === "missing" || change.kind === "saved",

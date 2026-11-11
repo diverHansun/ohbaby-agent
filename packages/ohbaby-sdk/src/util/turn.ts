@@ -1,4 +1,4 @@
-import type { UiPromptSubmission } from "../contract/prompt.js";
+import type { UiPromptError, UiPromptSubmission } from "../contract/prompt.js";
 import type { UiMessage, UiRun } from "../contract/snapshot.js";
 
 /**
@@ -23,6 +23,8 @@ export interface UiTurnTiming {
 }
 
 export interface UiTurn {
+  /** One safe terminal error for this visible turn; prompt takes precedence. */
+  readonly error?: UiPromptError;
   readonly runId: string;
   /** The user prompt that started the run, when there was one. */
   readonly prompt?: UiPromptSubmission;
@@ -90,6 +92,10 @@ export function listEndedTurns(input: {
       const turn: UiTurn = {
         runId,
         ...(prompt ? { prompt } : {}),
+        ...((timing.status === "failed" || timing.status === "interrupted") &&
+        (prompt?.error ?? run?.error)
+          ? { error: prompt?.error ?? run?.error }
+          : {}),
         trigger: turnTrigger(run, prompt, opening),
         timing,
       };

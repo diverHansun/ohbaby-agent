@@ -52,6 +52,7 @@ const RequestRecordSchema = z.object({
   startedAt: z.number(),
   firstTextAt: z.number().optional(),
   endedAt: z.number().optional(),
+  retryScheduled: z.literal(true).optional(),
   endTimeSource: z.literal("recovery").optional(),
   outcome: z.enum(["running", "success", "error", "aborted"]),
   usage: z

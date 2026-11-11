@@ -76,6 +76,7 @@ import {
   SourceSessionProjection,
 } from "./ui-state/source-session-projection.js";
 import { runToUiRun, messageToUiMessage } from "./ui-state/persistent-store.js";
+import { projectModelActivity } from "ohbaby-sdk";
 import type {
   UiSessionRecoveryClient,
   UiSessionScope,
@@ -2642,7 +2643,15 @@ export function createInProcessUiBackendClient(
           .filter((run) => !hiddenRuns.has(run.id))
           .map(async (run) => {
             const record = await sourceLedger.get(run.id);
-            return record ? { ...run, ...runToUiRun(record) } : run;
+            const projected = record ? { ...run, ...runToUiRun(record) } : run;
+            return {
+              ...projected,
+              modelActivity: projectModelActivity(
+                projected,
+                sessions.find((session) => session.id === run.sessionId)
+                  ?.messages ?? [],
+              ),
+            };
           }),
       ),
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),

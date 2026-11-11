@@ -370,6 +370,9 @@ describe("final step cache accounting through the in-process runtime", () => {
           childRequests[0]?.contextScopeId,
         );
         expect(JSON.stringify(f.requests.at(-1)?.messages)).toContain(
+          "The response could not be completed. Please try again.",
+        );
+        expect(JSON.stringify(f.requests.at(-1)?.messages)).not.toContain(
           "child provider failure after settled step",
         );
       }

@@ -1,7 +1,11 @@
-import type { UiModelRequest, UiToolExecution } from "./execution.js";
+import type {
+  UiModelRequest,
+  UiModelActivity,
+  UiToolExecution,
+} from "./execution.js";
 import type { UiReasoningConfig } from "./connect-model.js";
 import type { UiContextWindowUsage } from "./context-window.js";
-import type { UiPromptSubmission } from "./prompt.js";
+import type { UiPromptError, UiPromptSubmission } from "./prompt.js";
 
 export type UiRunStatus =
   | { readonly kind: "idle" }
@@ -110,6 +114,7 @@ export interface UiSession {
 }
 
 export interface UiRun {
+  readonly error?: UiPromptError;
   /** Event that started this run. A child result may arrive during any run. */
   readonly trigger?: "user" | "goal" | "subagent";
   /** Ledger result once the run has ended, independent of the session's idle status. */
@@ -117,7 +122,7 @@ export interface UiRun {
   readonly inputsCloseReason?: string;
   readonly endedAt?: string;
   readonly endTimeSource?: "recovery";
-  readonly modelActivity?: UiModelRequest;
+  readonly modelActivity?: UiModelActivity;
   readonly id: string;
   readonly sessionId: string;
   readonly status: UiRunStatus;

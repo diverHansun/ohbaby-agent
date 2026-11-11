@@ -191,7 +191,10 @@ describe("session title generator", () => {
     ).resolves.toBeNull();
 
     expect(emit).toHaveBeenCalledWith(sessionTitleGenerationFailed, {
-      error: failure,
+      error: expect.objectContaining({
+        name: "ProviderRequestError",
+        cause: failure,
+      }) as unknown,
     });
   });
 

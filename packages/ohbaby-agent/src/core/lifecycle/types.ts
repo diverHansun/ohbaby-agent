@@ -1,4 +1,5 @@
 import type { RunModel } from "../run-model.js";
+import type { Logger } from "../../observability/logger.js";
 import type { AgentStepRequestRecord } from "../message/types.js";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type {
@@ -31,6 +32,7 @@ import type {
 } from "../tool-scheduler/index.js";
 
 export interface LifecycleDeps {
+  readonly logger?: Logger;
   readonly displayReasoning?: DisplayReasoningOwner;
   readonly messageManager: MessageManager;
   readonly toolScheduler: ToolSchedulerInstance;
