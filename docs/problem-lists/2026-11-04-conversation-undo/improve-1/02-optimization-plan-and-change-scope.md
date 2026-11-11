@@ -157,7 +157,7 @@ TUI ◄────────────────────────�
 2. 会话在运行、有排队、goal 在跑时按钮照常可点，不置灰；后端会先停下来（Stage 1 第 6.3 步）。只有正在压缩时置灰，提示“Compacting…”。
 3. 点 Edit 后，这条用户消息的气泡原地变成编辑框，预填原文，下方有 Cancel 和 Send：
    - Enter 发送，Shift+Enter 换行，Esc 等同 Cancel。
-   - 编辑框下方一行灰字：“文件改动不会撤销”；这一条之后还有 N 轮时追加“之后的 N 轮对话会被移除”；有 goal 时追加“goal 已用的轮数不会回退”；会话在运行时追加“当前任务会先停止”；有排队的 prompt 时追加“排队中的 N 条消息也会移除”；goal 处于 `active` 时追加“goal 会暂停”。说明写在编辑框里，点 Send 就算确认，不再弹确认框。说明随会话状态实时更新。
+   - 编辑框下方一行灰字（下面是中文意思，界面上用[前端设计](../../2026-11-10-session-actions-frontend.md)第五节的英文文案）：“文件改动不会撤销”；这一条之后还有 N 轮时追加“之后的 N 轮对话会被移除”；有 goal 时追加“goal 已用的轮数不会回退”；会话在运行时追加“当前任务会先停止”；有排队的 prompt 时追加“排队中的 N 条消息也会移除”；goal 处于 `active` 时追加“goal 会暂停”。说明写在编辑框里，点 Send 就算确认，不再弹确认框。说明随会话状态实时更新。
    - 文字为空时 Send 置灰。
    - 同一时间只能有一个气泡处于编辑状态；主输入框和它的草稿不受影响。
    - 编辑状态只存在组件里，刷新页面就丢，不做持久化。
@@ -178,7 +178,7 @@ TUI ◄────────────────────────�
 
 1. `A/commands/catalog.ts` 加 `rewind` 命令（不设别名），`surfaces` 只含 `tui`，在 `T/app.tsx` 本地拦截（参照 `export`，:231）。
 2. 在 `T/components/dialog/command-panel-state.ts` 加一种交互面板，列出可撤销的 prompt，最新的在最上面，每行显示原文第一行和时间。TUI 只持有视图里最近一段 prompt，列表只覆盖这一段。
-3. 选中后显示一行确认：“撤销 N 轮，文件改动不会撤销，goal 已用的轮数不会回退。Enter 确认，Esc 取消。”会话在运行、有排队或 goal 在跑时，按 Web 编辑框的规则追加对应说明。运行中也能执行 `/rewind`，行为与 Web 相同。
+3. 选中后显示一行确认（界面上用前端设计 5.2 的英文文案）：“撤销 N 轮，文件改动不会撤销，goal 已用的轮数不会回退。Enter 确认，Esc 取消。”会话在运行、有排队或 goal 在跑时，按 Web 编辑框的规则追加对应说明。运行中也能执行 `/rewind`，行为与 Web 相同。
 4. 成功后把原文放进输入框，参照 `restoreQueuedEditInput`（`T/components/prompt/index.tsx:369`）。输入框有内容时先确认是否替换。失败时显示错误码对应的提示。
 5. 视图更新：消息走 `session-recovery.ts` 现有的 `removedMessageIds` 处理；prompt 现在是直接覆盖写入（`T/store/events.ts:120-124`），要改为收到带 `rewoundAt` 的 prompt 时从 store 里移除。每轮结束时追加的完成提示（`T/store/transcript.ts:385-432` 的 `appendTurnCompletions`）目前只增不删，撤销后要把被撤销轮次的那几行一并删掉，否则屏幕上会留下孤立的“Total Xs”。
 
