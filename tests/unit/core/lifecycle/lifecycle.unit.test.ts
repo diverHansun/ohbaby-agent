@@ -3099,7 +3099,7 @@ describe("Lifecycle.run", () => {
       retryDelayMs: 0,
     });
     expect(JSON.stringify(diagnostics)).not.toMatch(
-      /sk-test-secret|Bearer|req_012345|Say hello/u,
+      /sk-test-secret|Bearer|req_012345|upstreamId|Say hello/u,
     );
     expect(JSON.stringify(records)).not.toMatch(
       /upstreamCode|retryDelayMs|sk-test-secret/u,

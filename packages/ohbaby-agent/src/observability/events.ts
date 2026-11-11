@@ -218,9 +218,6 @@ export const modelRequestFailed = defineDiagnosticEvent({
     networkCode: diagnosticField.optional(
       diagnosticField.stringEnum(SAFE_PROVIDER_NETWORK_CODES),
     ),
-    upstreamId: diagnosticField.optional(
-      diagnosticField.externalId("operation"),
-    ),
     retryScheduled: diagnosticField.boolean(),
     retryDelayMs: diagnosticField.optional(diagnosticField.number()),
   },

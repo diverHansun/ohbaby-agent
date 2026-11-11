@@ -111,7 +111,6 @@ export interface ProviderErrorDetail {
   readonly statusCode?: number;
   readonly upstreamCode?: SafeProviderErrorCode;
   readonly upstreamType?: SafeProviderErrorType;
-  readonly requestId?: string;
   readonly networkCode?: SafeProviderNetworkCode;
 }
 
@@ -148,14 +147,6 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function field(value: Record<string, unknown>, key: string): unknown {
-  try {
-    return value[key];
-  } catch {
-    return undefined;
-  }
-}
-
 function causeChain(error: unknown): Record<string, unknown>[] {
   const chain: Record<string, unknown>[] = [];
   const seen = new Set<object>();
@@ -163,7 +154,7 @@ function causeChain(error: unknown): Record<string, unknown>[] {
   while (current && chain.length < 16 && !seen.has(current)) {
     seen.add(current);
     chain.push(current);
-    current = record(field(current, "cause"));
+    current = record(current.cause);
   }
   return chain;
 }
@@ -176,17 +167,13 @@ function allowed<T extends string>(
 }
 
 function status(error: unknown): number | undefined {
-  try {
-    const value = providerErrorStatus(error);
-    return value !== undefined &&
-      Number.isInteger(value) &&
-      value >= 100 &&
-      value <= 599
-      ? value
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  const value = providerErrorStatus(error);
+  return value !== undefined &&
+    Number.isInteger(value) &&
+    value >= 100 &&
+    value <= 599
+    ? value
+    : undefined;
 }
 
 function isWrapper(error: unknown): boolean {
@@ -198,45 +185,20 @@ function isWrapper(error: unknown): boolean {
 }
 
 function providerNode(value: Record<string, unknown>): boolean {
-  const nested = record(field(value, "error"));
+  const nested = record(value.error);
   return (
     status(value) !== undefined ||
     value instanceof OpenAIAPIError ||
     value instanceof AnthropicAPIError ||
     value instanceof ProviderStreamIdleTimeoutError ||
-    allowed(field(value, "code"), SAFE_PROVIDER_NETWORK_CODES) !== undefined ||
+    allowed(value.code, SAFE_PROVIDER_NETWORK_CODES) !== undefined ||
     [value, nested].some(
       (item) =>
         item !== undefined &&
-        (allowed(field(item, "code"), SAFE_PROVIDER_ERROR_CODES) !==
-          undefined ||
-          allowed(field(item, "type"), SAFE_PROVIDER_ERROR_TYPES) !==
-            undefined),
+        (allowed(item.code, SAFE_PROVIDER_ERROR_CODES) !== undefined ||
+          allowed(item.type, SAFE_PROVIDER_ERROR_TYPES) !== undefined),
     )
   );
-}
-
-function retryable(value: Record<string, unknown>): boolean {
-  try {
-    return isRetryableProviderError(value);
-  } catch {
-    return isRetryableProviderError({
-      status: status(value),
-      code: field(value, "code"),
-      type: field(value, "type"),
-      message: field(value, "message"),
-    });
-  }
-}
-
-function requestId(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length > 132) return undefined;
-  return /^req_[A-Za-z0-9]{16,128}$/u.test(value) ||
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-      value,
-    )
-    ? value
-    : undefined;
 }
 
 function classify(
@@ -309,7 +271,8 @@ function classify(
     return "timeout";
   if (statusCode !== undefined && statusCode >= 500) return "unavailable";
   if (statusCode !== undefined && statusCode >= 400) return "invalid_request";
-  if (networkCode !== undefined || chain.some(retryable)) return "connection";
+  if (networkCode !== undefined || chain.some(isRetryableProviderError))
+    return "connection";
   if (
     has([
       "invalid_request",
@@ -325,100 +288,79 @@ function classify(
   return "unknown";
 }
 
-function extractProviderError(error: unknown): ProviderErrorDetail | undefined {
-  const chain = causeChain(error);
-  const wrapped = chain.some(isWrapper);
-  if (!wrapped && chain.some(isAbortError)) return undefined;
-  const cause = chain.find((value) => !isWrapper(value) && providerNode(value));
-  if (!wrapped && cause === undefined) return undefined;
-
-  // Provider payloads are inspected only in memory; output is constructed field by field.
-  const evidence = chain
-    .flatMap((value) => {
-      const nested = record(field(value, "error"));
-      return nested === undefined ? [value] : [value, nested];
-    })
-    .map((value) => ({
-      code: field(value, "code"),
-      type: field(value, "type"),
-      message: field(value, "message"),
-      request_id: field(value, "request_id"),
-      requestId: field(value, "requestId"),
-      requestID: field(value, "requestID"),
-      _request_id: field(value, "_request_id"),
-    }));
-  const statusCode = chain.map(status).find((value) => value !== undefined);
-  const upstreamCode = evidence
-    .map((value) => allowed(value.code, SAFE_PROVIDER_ERROR_CODES))
-    .find((value) => value !== undefined);
-  const upstreamType = evidence
-    .map((value) => allowed(value.type, SAFE_PROVIDER_ERROR_TYPES))
-    .find((value) => value !== undefined);
-  const networkCode = chain
-    .map((value) => allowed(field(value, "code"), SAFE_PROVIDER_NETWORK_CODES))
-    .find((value) => value !== undefined);
-  const providerRequestId = evidence
-    .flatMap((value) => [
-      value.request_id,
-      value.requestId,
-      value.requestID,
-      value._request_id,
-    ])
-    .map(requestId)
-    .find((value) => value !== undefined);
-  const causeKind = classify(chain, evidence, statusCode, networkCode);
-  const interrupted = chain.some(
-    (value) => value instanceof ProviderStreamInterruptedError,
-  );
-  const kind = interrupted ? "stream_interrupted" : causeKind;
-  return {
-    kind,
-    message:
-      interrupted && causeKind !== "unknown"
-        ? `The response was interrupted. ${MESSAGES[causeKind]}`
-        : MESSAGES[kind],
-    retryable:
-      chain.some((value) => value instanceof ProviderRetryExhaustedError) ||
-      (cause !== undefined && retryable(cause)),
-    ...(statusCode === undefined ? {} : { statusCode }),
-    ...(upstreamCode === undefined ? {} : { upstreamCode }),
-    ...(upstreamType === undefined ? {} : { upstreamType }),
-    ...(providerRequestId === undefined
-      ? {}
-      : { requestId: providerRequestId }),
-    ...(networkCode === undefined ? {} : { networkCode }),
-  };
-}
-
 /** Safe shared provider meaning; unknown runtime failures remain with their owner. */
 export function providerErrorDetail(
   error: unknown,
 ): ProviderErrorDetail | undefined {
-  if (error instanceof ModelRequestValidationError) return undefined;
+  let knownProvider = false;
+  let interrupted = false;
+  let exhausted = false;
   try {
-    return extractProviderError(error);
+    if (error instanceof ModelRequestValidationError || isAbortError(error))
+      return undefined;
+    knownProvider =
+      isWrapper(error) ||
+      error instanceof OpenAIAPIError ||
+      error instanceof AnthropicAPIError;
+    interrupted = error instanceof ProviderStreamInterruptedError;
+    exhausted = error instanceof ProviderRetryExhaustedError;
+    const chain = causeChain(error);
+    const wrapped = chain.some(isWrapper);
+    if (!wrapped && chain.some(isAbortError)) return undefined;
+    knownProvider ||= wrapped;
+    // Retain provenance before reading optional details or later cause nodes.
+    const cause = chain.find((value) => {
+      const recognized = !isWrapper(value) && providerNode(value);
+      if (recognized) knownProvider = true;
+      return recognized;
+    });
+    if (!knownProvider) return undefined;
+    interrupted ||= chain.some(
+      (value) => value instanceof ProviderStreamInterruptedError,
+    );
+    exhausted ||= chain.some(
+      (value) => value instanceof ProviderRetryExhaustedError,
+    );
+    // Provider payloads are inspected only in memory; output is constructed field by field.
+    const evidence = chain
+      .flatMap((value) => {
+        const nested = record(value.error);
+        return nested === undefined ? [value] : [value, nested];
+      })
+      .map((value) => ({
+        code: value.code,
+        type: value.type,
+        message: value.message,
+      }));
+    const statusCode = chain.map(status).find((value) => value !== undefined);
+    const upstreamCode = evidence
+      .map((value) => allowed(value.code, SAFE_PROVIDER_ERROR_CODES))
+      .find((value) => value !== undefined);
+    const upstreamType = evidence
+      .map((value) => allowed(value.type, SAFE_PROVIDER_ERROR_TYPES))
+      .find((value) => value !== undefined);
+    const networkCode = chain
+      .map((value) => allowed(value.code, SAFE_PROVIDER_NETWORK_CODES))
+      .find((value) => value !== undefined);
+    const causeKind = classify(chain, evidence, statusCode, networkCode);
+    const kind = interrupted ? "stream_interrupted" : causeKind;
+    return {
+      kind,
+      message:
+        interrupted && causeKind !== "unknown"
+          ? `The response was interrupted. ${MESSAGES[causeKind]}`
+          : MESSAGES[kind],
+      retryable:
+        chain.some((value) => value instanceof ProviderRetryExhaustedError) ||
+        (cause !== undefined && isRetryableProviderError(cause)),
+      ...(statusCode === undefined ? {} : { statusCode }),
+      ...(upstreamCode === undefined ? {} : { upstreamCode }),
+      ...(upstreamType === undefined ? {} : { upstreamType }),
+      ...(networkCode === undefined ? {} : { networkCode }),
+    };
   } catch {
-    // Diagnostics must never replace the request failure, even for hostile getters.
-    try {
-      if (isAbortError(error)) return undefined;
-      if (
-        isWrapper(error) ||
-        error instanceof OpenAIAPIError ||
-        error instanceof AnthropicAPIError
-      ) {
-        const kind =
-          error instanceof ProviderStreamInterruptedError
-            ? "stream_interrupted"
-            : "unknown";
-        return {
-          kind,
-          message: MESSAGES[kind],
-          retryable: error instanceof ProviderRetryExhaustedError,
-        };
-      }
-    } catch {
-      // An uninspectable runtime object has no reliable provider provenance.
-    }
-    return undefined;
+    if (!knownProvider) return undefined;
+    const kind = interrupted ? "stream_interrupted" : "unknown";
+    return { kind, message: MESSAGES[kind], retryable: exhausted };
   }
 }
