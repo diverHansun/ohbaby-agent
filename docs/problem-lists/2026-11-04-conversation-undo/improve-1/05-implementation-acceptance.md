@@ -182,7 +182,7 @@ Stage 1 后端已通过三批联测，结果见[合并前检查](#合并前检�
 | T19 | 通过 | 气泡原地变编辑框，预填原文，光标在框里；提示行写明 “File changes won't be undone · 1 later turn will be removed”；Esc 和 Cancel 恢复；同时只有一个在编辑；空文字时 Send 置灰 |
 | T20 | 部分 | 主输入框草稿原样保留；运行中提示行加上 “The current task will stop first”，Send 后慢的那一轮被停下、新一轮开始。goal 和排队的提示只有单元层面的核对，没有在浏览器里搭出 goal 和排队场景 |
 | T21 | 通过 | 被撤销的轮次不刷新就消失；模型看到的历史随之变短；刷新后也看不到 |
-| T22 | 通过 | 在页面里替换 `rewindSession` 模拟：`REWIND_BEFORE_COMPACTION` 时编辑框和文字保留，红字提示；请求进行中 Send 显示加载、不能重复点；`sendError` 时编辑框关闭，文字接在主输入框草稿后面，草稿不丢 |
+| T22 | 部分 | 在页面里替换 `rewindSession` 模拟：`REWIND_BEFORE_COMPACTION` 时编辑框和文字保留，红字提示；请求进行中 Send 显示加载、不能重复点；`sendError` 时编辑框关闭，文字接在主输入框草稿后面，草稿不丢 | 这一条是模拟出来的，没有用真实后端触发；其余错误码只有文案的单元测试
 | T23 | 通过 | 两个标签页打开同一会话，一边撤销，另一边同步移除 |
 
 另外核对了设计稿第九节：1024px 宽、右侧面板开着时，编辑框和操作栏都没有横向溢出。
@@ -192,7 +192,7 @@ Stage 1 后端已通过三批联测，结果见[合并前检查](#合并前检�
 | ID | 结果 | 说明 |
 |---|---|---|
 | T24 | 通过 | 只列这个会话已经开始的 prompt，最新在上；单元测试 `rewind-model.unit.test.ts` |
-| T25 | 通过（有一处偏差） | 确认行是 “Rewind 2 turns. File changes won't be undone. Enter to confirm, Esc to cancel.”；确认后消息和完成提示都从屏幕上移除，原文回到输入框 |
+| T25 | 部分 | 确认行是 “Rewind 2 turns. File changes won't be undone. Enter to confirm, Esc to cancel.”；确认后消息和完成提示都从屏幕上移除，原文回到输入框。首次交付时，输入框已有内容会直接追加，没有先确认；2026-11-11 验收会话改为在确认行里加 “Your draft will be replaced.”，确认后替换。改后只有单元测试，没有在终端里重新走查 |
 | T26 | 部分 | 运行中执行 `/rewind`，确认行写明当前任务会先停止，确认后任务停止、原文回填。压缩点之前的轮次没有在真实环境触发 |
 
 **偏差**：设计稿说输入框已有内容时先问要不要替换。实际上 `/rewind` 本身就是在输入框里输入的，执行时输入框一定是空的，这个询问不会出现。所以改为：万一有内容，原文接在后面并空一行，不覆盖，和 Web 的 `sendError` 处理一致。
@@ -208,3 +208,17 @@ Stage 1 后端已通过三批联测，结果见[合并前检查](#合并前检�
 ### 回归
 
 在 `015e1a98` 上，`pnpm typecheck` 通过，`pnpm lint` 0 个错误，全量 `pnpm test` 7928 项通过、17 项跳过、0 项失败。
+
+## 前端验收意见（2026-11-11）
+
+验收会话在隔离环境里（临时目录加本地假模型，跑真实的 `ohbaby serve`）用浏览器走查了 Web 的编辑重发：编辑框原地替换气泡，提示行显示 “File changes won't be undone · 1 later turn will be removed”，发送后后面的轮次被移除，改过的文字得到新回答。TUI 没有在终端里实际操作，下面的 TUI 问题来自代码评审。
+
+验收会话直接修了三处 TUI 问题：
+
+| 问题 | 修法 | 测试 |
+|---|---|---|
+| `/rewind` 的列表和审批对话框同时响应按键，按一次 Enter 会同时确认撤销和应答审批 | 有审批或提问对话框时，列表不响应按键 | `RewindPanel.unit.test.tsx` 的 “ignores keys while another dialog owns the keyboard” |
+| 确认期间排队的提问开始运行，列表顶部多一行，撤销目标跟着行号漂移 | 按提问的 ID 记住选中项，不按行号 | 同文件的 “keeps the chosen prompt when a newer row appears before confirming” |
+| 输入框已有内容时直接追加，没有先确认（04 T25） | 确认行加 “Your draft will be replaced.”，确认后替换 | `rewind-model.unit.test.ts` 的 “says a draft in the input will be replaced” |
+
+Web 还有一处没修：编辑框打开后会话开始压缩，Send 仍能点（`ConversationStream.tsx`）。后端会拒绝并保留编辑状态，留待以后处理。

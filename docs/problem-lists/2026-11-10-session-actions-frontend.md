@@ -89,7 +89,7 @@ side chat 标签沿用现有的 `.ohb-side-panel-tab`，和 Subagents、Files、
  › （现有输入框）
 ```
 
-- 标题栏左边写“Side chat · Esc to close”，用主题的 `status.accent` 加粗。只有主会话在等审批时，右边才显示“Main session needs approval · Esc to return”，用 `status.warning`。
+- 标题栏左边写“Side chat · Esc to close”，用主题的 `status.accent` 加粗。side chat 正在回答时改成“Side chat · Esc to stop”：这时输入框为空按 Esc 或按 Ctrl+C 是停止这一轮，停下后再按 Esc 才关闭。只有主会话在等审批时，右边才显示“Main session needs approval · Esc to return”，用 `status.warning`。
 - 输入框复用现有的 `Prompt`，不开命令面板。
 - 输入框为空时按 Esc，关闭并删除这个 side chat。
 - 不可用时，按 02 的 Stage 3 给出对应的提示文字，有两种情况：主会话还没开始过；TUI 连着远程 daemon。
@@ -168,7 +168,9 @@ side chat 标签沿用现有的 `.ohb-side-panel-tab`，和 Subagents、Files、
   `Rewind N turns. File changes won't be undone. Enter to confirm, Esc to cancel.`
 
   会话有 goal 时，在第二句后面插入“Goal turns already used won't be refunded.”。会话在运行、有排队或 goal 在跑时，按 5.1 的表追加对应的句子。N 为 1 时用 turn。
-- 成功后把原文放回输入框。输入框里已有内容时，先确认要不要替换。
+- 成功后把原文放回输入框。输入框里已有内容时，确认文字的最后加一句“Your draft will be replaced.”，按 Enter 就算同意替换，不另外弹一次确认。
+- 确认期间列表变了（比如排队的提问开始运行，顶部多出一行），撤销的目标仍是用户选中的那条提问，N 按新的列表重新算。
+- 审批或提问对话框弹出时，列表不响应按键，对话框处理完再继续。
 
 ## 六、实施分批
 

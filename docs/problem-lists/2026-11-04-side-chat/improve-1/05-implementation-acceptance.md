@@ -164,7 +164,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/services/session/copy-history.int
 
 | ID | 结果 | 说明 |
 |---|---|---|
-| T20 | 通过 | 没发消息时 `/btw` 给出 “Send a message first” 的提示；主会话运行中可以打开；`/btw <问题>` 打开后立即提问；在面板里输入 `/compact` 作为普通文字发给 side chat。连远程 daemon 时的提示只核对了代码路径 |
+| T20 | 部分 | 没发消息时 `/btw` 给出 “Send a message first” 的提示；主会话运行中可以打开；`/btw <问题>` 打开后立即提问；在面板里输入 `/compact` 作为普通文字发给 side chat。连远程 daemon 时的提示只核对了代码路径 |
 | T21 | 通过 | 关闭面板后回到主会话，消息和状态正确；数据库里 side chat 已删除 |
 | T22 | 通过 | side chat 的审批在面板里弹出，批准后继续；面板打开时主会话请求审批，标题栏右侧出现 “Main session needs approval · Esc to return”，按 Esc 回到主会话后审批照常弹出 |
 | T23 | 通过 | 输入框有内容时 Esc 不关闭；为空时 Esc 关闭并删除 |
@@ -177,3 +177,27 @@ pnpm exec vitest run packages/ohbaby-agent/src/services/session/copy-history.int
 ### 回归
 
 在 `015e1a98` 上，`pnpm typecheck` 通过，`pnpm lint` 0 个错误，全量 `pnpm test` 7928 项通过、17 项跳过、0 项失败。
+
+## 前端验收意见（2026-11-11）
+
+验收会话在隔离环境里（临时目录加本地假模型，跑真实的 `ohbaby serve`）用浏览器走查了 Web：
+
+- 入口页卡片、“Add page”菜单、`⌘;` 都能打开 side chat；主会话没发过消息时入口变灰，提示 “Send a message first”。
+- 面板的空状态和输入框占位正确，回答下只有复制按钮，模型看得到主对话的历史，主对话不受影响。
+- 选中文字后出现 “Ask in side chat”，点击后按引用格式填进当前 side chat 的输入框，不自动发送。
+- 开 3 个 side chat，刷新后标签和消息都还在；点 × 能关闭。
+
+走查后改了三处：
+
+| 改动 | 说明 |
+|---|---|
+| 去掉顶栏右上角的 side chat 图标按钮 | 用户走查时确认不需要，其余入口保留（00 第 6 节 2026-11-11） |
+| 三击选中回答的最后一段时，不出现 “Ask in side chat” | 选区终点落在输入框开头，被当成选到了消息外面。现在接受这种选区，并去掉末尾的空行。`SelectionAction.unit.test.tsx` 加了一条用例 |
+| TUI 的 side chat 面板里没法中止 | 回答进行中，输入框为空时按 Esc 或按 Ctrl+C 停止这一轮，标题栏改成 “Side chat · Esc to stop”；停下后再按 Esc 才关闭。只有代码评审和类型检查，没有在终端里走查 |
+
+还没处理的问题，风险较低：
+
+- 主会话被归档或删除后，它的 side chat 客户端和事件流没有关闭（`use-side-chats.ts`）。浏览器对同一站点的连接数有上限，累计多了可能卡住其他请求。
+- 开到第 3 个 side chat 时，新标签没有滚进视野，标题和 × 被截断。
+- `closeSideChat` 失败时标签也被摘掉，刷新后又回来。
+- side chat 在等审批时，TUI 面板里按 Esc 关不掉，要先回答审批。
