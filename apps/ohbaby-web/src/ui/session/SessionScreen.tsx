@@ -19,6 +19,12 @@ import { ApprovalPanel } from "../permissions/ApprovalPanel.js";
 import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
 import { Banner } from "../shared/Banner.js";
 import { readableError } from "../shared/error-text.js";
+import {
+  composerDraftKey,
+  readSessionValue,
+  type StoredComposerDraft,
+} from "../composer/draft-storage.js";
+import { sessionActionError } from "./session-action-errors.js";
 import { DraftHero } from "./DraftHero.js";
 import { selectPersistedPromptError } from "./prompt-projection.js";
 import { isConnectionAbnormal } from "./selectors.js";
@@ -253,6 +259,49 @@ export function SessionScreen({
     ],
   );
 
+  // Editing a message: the server stops the chat, rewinds to that message and
+  // sends the new text in one call (undo 02 §2.1).
+  const editSessionId = view.activeSession?.id;
+  const sendEdit = useCallback(
+    async (promptId: string, text: string): Promise<string | null> => {
+      if (editSessionId === undefined) return null;
+      try {
+        const result = await client.rewindSession({
+          sessionId: editSessionId,
+          promptId,
+          text,
+        });
+        if (result.sendError) {
+          // The rewind stands but the send did not: the text goes to the
+          // main input, after any draft already there, never over it.
+          const stored = readSessionValue(
+            composerDraftKey(draftScopeKey),
+          ) as StoredComposerDraft | null;
+          const draft = stored?.text.trimEnd() ?? "";
+          prefillComposer(draft === "" ? text : `${draft}\n\n${text}`);
+          setActionError(
+            `The message was not sent: ${result.sendError.message}`,
+          );
+        } else follow();
+        return null;
+      } catch (error) {
+        return sessionActionError("edit", error);
+      }
+    },
+    [client, editSessionId, draftScopeKey, prefillComposer, follow],
+  );
+  const queuedCount = view.queuedPrompts.length;
+  const editStateHints = [
+    ...(view.activeGoal ? ["Goal turns already used won't be refunded"] : []),
+    ...(view.composer.isRunning ? ["The current task will stop first"] : []),
+    ...(queuedCount > 0
+      ? [
+          `${String(queuedCount)} queued ${queuedCount === 1 ? "message" : "messages"} will be removed`,
+        ]
+      : []),
+    ...(view.activeGoal?.status === "active" ? ["The goal will pause"] : []),
+  ];
+
   // Stable identity: the slash palette refetches its catalog when this changes.
   const listCommands = useCallback(() => runtime.listWebCommands(), [runtime]);
 
@@ -344,6 +393,13 @@ export function SessionScreen({
           onOpenSubagent={onOpenSubagent}
           onAskInSideChat={onAskInSideChat}
           onFork={onFork}
+          edit={{
+            unavailable: compactRequest.isCompacting(view.activeSession?.id)
+              ? "Compacting…"
+              : undefined,
+            stateHints: editStateHints,
+            send: sendEdit,
+          }}
         />
       ) : (
         <DraftHero

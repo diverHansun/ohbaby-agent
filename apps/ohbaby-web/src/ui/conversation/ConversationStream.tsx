@@ -23,7 +23,13 @@ import {
   ModelWaiting,
   PromptDuration,
 } from "./ExecutionProgress.js";
-import { LoaderCircle, MessageCircleQuestion, Split } from "lucide-react";
+import {
+  LoaderCircle,
+  MessageCircleQuestion,
+  Pencil,
+  Split,
+} from "lucide-react";
+import { UserMessageEditor } from "./UserMessageEditor.js";
 import { IconButton } from "../shared/IconButton.js";
 import { CopyButton } from "../shared/CopyButton.js";
 import { SelectionAction } from "./SelectionAction.js";
@@ -90,6 +96,18 @@ export function ConversationStream(props: {
    * The button shows wherever Copy shows on an answer.
    */
   readonly onFork?: (runId: string) => Promise<unknown>;
+  /**
+   * Main chat only: user messages can be edited in place and sent again
+   * (undo 02 Stage 2). Absent in side chats and subagent conversations.
+   */
+  readonly edit?: {
+    /** Why editing is off for now, e.g. "Compacting…". */
+    readonly unavailable?: string;
+    /** What a Send does to the session's current state, after the fixed hints. */
+    readonly stateHints: readonly string[];
+    /** Resolves to an error text to show in the editor, or null when done. */
+    readonly send: (promptId: string, text: string) => Promise<string | null>;
+  };
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamInnerRef = useRef<HTMLDivElement | null>(null);
@@ -218,6 +236,42 @@ export function ConversationStream(props: {
   const latestAnswerId = props.isRunning
     ? undefined
     : processes.at(-1)?.answerId;
+  const edit = props.variant === "side-chat" ? undefined : props.edit;
+  // One bubble at a time; the state is gone on reload by design.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editablePrompt = (
+    message: UiMessage,
+  ): UiPromptSubmission | undefined =>
+    edit &&
+    message.role === "user" &&
+    message.runtimeInputKind === undefined &&
+    !isCompactionMessage(message)
+      ? props.prompts.find(
+          (prompt) =>
+            prompt.userMessageId === message.id && prompt.status !== "steered",
+        )
+      : undefined;
+  const editHints = (message: UiMessage): readonly string[] => {
+    // A user message may carry no run id; its prompt names the turn.
+    const ownRun = message.runId ?? editablePrompt(message)?.runId;
+    const index = visibleMessages.indexOf(message);
+    const later = new Set(
+      visibleMessages
+        .slice(index + 1)
+        .flatMap((item) =>
+          item.runId && item.runId !== ownRun ? [item.runId] : [],
+        ),
+    ).size;
+    return [
+      "File changes won't be undone",
+      ...(later > 0
+        ? [
+            `${String(later)} later ${later === 1 ? "turn" : "turns"} will be removed`,
+          ]
+        : []),
+      ...(edit?.stateHints ?? []),
+    ];
+  };
   const messageActions = (message: UiMessage): ReactNode => {
     const copyable =
       (message.role === "user" && !isCompactionMessage(message)) ||
@@ -238,6 +292,25 @@ export function ConversationStream(props: {
             ),
           },
           ...(onFork && forkRunId !== undefined ? [forkAction(forkRunId)] : []),
+          ...(editablePrompt(message)
+            ? [
+                {
+                  key: "edit",
+                  node: (
+                    <IconButton
+                      label="Edit"
+                      title={edit?.unavailable ?? "Edit"}
+                      disabled={edit?.unavailable !== undefined}
+                      onClick={() => {
+                        setEditingId(message.id);
+                      }}
+                    >
+                      <Pencil aria-hidden="true" size={14} />
+                    </IconButton>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
     );
@@ -681,23 +754,44 @@ export function ConversationStream(props: {
                 id={messageDomId(item.message.id)}
                 hidden={hiddenIds.has(item.message.id)}
               >
-                <MessageRow
-                  message={item.message}
-                  steerState={
-                    props.unconsumedSteers?.find(
-                      (input) => input.messageId === item.message.id,
-                    )?.state
-                  }
-                  reasoning={props.reasoningByMessageId[item.message.id]}
-                  reasoningIdPrefix={`${messageDomId(item.message.id)}-reasoning`}
-                  reasoningHidden={(
-                    beforeAnswer.get(item.message.id) ?? []
-                  ).some((process) => process.foldable && !isOpen(process))}
-                  beforeText={(beforeAnswer.get(item.message.id) ?? [])
-                    .filter((process) => !process.foldable)
-                    .map(renderDuration)}
-                  actions={messageActions(item.message)}
-                />
+                {editingId === item.message.id &&
+                editablePrompt(item.message) ? (
+                  <UserMessageEditor
+                    initialText={
+                      editablePrompt(item.message)?.text ??
+                      messageBodyText(item.message)
+                    }
+                    hints={editHints(item.message)}
+                    onCancel={() => {
+                      setEditingId(null);
+                    }}
+                    onSend={async (text) => {
+                      const promptId = editablePrompt(item.message)?.promptId;
+                      if (!edit || promptId === undefined) return null;
+                      const failure = await edit.send(promptId, text);
+                      if (failure === null) setEditingId(null);
+                      return failure;
+                    }}
+                  />
+                ) : (
+                  <MessageRow
+                    message={item.message}
+                    steerState={
+                      props.unconsumedSteers?.find(
+                        (input) => input.messageId === item.message.id,
+                      )?.state
+                    }
+                    reasoning={props.reasoningByMessageId[item.message.id]}
+                    reasoningIdPrefix={`${messageDomId(item.message.id)}-reasoning`}
+                    reasoningHidden={(
+                      beforeAnswer.get(item.message.id) ?? []
+                    ).some((process) => process.foldable && !isOpen(process))}
+                    beforeText={(beforeAnswer.get(item.message.id) ?? [])
+                      .filter((process) => !process.foldable)
+                      .map(renderDuration)}
+                    actions={messageActions(item.message)}
+                  />
+                )}
                 {(terminalAfter.get(item.message.id) ?? []).map(renderDuration)}
               </div>
             </Fragment>

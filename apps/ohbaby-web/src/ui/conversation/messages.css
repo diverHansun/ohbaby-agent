@@ -600,3 +600,87 @@
     padding-top: 34px;
   }
 }
+
+/* A user message being edited in place (frontend design §5.1): the bubble
+   keeps its right edge and corner radius, and turns white with a border. */
+.ohb-message-editor {
+  animation: ohb-fade var(--duration-fast) var(--ease);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 10px 16px;
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
+  width: 76%;
+}
+
+.ohb-message-editor:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring-soft);
+}
+
+.ohb-message-editor textarea {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 24px;
+  outline: 0;
+  padding: 0;
+  resize: none;
+  width: 100%;
+}
+
+.ohb-message-editor-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ohb-message-editor-hint.is-error {
+  color: var(--danger-ink);
+}
+
+.ohb-message-editor-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.ohb-message-editor-send {
+  align-items: center;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--accent-contrast);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 6px;
+  height: 28px;
+  padding: 0 14px;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.ohb-message-editor-send:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+.ohb-message-editor-send:disabled {
+  background: var(--bg-selected);
+  color: var(--text-dim);
+  opacity: 1;
+}
+
+@media (max-width: 639px) {
+  .ohb-message-editor {
+    width: 100%;
+  }
+}

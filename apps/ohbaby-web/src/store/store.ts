@@ -548,6 +548,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         event.bindingGeneration !== view.bindingGeneration
       )
         return;
+      // A rewound prompt leaves with its messages (undo 02 Stage 2 step 5).
+      for (const prompt of event.prompts ?? [])
+        if (prompt.rewoundAt !== undefined)
+          loadedPrompts.delete(prompt.promptId);
       for (const id of event.removedMessageIds ?? []) {
         loaded.delete(id);
         observed.delete(id);

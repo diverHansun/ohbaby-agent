@@ -54,6 +54,7 @@ export function SessionConversation(props: {
   }) => void;
   readonly onAskInSideChat?: (selection: string) => void;
   readonly onFork?: (runId: string) => Promise<unknown>;
+  readonly edit?: Parameters<typeof ConversationStream>[0]["edit"];
 }): ReactElement {
   const { runtime, view, storeSnapshot, interactions } = props;
   const sessionId = view.activeSession?.id ?? null;
@@ -138,6 +139,7 @@ export function SessionConversation(props: {
             followToken={props.followToken}
             onAskInSideChat={props.onAskInSideChat}
             onFork={props.onFork}
+            edit={props.edit}
             commandNotices={
               <CommandNoticeList
                 notices={view.commandNotices.filter(
