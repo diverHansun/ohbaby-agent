@@ -169,3 +169,42 @@ Stage 1 后端已通过三批联测，结果见[合并前检查](#合并前检�
 全量测试时发现一条旧断言仍在匹配 shell 清理失败时的报错文本。按 R3 改为同时核对公开错误码 `SESSION_RUNNING` 和 `cause` 中的原始原因。该用例还验证失败后历史仍可见，重试后后台进程确实退出。
 
 最终全量 Vitest 共 7905 项通过、17 项跳过、0 项失败，包含 CLI 打包安装与进程测试。`pnpm build`、`pnpm typecheck` 和 `pnpm format:check` 通过。`pnpm lint` 报告 0 个错误、119 个警告，与 Fork 验收时相同。
+
+## 前端实施记录（2026-11-11）
+
+代码在 `codex/session-actions-frontend`：Web 是 `bec60fbb`，TUI 是 `015e1a98`。走查环境同 side chat 05 的前端记录（隔离数据库、本机假模型）。
+
+### Web
+
+| ID | 结果 | 说明 |
+|---|---|---|
+| T18 | 通过 | `message-edit-fork.unit.test.tsx`：steer 和没有 prompt 的消息不显示 Edit；运行中这一轮显示 Edit；side chat 里没有；压缩中置灰并提示 “Compacting…” |
+| T19 | 通过 | 气泡原地变编辑框，预填原文，光标在框里；提示行写明 “File changes won't be undone · 1 later turn will be removed”；Esc 和 Cancel 恢复；同时只有一个在编辑；空文字时 Send 置灰 |
+| T20 | 部分 | 主输入框草稿原样保留；运行中提示行加上 “The current task will stop first”，Send 后慢的那一轮被停下、新一轮开始。goal 和排队的提示只有单元层面的核对，没有在浏览器里搭出 goal 和排队场景 |
+| T21 | 通过 | 被撤销的轮次不刷新就消失；模型看到的历史随之变短；刷新后也看不到 |
+| T22 | 通过 | 在页面里替换 `rewindSession` 模拟：`REWIND_BEFORE_COMPACTION` 时编辑框和文字保留，红字提示；请求进行中 Send 显示加载、不能重复点；`sendError` 时编辑框关闭，文字接在主输入框草稿后面，草稿不丢 |
+| T23 | 通过 | 两个标签页打开同一会话，一边撤销，另一边同步移除 |
+
+另外核对了设计稿第九节：1024px 宽、右侧面板开着时，编辑框和操作栏都没有横向溢出。
+
+### TUI
+
+| ID | 结果 | 说明 |
+|---|---|---|
+| T24 | 通过 | 只列这个会话已经开始的 prompt，最新在上；单元测试 `rewind-model.unit.test.ts` |
+| T25 | 通过（有一处偏差） | 确认行是 “Rewind 2 turns. File changes won't be undone. Enter to confirm, Esc to cancel.”；确认后消息和完成提示都从屏幕上移除，原文回到输入框 |
+| T26 | 部分 | 运行中执行 `/rewind`，确认行写明当前任务会先停止，确认后任务停止、原文回填。压缩点之前的轮次没有在真实环境触发 |
+
+**偏差**：设计稿说输入框已有内容时先问要不要替换。实际上 `/rewind` 本身就是在输入框里输入的，执行时输入框一定是空的，这个询问不会出现。所以改为：万一有内容，原文接在后面并空一行，不覆盖，和 Web 的 `sendError` 处理一致。
+
+### 实施中发现并修好的问题
+
+- Web 提示行把被编辑这一轮自己的回答也算成 “later turn”。用户消息不带 run ID，现在改为从它的 prompt 取。
+- TUI 撤销后屏幕上残留孤立的 “Total 0s”。现在一轮的完成行只在这一轮还有消息留在屏幕上时保留，有单元测试。
+- TUI 收到带 `rewoundAt` 的 `prompt.updated` 时，会把这条 prompt 又写回 store。现在改为从 store 里移除。
+
+撤销正在运行的一轮后，屏幕上会留一行 “Interrupted”。这是 TUI 对任何被停下的一轮都会显示的提示，内容属实，下次发送时清掉，没有改。
+
+### 回归
+
+在 `015e1a98` 上，`pnpm typecheck` 通过，`pnpm lint` 0 个错误，全量 `pnpm test` 7928 项通过、17 项跳过、0 项失败。

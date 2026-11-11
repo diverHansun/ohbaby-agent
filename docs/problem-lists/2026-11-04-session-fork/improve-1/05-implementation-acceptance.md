@@ -127,3 +127,22 @@ F1 和 F2 已补齐，等待用户复核。
 F1 的 7 条测试都已在 fork 入口补上断言。F2 的 5 处改动都已如实写进 02 和本文档。
 
 结论：**通过，可以从 `61e563d5` 切撤销分支。** F3 到 F6 留待以后处理。撤销议题的 01、02、04 已按当前代码更新了代码引用，决定不变。
+
+## 前端实施记录（2026-11-11）
+
+代码在 `codex/session-actions-frontend`：Web 是 `48144fc1`，TUI 是 `015e1a98`。走查环境同 side chat 05 的前端记录（隔离数据库、本机假模型）。
+
+| ID | 结果 | 说明 |
+|---|---|---|
+| T15 | 通过 | fork 按钮紧挨复制按钮，只出现在主会话有复制按钮的回答上；side chat 面板里没有；点击后切到 “原标题 (1)”，内容到这一轮为止。单元测试 `message-edit-fork.unit.test.tsx` 覆盖显示规则 |
+| T16 | 部分 | 会话行菜单有 Fork；对一个只有失败轮次的会话点击，提示 “Nothing to fork yet”、不切换。“从另一个工作区的会话行 fork”没有走查 |
+| T17 | 部分 | 新会话出现在侧栏顶部，和普通会话平级，源会话不变。归档互不影响没有走查 |
+| T18 | 未走查 | 没有搭子代理场景 |
+| T19 | 通过 | `/fork` 切到新会话，提示 “Forked to Fake model chat (1)”；之后发的消息落在新会话里；被拒绝审批、没有回答的那一轮没有复制过去 |
+| T20 | 部分 | 错误文案由 SDK 的 `sessionActionErrorText` 统一给出，有单元测试；TUI 里没有在真实环境触发 `FORK_TARGET_INVALID` |
+
+错误文案表从 Web 挪到了 `packages/ohbaby-sdk/src/util/session-action-errors.ts`，Web 和 TUI 共用。
+
+### 回归
+
+在 `015e1a98` 上，`pnpm typecheck` 通过，`pnpm lint` 0 个错误，全量 `pnpm test` 7928 项通过、17 项跳过、0 项失败。

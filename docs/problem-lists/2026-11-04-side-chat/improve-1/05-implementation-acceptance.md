@@ -143,3 +143,37 @@ pnpm exec vitest run packages/ohbaby-agent/src/services/session/copy-history.int
 - 未绑定的快照沿用后端的 `activeSessionId`。后端当前选中的是 side chat 时，这个 ID 会指向一个已被过滤掉的会话（`client-view.ts:210-212`）。只有没绑定会话的旧 RPC 调用方会遇到。
 - 两个 prompt 同时运行时，不带 `sessionId` 的旧格式 `runtime.updated` 不会投给任何客户端。目前所有产生这个事件的地方都已带上 `sessionId`。
 - `runSessionIdsByRunId` 只在重置时清空，会一直增长。这在复修之前就存在，复修没有引入。
+
+## 前端实施记录（2026-11-11）
+
+代码在 `codex/session-actions-frontend`：Web 是 `f4b7eb07`，TUI 是 `015e1a98`。走查用的是隔离的数据目录和数据库，模型换成本机的假服务，没有调用真实模型，也没有碰用户自己的会话库。
+
+### Web（内置浏览器）
+
+| ID | 结果 | 说明 |
+|---|---|---|
+| T14 | 通过 | `side-chat-view.unit.test.ts`：只留边界之后的消息、prompt 和 run；边界不在已加载的页里时，复制来的 prompt 和 run 也不出现 |
+| T15 | 通过 | side chat 提问、审批期间，主会话的消息和状态照常 |
+| T16 | 通过 | 单元测试覆盖选区判断。浏览器里选中主会话回答的文字，出现 “Ask in side chat”；点击后输入框是 `> ` 引用加一个空行，焦点在输入框，没有自动发送 |
+| T17 | 通过 | 顶栏按钮、`⌘;`、入口页、Add page 菜单都能新建，标题依次是 Side chat 1、Side chat 2；主会话没发消息时入口置灰，提示 “Send a message first”；空状态两行文案和设计一致；消息只有复制按钮 |
+| T18 | 通过 | side chat 的审批在面板里弹出；看着第二个 side chat 时，第一个的标签出现等待审批的圆点，批准后圆点消失、回答继续 |
+| T19 | 部分 | 切到别的主会话时标签收起，切回来标签和内容都在；× 直接关闭、不弹确认。“离开期间来了审批，切回来还在”没有单独走查 |
+| T19b | 部分 | 刷新后两个 side chat 都恢复；关掉一个再刷新，只恢复剩下那个。断网重连没有走查 |
+
+### TUI（tmux 驱动真实 TUI）
+
+| ID | 结果 | 说明 |
+|---|---|---|
+| T20 | 通过 | 没发消息时 `/btw` 给出 “Send a message first” 的提示；主会话运行中可以打开；`/btw <问题>` 打开后立即提问；在面板里输入 `/compact` 作为普通文字发给 side chat。连远程 daemon 时的提示只核对了代码路径 |
+| T21 | 通过 | 关闭面板后回到主会话，消息和状态正确；数据库里 side chat 已删除 |
+| T22 | 通过 | side chat 的审批在面板里弹出，批准后继续；面板打开时主会话请求审批，标题栏右侧出现 “Main session needs approval · Esc to return”，按 Esc 回到主会话后审批照常弹出 |
+| T23 | 通过 | 输入框有内容时 Esc 不关闭；为空时 Esc 关闭并删除 |
+
+### 实施中发现并修好的问题
+
+- 进程内后端要先进入一次 side chat 会话，才能读到它的视图。TUI 面板在读视图前调用 `initializeSession`，它只准备视图，不切换当前会话。
+- `usePermissionSync` 原来会用自己的结果覆盖 TUI store 里的全部审批。side chat 那一份改为不写 store，由面板自己显示，主会话的审批列表不受影响。
+
+### 回归
+
+在 `015e1a98` 上，`pnpm typecheck` 通过，`pnpm lint` 0 个错误，全量 `pnpm test` 7928 项通过、17 项跳过、0 项失败。
