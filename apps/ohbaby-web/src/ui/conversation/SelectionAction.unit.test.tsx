@@ -31,6 +31,24 @@ describe("readMessageSelection (T16)", () => {
     expect(readMessageSelection(select(text), stream)).toBe("hello world");
   });
 
+  it("accepts a triple click that ends at the start of a block outside the messages", () => {
+    document.body.innerHTML = `<section id="stream"><div class="ohb-message-body"><p>last paragraph</p></div></section><div id="composer">draft</div>`;
+    const selection = document.getSelection();
+    if (!selection) throw new Error("no selection");
+    const range = document.createRange();
+    range.setStart(must("#stream p"), 0);
+    range.setEnd(must("#composer"), 0);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(readMessageSelection(selection, must("#stream"))).toBe(
+      "last paragraph",
+    );
+    range.setEnd(must("#composer"), 1);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(readMessageSelection(selection, must("#stream"))).toBeNull();
+  });
+
   it("ignores an empty selection", () => {
     document.body.innerHTML = `<section id="stream"><div class="ohb-message-body"><p>hello</p></div></section>`;
     const stream = must("#stream");

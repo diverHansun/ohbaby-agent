@@ -27,15 +27,18 @@ export function readMessageSelection(
     const body = element?.closest(".ohb-message-body");
     return body !== null && body !== undefined && container.contains(body);
   };
-  if (!inMessage(selection.anchorNode) || !inMessage(selection.focusNode))
-    return null;
+  const range = selection.getRangeAt(0);
+  if (!inMessage(range.startContainer)) return null;
+  // A triple click ends the selection at the very start of the next block,
+  // which for the last paragraph lies outside the messages.
+  if (!inMessage(range.endContainer) && range.endOffset !== 0) return null;
   const active = document.activeElement;
   if (
     active instanceof HTMLTextAreaElement ||
     active instanceof HTMLInputElement
   )
     return null;
-  const text = selection.toString();
+  const text = selection.toString().trimEnd();
   return text.trim() === "" ? null : text;
 }
 

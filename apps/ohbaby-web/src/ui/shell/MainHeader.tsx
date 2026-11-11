@@ -1,4 +1,4 @@
-import { MessageCircleQuestion, PanelLeft, PanelRight } from "lucide-react";
+import { PanelLeft, PanelRight } from "lucide-react";
 import type { ReactElement } from "react";
 import {
   type HeaderModel,
@@ -7,12 +7,6 @@ import {
 import { ContextUsageControl } from "../shared/ContextUsage.js";
 import { IconButton } from "../shared/IconButton.js";
 import { Spinner } from "../shared/Spinner.js";
-
-const SIDE_CHAT_SHORTCUT_LABEL =
-  typeof navigator !== "undefined" &&
-  /Mac|iPhone|iPad/.test(navigator.userAgent)
-    ? "⌘;"
-    : "Ctrl+;";
 
 const CONNECTION_LABELS: Partial<
   Record<HeaderModel["connectionKind"], string>
@@ -40,11 +34,6 @@ export function MainHeader(props: {
   /** The right panel's toggle; shown while the panel is closed, like the sidebar's. */
   readonly sidePanelOpen?: boolean;
   readonly onOpenSidePanel?: () => void;
-  /** Opens a new side chat; `unavailable` says why it cannot right now. */
-  readonly sideChat?: {
-    readonly onOpen: () => void;
-    readonly unavailable?: string;
-  };
 }): ReactElement {
   const abnormal =
     props.hasClient && isConnectionAbnormal(props.header.connectionKind);
@@ -79,20 +68,6 @@ export function MainHeader(props: {
             sessionId={props.sessionId}
             usage={props.header.contextWindowUsage}
           />
-        ) : null}
-        {props.sideChat ? (
-          <IconButton
-            label="Side chat"
-            // Two lines in the native tooltip: the name, then the shortcut.
-            title={
-              props.sideChat.unavailable ??
-              `Side chat\n${SIDE_CHAT_SHORTCUT_LABEL}`
-            }
-            disabled={props.sideChat.unavailable !== undefined}
-            onClick={props.sideChat.onOpen}
-          >
-            <MessageCircleQuestion aria-hidden="true" size={15} />
-          </IconButton>
         ) : null}
         {props.onOpenSidePanel && !props.sidePanelOpen ? (
           <IconButton

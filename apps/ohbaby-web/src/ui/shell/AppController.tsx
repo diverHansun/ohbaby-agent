@@ -177,7 +177,9 @@ export function AppController(props: {
         try {
           await runtime.forkSession(sessionId, options);
         } catch (error) {
-          throw new Error(sessionActionErrorText("fork", error), { cause: error });
+          throw new Error(sessionActionErrorText("fork", error), {
+            cause: error,
+          });
         }
       }),
     [runAction, runtime],
@@ -390,11 +392,6 @@ export function AppController(props: {
             setPanelOpenedByUser(true);
             sidePanel.setOpen(true);
           }}
-          sideChat={
-            client
-              ? { onOpen: openSideChat, unavailable: sideChats.unavailable }
-              : undefined
-          }
         />
       )}
       main={
