@@ -8,7 +8,8 @@ import type { SessionMenuAnchor } from "./SessionMenu.js";
 /**
  * One sidebar session (05 SessionRow): the open button, then a trailing
  * spinner (running), amber dot (awaiting approval) or relative time. On hover
- * the time gives way to the menu button.
+ * the time gives way to the menu button; a pinned row also shows a filled pin
+ * there, which unpins it.
  */
 export function SessionRow(props: {
   readonly session: SidebarSessionItem;
@@ -126,7 +127,7 @@ export function SessionRow(props: {
     <div
       ref={rowRef}
       data-session-id={props.session.id}
-      className={`ohb-session-row${props.active ? " ohb-session-active" : ""}${props.menuOpen ? " is-menu-open" : ""}`}
+      className={`ohb-session-row${props.active ? " ohb-session-active" : ""}${props.menuOpen ? " is-menu-open" : ""}${props.pinned ? " is-pinned" : ""}`}
       onPointerEnter={() => {
         setHovered(true);
       }}
@@ -156,25 +157,6 @@ export function SessionRow(props: {
         }
       }}
     >
-      {props.pinned ? (
-        <button
-          className="ohb-session-pin"
-          type="button"
-          aria-label={`Unpin ${title}`}
-          title="Unpin"
-          disabled={props.disabled || props.moving}
-          onClick={() => {
-            props.onUnpin(mainRef.current);
-          }}
-        >
-          <Pin
-            aria-hidden="true"
-            className="ohb-pin-icon"
-            size={13}
-            strokeWidth={1.75}
-          />
-        </button>
-      ) : null}
       <button
         ref={mainRef}
         className="ohb-session-main"
@@ -193,6 +175,25 @@ export function SessionRow(props: {
         </span>
       </button>
       <span className="ohb-session-hover-actions">
+        {props.pinned ? (
+          <button
+            className="ohb-session-pin"
+            type="button"
+            aria-label={`Unpin ${title}`}
+            title="Unpin"
+            disabled={props.disabled || props.moving}
+            onClick={() => {
+              props.onUnpin(mainRef.current);
+            }}
+          >
+            <Pin
+              aria-hidden="true"
+              className="ohb-pin-icon"
+              size={13}
+              fill="currentColor"
+            />
+          </button>
+        ) : null}
         <button
           ref={actionsRef}
           className="ohb-session-actions"

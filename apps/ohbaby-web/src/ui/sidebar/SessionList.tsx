@@ -38,6 +38,8 @@ export interface SessionListProps {
   readonly onSelectSession: (session: SidebarSessionItem) => void;
   /** Where focus goes when an archived row leaves no next row behind. */
   readonly fallbackFocus: () => HTMLElement | null;
+  /** A pin change moves the row to another section; the sidebar refocuses it there. */
+  readonly onPinChange: (sessionId: string) => void;
 }
 
 interface OpenSessionMenu {
@@ -123,6 +125,7 @@ export function SessionList(props: SessionListProps): ReactElement {
   ): void => {
     prepare(focus);
     setMenu(null);
+    props.onPinChange(session.id);
     pins.setPinned(session.id, pinned);
   };
   const archive = (

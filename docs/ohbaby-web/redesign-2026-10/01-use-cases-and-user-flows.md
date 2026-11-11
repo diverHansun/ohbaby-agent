@@ -56,7 +56,7 @@ ohbaby Web
 | 会话 | 对话 / Chat | 界面上统一叫“对话”，文档和代码里仍叫 session |
 | 新建草稿 | 新对话 / New chat | |
 | 工作区 | 工作区 / Workspace | 侧栏分组依据；project 只指 Git 仓库身份 |
-| 全部可见活跃会话 | 最近 / Recents | 侧栏底部的平铺列表，不能折叠，含工作区和置顶会话；无工作区草稿选择器里写 No workspace |
+| 全部可见活跃会话 | 最近 / Recents | 侧栏底部的平铺列表，可以折叠，含工作区会话，不含置顶会话；无工作区草稿选择器里写 No workspace |
 | 打开工作区目录 | 打开文件夹 / Open folder… | |
 | 换工作区 | 移到工作区 / Move to workspace… | 点开后在原位置显示工作区列表 |
 | 执行目录 | 工作目录 / Working directory | 会话态主区顶栏显示的路径 |

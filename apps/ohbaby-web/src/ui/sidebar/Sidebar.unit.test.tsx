@@ -168,6 +168,15 @@ it("moves pinned chats into Pinned, latest pin first, through the menu and the c
   expect(order()).toEqual(["Chat C", "Chat B", "Chat A"]);
   const pinnedRow = button("Unpin Chat B").closest(".ohb-session-row");
   if (!pinnedRow) throw new Error("Missing row");
+  // The pin sits after the title, among the hover actions, and only on pinned rows.
+  expect(
+    pinnedRow.querySelector(".ohb-session-hover-actions .ohb-session-pin"),
+  ).toBeTruthy();
+  expect(
+    container.querySelectorAll(
+      ".ohb-session-row:not(.is-pinned) .ohb-session-pin",
+    ),
+  ).toHaveLength(0);
   act(() => {
     pinnedRow.dispatchEvent(
       new MouseEvent("contextmenu", {
@@ -181,8 +190,16 @@ it("moves pinned chats into Pinned, latest pin first, through the menu and the c
   expect(button("Unpin")).toBe(document.activeElement);
   click("Unpin");
   expect(order()).toEqual(["Chat C", "Chat A", "Chat B"]);
+  // A real click focuses the pin before it unpins.
+  button("Unpin Chat C").focus();
   click("Unpin Chat C");
   expect(order()).toEqual(["Chat A", "Chat B", "Chat C"]);
+  // Focus follows the chat back to its workspace.
+  expect(
+    document.activeElement
+      ?.closest("[data-session-id]")
+      ?.getAttribute("data-session-id"),
+  ).toBe("C");
   expect(select).not.toHaveBeenCalled();
 });
 
@@ -595,7 +612,7 @@ it("offers Remove from workspace only to a chat with a workspace", () => {
   expect(document.body.textContent).not.toContain("Remove from workspace");
 });
 
-it("keeps workspace and pinned chats in Recents through moves and pages all sessions", async () => {
+it("keeps workspace chats in Recents, leaves pinned chats to Pinned and pages the rest", async () => {
   const recentRows = Array.from({ length: 10 }, (_, index) =>
     row(
       `R${String(index)}`,
@@ -604,68 +621,79 @@ it("keeps workspace and pinned chats in Recents through moves and pages all sess
     ),
   );
   render({ catalog: catalog(recentRows, { nextCursor: "next" }) });
-  const recentSection = (): HTMLElement => {
+  const sectionIds = (title: string): (string | null)[] => {
     const section = container.querySelector<HTMLElement>(
-      'section[aria-label="Recents"]',
+      `section[aria-label="${title}"]`,
     );
-    if (!section) throw new Error("Missing Recents");
-    return section;
-  };
-  const recentIds = (): (string | null)[] =>
-    Array.from(recentSection().querySelectorAll("[data-session-id]")).map(
+    if (!section) throw new Error(`Missing ${title}`);
+    return Array.from(section.querySelectorAll("[data-session-id]")).map(
       (element) => element.getAttribute("data-session-id"),
     );
-  expect(recentIds()).toEqual(["R0", "R1", "R2", "R3", "R4", "R5"]);
+  };
+  expect(sectionIds("Recents")).toEqual(["R0", "R1", "R2", "R3", "R4", "R5"]);
   pin("R0");
-  expect(recentIds()).toEqual(["R0", "R1", "R2", "R3", "R4", "R5"]);
+  expect(sectionIds("Pinned")).toEqual(["R0"]);
+  expect(sectionIds("Recents")).toEqual(["R1", "R2", "R3", "R4", "R5", "R6"]);
+  expect(sectionIds("Workspaces")).not.toContain("R0");
   render({
     catalog: catalog(
       recentRows.map((item) =>
-        item.id === "R0" ? { ...item, workspaceDirectory: null } : item,
+        item.id === "R2" ? { ...item, workspaceDirectory: null } : item,
       ),
       { nextCursor: "next" },
     ),
   });
-  expect(recentIds()).toContain("R0");
+  expect(sectionIds("Recents")).toContain("R2");
   await act(async () => {
-    const more = Array.from(recentSection().querySelectorAll("button")).find(
-      (element) => element.textContent === "Show more · 4",
+    const recents = container.querySelector('section[aria-label="Recents"]');
+    const more = Array.from(recents?.querySelectorAll("button") ?? []).find(
+      (element) => element.textContent === "Show more · 3",
     );
     if (!more) throw new Error("Missing Recents Show more");
     more.click();
     await Promise.resolve();
   });
-  expect(recentIds()).toHaveLength(10);
+  expect(sectionIds("Recents")).toHaveLength(9);
   const [[enough]] = loadMore.mock.calls;
   expect(enough(recentRows)).toBe(false);
-  expect(
-    enough([
-      ...recentRows,
-      ...Array.from({ length: 16 }, (_, index) =>
-        row(`S${String(index)}`, "/repo", "2026-08-01T00:00:00Z"),
-      ),
-    ]),
-  ).toBe(true);
+  // 6 + 20 unpinned rows: the pinned R0 does not count toward Recents.
+  const extraRows = (count: number): UiGlobalSession[] =>
+    Array.from({ length: count }, (_, index) =>
+      row(`S${String(index)}`, "/repo", "2026-08-01T00:00:00Z"),
+    );
+  expect(enough([...recentRows, ...extraRows(16)])).toBe(false);
+  expect(enough([...recentRows, ...extraRows(17)])).toBe(true);
 });
 
-it("restores Recents menu focus after pinning and unpinning without reordering", () => {
-  const recents = container.querySelector('section[aria-label="Recents"]');
-  if (!recents) throw new Error("Missing Recents");
-  const trigger = recents.querySelector<HTMLButtonElement>(
-    '[aria-label="Actions for Chat B"]',
+it("moves focus with a chat pinned from Recents and unpinned again", () => {
+  const recentIds = (): (string | null)[] =>
+    Array.from(
+      container.querySelectorAll(
+        'section[aria-label="Recents"] [data-session-id]',
+      ),
+    ).map((element) => element.getAttribute("data-session-id"));
+  const trigger = container.querySelector<HTMLButtonElement>(
+    'section[aria-label="Recents"] [aria-label="Actions for Chat B"]',
   );
   if (!trigger) throw new Error("Missing Recents menu trigger");
-  for (const label of ["Pin", "Unpin"]) {
-    act(() => {
-      trigger.click();
-    });
-    expect(document.activeElement).toBe(button(label));
-    click(label);
-    expect(document.activeElement).toBe(trigger);
-    expect(
-      Array.from(recents.querySelectorAll("[data-session-id]")).map((element) =>
-        element.getAttribute("data-session-id"),
-      ),
-    ).toEqual(["A", "B", "C"]);
-  }
+  act(() => {
+    trigger.click();
+  });
+  expect(document.activeElement).toBe(button("Pin"));
+  click("Pin");
+  expect(recentIds()).toEqual(["A", "C"]);
+  const pinnedTrigger = container.querySelector<HTMLButtonElement>(
+    'section[aria-label="Pinned"] [aria-label="Actions for Chat B"]',
+  );
+  expect(document.activeElement).toBe(pinnedTrigger);
+  act(() => {
+    pinnedTrigger?.click();
+  });
+  expect(document.activeElement).toBe(button("Unpin"));
+  click("Unpin");
+  expect(recentIds()).toEqual(["A", "B", "C"]);
+  expect(container.querySelector('section[aria-label="Pinned"]')).toBeNull();
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(
+    "Actions for Chat B",
+  );
 });

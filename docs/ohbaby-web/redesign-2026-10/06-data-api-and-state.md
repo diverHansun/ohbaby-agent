@@ -97,10 +97,10 @@ interface SidebarGroups {
 
 规则：
 
-- 工作区分组只看 `workspaceDirectory`；Recents 汇总全部全局目录会话，包括 `null`、有工作区和置顶会话。工作目录是什么不影响分组（improve-1：无工作区不等于默认目录）。
+- 工作区分组只看 `workspaceDirectory`；Recents 汇总所有未置顶的全局目录会话，包括 `null` 和有工作区的会话。工作目录是什么不影响分组（improve-1：无工作区不等于默认目录）。
 - 隐藏工作区的会话由服务端从列表里排除（improve-1 T8），前端不做隐藏过滤。
 - `workspaceDirectory` 不在工作区列表里（比如 TUI 刚建的目录还没登记，或工作区列表读取失败）时，用目录名临时建一个分组，不丢会话。
-- 置顶的会话在 Pinned 和 Recents 中均显示，不在原工作区分组重复出现。Recents 的顺序和分页不受置顶影响。
+- 置顶的会话只在 Pinned 中显示，不在原工作区分组和 Recents 中重复出现。Recents 按服务端顺序排列，分页只计未置顶的会话。
 
 ### 2.2 设置
 

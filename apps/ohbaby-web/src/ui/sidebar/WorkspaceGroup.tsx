@@ -29,7 +29,7 @@ export function WorkspaceGroup(props: {
     <section
       className={`ohb-workspace-group${props.current ? " is-current" : ""}`}
     >
-      <div className="ohb-workspace-heading">
+      <div className={`ohb-workspace-heading${menu ? " is-menu-open" : ""}`}>
         <button
           type="button"
           className="ohb-workspace-toggle"

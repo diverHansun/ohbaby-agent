@@ -58,7 +58,7 @@
 
 ### UC-SESSION-01 置顶、导出、归档
 
-- [ ] Pin 后会话移到 Pinned 区，不在原工作区分组重复出现；Unpin 后回到原工作区分组；两种状态均在 Recents 中按更新时间显示。
+- [ ] Pin 后会话只在 Pinned 区出现，原工作区分组和 Recents 都不再显示；Unpin 后回到原工作区分组和 Recents，Recents 按更新时间排序。
 - [ ] Export… › HTML / JSONL 能下载文件。
 - [ ] Archive 后行立即消失，不出现成功提示；如果正在打开这条会话，主区回到草稿态；服务端失败时行恢复并出现错误通知。
 

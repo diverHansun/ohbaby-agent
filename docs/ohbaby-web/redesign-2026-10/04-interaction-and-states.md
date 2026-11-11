@@ -57,7 +57,7 @@
 | 状态 | 页面表现 | 用户操作 |
 |---|---|---|
 | 首次加载 | 字标、New、Search、Settings 立即可用；会话树位置超过 300ms 未返回时显示一行 `Loading…` | 可直接新对话 |
-| 加载完成 | Pinned（有置顶才显示）→ Workspaces → Recents（不能折叠） | 浏览、打开 |
+| 加载完成 | Pinned（有置顶才显示）→ Workspaces → Recents，三个分区都能折叠 | 浏览、打开 |
 | 全新用户（无工作区、无会话） | 只有 Workspaces 标题和它旁边常驻的 `[+]`，不放说明文字；Recents 不显示 | 打开文件夹，或直接在主区对话 |
 | 某组还有更多 | 组尾 `Show more · N`；已展开过时并排 `Show less` | 加载更多 |
 | 加载更多中 | `Show more` 换成转圈，不可重复点击 | 等待 |

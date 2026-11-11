@@ -68,8 +68,8 @@ export function baseCount(key: SidebarGroupKey): number {
  * Groups the loaded global list for the sidebar: Pinned, then workspaces in
  * server order, then Recents. Grouping follows `workspaceDirectory` only;
  * a workspace the scope list does not know gets a temporary group so no row
- * is lost. Recents includes every loaded row in server order, including pins.
- * Pinned rows are omitted only from workspace groups.
+ * is lost. A pinned row lives only in Pinned; every other row shows in its
+ * workspace (if any) and in Recents, which keeps server order.
  */
 export function selectSidebarGroups(input: {
   readonly workspaces: readonly WorkspaceScopeSummary[];
@@ -85,9 +85,12 @@ export function selectSidebarGroups(input: {
   const recents: SidebarSessionItem[] = [];
   for (const session of input.sessions) {
     const item = toItem(session, input);
+    if (item.pinned) {
+      pinned.push(item);
+      continue;
+    }
     recents.push(item);
-    if (item.pinned) pinned.push(item);
-    else if (item.workspaceDirectory !== null) {
+    if (item.workspaceDirectory !== null) {
       const rows = byWorkspace.get(item.workspaceDirectory) ?? [];
       rows.push(item);
       byWorkspace.set(item.workspaceDirectory, rows);
@@ -168,10 +171,13 @@ export function countGroupRows(
   sessions: readonly UiGlobalSession[],
   pins: Readonly<Record<string, number>>,
 ): number {
-  if (key === "recents") return sessions.length;
   let count = 0;
   for (const session of sessions) {
     const pinned = Object.hasOwn(pins, session.id);
+    if (key === "recents") {
+      if (!pinned) count += 1;
+      continue;
+    }
     const rowKey: SidebarGroupKey = pinned
       ? "pinned"
       : session.workspaceDirectory === null

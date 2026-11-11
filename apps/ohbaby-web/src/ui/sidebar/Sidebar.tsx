@@ -138,7 +138,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
         newRef.current
       )?.focus({ preventScroll: true });
     }
-  }, [moving, catalog.sessions]);
+  }, [moving, catalog.sessions, pins.pins]);
   const groups = useMemo(
     () =>
       selectSidebarGroups({
@@ -225,6 +225,9 @@ export function Sidebar(props: SidebarProps): ReactElement {
         disabled={props.disabled}
         now={now}
         fallbackFocus={() => newRef.current}
+        onPinChange={(id) => {
+          movedFocus.current = id;
+        }}
         onSelectSession={props.onSelectSession}
         onArchiveSession={props.onArchiveSession}
         onExportSession={props.onExportSession}
@@ -329,7 +332,11 @@ export function Sidebar(props: SidebarProps): ReactElement {
                     <AlertCircle aria-hidden="true" size={13} />
                   </IconButton>
                 ) : null}
-                <IconButton label="Open folder…" onClick={props.onOpenFolder}>
+                <IconButton
+                  label="Open folder…"
+                  className="ohb-sidebar-open-folder"
+                  onClick={props.onOpenFolder}
+                >
                   <FolderPlus aria-hidden="true" size={13} />
                 </IconButton>
               </>

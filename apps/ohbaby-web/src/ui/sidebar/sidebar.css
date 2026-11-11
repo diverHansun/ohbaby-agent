@@ -64,13 +64,14 @@
   padding: 6px 8px 8px;
 }
 
-/* Pinned, Workspaces and Recents: one heading, so they line up. */
+/* Pinned, Workspaces and Recents: one heading, so they line up.
+   Type steps down a level at a time: section 15px, workspace 14px, chat 13px. */
 .ohb-sidebar-section-title {
   align-items: center;
-  color: var(--text-dim);
+  color: var(--text-muted);
   display: flex;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   justify-content: space-between;
   /* Tall enough for the Workspaces buttons, so all three headings match. */
   min-height: 38px;
@@ -89,7 +90,8 @@
   position: relative;
 }
 
-.ohb-workspace-heading:hover {
+.ohb-workspace-heading:hover,
+.ohb-workspace-heading.is-menu-open {
   background: var(--bg-hover);
 }
 
@@ -100,17 +102,18 @@
   color: var(--text-muted);
   display: flex;
   flex: 1;
-  font-size: 13.5px;
+  font-size: 14px;
+  font-weight: 500;
   gap: 8px;
   min-height: var(--row-height);
   min-width: 0;
-  padding: 0 4px 0 8px;
+  /* 10px, like the section heading text and Pinned/Recents chat titles. */
+  padding: 0 4px 0 10px;
   text-align: left;
 }
 
 .ohb-workspace-group.is-current .ohb-workspace-toggle {
   color: var(--text);
-  font-weight: 500;
 }
 
 .ohb-workspace-chevron {
@@ -143,8 +146,21 @@
 }
 
 .ohb-workspace-heading:hover .ohb-workspace-actions,
+.ohb-workspace-heading.is-menu-open .ohb-workspace-actions,
 .ohb-workspace-actions:focus-within {
   opacity: 1;
+}
+
+/* Sidebar icon buttons answer hover by darkening the icon, not by filling a
+   box around it: lighter on a list this dense. */
+.ohb-sidebar .ohb-icon-button:hover {
+  background: transparent;
+}
+
+.ohb-workspace-heading.is-menu-open
+  .ohb-workspace-actions
+  .ohb-icon-button:last-child {
+  color: var(--text);
 }
 
 .ohb-workspace-actions .ohb-icon-button {
@@ -164,6 +180,20 @@
   display: inline-flex;
 }
 
+/* Like row actions, Open folder waits for the pointer or keyboard focus; a
+   load error beside it stays visible. */
+.ohb-sidebar-open-folder {
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+
+.ohb-sidebar-section-title:hover .ohb-sidebar-open-folder,
+.ohb-sidebar-open-folder:focus-visible {
+  opacity: 1;
+}
+
 .ohb-sidebar-section-toggle {
   align-items: center;
   background: transparent;
@@ -176,15 +206,19 @@
   padding: 3px 6px;
 }
 
+.ohb-sidebar-section-toggle {
+  transition: color var(--duration-fast) var(--ease);
+}
+
 .ohb-sidebar-section-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 .ohb-group-footer {
   display: flex;
   gap: 4px;
-  padding: 0 0 6px 12px;
+  /* Lines Show more up with the chat titles above it. */
+  padding: 0 0 6px 14px;
 }
 
 .ohb-group-more {
@@ -200,7 +234,6 @@
 }
 
 button.ohb-group-more:hover {
-  background: var(--bg-hover);
   color: var(--text);
 }
 
@@ -254,7 +287,7 @@ button.ohb-group-more:hover {
   color: var(--text-muted);
   display: flex;
   flex: 1;
-  font-size: 13.5px;
+  font-size: 13px;
   gap: 8px;
   min-height: var(--row-height);
   min-width: 0;
@@ -324,6 +357,13 @@ button.ohb-group-more:hover {
   width: 7px;
 }
 
+/* A pinned row shows two buttons on hover (pin, menu): keep the title clear of both. */
+.ohb-session-row.is-pinned:hover .ohb-session-meta,
+.ohb-session-row.is-pinned.is-menu-open .ohb-session-meta,
+.ohb-session-row.is-pinned:focus-within .ohb-session-meta {
+  min-width: 48px;
+}
+
 /* Time gives way to the menu button on hover; activity marks stay. */
 .ohb-session-row:hover .ohb-session-meta > small,
 .ohb-session-row.is-menu-open .ohb-session-meta > small,
@@ -359,9 +399,14 @@ button.ohb-group-more:hover {
   width: 24px;
 }
 
+.ohb-session-pin,
+.ohb-session-actions {
+  transition: color var(--duration-fast) var(--ease);
+}
+
 .ohb-session-pin:hover,
-.ohb-session-actions:hover {
-  background: var(--bg-hover);
+.ohb-session-actions:hover,
+.ohb-session-row.is-menu-open .ohb-session-actions {
   color: var(--text);
 }
 
@@ -373,8 +418,7 @@ button.ohb-group-more:hover {
   }
 }
 
-/* Phones (03 §3.3, §5): 44px rows and touch targets; row actions stay visible
-   because there is no hover. */
+/* Phones (03 §3.3, §5): 44px rows and larger type. */
 @media (max-width: 639px) {
   .ohb-sidebar {
     --row-height: 44px;
@@ -385,15 +429,23 @@ button.ohb-group-more:hover {
     min-height: 44px;
   }
 
-  .ohb-workspace-toggle,
-  .ohb-session-main {
+  .ohb-sidebar-section-title {
+    font-size: 16px;
+  }
+
+  .ohb-workspace-toggle {
     font-size: 15px;
   }
 
-  .ohb-workspace-actions {
-    opacity: 1;
+  .ohb-session-main {
+    font-size: 14px;
   }
+}
 
+/* Row actions show on hover wherever there is a pointer, a narrow desktop
+   window included. Touch screens have no hover, so there they stay visible,
+   and on a phone they grow to 44px touch targets. */
+@media (hover: none) and (max-width: 639px) {
   .ohb-workspace-actions .ohb-icon-button,
   .ohb-session-pin,
   .ohb-session-actions {
@@ -401,18 +453,13 @@ button.ohb-group-more:hover {
     width: 44px;
   }
 
-  .ohb-session-hover-actions {
-    opacity: 1;
-    position: static;
-  }
-
   .ohb-session-meta > small {
     display: none;
   }
 }
 
-/* Touch screens wider than a phone have no hover either: keep row actions reachable. */
 @media (hover: none) {
+  .ohb-sidebar-open-folder,
   .ohb-workspace-actions,
   .ohb-session-hover-actions {
     opacity: 1;
