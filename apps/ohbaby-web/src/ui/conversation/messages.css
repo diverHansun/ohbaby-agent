@@ -497,9 +497,9 @@
 .ohb-message-actions {
   align-items: center;
   display: flex;
-  gap: 2px;
+  gap: 0;
   height: 28px;
-  margin: 2px -6px -22px;
+  margin: 2px -5px -22px;
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease);
 }
@@ -523,6 +523,11 @@
 
 .ohb-message-action {
   display: inline-flex;
+}
+
+/* Narrower than the usual 28px so the icons sit close together (Claude). */
+.ohb-message-actions .ohb-icon-button {
+  width: 24px;
 }
 
 /* Code blocks in Markdown: a soft panel with a small Copy label in the
@@ -683,4 +688,9 @@
   .ohb-message-editor {
     width: 100%;
   }
+}
+
+/* lucide's Split branches upwards; a fork reads left to right (Claude). */
+.ohb-fork-icon {
+  transform: rotate(90deg);
 }

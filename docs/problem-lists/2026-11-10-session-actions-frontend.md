@@ -27,14 +27,14 @@
 
 已经落地。fork 按钮和 Edit 按钮都挂在这里，规则沿用现状：
 
-- 按钮是 28px 见方的 ghost 按钮，图标 14px，和复制按钮一致；按钮间距 2px。
+- 按钮是 ghost 按钮，高 28px、宽 24px，图标 14px，按钮之间不留间距，所以相邻图标相隔 10px（2026-11-11 用户走查后收紧，原来相隔 16px）。
 - 最新一条回答下的操作栏常驻。更早的回答，鼠标悬停或按钮获得焦点时才淡入。触屏上一直显示。
 - 提示沿用 `IconButton` 现有的原生 `title`。需要说明的按钮，在标题和说明之间加一个换行，浏览器会显示成两行。
 
 | 按钮 | 位置 | 图标（lucide） | 提示 |
 |---|---|---|---|
 | Copy | 用户消息、AI 回答 | 已有 | 已有 |
-| Fork | AI 回答，紧挨 Copy | `Split`，最接近 Claude 截图里的分叉箭头 | `Fork from here` + 换行 + `Starts a new session from this point. This one stays as it is.` |
+| Fork | AI 回答，紧挨 Copy | `Split`，顺时针转 90 度，让分叉朝右，和 Claude 的图标方向一致（2026-11-11 用户确认）。会话行菜单里的 Fork 也一样 | `Fork from here` + 换行 + `Starts a new session from this point. This one stays as it is.` |
 | Edit | 用户消息，紧挨 Copy。steer 消息和没有对应 prompt 的消息不显示 | `Pencil` | `Edit` |
 
 side chat 面板（`variant: "side-chat"`）和子代理对话里只有 Copy。

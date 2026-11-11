@@ -221,7 +221,7 @@ export function SessionMenu(props: {
         data-menu-shortcut="f"
         onClick={props.onFork}
       >
-        <Split aria-hidden="true" size={13} />
+        <Split aria-hidden="true" className="ohb-fork-icon" size={13} />
         <span>Fork</span>
       </button>
       <div className="ohb-menu-separator" role="separator" />

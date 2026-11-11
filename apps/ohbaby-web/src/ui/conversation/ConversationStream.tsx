@@ -228,7 +228,7 @@ export function ConversationStream(props: {
         {forkingRunId === runId ? (
           <LoaderCircle aria-hidden="true" size={14} />
         ) : (
-          <Split aria-hidden="true" size={14} />
+          <Split aria-hidden="true" className="ohb-fork-icon" size={14} />
         )}
       </IconButton>
     ),
