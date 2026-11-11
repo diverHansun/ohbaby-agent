@@ -1,3 +1,4 @@
+import { ModelRequestValidationError } from "./request-validation-error.js";
 import OpenAI, { APIUserAbortError } from "openai";
 import type {
   ChatCompletionChunk,
@@ -455,12 +456,15 @@ export function createOpenAICompatibleProvider(
     async streamResponse(
       request: InterfaceProviderRequest,
     ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
-      const stream = await client.chat.completions.create(
-        buildRequestParams(request, options),
-        {
-          signal: request.signal,
-        },
-      );
+      let params: ReturnType<typeof buildRequestParams>;
+      try {
+        params = buildRequestParams(request, options);
+      } catch (error) {
+        throw new ModelRequestValidationError(error);
+      }
+      const stream = await client.chat.completions.create(params, {
+        signal: request.signal,
+      });
 
       return (async function* (): AsyncGenerator<
         InterfaceProviderStreamEvent,

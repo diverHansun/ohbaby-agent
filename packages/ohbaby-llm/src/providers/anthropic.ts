@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { ModelRequestValidationError } from "./request-validation-error.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { APIUserAbortError } from "@anthropic-ai/sdk/error";
 import type {
@@ -737,12 +738,15 @@ export function createAnthropicProvider(
     streamResponse(
       request: InterfaceProviderRequest,
     ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
-      const stream = client.messages.stream(
-        buildRequestParams(request, options),
-        {
-          signal: request.signal,
-        },
-      );
+      let params: ReturnType<typeof buildRequestParams>;
+      try {
+        params = buildRequestParams(request, options);
+      } catch (error) {
+        throw new ModelRequestValidationError(error);
+      }
+      const stream = client.messages.stream(params, {
+        signal: request.signal,
+      });
 
       return Promise.resolve(
         (async function* (): AsyncGenerator<

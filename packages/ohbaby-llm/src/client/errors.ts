@@ -14,6 +14,14 @@ export function isAbortError(error: unknown): boolean {
   );
 }
 
+/** Marks a terminal failure caught at the provider boundary without exposing its payload. */
+export class ProviderRequestError extends Error {
+  constructor(override readonly cause: unknown) {
+    super("The response could not be completed. Please try again.");
+    this.name = "ProviderRequestError";
+  }
+}
+
 /**
  * The model produced tool call arguments that are not valid JSON.
  *

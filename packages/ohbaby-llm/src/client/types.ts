@@ -17,6 +17,7 @@ import type { LLMConfig } from "../config/types.js";
 import type { ModelState } from "../providers/native-state.js";
 import type { ReasoningIntent } from "../providers/reasoning.js";
 import type { ProviderRetryEvent } from "./retry.js";
+import type { ProviderErrorDetail } from "./provider-error.js";
 
 /**
  * Re-export the owned model request type for convenience.
@@ -269,10 +270,24 @@ export interface ModelRequestAttempt {
   /** Provider-reported usage; absence means unknown, not zero. */
   readonly usage?: TokenUsage;
   readonly outcome: "running" | "success" | "error" | "aborted";
+  /** A retry was planned when this failed attempt ended, not necessarily sent. */
+  readonly retryScheduled?: true;
 }
 export interface ModelRequestObservation {
   readonly type: "request-started" | "first-text" | "request-ended";
   readonly request: ModelRequestAttempt;
+  /** Safe diagnostic context only; never part of persisted request facts. */
+  readonly failure?: Pick<
+    ProviderErrorDetail,
+    | "kind"
+    | "statusCode"
+    | "upstreamCode"
+    | "upstreamType"
+    | "networkCode"
+    | "requestId"
+  > & {
+    readonly retryDelayMs?: number;
+  };
 }
 
 /** Resolved ordinary-request settings, snapshotted before context maintenance. */

@@ -1,4 +1,5 @@
 import OpenAI, { APIUserAbortError } from "openai";
+import { ModelRequestValidationError } from "./request-validation-error.js";
 import type {
   ResponseCreateParamsStreaming,
   ResponseInput,
@@ -195,15 +196,20 @@ export function createOpenAIResponsesProvider(
       request,
     ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
       if (request.signal?.aborted) throw new APIUserAbortError();
-      const stream = await client.responses.create(
-        buildRequestParams(request, {
+      let params: ReturnType<typeof buildRequestParams>;
+      try {
+        params = buildRequestParams(request, {
           provider: options.id,
           model: request.model,
           protocol: "openai-responses",
           endpoint: options.baseUrl,
-        }),
-        { signal: request.signal },
-      );
+        });
+      } catch (error) {
+        throw new ModelRequestValidationError(error);
+      }
+      const stream = await client.responses.create(params, {
+        signal: request.signal,
+      });
       return mapResponsesStream(
         stream,
         options.tokenUsageReporter,

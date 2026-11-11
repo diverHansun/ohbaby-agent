@@ -97,19 +97,31 @@ export class RequestAttemptObserver {
     if (this.record && usage !== undefined)
       this.record = { ...this.record, usage };
   }
-  end(outcome: "success" | "error" | "aborted"): void {
+  end(
+    outcome: "success" | "error" | "aborted",
+    retryScheduled?: true,
+    failure?: ModelRequestObservation["failure"],
+  ): void {
     if (!this.started || !this.record || this.record.endedAt !== undefined)
       return;
     this.record = {
       ...this.record,
       endedAt: this.finishedAt ?? Date.now(),
       outcome,
+      ...(outcome === "error" && retryScheduled ? { retryScheduled } : {}),
     };
-    this.enqueue("request-ended");
+    this.enqueue("request-ended", outcome === "error" ? failure : undefined);
   }
-  private enqueue(type: ModelRequestObservation["type"]): void {
+  private enqueue(
+    type: ModelRequestObservation["type"],
+    failure?: ModelRequestObservation["failure"],
+  ): void {
     if (!this.record) return;
-    const fact = { type, request: this.record };
+    const fact = {
+      type,
+      request: this.record,
+      ...(failure === undefined ? {} : { failure }),
+    };
     const persist = async (): Promise<void> => {
       if (this.failure) return;
       try {

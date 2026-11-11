@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { ModelRequestValidationError } from "../providers/request-validation-error.js";
+import { providerErrorDetail } from "./provider-error.js";
 import {
   createIdleWatchdog,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
@@ -50,7 +52,11 @@ import {
   retryReason,
   type ProviderRetryPolicy,
 } from "./retry.js";
-import { ToolCallParseError, isContextOverflowError } from "./errors.js";
+import {
+  ProviderRequestError,
+  ToolCallParseError,
+  isContextOverflowError,
+} from "./errors.js";
 import {
   ModelStateSchema,
   NativeOutputSchema,
@@ -728,7 +734,121 @@ export async function* streamResponse(
       };
       return;
     } catch (caughtError) {
-      observer.end(signal.aborted ? "aborted" : "error");
+      let error: unknown = caughtError;
+      let delayMs: number | undefined;
+      // Decide once before sealing the end fact. Defer terminal errors until
+      // persistence completes so observation failures and cancellation keep
+      // their existing precedence.
+      try {
+        if (
+          caughtError instanceof ModelObservationError ||
+          caughtError instanceof ModelRequestValidationError ||
+          caughtError instanceof ToolCallParseError ||
+          signal.aborted
+        )
+          throw caughtError;
+
+        // SDKs may translate our timeout abort into their own AbortError.
+        // Preserve the watchdog cause without retrying caller cancellation.
+        error = watchdog.expired()
+          ? watchdog.providerSignal.reason
+          : caughtError;
+        if (provider.isAbortError(error)) {
+          throw annotatePromptCacheError(
+            new ProviderStreamInterruptedError(error, "provider_abort"),
+            promptCache.strategy,
+          );
+        }
+        if (error instanceof ProviderStreamInterruptedError) throw error;
+        if (validatingProtocol) {
+          throw new ProviderStreamInterruptedError(error, "protocol");
+        }
+
+        // Lifecycle owns the single forced-compaction retry, including an
+        // overflowing attempt that emitted a provisional completion already.
+        // Do not turn that explicit provider error into a transport failure.
+        if (isContextOverflowError(error)) throw error;
+        // Summaries have not executed tools or committed their partial output.
+        // Preserve SDK transport identity for Context's single remaining retry.
+        if (
+          purpose === "context-summary" &&
+          streamFailureSource(error) === "transport"
+        ) {
+          throw new ProviderStreamInterruptedError(error, "transport");
+        }
+
+        if (
+          accumulatedContent !== "" ||
+          accumulatedReasoning !== "" ||
+          accumulatedToolCalls.size > 0 ||
+          finishReason !== null ||
+          rawFinishReason !== undefined
+        ) {
+          throw annotatePromptCacheError(
+            new ProviderStreamInterruptedError(
+              error,
+              streamFailureSource(error),
+            ),
+            promptCache.strategy,
+          );
+        }
+
+        failedAttempts += 1;
+        const retryable = isRetryableProviderError(error);
+        if (failedAttempts > retryPolicy.maxRetriesPerStep || !retryable) {
+          if (retryable) {
+            throw annotatePromptCacheError(
+              new ProviderRetryExhaustedError(
+                annotatePromptCacheError(error, promptCache.strategy),
+                failedAttempts - 1,
+              ),
+              promptCache.strategy,
+            );
+          }
+          throw annotatePromptCacheError(error, promptCache.strategy);
+        }
+
+        delayMs = nextRetryDelayMs({
+          attempt: failedAttempts,
+          error,
+          policy: retryPolicy,
+        });
+      } catch (terminalError) {
+        error = terminalError;
+      }
+      let detail = providerErrorDetail(error);
+      if (
+        detail === undefined &&
+        delayMs === undefined &&
+        !signal.aborted &&
+        !(caughtError instanceof ModelObservationError) &&
+        !(caughtError instanceof ModelRequestValidationError) &&
+        !(caughtError instanceof ToolCallParseError) &&
+        !isContextOverflowError(error)
+      ) {
+        // The retry decision is already final. Keep provider provenance for
+        // untyped adapter failures without changing retry eligibility.
+        error = annotatePromptCacheError(
+          new ProviderRequestError(caughtError),
+          promptCache.strategy,
+        );
+        detail = providerErrorDetail(error);
+      }
+      observer.end(
+        signal.aborted ? "aborted" : "error",
+        delayMs === undefined ? undefined : true,
+        detail === undefined
+          ? undefined
+          : {
+              kind: detail.kind,
+              statusCode: detail.statusCode,
+              upstreamCode: detail.upstreamCode,
+              upstreamType: detail.upstreamType,
+              networkCode: detail.networkCode,
+              requestId: detail.requestId,
+              retryDelayMs: delayMs,
+            },
+      );
       await observer.flush();
       for (const fact of observer.drain())
         yield {
@@ -757,70 +877,7 @@ export async function* streamResponse(
         return;
       }
 
-      // SDKs may translate our timeout abort into their own AbortError. Preserve
-      // the watchdog cause without turning caller cancellation into a retry.
-      const error: unknown = watchdog.expired()
-        ? watchdog.providerSignal.reason
-        : caughtError;
-      if (provider.isAbortError(error)) {
-        throw annotatePromptCacheError(
-          new ProviderStreamInterruptedError(error, "provider_abort"),
-          promptCache.strategy,
-        );
-      }
-      if (error instanceof ProviderStreamInterruptedError) throw error;
-      if (validatingProtocol) {
-        throw new ProviderStreamInterruptedError(error, "protocol");
-      }
-
-      // Lifecycle owns the single forced-compaction retry, including an
-      // overflowing attempt that emitted a provisional completion already.
-      // Do not turn that explicit provider error into a transport failure.
-      if (isContextOverflowError(error)) throw error;
-      // Summaries have not executed tools or committed their partial output.
-      // Preserve SDK transport identity for Context's single remaining retry.
-      if (
-        purpose === "context-summary" &&
-        streamFailureSource(error) === "transport"
-      ) {
-        throw new ProviderStreamInterruptedError(error, "transport");
-      }
-
-      if (
-        accumulatedContent !== "" ||
-        accumulatedReasoning !== "" ||
-        accumulatedToolCalls.size > 0 ||
-        finishReason !== null ||
-        rawFinishReason !== undefined
-      ) {
-        throw annotatePromptCacheError(
-          new ProviderStreamInterruptedError(error, streamFailureSource(error)),
-          promptCache.strategy,
-        );
-      }
-
-      failedAttempts += 1;
-      if (
-        failedAttempts > retryPolicy.maxRetriesPerStep ||
-        !isRetryableProviderError(error)
-      ) {
-        if (isRetryableProviderError(error)) {
-          throw annotatePromptCacheError(
-            new ProviderRetryExhaustedError(
-              annotatePromptCacheError(error, promptCache.strategy),
-              failedAttempts - 1,
-            ),
-            promptCache.strategy,
-          );
-        }
-        throw annotatePromptCacheError(error, promptCache.strategy);
-      }
-
-      const delayMs = nextRetryDelayMs({
-        attempt: failedAttempts,
-        error,
-        policy: retryPolicy,
-      });
+      if (delayMs === undefined) throw error;
       // Notify before the backoff sleep so consumers see the retry while it
       // is happening, not after the next attempt succeeds.
       yield {

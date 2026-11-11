@@ -198,8 +198,11 @@ describe("streamResponse idle protection", () => {
       expect(
         run.records
           .filter((r) => r.type === "request-ended")
-          .map((r) => r.request.outcome),
-      ).toEqual(["error", "error"]);
+          .map((r) => [r.request.outcome, "retryScheduled" in r.request]),
+      ).toEqual([
+        ["error", true],
+        ["error", false],
+      ]);
       for (const source of streams)
         expect(source.return).toHaveBeenCalledOnce();
     },
@@ -225,6 +228,47 @@ describe("streamResponse idle protection", () => {
     });
     expect(provider.streamResponse).toHaveBeenCalledOnce();
     expect(run.chunks.some((c) => c.retry)).toBe(false);
+    expect(run.records.at(-1)?.request).not.toHaveProperty("retryScheduled");
+  });
+
+  it("calculates the retry delay once before saving the failed end fact", async () => {
+    const saved = deferred<undefined>();
+    const facts: ModelRequestObservation[] = [];
+    let calls = 0;
+    const { client, provider } = fixture(async () =>
+      ++calls === 1 ? never() : stream([{ finishReason: "stop" }]),
+    );
+    const run = collect(client, {
+      onRequestObservation: async (fact) => {
+        facts.push(fact);
+        if (fact.type === "request-ended" && fact.request.attempt === 1)
+          await saved.promise;
+      },
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(100);
+      expect(facts.at(-1)?.request).toMatchObject({
+        outcome: "error",
+        retryScheduled: true,
+      });
+      expect(Math.random).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(provider.streamResponse).toHaveBeenCalledOnce();
+      expect(run.chunks.some((chunk) => chunk.retry)).toBe(false);
+      saved.resolve(undefined);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(run.chunks.at(-1)?.retry?.delayMs).toBe(20);
+      await vi.advanceTimersByTimeAsync(19);
+      expect(provider.streamResponse).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await run.result).toBeUndefined();
+      expect(provider.streamResponse).toHaveBeenCalledTimes(2);
+      expect(Math.random).toHaveBeenCalledOnce();
+    } finally {
+      saved.resolve(undefined);
+      await vi.runAllTimersAsync();
+      await run.result;
+    }
   });
 
   it("keeps a partial summary timeout outside Context's transport retry", async () => {
@@ -260,6 +304,15 @@ describe("streamResponse idle protection", () => {
       expect(provider.streamResponse).toHaveBeenCalledOnce();
       if (when !== "backoff")
         expect(run.chunks.some((c) => c.retry)).toBe(false);
+      expect(run.records.at(-1)?.request).toMatchObject(
+        when === "backoff"
+          ? { outcome: "error", retryScheduled: true }
+          : { outcome: "aborted" },
+      );
+      if (when !== "backoff")
+        expect(run.records.at(-1)?.request).not.toHaveProperty(
+          "retryScheduled",
+        );
     },
   );
 
