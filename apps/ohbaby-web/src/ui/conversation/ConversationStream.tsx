@@ -215,7 +215,8 @@ export function ConversationStream(props: {
         title={
           "Fork from here\nStarts a new session from this point. This one stays as it is."
         }
-        className={forkingRunId === runId ? "is-spinning" : undefined}
+        // The fork arrow points right; it breathes rather than spins.
+        className={forkingRunId === runId ? "is-pulsing" : undefined}
         aria-busy={forkingRunId === runId}
         disabled={forkingRunId !== null}
         onClick={() => {

@@ -6027,7 +6027,7 @@ it("shows only a spinning brain while reasoning capability is detecting", async 
   );
   const status = app.container.querySelector(".ohb-reasoning-detecting");
   expect(status?.closest(".ohb-composer-input")).not.toBeNull();
-  expect(status?.querySelector(".ohb-reasoning-spinner")).not.toBeNull();
+  expect(status?.querySelector(".ohb-reasoning-pending")).not.toBeNull();
   expect(status?.textContent).toBe("");
   expect(app.container.textContent).not.toContain("检测中");
   expect(app.container.textContent).not.toContain("推理默认");

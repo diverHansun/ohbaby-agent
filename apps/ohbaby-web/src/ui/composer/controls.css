@@ -59,8 +59,10 @@
   min-height: 30px;
 }
 
-.ohb-reasoning-spinner {
-  animation: ohb-spin 1s linear infinite;
+/* Detecting: the brain stays upright and breathes. A turning brain reads
+   as a broken icon, not as loading. */
+.ohb-reasoning-pending {
+  animation: ohb-pulse 0.9s ease-in-out infinite alternate;
 }
 
 .ohb-reasoning-error {

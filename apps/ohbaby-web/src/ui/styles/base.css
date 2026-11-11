@@ -113,6 +113,17 @@ samp {
   }
 }
 
+/* "Working on it" for an icon whose shape means something: it stays
+   upright and breathes instead of turning. */
+@keyframes ohb-pulse {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.9;
+  }
+}
+
 @keyframes ohb-spin {
   to {
     transform: rotate(360deg);

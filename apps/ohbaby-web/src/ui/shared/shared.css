@@ -68,6 +68,11 @@
   color: var(--danger-ink);
 }
 
+/* An icon button whose work is under way, when the icon must not turn. */
+.ohb-icon-button.is-pulsing svg {
+  animation: ohb-pulse 0.9s ease-in-out infinite alternate;
+}
+
 /* An icon button whose work is under way, e.g. a refresh. */
 .ohb-icon-button.is-spinning svg {
   animation: ohb-spin 0.9s linear infinite;

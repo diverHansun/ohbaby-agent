@@ -16,7 +16,7 @@ export function ReasoningControl(props: {
         role="status"
         title={state.reason}
       >
-        <Brain className="ohb-reasoning-spinner" aria-hidden="true" size={14} />
+        <Brain className="ohb-reasoning-pending" aria-hidden="true" size={14} />
       </span>
     );
   if (state.kind === "unknown")
