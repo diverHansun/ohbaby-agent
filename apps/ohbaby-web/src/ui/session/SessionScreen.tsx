@@ -1,5 +1,6 @@
 import {
   getUnconsumedSteers,
+  sessionActionErrorText,
   type UiBackendClient,
   type UiSubagentInstanceReaderState,
 } from "ohbaby-sdk";
@@ -24,7 +25,6 @@ import {
   readSessionValue,
   type StoredComposerDraft,
 } from "../composer/draft-storage.js";
-import { sessionActionError } from "./session-action-errors.js";
 import { DraftHero } from "./DraftHero.js";
 import { selectPersistedPromptError } from "./prompt-projection.js";
 import { isConnectionAbnormal } from "./selectors.js";
@@ -285,7 +285,7 @@ export function SessionScreen({
         } else follow();
         return null;
       } catch (error) {
-        return sessionActionError("edit", error);
+        return sessionActionErrorText("edit", error);
       }
     },
     [client, editSessionId, draftScopeKey, prefillComposer, follow],

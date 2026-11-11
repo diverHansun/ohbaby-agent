@@ -286,6 +286,29 @@ describe("turn end lines (turn-projection)", () => {
     );
     expect(again).toBe(items);
   });
+
+  it("drops the end lines of rewound turns with their messages (undo T25)", () => {
+    const items = restore();
+    // A rewind back to w2 removes w2 and w3 from the screen.
+    const kept = items.filter(
+      (item) => item.id !== "w2-answer" && item.id !== "w3-answer",
+    );
+    const after = appendTurnCompletions(kept, {
+      sessionId: "s",
+      runs: runs.slice(0, 2),
+      prompts: [prompt],
+      messages: messages.filter(
+        (message) => message.runId !== "w2" && message.runId !== "w3",
+      ),
+    });
+    expect(after.map((item) => item.id)).toEqual([
+      "user",
+      "answer",
+      "turn-completion:r1",
+      "w1-answer",
+      "turn-completion:w1",
+    ]);
+  });
 });
 
 function idle(): TuiRuntimeStatus {

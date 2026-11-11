@@ -22,6 +22,9 @@ describe("command catalog", () => {
         "new",
         "compact",
         "export",
+        "btw",
+        "fork",
+        "rewind",
         "resume",
         "permission",
         "mcps",
@@ -258,6 +261,21 @@ describe("command catalog", () => {
         ),
       ).not.toContain("export");
     }
+  });
+
+  it("keeps side chat, fork and rewind to the TUI", () => {
+    const catalog = buildCommandCatalog();
+    for (const surface of ["stdout", "headless"] as const) {
+      const ids = filterCommandCatalogBySurface(catalog, surface).commands.map(
+        (command) => command.id,
+      );
+      for (const id of ["btw", "fork", "rewind"]) expect(ids).not.toContain(id);
+    }
+    expect(
+      filterCommandCatalogBySurface(catalog, "tui").commands.find(
+        (command) => command.id === "btw",
+      ),
+    ).toMatchObject({ acceptsArguments: true, argsHint: "[question]" });
   });
 
   it("exposes /effort only in the TUI", () => {

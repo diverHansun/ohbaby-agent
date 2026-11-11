@@ -113,6 +113,7 @@ export function createTerminalCommand(
           client: host.core,
           pendingPromptWorkspace: process.cwd(),
           initialNotices: runtime.takeStartupNotices?.() ?? [],
+          remote: remotePort !== undefined,
           subscribeEvents: (handler) => host.callbacks.subscribeEvents(handler),
           ...(host.subscribeDiagnosticsUnavailable === undefined
             ? {}

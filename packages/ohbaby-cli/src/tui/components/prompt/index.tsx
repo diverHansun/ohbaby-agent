@@ -84,6 +84,15 @@ export interface PromptProps {
   readonly permission?: UiPermissionState;
   readonly queuedPrompts?: readonly UiPromptSubmission[];
   readonly runtimeStatusLabel?: string;
+  /**
+   * Text to put in the input, e.g. a rewound message (/rewind). A new nonce
+   * applies it once; typed text stays and the new text follows a blank line.
+   */
+  readonly prefill?: { readonly nonce: number; readonly text: string };
+  /** Send `/…` as text, with no command palette (the /btw side chat). */
+  readonly plainText?: boolean;
+  /** Esc on an empty input, e.g. to close the /btw side chat. */
+  readonly onEscapeEmpty?: () => void;
 }
 
 export interface PendingReasoningSelection {
@@ -117,6 +126,9 @@ export function Prompt({
   permission,
   queuedPrompts = [],
   runtimeStatusLabel,
+  prefill,
+  plainText = false,
+  onEscapeEmpty,
 }: PromptProps): ReactElement {
   const [steerSelection, setSteerSelection] = useState(0);
   const [recoverySelection, setRecoverySelection] = useState(0);
@@ -213,6 +225,16 @@ export function Prompt({
     editorRef.current = nextEditor;
     setEditor(nextEditor);
   };
+
+  const appliedPrefill = useRef(prefill?.nonce ?? 0);
+  useEffect(() => {
+    if (!prefill || prefill.nonce === appliedPrefill.current) return;
+    appliedPrefill.current = prefill.nonce;
+    const current = editorText(editorRef.current).trimEnd();
+    replaceInput(
+      current === "" ? prefill.text : `${current}\n\n${prefill.text}`,
+    );
+  }, [prefill]);
 
   const replaceInput = (nextInput: string): void => {
     replaceEditor(
@@ -676,6 +698,15 @@ export function Prompt({
       }
 
       const currentQueuedEdit = queuedEditRef.current;
+      if (
+        key.escape &&
+        !currentQueuedEdit &&
+        onEscapeEmpty &&
+        currentInput.trim() === ""
+      ) {
+        onEscapeEmpty();
+        return;
+      }
       if (currentQueuedEdit && key.escape) {
         void client
           .releasePromptEditLease({
@@ -863,12 +894,16 @@ export function Prompt({
             { sessionId: sourceSession, creationGeneration },
             executeCommand,
             capturedModelEntryId,
+            plainText,
           );
           prepareCount(-1);
         };
         // Preserve the existing first-send sequence for all independent intents
         // in one creation context; the editor remains available during prepare.
-        if (sourceSession === null && !submission.trim().startsWith("/")) {
+        if (
+          sourceSession === null &&
+          (plainText || !submission.trim().startsWith("/"))
+        ) {
           pendingSubmissionRef.current = pendingSubmissionRef.current.then(
             send,
             send,
@@ -1217,6 +1252,7 @@ async function submitInput(
   },
   executeCommand?: CoreAPI["executeCommand"],
   modelEntryId?: string,
+  plainText = false,
 ): Promise<void> {
   const text = input.trim();
 
@@ -1224,7 +1260,7 @@ async function submitInput(
     return;
   }
 
-  if (!text.trim().startsWith("/")) {
+  if (plainText || !text.trim().startsWith("/")) {
     setError(null);
     if (!alreadyCleared) replaceInput("");
     let reasoning: UiReasoningConfig | undefined;

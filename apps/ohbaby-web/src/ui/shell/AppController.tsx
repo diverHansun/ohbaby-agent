@@ -1,3 +1,4 @@
+import { sessionActionErrorText } from "ohbaby-sdk";
 import {
   type ReactElement,
   useCallback,
@@ -23,7 +24,6 @@ import {
 } from "../side-panel/SidePanelPage.js";
 import { useSidePanel } from "../side-panel/use-side-panel.js";
 import { useSideChats } from "../side-chat/use-side-chats.js";
-import { sessionActionError } from "../session/session-action-errors.js";
 import { useTerminalTabs } from "../side-panel/terminal/use-terminal-tabs.js";
 import { ConfirmDialog } from "../shared/ConfirmDialog.js";
 import { Sidebar } from "../sidebar/Sidebar.js";
@@ -177,7 +177,7 @@ export function AppController(props: {
         try {
           await runtime.forkSession(sessionId, options);
         } catch (error) {
-          throw new Error(sessionActionError("fork", error), { cause: error });
+          throw new Error(sessionActionErrorText("fork", error), { cause: error });
         }
       }),
     [runAction, runtime],

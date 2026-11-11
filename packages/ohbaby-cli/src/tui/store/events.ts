@@ -120,7 +120,13 @@ export function applyTuiEvent(
     case "prompt.submitted":
     case "prompt.updated":
       return rebuildFromCollections(state, {
-        prompts: upsertByKey(state.prompts, event.prompt, "promptId"),
+        // A rewound prompt leaves the store with its messages (undo 02 Stage 3).
+        prompts:
+          event.prompt.rewoundAt === undefined
+            ? upsertByKey(state.prompts, event.prompt, "promptId")
+            : state.prompts.filter(
+                (prompt) => prompt.promptId !== event.prompt.promptId,
+              ),
       });
 
     case "message.appended": {

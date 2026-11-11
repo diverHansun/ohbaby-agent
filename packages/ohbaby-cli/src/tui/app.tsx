@@ -1,4 +1,14 @@
-import { compareUiPromptQueueOrder, getUnconsumedSteers } from "ohbaby-sdk";
+import {
+  compareUiPromptQueueOrder,
+  getUnconsumedSteers,
+  sessionActionErrorText,
+} from "ohbaby-sdk";
+import { SideChatPanel } from "./components/side-chat-panel.js";
+import { RewindPanel } from "./components/rewind/RewindPanel.js";
+import {
+  rewindablePrompts,
+  rewindConfirmation,
+} from "./components/rewind/rewind-model.js";
 import { createSubagentReader } from "ohbaby-sdk";
 import {
   SubagentBrowser,
@@ -99,6 +109,8 @@ export interface TerminalUiOptions {
   readonly subscribeDiagnosticsUnavailable?: (
     listener: () => void,
   ) => () => void;
+  /** Connected to a daemon with --remote-port; /btw is unavailable then. */
+  readonly remote?: boolean;
 }
 
 export function OhbabyTerminalApp({
@@ -111,6 +123,7 @@ export function OhbabyTerminalApp({
   subscribeEvents,
   subscribeDiagnosticsUnavailable,
   reportDurationClockAnomaly,
+  remote = false,
 }: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
@@ -173,16 +186,21 @@ export function OhbabyTerminalApp({
     [activeSessionId],
   );
   const exportNoticeSequenceRef = useRef(0);
-  const emitExportNotice = useCallback(
-    (level: "info" | "error", title: string, message: string): void => {
+  const emitLocalNotice = useCallback(
+    (
+      source: string,
+      level: "info" | "error",
+      title: string,
+      message: string,
+    ): void => {
       exportNoticeSequenceRef.current += 1;
       store.dispatch({
         notice: {
           createdAt: new Date().toISOString(),
-          id: `export_notice_${String(exportNoticeSequenceRef.current)}`,
+          id: `${source}_notice_${String(exportNoticeSequenceRef.current)}`,
           level,
           message,
-          source: "export",
+          source,
           title,
         },
         type: "notice.emitted",
@@ -190,6 +208,109 @@ export function OhbabyTerminalApp({
     },
     [store],
   );
+  const emitExportNotice = useCallback(
+    (level: "info" | "error", title: string, message: string): void => {
+      emitLocalNotice("export", level, title, message);
+    },
+    [emitLocalNotice],
+  );
+  // /btw replaces the main view while open (frontend design §3.2).
+  const [sideChat, setSideChat] = useState<{
+    readonly sideChatId: string;
+    readonly boundaryMessageId: string;
+    readonly firstQuestion?: string;
+  } | null>(null);
+  const [rewindOpen, setRewindOpen] = useState(false);
+  const [promptPrefill, setPromptPrefill] = useState<{
+    readonly nonce: number;
+    readonly text: string;
+  }>();
+  /** Runs /btw, /fork and /rewind here; each reports through a notice. */
+  const runSessionAction = useCallback(
+    async (
+      invocation: Parameters<CoreAPI["executeCommand"]>[0],
+    ): ReturnType<CoreAPI["executeCommand"]> => {
+      const base = {
+        clientInvocationId: invocation.clientInvocationId,
+        commandRunId: `local_${invocation.commandId}_${invocation.clientInvocationId}`,
+        eventCount: 0,
+        outputCount: 0,
+      };
+      const sessionId = activeSessionIdRef.current;
+      const fail = (title: string, message: string) => {
+        emitLocalNotice(invocation.commandId, "error", title, message);
+        return {
+          ...base,
+          error: { code: "COMMAND_FAILED", message, recoverable: true },
+          status: "failed" as const,
+        };
+      };
+      const done = { ...base, status: "completed" as const };
+      if (invocation.commandId === "rewind") {
+        if (sessionId === null) return fail("Rewind", "Nothing to rewind yet.");
+        setRewindOpen(true);
+        return done;
+      }
+      if (invocation.commandId === "fork") {
+        if (sessionId === null)
+          return fail("Fork failed", "Nothing to fork yet");
+        try {
+          const forked = await client.forkSession({ sessionId });
+          await client.selectSession(forked.sessionId);
+          emitLocalNotice(
+            "fork",
+            "info",
+            "Forked",
+            `Forked to ${forked.title}`,
+          );
+          return { ...done, sessionId: forked.sessionId };
+        } catch (caught) {
+          return fail("Fork failed", sessionActionErrorText("fork", caught));
+        }
+      }
+      // /btw
+      if (remote)
+        return fail(
+          "Side chat",
+          "/btw is not available when connected to a remote daemon",
+        );
+      const started =
+        sessionId !== null &&
+        store
+          .getState()
+          .prompts.some((prompt) => prompt.sessionId === sessionId);
+      if (!started)
+        return fail(
+          "Side chat",
+          "/btw is unavailable until this conversation has started. Send a message first, then try /btw again.",
+        );
+      try {
+        const opened = await client.openSideChat({ mainSessionId: sessionId });
+        const question = invocation.rawArgs.trim();
+        setSideChat({
+          sideChatId: opened.sideChatId,
+          boundaryMessageId: opened.boundaryMessageId,
+          ...(question === "" ? {} : { firstQuestion: question }),
+        });
+        return done;
+      } catch (caught) {
+        return fail("Side chat", formatError(caught));
+      }
+    },
+    [client, emitLocalNotice, remote, store],
+  );
+  const closeSideChat = useCallback((): void => {
+    const current = sideChat;
+    if (!current) return;
+    setSideChat(null);
+    // The main view was unmounted; reprint it as the subagent browser does.
+    if (!fullscreen) writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
+    void client
+      .closeSideChat({ sideChatId: current.sideChatId })
+      .catch((caught: unknown) => {
+        emitLocalNotice("btw", "error", "Side chat", formatError(caught));
+      });
+  }, [client, emitLocalNotice, fullscreen, sideChat, writeStdout]);
   const runExportCommand = useCallback(
     async (
       invocation: Parameters<CoreAPI["executeCommand"]>[0],
@@ -231,6 +352,8 @@ export function OhbabyTerminalApp({
       // /export runs locally so the file lands on this machine, even with a remote backend.
       if (invocation.commandId === "export")
         return runExportCommand(invocation);
+      if (["btw", "fork", "rewind"].includes(invocation.commandId))
+        return runSessionAction(invocation);
       if (invocation.commandId !== "compact")
         return client.executeCommand(invocation);
       if (compactCommandRef.current)
@@ -246,7 +369,7 @@ export function OhbabyTerminalApp({
           compactCommandRef.current = null;
       }
     },
-    [client, runExportCommand],
+    [client, runExportCommand, runSessionAction],
   );
   const footerModel = useFooterModel(
     client,
@@ -350,7 +473,11 @@ export function OhbabyTerminalApp({
   );
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
   const hasBackendDialog = permissions.length > 0 || interactions.length > 0;
-  const hasDialog = hasBackendDialog || commandPanel !== null;
+  const hasDialog = hasBackendDialog || commandPanel !== null || rewindOpen;
+  const rewindPrompts = useMemo(
+    () => rewindablePrompts(prompts, activeSessionId),
+    [prompts, activeSessionId],
+  );
   const contextWindowUsageLabel = formatFooterContextUsage(
     activeContextWindowUsage,
   );
@@ -776,6 +903,8 @@ export function OhbabyTerminalApp({
         compactCommandRef.current.abort();
         return;
       }
+      // The side chat and the rewind list own the keyboard while open.
+      if (sideChat !== null || rewindOpen) return;
       if (
         (!hasDialog || subagentBrowserOpen) &&
         key.ctrl &&
@@ -1127,14 +1256,29 @@ export function OhbabyTerminalApp({
       <AppShell
         priorityDock={hasDialog}
         fullscreen={fullscreen}
-        identity={`${activeSessionId ?? "empty"}:${String(screenGeneration)}:${String(subagentBrowserOpen)}`}
-        scrollEnabled={!subagentBrowserOpen}
+        identity={`${activeSessionId ?? "empty"}:${String(screenGeneration)}:${String(subagentBrowserOpen)}:${sideChat?.sideChatId ?? ""}`}
+        scrollEnabled={!subagentBrowserOpen && sideChat === null}
         output={
           <>
-            {permissions.length === 0 ? (
+            {permissions.length === 0 && sideChat === null ? (
               <HeaderContainer store={store} />
             ) : null}
-            {subagentBrowserOpen ? (
+            {sideChat !== null ? (
+              <SideChatPanel
+                key={sideChat.sideChatId}
+                client={client}
+                subscribeEvents={subscribeEvents}
+                sideChatId={sideChat.sideChatId}
+                boundaryMessageId={sideChat.boundaryMessageId}
+                firstQuestion={sideChat.firstQuestion}
+                mainNeedsApproval={permissions.length > 0}
+                footer={{
+                  model: footerModel,
+                  workingDirectory: activeSession?.workingDirectory,
+                }}
+                onClose={closeSideChat}
+              />
+            ) : subagentBrowserOpen ? (
               <>
                 {permissions.length > 0 ? (
                   <Text dimColor>
@@ -1178,8 +1322,41 @@ export function OhbabyTerminalApp({
           </>
         }
       >
-        {!subagentBrowserOpen ? (
+        {!subagentBrowserOpen && sideChat === null ? (
           <>
+            {rewindOpen && activeSessionId !== null ? (
+              <RewindPanel
+                prompts={rewindPrompts}
+                confirmation={(turns) =>
+                  rewindConfirmation({
+                    turns,
+                    goal: activeGoal,
+                    running: runtime.kind === "running",
+                    queued: queuedPrompts.length,
+                  })
+                }
+                onConfirm={async (prompt) => {
+                  try {
+                    const result = await client.rewindSession({
+                      sessionId: activeSessionId,
+                      promptId: prompt.promptId,
+                    });
+                    setRewindOpen(false);
+                    // The original text comes back to the input to edit.
+                    setPromptPrefill((current) => ({
+                      nonce: (current?.nonce ?? 0) + 1,
+                      text: result.restoredText,
+                    }));
+                    return null;
+                  } catch (caught) {
+                    return sessionActionErrorText("rewind", caught);
+                  }
+                }}
+                onClose={() => {
+                  setRewindOpen(false);
+                }}
+              />
+            ) : null}
             <DialogManager
               client={client}
               interactions={interactions}
@@ -1263,10 +1440,11 @@ export function OhbabyTerminalApp({
           </>
         ) : null}
         <Box
-          display={subagentBrowserOpen ? "none" : "flex"}
+          display={subagentBrowserOpen || sideChat !== null ? "none" : "flex"}
           flexDirection="column"
         >
           <Prompt
+            prefill={promptPrefill}
             footerOnly={hasDialog}
             onQueueModeChange={setQueueInputMode}
             activeSessionId={activeSessionId}
@@ -1275,7 +1453,7 @@ export function OhbabyTerminalApp({
             pendingModelEntryId={pendingModelEntryId}
             catalog={catalog}
             client={client}
-            disabled={hasDialog || subagentBrowserOpen}
+            disabled={hasDialog || subagentBrowserOpen || sideChat !== null}
             executeCommand={executePromptCommand}
             canSubmit={
               executionRecovery?.status !== "recovering" &&

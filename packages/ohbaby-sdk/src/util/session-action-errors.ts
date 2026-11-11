@@ -1,6 +1,7 @@
 /**
- * What the user reads when a fork or an edit is refused (frontend design §7).
- * The web notices, the edit box and the TUI status line share these texts.
+ * What the user reads when a fork or an edit (rewind) is refused (session
+ * actions frontend design §7). The Web notices, the Web edit box and the TUI
+ * status line share these texts.
  */
 const TEXTS: Readonly<
   Partial<Record<string, { readonly fork?: string; readonly edit?: string }>>
@@ -25,15 +26,16 @@ const TEXTS: Readonly<
   },
 };
 
-export function sessionActionError(
-  action: "fork" | "edit",
+export function sessionActionErrorText(
+  action: "fork" | "edit" | "rewind",
   error: unknown,
 ): string {
   const code =
     typeof error === "object" && error !== null && "code" in error
       ? error.code
       : undefined;
-  const known = typeof code === "string" ? TEXTS[code]?.[action] : undefined;
+  const key = action === "rewind" ? "edit" : action;
+  const known = typeof code === "string" ? TEXTS[code]?.[key] : undefined;
   if (known) return known;
   const detail = error instanceof Error ? error.message : String(error);
   return `Something went wrong: ${detail}`;

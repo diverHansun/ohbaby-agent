@@ -18,10 +18,14 @@ const EMPTY: PermissionSyncState = {
   attempts: 0,
 };
 
-/** Local and remote transports use the same independent approval baseline. */
+/**
+ * Local and remote transports use the same independent approval baseline.
+ * `store` receives this root's requests; the /btw side chat passes its own
+ * sink so the main session's list in the TUI store is left alone.
+ */
 export function usePermissionSync(
   client: CoreAPI,
-  store: TuiStore,
+  store: Pick<TuiStore, "setPermissions">,
   rootSessionId: string | null,
 ): { readonly state: PermissionSyncState; readonly retry: () => void } {
   const [state, setState] = useState<PermissionSyncState>(EMPTY);

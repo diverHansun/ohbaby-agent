@@ -46,6 +46,9 @@ const HELP_COMMAND_ORDER = [
   "new",
   "compact",
   "export",
+  "btw",
+  "fork",
+  "rewind",
   "goal",
   "permission",
   "mcps",
@@ -715,6 +718,19 @@ export function createBuiltinHandlers(
         return Promise.resolve();
       },
     },
+    ...(["btw", "fork", "rewind"] as const).map(
+      (id): CommandHandler => ({
+        id,
+        execute(_invocation, context): Promise<void> {
+          context.fail({
+            code: "INTERACTION_REQUIRED",
+            message: `Use /${id} in the TUI`,
+            recoverable: true,
+          });
+          return Promise.resolve();
+        },
+      }),
+    ),
     {
       id: "resume",
       execute(invocation, context): Promise<void> {

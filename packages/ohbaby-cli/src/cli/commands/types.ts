@@ -96,6 +96,8 @@ export interface CliCommandRuntime {
   /** Terminal capability probes that must finish before Ink owns stdin. */
   readonly prepareTerminalUi?: () => Promise<void>;
   readonly renderTerminalUi: (options: {
+    /** Connected to a daemon with --remote-port. */
+    readonly remote?: boolean;
     readonly reportDurationClockAnomaly?: (identity: string) => void;
     readonly pendingPromptWorkspace?: string;
     readonly clearOnStart?: boolean;

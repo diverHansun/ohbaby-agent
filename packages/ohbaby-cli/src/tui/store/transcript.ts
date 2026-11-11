@@ -380,7 +380,8 @@ function hasPendingOrRunningTool(message: UiMessage): boolean {
  * Adds an end line for each newly ended turn (`listEndedTurns`), once per run.
  * Lines are append-only during live use, like message fragments. When the
  * transcript is being restored, each line goes after the last item of its run
- * (or its prompt's user message) instead of at the end.
+ * (or its prompt's user message) instead of at the end. A line whose turn has
+ * no message left on screen (a rewound turn) is dropped with it.
  */
 export function appendTurnCompletions(
   items: readonly TranscriptItem[],
@@ -393,6 +394,7 @@ export function appendTurnCompletions(
   },
   restoring = false,
 ): readonly TranscriptItem[] {
+  items = dropOrphanTurnCompletions(items);
   const seen = new Set(
     items.flatMap((item) =>
       item.turnCompletion ? [item.turnCompletion.runId] : [],
@@ -429,4 +431,29 @@ export function appendTurnCompletions(
     else next.push(item);
   }
   return next;
+}
+
+function dropOrphanTurnCompletions(
+  items: readonly TranscriptItem[],
+): readonly TranscriptItem[] {
+  const lines = items.filter((item) => item.turnCompletion);
+  if (lines.length === 0) return items;
+  const runs = new Set(
+    items.flatMap((item) =>
+      !item.turnCompletion && item.message.runId ? [item.message.runId] : [],
+    ),
+  );
+  const messages = new Set(
+    items.flatMap((item) => (item.turnCompletion ? [] : [item.messageId])),
+  );
+  const orphan = (item: TranscriptItem): boolean => {
+    const turn = item.turnCompletion;
+    if (!turn) return false;
+    const userMessageId = turn.prompt?.userMessageId;
+    return (
+      !runs.has(turn.runId) &&
+      (userMessageId === undefined || !messages.has(userMessageId))
+    );
+  };
+  return lines.some(orphan) ? items.filter((item) => !orphan(item)) : items;
 }
