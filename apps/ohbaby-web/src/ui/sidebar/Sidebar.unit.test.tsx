@@ -340,7 +340,7 @@ it("groups by workspace with Recents last and starts new chats with or without a
       ".ohb-workspace-name, .ohb-sidebar-section-toggle > span:first-child",
     ),
   ).map((element) => element.textContent);
-  expect(headings).toEqual(["repo", "empty"]);
+  expect(headings).toEqual(["Workspaces", "repo", "empty", "Recents"]);
   expect(
     Array.from(container.querySelectorAll(".ohb-sidebar-empty")).map(
       (element) => element.textContent,
@@ -350,9 +350,29 @@ it("groups by workspace with Recents last and starts new chats with or without a
   expect(
     recents?.querySelector(".ohb-sidebar-section-title")?.textContent,
   ).toBe("Recents");
-  expect(recents?.querySelector(".ohb-sidebar-section-toggle")).toBeNull();
   expect(recents?.textContent).toContain("Chat N");
   expect(recents?.textContent).toContain("Chat P");
+  // Every section folds from its heading, and the choice is remembered.
+  const fold = (title: string): void => {
+    const toggle = Array.from(
+      container.querySelectorAll<HTMLElement>(".ohb-sidebar-section-toggle"),
+    ).find((element) => element.textContent === title);
+    if (!toggle) throw new Error(`Missing ${title} toggle`);
+    act(() => {
+      toggle.click();
+    });
+  };
+  fold("Recents");
+  expect(
+    container.querySelector('section[aria-label="Recents"]')?.textContent,
+  ).toBe("Recents");
+  fold("Workspaces");
+  expect(container.querySelector(".ohb-workspace-name")).toBeNull();
+  expect(
+    JSON.parse(localStorage.getItem("ohbaby.web.sidebar.collapsed.v2") ?? "[]"),
+  ).toEqual(["recents", "workspaces"]);
+  fold("Recents");
+  fold("Workspaces");
   click("New chat");
   click("New chat in repo");
   expect(newChat.mock.calls).toEqual([[null], ["/repo"]]);

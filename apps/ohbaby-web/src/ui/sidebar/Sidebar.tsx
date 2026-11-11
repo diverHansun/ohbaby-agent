@@ -90,6 +90,9 @@ export interface SidebarProps {
   ) => Promise<void>;
 }
 
+/** Folds every workspace at once; each workspace keeps its own key. */
+const WORKSPACES_KEY = "workspaces";
+
 /**
  * Wordmark, New chat and every chat across workspaces (03 §4.4): Pinned, then
  * workspaces, then Recents; Settings sits at the bottom. Each group shows 6 rows (Pinned 8) and Show more
@@ -301,7 +304,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
           {groups.pinned ? (
             <SidebarSection
               title="Pinned"
-              group={groups.pinned}
+              className="ohb-sidebar-pinned"
               expanded={!collapsed.has("pinned")}
               onToggle={() => {
                 toggle("pinned");
@@ -310,56 +313,64 @@ export function Sidebar(props: SidebarProps): ReactElement {
               {list(groups.pinned)}
             </SidebarSection>
           ) : null}
-          <div className="ohb-sidebar-section-title">
-            <span>Workspaces</span>
-            <span className="ohb-sidebar-section-actions">
-              {catalog.workspacesStatus === "error" ? (
-                <IconButton
-                  label="Workspaces could not be loaded. Retry"
-                  onClick={props.onRetry}
-                >
-                  <AlertCircle aria-hidden="true" size={13} />
+          <SidebarSection
+            title="Workspaces"
+            expanded={!collapsed.has(WORKSPACES_KEY)}
+            onToggle={() => {
+              toggle(WORKSPACES_KEY);
+            }}
+            actions={
+              <>
+                {catalog.workspacesStatus === "error" ? (
+                  <IconButton
+                    label="Workspaces could not be loaded. Retry"
+                    onClick={props.onRetry}
+                  >
+                    <AlertCircle aria-hidden="true" size={13} />
+                  </IconButton>
+                ) : null}
+                <IconButton label="Open folder…" onClick={props.onOpenFolder}>
+                  <FolderPlus aria-hidden="true" size={13} />
                 </IconButton>
-              ) : null}
-              <IconButton label="Open folder…" onClick={props.onOpenFolder}>
-                <FolderPlus aria-hidden="true" size={13} />
-              </IconButton>
-            </span>
-          </div>
-          {groups.workspaces.map((group) => (
-            <WorkspaceGroup
-              key={group.key}
-              directory={group.workspace.directory}
-              current={group.workspace.directory === activeWorkspace}
-              available={group.workspace.available}
-              expanded={!collapsed.has(group.key)}
-              onToggle={() => {
-                toggle(group.key);
-              }}
-              {...(group.workspace.available
-                ? {
-                    onNewChat: (): void => {
-                      props.onNewChat(group.workspace.directory);
-                    },
-                  }
-                : {})}
-              onHide={() => {
-                props.onHideWorkspace(group.workspace.directory);
-              }}
-            >
-              {list(group)}
-            </WorkspaceGroup>
-          ))}
+              </>
+            }
+          >
+            {groups.workspaces.map((group) => (
+              <WorkspaceGroup
+                key={group.key}
+                directory={group.workspace.directory}
+                current={group.workspace.directory === activeWorkspace}
+                available={group.workspace.available}
+                expanded={!collapsed.has(group.key)}
+                onToggle={() => {
+                  toggle(group.key);
+                }}
+                {...(group.workspace.available
+                  ? {
+                      onNewChat: (): void => {
+                        props.onNewChat(group.workspace.directory);
+                      },
+                    }
+                  : {})}
+                onHide={() => {
+                  props.onHideWorkspace(group.workspace.directory);
+                }}
+              >
+                {list(group)}
+              </WorkspaceGroup>
+            ))}
+          </SidebarSection>
           {groups.recents ? (
-            <section
-              className="ohb-sidebar-section ohb-sidebar-recents"
-              aria-label="Recents"
+            <SidebarSection
+              title="Recents"
+              className="ohb-sidebar-recents"
+              expanded={!collapsed.has("recents")}
+              onToggle={() => {
+                toggle("recents");
+              }}
             >
-              <div className="ohb-sidebar-section-title">
-                <span>Recents</span>
-              </div>
               {list(groups.recents)}
-            </section>
+            </SidebarSection>
           ) : null}
           {showLoading ? <p className="ohb-sidebar-status">Loading…</p> : null}
           {catalog.sessionsStatus === "error" &&
@@ -390,31 +401,42 @@ export function Sidebar(props: SidebarProps): ReactElement {
   );
 }
 
-/** A foldable section heading (Pinned). */
+/**
+ * A foldable section: Pinned, Workspaces and Recents share this heading so
+ * their size, colour and left edge match. The chevron follows the title.
+ */
 function SidebarSection(props: {
   readonly title: string;
-  readonly group: SidebarGroup;
+  readonly className?: string;
   readonly expanded: boolean;
   readonly onToggle: () => void;
+  /** Buttons at the right end of the heading, outside the toggle. */
+  readonly actions?: ReactNode;
   readonly children: ReactNode;
 }): ReactElement {
   return (
-    <section className="ohb-sidebar-section">
-      <button
-        type="button"
-        className="ohb-sidebar-section-title ohb-sidebar-section-toggle"
-        aria-expanded={props.expanded}
-        onClick={props.onToggle}
-      >
-        <span>
+    <section
+      className={`ohb-sidebar-section${props.className ? ` ${props.className}` : ""}`}
+      aria-label={props.title}
+    >
+      <div className="ohb-sidebar-section-title">
+        <button
+          type="button"
+          className="ohb-sidebar-section-toggle"
+          aria-expanded={props.expanded}
+          onClick={props.onToggle}
+        >
+          <span>{props.title}</span>
           <ChevronRight
             aria-hidden="true"
-            size={11}
+            size={12}
             className={`ohb-workspace-chevron${props.expanded ? " is-open" : ""}`}
           />
-          {props.title}
-        </span>
-      </button>
+        </button>
+        {props.actions ? (
+          <span className="ohb-sidebar-section-actions">{props.actions}</span>
+        ) : null}
+      </div>
       {props.expanded ? props.children : null}
     </section>
   );
