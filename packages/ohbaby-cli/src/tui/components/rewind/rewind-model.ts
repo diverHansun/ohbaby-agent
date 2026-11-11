@@ -36,6 +36,8 @@ export function rewindConfirmation(input: {
   readonly goal: UiGoal | null | undefined;
   readonly running: boolean;
   readonly queued: number;
+  /** The input already holds text that the restored prompt will replace. */
+  readonly hasDraft?: boolean;
 }): string {
   return [
     `Rewind ${count(input.turns, "turn", "turns")}.`,
@@ -48,6 +50,7 @@ export function rewindConfirmation(input: {
         ]
       : []),
     ...(input.goal?.status === "active" ? ["The goal will pause."] : []),
+    ...(input.hasDraft ? ["Your draft will be replaced."] : []),
     "Enter to confirm, Esc to cancel.",
   ].join(" ");
 }

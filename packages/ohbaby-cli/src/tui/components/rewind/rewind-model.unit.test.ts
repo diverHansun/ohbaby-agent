@@ -60,4 +60,18 @@ describe("rewind confirmation (T25, T26)", () => {
       "Rewind 3 turns. File changes won't be undone. Goal turns already used won't be refunded. The current task will stop first. 2 queued messages will be removed. The goal will pause. Enter to confirm, Esc to cancel.",
     );
   });
+
+  it("says a draft in the input will be replaced", () => {
+    expect(
+      rewindConfirmation({
+        turns: 1,
+        goal: null,
+        running: false,
+        queued: 0,
+        hasDraft: true,
+      }),
+    ).toBe(
+      "Rewind 1 turn. File changes won't be undone. Your draft will be replaced. Enter to confirm, Esc to cancel.",
+    );
+  });
 });

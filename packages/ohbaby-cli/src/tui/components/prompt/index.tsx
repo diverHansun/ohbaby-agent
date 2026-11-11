@@ -89,6 +89,8 @@ export interface PromptProps {
    * applies it once; typed text stays and the new text follows a blank line.
    */
   readonly prefill?: { readonly nonce: number; readonly text: string };
+  /** Kept equal to the current draft, for callers that must ask before replacing it. */
+  readonly draftRef?: { current: string };
   /** Send `/…` as text, with no command palette (the /btw side chat). */
   readonly plainText?: boolean;
   /** Esc on an empty input, e.g. to close the /btw side chat. */
@@ -127,6 +129,7 @@ export function Prompt({
   queuedPrompts = [],
   runtimeStatusLabel,
   prefill,
+  draftRef,
   plainText = false,
   onEscapeEmpty,
 }: PromptProps): ReactElement {
@@ -230,11 +233,12 @@ export function Prompt({
   useEffect(() => {
     if (!prefill || prefill.nonce === appliedPrefill.current) return;
     appliedPrefill.current = prefill.nonce;
-    const current = editorText(editorRef.current).trimEnd();
-    replaceInput(
-      current === "" ? prefill.text : `${current}\n\n${prefill.text}`,
-    );
+    // The caller has already asked before replacing a draft.
+    replaceInput(prefill.text);
   }, [prefill]);
+  useEffect(() => {
+    if (draftRef) draftRef.current = editorText(editor);
+  }, [draftRef, editor]);
 
   const replaceInput = (nextInput: string): void => {
     replaceEditor(

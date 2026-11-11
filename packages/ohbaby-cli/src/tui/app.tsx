@@ -221,6 +221,7 @@ export function OhbabyTerminalApp({
     readonly firstQuestion?: string;
   } | null>(null);
   const [rewindOpen, setRewindOpen] = useState(false);
+  const promptDraftRef = useRef("");
   const [promptPrefill, setPromptPrefill] = useState<{
     readonly nonce: number;
     readonly text: string;
@@ -1327,12 +1328,14 @@ export function OhbabyTerminalApp({
             {rewindOpen && activeSessionId !== null ? (
               <RewindPanel
                 prompts={rewindPrompts}
+                active={permissions.length === 0 && interactions.length === 0}
                 confirmation={(turns) =>
                   rewindConfirmation({
                     turns,
                     goal: activeGoal,
                     running: runtime.kind === "running",
                     queued: queuedPrompts.length,
+                    hasDraft: promptDraftRef.current.trim() !== "",
                   })
                 }
                 onConfirm={async (prompt) => {
@@ -1445,6 +1448,7 @@ export function OhbabyTerminalApp({
         >
           <Prompt
             prefill={promptPrefill}
+            draftRef={promptDraftRef}
             footerOnly={hasDialog}
             onQueueModeChange={setQueueInputMode}
             activeSessionId={activeSessionId}

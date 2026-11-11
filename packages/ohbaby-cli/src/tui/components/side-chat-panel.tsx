@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useInput } from "ink";
 import {
   applySessionChange,
   type CoreAPI,
@@ -112,6 +112,21 @@ export function SideChatPanel(props: {
       run.status.kind === "running" ||
       run.status.kind === "waiting-for-permission",
   );
+  const stop = (): void => {
+    if (!running) return;
+    void client.abortRun(running.id).catch((caught: unknown) => {
+      setError(formatError(caught));
+    });
+  };
+  const permissions = permissionSync.state.requests;
+  // Ctrl+C stops the side chat's turn; the approval dialog owns the keys
+  // while it is open.
+  useInput(
+    (value, key) => {
+      if (value === "\u0003" || (key.ctrl && value === "c")) stop();
+    },
+    { isActive: running !== undefined && permissions.length === 0 },
+  );
   const width = Math.max(1, layout.contentWidth);
   // Only what came after the boundary: the copied history stays hidden.
   const lines = useMemo(() => {
@@ -138,7 +153,6 @@ export function SideChatPanel(props: {
         ];
       });
   }, [view, props.boundaryMessageId, width, theme]);
-  const permissions = permissionSync.state.requests;
   const height = Math.max(3, layout.rows - 10);
   const rule = "─".repeat(width);
 
@@ -146,7 +160,7 @@ export function SideChatPanel(props: {
     <Box flexDirection="column">
       <Box justifyContent="space-between" width={width}>
         <Text bold color={theme.status.accent}>
-          Side chat · Esc to close
+          {running ? "Side chat · Esc to stop" : "Side chat · Esc to close"}
         </Text>
         {props.mainNeedsApproval ? (
           <Text color={theme.status.warning}>
@@ -185,7 +199,8 @@ export function SideChatPanel(props: {
         disabled={permissions.length > 0}
         footerOnly={permissions.length > 0}
         submitPrompt={(text) => submit(text)}
-        onEscapeEmpty={props.onClose}
+        // While a turn runs, Esc stops it; a second Esc then closes.
+        onEscapeEmpty={running ? stop : props.onClose}
         isRuntimeRunning={running !== undefined}
         model={props.footer.model}
         workingDirectory={props.footer.workingDirectory}
