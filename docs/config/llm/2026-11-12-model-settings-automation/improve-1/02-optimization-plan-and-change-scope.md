@@ -23,7 +23,7 @@
 | R13 | 复用现有调度器：同一条目的新触发取消旧任务并重新开始（现有行为，不做去重）；旧回包由 generation 与 routeKey 拒绝；写回成功时同时写入 `detectedRouteKey` | §5.2 | T10、T15、T17、T28 |
 | R14 | context 与 reasoning 分开记状态，所有结束路径都发通知；重新探测失败时保留旧值，状态保持 identified，原因写入内存中的 `reason`，不设 stale | §5.2 | T16、T17、T18 |
 | R15 | metadata 中模型名的模糊子串命中不算容量证据 | §5.3 | T11 |
-| R16 | 主动 probe 的 4 项行为修复（§6.1 第 5 项只记录限制）：Chat 先试 `reasoning_effort` 再试 `reasoning` 对象；档位并发验证，总期限 60 秒；只有 400/422 算不支持，其他非 2xx 状态一律 unknown；每个请求带一个空工具；Responses 正式请求允许经过能力校验的 max；Anthropic adaptive 排除 minimal，清理不兼容旧偏好并通知 | §6.1、§6.4 | T11、T12、T13、T31、T32 |
+| R16 | 主动 probe 的 4 项行为修复（§6.1 第 5 项只记录限制）：Chat 只用 `reasoning_effort`（D12 去掉 `reasoning` 对象回退）；档位并发验证，总期限 60 秒；只有 400/422 算不支持，其他非 2xx 状态一律 unknown；每个请求带一个空工具；Responses 正式请求允许经过能力校验的 max；Anthropic adaptive 排除 minimal，清理不兼容旧偏好并通知 | §6.1、§6.4 | T11、T12、T13、T31、T32 |
 | R17 | 新 run 不等待探测；能力未知时按 service-default 发送，用户偏好保留 | §6.3 | T25 |
 | R18 | 前端：输入框默认为空，检测值以“自动”提示显示；探测动效必定结束；能力未知时不把已选 effort 显示为生效；配置标签统一为 Reasoning Effort | §7 | T19、T20、T21、T25 |
 | R19 | 旧配置一次性迁移：context 转为检测值，恰好 8192 的输出值删除；混合格式中残留的顶层 `llmParams.maxTokens` 不再被条目继承；仅版本属性缺失时在 `readModelDocument` 中迁移，版本 2 只归一化，其他版本拒绝；首次落盘前备份并写入版本 2 | §3.1、§8 | T06、T25、T26 |
@@ -225,11 +225,11 @@ API key 有效不等于存在 `/models` 或返回 context。缺失时保持 unkn
 
 ### 6.1 五项修复
 
-**1. Chat 端点按顺序尝试两种参数格式。** 非 OpenAI 官方的 Chat 端点，先用 OpenAI 标准的 `reasoning_effort`（wire 为 `openai`），对照请求被 400/422 拒绝时，就用这种格式继续验证；对照请求返回 2xx（说明字段被忽略）时，再换 `reasoning` 对象（wire 为 `reasoning`）试一次。两种都被忽略时返回 unknown。OpenAI 官方 Chat 端点、Responses 和 Anthropic 路由仍只用各自现有的一种格式。探测得到的 wire 写进能力结果，正式请求按同一个 wire 序列化；关闭推理使用 serializer 中同一 wire 的写法，例如 Chat 上的 `reasoning_effort: "none"`。
+**1. Chat 端点使用 OpenAI 标准的 `reasoning_effort`。** 所有 Chat 端点（wire 为 `openai`）都用 `reasoning_effort`：对照请求被 400/422 拒绝时继续验证，返回 2xx（字段被忽略）时直接返回 unknown。Responses 和 Anthropic 路由各用现有的一种格式。原方案在 Chat 上还会回退尝试 `reasoning` 对象，实测 18 条路由没有一条需要它，按 D12 删除；只认 `reasoning` 对象的网关会得到 unknown，按 §6.3 走 service-default，不会出错。探测得到的 wire 写进能力结果，正式请求按同一个 wire 序列化；关闭推理使用 serializer 中同一 wire 的写法，例如 Chat 上的 `reasoning_effort: "none"`。
 
-**2. 档位并发验证，总期限 60 秒。** 对照请求通过后，按协议选择候选档位：Chat/Responses 最多 6 档，Anthropic adaptive 为 low/medium/high/xhigh/max 共 5 档、不探 minimal；这些候选和关闭请求一起并发发出，不再两个一批地串行。整次探测（含对照）的总期限从 30 秒改为 60 秒。单次探测最多 9 个 POST：两次对照，加 7 个验证请求。
+**2. 档位并发验证，总期限 60 秒。** 对照请求通过后，按协议选择候选档位：Chat/Responses 最多 6 档，Anthropic adaptive 为 low/medium/high/xhigh/max 共 5 档、不探 minimal；这些候选和关闭请求一起并发发出，不再两个一批地串行。整次探测（含对照）的总期限从 30 秒改为 60 秒。单次探测最多 8 个 POST：一次对照，加 7 个验证请求。
 
-**3. 只有 400/422 算“不支持该档位”。** 验证请求返回 2xx，记为支持；返回 400 或 422，记为不支持。其他任何结果，包括 401、403、404、408、413、429、3xx、5xx、网络错误、超时或取消，整次结果按 unknown 处理并记录原因，不拿残缺的档位列表充数。对照请求只有 2xx（字段被忽略，换下一种格式）和 400/422（字段被校验，继续验证）两种可用结果，其他结果同样直接返回 unknown，不再尝试下一种格式。
+**3. 只有 400/422 算“不支持该档位”。** 验证请求返回 2xx，记为支持；返回 400 或 422，记为不支持。其他任何结果，包括 401、403、404、408、413、429、3xx、5xx、网络错误、超时或取消，整次结果按 unknown 处理并记录原因，不拿残缺的档位列表充数。对照请求只有 2xx（字段被忽略，返回 unknown）和 400/422（字段被校验，继续验证）两种可用结果，其他结果同样直接返回 unknown。
 
 主动 probe 的返回值必须包含能力或有界失败原因，不能继续只返回 `ReasoningCapabilities | undefined`：当前调度器在主动探测失败时沿用 metadata 原因，会把主动阶段的 429/超时误报成“缺字段”。实际进入主动阶段后，以该阶段的失败原因为准，用于终态通知及旧值保留时的 `reason`。probe 的 fetch 使用 `redirect: "manual"`，确保 3xx 不被自动跟随后误判为最终 200/400；正式模型请求不因此改变。
 
@@ -271,7 +271,7 @@ API key 有效不等于存在 `/models` 或返回 context。缺失时保持 unkn
 3. 清理属于模型配置层：读取时产生规范化结果与清理事实，不因读取而写盘；下一次成功的常规保存或探测写回持久化清理后的配置。运行投影和设置视图必须立即一致，不能继续使用已清理偏好。不改历史消息、在途 run 或批量重写会话偏好；会话/单次请求不新增特殊恢复规则：能力已知时按现有请求校验拒绝不兼容选择；能力 unknown 时仍按 D3 使用 service-default，不发送该 effort，并在 UI 如实显示未生效。不能声称 unknown 路径也会报校验错。已有明确 effortMap 映射到合法输出值的偏好，以及不发送 output_config.effort 的 budget/binary 配置，不属于此项误清理范围；不新增自动 minimal→low 映射。
 4. 清理必须让用户可见。Settings 和 current-model 视图增加可选 `reasoningNotice: "unsupported-anthropic-effort-cleared"`，在产生清理的读取、Save 或 discovery 投影中携带；普通 settings 更新事件只负责通知重新读取，不能充当已展示提示的证据。该通知是固定码，不含原始配置或凭证；仅在当前进程内按模型保留，不落 model.json、不建持久通知队列，不能被后续 probe 状态覆盖。用户下一次成功保存该模型的明确 reasoning 选择后清除；同一次清理的保存不能立即清掉通知。Web 模型编辑器和 TUI 显示“此模型的 minimal 推理设置不受当前 Anthropic 请求格式支持，已清除该覆盖并恢复默认行为”。清理后重启无需重复历史提示；原文件尚未保存、再次读取仍需清理时，可以再次提示。
 
-§6.1 的六档是跨协议候选上限，各协议候选与本节一致，最多 9 个 POST 的上限不增加。D9/D10 不引入通用供应商框架，不改变普通输出默认值或已有能力优先级。T31/T32 覆盖完整请求与用户通知；本节已无待定行为取舍。
+§6.1 的六档是跨协议候选上限，各协议候选与本节一致，最多 8 个 POST 的上限不增加。D9/D10 不引入通用供应商框架，不改变普通输出默认值或已有能力优先级。T31/T32 覆盖完整请求与用户通知；本节已无待定行为取舍。
 
 ## 7. 前端实施契约与分工
 

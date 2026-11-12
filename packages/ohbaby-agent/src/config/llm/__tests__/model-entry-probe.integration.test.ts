@@ -238,14 +238,14 @@ it("fresh fallback replaces old automatic data, then fresh metadata stops probin
 it("an upstream accepting invalid controls leaves unknown and normal configuration uses service defaults", async () => {
   ignoreControls = true;
   const target = await add();
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(1);
   calls = [];
   expect(await settings.probeModelEntry(target.id, options())).toEqual({
     status: "unknown",
     efforts: [],
     reason: "ignored-reasoning",
   });
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(1);
   await settings.selectModelEntry(target.id);
   expect(
     resolveRequestReasoning(await reloadLLMConfig({ projectDirectory: root }))

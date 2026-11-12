@@ -30,7 +30,7 @@ export interface ReasoningProbeResult {
   readonly reasoningCapabilities?: ReasoningCapabilities;
   readonly reasoningReason?: ReasoningProbeReason;
 }
-type ProbeWire = "openai" | "reasoning" | "anthropic-adaptive";
+type ProbeWire = "openai" | "anthropic-adaptive";
 type RequestResult = "accepted" | "unsupported" | ReasoningProbeReason;
 
 /** A rejected impossible strength is the control for gateways that ignore unknown fields. */
@@ -66,26 +66,19 @@ export async function probeReasoningCapabilities(
       : input.interfaceProvider === "openai-responses"
         ? [{ type: "function", name: "noop", parameters }]
         : [{ type: "function", function: { name: "noop", parameters } }];
-  const request = async (
-    wire: ProbeWire,
-    effort: string,
-  ): Promise<RequestResult> => {
+  // One wire per protocol: Chat uses the standard reasoning_effort field.
+  const wire: ProbeWire =
+    input.interfaceProvider === "anthropic" ? "anthropic-adaptive" : "openai";
+  const request = async (effort: string): Promise<RequestResult> => {
+    const strength = effort === "off" ? "none" : effort;
     const reasoning =
-      effort === "off"
-        ? wire === "reasoning"
-          ? { reasoning: { enabled: false } }
-          : wire === "openai"
-            ? input.interfaceProvider === "openai-compatible"
-              ? { reasoning_effort: "none" }
-              : { reasoning: { effort: "none" } }
-            : { thinking: { type: "disabled" } }
-        : wire === "reasoning"
-          ? { reasoning: { enabled: true, effort } }
-          : wire === "openai"
-            ? input.interfaceProvider === "openai-compatible"
-              ? { reasoning_effort: effort }
-              : { reasoning: { effort } }
-            : { thinking: { type: "adaptive" }, output_config: { effort } };
+      wire === "anthropic-adaptive"
+        ? effort === "off"
+          ? { thinking: { type: "disabled" } }
+          : { thinking: { type: "adaptive" }, output_config: { effort } }
+        : input.interfaceProvider === "openai-compatible"
+          ? { reasoning_effort: strength }
+          : { reasoning: { effort: strength } };
     const outputLimit =
       input.interfaceProvider === "openai-compatible" && officialOpenAI
         ? { max_completion_tokens: 32 }
@@ -137,40 +130,30 @@ export async function probeReasoningCapabilities(
     }
   };
   try {
-    const wires: ProbeWire[] =
-      input.interfaceProvider === "anthropic"
-        ? ["anthropic-adaptive"]
-        : input.interfaceProvider === "openai-compatible" && !officialOpenAI
-          ? ["openai", "reasoning"]
-          : ["openai"];
-    for (const wire of wires) {
-      const control = await request(wire, INVALID_EFFORT);
-      if (control === "accepted") continue;
-      if (control !== "unsupported") return { reasoningReason: control };
-      const candidates =
-        input.interfaceProvider === "anthropic" ? EFFORTS.slice(1) : EFFORTS;
-      const results = await Promise.all(
-        [...candidates, "off"].map((effort) => request(wire, effort)),
-      );
-      const failure = results.find(
-        (result) => result !== "accepted" && result !== "unsupported",
-      );
-      if (failure) return { reasoningReason: failure };
-      const efforts = candidates.filter(
-        (_effort, index) => results[index] === "accepted",
-      );
-      if (efforts.length === 0)
-        return { reasoningReason: "unsupported-efforts" };
-      return {
-        reasoningCapabilities: {
-          mode: "effort",
-          wire,
-          supportsDisabled: results.at(-1) === "accepted",
-          efforts,
-        },
-      };
-    }
-    return { reasoningReason: "ignored-reasoning" };
+    const control = await request(INVALID_EFFORT);
+    if (control === "accepted") return { reasoningReason: "ignored-reasoning" };
+    if (control !== "unsupported") return { reasoningReason: control };
+    const candidates =
+      wire === "anthropic-adaptive" ? EFFORTS.slice(1) : EFFORTS;
+    const results = await Promise.all(
+      [...candidates, "off"].map((effort) => request(effort)),
+    );
+    const failure = results.find(
+      (result) => result !== "accepted" && result !== "unsupported",
+    );
+    if (failure) return { reasoningReason: failure };
+    const efforts = candidates.filter(
+      (_effort, index) => results[index] === "accepted",
+    );
+    if (efforts.length === 0) return { reasoningReason: "unsupported-efforts" };
+    return {
+      reasoningCapabilities: {
+        mode: "effort",
+        wire,
+        supportsDisabled: results.at(-1) === "accepted",
+        efforts,
+      },
+    };
   } finally {
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", cancel);

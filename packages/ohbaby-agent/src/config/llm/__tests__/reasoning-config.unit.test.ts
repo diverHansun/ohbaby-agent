@@ -138,7 +138,6 @@ describe("reasoning configuration", () => {
       model: "gpt-5.2",
       baseUrl: "https://api.openai.com/v1",
       modelJsonPath: path,
-      updateActiveModelProfile: true,
       contextWindowTokens: 20000,
     });
     const written = parseProjectedDocument(

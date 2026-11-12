@@ -102,7 +102,6 @@ describe("model configuration commit", () => {
         setActiveLLMConfig({
           ...input,
           model,
-          updateActiveModelProfile: true,
           contextWindowTokens: 1000,
         }),
       ),

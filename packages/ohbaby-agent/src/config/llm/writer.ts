@@ -78,13 +78,9 @@ export interface SetActiveLLMConfigInput {
   readonly clearTemperature?: boolean;
   readonly reasoning?: ReasoningConfig;
   readonly clearReasoning?: boolean;
-  readonly clearDiscoveredReasoning?: boolean;
   readonly maxTokens?: number | null;
   readonly contextWindowTokens?: number | null;
-  readonly clearContextWindowTokens?: boolean;
-  readonly clearActiveModelProfile?: boolean;
   readonly maxOutputTokens?: number | null;
-  readonly updateActiveModelProfile?: boolean;
   readonly modelJsonPath?: string;
   readonly envPath?: string;
 }
@@ -609,15 +605,10 @@ export async function setActiveLLMConfig(
           entry.apiKeyEnv,
           entry.promptCache,
         ]) || input.apiKey !== undefined;
-    if (changed || input.clearDiscoveredReasoning)
-      clearAutomaticCapabilities(entry);
+    if (changed) clearAutomaticCapabilities(entry);
     if (previousRoute !== modelProfileRouteKey(entry, entry.provider)) {
       delete entry.detectedContextWindowTokens;
       delete entry.detectedRouteKey;
-    }
-    if (input.clearContextWindowTokens || input.clearActiveModelProfile) {
-      delete entry.contextWindowTokens;
-      clearAutomaticCapabilities(entry);
     }
     document.activeProfileId = entry.id;
     const output =

@@ -57,80 +57,66 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it.each([false, true])(
-  "tries Chat standard effort first and uses the detected wire in real request resolution (fallback=%s)",
-  async (fallback) => {
-    const bodies = fixture((body) => {
-      if (fallback && body.reasoning_effort !== undefined) return 200;
-      return strength(body) === "medium" ||
-        strength(body) === "high" ||
-        disabled(body)
-        ? 200
-        : 422;
-    });
-    const result = await probeReasoningCapabilities(input);
-    expect(result).toEqual({
-      reasoningCapabilities: {
-        mode: "effort",
-        wire: fallback ? "reasoning" : "openai",
-        supportsDisabled: true,
-        efforts: ["medium", "high"],
+it("uses Chat standard effort and the detected wire in real request resolution", async () => {
+  const bodies = fixture((body) =>
+    strength(body) === "medium" || strength(body) === "high" || disabled(body)
+      ? 200
+      : 422,
+  );
+  const result = await probeReasoningCapabilities(input);
+  expect(result).toEqual({
+    reasoningCapabilities: {
+      mode: "effort",
+      wire: "openai",
+      supportsDisabled: true,
+      efforts: ["medium", "high"],
+    },
+  });
+  expect(bodies[0]?.reasoning_effort).toBe("ohbaby-invalid-effort");
+  expect(bodies).toHaveLength(8);
+  expect(bodies.every((body) => body.reasoning === undefined)).toBe(true);
+  expect(
+    bodies.every((body) => body.max_tokens === 32 && body.tools?.length === 1),
+  ).toBe(true);
+  expect(bodies[0]?.tools).toEqual([
+    {
+      type: "function",
+      function: {
+        name: "noop",
+        parameters: { type: "object", properties: {}, required: [] },
       },
-    });
-    expect(bodies[0]?.reasoning_effort).toBe("ohbaby-invalid-effort");
-    expect(bodies).toHaveLength(fallback ? 9 : 8);
-    expect(
-      bodies.every(
-        (body) => body.max_tokens === 32 && body.tools?.length === 1,
-      ),
-    ).toBe(true);
-    expect(bodies[0]?.tools).toEqual([
+    },
+  ]);
+  const route = {
+    ...input,
+    maxTokens: 32768,
+    modelProfiles: [
       {
-        type: "function",
-        function: {
-          name: "noop",
-          parameters: { type: "object", properties: {}, required: [] },
-        },
+        model: input.model,
+        contextWindowTokens: 300000,
+        reasoningCapabilities: result.reasoningCapabilities,
       },
-    ]);
-    const route = {
-      ...input,
-      maxTokens: 32768,
-      modelProfiles: [
-        {
-          model: input.model,
-          contextWindowTokens: 300000,
-          reasoningCapabilities: result.reasoningCapabilities,
-        },
-      ],
-    };
-    expect(
-      toChatReasoningWire(
-        resolveRequestReasoning({ ...route, reasoning: { effort: "high" } }),
-      ),
-    ).toEqual(
-      fallback
-        ? { reasoning: { enabled: true, effort: "high" } }
-        : { reasoning_effort: "high" },
-    );
-    expect(
-      toChatReasoningWire(
-        resolveRequestReasoning({ ...route, reasoning: { enabled: false } }),
-      ),
-    ).toEqual(
-      fallback
-        ? { reasoning: { enabled: false } }
-        : { reasoning_effort: "none" },
-    );
-  },
-);
+    ],
+  };
+  expect(
+    toChatReasoningWire(
+      resolveRequestReasoning({ ...route, reasoning: { effort: "high" } }),
+    ),
+  ).toEqual({ reasoning_effort: "high" });
+  expect(
+    toChatReasoningWire(
+      resolveRequestReasoning({ ...route, reasoning: { enabled: false } }),
+    ),
+  ).toEqual({ reasoning_effort: "none" });
+});
 
-it("returns unknown when both Chat fields are ignored, without probing strengths", async () => {
+it("returns unknown when Chat ignores reasoning_effort, without probing strengths", async () => {
   const bodies = fixture(() => 200);
   expect(await probeReasoningCapabilities(input)).toEqual({
     reasoningReason: "ignored-reasoning",
   });
-  expect(bodies).toHaveLength(2);
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]?.reasoning).toBeUndefined();
 });
 
 it.each(["openai-responses", "anthropic"] as const)(
@@ -198,7 +184,7 @@ it("uses native OpenAI's completion token cap", async () => {
   ).toBe(true);
 });
 
-it("does not try an alternate Chat wire when official OpenAI ignores the invalid effort", async () => {
+it("returns unknown after one request when official OpenAI ignores the invalid effort", async () => {
   const bodies = fixture(() => 200);
   expect(
     await probeReasoningCapabilities({

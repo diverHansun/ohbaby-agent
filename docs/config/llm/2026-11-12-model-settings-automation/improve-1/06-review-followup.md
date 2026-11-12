@@ -43,3 +43,11 @@ Pi 使用 `anthropic/claude-opus-5-5`、`xhigh`，会话 `codex-model-settings-f
 
 最终顺序检查全部退出码 0：typecheck、lint（0 errors、125 warnings）、format:check、build。日志依次为 `/tmp/model-settings-followup-typecheck-final.log`、`/tmp/model-settings-followup-lint-final.log`、`/tmp/model-settings-followup-format-final.log`、`/tmp/model-settings-followup-build-final.log`。临时浏览器服务已停止，没有读取或复制真实凭证。上一轮四个本地提交保持不变；本轮增量修复保留在工作区，未推送。
 
+
+## 精简收尾（D12）
+
+在 `bad4fc6c` 之后做了一轮只删不加的精简：
+
+- probe 去掉 Chat 上回退到 `reasoning` 对象的第二种格式。依据是 01 §5 的实测：18 条路由都不需要它，Zenmux Chat 也校验 `reasoning_effort`。单次探测从最多 9 个 POST 降为 8 个；字段被忽略时只发 1 个对照请求。
+- 删除 `setActiveLLMConfig` 输入里四个没有生产调用方的选项：`clearDiscoveredReasoning`、`clearContextWindowTokens`、`clearActiveModelProfile`、`updateActiveModelProfile`。基线时它们就已经没有生产调用方，只在测试里出现；相关测试改用 `contextWindowTokens: null`。
+- 8192 迁移规则保留，理由见 00 D12。

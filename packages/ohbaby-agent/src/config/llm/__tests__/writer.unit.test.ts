@@ -358,7 +358,6 @@ describe("setActiveLLMConfig", () => {
       contextWindowTokens: 200_000,
       maxOutputTokens: 8192,
       maxTokens: 8192,
-      updateActiveModelProfile: true,
       modelJsonPath: "D:/repo/.ohbaby/model.json",
     });
 
@@ -425,7 +424,7 @@ describe("setActiveLLMConfig", () => {
       model: "unknown-model",
       baseUrl: "https://example.com/v1",
       apiKeyEnv: "CUSTOM_API_KEY",
-      clearContextWindowTokens: true,
+      contextWindowTokens: null,
       modelJsonPath: "D:/repo/.ohbaby/model.json",
     });
 

@@ -60,6 +60,7 @@
 | D9 | 2026-11-12 | Responses 的 max 档位 | 同步修正正式请求：让经过能力校验的 max 可以发送，并补探测到请求的闭环测试。Anthropic minimal 另见 D10。 |
 | D10 | 2026-11-12 | Anthropic 的 minimal 档位 | 本轮不展示正式请求无法发送的 minimal，清理不兼容的旧偏好并通知用户；同步方案和验收项，先不改产品代码。具体适用范围见 02 §6.4。 |
 | D11 | 2026-11-12 | 实施中的 UI 与输入细节 | 用户要求删除不必要说明、限制数值输入范围；实现采用可选正安全整数，错误原文保留。接受模型行 Check settings 标记，以及新探测移除草稿档位后阻止保存的最小校验。此次审查授权后补充 composer 对已知 tokenBudgetIssue 的发送拦截和设置入口，保留草稿；准备阶段消息持久化失败另立议题。 |
+| D12 | 2026-11-12 | 实施后的代码精简 | 保留 8192 迁移规则（删掉它只省 3 行，却会让 v0.1.16 及更早版本升级的用户继续停在 8192）。删除 probe 在 Chat 上回退尝试 `reasoning` 对象的分支，单次探测最多 8 个 POST；删除 `setActiveLLMConfig` 中没有生产调用方的 `clearDiscoveredReasoning`、`clearContextWindowTokens`、`clearActiveModelProfile`、`updateActiveModelProfile`，清空 context 统一用 `null`。 |
 
 D1 的背景：旧代码在创建条目时把 context 写成 128000，探测结果也写回同一个字段，因此无法区分默认值、检测值和手填值。connect 路径则每次都把 8192 写进 max output。如果全部当作覆盖保留，老用户升级后表单仍然填满，自动探测也不会生效。
 

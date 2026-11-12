@@ -64,7 +64,6 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
       baseUrl: `${baseUrl}/`,
       interfaceProvider: "openai-responses",
       contextWindowTokens: 200000,
-      updateActiveModelProfile: true,
       modelJsonPath: path,
     });
     const written = await read();
@@ -101,7 +100,7 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
       model: "Dual",
       baseUrl,
       interfaceProvider: "openai-responses",
-      clearActiveModelProfile: true,
+      contextWindowTokens: null,
       modelJsonPath: path,
     });
     expect((await read()).models).toHaveLength(5);
@@ -117,7 +116,6 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
       baseUrl: `${baseUrl}/new`,
       interfaceProvider: "openai-responses",
       contextWindowTokens: 300000,
-      updateActiveModelProfile: true,
       modelJsonPath: path,
     });
     const added = (await read()).models?.at(-1);
@@ -260,7 +258,6 @@ it("legacy connect refreshes the first duplicate entry and retains its sibling",
       baseUrl,
       interfaceProvider: "openai-responses",
       contextWindowTokens: 200000,
-      updateActiveModelProfile: true,
       modelJsonPath: path,
     });
     const written = JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig;

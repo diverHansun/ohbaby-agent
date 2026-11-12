@@ -23,8 +23,8 @@
 | T09 | 新模型 Save 成功后，无手动点击即可 metadata + 必要时主动 reasoning probe；网络不持有配置锁 | R11、R12 | integration | S2 |
 | T10 | 已有同路由可信能力（含持久化 model-metadata/active-probe）在 Save 和设为默认时不重复付费请求，Detect again 才强制重验自动结果；unknown 下有脏字段的真实 Save 能重试；无改动 Save 仍禁用、Detect again 可重试；明确重探触发时取消旧任务，每个条目同一时刻最多一个在途任务；普通数值/label 编辑不重启在途任务，包括 context 已 unknown 而 reasoning 仍 detecting 的中间状态 | R11、R13 | integration + component | S2/S3 |
 | T11 | metadata 无字段/404 与 reasoning 主动发现独立；模型名模糊子串命中不算容量证据；认证失败/429 不继续批量探测 | R15、R16 | integration | S2 |
-| T12 | 非官方 Chat 端点先发 `reasoning_effort`；对照返回 2xx 时改用 `reasoning` 对象，两种都被忽略时为 unknown；探测得到的 wire 与正式请求序列化一致，关闭推理用同一 wire 的写法 | R16 | unit + integration | S2 |
-| T13 | 对照通过后各档位与关闭请求并发发出，总期限 60 秒，最多 9 个 POST；只有 400/422 记为不支持，验证中遇到 2xx 和 400/422 以外的任何结果时整体为 unknown 并记录原因；所有档位都返回 400（工具与 reasoning 不兼容）时为 unknown；每个请求带一个无参 `noop` 工具但不执行；metadata 缺字段后主动阶段出现 429/超时，终态应报告主动原因；302 带 Location 也应 unknown 且不请求跳转目标；用可控 HTTP fixture 断言 | R16 | protocol + integration | S2 |
+| T12 | Chat 端点只发 `reasoning_effort`，不发 `reasoning` 对象；对照返回 2xx 时只用 1 个请求就返回 unknown；探测得到的 wire 与正式请求序列化一致，关闭推理用同一 wire 的写法 | R16 | unit + integration | S2 |
+| T13 | 对照通过后各档位与关闭请求并发发出，总期限 60 秒，最多 8 个 POST；只有 400/422 记为不支持，验证中遇到 2xx 和 400/422 以外的任何结果时整体为 unknown 并记录原因；所有档位都返回 400（工具与 reasoning 不兼容）时为 unknown；每个请求带一个无参 `noop` 工具但不执行；metadata 缺字段后主动阶段出现 429/超时，终态应报告主动原因；302 带 Location 也应 unknown 且不请求跳转目标；用可控 HTTP fixture 断言 | R16 | protocol + integration | S2 |
 | T14 | 手动覆盖在探测前、探测中、探测后均不被覆盖；同数值显式输入也算覆盖；修改数值不丢失在途 reasoning 终态 | R3、R9 | integration | S1/S2/S3 |
 | T15 | 经 API 的 A→B→A、换 key、换协议、删除条目时，旧回包不能写回；修改 apiKeyEnv/promptCache 按只换 key 处理；运行、Settings/composer、discovery 已有能力判断与偏好校验均过滤掉 routeKey 缺失或不一致的检测 context 与自动 reasoning 能力；修改 provider/model/协议/baseUrl 后，检测到的 context 与自动 reasoning 一起清除并重新发现；只换 key 时 context 保留、reasoning 重新探测；手改 model.json 使 `detectedRouteKey` 与当前路由不一致时，检测结果视为不存在 | R4、R13 | integration | S2 |
 | T16 | 同一路由重新探测失败时保留旧值，状态仍为 identified，reason 带失败原因；SDK/OpenAPI/视图不再输出 stale，CLI footer 不因此显示 unknown；没有旧值时为 unknown；重启后 reason 清空；换路由后不沿用旧检测结果 | R14 | integration | S2 |
