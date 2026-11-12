@@ -209,6 +209,7 @@ describe("services/database", () => {
       { version: "027_prompt_submission_model_entry" },
       { version: "028_subagent_message_input" },
       { version: "029_message_rewind" },
+      { version: "030_subagent_goal_ownership" },
     ]);
   });
 

@@ -185,7 +185,7 @@ describe("offline retained queue migration", () => {
           "SELECT * FROM subagent_execution WHERE execution_id='finished'",
         )
         .get(),
-    ).toEqual({ ...completed, rewound_at: null });
+    ).toEqual({ ...completed, rewound_at: null, goal_id: null });
     expect(
       getDatabase()
         .prepare(

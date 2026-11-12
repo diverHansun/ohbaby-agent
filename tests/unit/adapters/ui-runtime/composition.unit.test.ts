@@ -670,8 +670,10 @@ describe("createUiRuntimeComposition skill tools", () => {
       );
       const saved = await messageManager.listBySession("parent");
       expect(
-        saved.find((message) => message.info.id === "internal-review")?.info
-          .runtimeInput,
+        saved.find(
+          // Runtime inputs always use their stable runtime identity, not initialUserMessageId.
+          (message) => message.info.id === `runtime:review:${run.runId}`,
+        )?.info.runtimeInput,
       ).toMatchObject({ kind: "subagent-status", targetRunId: run.runId });
       expect(
         (await currentRunInputStore.listByRun(run.runId))[0].processedRequestId,

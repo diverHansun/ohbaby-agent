@@ -1246,7 +1246,8 @@ it.each([
       } else lateFailure.resolve();
       await settlingOld.promise;
       expect(settlement.mock.calls[0]?.[2]).toMatchObject({
-        status: "failed",
+        // A Goal pause carries a stop intent, so the aborted turn settles as cancelled.
+        status: oldEnd === "pause" ? "cancelled" : "failed",
         usage: { totalTokens: 100, cachedInputTokens: 80 },
       });
       if (action === "resume") await command(client, ["resume"]);

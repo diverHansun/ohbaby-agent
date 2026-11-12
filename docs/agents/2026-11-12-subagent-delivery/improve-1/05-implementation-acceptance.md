@@ -130,3 +130,25 @@ Pi 第三轮限定复核结论为“这几处改动没有引入明显错误，�
 Pi 使用 `magpie/claude/claude-opus-5-5`、high，会话 `ohbaby-delivery-ui-20261112-a72e`，在项目根目录审查并直接修改。采纳并核对：有 Goal 时隐藏普通自动续跑说明，避免暂停 Goal 后作出错误承诺；来源按钮增加明确的 aria-label；修正新增测试的 lint 错误及回调返回类型。前端尚无每个实例的 Goal 归属，因此含 Goal 的会话即使有普通子代理，也保守省略此提示。这个场景用组件回归覆盖，没有宣称真实浏览器已验证 Goal 暂停路径。
 
 Pi 修改后，主代理重新构建 Web，重跑 4 文件 232 项测试全部通过；在内置浏览器刷新最终构建，确认 Open subagent xyl-a 仍打开对应 UI_CHILD_144 结果，浏览器错误日志为空。最终来源详情截图为 `/tmp/ohbaby-ui-source-detail-final-iab.png`。Web 构建保留已有大 chunk 警告，没有为这轮提示扩展打包优化范围。
+
+## 8. 合并前验收（同日）
+
+合并前跑了一次全量回归：`pnpm typecheck` 通过；`pnpm exec vitest run --maxWorkers=4 --minWorkers=1` 有 4 个文件、5 项失败。前面各节只跑了相关的 43 个文件，所以没发现。逐项核对后，5 项都是旧测试没跟上本轮的有意改动，不是产品缺陷：
+
+| 测试 | 原因 | 处理 |
+| --- | --- | --- |
+| `database.integration` 迁移列表 | 新增 `030_subagent_goal_ownership` | 预期补上这一项 |
+| `retained-migration.integration` 执行记录 | 新增 `goal_id` 列，旧记录为 SQL NULL（旧未知） | 预期补 `goal_id: null` |
+| `composition.unit` 内部巡查输入 | 运行时输入的消息 ID 固定为 `runtime:<inputId>`，不再用 `initialUserMessageId`（本轮核心修复） | 改按新 ID 查找 |
+| `goal-execution.integration` G10/G11 两例 | Goal 暂停带 stopIntent，被打断的轮次归为 cancelled，不再是 failed | pause 分支预期改为 cancelled；用量、轮次计数和暂停记录的断言不变，仍然通过 |
+
+修正后这 4 个文件 126 项全部通过。
+
+浏览器验收用 Claude 内置浏览器，接独立临时 home、SQLite 和带控制接口的假模型（不是真实上游）：
+
+1. 子代理 alpha 完成后，自动主轮次在请求边界被注入 HTTP 400。轮次末尾显示错误、`HTTP 400` 和“Results that triggered this run: alpha”；点 alpha 打开对应执行。列表同时显示 Completed 和“1 result awaiting main-agent receipt”。假模型日志只有一次失败请求，没有自动重试。
+2. 用户再发一条消息，这次请求带上了 alpha 的旧结果，主代理收到；待接收提示随之消失。
+3. 派出 beta 后，在主代理忙时点 Stop。beta 继续运行，出现“Main agent stopped. 1 subagent is still running…”提示，刷新后仍在。放行 beta 后，主代理无需用户输入自动续跑，提示消失。
+4. 停掉服务：先显示 `Reconnecting…`，约 10 秒后出现全页遮罩，灰色 Lychee 图标和新文案都对。重启服务后，会话历史完整，没有多余的自动请求。
+
+没覆盖到：内置浏览器在服务重启时会重新加载页面，所以没看到“服务已重启”那版遮罩文案（这版文案本轮没改）。
