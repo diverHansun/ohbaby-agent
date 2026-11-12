@@ -1,7 +1,10 @@
+import chalk, { type ForegroundColorName } from "chalk";
 import { Box, Text, useInput } from "ink";
 import {
   applySessionChange,
+  listEndedTurns,
   type CoreAPI,
+  type UiPromptError,
   type UiEventHandler,
   type UiSessionView,
   type UiUnsubscribe,
@@ -17,6 +20,8 @@ import { isVisibleTranscriptMessage } from "../store/transcript.js";
 import { useTheme } from "../theme/index.js";
 import { usePermissionSync } from "../use-permission-sync.js";
 import { renderMessageParts } from "./message/message-row.js";
+import { isExpectedInterruption } from "./transcript/prompt-completion.js";
+import { WorkingSpinner } from "./working-spinner.js";
 import { Prompt, type PromptProps } from "./prompt/index.js";
 
 /** The side chat's approvals stay out of the main session's list. */
@@ -134,25 +139,55 @@ export function SideChatPanel(props: {
     const boundary = messages.findIndex(
       (message) => message.id === props.boundaryMessageId,
     );
-    return messages
+    const shown = messages
       .slice(boundary + 1)
-      .filter(isVisibleTranscriptMessage)
-      .flatMap((message) => {
-        const parts = renderMessageParts(message, width - 2, theme).flatMap(
-          (part) =>
-            wrapAnsi(part.kind === "text" ? part.text : part.label, width - 2, {
-              hyperlinks: true,
-            }),
-        );
-        if (parts.every((line) => line.trim() === "")) return [];
-        return [
-          ...(message.role === "user"
-            ? parts.map((line, index) => `${index === 0 ? "› " : "  "}${line}`)
-            : parts.map((line) => `  ${line}`)),
-          "",
-        ];
-      });
-  }, [view, props.boundaryMessageId, width, theme]);
+      .filter(isVisibleTranscriptMessage);
+    // A failed turn says why under its last message, as in the main chat.
+    const errorAfter = new Map<string, UiPromptError>();
+    if (view) {
+      for (const turn of listEndedTurns({
+        sessionId: sideChatId,
+        runs: view.runs,
+        prompts: view.prompts,
+        messages,
+      })) {
+        if (
+          !turn.error ||
+          isExpectedInterruption(turn.timing.status, turn.error)
+        )
+          continue;
+        const anchor =
+          shown.findLast((message) => message.runId === turn.runId) ??
+          shown.find((message) => message.id === turn.prompt?.userMessageId);
+        if (anchor) errorAfter.set(anchor.id, turn.error);
+      }
+    }
+    return shown.flatMap((message) => {
+      const parts = renderMessageParts(message, width - 2, theme).flatMap(
+        (part) =>
+          wrapAnsi(part.kind === "text" ? part.text : part.label, width - 2, {
+            hyperlinks: true,
+          }),
+      );
+      const body = parts.every((line) => line.trim() === "")
+        ? []
+        : message.role === "user"
+          ? parts.map((line, index) => `${index === 0 ? "› " : "  "}${line}`)
+          : parts.map((line) => `  ${line}`);
+      const error = errorAfter.get(message.id);
+      const errorLines = error
+        ? wrapAnsi(
+            paint(theme.status.error, `Error: ${error.message}`) +
+              (error.statusCode === undefined
+                ? ""
+                : chalk.dim(` HTTP ${String(error.statusCode)}`)),
+            width - 2,
+          ).map((line) => `  ${line}`)
+        : [];
+      if (body.length === 0 && errorLines.length === 0) return [];
+      return [...body, ...errorLines, ""];
+    });
+  }, [view, props.boundaryMessageId, width, theme, sideChatId]);
   const height = Math.max(3, layout.rows - 10);
   const rule = "─".repeat(width);
 
@@ -177,7 +212,10 @@ export function SideChatPanel(props: {
       ) : (
         <Text>{lines.slice(-height).join("\n")}</Text>
       )}
-      {running ? <Text color={theme.text.dim}>Thinking…</Text> : null}
+      <WorkingSpinner
+        runtime={running?.status ?? { kind: "idle" }}
+        run={running}
+      />
       {error ? <Text color={theme.status.error}>{error}</Text> : null}
       <Text color={theme.text.dim}>{rule}</Text>
       {permissions.length > 0 ? (
@@ -207,4 +245,10 @@ export function SideChatPanel(props: {
       />
     </Box>
   );
+}
+
+function paint(value: string, text: string): string {
+  return value.startsWith("#")
+    ? chalk.hex(value)(text)
+    : chalk[value as ForegroundColorName](text);
 }

@@ -49,11 +49,19 @@ function isDefiniteSubmissionRejection(error: unknown): boolean {
   ].includes(String(error.code));
 }
 
+/** How long the connection may stay down before the status says it is lost. */
+export const CONNECTION_LOST_AFTER_MS = 10_000;
+
 export interface TuiRecoveryState {
   readonly sync: SessionSyncState;
   readonly control: UiSessionControl | null;
   readonly initialized: boolean;
   readonly connected?: boolean;
+  /**
+   * The connection has stayed down for about ten seconds: the status turns
+   * static. It ends once connected and the open session has re-synced.
+   */
+  readonly connectionLost?: boolean;
   readonly runtimeEpoch?: string;
   readonly historyStale?: boolean;
   readonly historyReasoningMissing?: boolean;
@@ -229,11 +237,32 @@ export function createTuiSessionRecovery(options: {
       schedule();
     }
   }
+  let outageTimer: ReturnType<typeof setTimeout> | undefined;
+  let outageOpen = false;
   function publish(patch: Partial<TuiRecoveryState>): void {
     if (disposed) return;
     state = { ...state, ...patch };
+    trackOutage();
     options.onChange?.(state);
     schedule();
+  }
+  // A brief drop keeps "Reconnecting…"; one that lasts says so, statically.
+  // A hello that drops again before the session re-syncs does not restart it.
+  function trackOutage(): void {
+    if (state.connected !== false) {
+      if (state.sync.status === "syncing") return;
+      clearTimeout(outageTimer);
+      outageTimer = undefined;
+      outageOpen = false;
+      if (state.connectionLost) state = { ...state, connectionLost: false };
+      return;
+    }
+    if (outageOpen) return;
+    outageOpen = true;
+    outageTimer = setTimeout(() => {
+      outageTimer = undefined;
+      publish({ connectionLost: true });
+    }, CONNECTION_LOST_AFTER_MS);
   }
   function savePending(pending: readonly PendingTuiPrompt[]): void {
     options.savePending?.(pending);
@@ -814,6 +843,7 @@ export function createTuiSessionRecovery(options: {
     },
     dispose(): void {
       cancelReads();
+      clearTimeout(outageTimer);
       disposed = true;
       ++selection;
       ++controlTicket;

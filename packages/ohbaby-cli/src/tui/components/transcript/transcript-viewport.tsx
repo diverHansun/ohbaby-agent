@@ -1,10 +1,5 @@
 import { Box, useStdout } from "ink";
-import type {
-  UiModelRequest,
-  UiMessage,
-  UiNotice,
-  UiUnconsumedSteer,
-} from "ohbaby-sdk";
+import type { UiMessage, UiNotice, UiRun, UiUnconsumedSteer } from "ohbaby-sdk";
 import { useContext, type ReactElement } from "react";
 import { TranscriptDocumentContext } from "../../layout/context.js";
 import type {
@@ -33,7 +28,8 @@ export interface TranscriptViewportProps {
   readonly liveReasoning?: TuiReasoningViewState;
   readonly notices: readonly UiNotice[];
   readonly runtime: TuiRuntimeStatus;
-  readonly modelActivity?: UiModelRequest;
+  /** The run behind `runtime`, when the status slot may show it. */
+  readonly run?: UiRun;
 }
 
 export function TranscriptViewport({
@@ -45,7 +41,7 @@ export function TranscriptViewport({
   liveReasoning,
   notices,
   runtime,
-  modelActivity,
+  run,
 }: TranscriptViewportProps): ReactElement {
   const { stdout } = useStdout();
   const fullDocument = useContext(TranscriptDocumentContext);
@@ -97,7 +93,7 @@ export function TranscriptViewport({
           />
         </>
       )}
-      <WorkingSpinner runtime={runtime} modelActivity={modelActivity} />
+      <WorkingSpinner runtime={runtime} run={run} />
       <NoticeLane notices={notices} />
     </Box>
   );

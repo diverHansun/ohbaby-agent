@@ -8042,3 +8042,27 @@ it.each([
     );
   },
 );
+
+it("says Reconnecting… as soon as the remote connection drops", async () => {
+  const client = createFakeClient(snapshot());
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  try {
+    await flush();
+    await flush();
+    client.emit({
+      type: "session.resync-required",
+      runtimeEpoch: "epoch",
+      sessionId: "session_1",
+      connectionGeneration: 9,
+      disconnected: true,
+    });
+    await waitForFrame(app, (frame) => frame.includes("Reconnecting…"));
+  } finally {
+    app.unmount();
+  }
+});

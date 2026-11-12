@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPendingPromptStorage } from "./pending-prompts.js";
 import {
+  CONNECTION_LOST_AFTER_MS,
   createTuiSessionRecovery,
   type TuiSessionRecovery,
 } from "./session-recovery.js";
@@ -258,6 +259,50 @@ describe("TUI source recovery", () => {
     });
     await tick();
     expect(client.getSessionView).toHaveBeenCalledTimes(count + 1);
+    recovery.dispose();
+  });
+  it("says the connection is lost only after it stays down, until the session re-syncs", async () => {
+    const { recovery } = setup();
+    await recovery.start();
+    await tick();
+    vi.useFakeTimers();
+    try {
+      const drop = (generation: number): void => {
+        recovery.receive({
+          type: "session.resync-required",
+          runtimeEpoch: "epoch",
+          sessionId: "a",
+          connectionGeneration: generation,
+          disconnected: true,
+        });
+      };
+      drop(1);
+      vi.advanceTimersByTime(CONNECTION_LOST_AFTER_MS - 1);
+      expect(recovery.getState().connectionLost).not.toBe(true);
+      // A hello that drops again before re-syncing keeps the clock going.
+      recovery.receive({
+        type: "session.resync-required",
+        runtimeEpoch: "epoch",
+        sessionId: "a",
+        connectionGeneration: 2,
+      });
+      drop(3);
+      vi.advanceTimersByTime(1);
+      expect(recovery.getState().connectionLost).toBe(true);
+      recovery.receive({
+        type: "session.resync-required",
+        runtimeEpoch: "epoch",
+        sessionId: "a",
+        connectionGeneration: 4,
+      });
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+    await tick();
+    expect(recovery.getState().connected).toBe(true);
+    expect(recovery.getState().sync.status).toBe("ready");
+    expect(recovery.getState().connectionLost).toBe(false);
     recovery.dispose();
   });
   it("does not overwrite a live message with an older page and keeps invalidated history readable", async () => {

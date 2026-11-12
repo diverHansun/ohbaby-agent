@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TuiRuntimeStatus } from "../store/snapshot.js";
 import { WorkingSpinner } from "./working-spinner.js";
 import { WORKING_PHRASES } from "./working-phrases.js";
+import type { UiModelActivity, UiRun } from "ohbaby-sdk";
 import { SHIMMER_INTERVAL_MS } from "./shimmer-text.js";
 
 const previousNoAnimation = process.env.OHBABY_TUI_NO_ANIM;
@@ -50,13 +51,25 @@ const request = {
   outcome: "running" as const,
 };
 
+/** The run behind a running status; it started at t=1000 like `request`. */
+function runOf(activity?: UiModelActivity, runId = "run_1"): UiRun {
+  return {
+    id: runId,
+    sessionId: "session",
+    status: { kind: "running", runId },
+    startedAt: new Date(1000).toISOString(),
+    updatedAt: new Date(1000).toISOString(),
+    ...(activity === undefined ? {} : { modelActivity: activity }),
+  };
+}
+
 function frameOf(runtime: TuiRuntimeStatus): string {
   let app: ReturnType<typeof render> | undefined;
   act(() => {
     app = render(
       <WorkingSpinner
         runtime={runtime}
-        modelActivity={
+        run={runOf(
           runtime.kind === "running" && runtime.title
             ? {
                 requestId: "summary-request",
@@ -70,8 +83,9 @@ function frameOf(runtime: TuiRuntimeStatus): string {
             : {
                 ...request,
                 runId: runtime.kind === "running" ? runtime.runId : "run_1",
-              }
-        }
+              },
+          runtime.kind === "running" ? runtime.runId : "run_1",
+        )}
       />,
     );
   });
@@ -117,7 +131,7 @@ describe("WorkingSpinner", () => {
       app = render(
         <WorkingSpinner
           runtime={{ kind: "running", runId: "run_1" }}
-          modelActivity={request}
+          run={runOf(request)}
         />,
       );
     });
@@ -129,7 +143,7 @@ describe("WorkingSpinner", () => {
       app?.rerender(
         <WorkingSpinner
           runtime={{ kind: "running", runId: "run_1" }}
-          modelActivity={request}
+          run={runOf(request)}
         />,
       );
     });
@@ -161,7 +175,7 @@ it.each([20, 40])(
                 runId: "run_1",
                 title: WORKING_PHRASES[0],
               }}
-              modelActivity={request}
+              run={runOf(request)}
             />
           </DurationSampleContext.Provider>
         </Box>,
@@ -169,7 +183,7 @@ it.each([20, 40])(
     });
     const frame = app.lastFrame() ?? "";
     expect(frame.split("\n")).toHaveLength(1);
-    expect(frame).toContain(" · 1s");
+    expect(frame).toContain(" 1s");
     expect(stringWidth(frame)).toBeLessThanOrEqual(columns);
     act(() => {
       app.unmount();
@@ -177,23 +191,97 @@ it.each([20, 40])(
   },
 );
 
-it("hides the heartbeat during startup and after first body text", () => {
+it("holds the slot from the turn's start and while text streams, as in pi", () => {
   let app!: ReturnType<typeof render>;
   act(() => {
     app = render(
-      <WorkingSpinner runtime={{ kind: "running", runId: "run_1" }} />,
+      <WorkingSpinner
+        runtime={{ kind: "running", runId: "run_1" }}
+        run={runOf()}
+      />,
     );
   });
-  expect(app.lastFrame()).toBe("");
+  const phrase = matchedPhrase(app.lastFrame() ?? "");
+  expect(phrase).toBeDefined();
   act(() => {
     app.rerender(
       <WorkingSpinner
         runtime={{ kind: "running", runId: "run_1" }}
-        modelActivity={{ ...request, firstTextAt: 2000 }}
+        run={runOf({ ...request, firstTextAt: 2000 })}
       />,
     );
   });
+  expect(app.lastFrame()).toContain(phrase);
+  // A command run (no agent run behind it) keeps its own status instead.
+  act(() => {
+    app.rerender(
+      <WorkingSpinner runtime={{ kind: "running", runId: "command_x" }} />,
+    );
+  });
   expect(app.lastFrame()).toBe("");
+  act(() => {
+    app.unmount();
+  });
+});
+
+it("turns into Retrying #n in the same slot while retries run, without a timer", () => {
+  const sample = { serverNow: 5000, receivedAt: performance.now() };
+  const failed = {
+    ...request,
+    attempt: 1,
+    endedAt: 2000,
+    outcome: "error" as const,
+    retryScheduled: true as const,
+    phase: "retrying" as const,
+    waitingStartedAt: 1000,
+  };
+  const view = (activity: UiModelActivity): ReactElement => (
+    <DurationSampleContext.Provider value={sample}>
+      <WorkingSpinner
+        runtime={{ kind: "running", runId: "run_1" }}
+        run={runOf(activity)}
+      />
+    </DurationSampleContext.Provider>
+  );
+  let app!: ReturnType<typeof render>;
+  act(() => {
+    app = render(view(failed));
+  });
+  expect(app.lastFrame()).toBe("Retrying #1");
+  // The retry request itself is still retry #1.
+  act(() => {
+    app.rerender(
+      view({
+        ...failed,
+        requestId: "r2",
+        attempt: 2,
+        endedAt: undefined,
+        outcome: "running",
+        retryScheduled: undefined,
+      }),
+    );
+  });
+  expect(app.lastFrame()).toBe("Retrying #1");
+  act(() => {
+    app.rerender(view({ ...failed, requestId: "r2", attempt: 2 }));
+  });
+  expect(app.lastFrame()).toBe("Retrying #2");
+  // Recovered: back to the phrase with the turn's time.
+  act(() => {
+    app.rerender(
+      view({
+        ...failed,
+        requestId: "r3",
+        attempt: 3,
+        endedAt: undefined,
+        outcome: "running",
+        retryScheduled: undefined,
+        phase: "requesting",
+      }),
+    );
+  });
+  expect(matchedPhrase(app.lastFrame() ?? "")).toBeDefined();
+  expect(app.lastFrame()).toContain("4s");
   act(() => {
     app.unmount();
   });
@@ -208,7 +296,7 @@ it("routes a clock anomaly once to diagnostics without repeating it on ticks", (
       <DurationSampleContext.Provider value={sample}>
         <WorkingSpinner
           runtime={{ kind: "running", runId: "run_1" }}
-          modelActivity={request}
+          run={runOf(request)}
         />
       </DurationSampleContext.Provider>
     </DurationDiagnosticContext.Provider>
@@ -221,7 +309,7 @@ it("routes a clock anomaly once to diagnostics without repeating it on ticks", (
     app.rerender(view());
   });
   expect(report).toHaveBeenCalledTimes(1);
-  expect(report).toHaveBeenCalledWith("req");
+  expect(report).toHaveBeenCalledWith("run_1");
   act(() => {
     app.unmount();
   });
@@ -237,7 +325,7 @@ it("keeps its phrase across permission and retry attempts in the same run", () =
     app = render(
       <WorkingSpinner
         runtime={{ kind: "running", runId: "run_1" }}
-        modelActivity={request}
+        run={runOf(request)}
       />,
     );
   });
@@ -246,7 +334,7 @@ it("keeps its phrase across permission and retry attempts in the same run", () =
     app.rerender(
       <WorkingSpinner
         runtime={{ kind: "waiting-for-permission", requestId: "approve" }}
-        modelActivity={request}
+        run={runOf(request)}
       />,
     );
   });
@@ -254,7 +342,7 @@ it("keeps its phrase across permission and retry attempts in the same run", () =
     app.rerender(
       <WorkingSpinner
         runtime={{ kind: "running", runId: "run_1" }}
-        modelActivity={{ ...request, requestId: "retry", attempt: 1 }}
+        run={runOf({ ...request, requestId: "retry", attempt: 1 })}
       />,
     );
   });
@@ -274,7 +362,7 @@ it("runs one animation timer and stops animation and duration timers when hidden
     <DurationSampleContext.Provider value={sample}>
       <WorkingSpinner
         runtime={{ kind: "running", runId: "run_1" }}
-        modelActivity={hidden ? { ...request, firstTextAt: 2000 } : request}
+        run={hidden ? undefined : runOf(request)}
       />
     </DurationSampleContext.Provider>
   );
@@ -301,17 +389,17 @@ it("runs one animation timer and stops animation and duration timers when hidden
   });
 });
 
-it("keeps the run phrase while displaying current state titles and per-request durations", () => {
+it("keeps the run phrase while displaying current state titles and the turn's time", () => {
   const sample = { serverNow: 5000, receivedAt: performance.now() };
   const view = (retry: boolean, title?: string): ReactElement => (
     <DurationSampleContext.Provider value={sample}>
       <WorkingSpinner
         runtime={{ kind: "running", runId: "run_1", title }}
-        modelActivity={
+        run={runOf(
           retry
             ? { ...request, requestId: "retry", startedAt: 4000, attempt: 1 }
-            : request
-        }
+            : request,
+        )}
       />
     </DurationSampleContext.Provider>
   );
@@ -325,12 +413,13 @@ it("keeps the run phrase while displaying current state titles and per-request d
     app.rerender(view(true, "Retrying request"));
   });
   expect(app.lastFrame()).toContain("Retrying request");
-  expect(app.lastFrame()).toContain("1s");
+  // A new request does not restart the turn's clock.
+  expect(app.lastFrame()).toContain("4s");
   act(() => {
     app.rerender(view(true));
   });
   expect(app.lastFrame()).toContain(phrase);
-  expect(app.lastFrame()).toContain("1s");
+  expect(app.lastFrame()).toContain("4s");
   act(() => {
     app.unmount();
   });
