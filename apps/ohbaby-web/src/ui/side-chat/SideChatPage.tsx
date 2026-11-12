@@ -209,9 +209,13 @@ export function SideChatPage(props: {
               runs={(view.snapshot?.runs ?? []).filter(
                 (run) => run.sessionId === sideChatId,
               )}
-              activeRun={view.snapshot?.runs.find(
-                (run) => run.id === view.composer.activeRunId,
-              )}
+              activeRun={
+                offline
+                  ? undefined
+                  : view.snapshot?.runs.find(
+                      (run) => run.id === view.composer.activeRunId,
+                    )
+              }
               isRunning={view.composer.isRunning}
               reasoningByMessageId={view.reasoningByMessageId}
               commandNotices={null}

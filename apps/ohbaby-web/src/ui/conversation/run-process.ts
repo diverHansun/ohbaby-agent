@@ -1,6 +1,7 @@
 import {
   listEndedTurns,
   type UiMessage,
+  type UiPromptError,
   type UiPromptSubmission,
   type UiRun,
   type UiTurnTiming,
@@ -22,6 +23,28 @@ export interface RunProcess {
   readonly afterId?: string;
   readonly processIds: readonly string[];
   readonly foldable: boolean;
+  /** Why the turn failed, shown once at its end; never a stop the user asked for. */
+  readonly error?: UiPromptError;
+}
+
+/**
+ * An interruption the user or the service meant (stop, shutdown) ends the turn
+ * normally; it is not a failure to report.
+ */
+export function isExpectedInterruption(
+  status: string | undefined,
+  error: UiPromptError,
+  runTerminalReason: string | undefined,
+): boolean {
+  if (status !== "interrupted" || error.source !== "runtime") return false;
+  const terminalReason = error.terminalReason ?? runTerminalReason;
+  // Successful aborts retain a generic marker alongside the concrete stop reason.
+  const reason =
+    (terminalReason === undefined || terminalReason === "cancelled") &&
+    error.code === "RUN_INTERRUPTED"
+      ? error.message
+      : terminalReason;
+  return reason === "user-stop" || reason === "service-shutdown";
 }
 
 /**
@@ -49,7 +72,7 @@ export function projectRunProcesses(
     runs,
     prompts,
     messages: allMessages,
-  }).map(({ runId, prompt, trigger, timing }) => {
+  }).map(({ runId, prompt, trigger, timing, error }) => {
     const owned = messages.filter((message) => message.runId === runId);
     const lastAssistant = owned
       .filter((message) => message.role === "assistant")
@@ -103,9 +126,19 @@ export function projectRunProcesses(
       sessionPrompts.some(
         (item) => item.steerReceipt?.acceptedTargetRunId === runId,
       );
+    const shownError =
+      error &&
+      !isExpectedInterruption(
+        timing.status,
+        error,
+        runs.find((run) => run.id === runId)?.terminalReason,
+      )
+        ? error
+        : undefined;
     return {
       runId,
       ...(prompt ? { prompt } : {}),
+      ...(shownError ? { error: shownError } : {}),
       trigger,
       timing,
       answerId: answer?.id,

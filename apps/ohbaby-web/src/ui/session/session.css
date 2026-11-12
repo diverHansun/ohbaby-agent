@@ -175,6 +175,34 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   font-size: 12.5px;
 }
 
+/* The retry number rolls up a line when it changes; reduced motion jumps. */
+.ohb-flip {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  height: 1.3em;
+  line-height: 1.3em;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.ohb-flip > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.ohb-flip-roll {
+  animation: ohb-flip-roll 360ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes ohb-flip-roll {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+
 .ohb-compact-notice {
   color: var(--text-dim);
   font-size: 13px;

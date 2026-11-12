@@ -11,6 +11,7 @@ import {
 
 import type {
   UiMessage,
+  UiPromptError,
   UiPromptSubmission,
   UiRun,
   UiUnconsumedSteer,
@@ -21,6 +22,7 @@ import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import {
   Compacting,
   ModelWaiting,
+  TurnError,
   PromptDuration,
 } from "./ExecutionProgress.js";
 import {
@@ -36,7 +38,11 @@ import { SelectionAction } from "./SelectionAction.js";
 import { type MessageAction, MessageActions } from "./MessageActions.js";
 import { isCompactionMessage, messageBodyText } from "./message-text.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
-import { projectRunProcesses, type RunProcess } from "./run-process.js";
+import {
+  isExpectedInterruption,
+  projectRunProcesses,
+  type RunProcess,
+} from "./run-process.js";
 import { isNearBottom, scrollToBottom, scrollsNested } from "./streamScroll.js";
 
 export interface PromptProjectionModel {
@@ -179,11 +185,19 @@ export function ConversationStream(props: {
   const beforeProcess = new Map<string, RunProcess[]>();
   const terminalAfter = new Map<string, RunProcess[]>();
   const processOwners = new Map<string, RunProcess>();
+  // A failed turn's reason closes the turn, after its last message.
+  const errorAfter = new Map<string, RunProcess[]>();
+  const failedRunIds = new Set<string>();
   for (const process of processes) {
     const anchor = process.answerId ?? process.afterId;
     if (anchor) {
       const map = process.answerId ? beforeAnswer : terminalAfter;
       map.set(anchor, [...(map.get(anchor) ?? []), process]);
+    }
+    if (process.error) {
+      failedRunIds.add(process.runId);
+      if (anchor)
+        errorAfter.set(anchor, [...(errorAfter.get(anchor) ?? []), process]);
     }
     if (process.foldable) {
       const start = process.processIds.at(0) ?? process.answerId;
@@ -195,6 +209,41 @@ export function ConversationStream(props: {
       for (const id of process.processIds) processOwners.set(id, process);
     }
   }
+  // A prompt that failed before its turn could form still answers under its message.
+  const turnRunIds = new Set(processes.map((process) => process.runId));
+  const promptErrorAfter = new Map<string, UiPromptError>();
+  for (const prompt of props.prompts) {
+    if (
+      prompt.sessionId !== props.sessionId ||
+      prompt.error === undefined ||
+      (prompt.status !== "failed" && prompt.status !== "interrupted") ||
+      (prompt.runId !== undefined && turnRunIds.has(prompt.runId)) ||
+      isExpectedInterruption(
+        prompt.status,
+        prompt.error,
+        props.runs?.find((run) => run.id === prompt.runId)?.terminalReason,
+      )
+    )
+      continue;
+    promptErrorAfter.set(prompt.userMessageId, prompt.error);
+  }
+  // A failure is announced once, and only for a turn seen running here;
+  // failures already in the history when it loads stay quiet.
+  const latestFailure = processes.filter((process) => process.error).at(-1);
+  const failedRunId = latestFailure?.runId;
+  const failureMessage = latestFailure?.error?.message;
+  const activeRunId = props.isRunning ? props.activeRun?.id : undefined;
+  const watchedRunId = useRef<string | undefined>(undefined);
+  const [failureAnnouncement, setFailureAnnouncement] = useState("");
+  useEffect(() => {
+    if (activeRunId !== undefined) watchedRunId.current = activeRunId;
+  }, [activeRunId]);
+  useEffect(() => {
+    if (failedRunId === undefined || failedRunId !== watchedRunId.current)
+      return;
+    watchedRunId.current = undefined;
+    setFailureAnnouncement(failureMessage ?? "");
+  }, [failedRunId, failureMessage]);
   // Copy sits on user messages and on each turn's final answer only, the
   // message the folded view shows (copy topic 02 §2.2). The newest finished
   // turn's answer keeps its row visible, as in Claude; none does while a turn
@@ -331,6 +380,12 @@ export function ConversationStream(props: {
   const focusedProcessElement = useRef<HTMLElement | null>(null);
   const handledAnchor = useRef<string | undefined>(undefined);
   const toggleAnchor = useRef<{ id: string; offset: number } | null>(null);
+  const renderPromptError = (error: UiPromptError | undefined): ReactNode =>
+    error ? <TurnError error={error} /> : null;
+  const renderTurnError = (process: RunProcess): ReactNode =>
+    process.error ? (
+      <TurnError key={`error:${process.runId}`} error={process.error} />
+    ) : null;
   const renderDuration = (process: RunProcess): ReactNode => {
     const answer = visibleMessages.find(
       (message) => message.id === process.answerId,
@@ -783,6 +838,10 @@ export function ConversationStream(props: {
                       )?.state
                     }
                     reasoning={props.reasoningByMessageId[item.message.id]}
+                    hideInterruptionNote={
+                      item.message.runId !== undefined &&
+                      failedRunIds.has(item.message.runId)
+                    }
                     reasoningIdPrefix={`${messageDomId(item.message.id)}-reasoning`}
                     reasoningHidden={(
                       beforeAnswer.get(item.message.id) ?? []
@@ -794,6 +853,8 @@ export function ConversationStream(props: {
                   />
                 )}
                 {(terminalAfter.get(item.message.id) ?? []).map(renderDuration)}
+                {(errorAfter.get(item.message.id) ?? []).map(renderTurnError)}
+                {renderPromptError(promptErrorAfter.get(item.message.id))}
               </div>
             </Fragment>
           ) : (
@@ -802,9 +863,21 @@ export function ConversationStream(props: {
         )}
         {processes
           .filter((process) => !process.answerId && !process.afterId)
-          .map(renderDuration)}
+          .flatMap((process) => [
+            renderDuration(process),
+            renderTurnError(process),
+          ])}
         {props.commandNotices}
-        {props.isRunning ? <ModelWaiting run={props.activeRun} /> : null}
+        <div className="ohb-visually-hidden" role="status">
+          {failureAnnouncement}
+        </div>
+        {props.isRunning ? (
+          <ModelWaiting
+            run={props.activeRun}
+            messages={messages}
+            reasoningByMessageId={props.reasoningByMessageId}
+          />
+        ) : null}
         {props.compacting ? <Compacting /> : null}
         {props.compactNotice ? (
           <div className="ohb-compact-notice" role="status">

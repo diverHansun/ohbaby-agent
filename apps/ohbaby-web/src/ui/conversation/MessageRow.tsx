@@ -13,6 +13,8 @@ export function MessageRow(props: {
   readonly reasoning?: ReasoningViewState;
   readonly beforeText?: ReactNode;
   readonly reasoningHidden?: boolean;
+  /** The turn's error line already says why it stopped; skip the app's note. */
+  readonly hideInterruptionNote?: boolean;
   readonly reasoningIdPrefix?: string;
   /** The action row under the body (copy, and later Edit and fork). */
   readonly actions?: ReactNode;
@@ -23,7 +25,13 @@ export function MessageRow(props: {
   );
   const isUser = props.message.role === "user";
   const isCompaction = isCompactionMessage(props.message);
-  const visibleParts = filterTodoToolParts(props.message.parts);
+  const visibleParts = filterTodoToolParts(props.message.parts).filter(
+    (part) =>
+      !(
+        props.hideInterruptionNote &&
+        part.metadata?.kind === "lifecycle-interruption"
+      ),
+  );
   const pairedParts = pairToolParts(visibleParts);
   const firstText = pairedParts.findIndex(
     (entry) => entry.kind === "part" && entry.part.type === "text",

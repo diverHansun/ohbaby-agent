@@ -1,5 +1,6 @@
 import type { UiPromptSubmission } from "ohbaby-sdk";
 import type { PromptProjectionModel } from "../conversation/ConversationStream.js";
+import { isExpectedInterruption } from "../conversation/run-process.js";
 import type { ViewModel } from "./selectors.js";
 
 /** A prompt this browser submitted, tracked until the server-side record takes over. */
@@ -70,20 +71,16 @@ export function isExpectedPromptInterruption(
   prompt: UiPromptSubmission,
   view: ViewModel,
 ): boolean {
-  if (prompt.status !== "interrupted" || prompt.error?.source !== "runtime")
-    return false;
+  if (prompt.error === undefined) return false;
   const run = view.snapshot?.runs.find(
     (candidate) =>
       candidate.id === prompt.runId && candidate.sessionId === prompt.sessionId,
   );
-  const terminalReason = prompt.error.terminalReason ?? run?.terminalReason;
-  // Successful aborts retain a generic marker alongside the concrete stop reason.
-  const reason =
-    (terminalReason === undefined || terminalReason === "cancelled") &&
-    prompt.error.code === "RUN_INTERRUPTED"
-      ? prompt.error.message
-      : terminalReason;
-  return reason === "user-stop" || reason === "service-shutdown";
+  return isExpectedInterruption(
+    prompt.status,
+    prompt.error,
+    run?.terminalReason,
+  );
 }
 
 export function selectPromptProjection(input: {
@@ -204,46 +201,6 @@ export function selectPromptProjection(input: {
         left.id.localeCompare(right.id),
     ),
     ...(startupCandidates.length === 0 ? {} : { startupThinkingAt }),
-  };
-}
-
-export function selectPersistedPromptError(view: ViewModel): {
-  readonly message: string;
-  readonly promptId: string;
-} | null {
-  const activeSessionId = view.composer.activeSessionId;
-  if (
-    !activeSessionId ||
-    hasActiveTurnForSession(view.snapshot, activeSessionId)
-  ) {
-    return null;
-  }
-  const latest = (view.snapshot?.prompts ?? [])
-    .filter((prompt) => prompt.sessionId === activeSessionId)
-    .reduce<UiPromptSubmission | null>(
-      (current, prompt) =>
-        current === null || prompt.createdAt >= current.createdAt
-          ? prompt
-          : current,
-      null,
-    );
-  if (
-    !latest ||
-    isExpectedPromptInterruption(latest, view) ||
-    (latest.status !== "failed" && latest.status !== "interrupted") ||
-    !view.activeSession?.messages.some(
-      (message) => message.id === latest.userMessageId,
-    )
-  ) {
-    return null;
-  }
-  return {
-    message:
-      latest.error?.message ??
-      (latest.status === "failed"
-        ? "Prompt failed."
-        : "Prompt was interrupted."),
-    promptId: latest.promptId,
   };
 }
 
