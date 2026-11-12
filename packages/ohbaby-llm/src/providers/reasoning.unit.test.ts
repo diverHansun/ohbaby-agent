@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createInterfaceProvider } from "./index.js";
 import {
   capabilitiesFor,
+  hasUnsupportedAnthropicEffortPreference,
   mergeReasoningIntent,
   resolveRequestReasoning,
   toAnthropicReasoningWire,
@@ -415,3 +417,268 @@ it("official builtins outrank old automatic profiles while explicit overrides re
     capabilitiesFor({ ...route, modelProfiles: [profile] }).capability?.mode,
   ).toBe("none");
 });
+
+describe("effective Anthropic adaptive capabilities", () => {
+  const adaptive = (
+    capability: ReasoningCapabilities,
+  ): ResolveRequestReasoningOptions => ({
+    ...custom(capability),
+    interfaceProvider: "anthropic",
+  });
+  it("filters unsendable evidence without changing raw evidence or legal mappings", () => {
+    const raw: ReasoningCapabilities = {
+      ...effort,
+      wire: "anthropic-adaptive",
+      efforts: ["minimal", "low", "high", "max"],
+      defaultEffort: "minimal",
+      effortOrder: ["minimal", "high", "low", "max"],
+      effortMap: { minimal: "low", custom: "minimal" },
+    };
+    const target = adaptive(raw);
+    const result = capabilitiesFor(target);
+    expect(result.source).toBe("local-model-profile");
+    expect(result.capability).toEqual({
+      ...effort,
+      wire: "anthropic-adaptive",
+      efforts: ["low", "high", "max"],
+      effortOrder: ["high", "low", "max"],
+      effortMap: { minimal: "low" },
+    });
+    expect(raw.efforts).toEqual(["minimal", "low", "high", "max"]);
+    expect(
+      toAnthropicReasoningWire(
+        resolveRequestReasoning({
+          ...target,
+          reasoning: { effort: "minimal" },
+        }),
+      ),
+    ).toEqual({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
+    });
+    expect(
+      hasUnsupportedAnthropicEffortPreference({
+        ...target,
+        reasoning: { effort: "minimal" },
+      }),
+    ).toBe(false);
+    expect(
+      hasUnsupportedAnthropicEffortPreference({
+        ...target,
+        reasoning: { effort: "custom" },
+      }),
+    ).toBe(true);
+  });
+  it("returns unknown for minimal-only evidence but still detects an incompatible stored preference", () => {
+    const target = {
+      ...adaptive({
+        ...effort,
+        wire: "anthropic-adaptive",
+        efforts: ["minimal"],
+      }),
+      reasoning: { effort: "minimal" },
+    };
+    expect(capabilitiesFor(target)).toEqual({ source: "unknown" });
+    expect(resolveRequestReasoning(target).mode).toBe("service-default");
+    expect(toAnthropicReasoningWire(resolveRequestReasoning(target))).toEqual(
+      {},
+    );
+    expect(hasUnsupportedAnthropicEffortPreference(target)).toBe(true);
+  });
+  it("rejects unsupported explicit preferences when legal adaptive capability remains", () => {
+    const target = adaptive({
+      ...effort,
+      wire: "anthropic-adaptive",
+      efforts: ["minimal", "high"],
+    });
+    expect(() =>
+      resolveRequestReasoning({ ...target, reasoning: { effort: "minimal" } }),
+    ).toThrow(/Unsupported reasoning effort/);
+  });
+  it("does not clear budget, binary, or disabled preferences", () => {
+    for (const capability of [
+      {
+        ...effort,
+        wire: "anthropic-budget",
+        efforts: ["minimal"],
+        budgets: { minimal: 1024 },
+      },
+      { mode: "binary", wire: "thinking", supportsDisabled: true },
+    ] as ReasoningCapabilities[]) {
+      const target = adaptive(capability);
+      expect(capabilitiesFor(target).capability).toEqual(capability);
+      expect(
+        hasUnsupportedAnthropicEffortPreference({
+          ...target,
+          reasoning: { effort: "minimal" },
+        }),
+      ).toBe(false);
+    }
+    expect(
+      hasUnsupportedAnthropicEffortPreference({
+        ...adaptive({
+          ...effort,
+          wire: "anthropic-adaptive",
+          efforts: ["minimal"],
+        }),
+        reasoning: { enabled: false, effort: "minimal" },
+      }),
+    ).toBe(false);
+  });
+});
+
+it("filters after source precedence, including explicit minimal-only overrides of builtins", () => {
+  const route: ResolveRequestReasoningOptions = {
+    provider: "alias",
+    model: "claude-sonnet-4-6",
+    interfaceProvider: "anthropic",
+    baseUrl: "https://api.anthropic.com",
+    maxTokens: 32768,
+    reasoning: { effort: "minimal" },
+  };
+  const profile = {
+    provider: "alias",
+    model: route.model,
+    contextWindowTokens: 300000,
+    reasoningCapabilities: {
+      mode: "effort",
+      wire: "anthropic-adaptive",
+      supportsDisabled: true,
+      efforts: ["minimal"],
+    } as const,
+  };
+  expect(
+    capabilitiesFor({
+      ...route,
+      modelProfiles: [
+        { ...profile, reasoningCapabilitySource: "active-probe" },
+      ],
+    }).source,
+  ).toBe("builtin:anthropic/adaptive-thinking");
+  expect(capabilitiesFor({ ...route, modelProfiles: [profile] })).toEqual({
+    source: "unknown",
+  });
+  expect(
+    hasUnsupportedAnthropicEffortPreference({
+      ...route,
+      modelProfiles: [profile],
+    }),
+  ).toBe(true);
+  for (const source of ["model-metadata", "active-probe"] as const) {
+    const options = {
+      ...route,
+      baseUrl: "https://custom.example",
+      modelProfiles: [
+        {
+          ...profile,
+          reasoningCapabilitySource: source,
+          reasoningCapabilities: {
+            ...profile.reasoningCapabilities,
+            efforts: ["minimal", "high"],
+          },
+        },
+      ],
+    };
+    expect(capabilitiesFor(options)).toMatchObject({
+      source,
+      capability: { efforts: ["high"] },
+    });
+  }
+});
+
+it.each(["openai", "reasoning", "anthropic-adaptive"] as const)(
+  "serializes effective %s capability through the real SDK transport",
+  async (wire) => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_url, init) => {
+        bodies.push(
+          JSON.parse(init?.body as string) as Record<string, unknown>,
+        );
+        return await Promise.resolve(
+          new Response(
+            wire === "anthropic-adaptive"
+              ? [
+                  {
+                    type: "message_start",
+                    message: {
+                      id: "fixture",
+                      type: "message",
+                      role: "assistant",
+                      model: "fixture-model",
+                      content: [],
+                      stop_reason: null,
+                      stop_sequence: null,
+                      usage: { input_tokens: 1, output_tokens: 0 },
+                    },
+                  },
+                  {
+                    type: "message_delta",
+                    delta: { stop_reason: "end_turn", stop_sequence: null },
+                    usage: { output_tokens: 1 },
+                  },
+                  { type: "message_stop" },
+                ]
+                  .map(
+                    (event) =>
+                      `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+                  )
+                  .join("")
+              : "data: [DONE]\n\n",
+            {
+              headers: { "content-type": "text/event-stream" },
+            },
+          ),
+        );
+      });
+    try {
+      const interfaceProvider =
+        wire === "anthropic-adaptive" ? "anthropic" : "openai-compatible";
+      const provider = createInterfaceProvider({
+        id: "fixture",
+        apiKey: "fixture",
+        baseUrl: "https://fixture.invalid",
+        interfaceProvider,
+      });
+      const options: ResolveRequestReasoningOptions = {
+        ...custom({
+          ...effort,
+          wire,
+          efforts: ["minimal", "low", "high"],
+          effortMap:
+            wire === "anthropic-adaptive" ? { minimal: "low" } : undefined,
+        }),
+        interfaceProvider,
+        reasoning: {
+          effort: wire === "anthropic-adaptive" ? "minimal" : "high",
+        },
+      };
+      const stream = await provider.streamResponse({
+        model: "fixture-model",
+        messages: [{ role: "user", content: "hello" }],
+        maxTokens: 32768,
+        promptCache: { strategy: "observe-only", reason: "fixture" },
+        reasoning: resolveRequestReasoning(options),
+      });
+      for await (const _event of stream) {
+        /* consume SDK stream */
+      }
+      expect(bodies).toHaveLength(1);
+      if (wire === "anthropic-adaptive")
+        expect(bodies[0]).toMatchObject({
+          thinking: { type: "adaptive" },
+          output_config: { effort: "low" },
+          max_tokens: 32768,
+        });
+      else
+        expect(bodies[0]).toMatchObject(
+          wire === "openai"
+            ? { reasoning_effort: "high" }
+            : { reasoning: { enabled: true, effort: "high" } },
+        );
+    } finally {
+      fetch.mockRestore();
+    }
+  },
+);

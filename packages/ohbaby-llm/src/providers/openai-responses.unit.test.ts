@@ -1784,7 +1784,7 @@ describe("Responses streamed reasoning parts", () => {
 });
 
 describe("Responses reasoning request wire", () => {
-  it.each(["medium", "high", "disabled"])(
+  it.each(["medium", "high", "max", "disabled"])(
     "serializes resolved %s reasoning through the SDK without default temperature",
     async (mode) => {
       await sdkFixture(

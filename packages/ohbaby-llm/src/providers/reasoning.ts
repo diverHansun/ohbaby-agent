@@ -74,7 +74,8 @@ const NON_REASONING: ReasoningCapabilities = {
   supportsDisabled: true,
   temperature: "allowed",
 };
-export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
+/** Original source for migration and discovery priority; request consumers use capabilitiesFor. */
+export function rawCapabilitiesFor(options: ResolveRequestReasoningOptions): {
   capability?: ReasoningCapabilities;
   source: string;
 } {
@@ -245,6 +246,52 @@ export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
   }
   return automatic ?? { source: "unknown" };
 }
+/** Select the original winning source before applying serializer compatibility. */
+export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
+  capability?: ReasoningCapabilities;
+  source: string;
+} {
+  const selected = rawCapabilitiesFor(options);
+  const capability = selected.capability;
+  if (capability?.wire !== "anthropic-adaptive" || capability.mode !== "effort")
+    return selected;
+  const efforts =
+    capability.efforts?.filter((value) =>
+      ["low", "medium", "high", "xhigh", "max"].includes(value),
+    ) ?? [];
+  if (efforts.length === 0) return { source: "unknown" };
+  const effective = { ...capability, efforts };
+  if (effective.defaultEffort && !efforts.includes(effective.defaultEffort))
+    delete effective.defaultEffort;
+  if (effective.effortOrder)
+    effective.effortOrder = effective.effortOrder.filter((value) =>
+      efforts.includes(value),
+    );
+  if (effective.effortMap)
+    effective.effortMap = Object.fromEntries(
+      Object.entries(effective.effortMap).filter(([, value]) =>
+        efforts.includes(value),
+      ),
+    );
+  return { ...selected, capability: effective };
+}
+
+/** Detect the known incompatible stored preference even if projection becomes unknown. */
+export function hasUnsupportedAnthropicEffortPreference(
+  options: ResolveRequestReasoningOptions,
+): boolean {
+  const capability = rawCapabilitiesFor(options).capability;
+  const intent = mergeReasoningIntent(options.reasoning, options.override);
+  return (
+    options.interfaceProvider === "anthropic" &&
+    capability?.wire === "anthropic-adaptive" &&
+    capability.mode === "effort" &&
+    intent.enabled &&
+    intent.explicit.effort &&
+    (capability.effortMap?.[intent.effort] ?? intent.effort) === "minimal"
+  );
+}
+
 function fail(message: string): never {
   throw new ConfigError(message, "INVALID_FIELD");
 }

@@ -26,6 +26,8 @@ export type {
 } from "./providers/native-state.js";
 export {
   capabilitiesFor,
+  rawCapabilitiesFor,
+  hasUnsupportedAnthropicEffortPreference,
   compatibleReasoningPreference,
   defaultReasoningEffort,
   mergeReasoningIntent,

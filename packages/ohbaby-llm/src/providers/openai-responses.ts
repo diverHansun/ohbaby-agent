@@ -152,7 +152,8 @@ function buildRequestParams(
     effort !== "low" &&
     effort !== "medium" &&
     effort !== "high" &&
-    effort !== "xhigh"
+    effort !== "xhigh" &&
+    effort !== "max"
   )
     rejectRequest(`unsupported Responses reasoning effort ${effort}`);
   return {
