@@ -118,7 +118,7 @@ describe("providerErrorDetail", () => {
     expect(providerErrorDetail(hostile)).toBeUndefined();
   });
 
-  it("keeps finite diagnostics without reading any upstream request ID aliases", () => {
+  it("keeps core diagnostics when request ID accessors throw and accepts only validated IDs", () => {
     const secret =
       "sk-private-value https://private.example/prompt Bearer secret";
     const requestId = "req_0123456789abcdef0123456789abcdef";
@@ -144,7 +144,7 @@ describe("providerErrorDetail", () => {
       ]) {
         Object.defineProperty(error, key, {
           get() {
-            throw new Error("upstream ID must not be read");
+            throw new Error("hostile upstream ID accessor");
           },
         });
       }
@@ -167,6 +167,7 @@ describe("providerErrorDetail", () => {
       kind: "invalid_request",
       statusCode: 400,
       retryable: false,
+      upstreamId: requestId,
       message: "The model rejected the request. Check the model configuration.",
     });
   });
@@ -216,3 +217,80 @@ describe("providerErrorDetail", () => {
     }
   });
 });
+
+it("retains bounded upstream diagnostics without provider prose or retry changes", () => {
+  const detail = providerErrorDetail({
+    status: 400,
+    request_id: "req_123456789abcdef",
+    error: {
+      message: "Concurrent requests exceeded the limit for key sk-secret",
+    },
+  });
+  expect(detail).toMatchObject({
+    upstreamReason: "concurrency_limit",
+    upstreamId: "req_123456789abcdef",
+    retryable: false,
+  });
+  expect(JSON.stringify(detail)).not.toContain("sk-secret");
+  expect(
+    providerErrorDetail({
+      status: 400,
+      request_id: "Bearer secret",
+      error: { message: "Missing reasoning_content in assistant tool call" },
+    }),
+  ).toMatchObject({ upstreamReason: "invalid_reasoning_content" });
+  expect(
+    providerErrorDetail({
+      status: 400,
+      request_id: "sk-secret",
+      message: "private prompt",
+    }),
+  ).not.toHaveProperty("upstreamId");
+});
+
+it.each([
+  [
+    "tool_calls must be followed by messages for each tool_call_id",
+    "invalid_tool_request",
+  ],
+  [
+    "reasoning_content is required for this assistant message",
+    "invalid_reasoning_content",
+  ],
+  [
+    "reasoning_content must not be included when thinking is disabled",
+    "invalid_reasoning_content",
+  ],
+  ["reasoning_content must be a string", "invalid_reasoning_content"],
+  ["Concurrent tool calls are limited to 8 per message", undefined],
+  [
+    "tool_calls[0].function.arguments does not match schema",
+    "invalid_tool_request",
+  ],
+  [
+    "You exceeded the maximum number of concurrent requests",
+    "concurrency_limit",
+  ],
+  ["Unknown upstream failure containing private input", undefined],
+  ["x".repeat(4096) + " concurrent requests limit", undefined],
+] as const)(
+  "extracts only recognized upstream hints (case %#)",
+  (message, reason) => {
+    const error = new APIError(
+      400,
+      { message },
+      undefined,
+      new Headers({ "x-request-id": "req_0123456789abcdef" }),
+    );
+    const detail = providerErrorDetail(
+      new ProviderStreamInterruptedError(error),
+    );
+    expect(detail).toMatchObject({
+      kind: "stream_interrupted",
+      statusCode: 400,
+      retryable: false,
+      upstreamId: "req_0123456789abcdef",
+    });
+    expect(detail?.upstreamReason).toBe(reason);
+  },
+);

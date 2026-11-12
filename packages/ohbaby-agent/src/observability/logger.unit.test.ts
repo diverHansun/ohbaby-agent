@@ -37,6 +37,40 @@ const userSkillEvent = defineDiagnosticEvent({
 });
 
 describe("diagnostic event contract", () => {
+  it.each([
+    ["req_0123456789abcdef", "req_0123456789abcdef"],
+    ["0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef"],
+    [
+      "c17a668d-604d-40f0-9663-fdc1b187a003",
+      "c17a668d-604d-40f0-9663-fdc1b187a003",
+    ],
+    ["Bearer sk-private", undefined],
+    ["https://example.com/?api_key=private", undefined],
+    ["req_0123456789abcdef\nAuthorization: secret", undefined],
+    ["req_" + "a".repeat(200), undefined],
+  ])(
+    "validates upstream request IDs again at the log boundary (%s)",
+    (input, expected) => {
+      const event = defineDiagnosticEvent({
+        component: "diagnostics",
+        event: "diagnostics.tested",
+        fields: {
+          upstreamId: diagnosticField.optional(diagnosticField.upstreamId()),
+        },
+        level: "trace",
+      });
+      const { record } = encodeDiagnosticEvent(
+        event,
+        { upstreamId: input },
+        { roots: {} },
+        "2026-11-12",
+      );
+      expect(record.upstreamId).toBe(expected);
+      if (expected === undefined)
+        expect(record).not.toHaveProperty("upstreamId");
+    },
+  );
+
   it("encodes only declared fields with policy-aware encoders", () => {
     const encoded = encodeDiagnosticEvent(
       safeEvent,

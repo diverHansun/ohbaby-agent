@@ -1,5 +1,7 @@
 import {
   PROVIDER_ERROR_KINDS,
+  SAFE_UPSTREAM_REASONS,
+  safeUpstreamId,
   SAFE_PROVIDER_ERROR_CODES,
   SAFE_PROVIDER_ERROR_TYPES,
   SAFE_PROVIDER_NETWORK_CODES,
@@ -144,6 +146,7 @@ const SAFE_NUMERIC_CONTENT_FIELD_NAMES = new Set([
 ]);
 const DIAGNOSTIC_ENUM_VALUES = new Set([
   ...PROVIDER_ERROR_KINDS,
+  ...SAFE_UPSTREAM_REASONS,
   ...SAFE_PROVIDER_ERROR_CODES,
   ...SAFE_PROVIDER_ERROR_TYPES,
   ...SAFE_PROVIDER_NETWORK_CODES,
@@ -424,6 +427,9 @@ export const diagnosticField = Object.freeze({
   ): DiagnosticFieldEncoder<string> {
     return createEncoder((value) => `${kind}_${shortHash(kind, value)}`);
   },
+  upstreamId(): DiagnosticFieldEncoder<string> {
+    return createEncoder((value) => safeUpstreamId(value));
+  },
   externalError(): DiagnosticFieldEncoder<unknown> {
     return createEncoder((value) => safeError(value));
   },
@@ -527,7 +533,7 @@ export function defineDiagnosticEvent<
     throw new TypeError("diagnostic level must be a stable identifier");
   }
   const entries = Object.entries(fields);
-  if (entries.length > 16 || entries.some(([key]) => key === "truncated")) {
+  if (entries.length > 18 || entries.some(([key]) => key === "truncated")) {
     throw new TypeError("diagnostic event has invalid fields");
   }
   for (const [key, encoder] of entries) {

@@ -844,6 +844,8 @@ export async function* streamResponse(
               statusCode: detail.statusCode,
               upstreamCode: detail.upstreamCode,
               upstreamType: detail.upstreamType,
+              upstreamReason: detail.upstreamReason,
+              upstreamId: detail.upstreamId,
               networkCode: detail.networkCode,
               retryDelayMs: delayMs,
             },

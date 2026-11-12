@@ -1550,6 +1550,8 @@ export class Lifecycle {
                         statusCode: fact.failure.statusCode,
                         upstreamCode: fact.failure.upstreamCode,
                         upstreamType: fact.failure.upstreamType,
+                        upstreamReason: fact.failure.upstreamReason,
+                        upstreamId: fact.failure.upstreamId,
                         networkCode: fact.failure.networkCode,
                         retryScheduled: request.retryScheduled === true,
                         retryDelayMs: fact.failure.retryDelayMs,

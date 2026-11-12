@@ -1,5 +1,6 @@
 import {
   PROVIDER_ERROR_KINDS,
+  SAFE_UPSTREAM_REASONS,
   SAFE_PROVIDER_ERROR_CODES,
   SAFE_PROVIDER_ERROR_TYPES,
   SAFE_PROVIDER_NETWORK_CODES,
@@ -193,7 +194,7 @@ export const sessionStoragePreparationFailed = defineDiagnosticEvent({
   level: "warn",
 });
 
-/** Per-attempt facts only. IDs use the existing stable diagnostic fingerprints. */
+/** Per-attempt facts only. Local IDs use stable fingerprints; upstreamId is a validated support reference. */
 export const modelRequestFailed = defineDiagnosticEvent({
   component: "llm",
   event: "llm.request.failed",
@@ -218,6 +219,10 @@ export const modelRequestFailed = defineDiagnosticEvent({
     networkCode: diagnosticField.optional(
       diagnosticField.stringEnum(SAFE_PROVIDER_NETWORK_CODES),
     ),
+    upstreamReason: diagnosticField.optional(
+      diagnosticField.stringEnum(SAFE_UPSTREAM_REASONS),
+    ),
+    upstreamId: diagnosticField.optional(diagnosticField.upstreamId()),
     retryScheduled: diagnosticField.boolean(),
     retryDelayMs: diagnosticField.optional(diagnosticField.number()),
   },

@@ -103,6 +103,50 @@ export type SafeProviderErrorType = (typeof SAFE_PROVIDER_ERROR_TYPES)[number];
 export type SafeProviderNetworkCode =
   (typeof SAFE_PROVIDER_NETWORK_CODES)[number];
 
+/** Diagnostic labels only: never retain arbitrary provider prose. */
+export const SAFE_UPSTREAM_REASONS = [
+  "concurrency_limit",
+  "invalid_reasoning_content",
+  "invalid_tool_request",
+] as const;
+
+export function safeUpstreamId(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 128) return undefined;
+  return /^(?:req_[A-Za-z0-9]{8,100}|[a-fA-F0-9]{32}|[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12})$/u.test(
+    value,
+  )
+    ? value
+    : undefined;
+}
+
+function upstreamReason(
+  evidence: readonly Record<string, unknown>[],
+): (typeof SAFE_UPSTREAM_REASONS)[number] | undefined {
+  for (const item of evidence) {
+    if (typeof item.message !== "string") continue;
+    const message = item.message.slice(0, 4096);
+    if (
+      /\b(?:concurrent requests?|request concurrency)\b[^\n]{0,160}(?:limit|exceed|maximum)|(?:limit|exceed|maximum|too many)[^\n]{0,160}\b(?:concurrent requests?|request concurrency)\b/iu.test(
+        message,
+      )
+    )
+      return "concurrency_limit";
+    if (
+      /(?:missing|required|must)[^\n]{0,160}reasoning_content|reasoning_content[^\n]{0,160}(?:missing|required|must)/iu.test(
+        message,
+      )
+    )
+      return "invalid_reasoning_content";
+    if (
+      /tool_(?:call_id|calls)[^\n]{0,160}(?:missing|match|respond|follow)|(?:missing|match|respond|follow)[^\n]{0,160}tool_(?:call_id|calls)/iu.test(
+        message,
+      )
+    )
+      return "invalid_tool_request";
+  }
+  return undefined;
+}
+
 export interface ProviderErrorDetail {
   readonly kind: ProviderErrorKind;
   readonly message: string;
@@ -112,6 +156,8 @@ export interface ProviderErrorDetail {
   readonly upstreamCode?: SafeProviderErrorCode;
   readonly upstreamType?: SafeProviderErrorType;
   readonly networkCode?: SafeProviderNetworkCode;
+  readonly upstreamReason?: (typeof SAFE_UPSTREAM_REASONS)[number];
+  readonly upstreamId?: string;
 }
 
 const MESSAGES: Readonly<Record<ProviderErrorKind, string>> = {
@@ -342,10 +388,29 @@ export function providerErrorDetail(
     const networkCode = chain
       .map((value) => allowed(value.code, SAFE_PROVIDER_NETWORK_CODES))
       .find((value) => value !== undefined);
+    // Optional diagnostics cannot erase the core error if a hostile getter throws.
+    let upstreamId: string | undefined;
+    try {
+      upstreamId = chain
+        .map((value) =>
+          safeUpstreamId(
+            value instanceof OpenAIAPIError ||
+              value instanceof AnthropicAPIError
+              ? value.requestID
+              : value.request_id,
+          ),
+        )
+        .find(Boolean);
+    } catch {
+      /* Keep the already classified failure. */
+    }
+    const reason = upstreamReason(evidence);
     const causeKind = classify(chain, evidence, statusCode, networkCode);
     const kind = interrupted ? "stream_interrupted" : causeKind;
     return {
       kind,
+      ...(reason === undefined ? {} : { upstreamReason: reason }),
+      ...(upstreamId === undefined ? {} : { upstreamId }),
       message:
         interrupted && causeKind !== "unknown"
           ? `The response was interrupted. ${MESSAGES[causeKind]}`

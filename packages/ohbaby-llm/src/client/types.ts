@@ -279,7 +279,13 @@ export interface ModelRequestObservation {
   /** Safe diagnostic context only; never part of persisted request facts. */
   readonly failure?: Pick<
     ProviderErrorDetail,
-    "kind" | "statusCode" | "upstreamCode" | "upstreamType" | "networkCode"
+    | "kind"
+    | "statusCode"
+    | "upstreamCode"
+    | "upstreamType"
+    | "networkCode"
+    | "upstreamReason"
+    | "upstreamId"
   > & {
     readonly retryDelayMs?: number;
   };

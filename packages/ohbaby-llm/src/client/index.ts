@@ -26,6 +26,8 @@ export {
 } from "./errors.js";
 export {
   providerErrorDetail,
+  SAFE_UPSTREAM_REASONS,
+  safeUpstreamId,
   PROVIDER_ERROR_KINDS,
   SAFE_PROVIDER_ERROR_CODES,
   SAFE_PROVIDER_ERROR_TYPES,

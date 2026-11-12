@@ -2947,51 +2947,63 @@ describe("Lifecycle.run", () => {
     });
   });
 
-  it("does not retry non-overflow provider errors", async () => {
-    const requests: InterfaceProviderRequest[] = [];
-    const messageManager = createMessageManager({
-      bus: createBus(),
-      store: createInMemoryMessageStore(),
-      idGenerator: createDeterministicIds(),
-      now: () => 1_700_000_000_000,
-    });
-    const prepareTurn = vi
-      .fn<ContextManager["prepareTurn"]>()
-      .mockResolvedValue(
-        preparedTurn([{ role: "user", content: "Say hello" }]),
+  it.each([undefined, 400])(
+    "does not retry non-overflow provider errors (status %s)",
+    async (status) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+        idGenerator: createDeterministicIds(),
+        now: () => 1_700_000_000_000,
+      });
+      const prepareTurn = vi
+        .fn<ContextManager["prepareTurn"]>()
+        .mockResolvedValue(
+          preparedTurn([{ role: "user", content: "Say hello" }]),
+        );
+      const providerError =
+        status === undefined
+          ? new Error("network down")
+          : Object.assign(new Error("Concurrent requests exceeded the limit"), {
+              status,
+            });
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(prepareTurn),
+        llmClient: createRejectingSequenceLLMClient({
+          errors: [providerError],
+          requests,
+        }),
+        messageManager,
+        toolScheduler: {
+          executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+        } as unknown as ToolSchedulerInstance,
+      });
+
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run({
+          directory: "D:/repo",
+          modelId: "fake-model",
+          sessionId: "session_test",
+        }),
       );
-    const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(prepareTurn),
-      llmClient: createRejectingSequenceLLMClient({
-        errors: [new Error("network down")],
-        requests,
-      }),
-      messageManager,
-      toolScheduler: {
-        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
-      } as unknown as ToolSchedulerInstance,
-    });
+      expect(result).toMatchObject({
+        success: false,
+        finalResponse:
+          status === undefined
+            ? "The response could not be completed. Please try again."
+            : "The model rejected the request. Check the model configuration.",
+        failureCause:
+          status === undefined
+            ? { name: "ProviderRequestError", cause: providerError }
+            : providerError,
+        usage: { usageComplete: false },
+      });
 
-    const { result } = await consumeLifecycleEvents(
-      lifecycle.run({
-        directory: "D:/repo",
-        modelId: "fake-model",
-        sessionId: "session_test",
-      }),
-    );
-    expect(result).toMatchObject({
-      success: false,
-      finalResponse: "The response could not be completed. Please try again.",
-      failureCause: {
-        name: "ProviderRequestError",
-        cause: new Error("network down"),
-      },
-      usage: { usageComplete: false },
-    });
-
-    expect(prepareTurn).toHaveBeenCalledTimes(1);
-    expect(requests).toHaveLength(1);
-  });
+      expect(prepareTurn).toHaveBeenCalledTimes(1);
+      expect(requests).toHaveLength(1);
+    },
+  );
 
   it("returns a structured result when retryable provider errors exhaust retries", async () => {
     const requests: InterfaceProviderRequest[] = [];
@@ -3021,12 +3033,17 @@ describe("Lifecycle.run", () => {
         preparedTurn([{ role: "user", content: "Say hello" }]),
       );
     const retryableErrors = Array.from({ length: 6 }, () =>
-      Object.assign(new Error("Authorization: Bearer sk-test-secret"), {
-        headers: { "retry-after-ms": "0" },
-        status: 429,
-        code: "rate_limit_exceeded",
-        request_id: "req_0123456789abcdef",
-      }),
+      Object.assign(
+        new Error(
+          "Concurrent requests exceeded limit; Authorization: Bearer sk-test-secret",
+        ),
+        {
+          headers: { "retry-after-ms": "0" },
+          status: 429,
+          code: "rate_limit_exceeded",
+          request_id: "req_0123456789abcdef",
+        },
+      ),
     );
     const lifecycle = new Lifecycle({
       logger,
@@ -3096,13 +3113,15 @@ describe("Lifecycle.run", () => {
       kind: "rate_limit",
       statusCode: 429,
       upstreamCode: "rate_limit_exceeded",
+      upstreamReason: "concurrency_limit",
+      upstreamId: "req_0123456789abcdef",
       retryDelayMs: 0,
     });
     expect(JSON.stringify(diagnostics)).not.toMatch(
-      /sk-test-secret|Bearer|req_012345|upstreamId|Say hello/u,
+      /sk-test-secret|Bearer|Say hello/u,
     );
     expect(JSON.stringify(records)).not.toMatch(
-      /upstreamCode|retryDelayMs|sk-test-secret/u,
+      /upstreamCode|upstreamReason|upstreamId|retryDelayMs|sk-test-secret/u,
     );
   });
 
