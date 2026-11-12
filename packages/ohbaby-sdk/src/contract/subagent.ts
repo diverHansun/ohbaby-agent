@@ -42,6 +42,8 @@ export interface UiSubagentExecution {
     | "pending"
     | "delivered"
     | "processed";
+  /** Most recent automatic parent run claimed for this result; not proof of consumption. */
+  readonly wakeupRunId?: string;
   readonly processedRequestId?: string;
   readonly artifactPath?: string;
   readonly childUserMessageId?: string;

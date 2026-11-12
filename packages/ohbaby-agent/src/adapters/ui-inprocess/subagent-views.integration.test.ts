@@ -91,6 +91,20 @@ async function fixture() {
   return { reader, messages, source, executions };
 }
 describe("readonly subagent execution views", () => {
+  it("projects the saved wakeup run without treating it as consumption", async () => {
+    const { executions, reader } = await fixture();
+    const record = await executions.getForRoot("a", "root");
+    if (!record) throw new Error("Missing fixture execution");
+    await executions.finish(record, {
+      status: "completed",
+      completedAt: 3,
+      output: "done",
+    });
+    await executions.claimWakeup(record, 4, { runId: "parent-wakeup" });
+    const view = await reader.view({ rootSessionId: "root", executionId: "a" });
+    expect(view.execution.wakeupRunId).toBe("parent-wakeup");
+    expect(view.execution.delivery).toBe("pending");
+  });
   it("pages exact execution and scope, retaining complete reasoning but hiding todo bodies", async () => {
     const { reader } = await fixture();
     const latest = await reader.view({

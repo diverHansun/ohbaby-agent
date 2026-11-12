@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { UiMessage } from "ohbaby-sdk";
 import { ConversationStream } from "./ConversationStream.js";
 import { ConversationPresentation } from "./ConversationPresentation.js";
@@ -611,4 +611,70 @@ describe("failed turn reason", () => {
     ]);
     expect(container.querySelector(".ohb-turn-error")).toBeNull();
   });
+});
+
+it("links an automatic failure only to its backend-associated result sources", () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const open = vi.fn();
+  try {
+    act(() => {
+      root.render(
+        <ConversationStream
+          historyState="ready"
+          historyHasMore={false}
+          historyStale={false}
+          onLoadHistory={() => Promise.resolve()}
+          promptRows={[]}
+          messages={[]}
+          sessionId="session"
+          prompts={[]}
+          activeRun={undefined}
+          isRunning={false}
+          reasoningByMessageId={{}}
+          commandNotices={null}
+          runs={[
+            {
+              id: "wake",
+              sessionId: "session",
+              trigger: "subagent",
+              status: { kind: "idle" },
+              outcome: "failed",
+              startedAt: "2026-11-12T00:00:00Z",
+              updatedAt: "2026-11-12T00:00:01Z",
+              endedAt: "2026-11-12T00:00:01Z",
+              error: {
+                code: "FAILED",
+                source: "runtime",
+                retryable: false,
+                message: "Could not process results",
+              },
+            },
+          ]}
+          resultSources={[
+            {
+              runId: "wake",
+              executionId: "exec-a",
+              label: "xyl-a",
+              onOpen: open,
+            },
+            { runId: "other", executionId: "exec-b", label: "xyl-b" },
+          ]}
+        />,
+      );
+    });
+    const error = container.querySelector(".ohb-turn-error");
+    expect(error?.textContent).toContain(
+      "Results that triggered this run: xyl-a",
+    );
+    expect(error?.textContent).not.toContain("xyl-b");
+    act(() => error?.querySelector<HTMLButtonElement>("button")?.click());
+    expect(open).toHaveBeenCalledOnce();
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  }
 });

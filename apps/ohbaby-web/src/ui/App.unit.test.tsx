@@ -7724,3 +7724,86 @@ it("covers the app once the services stay out of reach, keeping the draft undern
   ).toBe(false);
   expect(textareaValue(app.container)).toBe("half-written thought");
 });
+
+it("explains surviving children after confirmed main Stop, then clears on a new run", async () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const fake = createFakeRuntime({ snapshot: initial });
+  const children = workerSnapshot("session_1", true);
+  fake.client.listSubagentInstances = vi.fn(() =>
+    Promise.resolve({
+      ...children,
+      instances: children.instances.map((instance) => ({
+        ...instance,
+        status: "running" as const,
+        currentExecutionId: "exec",
+      })),
+    }),
+  );
+  const app = mountApp(fake.runtime);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(app.container.textContent).not.toContain("Main agent stopped.");
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  expect(app.container.textContent).not.toContain("Main agent stopped.");
+  const stopped = {
+    ...initial,
+    status: { kind: "idle" as const },
+    runs: [
+      {
+        ...initial.runs[0],
+        status: { kind: "idle" as const },
+        outcome: "interrupted" as const,
+        inputsCloseReason: "user-stop",
+        endedAt: timestamp,
+      },
+    ],
+  };
+  act(() => {
+    fake.store.replaceSnapshot(stopped, 2);
+  });
+  expect(app.container.textContent).toContain(
+    "Main agent stopped. 1 subagent is still running; their results can resume the main agent.",
+  );
+  // Stop pauses a Goal; child results then wait for the Goal instead of resuming.
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...stopped,
+        goals: [
+          {
+            sessionId: "session_1",
+            goal: {
+              objective: "ship",
+              status: "paused",
+              turnsUsed: 1,
+              wallClockMs: 0,
+            },
+          },
+        ],
+      },
+      3,
+    );
+  });
+  expect(app.container.textContent).not.toContain("Main agent stopped.");
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        status: { kind: "running", runId: "new-run" },
+        runs: [
+          {
+            ...initial.runs[0],
+            id: "new-run",
+            startedAt: "2026-11-12T00:00:00Z",
+          },
+        ],
+      },
+      4,
+    );
+  });
+  expect(app.container.textContent).not.toContain("Main agent stopped.");
+});

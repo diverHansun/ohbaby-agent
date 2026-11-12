@@ -108,6 +108,33 @@ export function SessionConversation(props: {
           }}
         >
           <ConversationStream
+            resultSources={(
+              interactions.subagentState.list?.executions ?? []
+            ).flatMap((execution) => {
+              if (
+                !execution.wakeupRunId ||
+                execution.rootSessionId !== sessionId
+              )
+                return [];
+              const instance = props.subagentInstances
+                ? findInstance(props.subagentInstances, execution.subagentId)
+                : undefined;
+              return [
+                {
+                  runId: execution.wakeupRunId,
+                  executionId: execution.executionId,
+                  label: instance?.displayName ?? execution.subagentId,
+                  onOpen:
+                    instance && props.onOpenSubagent
+                      ? (): void =>
+                          props.onOpenSubagent?.({
+                            subagentId: execution.subagentId,
+                            executionId: execution.executionId,
+                          })
+                      : undefined,
+                },
+              ];
+            })}
             unconsumedSteers={getUnconsumedSteers(view.activeSession)}
             historyState={storeSnapshot.historyState}
             historyHasMore={storeSnapshot.historyHasMore}

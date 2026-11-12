@@ -30,6 +30,7 @@ export const projectSubagentExecution = (
   terminalReason: record.reason,
   resultStored: record.completedAt !== undefined,
   delivery: record.delivery.state,
+  wakeupRunId: record.delivery.wakeupRunId,
   processedRequestId: record.delivery.processedRequestId,
   artifactPath:
     record.artifact.state === "ready" ? record.artifact.path : undefined,

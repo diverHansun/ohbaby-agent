@@ -56,10 +56,13 @@ function InstanceRow(props: {
           </span>
         ) : null}
         {(instance.pendingResultCount ?? 0) > 0 ? (
-          <span className="ohb-subagent-instance-note">
+          <span
+            className="ohb-subagent-instance-note"
+            title="A result is received when it is included in a successful main-agent request. This does not mean the overall task is complete."
+          >
             {instance.pendingResultCount === 1
-              ? "1 result awaiting parent"
-              : `${String(instance.pendingResultCount)} results awaiting parent`}
+              ? "1 result awaiting main-agent receipt"
+              : `${String(instance.pendingResultCount)} results awaiting main-agent receipt`}
           </span>
         ) : null}
       </button>

@@ -215,14 +215,42 @@ export function PromptDuration({
  */
 export function TurnError({
   error,
+  relatedSubagents,
 }: {
   readonly error: UiPromptError;
+  readonly relatedSubagents?: readonly {
+    readonly executionId: string;
+    readonly label: string;
+    readonly onOpen?: () => void;
+  }[];
 }): ReactElement {
   return (
     <div className="ohb-turn-error">
       <CircleAlert size={14} aria-hidden="true" />
       <p>
         {error.message}
+        {relatedSubagents?.length ? (
+          <small>
+            Results that triggered this run:{" "}
+            {relatedSubagents.map((source, index) => (
+              <span key={source.executionId}>
+                {index > 0 ? ", " : ""}
+                {source.onOpen ? (
+                  <button
+                    type="button"
+                    className="ohb-banner-action"
+                    aria-label={`Open subagent ${source.label}`}
+                    onClick={source.onOpen}
+                  >
+                    {source.label}
+                  </button>
+                ) : (
+                  source.label
+                )}
+              </span>
+            ))}
+          </small>
+        ) : null}
         {error.statusCode === undefined ? null : (
           <small>HTTP {error.statusCode}</small>
         )}

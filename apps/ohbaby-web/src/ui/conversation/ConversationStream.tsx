@@ -62,6 +62,12 @@ export interface ConversationReadingPosition {
 }
 
 export function ConversationStream(props: {
+  readonly resultSources?: readonly {
+    readonly runId: string;
+    readonly executionId: string;
+    readonly label: string;
+    readonly onOpen?: () => void;
+  }[];
   readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly preserveMessageOrder?: boolean;
   readonly readingPosition?: ConversationReadingPosition;
@@ -384,7 +390,13 @@ export function ConversationStream(props: {
     error ? <TurnError error={error} /> : null;
   const renderTurnError = (process: RunProcess): ReactNode =>
     process.error ? (
-      <TurnError key={`error:${process.runId}`} error={process.error} />
+      <TurnError
+        key={`error:${process.runId}`}
+        error={process.error}
+        relatedSubagents={props.resultSources?.filter(
+          (source) => source.runId === process.runId,
+        )}
+      />
     ) : null;
   const renderDuration = (process: RunProcess): ReactNode => {
     const answer = visibleMessages.find(

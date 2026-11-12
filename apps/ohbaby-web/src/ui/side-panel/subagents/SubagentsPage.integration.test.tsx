@@ -391,7 +391,9 @@ describe("Subagents page", () => {
     expect(groups[0]?.textContent).toContain("2 unprocessed messages");
     expect(groups[0]?.textContent).toContain("Needs approval");
     expect(groups[1]?.textContent).toContain("Interrupted");
-    expect(groups[1]?.textContent).toContain("2 results awaiting parent");
+    expect(groups[1]?.textContent).toContain(
+      "2 results awaiting main-agent receipt",
+    );
     expect(fake.list).toHaveBeenCalledWith(
       expect.objectContaining({ rootSessionId: "root" }),
     );

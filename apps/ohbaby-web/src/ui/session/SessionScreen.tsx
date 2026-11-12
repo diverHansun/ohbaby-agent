@@ -303,6 +303,30 @@ export function SessionScreen({
     compactRequest.isCompacting(view.activeSession?.id) ||
     (compactRequest.notice !== null &&
       compactRequest.notice.sessionId === view.activeSession?.id);
+  const latestRun = view.snapshot?.runs
+    .filter((run) => run.sessionId === view.activeSession?.id)
+    .reduce<
+      NonNullable<typeof view.snapshot>["runs"][number] | undefined
+    >((latest, run) => (!latest || run.startedAt > latest.startedAt ? run : latest), undefined);
+  const remainingChildren =
+    subagentInstances &&
+    !subagentInstances.loading &&
+    !subagentInstances.error &&
+    subagentInstances.snapshot &&
+    subagentInstances.snapshot.rootSessionId === view.activeSession?.id
+      ? subagentInstances.snapshot.instances.filter(
+          (instance) =>
+            instance.status === "pending" || instance.status === "running",
+        ).length
+      : 0;
+  // A Goal session only auto-continues through its Goal driver, which Stop pauses.
+  const stoppedWithChildren =
+    !view.activeGoal &&
+    !view.composer.isRunning &&
+    !isConnectionAbnormal(view.header.connectionKind) &&
+    latestRun?.outcome === "interrupted" &&
+    latestRun.inputsCloseReason === "user-stop" &&
+    remainingChildren > 0;
   const setPermission = (
     input: Parameters<UiBackendClient["setPermission"]>[0],
   ): void => {
@@ -344,6 +368,14 @@ export function SessionScreen({
           onRetry={() => {
             runtime.retrySession();
           }}
+        />
+        <Banner
+          tone="info"
+          message={
+            stoppedWithChildren
+              ? `Main agent stopped. ${String(remainingChildren)} ${remainingChildren === 1 ? "subagent is" : "subagents are"} still running; their results can resume the main agent.`
+              : null
+          }
         />
         <SessionBanners
           runtime={runtime}

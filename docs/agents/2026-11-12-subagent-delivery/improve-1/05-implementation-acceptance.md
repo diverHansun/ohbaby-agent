@@ -104,3 +104,29 @@ Pi 第三轮限定复核结论为“这几处改动没有引入明显错误，�
 - 本文所在文档提交 — 设计、实施证据及权威模块文档同步。
 
 两批代码提交均通过仓库原有 pre-commit 全仓 lint/typecheck，未绕过钩子。最后统一时钟和删除无意义 catch 后，补跑唤醒集成 11 项通过；Host 测试夹具类型修正后，目标中断测试也通过。
+
+## 7. 前端补充验收（同日，基线 8f647c44）
+
+用户确认补齐三处小优化，继续保留开发分支，不合并：
+
+- 子代理列表明确显示“等待主代理接收”，说明结果接收不等于整体任务完成。
+- 自动处理失败在原 TurnError 区域提供关联子代理入口，复用已有侧栏和执行定位。后端投影已有 execution.delivery.wakeupRunId，前端不解析错误文本或消息 ID 推断来源。
+- 主 Stop 后复用 Banner 说明仍在运行的子代理以后可唤醒主代理；依据确认的 run 终态和当前会话子代理快照，RPC 返回成功本身不算停止确认。刷新可重建，进入新运行或子代理全部结束后消失。
+
+关联范围有意有限：wakeupRunId 是最近一次自动认领，重试后旧轮次可能没有来源链接；未加载的历史执行也不猜测来源。文案说明“触发此轮的结果”，不把相关子代理宣称为错误根因，也不宣称涵盖该轮顺带收到的所有结果。没有新增存储或重试状态。
+
+浏览器验收使用临时工作目录、独立 SQLite、源码 persistent backend 和编译 Web，真实模型为 OpenAI gpt-6.1-terra / Responses / medium。用可控阻塞点安排父子时序，并在自动主请求边界注入 HTTP 400 验证错误反馈；这不是实际上游宕机。启动探针最初缺少全局 scopes/catalog 装配，补齐临时服务器后继续验证，没有改产品路由。
+
+初始使用 Playwright，用户随后明确要求内置浏览器，此后改用 Codex 内置浏览器完成以下验证，未继续调用 Playwright：
+
+1. 打开同一测试会话，看到自动失败及 xyl-a 来源按钮；点击打开正确子执行，显示真实模型返回的 UI_CHILD_144。
+2. 返回子代理列表，看到 Completed 与 1 result awaiting main-agent receipt 同时存在。
+3. 在主输入框发送读取保存结果的请求，主模型回复 UI_PARENT_144，列表的待接收提示消失。
+4. 在内置浏览器发送新任务，派遣 ui-stop-check。子请求保持运行时点击主 Stop，看到“1 subagent is still running”说明；刷新后说明仍准确。
+5. 放行子请求后，无需用户再次输入，主代理自动输出 UI_PARENT_121；停止提示清除。后台核对两条执行均 processed，pendingResultCount 均为 0。
+
+会话 ID 为 session_1794463675818_tgne8t1。脱敏证据在 `/tmp/ohbaby-ui-browser-evidence-20261112.json`，内置浏览器截图在 `/tmp/ohbaby-ui-{pending,error-source,stop,resumed}-iab.png`。这些均不进入仓库；没有新增 E2E 脚本或修改 4096 的原会话。
+
+Pi 使用 `magpie/claude/claude-opus-5-5`、high，会话 `ohbaby-delivery-ui-20261112-a72e`，在项目根目录审查并直接修改。采纳并核对：有 Goal 时隐藏普通自动续跑说明，避免暂停 Goal 后作出错误承诺；来源按钮增加明确的 aria-label；修正新增测试的 lint 错误及回调返回类型。前端尚无每个实例的 Goal 归属，因此含 Goal 的会话即使有普通子代理，也保守省略此提示。这个场景用组件回归覆盖，没有宣称真实浏览器已验证 Goal 暂停路径。
+
+Pi 修改后，主代理重新构建 Web，重跑 4 文件 232 项测试全部通过；在内置浏览器刷新最终构建，确认 Open subagent xyl-a 仍打开对应 UI_CHILD_144 结果，浏览器错误日志为空。最终来源详情截图为 `/tmp/ohbaby-ui-source-detail-final-iab.png`。Web 构建保留已有大 chunk 警告，没有为这轮提示扩展打包优化范围。
