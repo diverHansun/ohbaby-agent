@@ -342,7 +342,7 @@ SDK、agent、CLI 和 Web 需要同批发布；Settings/current-model 读取字�
 
 ### 9.1 默认值的唯一来源
 
-用户已确认（见 [00 §6](00-discussion.md) D5）：两个默认值只在 `services/llm-model/modelProfiles.ts` 中定义并导出，其他位置一律 import。基线 `b8d5fc67` 上需要处理的位置如下（路径相对 `packages/ohbaby-agent/src`，Web 路径相对 `apps/ohbaby-web/src`）：
+用户已确认（见 [00 §6](00-discussion.md) D5）：两个默认值只在 `services/llm-model/modelProfiles.ts` 中定义并导出，其他生产路径一律 import。基线 `b8d5fc67` 上需要处理的位置如下（路径相对 `packages/ohbaby-agent/src`，Web 路径相对 `apps/ohbaby-web/src`）：
 
 | 位置 | 现状 | 改为 |
 | --- | --- | --- |
@@ -373,3 +373,7 @@ S2 的新运行准备边界还包括 `adapters/ui-inprocess.ts` 中 resolveRunMo
 - metadata/主动验证也不能证明网关在每个请求都执行了对应推理强度；显示基于当前可获得的证据。
 - 不新增定时刷新、通用供应商注册框架、公共目录依赖或动态 effort 预算。
 - 输出截断后的接续机制保留为后续议题，仍需独立的运行时状态和工具安全设计；不因本轮分 Stage 新开 improve-2。
+
+### 默认值静态检查的测试边界
+
+§9.1 的单一来源要求针对生产请求与配置解析。Web 开发 mock 中的 `MOCK_DEFAULT_CONTEXT` / `MOCK_DEFAULT_MAX_OUTPUT` 是测试替身，允许保留，不要求浏览器包导入 agent 的运行模块。测试 fixture 的显式数值与旧 8192 迁移常量同样不属于散落生产默认值。

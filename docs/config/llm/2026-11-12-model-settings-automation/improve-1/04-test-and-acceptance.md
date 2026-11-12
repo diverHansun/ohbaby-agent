@@ -47,6 +47,8 @@
 | T33 | Composer 选中已知 tokenBudgetIssue 的模型时，点击、Enter、命令提交和重发均不发请求，草稿保留；显示 Check settings 并打开设置；切到兼容模型或修正配置后恢复；运行中 Stop 不受影响 | R6、R18、D11 | component + browser | S3 |
 | T34 | TUI 设默认模型启动探测后，通过原有事件推送 context/reasoning 中间态与终态，current-model 可观察终态，不停留在 detecting | R11、R14 | integration | S4 |
 | T35 | connect 只改数值时不重启同路由在途 metadata/active probe（包含两个并发保存）；已知能力复用；连接变化取消旧任务并重探，unknown 的真实保存可重试 | R11、R13 | integration | S2/S4 |
+| T36 | 独立 draft probe 引用了不存在的 API key 时不发请求，返回 missing-credential 并保留用户 context 或默认兜底；未指定凭证变量的 keyless 端点仍可探测 | R20、R21、T27 | unit | S2/S4 |
+| T37 | 同路由重复刷新取消旧任务时，即使旧 context/reasoning 写回已在配置锁中排队，也不得落盘、清理偏好或产生通知；新任务的失败终态仍可见 | R13、T17 | integration | S2 |
 
 ## 3. 测试位置与执行方式
 

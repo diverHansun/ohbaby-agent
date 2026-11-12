@@ -51,3 +51,5 @@ Pi 使用 `anthropic/claude-opus-5-5`、`xhigh`，会话 `codex-model-settings-f
 - probe 去掉 Chat 上回退到 `reasoning` 对象的第二种格式。依据是 01 §5 的实测：18 条路由都不需要它，Zenmux Chat 也校验 `reasoning_effort`。单次探测从最多 9 个 POST 降为 8 个；字段被忽略时只发 1 个对照请求。
 - 删除 `setActiveLLMConfig` 输入里四个没有生产调用方的选项：`clearDiscoveredReasoning`、`clearContextWindowTokens`、`clearActiveModelProfile`、`updateActiveModelProfile`。基线时它们就已经没有生产调用方，只在测试里出现；相关测试改用 `contextWindowTokens: null`。
 - 8192 迁移规则保留，理由见 00 D12。
+
+上述增量已分别提交为 `bad4fc6c` 和 `e501a48f`。本文此前的“保留在工作区，未推送”是当时状态；D12 之后重新运行的全量预检、真实请求、独立审查与最终合并记录见 [07 分支最终验收](07-final-branch-acceptance.md)，不沿用这里的历史测试数量或 Pi 429 结果。

@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | improve-1 | 2026-11-12 | 用户报告输出上限与模型配置自动探测体验问题 | 实施与验收完成 |
 
-用户在方案审查后授权实施。已完成默认值、可选覆盖、Save 自动发现、Responses max 和 Anthropic minimal 清理，以及 Web/TUI 集成；最终测试与真实页面证据记录在 [05 实施与验收](improve-1/05-implementation-acceptance.md)。原讨论和方案保留作为决策与行为契约，不用作实施进度日志。
+用户在方案审查后授权实施。已完成默认值、可选覆盖、Save 自动发现、Responses max 和 Anthropic minimal 清理，以及 Web/TUI 集成；首次实施记录见 [05 实施与验收](improve-1/05-implementation-acceptance.md)，合并前全量复测、独立审查与当前页面证据见 [07 分支最终验收](improve-1/07-final-branch-acceptance.md)。原讨论和方案保留作为决策与行为契约，不用作实施进度日志。
 
 ## 文档地图
 
@@ -21,6 +21,7 @@
 - [04 测试与验收标准](improve-1/04-test-and-acceptance.md)
 - [05 实施与验收记录](improve-1/05-implementation-acceptance.md)
 - [06 外部审查后的修复与复核](improve-1/06-review-followup.md)
+- [07 分支最终验收](improve-1/07-final-branch-acceptance.md)
 
 02 是行为契约，04 是验收标准。后端由主代理承担；Web 前端主体由 Pi `anthropic/claude-opus-5-5`、`xhigh` 完成，主代理负责复核、后续精简和集成验收。具体分工及供应商 429 对续跑的影响见 05。
 
