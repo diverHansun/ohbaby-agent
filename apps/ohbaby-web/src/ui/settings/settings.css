@@ -212,6 +212,18 @@
   margin: 6px 0 8px;
 }
 
+/* Model rows keep lightweight hover feedback without a full-width bar. */
+[data-model-id] .ohb-settings-row.is-clickable .ohb-settings-row-main:hover {
+  background: transparent;
+}
+
+[data-model-id] .ohb-settings-row-main:hover .ohb-settings-row-title {
+  text-decoration: underline;
+  text-decoration-color: var(--border-focus);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
 /* Model editor sub-page */
 .ohb-settings-editor-header {
   align-items: center;
@@ -312,6 +324,16 @@
 
 .ohb-settings-input::placeholder {
   color: var(--text-dim);
+}
+
+/* Native select, its arrow drawn in: inset from the edge, centred, hairline. */
+.ohb-settings-select {
+  appearance: none;
+  background-image: var(--icon-select-chevron);
+  background-position: right 12px center;
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+  padding-right: 32px;
 }
 
 .ohb-settings-input:focus,

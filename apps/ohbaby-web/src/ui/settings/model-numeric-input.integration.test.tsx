@@ -190,6 +190,8 @@ it("keeps both automatic numeric fields empty and omits them from an unrelated e
   const editor = await renderModelEditor(automatic);
   expect(editor.field("Context window").value).toBe("");
   expect(editor.field("Max output").value).toBe("");
+  expect(editor.field("Context window").placeholder).toBe("Optional");
+  expect(editor.field("Max output").placeholder).toBe("Optional");
   expect(editor.save().disabled).toBe(true);
   await input(editor.field("Label"), "Research");
   expect(editor.save().disabled).toBe(false);

@@ -473,7 +473,7 @@ export function ModelEditor(props: {
             />
           </FieldRow>
           <FieldRow id={id("label")} label="Label" error={errorFor("label")}>
-            {input("label")}
+            {input("label", { placeholder: "Optional" })}
           </FieldRow>
           {entry?.configurationComplete ? (
             <ReasoningEffortRow
@@ -519,7 +519,8 @@ export function ModelEditor(props: {
             >
               {input("contextWindowTokens", {
                 type: "number",
-                placeholder: "Auto",
+                // Empty still means automatic; the note says what it uses.
+                placeholder: "Optional",
               })}
               {entry ? <AutoContextNote entry={entry} /> : null}
             </FieldRow>
@@ -531,7 +532,7 @@ export function ModelEditor(props: {
             >
               {input("maxOutputTokens", {
                 type: "number",
-                placeholder: "Auto",
+                placeholder: "Optional",
               })}
             </FieldRow>
             <FieldRow
