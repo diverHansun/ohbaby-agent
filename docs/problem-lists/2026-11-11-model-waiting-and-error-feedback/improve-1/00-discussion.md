@@ -164,6 +164,8 @@ F7 取代了 02 §3.4 原先的设想（输入框显示 `Draft while disconnecte
 - 遮罩只由主连接驱动：Side Chat 与主会话连同一个 daemon，主连接断了侧聊也不可用；侧聊在 10 秒内仍显示自己的 `Reconnecting…`。`Reconnect now` 只唤醒主连接的重连循环。
 - 401 / 409 立即显示“服务已重启”的遮罩，不等 10 秒，因为重连循环此时已经停止。这个状态不会被 10 秒计时覆盖。
 - 断线后连接恢复、会话同步结束（就绪或出错）即撤掉遮罩；同步出错时由会话顶部现有的同步失败提示和重试入口接手，不被遮罩盖住。
+- 遮罩顶部用灰色的 Lychee 图标（40px，复用 `LycheeMark`，果壳和叶子都改用灰色变量），替换原来的空心小圆点（用户追加，2026-11-12）。
+- 断线说明改为 `Your services aren’t responding. Your work on this page is safe, and it will reconnect as soon as they’re back.`。原文 `the connection comes back on its own` 承诺过头：用户关掉服务后连接不会自己回来，页面只会一直重试；`Everything here is kept` 也说不清保留的是什么。
 
 ## 14. TUI 讨论（Claude，2026-11-12）
 

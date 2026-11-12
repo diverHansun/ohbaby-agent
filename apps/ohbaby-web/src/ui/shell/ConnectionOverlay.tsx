@@ -8,6 +8,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ConnectionNotice } from "../../api/daemon/wire.js";
+import { LycheeMark } from "../shared/LycheeMark.js";
 
 /**
  * Covers the app once its services have stayed out of reach, so nothing on
@@ -61,12 +62,15 @@ export function ConnectionOverlay(props: {
       }}
     >
       <div className="ohb-connection-overlay-body">
-        <span className="ohb-connection-overlay-mark" aria-hidden="true" />
+        {/* Lychee in gray: the agent is here, just out of reach. */}
+        <span className="ohb-connection-overlay-mark" aria-hidden="true">
+          <LycheeMark size={40} />
+        </span>
         <h1 id={titleId}>Disconnected</h1>
         <p id={bodyId}>
           {restarted
             ? "Your services restarted while this page was open. Refresh to continue."
-            : "Your services aren’t responding. Everything here is kept, and the connection comes back on its own."}
+            : "Your services aren’t responding. Your work on this page is safe, and it will reconnect as soon as they’re back."}
         </p>
         <button
           type="button"

@@ -206,12 +206,18 @@
   text-align: center;
 }
 
+/* The Lychee mark drained to gray while the services are out of reach. */
 .ohb-connection-overlay-mark {
-  border: 1.5px solid var(--text-dim);
-  border-radius: 50%;
-  height: 10px;
-  margin-bottom: 22px;
-  width: 10px;
+  margin-bottom: 18px;
+}
+
+.ohb-connection-overlay-mark .ohb-lychee-mark {
+  color: var(--text-dim);
+}
+
+.ohb-connection-overlay-mark .ohb-lychee-leaf {
+  fill: var(--border-strong);
+  stroke: var(--text-dim);
 }
 
 .ohb-connection-overlay h1 {
@@ -228,6 +234,7 @@
   font-size: 15px;
   line-height: 1.55;
   margin: 12px 0 0;
+  text-wrap: pretty;
 }
 
 .ohb-connection-overlay-action {

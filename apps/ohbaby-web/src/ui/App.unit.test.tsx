@@ -7697,6 +7697,19 @@ it("covers the app once the services stay out of reach, keeping the draft undern
   expect(overlay?.getAttribute("role")).toBe("alertdialog");
   expect(overlay?.textContent).toContain("Disconnected");
   expect(overlay?.textContent).toContain("Your services");
+  // No promise that the services come back by themselves.
+  expect(overlay?.textContent).toContain(
+    "it will reconnect as soon as they’re back",
+  );
+  // The gray Lychee mark stays decorative inside the dialog.
+  expect(
+    overlay?.querySelector(".ohb-connection-overlay-mark .ohb-lychee-mark"),
+  ).not.toBeNull();
+  expect(
+    overlay
+      ?.querySelector(".ohb-connection-overlay-mark")
+      ?.getAttribute("aria-hidden"),
+  ).toBe("true");
   expect(overlay?.textContent).not.toMatch(/ohbaby/iu);
   expect(overlay?.querySelectorAll("button")).toHaveLength(1);
   expect(
