@@ -151,12 +151,6 @@
   opacity: 1;
 }
 
-/* Sidebar icon buttons answer hover by darkening the icon, not by filling a
-   box around it: lighter on a list this dense. */
-.ohb-sidebar .ohb-icon-button:hover {
-  background: transparent;
-}
-
 .ohb-workspace-heading.is-menu-open
   .ohb-workspace-actions
   .ohb-icon-button:last-child {

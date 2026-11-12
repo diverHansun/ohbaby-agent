@@ -58,8 +58,9 @@
   width: 28px;
 }
 
+/* Hover darkens the icon only, with no box around it (pi): a 28px square
+   around a 16px icon reads heavier than the icon itself. */
 .ohb-icon-button:hover {
-  background: var(--bg-hover);
   color: var(--text);
 }
 
