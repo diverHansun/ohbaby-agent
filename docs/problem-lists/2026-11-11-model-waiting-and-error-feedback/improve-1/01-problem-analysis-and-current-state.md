@@ -49,6 +49,8 @@
 
 ### P4：关闭记忆及可见进展的语义不完整
 
+（2026-11-12 注：关闭功能已随 00 §13 F2 取消，本节关闭记忆部分仅作现状记录。）
+
 主会话用组件局部 `dismissedPromptErrorId` 记关闭；刷新后提示恢复。现有 [draft-storage.ts](../../../../apps/ohbaby-web/src/ui/composer/draft-storage.ts) 已有容错的 sessionStorage 读写辅助，可复用存储方式。
 
 `ModelWaiting` 只看 `firstTextAt`。但当前 Thought 正文已经展示时，第一条回答正文可能还没到，所以 Thought 与 Thinking 可能同时出现。这里要区分“用户已看到进展”和“后端是否允许重试”：[request-observation.ts](../../../../packages/ohbaby-llm/src/client/request-observation.ts) 的首正文指标只记录 `textDelta`，不能改成通用输出指标。

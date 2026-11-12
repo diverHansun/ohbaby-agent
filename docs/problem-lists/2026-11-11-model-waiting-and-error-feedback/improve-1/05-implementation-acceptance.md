@@ -101,3 +101,40 @@
 同一 Pi 会话再次调用 anthropic/claude-opus-5-5、xhigh，建议提交；其只读验证 163 项测试通过，并提醒同步文档。该意见对应初版收窄；子代理随后发现的普通 HTTP 对象兜底缺口另行修正并复核。Pi 原文呈现在对话中，不另建评审文件。
 
 最终针对性回归：provider-error、request-observation、stream-idle、error-detail、lifecycle 共 5 个文件、163 项全部通过。子代理复核确认普通 HTTP provider 的兜底缺口关闭，未恢复多层防护。前端和 SDK diff 为空；streaming 只删除非持久诊断字段。本次不重复全量或真实模型请求，按现有提交钩子执行静态检查后提交。
+
+## Web 前端实施与走查（2026-11-12）
+
+Claude 按 00 §13（F1–F10）实施 Web；TUI 按用户安排在 Web 验收后单独进行，本节不代表 TUI 通过。
+
+改动范围：
+
+- **等待行**：`ModelWaiting` 改用 `modelActivity.phase` 和 `waitingStartedAt`，整条请求链保持同一行；重试时显示 `Retrying #n`，数字翻动、不显示计时；当前步骤出现可见正文、Thought 或工具卡片后让位；连接异常时不显示旧快照的等待行。
+- **轮次错误**：`RunProcess` 带上 `listEndedTurns` 的 `error`（排除用户停止、服务关闭），在失败轮次末尾显示一行说明和可选 `HTTP 状态码`；同一轮的应用中断说明不再重复显示；尚未形成轮次的失败提问挂在其用户消息下。会话顶部卡片不再显示模型终态错误，`selectPersistedPromptError` 删除。
+- **断线遮罩**：SSE 单次尝试 10 秒等不到 hello 即重试；401 / 409 视为 daemon 已重启并停止循环；`ClientSync` 在断线 10 秒后发布 `lost`，重启时发布 `restarted`；`AppShell` 增加 `blocking` 位，遮罩期间整页 `inert`。用户可见文案中的 `ohbaby` 改为“your services”。
+
+自动化验证：`apps/ohbaby-web` 全部测试通过（含新增的重试计数、轮次错误、SSE 重试、断线计时和遮罩测试）；`tsc -b`、ESLint、Prettier 通过。
+
+浏览器走查（独立 home、假 OpenAI 兼容模型、真实 daemon 与 HTTP 链路）：
+
+| 场景 | 结果 |
+| --- | --- |
+| 429 一次后成功 | `Retrying #1` 原位换成回答，未出现错误行 |
+| 连续 429 直到重试耗尽 | 每 50 ms 采样：同一个 DOM 节点从 `Retrying #1` 走到 `#5`，结束时移除一次，无闪动；轮次末尾显示说明和 `HTTP 429` |
+| 连接失败耗尽 | 显示“Could not reach the model…”，无状态码行 |
+| 部分输出后断流 | 保留已输出内容，轮次末尾一条中断说明 |
+| Side Chat 连续 429 | 侧聊内 `Retrying #2` 后显示自己的错误行，主会话不受影响，输入框上方无卡片 |
+| 刷新页面 | 错误行仍在所属轮次，只出现一次 |
+| 停止 daemon | 10 秒内顶栏 `Reconnecting…`，约 10 秒后全页静态遮罩 |
+| 重启 daemon（新 token） | 遮罩改为“服务已重启，刷新继续”；点击 Refresh 后页面恢复 |
+| 正常请求 | `Thinking 3s`，无 ` · ` 分隔 |
+
+走查中发现并修复一个问题：401 时先清除 `lost` 会同步触发新的 10 秒计时，10 秒后把“已重启”覆盖回“未响应”。改为先写 `restarted` 再清理计时，并让计时不覆盖 `restarted`，补充对应单元测试。
+
+未覆盖：断线后同一 daemon 自动恢复（无法在不重启 daemon 的情况下制造断流，由单元测试覆盖）；减少动态效果下的翻动动画依赖全局规则，未单独截图；应用目前只有浅色主题。
+
+子代理代码审查（只读）报告 1 条中等、5 条轻微问题，均已修复：
+
+- **中**：设置弹窗打开时会给整个 `.ohb-shell` 加 `inert`，原先放在 shell 内的遮罩也随之不可点。改为挂到 `body` 的原生 `<dialog>`，用 `showModal()` 进入顶层，其余内容（含设置、菜单等 portal）一并不可操作，Esc 不能关闭。浏览器复核：设置打开时断线，遮罩在最上层（`:modal` 为真），焦点在 `Reconnect now`，Esc 无效，重启后 Refresh 正常。
+- **轻**：读屏改为只播报 `Thinking` / `Retrying #n` 的变化，不播报每秒计时；本页看着运行后失败的轮次，用一次 polite 播报说出原因，历史错误不重复播报。遮罩撤下后焦点回到原来的位置。等待 hello 的尝试中按 `Reconnect now` 会立即放弃该尝试并重连。重试期间不再每秒重渲染。常量注释位置、未使用的类名和不必要的导出已清理。
+
+提交：`d1a1dcbb`（等待行与轮次错误）、`de8ce134`（断线遮罩）。修复后 `apps/ohbaby-web` 全部 950 项测试、`tsc -b`、ESLint 通过。
