@@ -39,12 +39,12 @@ RunManager 在 durable ledger 已标记 running 后通知输入通道就绪。�
 
 ## 结果交付与监督
 
-子执行自然终态把结果写到执行台账的 pending delivery，独立于最初的工具受理回执交付。主动 stop/close 的控制回执不触发结果唤醒。历史 foreground 记录继续只读，不能按新后台结果重新投递。
+子执行自然终态及受控的 process-interrupted/service-shutdown 故障中断，把结果写到执行台账的 pending delivery，独立于最初的工具受理回执交付。主动 stop/close 的控制回执不触发结果唤醒。历史 foreground 记录继续只读，不能按新后台结果重新投递。
 
 - 主会话忙碌：continuation coordinator 在下一模型请求前接收本会话 pending 结果。
 - 主会话空闲：session supervisor 通过现有 `SessionExecutionGate` 和内部提交入口申请一轮，和用户输入共用执行门。
 - 每个结果保留稳定的 `notificationId`，每个接收 run 使用独立 `inputId`。旧请求成员关系不可改写。
-- 只有请求成功才 mark processed。失败或停止后的结果可在后续用户输入、新结果中重投；`wakeupAttemptedAt` 防止同一结果反复自动开启主轮次。
+- 只有请求成功才 mark processed。失败或停止后的结果可在后续用户输入、新结果中重投；请求尝试阻止同一结果反复自动开启主轮次。首个请求前非 Stop 的入口故障最多额外重试 3 次，恢复额度和 run 关联持久保存在原 delivery 字段中。
 - 内部唤醒输入标记为 `subagent-status`，实际结果为 `subagent-result`。
 
 后台子代理在运行时由程序检查执行状态。终态结果到达后，主代理忙时在当前 run 接收，空闲时申请一次结果唤醒。每次子执行默认及最大三十分钟实际工作预算，纯审批等待不计入。
@@ -60,6 +60,7 @@ RunManager 在 durable ledger 已标记 running 后通知输入通道就绪。�
 | `SessionSubagentHost` | 受理、名额、实例串行、stop/close、执行预算 |
 | instance / execution stores | 实例状态、执行历史、结果交付与幂等收据 |
 | `execution-message-channel` | 运行中消息的持久受理、关闭记录和原文读取 |
+| `delivery` | 统一投递资格、精确请求补确认、有限入口恢复和持久 Goal 归属核对；不另建信箱 |
 | `continuation-coordinator` | 当前 run 的结果输入与成功请求确认 |
 | `session-supervisor` | 会话状态检查、结果发现和唤醒去重 |
 | `ui-inprocess` | 用户、Goal、子代理结果共用的主执行准入 |
@@ -76,7 +77,7 @@ primary 历史仍按 `context_scope_id IS NULL` 读取。子代理按 `sessionId
 
 runtime 重置先经过 `resetRuntime` 串行屏障并关闭新准入，再发出 `RunManager.cancelAll`，由 `SandboxManager.dispose` 等待已有 lease 的清理。关闭阶段可以在同一 deadline 内并行等待各资源，但不能把超时或销毁失败写成已确认。重置不会重播旧排队任务；旧输入保留原文及 `closedAt/closeReason`。
 
-Goal 的显式整体停止与预算耗尽按该 Goal 实际持有的 root runs 回收后台执行；普通主 Stop 不走这条整体终止路径。Goal root 归属目前只存内存，重启时已有后台执行会被恢复为中断，因此无需依靠重启后的旧归属继续执行。耗尽 Goal 的结果不会自动冒用普通轮次绕过预算；同一会话的普通后台结果仍可独立唤醒，用户主动输入也可查看已保存的 Goal 结果。
+Goal 的显式整体停止与预算耗尽按该 Goal 实际持有的 root runs 回收后台执行；普通主 Stop 不走这条整体终止路径。execution 在受理时保存可信的 goalId（Goal 字符串／普通 null／旧记录缺失）；内存 ownedRuns 仍服务于运行中控制，不再作为投递路由的唯一依据。重启时遗留后台执行按 owner 证据恢复为中断，结果通知继续受持久归属约束。耗尽 Goal 的结果不会自动冒用普通轮次绕过预算；同一会话的普通后台结果仍可独立唤醒，用户主动输入也可查看已保存的 Goal 结果。
 
 ## UI 实例读取与停止
 
@@ -85,3 +86,7 @@ SDK 的 `listSubagentInstances` 返回主会话全部未关闭实例的完整快
 `stopSubagent` 必须带 `expectedExecutionId`，交由 Host 原子比对，不调用主会话 abort。回执区分 accepted、confirmed、not_running 和 execution_changed。UI 详情在 close 后返回 `SUBAGENT_CLOSED` 并释放 watch/projection；未知或跨 root 的实例返回 `SUBAGENT_NOT_FOUND`，失效的客户端会话绑定返回既有 `SESSION_SCOPE_CHANGED`。释放 watch 不停止执行。主模型 monitor 的授权历史读取和 CLI 的旧 execution reader 仍保留。
 
 HTTP 入口为 `GET /v1/sessions/:id/subagent-instances` 与 `POST /v1/sessions/:id/subagents/:subagentId/stop`；既有 conversation 路径继续负责详情、锚点和 watch。SDK 与 RPC 采用相同的方法及回执，读授权和控制授权分别检查所选主会话。
+
+`pendingResultCount` 是可选只读投影，汇总一个实例所有可见 execution 的未消费结果；与主到子未消费消息数分开。Completed 仅描述子执行，无输出的自动主 run 失败也进入 SDK 共用 turn 错误展示，正常静默成功与用户 Stop 不增加错误提示。
+
+投递服务、准备阶段 Stop 和恢复规则的实施依据见 [本轮验收](2026-11-12-subagent-delivery/improve-1/05-implementation-acceptance.md)。

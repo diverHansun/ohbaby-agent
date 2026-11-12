@@ -59,6 +59,7 @@
 | D6 | 创建 `AgentInstance` 和 `contextScopeId` | `SessionSubagentHost` / `AgentInstanceFactory` |
 | D7 | 管理长生命周期 subagent 状态、名额、消息输入、close、timeout、recover | `SessionSubagentHost` / `SubagentInstanceStore` |
 | D8 | 删除旧 subagent runner/executor API | `agents/index.ts` / package root exports |
+| D9 | 核对父子结果投递、请求确认与有限入口恢复，复用现有存储 | `subagents/delivery` |
 
 ---
 
@@ -108,3 +109,7 @@
 - [x] 能区分 `agents` 和 `core/agents`。
 - [x] 能明确哪些旧职责已经移除。
 - [x] 能明确 primary 与 subagent 的运行和编排边界。
+
+## 父子投递补充（2026-11-12）
+
+`delivery` 组合现有 execution、runtime input、run/request 事实，统一路由和恢复判断；它不执行模型、不建立第二份队列、不替代 SessionExecutionGate。主代理收到通知后在原任务内决定补救，继续使用已有工具；模块不自动重放工具或重新派遣子代理。故障中断也通知，手动停止子代理不独立唤醒主代理。见 [实施验收](2026-11-12-subagent-delivery/improve-1/05-implementation-acceptance.md)。
