@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createSubagentConversationReader,
+  type UiPromptError,
   type UiSubagentConversationReaderState,
   type UiSubagentExecution,
 } from "ohbaby-sdk";
@@ -25,6 +26,7 @@ function ChildReading(props: {
   readonly readingCache: SubagentReadingCache;
   readonly state: UiSubagentConversationReaderState;
   readonly anchorToken?: string;
+  readonly followAnchor?: boolean;
 }): ReactElement {
   const selected = props.state.selected;
   const identity = `${selected?.rootSessionId ?? ""}:${selected?.subagentId ?? ""}`;
@@ -36,6 +38,7 @@ function ChildReading(props: {
         memory={readingMemory(props.readingCache, identity)}
         identity={identity}
         anchorToken={props.anchorToken}
+        followAnchor={props.followAnchor}
       />
     </section>
   );
@@ -368,4 +371,218 @@ it("shows available-history guidance when the delegation has no exact parent anc
     "This delegation’s original message is unavailable. Showing available conversation history.",
   );
   expect(element.textContent).toContain("Investigate the issue");
+});
+
+const providerError = {
+  code: "PROVIDER_API",
+  message: "The model rejected the request. Check the model configuration.",
+  source: "provider" as const,
+  retryable: false,
+  providerId: "zenmux",
+  statusCode: 400,
+};
+/**
+ * A child whose run failed. Its turns live in the physical child session,
+ * which several subagents can share; `root:subagent` only keys reading state.
+ */
+function failedState(
+  subagentId = "worker",
+  runId = "child-run",
+  error: UiPromptError = providerError,
+): UiSubagentConversationReaderState {
+  const failed = {
+    ...execution,
+    subagentId,
+    status: "failed" as const,
+    childSessionId: "child",
+    childRunId: runId,
+  };
+  const messages = [
+    {
+      id: `${subagentId}-task`,
+      role: "user" as const,
+      createdAt: "2026-11-12T15:28:00Z",
+      parts: [{ type: "text" as const, text: "Check both items." }],
+    },
+    {
+      id: `${subagentId}-step`,
+      role: "assistant" as const,
+      runId,
+      status: "completed" as const,
+      createdAt: "2026-11-12T15:28:05Z",
+      parts: [
+        {
+          type: "tool-call" as const,
+          call: {
+            id: `${subagentId}-tool`,
+            name: "read",
+            input: { path: "/a" },
+            status: "completed" as const,
+          },
+        },
+        {
+          type: "tool-result" as const,
+          result: { callId: `${subagentId}-tool`, output: "a" },
+        },
+      ],
+    },
+    {
+      id: `${subagentId}-failed`,
+      role: "assistant" as const,
+      runId,
+      status: "error" as const,
+      finishReason: "error",
+      createdAt: "2026-11-12T15:28:10Z",
+      parts: [],
+    },
+  ];
+  const base = state();
+  return {
+    ...base,
+    selected: failed,
+    conversation: base.conversation && {
+      ...base.conversation,
+      subagentId,
+      anchorMessageId: `${subagentId}-task`,
+      executions: [failed],
+      messages,
+      view: {
+        ...base.conversation.view,
+        session: { ...base.conversation.view.session, messages },
+        runs: [
+          {
+            id: runId,
+            sessionId: "child",
+            status: { kind: "idle" },
+            outcome: "failed",
+            startedAt: "2026-11-12T15:28:00Z",
+            endedAt: "2026-11-12T15:28:10Z",
+            updatedAt: "2026-11-12T15:28:10Z",
+            error,
+          },
+        ],
+      },
+    },
+  };
+}
+/** The body on one root, as a host page keeps it across selections. */
+function mountReading(): {
+  readonly element: HTMLDivElement;
+  readonly readingCache: SubagentReadingCache;
+  readonly render: (
+    data: UiSubagentConversationReaderState | null,
+    followAnchor?: boolean,
+  ) => void;
+} {
+  const element = document.createElement("div");
+  document.body.append(element);
+  const root = createRoot(element);
+  const reader = createSubagentConversationReader({}, "root");
+  const readingCache: SubagentReadingCache = new Map();
+  mounted.push(() => {
+    act(() => {
+      root.unmount();
+    });
+    reader.dispose();
+    element.remove();
+  });
+  return {
+    element,
+    readingCache,
+    render: (data, followAnchor): void => {
+      act(() => {
+        root.render(
+          data ? (
+            <ChildReading
+              reader={reader}
+              readingCache={readingCache}
+              state={data}
+              followAnchor={followAnchor}
+            />
+          ) : null,
+        );
+      });
+    },
+  };
+}
+function scrollTo(element: HTMLElement, top: number): void {
+  const stream = element.querySelector<HTMLElement>(".ohb-stream");
+  if (!stream) throw new Error("No stream");
+  act(() => {
+    stream.scrollTop = top;
+    stream.dispatchEvent(new Event("scroll"));
+  });
+}
+
+it.each([400, 429, undefined])(
+  "shows a child's failure once with its actual HTTP status (%s)",
+  (statusCode) => {
+    const { element, render } = mountReading();
+    render(
+      failedState("worker", "child-run", { ...providerError, statusCode }),
+    );
+    const errors = element.querySelectorAll(".ohb-turn-error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].textContent).toContain(providerError.message);
+    if (statusCode === undefined) {
+      expect(errors[0].textContent).not.toContain("HTTP");
+    } else {
+      expect(errors[0].textContent).toContain(`HTTP ${String(statusCode)}`);
+      if (statusCode === 429)
+        expect(errors[0].textContent).not.toContain("HTTP 400");
+    }
+    expect(
+      element.querySelector(
+        '[data-message-id="worker-failed"] .ohb-turn-error',
+      ),
+    ).toBe(errors[0]);
+    // A run failure is not a reading problem: no reader alert or Retry.
+    expect(element.querySelector('[role="alert"]')).toBeNull();
+  },
+);
+
+it("keeps a reader error apart from a run failure", () => {
+  const { element, render } = mountReading();
+  render({ ...failedState(), error: "Connection lost" });
+  const alert = element.querySelector(".ohb-child-notice[role='alert']");
+  const turnError = element.querySelector(".ohb-turn-error");
+  expect(alert?.textContent).toContain("Connection lost");
+  expect(alert?.textContent).not.toContain(providerError.message);
+  expect(turnError?.textContent).toContain(providerError.message);
+  expect(turnError?.textContent).not.toContain("Connection lost");
+  render({ ...state(), error: "Connection lost" });
+  expect(
+    element.querySelector(".ohb-child-notice[role='alert']"),
+  ).not.toBeNull();
+  expect(element.querySelector(".ohb-turn-error")).toBeNull();
+});
+
+it("keeps a failed child's reason and reading place when reopened", () => {
+  const { element, render } = mountReading();
+  render(failedState(), false);
+  scrollTo(element, 25);
+  render(null);
+  render(failedState(), false);
+  expect(element.querySelector(".ohb-stream")?.scrollTop).toBe(25);
+  expect(element.querySelector(".ohb-turn-error")?.textContent).toContain(
+    providerError.message,
+  );
+});
+
+it("keeps reading places apart for subagents sharing one child session", () => {
+  const { element, readingCache, render } = mountReading();
+  const worker = failedState("worker", "run-a");
+  const other = failedState("other", "run-b");
+  render(worker, false);
+  scrollTo(element, 25);
+  render(other, false);
+  expect(element.querySelector(".ohb-stream")?.scrollTop).toBe(0);
+  expect(
+    element.querySelector('[data-message-id="other-failed"] .ohb-turn-error'),
+  ).not.toBeNull();
+  scrollTo(element, 12);
+  render(worker, false);
+  expect(element.querySelector(".ohb-stream")?.scrollTop).toBe(25);
+  expect(readingCache.get("root:worker")?.position.top).toBe(25);
+  expect(readingCache.get("root:other")?.position.top).toBe(12);
 });

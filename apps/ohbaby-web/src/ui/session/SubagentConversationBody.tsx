@@ -45,7 +45,10 @@ export function SubagentConversationBody({
   readonly reader: Reader;
   readonly state: UiSubagentConversationReaderState;
   readonly memory: ReadingMemory;
-  /** Keys the stream's reading position; `rootSessionId:subagentId`. */
+  /**
+   * Keys the reading state; `rootSessionId:subagentId`. Several subagents can
+   * share one child session, so this is not the session id the turns use.
+   */
   readonly identity: string;
   readonly anchorToken?: string;
   /** False when reopening a held conversation: keep the reading position instead. */
@@ -96,6 +99,8 @@ export function SubagentConversationBody({
         }}
       >
         <ConversationStream
+          // One stream per subagent, so local reading state never carries over.
+          key={identity}
           preserveMessageOrder
           readingPosition={memory.position}
           anchorMessageId={
@@ -120,8 +125,10 @@ export function SubagentConversationBody({
           onLoadHistory={() => reader.loadEarlier()}
           promptRows={[]}
           messages={conversation?.messages ?? []}
-          sessionId={identity}
+          // Turns match runs by the child session, as in the main conversation.
+          sessionId={conversation?.view.session.id ?? null}
           prompts={[]}
+          runs={conversation?.view.runs}
           activeRun={conversation?.view.runs.find(
             (run) => run.status.kind === "running",
           )}
