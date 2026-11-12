@@ -61,6 +61,7 @@
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+  user-select: none;
 }
 
 .ohb-side-panel-tab {
@@ -84,6 +85,23 @@
 .ohb-side-panel-tab.is-active {
   background: var(--bg-selected);
   color: var(--text);
+}
+
+/* A dragged tab (03 §4.9) follows the pointer over its neighbours, so its pill
+   is opaque and outlined; the strip clips outer shadows. Nothing animates, so
+   reduced motion needs no rule. */
+.ohb-side-panel-tab.is-dragging {
+  background:
+    linear-gradient(var(--bg-selected), var(--bg-selected)), var(--bg);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text);
+  cursor: grabbing;
+  position: relative;
+  z-index: 1;
+}
+
+.ohb-side-panel-tab.is-dragging > button {
+  cursor: grabbing;
 }
 
 .ohb-side-panel-tab > button[role="tab"] {
