@@ -15,6 +15,7 @@ import { selectViewModel } from "../session/selectors.js";
 import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
 import { type NoticeItem, NoticeStack } from "../shared/Notice.js";
+import { ConnectionOverlay } from "./ConnectionOverlay.js";
 import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
 import { useSubagentInstances } from "../shared/subagent-instances.js";
 import { SidePanel } from "../side-panel/SidePanel.js";
@@ -448,6 +449,16 @@ export function AppController(props: {
             )}
           />
         ) : undefined
+      }
+      blocking={
+        client && storeSnapshot.connectionNotice ? (
+          <ConnectionOverlay
+            notice={storeSnapshot.connectionNotice}
+            onReconnect={() => {
+              runtime.reconnectNow();
+            }}
+          />
+        ) : null
       }
       overlays={
         <>

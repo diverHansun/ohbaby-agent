@@ -1796,7 +1796,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const banner = app.container.querySelector(".ohb-banner-error");
     expect(banner?.textContent).toBe(
-      "Can't reach ohbaby. Check that it's still running.",
+      "Can't reach your services. Check that they're still running.",
     );
     // A state error clears itself, so it offers no Dismiss that cannot work.
     expect(banner?.querySelector(".ohb-banner-close")).toBeNull();
@@ -5265,6 +5265,7 @@ function createFakeRuntime(input: {
     runtime: {
       retryPermissions: vi.fn(),
       retrySession: vi.fn(),
+      reconnectNow: vi.fn(),
       loadEarlierHistory: vi.fn(() => Promise.resolve()),
       retryUnknownPrompts: vi.fn(() => Promise.resolve()),
       forgetUnknownPrompt: vi.fn(),
@@ -7680,3 +7681,46 @@ it.each([false, true])(
       });
   },
 );
+
+it("covers the app once the services stay out of reach, keeping the draft underneath", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "half-written thought");
+  act(() => {
+    fake.store.setConnectionState("reconnecting");
+    fake.store.setConnectionNotice("lost");
+  });
+  // A modal dialog on the top layer, outside the app root.
+  const overlay = document.querySelector(".ohb-connection-overlay");
+  expect(overlay?.getAttribute("role")).toBe("alertdialog");
+  expect(overlay?.textContent).toContain("Disconnected");
+  expect(overlay?.textContent).toContain("Your services");
+  expect(overlay?.textContent).not.toMatch(/ohbaby/iu);
+  expect(overlay?.querySelectorAll("button")).toHaveLength(1);
+  expect(
+    app.container.querySelector(".ohb-shell-main")?.hasAttribute("inert"),
+  ).toBe(true);
+  // No spinner on the static state.
+  expect(overlay?.querySelector(".ohb-spinner")).toBeNull();
+  act(() => {
+    overlay?.querySelector("button")?.click();
+  });
+  expect(fake.runtime.reconnectNow).toHaveBeenCalledOnce();
+  act(() => {
+    fake.store.setConnectionNotice("restarted");
+  });
+  expect(
+    document.querySelector(".ohb-connection-overlay button")?.textContent,
+  ).toBe("Refresh");
+  act(() => {
+    fake.store.setConnectionState("live");
+    fake.store.setConnectionNotice(null);
+  });
+  expect(document.querySelector(".ohb-connection-overlay")).toBeNull();
+  expect(
+    app.container.querySelector(".ohb-shell-main")?.hasAttribute("inert"),
+  ).toBe(false);
+  expect(textareaValue(app.container)).toBe("half-written thought");
+});

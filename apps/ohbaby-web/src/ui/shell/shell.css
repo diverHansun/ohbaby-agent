@@ -165,3 +165,93 @@
     border-left: 0;
   }
 }
+
+/* The panel and floating layers keep their own layout inside the shell. */
+.ohb-shell-rest {
+  display: contents;
+}
+
+/* Services out of reach: the page fades behind frosted glass, one quiet
+   message on top. Static on purpose; nothing here pretends to be working. */
+.ohb-connection-overlay {
+  align-items: center;
+  animation: ohb-connection-overlay-in 320ms var(--ease) both;
+  backdrop-filter: blur(20px) saturate(0.2);
+  -webkit-backdrop-filter: blur(20px) saturate(0.2);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border: 0;
+  color: var(--text);
+  display: flex;
+  height: 100%;
+  inset: 0;
+  justify-content: center;
+  margin: 0;
+  max-height: none;
+  max-width: none;
+  padding: 24px;
+  position: fixed;
+  width: 100%;
+  z-index: 300;
+}
+
+.ohb-connection-overlay::backdrop {
+  background: transparent;
+}
+
+.ohb-connection-overlay-body {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  max-width: 380px;
+  text-align: center;
+}
+
+.ohb-connection-overlay-mark {
+  border: 1.5px solid var(--text-dim);
+  border-radius: 50%;
+  height: 10px;
+  margin-bottom: 22px;
+  width: 10px;
+}
+
+.ohb-connection-overlay h1 {
+  color: var(--text);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.ohb-connection-overlay p {
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.55;
+  margin: 12px 0 0;
+}
+
+.ohb-connection-overlay-action {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 15px;
+  font-weight: 500;
+  gap: 2px;
+  margin-top: 22px;
+  padding: 4px 6px;
+}
+
+.ohb-connection-overlay-action:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+@keyframes ohb-connection-overlay-in {
+  from {
+    opacity: 0;
+  }
+}

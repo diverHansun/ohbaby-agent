@@ -9,11 +9,11 @@ const SYNC_FAILURE =
 /** Turns a raw error message into one a user can act on. */
 export function readableError(message: string): string {
   if (NETWORK_FAILURE.test(message)) {
-    return "Can't reach ohbaby. Check that it's still running.";
+    return "Can't reach your services. Check that they're still running.";
   }
   if (SYNC_FAILURE.test(message)) {
     globalThis.console.warn(`[ohbaby] ${message}`);
-    return "Lost sync with ohbaby. Reload the page if this doesn't clear.";
+    return "Lost sync with your services. Reload the page if this doesn't clear.";
   }
   return message;
 }

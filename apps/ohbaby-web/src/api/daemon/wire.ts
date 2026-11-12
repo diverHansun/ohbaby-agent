@@ -83,6 +83,8 @@ export interface DirectoryPickerListResponse {
   readonly parent: string | null;
 }
 
+export type ConnectionNotice = "lost" | "restarted";
+
 export type ConnectionState =
   | "connecting"
   | "live"
@@ -143,6 +145,12 @@ export interface StoreSnapshot {
   readonly permission: UiPermissionState | null;
   readonly sessionIndex: readonly UiSessionIndexEntry[];
   readonly connectionState: ConnectionState;
+  /**
+   * What the page says once the connection has stayed down: `lost` after
+   * about ten seconds without it, `restarted` when the daemon no longer knows
+   * this page. Owned by the connection; null while it is fine or recovering.
+   */
+  readonly connectionNotice: ConnectionNotice | null;
   readonly currentModel: UiCurrentModelConfig | null;
   /** True once the current model was read; `currentModel: null` then means none is configured. */
   readonly currentModelLoaded: boolean;

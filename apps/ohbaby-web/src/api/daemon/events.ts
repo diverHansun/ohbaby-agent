@@ -31,6 +31,20 @@ interface ParsedSseFrame {
 
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 5_000;
+/** One attempt may take this long to open and say hello before it is retried. */
+export const EVENT_STREAM_ATTEMPT_TIMEOUT_MS = 10_000;
+
+/**
+ * The daemon refused this page outright: its token (401) or its client
+ * registration (409) belongs to an earlier daemon run. Retrying cannot help;
+ * only a reload picks up the new ones.
+ */
+export class DaemonEventsRejectedError extends Error {
+  constructor(readonly status: 401 | 409) {
+    super(`Daemon SSE failed with HTTP ${String(status)}`);
+    this.name = "DaemonEventsRejectedError";
+  }
+}
 
 function requestUrl(baseUrl: string, path: string): string {
   if (baseUrl.length === 0) {
@@ -83,10 +97,6 @@ function parseEventData(data: string): WebSseEvent {
   return value as WebSseEvent;
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
 export class FetchDaemonEventStream implements DaemonEventStream {
   private readonly baseUrl: string;
   private readonly clientId: string;
@@ -96,6 +106,10 @@ export class FetchDaemonEventStream implements DaemonEventStream {
   private abortController: AbortController | undefined;
   private lastEventId: string | undefined;
   private loopPromise: Promise<void> | undefined;
+  /** Ends the current attempt's hello deadline once the stream is live. */
+  private helloReceived: (() => void) | undefined;
+  /** Cuts the current wait between attempts short. */
+  private wakeLoop: (() => void) | undefined;
 
   constructor(options: DaemonEventStreamOptions) {
     this.baseUrl = options.baseUrl;
@@ -150,6 +164,11 @@ export class FetchDaemonEventStream implements DaemonEventStream {
     await readyPromise;
   }
 
+  /** Tries again now instead of waiting out the backoff; no second stream. */
+  wake(): void {
+    this.wakeLoop?.();
+  }
+
   async close(): Promise<void> {
     const pending = this.loopPromise;
     this.abortController?.abort();
@@ -172,28 +191,68 @@ export class FetchDaemonEventStream implements DaemonEventStream {
       callbacks.onConnectionState?.(
         firstAttempt ? "connecting" : "reconnecting",
       );
+      // A stalled open or a missing hello must not hang the loop forever; a
+      // live stream may stay quiet as long as it likes.
+      const attempt = new AbortController();
+      const stop = (): void => {
+        attempt.abort();
+      };
+      signal.addEventListener("abort", stop, { once: true });
+      const outcome = { timedOut: false, woken: false };
+      const deadline = setTimeout(() => {
+        outcome.timedOut = true;
+        attempt.abort();
+      }, EVENT_STREAM_ATTEMPT_TIMEOUT_MS);
+      this.helloReceived = (): void => {
+        clearTimeout(deadline);
+        this.wakeLoop = undefined;
+      };
+      // Until hello, waking drops this attempt and opens a fresh one at once.
+      this.wakeLoop = (): void => {
+        outcome.woken = true;
+        attempt.abort();
+      };
       try {
-        await this.openOnce(callbacks, signal, ready);
+        await this.openOnce(callbacks, attempt.signal, ready);
         if (signal.aborted) return;
+        if (outcome.timedOut)
+          throw new Error("Daemon SSE did not respond in time");
         callbacks.onConnectionState?.("reconnecting");
         reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
       } catch (error) {
-        if (signal.aborted || isAbortError(error)) {
-          return;
-        }
-        const normalized =
-          error instanceof Error ? error : new Error(String(error));
+        if (signal.aborted) return;
+        if (outcome.woken) continue;
+        const normalized = outcome.timedOut
+          ? new Error("Daemon SSE did not respond in time")
+          : error instanceof Error
+            ? error
+            : new Error(String(error));
         callbacks.onError?.(normalized);
         if (firstAttempt) {
           ready.reject(normalized);
         }
+        if (normalized instanceof DaemonEventsRejectedError) return;
         reconnectDelayMs = Math.min(
           reconnectDelayMs * 2,
           MAX_RECONNECT_DELAY_MS,
         );
+      } finally {
+        clearTimeout(deadline);
+        signal.removeEventListener("abort", stop);
+        this.helloReceived = undefined;
+        this.wakeLoop = undefined;
       }
       firstAttempt = false;
-      await delay(reconnectDelayMs, signal);
+      if (outcome.woken) continue;
+      const pause = new AbortController();
+      const endPause = (): void => {
+        pause.abort();
+      };
+      signal.addEventListener("abort", endPause, { once: true });
+      this.wakeLoop = endPause;
+      await delay(reconnectDelayMs, pause.signal);
+      signal.removeEventListener("abort", endPause);
+      this.wakeLoop = undefined;
     }
   }
 
@@ -221,6 +280,9 @@ export class FetchDaemonEventStream implements DaemonEventStream {
         signal,
       },
     );
+    if (response.status === 401 || response.status === 409) {
+      throw new DaemonEventsRejectedError(response.status);
+    }
     if (!response.ok) {
       throw new Error(`Daemon SSE failed with HTTP ${String(response.status)}`);
     }
@@ -291,6 +353,7 @@ export class FetchDaemonEventStream implements DaemonEventStream {
     }
     const event = parseEventData(frame.data);
     if (event.type === "hello") {
+      this.helloReceived?.();
       callbacks.onConnectionState?.("live");
       ready.resolve();
     }

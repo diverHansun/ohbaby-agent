@@ -54,6 +54,8 @@ export interface OhbabyWebRuntime {
   readonly settings: SettingsLayer;
   retryPermissions(): void;
   retrySession(): void;
+  /** Retries a dropped daemon connection now rather than after the backoff. */
+  reconnectNow(): void;
   loadEarlierHistory(): Promise<void>;
   retryUnknownPrompts(): Promise<void>;
   forgetUnknownPrompt(clientRequestId: string): void;
@@ -205,6 +207,9 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
   retrySession(): void {
     this.instance.client?.retrySession();
+  }
+  reconnectNow(): void {
+    this.instance.client?.reconnectNow();
   }
   async loadEarlierHistory(): Promise<void> {
     await this.instance.client?.loadEarlierHistory();

@@ -90,6 +90,10 @@ export class BrowserDaemonClient implements UiBackendClient {
     this.sync.retrySession();
   }
 
+  reconnectNow(): void {
+    this.sync.reconnectNow();
+  }
+
   loadEarlierHistory(): Promise<void> {
     return this.sync.loadEarlierHistory();
   }
