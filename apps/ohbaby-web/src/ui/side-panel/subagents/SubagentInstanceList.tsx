@@ -55,6 +55,13 @@ function InstanceRow(props: {
             {unprocessedText(instance.unprocessedMessageCount)}
           </span>
         ) : null}
+        {(instance.pendingResultCount ?? 0) > 0 ? (
+          <span className="ohb-subagent-instance-note">
+            {instance.pendingResultCount === 1
+              ? "1 result awaiting parent"
+              : `${String(instance.pendingResultCount)} results awaiting parent`}
+          </span>
+        ) : null}
       </button>
     </li>
   );

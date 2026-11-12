@@ -129,6 +129,10 @@ describe("complete subagent instance snapshots", () => {
         status: "completed",
         completedAt: index + 20,
       });
+      if (index === 4) {
+        await executions.markDelivered(record, "latest-input", 25);
+        await executions.markProcessed(record, "latest-request", 26);
+      }
     }
     const snapshot = await projection.list({
       rootSessionId: "root",
@@ -147,6 +151,7 @@ describe("complete subagent instance snapshots", () => {
       displayName: "Name one",
       description: "latest task",
       unprocessedMessageCount: 2,
+      pendingResultCount: 4,
       approvalBlocked: false,
       settling: false,
     });

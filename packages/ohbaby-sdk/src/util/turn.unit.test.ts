@@ -40,6 +40,29 @@ const answer = (id: string, runId: string): UiMessage => ({
 });
 
 describe("listEndedTurns", () => {
+  it("shows automatic failures before the first message, without surfacing silent success or Stop", () => {
+    const error = {
+      code: "INTERNAL",
+      message: "Input admission failed",
+      source: "runtime" as const,
+      retryable: false,
+    };
+    const turns = listEndedTurns({
+      sessionId: "s",
+      prompts: [],
+      messages: [],
+      runs: [
+        run("failed", { trigger: "subagent", outcome: "failed", error }),
+        run("interrupted", { trigger: "goal", outcome: "interrupted", error }),
+        run("success", { trigger: "subagent" }),
+        run("stop", { trigger: "subagent", outcome: "cancelled", error }),
+      ],
+    });
+    expect(turns.map((turn) => [turn.runId, turn.error?.message])).toEqual([
+      ["failed", "Input admission failed"],
+      ["interrupted", "Input admission failed"],
+    ]);
+  });
   it("chooses one error per visible failed turn with session and terminal boundaries", () => {
     const error = {
       code: "PROVIDER_API",

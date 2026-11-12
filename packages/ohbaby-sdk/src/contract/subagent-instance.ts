@@ -34,6 +34,8 @@ export interface UiSubagentInstance {
   /** Required execution cleanup, excluding naturally detached shell jobs. */
   readonly settling: boolean;
   readonly unprocessedMessageCount: number;
+  /** Child results not yet included in a successful parent request, across executions. */
+  readonly pendingResultCount?: number;
 }
 
 export interface UiSubagentInstanceQuery {

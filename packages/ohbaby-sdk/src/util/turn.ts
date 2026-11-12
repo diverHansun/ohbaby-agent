@@ -45,8 +45,8 @@ export function isPromptPending(prompt: UiPromptSubmission): boolean {
  * prompt is still pending has not ended as a turn yet: the run reports its end
  * before the prompt does, and the turn's timing comes from the prompt. A run
  * without a prompt counts only once it wrote a message of its own (hidden
- * runtime inputs do not count): one that failed before writing anything shows
- * nothing. A user turn keeps its prompt, which anchors it even when the run
+ * runtime inputs do not count), or ended with an automatic-run error. A user
+ * turn keeps its prompt, which anchors it even when the run
  * wrote nothing else. `messages` must include hidden runtime inputs, which
  * identify subagent wake-ups recorded before runs carried a trigger.
  */
@@ -85,7 +85,11 @@ export function listEndedTurns(input: {
       if (pendingRuns.has(runId)) return [];
       const run = runById.get(runId);
       const prompt = promptByRun.get(runId);
-      if (!prompt && !withMessages.has(runId)) return [];
+      const automaticFailure =
+        (run?.trigger === "subagent" || run?.trigger === "goal") &&
+        (run.outcome === "failed" || run.outcome === "interrupted") &&
+        run.error !== undefined;
+      if (!prompt && !withMessages.has(runId) && !automaticFailure) return [];
       const timing = turnTiming(run, prompt);
       if (!timing) return [];
       const opening = input.messages.find((message) => message.runId === runId);

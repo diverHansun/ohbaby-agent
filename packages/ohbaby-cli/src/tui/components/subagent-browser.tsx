@@ -166,6 +166,10 @@ export function SubagentBrowser({
               >
                 {selectedIndex === listStart + index ? "›" : " "}{" "}
                 {execution.subagentId} · {execution.status} ·{" "}
+                {execution.delivery === "pending" ||
+                execution.delivery === "delivered"
+                  ? "awaiting parent · "
+                  : ""}
                 {execution.executionId} ·{" "}
                 {new Date(execution.updatedAt).toLocaleTimeString()}
               </Text>

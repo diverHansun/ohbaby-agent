@@ -17,6 +17,7 @@ import type {
   SubagentExecutionStore,
 } from "../../agents/subagents/execution-store.js";
 import { subagentAccessError } from "../../agents/subagents/access-error.js";
+import { listSessionExecutions } from "../../agents/subagents/continuation-coordinator.js";
 
 function nonEmpty(value?: string): string | undefined {
   const text = value?.trim();
@@ -97,6 +98,7 @@ export class SubagentInstanceProjection {
     item: SubagentInstanceRecord,
     input: UiSubagentInstanceQuery,
     runtime: SubagentStatusResult | undefined,
+    pendingResultCount?: number,
   ): Promise<UiSubagentInstance | undefined> {
     if (item.parentSessionId !== input.rootSessionId)
       throw subagentAccessError("SUBAGENT_NOT_FOUND");
@@ -156,6 +158,20 @@ export class SubagentInstanceProjection {
         runtime?.facts?.find((fact) => fact.subagentId === item.subagentId)
           ?.approval.blocked ?? false,
       settling: state?.settling ?? false,
+      pendingResultCount:
+        pendingResultCount ??
+        (
+          await listSessionExecutions(
+            this.options.executions,
+            input.rootSessionId,
+          )
+        ).filter(
+          (record) =>
+            record.subagentId === item.subagentId &&
+            record.rewoundAt === undefined &&
+            (record.delivery.state === "pending" ||
+              record.delivery.state === "delivered"),
+        ).length,
       unprocessedMessageCount:
         state?.unprocessedMessages.length ??
         (execution ? await this.options.unprocessedCount(execution) : 0),
@@ -178,10 +194,32 @@ export class SubagentInstanceProjection {
         this.rootsByChild.set(item.sessionId, input.rootSessionId);
       const runtime = await this.options.runtime(input.rootSessionId);
       const records = runtime?.items ?? saved;
+      const pendingCounts = new Map<string, number>();
+      for (const execution of await listSessionExecutions(
+        this.options.executions,
+        input.rootSessionId,
+      )) {
+        if (
+          execution.rewoundAt === undefined &&
+          (execution.delivery.state === "pending" ||
+            execution.delivery.state === "delivered")
+        )
+          pendingCounts.set(
+            execution.subagentId,
+            (pendingCounts.get(execution.subagentId) ?? 0) + 1,
+          );
+      }
       const instances = await Promise.all(
         records
           .filter((item) => item.closedAt === undefined)
-          .map((item) => this.projectRow(item, input, runtime)),
+          .map((item) =>
+            this.projectRow(
+              item,
+              input,
+              runtime,
+              pendingCounts.get(item.subagentId) ?? 0,
+            ),
+          ),
       );
       await this.options.validateRoot(input);
       input.signal?.throwIfAborted();
