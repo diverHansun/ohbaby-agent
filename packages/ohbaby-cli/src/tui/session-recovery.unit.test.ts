@@ -720,6 +720,33 @@ describe("TUI rejected submissions and exact Stop targets", () => {
     expect(recovery.getState().pending).toEqual([]);
     recovery.dispose();
   });
+  it("stops the confirmed run even while another control read is in flight", async () => {
+    const { recovery, client } = setup();
+    await recovery.start();
+    await tick();
+    const control = {
+      runtimeEpoch: "epoch",
+      sessionId: "a",
+      rootSessionId: "a",
+      runId: "real-run",
+      driver: "user" as const,
+    };
+    let release!: (value: typeof control) => void;
+    client.getSessionControl.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    // e.g. an approval event refreshing control just before Ctrl+C.
+    const background = recovery.refreshControl();
+    const stopping = recovery.stop("real-run");
+    release(control);
+    await background;
+    await stopping;
+    expect(client.abortRun).toHaveBeenCalledWith("real-run");
+    recovery.dispose();
+  });
   it("never retargets Stop(A) when its control refresh discovers B", async () => {
     const { recovery, client } = setup();
     await recovery.start();

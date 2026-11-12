@@ -274,12 +274,21 @@ export function createTuiSessionRecovery(options: {
       ticket = ++controlTicket,
       generation = selection;
     controlDirty = true;
-    const existing = reads.get(`control:${String(generation)}`);
-    if (existing) {
+    // Wait out a read already in flight, then read again under the same
+    // ticket: a fresh ticket here would make a Stop waiting on this refresh
+    // think another refresh had superseded it.
+    for (
+      let existing = reads.get(`control:${String(generation)}`);
+      existing;
+      existing = reads.get(`control:${String(generation)}`)
+    ) {
       await existing.work.catch(() => undefined);
-      if (isConnected() && ticket === controlTicket && generation === selection)
-        await refreshControl();
-      return;
+      if (
+        !isConnected() ||
+        ticket !== controlTicket ||
+        generation !== selection
+      )
+        return;
     }
     try {
       const control = await read(`control:${String(generation)}`, (signal) =>
