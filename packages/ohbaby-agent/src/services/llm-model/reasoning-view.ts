@@ -41,8 +41,6 @@ export function reasoningCapabilityView(
         ? {}
         : { enabled: true, ...(effort === undefined ? {} : { effort }) },
     source,
-    ...(discovery?.status === "unknown"
-      ? { stale: true, reason: discovery.reason }
-      : {}),
+    ...(discovery?.reason ? { reason: discovery.reason } : {}),
   };
 }

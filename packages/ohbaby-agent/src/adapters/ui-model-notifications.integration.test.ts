@@ -52,16 +52,21 @@ describe("model discovery recovery notifications", () => {
       });
       expect(
         events.filter((event) => event.type === "model.invalidated"),
-      ).toHaveLength(1);
+      ).toHaveLength(2);
       release();
-      await vi.waitFor(() => {
-        expect(
-          events.filter((event) => event.type === "model.invalidated"),
-        ).toHaveLength(2);
+      await vi.waitFor(async () => {
+        const current = await backend.getCurrentModel();
+        expect(current?.contextDiscovery.status).toBe("identified");
+        expect(current?.reasoning?.status).toBe("identified");
       });
+      expect(
+        events.filter((event) => event.type === "model.invalidated").length,
+      ).toBeGreaterThanOrEqual(4);
       expect(await backend.getCurrentModel()).toMatchObject({
         model: "notification-model",
-        contextWindowTokens: 262144,
+        contextWindowTokens: 128000,
+        detectedContextWindowTokens: 262144,
+        effectiveContextWindowTokens: 128000,
       });
       expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
         false,
@@ -92,6 +97,11 @@ describe("model discovery recovery notifications", () => {
       expect(fetchMetadata).toHaveBeenCalledTimes(2);
     } finally {
       release();
+      await vi.waitFor(async () => {
+        const current = await backend.getCurrentModel();
+        expect(current?.contextDiscovery.status).not.toBe("detecting");
+        expect(current?.reasoning?.status).not.toBe("detecting");
+      });
       await backend.dispose();
       vi.unstubAllGlobals();
       if (previousHome === undefined) delete process.env.HOME;

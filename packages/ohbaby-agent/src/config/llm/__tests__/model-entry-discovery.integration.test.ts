@@ -22,6 +22,15 @@ let requests: {
   response: ServerResponse;
 }[];
 let notifications: number;
+async function detected(id: string, value: number): Promise<void> {
+  await vi.waitFor(async () => {
+    const settings = await readModelSettings(opts);
+    const entry = settings.models.find((model) => model.id === id);
+    expect(entry?.detectedContextWindowTokens).toBe(value);
+    expect(entry?.contextDiscovery.status).toBe("identified");
+    expect(entry?.reasoning.status).toBe("identified");
+  });
+}
 let opts: { modelJsonPath: string; envPath: string; onDiscovery: () => void };
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "entry-discovery-"));
@@ -113,12 +122,11 @@ it("returns saved before metadata, discovers candidates independently without PO
     11111,
     ["low"],
   );
-  await vi.waitFor(() => {
-    expect(notifications).toBe(2);
-  });
+  await detected(a.id, 11111);
+  await detected(b.id, 22222);
   const document = await readModelDocument(opts);
   expect(document.models.map((e) => e.id)).toEqual([a.id, b.id]);
-  expect(document.models.map((e) => e.contextWindowTokens)).toEqual([
+  expect(document.models.map((e) => e.detectedContextWindowTokens)).toEqual([
     11111, 22222,
   ]);
   expect(document.models.map((e) => e.reasoningCapabilities?.efforts)).toEqual([
@@ -126,6 +134,10 @@ it("returns saved before metadata, discovers candidates independently without PO
     ["high"],
   ]);
   expect(document.activeProfileId).toBe(a.id);
+  expect(notifications).toBeGreaterThanOrEqual(6);
+  expect(
+    document.models.every((entry) => entry.contextWindowTokens === undefined),
+  ).toBe(true);
   expect(
     document.models.every((entry) => entry.maxOutputTokens === undefined),
   ).toBe(true);
@@ -152,14 +164,12 @@ it("same-reference key replacement invalidates late old key metadata and clears 
   });
   expect(requests.map((r) => r.key)).toEqual(["Bearer old", "Bearer new"]);
   answer(1, 22222);
-  await vi.waitFor(() => {
-    expect(notifications).toBe(1);
-  });
+  await detected(a.id, 22222);
+  expect(requests[0].response.destroyed).toBe(true);
   answer(0, 999999);
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  expect((await readModelDocument(opts)).models[0].contextWindowTokens).toBe(
-    22222,
-  );
+  expect(
+    (await readModelDocument(opts)).models[0].detectedContextWindowTokens,
+  ).toBe(22222);
 });
 it("late results cannot resurrect deletion or override a later active selection", async () => {
   const a = await add("a");
@@ -168,24 +178,25 @@ it("late results cannot resurrect deletion or override a later active selection"
     expect(requests).toHaveLength(2);
   });
   await selectModelEntry(b.id, opts);
+  await vi.waitFor(() => {
+    expect(requests).toHaveLength(3);
+  });
   await deleteModelEntry(a.id, opts);
   answer(
     requests.findIndex((request) => request.key === "Bearer a"),
     999999,
   );
   answer(
-    requests.findIndex((request) => request.key === "Bearer b"),
+    requests.findLastIndex((request) => request.key === "Bearer b"),
     22222,
   );
-  await vi.waitFor(() => {
-    expect(notifications).toBeGreaterThanOrEqual(1);
-  });
+  await detected(b.id, 22222);
   const document = await readModelDocument(opts);
   expect(document.models.map((e) => e.id)).toEqual([b.id]);
   expect(document.activeProfileId).toBe(b.id);
   expect(
     document.models.find((entry) => entry.id === document.activeProfileId)
-      ?.contextWindowTokens,
+      ?.detectedContextWindowTokens,
   ).toBe(22222);
 });
 it("metadata failures preserve saved candidates, unknown has no guessed efforts or active probes", async () => {
@@ -194,12 +205,17 @@ it("metadata failures preserve saved candidates, unknown has no guessed efforts 
     expect(requests).toHaveLength(1);
   });
   requests[0].response.writeHead(401).end("secret-error");
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await vi.waitFor(async () => {
+    expect((await readModelSettings(opts)).models[0].reasoning.status).toBe(
+      "unknown",
+    );
+  });
   const settings = await readModelSettings(opts);
   expect(settings.models).toHaveLength(1);
   expect(settings.models[0].reasoning).toEqual({
     status: "unknown",
     efforts: [],
+    reason: "authentication",
   });
   expect(requests).toHaveLength(1);
   expect(await readFile(opts.modelJsonPath, "utf8")).not.toContain(
@@ -214,9 +230,7 @@ it("superseded scheduled jobs stop before invoking fetch with an already aborted
     expect(requests).toHaveLength(1);
   });
   answer(0, 12345);
-  await vi.waitFor(() => {
-    expect(notifications).toBe(1);
-  });
+  await detected((await readModelDocument(opts)).models[0].id, 12345);
   const { coordinateModelConfig } = await import("../config-coordination.js");
   // Keep scheduled network work paused until both snapshots exist, proving pre-start cancellation.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -231,9 +245,9 @@ it("superseded scheduled jobs stop before invoking fetch with an already aborted
     });
     answer(1, 45678);
     await second;
-    expect((await readModelDocument(opts)).models[0].contextWindowTokens).toBe(
-      45678,
-    );
+    expect(
+      (await readModelDocument(opts)).models[0].detectedContextWindowTokens,
+    ).toBe(45678);
   } finally {
     vi.useRealTimers();
   }
@@ -300,19 +314,19 @@ it("concurrent legacy saves discover their atomically saved entries without reta
     requests.findIndex((request) => request.url === "/b/v1/models"),
     22222,
   );
-  await vi.waitFor(() => {
-    expect(notifications).toBe(1);
-  });
+  await detected(b.id, 22222);
   answer(
     requests.findIndex((request) => request.url === "/a/v1/models"),
     11111,
   );
-  await vi.waitFor(() => {
-    expect(notifications).toBe(2);
-  });
+  await detected(a.id, 11111);
+  await detected(b.id, 22222);
   const document = await readModelDocument(opts);
   expect(
-    document.models.map((entry) => [entry.id, entry.contextWindowTokens]),
+    document.models.map((entry) => [
+      entry.id,
+      entry.detectedContextWindowTokens,
+    ]),
   ).toEqual([
     [a.id, 11111],
     [b.id, 22222],
@@ -324,7 +338,7 @@ it("concurrent legacy saves discover their atomically saved entries without reta
   ).toBe(`${endpoint}/b/v1`);
   expect(
     document.models.find((entry) => entry.id === document.activeProfileId)
-      ?.contextWindowTokens,
+      ?.detectedContextWindowTokens,
   ).toBe(22222);
 });
 
@@ -334,9 +348,7 @@ it("contains discovery preparation failure after a successful save without losin
     expect(requests).toHaveLength(1);
   });
   answer(0, 12345);
-  await vi.waitFor(() => {
-    expect(notifications).toBe(1);
-  });
+  await detected((await readModelDocument(opts)).models[0].id, 12345);
   const { startModelEntryDiscovery } =
     await import("../apply-active-model-config.js");
   const read = vi
@@ -358,15 +370,13 @@ it("keeps a budget or label edit and does not restart discovery when the connect
     expect(requests).toHaveLength(1);
   });
   answer(0, 200000);
-  await vi.waitFor(() => {
-    expect(notifications).toBe(1);
-  });
+  await detected(a.id, 200000);
   await updateModelEntry(
     a.id,
     { contextWindowTokens: 64000, label: "Edited" },
     opts,
   );
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await detected(a.id, 200000);
   // A restarted task would also replace (and so cancel) a selection's active probe.
   expect(requests).toHaveLength(1);
   const [entry] = (await readModelDocument(opts)).models;
@@ -385,9 +395,7 @@ it("preserves budget edited while metadata is still pending", async () => {
     opts,
   );
   answer(0, 200000);
-  await vi.waitFor(() => {
-    expect(notifications).toBe(1);
-  });
+  await detected(a.id, 200000);
   const [entry] = (await readModelDocument(opts)).models;
   expect(entry.contextWindowTokens).toBe(64000);
   expect(entry.reasoningCapabilities?.efforts).toEqual(["low", "high"]);

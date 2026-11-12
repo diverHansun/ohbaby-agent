@@ -14,7 +14,6 @@ import {
   updateModelEntry,
   selectModelEntry,
   probeModelEntry,
-  startModelEntryDiscovery,
   deleteModelEntry,
   deleteModelProvider,
   ModelEntryCreateSchema,
@@ -114,10 +113,6 @@ export function registerGlobalSettingsRoutes(
       if (!parsed.ok) return unreadableBody(context, parsed);
       const { id } = ModelEntrySelectSchema.parse(parsed.value);
       const result = await selectModelEntry(id, modelOptions);
-      void startModelEntryDiscovery(id, {
-        ...modelOptions,
-        allowActiveProbe: true,
-      });
       await ctx.notify(["model"]);
       return context.json({
         ok: true,

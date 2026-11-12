@@ -9,6 +9,7 @@
 - **[data-model.md](data-model.md)**：核心数据概念的定义
 - **[dfd-interface.md](dfd-interface.md)**：数据流和对外接口
 - **[test.md](test.md)**：测试策略和验证方式
+- **[模型配置默认值与保存后自动探测方案](2026-11-12-model-settings-automation/README.md)**：2026-11-12 方案、实施与验收记录，涵盖 32K 输出默认、300K 上下文兜底、用户覆盖及自动 Reasoning Effort 发现。
 
 ## 快速了解
 

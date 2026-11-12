@@ -1,5 +1,5 @@
-const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
-export const DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 300_000;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
 const DEFAULT_SAFETY_MARGIN_TOKENS = 1_024;
 
 export type ModelProfileSource = "user" | "fallback";

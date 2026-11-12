@@ -35,7 +35,7 @@ describe("tokenCounting", () => {
       const counter: TokenCounter = createHeuristicTokenCounter();
 
       expect(counter.estimateTokens("abcd")).toBe(1);
-      expect(counter.getLimit("gpt-4")).toBe(128_000);
+      expect(counter.getLimit("gpt-4")).toBe(300_000);
     });
 
     it("uses a configured default context window for unknown model ids", () => {

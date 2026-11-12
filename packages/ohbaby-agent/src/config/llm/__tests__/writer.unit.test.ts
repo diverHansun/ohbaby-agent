@@ -172,7 +172,7 @@ describe("setActiveLLMConfig", () => {
     const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
-    expect(modelJson.llmParams.maxTokens).toBe(8192);
+    expect(modelJson.llmParams.maxTokens).toBe(32768);
     expect(modelJson.apiConfig).toEqual({
       baseUrl: "http://127.0.0.1:1234/v1",
       interfaceProvider: "openai-compatible",
@@ -234,8 +234,8 @@ describe("setActiveLLMConfig", () => {
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
     expect(modelJson.llmParams).toEqual({
-      maxTokens: 8192,
-      contextWindowTokens: 128000,
+      maxTokens: 32768,
+      contextWindowTokens: 300000,
     });
     expect(modelJson.models?.[1]).toMatchObject({
       temperature: 0.1,
@@ -277,8 +277,8 @@ describe("setActiveLLMConfig", () => {
       findWriteCall((file) => file.includes("model.json")),
     );
     expect(written.llmParams).toEqual({
-      maxTokens: 8192,
-      contextWindowTokens: 128000,
+      maxTokens: 32768,
+      contextWindowTokens: 300000,
     });
   });
 
@@ -433,8 +433,8 @@ describe("setActiveLLMConfig", () => {
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
     expect(modelJson.llmParams).toEqual({
-      maxTokens: 8192,
-      contextWindowTokens: 128000,
+      maxTokens: 32768,
+      contextWindowTokens: 300000,
     });
     expect(modelJson.models).toHaveLength(4);
     expect(modelJson.models?.[0]).toMatchObject(existingModelJson.models[0]);
@@ -445,7 +445,7 @@ describe("setActiveLLMConfig", () => {
     });
     expect(modelJson.models?.[3]).toMatchObject({
       model: "unknown-model",
-      contextWindowTokens: 128000,
+      contextWindowTokens: 300000,
     });
   });
 });

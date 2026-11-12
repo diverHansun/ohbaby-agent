@@ -2369,7 +2369,7 @@ describe("createInProcessUiBackendClient", () => {
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.example/v1",
         contextWindowSource: "default",
-        contextWindowTokens: 128_000,
+        contextWindowTokens: 300_000,
         envPath: globalEnvPath,
         interfaceProvider: "openai-compatible",
         maxOutputTokens: 8192,
@@ -2392,10 +2392,14 @@ describe("createInProcessUiBackendClient", () => {
         baseUrl: "https://zenmux.example/v1",
         interfaceProvider: "openai-compatible",
         model: "anthropic/claude-sonnet-4.6",
-        contextWindowTokens: 128_000,
         maxOutputTokens: 8192,
         provider: "zenmux",
       });
+      expect(
+        (modelJson.models as Record<string, unknown>[]).find(
+          (entry) => entry.id === modelJson.activeProfileId,
+        ),
+      ).not.toHaveProperty("contextWindowTokens");
       expect(modelJson).not.toHaveProperty("llmParams");
       expect(modelJson).not.toHaveProperty("apiKey");
       expect((modelJson.models as Record<string, unknown>[])[0]).toMatchObject({
@@ -2758,15 +2762,20 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: projectRoot,
       });
 
-      await expect(client.getCurrentModel()).resolves.toMatchObject({
+      const current = await client.getCurrentModel();
+      expect(current).toMatchObject({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.ai/api/anthropic",
-        contextWindowTokens: 200_000,
+        detectedContextWindowTokens: 200_000,
+        effectiveContextWindowTokens: 200_000,
+        effectiveMaxOutputTokens: 32768,
+        contextDiscovery: { status: "identified" },
         interfaceProvider: "anthropic",
-        maxOutputTokens: 8192,
         model: "anthropic/claude-sonnet-4.6",
         provider: "zenmux",
       });
+      expect(current).not.toHaveProperty("contextWindowTokens");
+      expect(current).not.toHaveProperty("maxOutputTokens");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -2824,15 +2833,20 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: projectRoot,
       });
 
-      await expect(client.getCurrentModel()).resolves.toMatchObject({
+      const current = await client.getCurrentModel();
+      expect(current).toMatchObject({
         apiKeyEnv: "OPENAI_API_KEY",
         baseUrl: "https://api.openai.com/v1",
-        contextWindowTokens: 128_000,
+        detectedContextWindowTokens: 128_000,
+        effectiveContextWindowTokens: 128_000,
+        effectiveMaxOutputTokens: 32768,
+        contextDiscovery: { status: "identified" },
         interfaceProvider: "openai-responses",
-        maxOutputTokens: 8192,
         model: "gpt-5.6",
         provider: "openai",
       });
+      expect(current).not.toHaveProperty("contextWindowTokens");
+      expect(current).not.toHaveProperty("maxOutputTokens");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

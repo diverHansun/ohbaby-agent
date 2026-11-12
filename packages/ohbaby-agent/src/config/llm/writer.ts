@@ -1,11 +1,15 @@
 import { LLMConfigManager } from "./manager.js";
-import { startModelEntryDiscovery } from "./apply-active-model-config.js";
+import {
+  startModelEntryDiscovery,
+  modelEntryDiscoveryState,
+} from "./apply-active-model-config.js";
 import * as fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { resolve, dirname, join } from "node:path";
 import { z } from "zod";
 import {
   capabilitiesFor,
+  hasUnsupportedAnthropicEffortPreference,
   ConfigError,
   compatibleReasoningPreference,
   modelProfileRouteKey,
@@ -23,7 +27,6 @@ import type {
   UiSettingsModelPatch,
   UiSettingsModels,
 } from "ohbaby-sdk";
-import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../services/llm-model/modelProfiles.js";
 import { reasoningCapabilityView } from "../../services/llm-model/reasoning-view.js";
 import {
   runtimeEnvValue,
@@ -50,7 +53,10 @@ import { loadSearchJson } from "../tools/search/loaders.js";
 import { validateSearchJson } from "../tools/search/validation.js";
 import {
   configurationComplete,
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  entryReasoningOptions,
+  modelEntryNumericView,
+  clearModelReasoningNotice,
+  clearUnsupportedAnthropicEffortPreference,
   normalizeModelDocument,
   readModelDocument,
   ModelSettingsError,
@@ -77,11 +83,11 @@ export interface SetActiveLLMConfigInput {
     | "model-metadata"
     | "active-probe";
   readonly clearDiscoveredReasoning?: boolean;
-  readonly maxTokens?: number;
-  readonly contextWindowTokens?: number;
+  readonly maxTokens?: number | null;
+  readonly contextWindowTokens?: number | null;
   readonly clearContextWindowTokens?: boolean;
   readonly clearActiveModelProfile?: boolean;
-  readonly maxOutputTokens?: number;
+  readonly maxOutputTokens?: number | null;
   readonly updateActiveModelProfile?: boolean;
   readonly modelJsonPath?: string;
   readonly envPath?: string;
@@ -143,6 +149,8 @@ export const ModelEntryPatchSchema = z
   .extend({
     label: z.string().nullable().optional(),
     reasoning: fields.reasoning.nullable(),
+    contextWindowTokens: fields.contextWindowTokens.nullable(),
+    maxOutputTokens: fields.maxOutputTokens.nullable(),
   })
   .strict();
 export const ModelEntrySelectSchema = z
@@ -180,13 +188,11 @@ function clearAutomaticCapabilities(entry: ModelEntry): void {
 }
 function clearIncompatibleReasoningPreference(
   entry: ModelEntry | undefined,
+  modelJsonPath?: string,
 ): void {
   if (!entry || !configurationComplete(entry)) return;
-  const capability = capabilitiesFor({
-    ...entry,
-    maxTokens: entry.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-    modelProfiles: [entry],
-  }).capability;
+  clearUnsupportedAnthropicEffortPreference(entry, modelJsonPath);
+  const capability = capabilitiesFor(entryReasoningOptions(entry)).capability;
   if (!compatibleReasoningPreference(entry.reasoning, capability))
     delete entry.reasoning;
 }
@@ -229,21 +235,26 @@ async function projectSettings(
           values[entry.apiKeyEnv],
         ) !== undefined,
       configurationComplete: configurationComplete(entry),
-      contextWindowTokens: entry.contextWindowTokens,
-      ...(entry.maxOutputTokens === undefined
-        ? {}
-        : { maxOutputTokens: entry.maxOutputTokens }),
+      ...modelEntryNumericView(
+        entry,
+        options.modelJsonPath,
+        modelEntryDiscoveryState(
+          entry.id,
+          options,
+          modelProfileRouteKey(entry, entry.provider),
+        )?.context,
+      ),
       ...(entry.reasoning === undefined
         ? {}
         : { reasoningDefault: entry.reasoning }),
-      reasoning: reasoningCapabilityView({
-        ...entry,
-        baseUrl: entry.baseUrl ?? "",
-        interfaceProvider:
-          entry.interfaceProvider ?? DEFAULT_INTERFACE_PROVIDER,
-        maxTokens: entry.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-        modelProfiles: [entry],
-      }),
+      reasoning: reasoningCapabilityView(
+        entryReasoningOptions(entry),
+        modelEntryDiscoveryState(
+          entry.id,
+          options,
+          modelProfileRouteKey(entry, entry.provider),
+        )?.reasoning,
+      ),
     })),
   };
 }
@@ -264,7 +275,15 @@ async function patchEntry(
   patch: UiSettingsModelPatch,
   options: ModelSettingsOptions,
 ): Promise<SecretWrite | undefined> {
-  const { apiKey, apiKeyEnv, label, reasoning, ...ordinary } = patch;
+  const {
+    apiKey,
+    apiKeyEnv,
+    label,
+    reasoning,
+    contextWindowTokens,
+    maxOutputTokens,
+    ...ordinary
+  } = patch;
   const updates: Record<string, unknown> = ordinary;
   Object.assign(
     entry,
@@ -272,6 +291,12 @@ async function patchEntry(
       Object.entries(updates).filter(([, value]) => value !== undefined),
     ),
   );
+  if (contextWindowTokens === null) delete entry.contextWindowTokens;
+  else if (contextWindowTokens !== undefined)
+    entry.contextWindowTokens = contextWindowTokens;
+  if (maxOutputTokens === null) delete entry.maxOutputTokens;
+  else if (maxOutputTokens !== undefined)
+    entry.maxOutputTokens = maxOutputTokens;
   if (reasoning === null) delete entry.reasoning;
   else if (reasoning !== undefined) entry.reasoning = reasoning;
   if (label === null) delete entry.label;
@@ -318,7 +343,7 @@ async function persistDocument(
   options: ModelSettingsOptions,
   secret?: SecretWrite,
 ): Promise<void> {
-  normalizeModelDocument(document);
+  const normalized = normalizeModelDocument(document);
   const modelJsonPath = options.modelJsonPath ?? getModelJsonPath();
   const envPath = options.envPath ?? getGlobalEnvPath();
   const originalModel = await readOptionalConfigFile(modelJsonPath);
@@ -335,7 +360,7 @@ async function persistDocument(
   try {
     await writeFileAtomically(
       modelJsonPath,
-      `${JSON.stringify(document, null, 2)}\n`,
+      `${JSON.stringify(normalized, null, 2)}\n`,
     );
     if (secret) await writeEnvSecret(envPath, secret.apiKeyEnv, secret.apiKey);
   } catch (error) {
@@ -371,8 +396,6 @@ export function createModelEntry(
       id: `profile-${randomUUID()}`,
       provider: patch.provider,
       model: patch.model,
-      contextWindowTokens:
-        patch.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
     };
     document.models.push(entry);
     const secret = await patchEntry(document, entry, patch, options);
@@ -380,7 +403,11 @@ export function createModelEntry(
     selectFirstCompleteEntry(document, entry);
     await persistDocument(document, options, secret);
     bumpGeneration(entry.id, options);
-    void startModelEntryDiscovery(entry.id, options);
+    await startModelEntryDiscovery(entry.id, {
+      ...options,
+      allowActiveProbe: true,
+      background: true,
+    });
     return projectSettings(document, options);
   });
 }
@@ -393,6 +420,7 @@ export function updateModelEntry(
     const patch = ModelEntryPatchSchema.parse(input);
     const document = await readModelDocument(options);
     const entry = requireEntry(document, id);
+    const connectionValues: Record<string, unknown> = patch;
     const connectionChanged = [
       "provider",
       "model",
@@ -401,19 +429,49 @@ export function updateModelEntry(
       "apiKeyEnv",
       "apiKey",
       "promptCache",
-    ].some((key) => Object.hasOwn(patch, key));
+    ].some((key) => connectionValues[key] !== undefined);
+    const previousEntry = JSON.stringify(entry);
+    const previousRoute = modelProfileRouteKey(entry, entry.provider);
     const secret = await patchEntry(document, entry, patch, options);
     if (connectionChanged) clearAutomaticCapabilities(entry);
+    if (previousRoute !== modelProfileRouteKey(entry, entry.provider)) {
+      delete entry.detectedContextWindowTokens;
+      delete entry.detectedRouteKey;
+    }
     if (patch.reasoning === undefined)
-      clearIncompatibleReasoningPreference(entry);
+      clearIncompatibleReasoningPreference(entry, options.modelJsonPath);
     validateEntryReasoning(entry);
     selectFirstCompleteEntry(document, entry);
     await persistDocument(document, options, secret);
     if (connectionChanged) bumpGeneration(id, options);
     // Budget/label edits keep their value and must not replace a running task,
     // such as the active probe started when this entry was selected.
-    if (connectionChanged && configurationComplete(entry))
-      void startModelEntryDiscovery(id, options);
+    if (patch.reasoning !== undefined)
+      clearModelReasoningNotice(id, options.modelJsonPath);
+    const discovery = modelEntryDiscoveryState(
+      id,
+      options,
+      modelProfileRouteKey(entry, entry.provider),
+    );
+    const inFlight =
+      discovery?.context.status === "detecting" ||
+      discovery?.reasoning.status === "detecting";
+    const unknownContext = !modelEntryNumericView(entry, options.modelJsonPath)
+      .detectedContextWindowTokens;
+    const unknownReasoning = !capabilitiesFor(entryReasoningOptions(entry))
+      .capability;
+    if (
+      configurationComplete(entry) &&
+      (connectionChanged ||
+        (previousEntry !== JSON.stringify(entry) &&
+          !inFlight &&
+          (unknownContext || unknownReasoning)))
+    )
+      await startModelEntryDiscovery(id, {
+        ...options,
+        allowActiveProbe: true,
+        background: true,
+      });
     return projectSettings(document, options);
   });
 }
@@ -428,6 +486,11 @@ export function selectModelEntry(
       throw new ModelSettingsError("MODEL_CONFIG_INCOMPLETE");
     document.activeProfileId = id;
     await persistDocument(document, options);
+    await startModelEntryDiscovery(id, {
+      ...options,
+      allowActiveProbe: true,
+      background: true,
+    });
     return projectSettings(document, options);
   });
 }
@@ -441,7 +504,11 @@ export async function probeModelEntry(
     if (!configurationComplete(entry))
       throw new ModelSettingsError("MODEL_CONFIG_INCOMPLETE");
   });
-  await startModelEntryDiscovery(id, { ...options, allowActiveProbe: true });
+  await startModelEntryDiscovery(id, {
+    ...options,
+    allowActiveProbe: true,
+    forceActiveProbe: true,
+  });
   const result = await readModelSettings(options);
   const entry = result.models.find((model) => model.id === id);
   if (!entry) throw new ModelSettingsError("MODEL_NOT_FOUND");
@@ -508,8 +575,6 @@ export async function setActiveLLMConfig(
         id: `profile-${randomUUID()}`,
         provider: input.provider,
         model: input.model,
-        contextWindowTokens:
-          input.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
       };
       document.models.push(entry);
     }
@@ -531,6 +596,7 @@ export async function setActiveLLMConfig(
         : { maxOutputTokens: input.maxOutputTokens }),
     };
     ModelEntryPatchSchema.parse(patch);
+    const previousRoute = modelProfileRouteKey(entry, entry.provider);
     const previous = JSON.stringify([
       entry.provider,
       entry.model,
@@ -553,8 +619,12 @@ export async function setActiveLLMConfig(
         ]) || input.apiKey !== undefined;
     if (changed || input.clearDiscoveredReasoning)
       clearAutomaticCapabilities(entry);
+    if (previousRoute !== modelProfileRouteKey(entry, entry.provider)) {
+      delete entry.detectedContextWindowTokens;
+      delete entry.detectedRouteKey;
+    }
     if (input.clearContextWindowTokens || input.clearActiveModelProfile) {
-      entry.contextWindowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS;
+      delete entry.contextWindowTokens;
       clearAutomaticCapabilities(entry);
     }
     if (
@@ -564,13 +634,15 @@ export async function setActiveLLMConfig(
       entry.reasoningCapabilities = input.discoveredReasoningCapabilities;
       entry.reasoningCapabilitySource =
         input.discoveredReasoningCapabilitySource ?? "model-metadata";
+      entry.detectedRouteKey = modelProfileRouteKey(entry, entry.provider);
     }
     document.activeProfileId = entry.id;
-    entry.maxOutputTokens =
-      input.maxOutputTokens ??
-      input.maxTokens ??
-      entry.maxOutputTokens ??
-      DEFAULT_MAX_OUTPUT_TOKENS;
+    const output =
+      input.maxOutputTokens !== undefined
+        ? input.maxOutputTokens
+        : input.maxTokens;
+    if (output === null) delete entry.maxOutputTokens;
+    else if (output !== undefined) entry.maxOutputTokens = output;
     if (input.clearTemperature) delete entry.temperature;
     else if (input.temperature !== undefined)
       entry.temperature = input.temperature;
@@ -580,10 +652,12 @@ export async function setActiveLLMConfig(
     if (!configurationComplete(entry))
       throw new ModelSettingsError("MODEL_CONFIG_INCOMPLETE");
     if (input.reasoning === undefined)
-      clearIncompatibleReasoningPreference(entry);
+      clearIncompatibleReasoningPreference(entry, input.modelJsonPath);
     validateEntryReasoning(entry);
     await persistDocument(document, input, secret);
     if (changed) bumpGeneration(entry.id, input);
+    if (input.reasoning !== undefined || input.clearReasoning)
+      clearModelReasoningNotice(entry.id, input.modelJsonPath);
     return {
       profileId: entry.id,
       provider: entry.provider,
@@ -606,7 +680,7 @@ export function writeModelEntryMetadata(
   expected: {
     generation: number;
     routeKey: string;
-    contextWindowTokens: number;
+    contextWindowTokens?: number;
   },
   metadata: {
     contextWindowTokens?: number;
@@ -625,13 +699,13 @@ export function writeModelEntryMetadata(
       modelProfileRouteKey(entry, entry.provider) !== expected.routeKey
     )
       return false;
-    // A later manual budget edit wins over this task's older snapshot, without
-    // discarding the task's reasoning evidence or cancelling its active probe.
-    if (
-      metadata.contextWindowTokens !== undefined &&
-      entry.contextWindowTokens === expected.contextWindowTokens
-    )
-      entry.contextWindowTokens = metadata.contextWindowTokens;
+    if (entry.detectedRouteKey !== expected.routeKey) {
+      delete entry.detectedContextWindowTokens;
+      clearAutomaticCapabilities(entry);
+    }
+    if (metadata.contextWindowTokens !== undefined)
+      entry.detectedContextWindowTokens = metadata.contextWindowTokens;
+    entry.detectedRouteKey = expected.routeKey;
     if (
       metadata.reasoningCapabilities &&
       (!entry.reasoningCapabilities || entry.reasoningCapabilitySource)
@@ -640,7 +714,7 @@ export function writeModelEntryMetadata(
       entry.reasoningCapabilitySource =
         metadata.reasoningCapabilitySource ?? "model-metadata";
     }
-    clearIncompatibleReasoningPreference(entry);
+    clearIncompatibleReasoningPreference(entry, options.modelJsonPath);
     // Discovery can reveal a supported effort whose budget exceeds this entry's
     // output ceiling. Keep the capability evidence, but discard that stale default.
     try {
@@ -668,11 +742,12 @@ function selectFirstCompleteEntry(
 function validateEntryReasoning(entry: ModelEntry): void {
   validateReasoningConfig(entry.reasoning);
   if (!entry.reasoning || !configurationComplete(entry)) return;
-  const config = {
-    ...entry,
-    maxTokens: entry.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-    modelProfiles: [entry],
-  };
+  const config = entryReasoningOptions(entry);
+  if (hasUnsupportedAnthropicEffortPreference(config))
+    throw new ConfigError(
+      "Anthropic minimal effort is unsupported",
+      "INVALID_FIELD",
+    );
   if (capabilitiesFor(config).capability) resolveRequestReasoning(config);
 }
 
@@ -682,12 +757,7 @@ async function backupLegacyModelDocument(
 ): Promise<void> {
   if (original === undefined) return;
   const raw = JSON.parse(original) as Record<string, unknown>;
-  if (
-    !["provider", "defaultModel", "apiConfig", "llmParams"].some((key) =>
-      Object.hasOwn(raw, key),
-    )
-  )
-    return;
+  if (Object.hasOwn(raw, "schemaVersion")) return;
   const directory = join(
     dirname(modelJsonPath),
     "backups",

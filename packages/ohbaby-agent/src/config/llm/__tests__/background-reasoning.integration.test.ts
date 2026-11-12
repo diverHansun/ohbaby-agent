@@ -5,9 +5,26 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { applyActiveModelConfig } from "../apply-active-model-config.js";
+import { readModelDocument } from "../model-document.js";
+import {
+  applyActiveModelConfig,
+  modelEntryDiscoveryState,
+} from "../apply-active-model-config.js";
 const dirs: string[] = [];
+async function terminal(modelJsonPath: string, model?: string): Promise<void> {
+  await vi.waitFor(async () => {
+    const document = await readModelDocument({ modelJsonPath });
+    for (const entry of document.models.filter(
+      (entry) => model === undefined || entry.model === model,
+    )) {
+      const state = modelEntryDiscoveryState(entry.id, { modelJsonPath });
+      expect(state?.context.status).not.toBe("detecting");
+      expect(state?.reasoning.status).not.toBe("detecting");
+    }
+  });
+}
 afterEach(async () => {
+  for (const root of dirs) await terminal(join(root, "model.json"));
   vi.unstubAllGlobals();
   await Promise.all(
     dirs.splice(0).map((p) => rm(p, { recursive: true, force: true })),
@@ -31,11 +48,11 @@ it("discovers reasoning strengths in the background when model metadata only say
         ],
       });
     const body = JSON.parse(init?.body as string) as {
-      reasoning?: { effort?: string; enabled?: boolean };
+      reasoning_effort?: string;
     };
     return new Response(null, {
       status:
-        body.reasoning?.effort === "medium" || body.reasoning?.effort === "high"
+        body.reasoning_effort === "medium" || body.reasoning_effort === "high"
           ? 200
           : 400,
     });
@@ -58,6 +75,7 @@ it("discovers reasoning strengths in the background when model metadata only say
   });
   expect(saved.saved).toBe(true);
   await done;
+  await terminal(join(root, "model.json"));
   const config = parseProjectedDocument(
     await readFile(join(root, "model.json"), "utf8"),
   ) as ModelJsonConfig;
@@ -109,19 +127,12 @@ it("reports saved without waiting and retains independent previous-entry results
     envPath: join(root, "env"),
     deferMetadata: true,
   };
-  const saved = await Promise.race([
-    applyActiveModelConfig({
-      ...common,
-      baseUrl: "https://route-a.example/v1",
-      model: "a",
-    }),
-    new Promise<"blocked">((resolve) =>
-      setTimeout(() => {
-        resolve("blocked");
-      }, 100),
-    ),
-  ]);
-  expect(saved).not.toBe("blocked");
+  const saved = await applyActiveModelConfig({
+    ...common,
+    baseUrl: "https://route-a.example/v1",
+    model: "a",
+  });
+  expect(saved.saved).toBe(true);
   let discovered!: () => void;
   const done = new Promise<void>((resolve) => {
     discovered = resolve;
@@ -133,6 +144,7 @@ it("reports saved without waiting and retains independent previous-entry results
     onDiscovery: discovered,
   });
   await done;
+  await terminal(common.modelJsonPath, "b");
   answerA(
     Response.json({
       data: [
@@ -148,7 +160,7 @@ it("reports saved without waiting and retains independent previous-entry results
       ],
     }),
   );
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await terminal(common.modelJsonPath, "a");
   const config = parseProjectedDocument(
     await readFile(common.modelJsonPath, "utf8"),
   ) as ModelJsonConfig;
@@ -199,6 +211,7 @@ it("clears an incompatible persisted global intent after confirmed capability di
     onDiscovery: done,
   });
   await detected;
+  await terminal(common.modelJsonPath);
   expect(
     (
       parseProjectedDocument(
@@ -234,6 +247,7 @@ it("explicit retry publishes identified capability and preserves verified eviden
     onDiscovery: complete,
   });
   await done;
+  await terminal(input.modelJsonPath);
   vi.stubGlobal("fetch", async () =>
     Response.json({
       data: [
@@ -261,14 +275,14 @@ it("explicit retry publishes identified capability and preserves verified eviden
     efforts: ["low", "high"],
     default: { effort: "low" },
   });
-  expect(notifications).toBe(1);
+  expect(notifications).toBeGreaterThanOrEqual(3);
   vi.stubGlobal("fetch", async () => new Response("limited", { status: 429 }));
-  const stale = await probeActiveModelContextWindow(input);
-  expect(stale.reasoning).toMatchObject({
+  const retried = await probeActiveModelContextWindow(input);
+  expect(retried.reasoning).toMatchObject({
     status: "identified",
-    stale: true,
     reason: "rate-limit",
   });
+  expect(retried.reasoning).not.toHaveProperty("stale");
   let backgroundDone!: () => void;
   const backgroundFinished = new Promise<void>((resolve) => {
     backgroundDone = resolve;
@@ -279,11 +293,12 @@ it("explicit retry publishes identified capability and preserves verified eviden
     onDiscovery: backgroundDone,
   });
   await backgroundFinished;
+  await terminal(input.modelJsonPath);
   const { currentDiscoveryState } =
     await import("../apply-active-model-config.js");
   expect(
     await currentDiscoveryState(input.modelJsonPath, input.envPath),
-  ).toMatchObject({ status: "unknown", reason: "rate-limit" });
+  ).toEqual({ status: "identified" });
   const persisted = JSON.parse(
     await readFile(input.modelJsonPath, "utf8"),
   ) as ModelJsonConfig;

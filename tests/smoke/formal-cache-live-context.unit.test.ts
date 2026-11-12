@@ -536,8 +536,8 @@ it("awaits the public metadata probe when seeded reasoning is already identified
       headers: { "content-type": "text/event-stream" },
     });
   });
-  // Match the live protocol test exactly: GPT profile, seeded capabilities and
-  // 128000 fallback, public connect, then close/reopen the same SQLite database.
+  // Keep the explicit user override through metadata discovery, public connect,
+  // and closing/reopening the same SQLite database.
   const session = await createFormalCacheSession("zenmux-gpt56-luna-chat", {
     maxRequests: 20,
   });
@@ -590,7 +590,7 @@ it("awaits the public metadata probe when seeded reasoning is already identified
     const usage = snapshot.contextWindowUsages?.find(
       (item) => item.sessionId === sessionId,
     );
-    expect(usage?.contextWindowTokens).toBe(1050000);
+    expect(usage?.contextWindowTokens).toBe(1000000);
     expect(usage?.currentTokens).toBeGreaterThan(0);
   }
   try {
@@ -601,7 +601,7 @@ it("awaits the public metadata probe when seeded reasoning is already identified
       interfaceProvider: "openai-compatible",
       baseUrl: "https://zenmux.ai/api/v1",
       apiKeyEnv: "ZENMUX_API_KEY",
-      contextWindowTokens: 128000,
+      contextWindowTokens: 1000000,
       maxOutputTokens: 4096,
     };
     const { model: saved } = await request<{ model: UiConnectModelResult }>(
@@ -610,7 +610,7 @@ it("awaits the public metadata probe when seeded reasoning is already identified
       input,
     );
     expect(saved).toMatchObject({
-      contextWindowTokens: 128000,
+      contextWindowTokens: 1000000,
       contextWindowSource: "user",
     });
     await vi.waitFor(() => expect(metadataResponses).toHaveLength(1));
@@ -618,7 +618,7 @@ it("awaits the public metadata probe when seeded reasoning is already identified
       "/v1/model",
     );
     expect(initial.reasoning?.status).toBe("identified");
-    expect(initial.contextWindowTokens).toBe(128000);
+    expect(initial.contextWindowTokens).toBe(1000000);
     const pendingProbe = request<{ probe: UiProbeModelContextWindowResult }>(
       "/v1/model/context-window-probe",
       "POST",
@@ -633,13 +633,17 @@ it("awaits the public metadata probe when seeded reasoning is already identified
       );
     const { probe } = await pendingProbe;
     expect(probe).toMatchObject({
-      contextWindowTokens: 1050000,
-      contextWindowSource: "detected",
+      contextWindowTokens: 1000000,
+      contextWindowSource: "user",
     });
     const { model: current } = await request<{ model: UiCurrentModelConfig }>(
       "/v1/model",
     );
-    expect(current.contextWindowTokens).toBe(probe.contextWindowTokens);
+    expect(current).toMatchObject({
+      contextWindowTokens: 1000000,
+      detectedContextWindowTokens: 1050000,
+      effectiveContextWindowTokens: 1000000,
+    });
     await submit();
     await handle.dispose();
     await session.reopen();
@@ -652,7 +656,11 @@ it("awaits the public metadata probe when seeded reasoning is already identified
     const { model: reopened } = await request<{ model: UiCurrentModelConfig }>(
       "/v1/model",
     );
-    expect(reopened.contextWindowTokens).toBe(probe.contextWindowTokens);
+    expect(reopened).toMatchObject({
+      contextWindowTokens: 1000000,
+      detectedContextWindowTokens: 1050000,
+      effectiveContextWindowTokens: 1000000,
+    });
     await submit();
   } finally {
     // Resolve the controlled transport even if an assertion fails before probe.

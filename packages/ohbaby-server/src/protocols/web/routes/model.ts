@@ -55,14 +55,22 @@ export function registerModelRoutes(app: Hono, ctx: DaemonRouteContext): void {
     }
     const body = isRecord(parsed.value) ? parsed.value : {};
     const input = modelConnectInputFromBody(body);
-    if (input === undefined) {
+    if (
+      input === undefined ||
+      input.contextWindowTokens === null ||
+      input.maxOutputTokens === null
+    ) {
       return context.json(
         webErrorBody("model connection body is invalid"),
         400,
       );
     }
     try {
-      const probe = await ctx.options.backend.probeModelContextWindow(input);
+      const probe = await ctx.options.backend.probeModelContextWindow({
+        ...input,
+        contextWindowTokens: input.contextWindowTokens,
+        maxOutputTokens: input.maxOutputTokens,
+      });
       return context.json({ ok: true, probe });
     } catch (error) {
       return context.json(webErrorBody(errorMessage(error)), 400);

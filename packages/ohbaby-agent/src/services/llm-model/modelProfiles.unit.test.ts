@@ -85,7 +85,7 @@ describe("modelProfiles", () => {
       });
       expect(registry.resolve(model)).toMatchObject({
         contextWindowTokens: 96_000,
-        maxOutputTokens: 8_192,
+        maxOutputTokens: 32_768,
         provider: "custom",
         source: "fallback",
       });

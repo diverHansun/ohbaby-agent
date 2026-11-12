@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyActiveModelConfig,
   probeActiveModelContextWindow,
+  modelEntryDiscoveryState,
 } from "../apply-active-model-config.js";
+import { readModelDocument } from "../model-document.js";
+import { readModelSettings, probeModelEntry } from "../writer.js";
 import { _LLMConfigManager as LLMConfigManager } from "../index.js";
 
 describe("applyActiveModelConfig", () => {
@@ -22,6 +25,19 @@ describe("applyActiveModelConfig", () => {
   let expectedOpenAIApiKeyAfterTest: string | undefined;
   let verifyOpenAIApiKeyRestore = false;
   let fetchMock: ReturnType<typeof vi.fn>;
+
+  async function discoveryFinished(): Promise<void> {
+    await vi.waitFor(async () => {
+      const document = await readModelDocument({ modelJsonPath });
+      for (const entry of document.models) {
+        const state = modelEntryDiscoveryState(entry.id, { modelJsonPath });
+        if (state) {
+          expect(state.context.status).not.toBe("detecting");
+          expect(state.reasoning.status).not.toBe("detecting");
+        }
+      }
+    });
+  }
 
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-connect-"));
@@ -56,6 +72,13 @@ describe("applyActiveModelConfig", () => {
   });
 
   afterEach(async () => {
+    if (
+      await fs.stat(modelJsonPath).then(
+        () => true,
+        () => false,
+      )
+    )
+      await discoveryFinished();
     vi.unstubAllGlobals();
     restoreEnvValue("HOME", originalHome);
     restoreEnvValue("USERPROFILE", originalUserProfile);
@@ -158,8 +181,11 @@ describe("applyActiveModelConfig", () => {
         llmParams: { maxTokens: number };
         models: { maxOutputTokens?: number }[];
       };
-      expect(saved.llmParams.maxTokens).toBe(8192);
-      expect(saved.models[0].maxOutputTokens).toBe(8192);
+      expect(saved.llmParams.maxTokens).toBe(32768);
+      const raw = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
+        models: Record<string, unknown>[];
+      };
+      expect(raw.models[0]).not.toHaveProperty("maxOutputTokens");
     },
   );
 
@@ -183,7 +209,23 @@ describe("applyActiveModelConfig", () => {
     });
   });
 
-  it("writes safe active config, env value, and resolved model profile", async () => {
+  it("saves before discovery and later writes detected context without an override", async () => {
+    let releaseMetadata!: () => void;
+    const metadataGate = new Promise<void>((resolve) => {
+      releaseMetadata = resolve;
+    });
+    fetchMock.mockImplementationOnce(async () => {
+      await metadataGate;
+      return Response.json({
+        data: [
+          {
+            id: "anthropic/claude-sonnet-4.6",
+            context_length: 200_000,
+            reasoning: false,
+          },
+        ],
+      });
+    });
     const result = await applyActiveModelConfig({
       apiKey: "sk-test-secret",
       apiKeyEnv: "ZENMUX_API_KEY",
@@ -195,6 +237,13 @@ describe("applyActiveModelConfig", () => {
       provider: "zenmux",
     });
 
+    expect(result.saved).toBe(true);
+    expect(
+      (await readModelDocument({ modelJsonPath })).models[0]
+        .detectedContextWindowTokens,
+    ).toBeUndefined();
+    releaseMetadata();
+    await discoveryFinished();
     const modelJson = parseProjectedDocument(
       await fs.readFile(modelJsonPath, "utf-8"),
     ) as {
@@ -220,8 +269,8 @@ describe("applyActiveModelConfig", () => {
     expect(result).toEqual({
       apiKeyEnv: "ZENMUX_API_KEY",
       baseUrl: "https://zenmux.ai/api/anthropic",
-      contextWindowSource: "detected",
-      contextWindowTokens: 200_000,
+      contextWindowSource: "default",
+      contextWindowTokens: 300_000,
       interfaceProvider: "anthropic",
       model: "anthropic/claude-sonnet-4.6",
       modelJsonPath,
@@ -240,7 +289,7 @@ describe("applyActiveModelConfig", () => {
       },
       llmParams: {
         contextWindowTokens: 200_000,
-        maxTokens: 8_192,
+        maxTokens: 32_768,
       },
       models: [
         {
@@ -254,6 +303,11 @@ describe("applyActiveModelConfig", () => {
       "ZENMUX_API_KEY=sk-test-secret\n",
     );
     expect(process.env.ZENMUX_API_KEY).toBe("sk-test-secret");
+    const raw = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
+      models: Record<string, unknown>[];
+    };
+    expect(raw.models[0]).not.toHaveProperty("contextWindowTokens");
+    expect(raw.models[0].detectedContextWindowTokens).toBe(200_000);
   });
 
   it("uses existing env values when API key value is omitted", async () => {
@@ -296,6 +350,7 @@ describe("applyActiveModelConfig", () => {
     });
 
     expect(result.warning).toBeUndefined();
+    await discoveryFinished();
     expect(fetchMock).toHaveBeenCalledWith(
       "https://zenmux.ai/api/anthropic/v1/models",
       expect.objectContaining({
@@ -334,6 +389,7 @@ describe("applyActiveModelConfig", () => {
       contextWindowSource: "detected",
       contextWindowTokens: 200_000,
     });
+    await discoveryFinished();
     expect(fetchMock).toHaveBeenCalledWith(
       "https://zenmux.ai/api/anthropic/v1/models",
       expect.objectContaining({
@@ -345,7 +401,7 @@ describe("applyActiveModelConfig", () => {
     );
   });
 
-  it("warns when an api key env is configured but no value is available", async () => {
+  it("saves a missing credential and reports it in terminal discovery state", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response("unauthorized", { status: 401 }),
     );
@@ -363,13 +419,20 @@ describe("applyActiveModelConfig", () => {
     expect(result).toMatchObject({
       apiKeyEnv: "ZENMUX_API_KEY",
       contextWindowSource: "default",
-      contextWindowTokens: 128_000,
+      contextWindowTokens: 300_000,
       saved: true,
     });
-    expect(result.warning).toContain(
-      "API key env ZENMUX_API_KEY is configured but no value was found",
-    );
-    expect(result.warning).toMatch(/context window/i);
+    await discoveryFinished();
+    const settings = await readModelSettings({ modelJsonPath, envPath });
+    expect(settings.models[0].contextDiscovery).toEqual({
+      status: "unknown",
+      reason: "missing-credential",
+    });
+    expect(settings.models[0].reasoning).toMatchObject({
+      status: "unknown",
+      reason: "missing-credential",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
     await expect(fs.stat(envPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -408,8 +471,8 @@ describe("applyActiveModelConfig", () => {
 
     expect(result).toMatchObject({
       baseUrl: "http://127.0.0.1:1234/v1",
-      contextWindowSource: "detected",
-      contextWindowTokens: 65_536,
+      contextWindowSource: "default",
+      contextWindowTokens: 300_000,
       model: "local-model",
       provider: "lmstudio",
       saved: true,
@@ -421,6 +484,7 @@ describe("applyActiveModelConfig", () => {
       interfaceProvider: "openai-compatible",
     });
     await expect(fs.stat(envPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await discoveryFinished();
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:1234/v1/models",
       expect.objectContaining({
@@ -448,7 +512,7 @@ describe("applyActiveModelConfig", () => {
     expect(process.env[result.apiKeyEnv]).toBe("sk-local-proxy-secret");
   });
 
-  it("uses detected context window over a user-provided value", async () => {
+  it("preserves a user context override while storing the independently detected value", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -475,8 +539,16 @@ describe("applyActiveModelConfig", () => {
       provider: "zenmux",
     });
 
-    expect(result.contextWindowTokens).toBe(262_144);
-    expect(result.contextWindowSource).toBe("detected");
+    expect(result.contextWindowTokens).toBe(128_000);
+    expect(result.contextWindowSource).toBe("user");
+    await discoveryFinished();
+    expect(
+      (await readModelSettings({ modelJsonPath, envPath })).models[0],
+    ).toMatchObject({
+      contextWindowTokens: 128_000,
+      detectedContextWindowTokens: 262_144,
+      effectiveContextWindowTokens: 128_000,
+    });
     expect(JSON.stringify(result)).not.toContain("sk-test-secret");
 
     const modelJson = parseProjectedDocument(
@@ -486,7 +558,7 @@ describe("applyActiveModelConfig", () => {
         readonly contextWindowTokens?: number;
       };
     };
-    expect(modelJson.llmParams.contextWindowTokens).toBe(262_144);
+    expect(modelJson.llmParams.contextWindowTokens).toBe(128_000);
   });
 
   it.each(["same route", "switching back to a saved route"])(
@@ -546,7 +618,7 @@ describe("applyActiveModelConfig", () => {
         ),
       );
       let notifyDiscovery: () => void = () => undefined;
-      const discoveryFinished = new Promise<void>((resolve) => {
+      const discoveryStarted = new Promise<void>((resolve) => {
         notifyDiscovery = resolve;
       });
 
@@ -561,7 +633,8 @@ describe("applyActiveModelConfig", () => {
         deferMetadata: true,
         onDiscovery: notifyDiscovery,
       });
-      await discoveryFinished;
+      await discoveryStarted;
+      await discoveryFinished();
 
       const saved = parseProjectedDocument(
         await fs.readFile(modelJsonPath, "utf8"),
@@ -622,7 +695,7 @@ describe("applyActiveModelConfig", () => {
       ),
     );
     let notifyDiscovery: () => void = () => undefined;
-    const discoveryFinished = new Promise<void>((resolve) => {
+    const discoveryStarted = new Promise<void>((resolve) => {
       notifyDiscovery = resolve;
     });
 
@@ -637,13 +710,29 @@ describe("applyActiveModelConfig", () => {
       deferMetadata: true,
       onDiscovery: notifyDiscovery,
     });
-    await discoveryFinished;
+    await discoveryStarted;
+    await discoveryFinished();
 
     expect(
       (fetchMock.mock.calls as [string, RequestInit?][]).filter(
         ([, init]) => init?.method === "POST",
       ),
-    ).toHaveLength(7);
+    ).toHaveLength(0);
+    const target = (await readModelDocument({ modelJsonPath })).models[0];
+    const refreshed = await probeModelEntry(target.id, {
+      modelJsonPath,
+      envPath,
+    });
+    expect(refreshed).toMatchObject({
+      status: "identified",
+      reason: "unsupported-efforts",
+      efforts: ["low", "medium"],
+    });
+    expect(
+      (fetchMock.mock.calls as [string, RequestInit?][]).filter(
+        ([, init]) => init?.method === "POST",
+      ),
+    ).toHaveLength(8);
     const retained = parseProjectedDocument(
       await fs.readFile(modelJsonPath, "utf8"),
     );
@@ -688,7 +777,7 @@ describe("applyActiveModelConfig", () => {
       ),
     );
     let notifyDiscovery: () => void = () => undefined;
-    const discoveryFinished = new Promise<void>((resolve) => {
+    const discoveryStarted = new Promise<void>((resolve) => {
       notifyDiscovery = resolve;
     });
 
@@ -703,7 +792,8 @@ describe("applyActiveModelConfig", () => {
       deferMetadata: true,
       onDiscovery: notifyDiscovery,
     });
-    await discoveryFinished;
+    await discoveryStarted;
+    await discoveryFinished();
 
     expect(
       (fetchMock.mock.calls as [string, RequestInit?][]).filter(
@@ -712,7 +802,7 @@ describe("applyActiveModelConfig", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("uses the user-provided context window and returns a warning when detection fails", async () => {
+  it("keeps the user context override when background detection fails", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
     const result = await applyActiveModelConfig({
@@ -729,10 +819,15 @@ describe("applyActiveModelConfig", () => {
 
     expect(result.contextWindowTokens).toBe(64_000);
     expect(result.contextWindowSource).toBe("user");
-    expect(result.warning).toMatch(/context window/i);
+    expect(result.warning).toBeUndefined();
+    await discoveryFinished();
+    expect(
+      (await readModelSettings({ modelJsonPath, envPath })).models[0]
+        .contextDiscovery,
+    ).toEqual({ status: "unknown", reason: "network-error" });
   });
 
-  it("uses a 128k default and returns a warning when detection fails without a user value", async () => {
+  it("keeps the 300k fallback without a stored override when background detection fails", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
     const result = await applyActiveModelConfig({
@@ -746,9 +841,14 @@ describe("applyActiveModelConfig", () => {
       provider: "zenmux",
     });
 
-    expect(result.contextWindowTokens).toBe(128_000);
+    expect(result.contextWindowTokens).toBe(300_000);
     expect(result.contextWindowSource).toBe("default");
-    expect(result.warning).toMatch(/context window/i);
+    expect(result.warning).toBeUndefined();
+    await discoveryFinished();
+    expect(
+      (await readModelSettings({ modelJsonPath, envPath })).models[0]
+        .contextDiscovery,
+    ).toEqual({ status: "unknown", reason: "network-error" });
 
     const modelJson = parseProjectedDocument(
       await fs.readFile(modelJsonPath, "utf-8"),
@@ -757,7 +857,7 @@ describe("applyActiveModelConfig", () => {
         readonly contextWindowTokens?: number;
       };
     };
-    expect(modelJson.llmParams.contextWindowTokens).toBe(128_000);
+    expect(modelJson.llmParams.contextWindowTokens).toBe(300_000);
   });
 
   it("probes context window without writing active config", async () => {
@@ -806,7 +906,7 @@ describe("applyActiveModelConfig", () => {
     });
     expect(defaultFallback).toMatchObject({
       contextWindowSource: "default",
-      contextWindowTokens: 128_000,
+      contextWindowTokens: 300_000,
     });
     expect(defaultFallback.warning).toMatch(/context window/i);
   });

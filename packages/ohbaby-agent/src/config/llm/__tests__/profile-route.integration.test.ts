@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { setActiveLLMConfig } from "../writer.js";
 import type { ModelJsonConfig, ModelJsonModelProfile } from "ohbaby-llm";
 import { capabilitiesFor } from "ohbaby-llm";
-import { loadProjectedModelJson } from "../model-document.js";
+import {
+  readModelDocument,
+  loadProjectedModelJson,
+} from "../model-document.js";
 
 it("preserves independent routes and legacy profiles, and resolves the exact route first", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ohbaby-route-"));
@@ -72,12 +75,16 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
       interfaceProvider: "openai-responses",
       contextWindowTokens: 200000,
     });
-    expect(written.models?.slice(1)).toMatchObject([
-      responses,
-      other,
-      generic,
-      caseDistinct,
-    ]);
+    expect(written.models?.slice(1)).toMatchObject(
+      [responses, other, generic, caseDistinct].map(
+        ({ contextWindowTokens, ...profile }) => ({
+          ...profile,
+          detectedContextWindowTokens: contextWindowTokens,
+        }),
+      ),
+    );
+    for (const entry of written.models?.slice(1) ?? [])
+      expect(entry).not.toHaveProperty("contextWindowTokens");
     const projected = await loadProjectedModelJson({ modelJsonPath: path });
     expect(
       capabilitiesFor({
@@ -98,7 +105,11 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
       modelJsonPath: path,
     });
     expect((await read()).models).toHaveLength(5);
-    expect((await read()).models?.[0].contextWindowTokens).toBe(128000);
+    expect((await read()).models?.[0].contextWindowTokens).toBeUndefined();
+    expect(
+      (await loadProjectedModelJson({ modelJsonPath: path })).llmParams
+        .contextWindowTokens,
+    ).toBe(300000);
     expect((await read()).models?.slice(1)).toEqual(written.models?.slice(1));
     await setActiveLLMConfig({
       provider: "gateway",
@@ -262,7 +273,16 @@ it("legacy connect refreshes the first duplicate entry and retains its sibling",
         efforts: ["medium"],
       },
     });
-    expect(written.models?.[1]).toMatchObject(profile);
+    const { contextWindowTokens, ...sibling } = profile;
+    expect(written.models?.[1]).toMatchObject({
+      ...sibling,
+      detectedContextWindowTokens: contextWindowTokens,
+    });
+    expect(written.models?.[1]).not.toHaveProperty("contextWindowTokens");
+    expect(
+      (await readModelDocument({ modelJsonPath: path })).models[1]
+        .detectedRouteKey,
+    ).toBeDefined();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

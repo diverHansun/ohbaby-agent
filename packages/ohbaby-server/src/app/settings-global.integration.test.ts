@@ -754,7 +754,7 @@ it("returns MODEL_CONFIG_INCOMPLETE for legacy history and redacts successful mo
   expect(got).not.toMatch(/url-secret|encoded-secret|key-secret/);
 });
 
-it("global target probes and active selection refresh through HTTP, emitting both model events without a directory header", async () => {
+it("global target probes refresh and active selection reuses evidence through HTTP, emitting both model events without a directory header", async () => {
   const events = await eventStream(join(root, "a"), "probe-events");
   let posts = 0;
   let effort = "high";
@@ -773,12 +773,12 @@ it("global target probes and active selection refresh through HTTP, emitting bot
       for await (const chunk of req)
         chunks.push(Buffer.from(chunk as Uint8Array));
       const body = JSON.parse(Buffer.concat(chunks).toString()) as {
-        reasoning?: { effort?: string; enabled?: boolean };
+        reasoning_effort?: string;
       };
       posts++;
       res
         .writeHead(
-          body.reasoning?.effort === effort || body.reasoning?.enabled === false
+          body.reasoning_effort === effort || body.reasoning_effort === "none"
             ? 200
             : 400,
         )
@@ -803,9 +803,12 @@ it("global target probes and active selection refresh through HTTP, emitting bot
       const current = (await (
         await request("models")
       ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
-      expect(current.models[0].contextWindowTokens).toBe(48000);
+      expect(current.models[0].contextWindowTokens).toBeUndefined();
+      expect(current.models[0].detectedContextWindowTokens).toBe(48000);
+      expect(current.models[0].effectiveContextWindowTokens).toBe(48000);
+      expect(current.models[0].reasoning.status).toBe("identified");
     });
-    expect(posts).toBe(0);
+    expect(posts).toBe(8);
     const offset = events().length;
     const probed = await request("models/probe", "POST", { id });
     expect(probed.status).toBe(200);
@@ -817,7 +820,7 @@ it("global target probes and active selection refresh through HTTP, emitting bot
         efforts: ["high"],
       },
     });
-    expect(posts).toBe(8);
+    expect(posts).toBe(16);
     expect(
       (
         (await (
@@ -837,9 +840,22 @@ it("global target probes and active selection refresh through HTTP, emitting bot
         await request("models")
       ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
       expect(current.active?.id).toBe(id);
-      expect(current.models[0].reasoning.efforts).toEqual(["low"]);
+      expect(current.models[0].contextDiscovery.status).toBe("identified");
+      expect(current.models[0].reasoning.status).toBe("identified");
+      expect(current.models[0].reasoning.efforts).toEqual(["high"]);
     });
     expect(posts).toBe(16);
+    const refreshed = await request("models/probe", "POST", { id });
+    expect(refreshed.status).toBe(200);
+    expect(await refreshed.json()).toMatchObject({
+      ok: true,
+      reasoning: {
+        status: "identified",
+        source: "active-probe",
+        efforts: ["low"],
+      },
+    });
+    expect(posts).toBe(24);
     expect(
       (await request("models/probe", "POST", { id: "missing" })).status,
     ).toBe(404);
@@ -997,3 +1013,69 @@ it("finishes an otherwise complete legacy entry without requiring a key", async 
   expect(entry?.apiKeyConfigured).toBe(false);
   expect((await request("models/active", "POST", { id })).status).toBe(200);
 });
+
+it.each(["contextWindowTokens", "maxOutputTokens"])(
+  "rejects null %s on Create but accepts it as an explicit Patch clear",
+  async (field) => {
+    const profile = {
+      provider: "numeric-contract",
+      model: "no-network-model",
+      baseUrl: "http://127.0.0.1:1/v1",
+      interfaceProvider: "openai-compatible",
+      apiKeyEnv: "MISSING_NUMERIC_CONTRACT_KEY",
+    };
+    vi.stubEnv("MISSING_NUMERIC_CONTRACT_KEY", undefined);
+    const invalid = await request("models/profiles", "POST", {
+      ...profile,
+      [field]: null,
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION_FAILED", fields: [{ path: [field] }] },
+    });
+    const created = await request("models/profiles", "POST", {
+      ...profile,
+      contextWindowTokens: 48000,
+      maxOutputTokens: 4096,
+    });
+    expect(created.status).toBe(200);
+    const saved =
+      (await created.json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    const id = required(
+      saved.models.find((model) => model.provider === profile.provider),
+    ).id;
+    const omitted = await request(`models/profiles/${id}`, "PATCH", {
+      label: "numeric intent preserved",
+    });
+    expect(omitted.status).toBe(200);
+    const unchanged =
+      (await omitted.json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    expect(unchanged.models.find((model) => model.id === id)).toMatchObject({
+      contextWindowTokens: 48000,
+      maxOutputTokens: 4096,
+    });
+    const cleared = await request(`models/profiles/${id}`, "PATCH", {
+      [field]: null,
+    });
+    expect(cleared.status).toBe(200);
+    const current = (await (
+      await request("models")
+    ).json()) as import("ohbaby-sdk").UiSettingsModelsResponse;
+    const model = required(current.models.find((entry) => entry.id === id));
+    expect(model).not.toHaveProperty(field);
+    expect(model).toMatchObject(
+      field === "contextWindowTokens"
+        ? {
+            effectiveContextWindowTokens: 300000,
+            maxOutputTokens: 4096,
+            effectiveMaxOutputTokens: 4096,
+          }
+        : {
+            contextWindowTokens: 48000,
+            effectiveContextWindowTokens: 48000,
+            effectiveMaxOutputTokens: 32768,
+          },
+    );
+  },
+);

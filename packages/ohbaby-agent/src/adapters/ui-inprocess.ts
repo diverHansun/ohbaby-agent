@@ -87,11 +87,14 @@ import type {
   UiPromptReceiptResult,
 } from "ohbaby-sdk";
 import type { ResolveRequestReasoningOptions } from "ohbaby-llm";
-import { validateReasoningConfig } from "ohbaby-llm";
+import { validateReasoningConfig, modelProfileRouteKey } from "ohbaby-llm";
 import type { ReasoningConfig } from "ohbaby-llm";
 import { resolveRequestReasoning } from "ohbaby-llm";
 import { reasoningCapabilityView } from "../services/llm-model/reasoning-view.js";
-import { currentDiscoveryState } from "../config/llm/apply-active-model-config.js";
+import {
+  currentDiscoveryState,
+  modelEntryDiscoveryState,
+} from "../config/llm/apply-active-model-config.js";
 import {
   coordinateModelConfig,
   settingsConfigVersion,
@@ -104,6 +107,7 @@ import {
   readModelDocument,
   configurationComplete,
   ModelSettingsError,
+  modelEntryNumericView,
 } from "../config/llm/model-document.js";
 import { selectModelEntry } from "../config/llm/writer.js";
 import { createPermissionProjection } from "./app-events/permission-projection.js";
@@ -3084,9 +3088,17 @@ export function createInProcessUiBackendClient(
         source,
         apiKeyEnv: config.apiKeyEnv,
         baseUrl: config.baseUrl,
-        contextWindowTokens: config.contextWindowTokens,
+        ...modelEntryNumericView(
+          entry,
+          undefined,
+          modelEntryDiscoveryState(
+            entry.id,
+            {},
+            modelProfileRouteKey(entry, entry.provider),
+          )?.context,
+        ),
         interfaceProvider: config.interfaceProvider,
-        maxOutputTokens: config.maxTokens,
+
         model: config.model,
         provider: config.provider,
         // This query describes the next turn's configuration. Settings keeps

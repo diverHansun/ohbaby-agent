@@ -59,11 +59,11 @@ describe("config/llm integration", () => {
         interfaceProvider: "openai-compatible",
         promptCache: "auto",
         maxTokens: 4096,
-        contextWindowTokens: 128000,
+        contextWindowTokens: 300000,
         modelProfiles: [
           expect.objectContaining({
             model: "gpt-4",
-            contextWindowTokens: 128000,
+            contextWindowTokens: 300000,
           }),
         ],
       });

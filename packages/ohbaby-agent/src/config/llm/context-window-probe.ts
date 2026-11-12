@@ -1,3 +1,4 @@
+import type { ReasoningProbeReason } from "./reasoning-active-probe.js";
 import { validateReasoningCapabilities } from "ohbaby-llm";
 import type { InterfaceProviderKind, ReasoningCapabilities } from "ohbaby-llm";
 
@@ -37,7 +38,8 @@ export interface ProbeContextWindowResult {
     | "timeout"
     | "cancelled"
     | "invalid-json"
-    | "network-error";
+    | "network-error"
+    | ReasoningProbeReason;
 }
 
 export async function probeContextWindow(
@@ -67,7 +69,6 @@ export async function probeContextWindow(
   try {
     let url = buildModelMetadataUrl(input);
     const visited = new Set<string>();
-    let fuzzyContext: number | undefined;
     while (!visited.has(url)) {
       visited.add(url);
       const response = await abortable(
@@ -95,13 +96,8 @@ export async function probeContextWindow(
           isRecord(entry) &&
           (entry.id ?? entry.model ?? entry.name) === input.model,
       );
-      // Existing fuzzy context-window matching remains independent of exact reasoning identity.
-      fuzzyContext ??= extractContextWindowTokens(
-        findBestModelEntry(entries, input.model),
-      );
       if (isRecord(exact)) {
-        const contextWindowTokens =
-          extractContextWindowTokens(exact) ?? fuzzyContext;
+        const contextWindowTokens = extractContextWindowTokens(exact);
         const candidate =
           exact.reasoningCapabilities ?? exact.reasoning_capabilities;
         let reasoningCapabilities: ReasoningCapabilities | undefined;
@@ -142,12 +138,7 @@ export async function probeContextWindow(
       );
       url = next.toString();
     }
-    return fuzzyContext === undefined
-      ? failed("model-not-found")
-      : {
-          reasoningReason: "model-not-found",
-          contextWindowTokens: fuzzyContext,
-        };
+    return failed("model-not-found");
   } catch {
     return failed(
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Mutated by the timeout callback while awaiting network/body reads.
@@ -262,95 +253,6 @@ function modelEntriesFromPayload(payload: unknown): readonly unknown[] {
     return payload.models;
   }
   return [];
-}
-
-function findBestModelEntry(
-  entries: readonly unknown[],
-  model: string,
-): Record<string, unknown> | undefined {
-  const strongMatch = entries.find(
-    (entry) => modelEntryMatchStrength(entry, model) === "strong",
-  );
-  if (isRecord(strongMatch)) {
-    return strongMatch;
-  }
-  const fuzzyMatch = entries.find(
-    (entry) => modelEntryMatchStrength(entry, model) === "fuzzy",
-  );
-  return isRecord(fuzzyMatch) ? fuzzyMatch : undefined;
-}
-
-function modelEntryMatchStrength(
-  entry: unknown,
-  model: string,
-): "strong" | "fuzzy" | undefined {
-  if (!isRecord(entry)) {
-    return undefined;
-  }
-  const id =
-    stringField(entry, "id") ??
-    stringField(entry, "model") ??
-    stringField(entry, "name");
-  if (id === undefined) {
-    return undefined;
-  }
-  return modelIdMatchStrength(id, model);
-}
-
-function modelIdMatchStrength(
-  candidate: string,
-  target: string,
-): "strong" | "fuzzy" | undefined {
-  const candidateLower = candidate.toLowerCase();
-  const targetLower = target.toLowerCase();
-  if (
-    candidateLower === targetLower ||
-    candidateLower.endsWith(`/${targetLower}`) ||
-    targetLower.endsWith(`/${candidateLower}`)
-  ) {
-    return "strong";
-  }
-
-  const candidateTokens = modelIdTokens(candidateLower);
-  const targetTokens = modelIdTokens(targetLower);
-  const meaningfulTargetTokens = targetTokens.filter(
-    (token) => /[a-z]/u.test(token) && token.length >= 3,
-  );
-  return targetTokens.length > 1 &&
-    meaningfulTargetTokens.length > 0 &&
-    targetTokens.every((token) => candidateTokenMatches(candidateTokens, token))
-    ? "fuzzy"
-    : undefined;
-}
-
-function modelIdTokens(value: string): readonly string[] {
-  return value.match(/[a-z0-9]+/gu) ?? [];
-}
-
-function candidateTokenMatches(
-  candidateTokens: readonly string[],
-  targetToken: string,
-): boolean {
-  if (/^\d+$/u.test(targetToken)) {
-    return candidateTokens.some(
-      (candidateToken) =>
-        candidateToken === targetToken ||
-        (/^[a-z]+\d+$/u.test(candidateToken) &&
-          candidateToken.endsWith(targetToken)),
-    );
-  }
-  return candidateTokens.some(
-    (candidateToken) =>
-      candidateToken === targetToken || candidateToken.includes(targetToken),
-  );
-}
-
-function stringField(
-  record: Record<string, unknown>,
-  field: string,
-): string | undefined {
-  const value = record[field];
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
 function parsePositiveInteger(value: unknown): number | undefined {

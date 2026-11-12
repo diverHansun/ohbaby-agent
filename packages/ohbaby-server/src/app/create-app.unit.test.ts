@@ -101,6 +101,9 @@ function currentModelConfig(): UiCurrentModelConfig {
   return {
     id: "fake",
     source: "default",
+    effectiveContextWindowTokens: 100,
+    effectiveMaxOutputTokens: 10,
+    contextDiscovery: { status: "unknown" },
     apiKeyEnv: "FAKE_API_KEY",
     baseUrl: "https://example.invalid/v1",
     contextWindowTokens: 100,
@@ -3040,6 +3043,24 @@ describe("createDaemonServerApp", () => {
   });
 
   it.each([
+    {
+      body: {
+        provider: "fixture",
+        model: "model",
+        baseUrl: "https://fixture.test",
+        contextWindowTokens: null,
+      },
+      path: "/v1/model/context-window-probe",
+    },
+    {
+      body: {
+        provider: "fixture",
+        model: "model",
+        baseUrl: "https://fixture.test",
+        maxOutputTokens: null,
+      },
+      path: "/v1/model/context-window-probe",
+    },
     {
       body: {
         apiKeyEnv: "ANTHROPIC_API_KEY",

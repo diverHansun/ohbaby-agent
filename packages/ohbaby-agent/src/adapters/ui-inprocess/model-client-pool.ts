@@ -63,7 +63,9 @@ export function createModelClientPool(options: {
           model: config.model,
           baseUrl: config.baseUrl,
           interfaceProvider: config.interfaceProvider,
-          contextWindowTokens: config.contextWindowTokens ?? 128_000,
+          ...(config.contextWindowTokens === undefined
+            ? {}
+            : { contextWindowTokens: config.contextWindowTokens }),
           maxOutputTokens: config.maxTokens,
           reasoning: config.reasoning,
         });

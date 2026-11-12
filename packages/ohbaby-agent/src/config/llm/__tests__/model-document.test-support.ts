@@ -1,6 +1,7 @@
 import {
   normalizeModelDocument,
   projectModelDocument,
+  projectModelEntry,
 } from "../model-document.js";
 import type { ModelJsonConfig } from "ohbaby-llm";
 import type { ModelDocument } from "../model-document.js";
@@ -12,5 +13,12 @@ export function parseProjectedDocument(
   const document = normalizeModelDocument(JSON.parse(text));
   const projected = projectModelDocument(document);
   if (!projected) throw new Error("Expected a configured model");
-  return { ...projected, ...document };
+  return {
+    ...projected,
+    ...document,
+    models: document.models.map((entry) => ({
+      ...entry,
+      ...projectModelEntry(entry),
+    })),
+  };
 }

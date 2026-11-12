@@ -1,3 +1,5 @@
+import type { UiModelSettingsNumericView } from "./connect-model.js";
+
 /** Instance settings HTTP reads use the workspace directory header, with no request body. */
 export interface UiSettingsMcpTool {
   readonly name: string;
@@ -160,15 +162,20 @@ export interface UiSettingsModelCreate {
   readonly maxOutputTokens?: number;
 }
 export type UiSettingsModelPatch = Partial<
-  Omit<UiSettingsModelCreate, "label" | "reasoning">
+  Omit<
+    UiSettingsModelCreate,
+    "label" | "reasoning" | "contextWindowTokens" | "maxOutputTokens"
+  >
 > & {
   readonly label?: string | null;
+  readonly contextWindowTokens?: number | null;
+  readonly maxOutputTokens?: number | null;
   readonly reasoning?: import("./connect-model.js").UiReasoningConfig | null;
 };
 export interface UiSettingsModelSelect {
   readonly id: string;
 }
-export interface UiSettingsModel {
+export interface UiSettingsModel extends UiModelSettingsNumericView {
   readonly reasoningDefault?: import("./connect-model.js").UiReasoningConfig;
   readonly id: string;
   readonly provider: string;
@@ -180,8 +187,6 @@ export interface UiSettingsModel {
   readonly apiKeyEnv?: string;
   readonly apiKeyConfigured: boolean;
   readonly configurationComplete: boolean;
-  readonly contextWindowTokens: number;
-  readonly maxOutputTokens?: number;
   readonly reasoning: import("./connect-model.js").UiReasoningCapabilityView;
 }
 export interface UiSettingsModels {

@@ -2,98 +2,56 @@
 
 ## 测试范围
 
-**覆盖的职责**：
-- 从 model.json 加载配置
-- 父进程环境变量优先，缺失时从项目 `.env` 解析 API Key
-- 验证配置的完整性和有效性
-- 缓存和热重载机制
-- 错误情况的处理和报告
-
-**不覆盖的内容**：
-- 文件系统的底层行为（假设 fs 模块正确）
-- Node.js 环境变量系统（假设 process.env 正确）
-- 外部模块（llm-client、command）如何使用本模块的配置
+覆盖模型库读取、版本迁移、凭证解析、写入事务、有效值投影、自动发现和运行准入，并验证 SDK/HTTP/Web/TUI 的一致契约。文件系统实现和供应商是否真实执行推理不由本模块测试保证。
 
 ## 关键场景
 
 ### 正常路径
 
-1. **配置成功加载**：model.json 和 API Key 都有效，getLLMConfig() 返回完整的 LLMConfig
-2. **缓存生效**：第一次调用加载，第二次调用返回缓存结果，不重复加载文件
-3. **项目 .env 生效**：`.env` 可补充 API Key，不修改 `process.env`，且不覆盖父进程已有环境变量
-4. **热重载工作**：reloadLLMConfig() 清除缓存，下一次调用重新加载文件
+1. 仅填连接创建模型，两个覆盖字段保持省略，运行有效 context/output 为 300000/32768；effort 不影响普通输出上限。
+2. 同路由检测值只写 `detectedContextWindowTokens`；手动覆盖优先。清空覆盖后回到自动，重新读取不把检测或 fallback 写回覆盖。
+3. Save 先完成发布，自动发现锁外运行；context/reasoning 独立进入终态并通知。普通 Save 复用可信能力，Detect again 强制刷新自动能力。
+4. 主、子代理使用同一有效配置；标题、摘要、probe 的专用额度不受普通默认影响。
+5. 新 run 能力未知时立即使用 service-default，不发送 effort；已有同路由能力重探期间继续可用，失败后 identified+reason。
 
 ### 错误路径
 
-1. **model.json 不存在**：抛出 ConfigError，错误代码为 'FILE_NOT_FOUND'，错误信息指出路径
-2. **model.json 格式无效**：抛出 ConfigError，错误代码为 'INVALID_JSON'，错误信息指出具体语法错误
-3. **必填字段缺失**：抛出 ConfigError，错误代码为 'MISSING_FIELD'，错误信息列出缺失的字段
-4. **字段值无效**：
-   - temperature 不在 0-2 范围内 → ConfigError，错误代码为 'INVALID_TEMPERATURE'
-   - maxTokens 为负数 → ConfigError，错误代码为 'INVALID_MAX_TOKENS'
-5. **API Key 不存在**：环境变量未设置 → ConfigError，错误代码为 'MISSING_API_KEY'，错误信息指出哪个环境变量缺失
-6. **API Key 为空**：环境变量设置但值为空 → ConfigError，错误代码为 'EMPTY_API_KEY'
+1. Create 的 null、0、负数、小数、空字符串拒绝；Patch 的 null 清除，省略保持。connect 的 null 保留到 writer，正式 maxOutputTokens（包括 null）优先于 maxTokens 别名。
+2. context 小于等于输出预留与余量时仍可保存、读取、显示 tokenBudgetIssue；仅该模型的新 run 返回 `MODEL_TOKEN_LIMITS_INCOMPATIBLE`，其他模型可运行，修正覆盖后恢复。
+3. 缺失凭证引用不发送探测；key、指纹不进入模型库、状态、错误或日志。无鉴权端点保留可用性。
+4. 配置写入失败不发起有效探测；credential+model 事务失败验证回滚保护。发现失败不撤销 Save。
+5. 探测只有 400/422 表示不支持；429、5xx、超时、取消等为 unknown，不发布残缺档位。总期限和所有异常终态都结束动效。
 
 ### 边界情况
 
-1. **temperature 为 0**：有效，表示完全确定性
-2. **temperature 为 2**：有效，最高随机性
-3. **maxTokens 为 1**：有效，最小值
-4. **model.json 包含额外字段**：忽略额外字段，不报错
-5. **连续调用 reloadLLMConfig()**：每次都清除缓存并重新加载，不出现竞态条件
+- 缺版本文件先展开旧格式再迁移：context→检测值、8192→无覆盖；混合格式残留顶层 maxTokens 不再继承。版本 2 的明确 8192 不迁移，其他版本拒绝。
+- 读取不写盘；首次正常保存或探测写回前备份原文件并写版本 2，后续不重复备份。
+- 改 provider/model/协议/base URL 清两类自动证据；只换 key、apiKeyEnv/promptCache 保留 context，重探 reasoning。手改 routeKey 不匹配时读取过滤证据。
+- A→B→A、旧请求晚到、Save 后立即编辑、重新探测时修改覆盖均不覆盖新意图；无关编辑不取消在途任务。启动、列表读取和准备 run 不发起探测。
+- 用户输入与检测值相同仍建立覆盖；推送保留草稿和基线。TUI 预填仅覆盖，清空发送 null，无编辑不保存，自动提示不冒充输入。
+- Responses 识别 max 后可选择并实际发送，未知字符串或当前不支持的档位拒绝，普通输出仍为 32768。
+- Anthropic adaptive 的 metadata/内置/显式/旧自动能力统一过滤 minimal，原始证据保留，过滤为空时 unknown。无版本和版本 2 默认偏好均在读取时清理；新显式无效 minimal 拒绝。
+- Anthropic 清理读取不写盘，下一次保存持久化；Settings/current-model 均携带固定通知，Web/TUI 实际显示。probe 不清通知，失败选择不清通知，成功明确选择清除。合法 minimal→low effortMap、budget/binary 不误清理。
+- 会话/单次 minimal 偏好在能力已知时拒绝；能力 unknown 时使用 service-default，wire 不含 minimal；不改历史消息或在途 run。
 
 ## 集成点测试
 
-### 与文件系统集成
-
-- 能否正确读取 `~/.ohbaby/model.json`
-- 文件不存在时的错误处理
-- 文件权限问题时的错误处理（如无读权限）
-
-### 与环境变量集成
-
-- 能否正确读取 process.env 中指定的 API Key
-- 环境变量不存在时的错误处理
-- 环境变量值为空字符串时的错误处理
-
-### 与 llm-client 集成
-
-- config/llm 返回的 LLMConfig 的所有字段都能被 llm-client 正确使用
-- llm-client 无法从其他地方获取配置，必须依赖本模块的输出
+| 接缝 | 重点 |
+| --- | --- |
+| `config/llm/__tests__/model-settings-automation.integration.test.ts` | 数字迁移、有效值、清空、自动发现与缺凭证 |
+| `config/llm/__tests__/anthropic-effort-migration.integration.test.ts` | D10 读取清理、下一次写入、通知生命周期、合法映射和未知请求偏好 |
+| `model-entry-discovery` / `model-entry-probe` / `writer` / `config-commit` 现有测试 | 路由身份、取消与旧回包、缓存/强制刷新、事务边界 |
+| `ohbaby-llm` reasoning 与 provider 测试 | D9 max 正式序列化、D10 有效档位与实际 wire、probe 状态分类 |
+| `ohbaby-server` settings-global、request-helpers、create-app 测试 | Create/Patch/connect HTTP 校验与 OpenAPI 对齐 |
+| `tests/integration/adapters/ui-runtime/model-settings-automation.integration.test.ts` | 公共提交路径的预算拒绝、其他模型可用、修正后恢复 |
+| Web settings/composer 与 TUI connect/effort/footer 测试 | 覆盖/自动分离、脏字段、推送草稿保护、状态与通知可见 |
 
 ## 验证策略
 
-**单元测试**（isolation）：
-- loaders.test.ts：测试 loadModelJson()、loadApiKey() 函数
-  - 使用 mock 文件系统避免依赖真实文件
-  - 使用 mock 环境变量
-  - 验证返回值和错误情况
+先运行本次修改涉及的精确测试，再执行仓库 typecheck、lint、format:check、test、build。测试结果须记录实际命令和退出码，不能把计划运行写成通过。
 
-- validation.test.ts：测试 validateModelJson()、validateApiKey() 函数
-  - 纯函数，易于单元测试
-  - 测试所有字段的验证规则
-  - 测试边界值和错误情况
+使用独立临时 OHBABY_HOME、项目目录和本地 HTTP fixture；控制 deferred 响应、超时与状态码，结束时等待发现终态并清理数据库、环境和连接。避免并行运行会竞争 CLI package build 锁的全量套件。
 
-- manager.test.ts：测试 LLMConfigManager 的缓存和热重载机制
-  - 使用 mock 的 loaders 避免 I/O
-  - 验证缓存是否生效
-  - 验证 reload() 是否清除缓存
-  - 验证单例机制
+真实验收覆盖三种协议的产品流式请求、工具闭环、主动 reasoning 发现及 metadata 无 context 的路由。页面流程为：仅连接 Save → 发现终态 → 手动覆盖 → 重探不覆盖 → 清空 → 关闭重开 → 实际运行并核对参数。临时模型和会话使用独立标识，结束恢复默认并清理。
 
-**集成测试**（integration）：
-- integration.test.ts：测试完整流程（使用真实文件或完整 mock）
-  - 设置真实 model.json 文件（或 mock）
-  - 设置环境变量
-  - 调用 getLLMConfig()，验证完整返回值
-  - 修改 model.json，调用 reloadLLMConfig()，验证新值
-  - 验证错误场景的完整流程
-
-**测试环境**：
-- 使用 Vitest 作为测试框架
-- 使用 fixtures/ 目录存放 model.json 样本
-- 使用 beforeEach/afterEach 清理环境变量和文件系统
-- 不依赖全局状态，确保测试隔离
-
-**无需自动化测试的部分**：
-- 真实文件权限问题（可手工验证）
-- 真实网络 I/O（API Key 有效性验证由 llm-client 负责）
+完整矩阵和真实请求范围见 [improve-1 测试与验收](2026-11-12-model-settings-automation/improve-1/04-test-and-acceptance.md)。本页定义测试责任，不替代执行记录；短请求接受 32768 不等于长上下文、流式工具或 length 自动接续验收。

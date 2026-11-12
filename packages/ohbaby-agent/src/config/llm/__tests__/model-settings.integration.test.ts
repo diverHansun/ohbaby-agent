@@ -40,14 +40,24 @@ async function add(fields = {}): Promise<import("ohbaby-sdk").UiSettingsModel> {
   return entry;
 }
 describe("independent model settings", () => {
-  it("appends identical routes without deduplication and keeps the first default and persists defaults", async () => {
+  it("appends identical routes without deduplication and keeps the first default without persisting automatic limits", async () => {
     const a = await add({ apiKey: "secret-a", label: "Work" });
     const b = await add({ apiKey: "secret-b" });
     expect(a.id).not.toBe(b.id);
     expect(a.apiKeyEnv).not.toBe(b.apiKeyEnv);
     expect((await readModelSettings(opts)).active?.id).toBe(a.id);
     expect((await disk()).models.map((e) => e.id)).toEqual([a.id, b.id]);
-    expect(a.contextWindowTokens).toBe(128000);
+    expect(a.contextWindowTokens).toBeUndefined();
+    expect(a.maxOutputTokens).toBeUndefined();
+    expect(a.effectiveContextWindowTokens).toBe(300000);
+    expect(a.effectiveMaxOutputTokens).toBe(32768);
+    expect(
+      (await disk()).models.every(
+        (entry) =>
+          entry.contextWindowTokens === undefined &&
+          entry.maxOutputTokens === undefined,
+      ),
+    ).toBe(true);
     expect(JSON.stringify(await readModelSettings(opts))).not.toMatch(
       /secret-a|secret-b/,
     );

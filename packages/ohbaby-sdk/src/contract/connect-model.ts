@@ -21,8 +21,8 @@ export interface UiConnectModelInput {
   readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly model: string;
-  readonly contextWindowTokens?: number;
-  readonly maxOutputTokens?: number;
+  readonly contextWindowTokens?: number | null;
+  readonly maxOutputTokens?: number | null;
 }
 
 export interface UiConnectModelResult {
@@ -40,7 +40,26 @@ export interface UiConnectModelResult {
   readonly warning?: string;
 }
 
-export interface UiCurrentModelConfig {
+/** User overrides and automatic evidence are distinct from runtime budgets. */
+export interface UiModelSettingsNumericView {
+  readonly contextWindowTokens?: number;
+  readonly detectedContextWindowTokens?: number;
+  readonly effectiveContextWindowTokens: number;
+  readonly maxOutputTokens?: number;
+  readonly effectiveMaxOutputTokens: number;
+  readonly contextDiscovery: {
+    readonly status: "detecting" | "identified" | "unknown";
+    readonly reason?: string;
+  };
+  readonly tokenBudgetIssue?: {
+    readonly code: "MODEL_TOKEN_LIMITS_INCOMPATIBLE";
+    readonly contextWindowTokens: number;
+    readonly maxOutputTokens: number;
+  };
+  readonly reasoningNotice?: "unsupported-anthropic-effort-cleared";
+}
+
+export interface UiCurrentModelConfig extends UiModelSettingsNumericView {
   readonly id: string;
   readonly source: "explicit" | "default";
   readonly reasoning?: UiReasoningCapabilityView;
@@ -49,8 +68,6 @@ export interface UiCurrentModelConfig {
   readonly interfaceProvider: UiCurrentModelInterfaceProvider;
   readonly apiKeyEnv?: string;
   readonly model: string;
-  readonly contextWindowTokens?: number;
-  readonly maxOutputTokens?: number;
 }
 
 export interface UiProbeModelContextWindowInput {
@@ -135,7 +152,6 @@ export interface UiReasoningCapabilityView {
   readonly default?: UiReasoningConfig;
   readonly source?: string;
   readonly reason?: string;
-  readonly stale?: boolean;
 }
 
 export const UI_REASONING_STATUSES = [

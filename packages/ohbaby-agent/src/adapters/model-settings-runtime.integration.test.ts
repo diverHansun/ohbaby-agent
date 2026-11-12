@@ -21,6 +21,7 @@ it("normal loaders keep in-flight rounds on A then both workspaces use B's own p
   LLMConfigManager.resetInstance();
   const calls: { path: string; key: string; body: Record<string, unknown> }[] =
     [];
+  const probes: Record<string, unknown>[] = [];
   const held: { response: ServerResponse; body: Record<string, unknown> }[] =
     [];
   function finish(
@@ -88,6 +89,11 @@ it("normal loaders keep in-flight rounds on A then both workspaces use B's own p
         chunks.push(Buffer.from(chunk as Uint8Array));
       const raw = Buffer.concat(chunks).toString("utf8");
       const body = JSON.parse(raw) as Record<string, unknown>;
+      if (body.stream !== true) {
+        probes.push(body);
+        response.writeHead(400).end();
+        return;
+      }
       const title = raw.includes("Write a short conversation title");
       if (!title)
         calls.push({
@@ -164,7 +170,11 @@ it("normal loaders keep in-flight rounds on A then both workspaces use B's own p
       ["/b/v1/messages", "runtime-key-b"],
       ["/b/v1/messages", "runtime-key-b"],
     ]);
+    expect(probes.length).toBeGreaterThan(0);
+    expect(probes.every((body) => body.max_tokens === 32)).toBe(true);
     for (const call of calls) {
+      expect(call.body.stream).toBe(true);
+      expect(call.body.max_tokens).toBe(32768);
       expect(call.body).not.toHaveProperty("reasoning");
       expect(call.body).not.toHaveProperty("reasoning_effort");
       expect(call.body).not.toHaveProperty("thinking");

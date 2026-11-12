@@ -1512,7 +1512,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     },
   );
 
-  it("does not announce compaction without eligible older history for an oversized output preference", async () => {
+  it("rejects an oversized output preference before requesting a model or announcing compaction", async () => {
     const bus = createBus();
     const workdir = await tempWorkdir();
     const messageManager = createMessageManager({
@@ -1541,31 +1541,32 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     const notices: { readonly key?: string; readonly title: string }[] = [];
 
-    const composition = await createUiRuntimeComposition({
-      agentManager: new AgentManager(),
-      bus,
-      llmClient,
-      mcpManager: { getAllTools: () => Promise.resolve([]) },
-      messageManager,
-      onNotice: (notice) => {
-        notices.push(notice);
-      },
-      permissionState: createPermissionState({
+    await expect(async () =>
+      createUiRuntimeComposition({
+        agentManager: new AgentManager(),
         bus,
-        initialLevel: "full-access",
+        llmClient,
+        mcpManager: { getAllTools: () => Promise.resolve([]) },
+        messageManager,
+        onNotice: (notice) => {
+          notices.push(notice);
+        },
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+        skillRegistry: createMutableSkillRegistry([]),
+        workdir,
       }),
-      skillRegistry: createMutableSkillRegistry([]),
-      workdir,
+    ).rejects.toMatchObject({
+      code: "MODEL_TOKEN_LIMITS_INCOMPATIBLE",
+      promptError: {
+        code: "MODEL_TOKEN_LIMITS_INCOMPATIBLE",
+        source: "runtime",
+        retryable: false,
+      },
     });
-
-    const result = await composition.startSession({
-      triggerSource: "user",
-      agentName: "build",
-      projectRoot: workdir,
-      prompt: "new turn",
-      sessionId: "session_small",
-    });
-    await composition.runManager.waitForCompletion(result.runId);
+    expect(requests).toHaveLength(0);
 
     expect(notices.map((notice) => notice.key)).not.toContain(
       "context:compact:session_small",

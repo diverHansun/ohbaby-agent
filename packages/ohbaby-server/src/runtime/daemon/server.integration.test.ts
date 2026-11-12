@@ -3014,6 +3014,9 @@ it("transports session model choices, scoped queries and default selection over 
     return Promise.resolve({
       id: "a",
       source: "explicit",
+      effectiveContextWindowTokens: 100000,
+      effectiveMaxOutputTokens: 4096,
+      contextDiscovery: { status: "unknown" },
       provider: "test",
       model: "one",
       baseUrl: "http://localhost",

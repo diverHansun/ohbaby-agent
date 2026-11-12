@@ -86,6 +86,7 @@ export type {
 export type { UiPromptCacheUsage } from "./contract/prompt-cache-usage.js";
 export type {
   UiCurrentModelConfig,
+  UiModelSettingsNumericView,
   UiReasoningConfig,
   UiReasoningCapabilityView,
   UiCurrentModelInterfaceProvider,

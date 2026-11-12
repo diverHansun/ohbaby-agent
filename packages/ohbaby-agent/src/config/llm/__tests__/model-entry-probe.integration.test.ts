@@ -65,14 +65,17 @@ beforeEach(async () => {
       const thinking = body.thinking as { type?: string } | undefined;
       const effort =
         (body.output_config as { effort?: string } | undefined)?.effort ??
-        reasoning?.effort;
+        reasoning?.effort ??
+        (body.reasoning_effort as string | undefined);
       res
         .writeHead(
-          ignoreControls ||
-            accepted.includes(effort ?? "") ||
-            reasoning?.enabled === false ||
-            reasoning?.effort === "none" ||
-            thinking?.type === "disabled"
+          body.model === "same" &&
+            (ignoreControls ||
+              accepted.includes(effort ?? "") ||
+              reasoning?.enabled === false ||
+              reasoning?.effort === "none" ||
+              thinking?.type === "disabled" ||
+              body.reasoning_effort === "none")
             ? 200
             : 400,
         )
@@ -85,6 +88,13 @@ beforeEach(async () => {
   baseUrl = `http://127.0.0.1:${String((upstream.address() as { port: number }).port)}`;
 });
 afterEach(async () => {
+  await vi.waitFor(async () => {
+    const view = await settings.readModelSettings();
+    for (const entry of view.models) {
+      expect(entry.contextDiscovery.status).not.toBe("detecting");
+      expect(entry.reasoning.status).not.toBe("detecting");
+    }
+  });
   upstream.closeAllConnections();
   await new Promise<void>((resolve) =>
     upstream.close(() => {
@@ -114,8 +124,13 @@ async function add(
     },
     options(),
   );
-  await vi.waitFor(() => {
+  await vi.waitFor(async () => {
+    const entry = (await settings.readModelSettings()).models.find(
+      (model) => model.id === result.models[0].id,
+    );
     expect(notices).toBeGreaterThan(0);
+    expect(entry?.reasoning.status).not.toBe("detecting");
+    expect(entry?.contextDiscovery.status).not.toBe("detecting");
   });
   return result.models[0];
 }
@@ -123,7 +138,8 @@ it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
   "manual %s discovery persists only the target and normal loading uses the confirmed wire",
   async (protocol) => {
     const target = await add(protocol);
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(protocol === "anthropic" ? 7 : 8);
+    calls = [];
     const view = await settings.probeModelEntry(target.id, options());
     expect(view).toMatchObject({
       status: "identified",
@@ -142,7 +158,7 @@ it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
         : protocol === "openai-responses"
           ? "/v1/responses"
           : "/v1/chat/completions";
-    expect(calls).toHaveLength(8);
+    expect(calls).toHaveLength(protocol === "anthropic" ? 7 : 8);
     expect(
       calls.every(
         (call) =>
@@ -164,7 +180,7 @@ it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
               max_output_tokens: 32,
             }
           : {
-              reasoning: { enabled: true, effort: "ohbaby-invalid-effort" },
+              reasoning_effort: "ohbaby-invalid-effort",
               max_tokens: 32,
             },
     );
@@ -185,7 +201,7 @@ it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
           }
         : protocol === "openai-responses"
           ? { reasoning: { effort: "medium" } }
-          : { reasoning: { enabled: true, effort: "medium" } },
+          : { reasoning_effort: "medium" },
     );
     expect(config.apiKey).toBe("target-key");
   },
@@ -220,13 +236,16 @@ it("fresh fallback replaces old automatic data, then fresh metadata stops probin
   expect(calls).toHaveLength(0);
 });
 it("an upstream accepting invalid controls leaves unknown and normal configuration uses service defaults", async () => {
-  const target = await add();
   ignoreControls = true;
+  const target = await add();
+  expect(calls).toHaveLength(2);
+  calls = [];
   expect(await settings.probeModelEntry(target.id, options())).toEqual({
     status: "unknown",
     efforts: [],
+    reason: "ignored-reasoning",
   });
-  expect(calls).toHaveLength(1);
+  expect(calls).toHaveLength(2);
   await settings.selectModelEntry(target.id);
   expect(
     resolveRequestReasoning(await reloadLLMConfig({ projectDirectory: root }))
@@ -311,6 +330,7 @@ it("fresh metadata replaces an older metadata result without active probing", as
 
 it("keeps a running active probe and a later budget edit when only the label or budget changes", async () => {
   const target = await add();
+  calls = [];
   let entered!: () => void;
   let release!: () => void;
   const started = new Promise<void>((resolve) => {

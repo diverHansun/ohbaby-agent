@@ -227,8 +227,14 @@ export function modelConnectInputFromBody(
   const apiKeyEnv = asNonEmptyString(value.apiKeyEnv);
   const apiKey = asNonEmptyString(value.apiKey);
   const model = asNonEmptyString(value.model);
-  const contextWindowTokens = asPositiveInteger(value.contextWindowTokens);
-  const maxOutputTokens = asPositiveInteger(value.maxOutputTokens);
+  const contextWindowTokens =
+    value.contextWindowTokens === null
+      ? null
+      : asPositiveInteger(value.contextWindowTokens);
+  const maxOutputTokens =
+    value.maxOutputTokens === null
+      ? null
+      : asPositiveInteger(value.maxOutputTokens);
   if (
     provider === undefined ||
     baseUrl === undefined ||

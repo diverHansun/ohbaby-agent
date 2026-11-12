@@ -40,6 +40,36 @@ export function createOpenApiDocument(
   const string = { type: "string" };
   const strings = { type: "array", items: string };
   const positiveInteger = { type: "integer", minimum: 1 };
+  const nullableOverride = {
+    type: ["integer", "null"],
+    minimum: 1,
+    description: "User override. Omission preserves it; null clears it.",
+  };
+  const numericView = {
+    contextWindowTokens: positiveInteger,
+    detectedContextWindowTokens: positiveInteger,
+    effectiveContextWindowTokens: positiveInteger,
+    maxOutputTokens: positiveInteger,
+    effectiveMaxOutputTokens: positiveInteger,
+    contextDiscovery: {
+      type: "object",
+      required: ["status"],
+      properties: {
+        status: { enum: ["detecting", "identified", "unknown"] },
+        reason: string,
+      },
+    },
+    tokenBudgetIssue: {
+      type: "object",
+      required: ["code", "contextWindowTokens", "maxOutputTokens"],
+      properties: {
+        code: { const: "MODEL_TOKEN_LIMITS_INCOMPATIBLE" },
+        contextWindowTokens: positiveInteger,
+        maxOutputTokens: positiveInteger,
+      },
+    },
+    reasoningNotice: { const: "unsupported-anthropic-effort-cleared" },
+  };
   const keyEnv = {
     type: ["string", "null"],
     pattern: "^[A-Za-z_][A-Za-z0-9_]*$",
@@ -124,11 +154,52 @@ export function createOpenApiDocument(
       additionalProperties: false,
       properties: {
         ...modelFields,
+        contextWindowTokens: nullableOverride,
+        maxOutputTokens: nullableOverride,
         reasoning: { anyOf: [ref("ReasoningConfig"), { type: "null" }] },
         label: {
           type: ["string", "null"],
           description: "null clears the label; omission preserves it.",
         },
+      },
+    },
+    ConnectModelInput: {
+      type: "object",
+      required: ["provider", "model", "baseUrl"],
+      properties: {
+        provider: modelFields.provider,
+        model: modelFields.model,
+        baseUrl: modelFields.baseUrl,
+        interfaceProvider: modelFields.interfaceProvider,
+        apiKeyEnv: string,
+        apiKey,
+        contextWindowTokens: nullableOverride,
+        maxOutputTokens: nullableOverride,
+      },
+    },
+    CurrentModelConfig: {
+      type: "object",
+      required: [
+        "id",
+        "source",
+        "provider",
+        "model",
+        "baseUrl",
+        "interfaceProvider",
+        "effectiveContextWindowTokens",
+        "effectiveMaxOutputTokens",
+        "contextDiscovery",
+      ],
+      properties: {
+        id: string,
+        source: { enum: ["explicit", "default"] },
+        provider: string,
+        model: string,
+        baseUrl: string,
+        interfaceProvider: modelFields.interfaceProvider,
+        apiKeyEnv: string,
+        ...numericView,
+        reasoning: ref("ReasoningCapabilityView"),
       },
     },
     SettingsModelTarget: {
@@ -145,7 +216,9 @@ export function createOpenApiDocument(
         "model",
         "apiKeyConfigured",
         "configurationComplete",
-        "contextWindowTokens",
+        "effectiveContextWindowTokens",
+        "effectiveMaxOutputTokens",
+        "contextDiscovery",
         "reasoning",
       ],
       description:
@@ -161,8 +234,7 @@ export function createOpenApiDocument(
         apiKeyEnv: string,
         apiKeyConfigured: { type: "boolean" },
         configurationComplete: { type: "boolean" },
-        contextWindowTokens: positiveInteger,
-        maxOutputTokens: positiveInteger,
+        ...numericView,
         reasoning: ref("ReasoningCapabilityView"),
         reasoningDefault: ref("ReasoningConfig"),
       },
@@ -722,7 +794,6 @@ export function createOpenApiDocument(
             default: { $ref: "#/components/schemas/ReasoningConfig" },
             source: { type: "string" },
             reason: { type: "string" },
-            stale: { type: "boolean" },
           },
         },
       },
@@ -909,11 +980,30 @@ export function createOpenApiDocument(
             "200": {
               description:
                 "Resolved model config without secret values, including entry id and source (explicit or default)",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: { const: true },
+                      model: {
+                        anyOf: [ref("CurrentModelConfig"), { type: "null" }],
+                      },
+                    },
+                  },
+                },
+              },
             },
           },
           summary: "Get current model config",
         },
         post: {
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": { schema: ref("ConnectModelInput") },
+            },
+          },
           responses: {
             "200": {
               description: "Model config saved",

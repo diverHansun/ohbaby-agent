@@ -2,95 +2,60 @@
 
 ## 架构概览
 
-LLM 配置模块由以下主要部分组成：
+模型库保存用户意图和自动证据，后端统一投影有效数值，运行层只消费完整配置。
 
-- **Loaders（加载层）**：负责从文件和环境变量读取原始配置数据
-- **Validation（验证层）**：对配置进行格式、类型、值范围的检查
-- **Manager（管理层）**：整合加载和验证，提供缓存、热重载等能力
-- **Public API（接口层）**：对外暴露简洁的函数接口，隐藏内部实现
+```text
+Settings / connect
+  → 校验并原子保存模型库
+  → 返回保存结果
+  → 后台 context metadata / reasoning 发现
+  → 按 generation 与 routeKey 写回证据、通知刷新
 
-各部分协作流程：
-
+模型库读取 → 旧格式迁移与兼容清理 → 过滤异路由证据
+  → 覆盖 / 检测 / 产品默认解析 → LLMConfig → RunModel → 主、子代理
 ```
-getLLMConfig() 调用
-  ↓
-检查缓存 → 有效则返回
-  ↓
-loadModelJson() 读取 model.json
-  ↓
-loadApiKey() 读取环境变量中的 API Key
-  ↓
-validateModelJson() 验证 model.json 格式和内容
-  ↓
-validateApiKey() 验证 API Key 存在
-  ↓
-合并配置为 LLMConfig 对象
-  ↓
-缓存结果并返回
-```
+
+Save 不等待网络，网络不占配置发布锁；写入失败不启动有效探测，探测失败不撤销已保存意图。context 与 reasoning 独立记录阶段状态，开始、阶段变化和所有终态都通知消费者重新读取。
 
 ## 设计模式与理由
 
-**单例模式（Singleton）**
-- LLMConfigManager 作为单例存在，确保全局只有一份配置实例
-- 避免多次加载配置文件，降低 I/O 成本
+**存储与运行投影分离**
 
-**Fail Fast 原则**
-- 配置验证失败立即抛异常，不尝试降级或部分使用
-- 理由：配置是系统前置条件，无法降级
+版本 2 模型库中的 context/output 是可选用户覆盖。纯解析函数使用“覆盖 > 同路由 context 证据 > 300000”和“输出覆盖 > 32768”，运行 `maxTokens` 保持必填。默认值集中于 `modelProfiles.ts`，不通过 Settings 输入框或 writer 回写。
 
-**缓存策略**
-- 首次加载后缓存配置对象，后续调用直接返回缓存
-- 提供 reload() 方法主动清除缓存，支持热重载
-- 理由：model.json 不会频繁变化，缓存降低 I/O；热重载支持运维需求
+**结构校验与单模型可用性分离**
 
-**函数式导出**
-- 对外仅暴露 getLLMConfig() 和 reloadLLMConfig() 函数，不暴露 Manager 类
-- 理由：隐藏实现细节，降低消费者的认知负担
+类型、格式、正整数等错误拒绝保存。context 无法容纳输出及安全余量时仍保存证据与设置视图，返回 `tokenBudgetIssue`；在新 run 准备阶段拒绝该模型，其他模型继续使用。已运行的模型快照不追溯修改。
+
+**复用发现调度器**
+
+新建完整连接、改连接、能力 unknown 时的实际修改 Save、Detect again、设为默认触发发现。已有可信能力的普通保存复用缓存；手动 Detect again 强制刷新自动能力。已有任务时，单纯 label、数值或 effort 编辑不重启任务。明确重探替换旧任务；generation 和 routeKey 拒绝旧回包，包括 A→B→A。
+
+启动、Settings 列表读取、配置热重载和准备新 run 都不主动发起付费探测。能力未知时新 run 不等待，使用 service-default，不发送 effort；保留用户偏好。相同路由旧证据在重新探测失败后保留，状态 identified，失败原因只在内存中展示。
+
+**协议能力与偏好分离**
+
+Responses 可发送经有效能力确认的 max。Anthropic adaptive 在统一能力出口过滤 minimal，只有 minimal 的证据变为 unknown；显式合法 effortMap 保留。旧模型默认偏好若实际会发送 minimal，读取时清理并生成内存通知，下一次写入持久化。新显式无效选择拒绝；会话/单次偏好在已知能力时校验，未知时遵循 service-default。
 
 ## 模块结构与文件组织
 
-```
-src/config/llm/
-├── types.ts          定义 LLMConfig、ModelJsonConfig、ConfigError 等类型
-├── validation.ts     验证函数：validateModelJson()、validateApiKey() 等
-├── loaders.ts        加载函数：loadModelJson()、loadApiKey() 等
-├── manager.ts        LLMConfigManager 类（单例、缓存、热重载）
-├── index.ts          公开接口导出：getLLMConfig()、reloadLLMConfig() 等
-└── __tests__/
-    ├── loaders.test.ts
-    ├── manager.test.ts
-    ├── validation.test.ts
-    ├── integration.test.ts
-    └── fixtures/      测试数据
-```
-
-各文件职责：
-
-- **types.ts**：定义配置相关的类型和错误类，不包含实现逻辑
-- **validation.ts**：纯函数式验证，无状态，易于单元测试
-- **loaders.ts**：纯函数式加载，处理文件 I/O 和环境变量读取
-- **manager.ts**：管理类，协调加载和验证，维护缓存状态
-- **index.ts**：导出公开接口，隐藏实现类
+| 位置 | 职责 |
+| --- | --- |
+| `config/llm/loaders.ts` | 原始 JSON、env 读取 |
+| `config/llm/model-document.ts` | 版本迁移、存储校验、路由过滤、有效值与读取视图投影、清理通知 |
+| `config/llm/writer.ts` / `config-coordination.ts` | 变更校验、凭证事务保护、原子发布、检测写回与并发协调 |
+| `config/llm/apply-active-model-config.ts` | connect 适配与共用发现调度器 |
+| `config/llm/context-window-probe.ts` / `reasoning-active-probe.ts` | metadata 发现、主动能力探测 |
+| `config/llm/manager.ts` | 默认模型旧接口的缓存与重载；指定条目使用独立加载 |
+| `services/llm-model/modelProfiles.ts` / `reasoning-view.ts` | 默认常量、预算解析、能力状态视图 |
+| `adapters/ui-inprocess/model-client-pool.ts` / `ui-runtime/run-model.ts` | 会话模型解析、客户端复用、运行快照与预算准入 |
+| `ohbaby-llm` | 运行配置校验、有效能力解析及各协议序列化 |
+| `ohbaby-sdk` / `ohbaby-server` / Web / TUI | 同步覆盖、检测、有效值契约与可见状态 |
 
 ## 架构约束与权衡
 
-**权衡1：每次调用都从缓存读 vs 每次调用都重新加载**
-- 选择：缓存 + 主动热重载
-- 理由：model.json 不会自动变化，缓存提高性能；热重载支持运维需求
-- 代价：内存中持有一份配置副本
-
-**权衡2：同步加载 vs 异步加载**
-- 选择：异步（async/await）
-- 理由：加载和验证可能涉及文件 I/O，异步更符合 Node.js 最佳实践
-- 代价：调用者需要 await
-
-**权衡3：Fail Fast vs 可降级**
-- 选择：Fail Fast
-- 理由：配置无效时应用无法正常运行，降级无意义
-- 代价：应用启动失败需要用户修复配置
-
-**权衡4：单全局实例 vs 多实例允许**
-- 选择：单全局实例（单例）
-- 理由：配置通常是全局的、唯一的；避免多实例导致配置不一致
-- 代价：无法同时运行多个配置实例（通常不需要）
+- routeKey 由 provider/model/协议/规范化 base URL 构成，context 与自动 reasoning 共用；key 改动保留 context、重探 reasoning，不保存凭证指纹。
+- 配置发布锁是进程内协调；原子替换与回滚保护文件提交，不提供跨进程事务。
+- 自动状态和失败原因不持久化；重启不会恢复永久 detecting，也不会启动探测恢复队列。无 TTL、无周期刷新。
+- 主动探测只有 400/422 表示参数不支持，其余失败为 unknown；档位并发验证、总期限 60 秒，每次请求携带空工具定义，不执行工具。
+- 300000 兜底与显式 32768 输出不保证所有第三方兼容；保留可修正问题，不静默扩容或降低输出，也不随 effort 改动额度。

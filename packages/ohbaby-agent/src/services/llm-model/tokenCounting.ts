@@ -1,3 +1,4 @@
+import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "./modelProfiles.js";
 import {
   createModelProfileRegistry,
   type ModelProfileRegistration,
@@ -7,7 +8,7 @@ import {
 
 const ASCII_TOKEN_WEIGHT = 0.25;
 const NON_ASCII_TOKEN_WEIGHT = 1.3;
-const DEFAULT_MODEL_LIMIT = 128_000;
+const DEFAULT_MODEL_LIMIT = DEFAULT_CONTEXT_WINDOW_TOKENS;
 
 export interface HeuristicTokenCounterOptions {
   readonly defaultLimit?: number;

@@ -92,7 +92,7 @@ describe("context window metadata probe helpers", () => {
     }
   });
 
-  it("falls back to provider-prefixed fuzzy matching for Kimi aliases", async () => {
+  it("rejects provider-prefixed fuzzy matches as context evidence", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -104,6 +104,7 @@ describe("context window metadata probe helpers", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     try {
+      const warning: unknown = expect.any(String);
       await expect(
         probeContextWindow({
           apiKey: "secret",
@@ -111,7 +112,10 @@ describe("context window metadata probe helpers", () => {
           interfaceProvider: "anthropic",
           model: "kimi-2.6",
         }),
-      ).resolves.toMatchObject({ contextWindowTokens: 262_144 });
+      ).resolves.toEqual({
+        reasoningReason: "model-not-found",
+        warning,
+      });
     } finally {
       vi.unstubAllGlobals();
     }

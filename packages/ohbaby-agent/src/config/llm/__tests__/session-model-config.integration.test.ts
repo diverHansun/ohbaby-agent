@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { modelProfileRouteKey, resolveRequestReasoning } from "ohbaby-llm";
 import {
-  normalizeModelDocument,
+  readModelDocument,
   projectModelDocument,
   type ModelDocument,
 } from "../model-document.js";
@@ -38,8 +38,8 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-it("migrates parameters per entry, preserves overrides, and projects the requested entry", () => {
-  const document = normalizeModelDocument({
+it("migrates parameters per entry without inheriting a mixed-format global output value", async () => {
+  const original = {
     activeProfileId: "a",
     llmParams: {
       maxTokens: 4000,
@@ -50,23 +50,27 @@ it("migrates parameters per entry, preserves overrides, and projects the request
       { ...route, id: "a", maxOutputTokens: 5000 },
       { ...route, id: "b" },
     ],
-  });
+  };
+  await writeFile(options.modelJsonPath, JSON.stringify(original));
+  const document = await readModelDocument(options);
   expect(document).not.toHaveProperty("llmParams");
   expect(document.models[0]).toMatchObject({
     maxOutputTokens: 5000,
     temperature: 0.3,
     reasoning: { effort: "high" },
   });
-  expect(document.models[1]).toMatchObject({ maxOutputTokens: 4000 });
+  expect(document.models[1]).not.toHaveProperty("maxOutputTokens");
+  expect(document.models[1]).not.toHaveProperty("contextWindowTokens");
+  expect(document.models[1].detectedContextWindowTokens).toBe(128000);
   expect(document.models[1]).not.toHaveProperty("temperature");
   expect(document.models[1]).not.toHaveProperty("reasoning");
   expect(projectModelDocument(document, "b")?.llmParams).toEqual({
-    maxTokens: 4000,
+    maxTokens: 32768,
     contextWindowTokens: 128000,
   });
 });
-it("drops legacy reasoning incompatible with the original default", () => {
-  const document = normalizeModelDocument({
+it("drops legacy reasoning incompatible with the original default", async () => {
+  const original = {
     activeProfileId: "a",
     llmParams: { maxTokens: 4000, reasoning: { effort: "high" } },
     models: [
@@ -80,12 +84,14 @@ it("drops legacy reasoning incompatible with the original default", () => {
         },
       },
     ],
-  });
+  };
+  await writeFile(options.modelJsonPath, JSON.stringify(original));
+  const document = await readModelDocument(options);
   expect(document.models[0]).not.toHaveProperty("reasoning");
 });
 it.each([4096, 8192])(
-  "checks migrated reasoning against the preserved entry output ceiling %i",
-  (maxOutputTokens) => {
+  "checks migrated reasoning against the effective entry output ceiling from legacy %i",
+  async (maxOutputTokens) => {
     const capability = {
       mode: "effort" as const,
       wire: "anthropic-budget" as const,
@@ -94,7 +100,7 @@ it.each([4096, 8192])(
       budgets: { low: 1024, high: 4096 },
       supportsDisabled: true,
     };
-    const document = normalizeModelDocument({
+    const original = {
       activeProfileId: "a",
       llmParams: { maxTokens: 8192, reasoning: { effort: "high" } },
       models: [
@@ -106,8 +112,15 @@ it.each([4096, 8192])(
           reasoningCapabilities: capability,
         },
       ],
-    });
-    expect(document.models[0].maxOutputTokens).toBe(maxOutputTokens);
+    };
+    await writeFile(options.modelJsonPath, JSON.stringify(original));
+    const document = await readModelDocument(options);
+    expect(document.models[0].maxOutputTokens).toBe(
+      maxOutputTokens === 8192 ? undefined : maxOutputTokens,
+    );
+    expect(projectModelDocument(document)?.llmParams.maxTokens).toBe(
+      maxOutputTokens === 8192 ? 32768 : maxOutputTokens,
+    );
     expect(document.models[0].reasoningCapabilities).toEqual(capability);
     expect(document.models[0].reasoning).toEqual(
       maxOutputTokens === 4096 ? undefined : { effort: "high" },
@@ -139,7 +152,7 @@ it("backs up the original bytes only on the first migration write", async () => 
         unknown
       >,
     ).sort(),
-  ).toEqual(["activeProfileId", "models"]);
+  ).toEqual(["activeProfileId", "models", "schemaVersion"]);
   await selectModelEntry(first.models[1].id, options);
   expect(await readdir(join(dir, "backups"))).toEqual(backups);
 });
