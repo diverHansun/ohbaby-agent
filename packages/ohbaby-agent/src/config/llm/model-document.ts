@@ -26,7 +26,7 @@ import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   calculateTokenBudget,
 } from "../../services/llm-model/modelProfiles.js";
-export { DEFAULT_CONTEXT_WINDOW_TOKENS } from "../../services/llm-model/modelProfiles.js";
+const LEGACY_DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 
 export interface ModelEntry extends Omit<
   ModelJsonModelProfile,
@@ -413,7 +413,8 @@ function migrateModelDocument(raw: unknown): ModelDocument {
       entry.detectedContextWindowTokens = entry.contextWindowTokens;
       delete entry.contextWindowTokens;
     }
-    if (entry.maxOutputTokens === 8192) delete entry.maxOutputTokens;
+    if (entry.maxOutputTokens === LEGACY_DEFAULT_MAX_OUTPUT_TOKENS)
+      delete entry.maxOutputTokens;
     if (
       entry.detectedContextWindowTokens !== undefined ||
       entry.reasoningCapabilitySource === "model-metadata" ||

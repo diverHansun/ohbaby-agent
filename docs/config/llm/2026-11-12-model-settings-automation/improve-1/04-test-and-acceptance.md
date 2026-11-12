@@ -44,6 +44,9 @@
 | T30 | 默认值单一来源：按 02 §9.1 的 grep 检查通过；没有覆盖的条目能通过 `validateEntry`；connect 不把检测值或默认值写进覆盖字段；注入 client 未提供 context 时，条目中不出现 `contextWindowTokens`；创建、connect、清空都不把默认值写进覆盖字段；Web mock 创建行为与后端一致 | R20 | static check + integration | S1/S3 |
 | T31 | Responses probe 识别 max → 保存自动能力 → 重新读取 → 用户选择 max → 正式 provider 请求包含 reasoning.effort=max；普通输出仍为 32768；内置 Zenmux luna Responses 和迁移后的旧自动 max 证据及偏好也能发送；当前能力不支持 max 时仍拒绝选择，任意未知字符串仍被拒绝；自动探测不得替用户选 max | R1、R16、R19 | protocol + integration | S2/S4 |
 | T32 | Anthropic adaptive 不探 minimal；metadata/内置/显式/旧自动能力有效投影均不发布不可发送档位，合法档位与来源优先级保留；只有 minimal 的证据过滤后为 unknown 且配置可读；无版本与版本 2 的不兼容模型默认偏好均清理，读取不写盘、下次成功保存后重启不恢复；新显式 minimal 设置校验失败；通知码随 Settings/current-model 投影送达，Web/TUI 实际显示清理提示，后续 probe 不覆盖提示，用户新 reasoning 选择成功保存后清除；不误清合法 effortMap 或 budget/binary 配置，不修改在途 run；会话/单次显式偏好在能力已知时校验，能力过滤为空后仍按 D3 使用 service-default 且不发送 minimal，UI 显示未生效；真实请求不再包含 output_config.effort=minimal，不自动映射为 low | R16、R18、R19 | unit + integration + contract + component/browser | S1/S2/S3/S4 |
+| T33 | Composer 选中已知 tokenBudgetIssue 的模型时，点击、Enter、命令提交和重发均不发请求，草稿保留；显示 Check settings 并打开设置；切到兼容模型或修正配置后恢复；运行中 Stop 不受影响 | R6、R18、D11 | component + browser | S3 |
+| T34 | TUI 设默认模型启动探测后，通过原有事件推送 context/reasoning 中间态与终态，current-model 可观察终态，不停留在 detecting | R11、R14 | integration | S4 |
+| T35 | connect 只改数值时不重启同路由在途 metadata/active probe（包含两个并发保存）；已知能力复用；连接变化取消旧任务并重探，unknown 的真实保存可重试 | R11、R13 | integration | S2/S4 |
 
 ## 3. 测试位置与执行方式
 

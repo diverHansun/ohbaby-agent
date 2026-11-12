@@ -376,7 +376,6 @@ it("legacy connect preserves query/fragment endpoint identity instead of trimmin
     ...opts,
     baseUrl: endpoint,
     projectRoot: dir,
-    deferMetadata: true,
   });
   const document = await disk();
   expect(document.models).toHaveLength(1);

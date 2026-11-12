@@ -18,6 +18,7 @@ import {
   type GoalPanelIntent,
 } from "../commands/GoalControl.js";
 import { type StructuredCommandRequest } from "../commands/StructuredCommandOverlay.js";
+import { Banner } from "../shared/Banner.js";
 import { ComposerControls } from "./ComposerControls.js";
 import { ComposerInput } from "./ComposerInput.js";
 import { fitComposerTextarea } from "./composerTextarea.js";
@@ -96,7 +97,8 @@ export function Composer(props: {
   readonly model: ComposerModel;
   /** The model menu in the control row (D15). */
   readonly modelControl?: ReactNode;
-  /** The settings entry the next turn uses; feeds the thinking control. */
+  readonly onOpenModelSettings: () => void;
+  /** The settings entry the next turn uses; feeds the reasoning control. */
   readonly modelEntry?: UiSettingsModel;
   readonly activeGoal?: UiGoal | null;
   readonly onExecuteGoalCommand?: ExecuteGoalCommand;
@@ -150,20 +152,24 @@ export function Composer(props: {
     textareaRef,
   });
 
+  const tokenBudgetIssue = props.modelEntry?.tokenBudgetIssue;
   const canSend =
     props.model.canSend &&
+    !tokenBudgetIssue &&
     (!queuedEdit?.leaseLost || queuedEdit.retainedSendText !== undefined) &&
     draft.trim().length > 0 &&
     !isSubmitting &&
     !props.isPromptAdmitting;
   const showStop =
     props.stopLabel !== undefined ||
+    (tokenBudgetIssue !== undefined && props.model.canStop) ||
     (!queuedEdit &&
       ((props.model.isRunning && draft.trim().length === 0) ||
         (props.model.canStop &&
           (!props.model.canSend || draft.trim().length === 0))));
   const canUseSlash =
     props.model.canSend &&
+    !tokenBudgetIssue &&
     !queuedEdit &&
     !isSubmitting &&
     !props.isPromptAdmitting;
@@ -332,7 +338,7 @@ export function Composer(props: {
         <div className="ohb-steer-recovery" ref={recoveryRef}>
           <UnconsumedSteers
             inputs={props.unconsumedSteers ?? []}
-            disabled={props.model.disabled}
+            disabled={props.model.disabled || tokenBudgetIssue !== undefined}
             scopeKey={props.draftScopeKey}
             resend={async (input) => {
               const generation = draftScopeGeneration.current;
@@ -397,6 +403,15 @@ export function Composer(props: {
           onOpenGoalPanel={props.onOpenGoalPanel}
           scopeKey={props.draftScopeKey}
           sessionId={props.model.activeSessionId ?? props.activeSession?.id}
+        />
+        <Banner
+          tone="attention"
+          message={
+            tokenBudgetIssue ? "Model token limits are incompatible." : null
+          }
+          actions={[
+            { label: "Check settings", onClick: props.onOpenModelSettings },
+          ]}
         />
         <ComposerInput
           inputRef={composerInputRef}

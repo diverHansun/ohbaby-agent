@@ -4898,7 +4898,6 @@ export function createInProcessUiBackendClient(
       const result = await applyActiveModelConfig({
         ...input,
         projectRoot,
-        deferMetadata: true,
         onDiscovery: publishModelInvalidation,
       });
       let warning = result.warning;
@@ -5807,7 +5806,9 @@ export function createInProcessUiBackendClient(
     updateSessionReasoning: updateSessionReasoningInternal,
     updateSessionModel: updateSessionModelInternal,
     async selectDefaultModel(entryId) {
-      const result = await selectModelEntry(entryId);
+      const result = await selectModelEntry(entryId, {
+        onDiscovery: publishModelInvalidation,
+      });
       await publishModelInvalidation();
       return { ...result, ok: true };
     },

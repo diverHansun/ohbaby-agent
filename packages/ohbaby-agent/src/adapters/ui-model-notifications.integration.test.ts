@@ -95,6 +95,48 @@ describe("model discovery recovery notifications", () => {
         false,
       );
       expect(fetchMetadata).toHaveBeenCalledTimes(2);
+      let releaseSelection!: () => void;
+      const selectedMetadata = new Promise<void>((resolve) => {
+        releaseSelection = resolve;
+      });
+      fetchMetadata.mockImplementationOnce(async () => {
+        await selectedMetadata;
+        return Response.json({
+          data: [
+            {
+              id: "notification-model",
+              context_length: 1048576,
+              reasoning: false,
+            },
+          ],
+        });
+      });
+      const currentId = (await backend.getCurrentModel())?.id;
+      if (!currentId) throw new Error("Expected current model entry");
+      events.length = 0;
+      try {
+        await backend.selectDefaultModel(currentId);
+        expect((await backend.getCurrentModel())?.contextDiscovery.status).toBe(
+          "detecting",
+        );
+        const initialEvents = events.filter(
+          (event) => event.type === "model.invalidated",
+        ).length;
+        releaseSelection();
+        await vi.waitFor(async () => {
+          expect(
+            (await backend.getCurrentModel())?.contextDiscovery.status,
+          ).toBe("identified");
+          expect(
+            events.filter((event) => event.type === "model.invalidated").length,
+          ).toBeGreaterThan(initialEvents);
+        });
+        expect(await backend.getCurrentModel()).toMatchObject({
+          detectedContextWindowTokens: 1048576,
+        });
+      } finally {
+        releaseSelection();
+      }
     } finally {
       release();
       await vi.waitFor(async () => {

@@ -58,7 +58,6 @@ interface ResolvedApiKey {
 
 export interface ApplyActiveModelConfigInput {
   readonly reasoning?: ReasoningConfig;
-  readonly deferMetadata?: boolean;
   readonly onDiscovery?: () => void | Promise<void>;
   readonly provider?: string;
   readonly baseUrl: string;
@@ -161,7 +160,6 @@ export async function probeActiveModelContextWindow(
           modelJsonPath: input.modelJsonPath,
           envPath,
           onDiscovery: input.onDiscovery,
-          allowActiveProbe: true,
           forceActiveProbe: true,
         })
       : await probeContextWindow({
@@ -291,19 +289,38 @@ export async function applyActiveModelConfig(
     modelJsonPath: input.modelJsonPath,
     envPath,
   });
-  await startModelEntryDiscovery(writeResult.profileId, {
-    modelJsonPath: writeResult.modelJsonPath,
-    envPath,
-    onDiscovery: input.onDiscovery,
-    allowActiveProbe: true,
-    background: true,
-  });
-  const document = await readModelDocument({
-    modelJsonPath: writeResult.modelJsonPath,
-  });
-  const entry = document.models.find((e) => e.id === writeResult.profileId);
-  if (!entry)
-    throw new ConfigError("Saved model was removed", "FILE_NOT_FOUND");
+  const entry = await coordinateModelConfig(
+    writeResult.modelJsonPath,
+    async () => {
+      const document = await readModelDocument({
+        modelJsonPath: writeResult.modelJsonPath,
+      });
+      const entry = document.models.find((e) => e.id === writeResult.profileId);
+      if (!entry)
+        throw new ConfigError("Saved model was removed", "FILE_NOT_FOUND");
+      const discoveryOptions = {
+        modelJsonPath: writeResult.modelJsonPath,
+        envPath,
+        onDiscovery: input.onDiscovery,
+      };
+      const discovery = modelEntryDiscoveryState(
+        entry.id,
+        discoveryOptions,
+        modelProfileRouteKey(entry, entry.provider),
+      );
+      const inFlight =
+        discovery?.context.status === "detecting" ||
+        discovery?.reasoning.status === "detecting";
+      // Check and claim under the same lock so concurrent Connect saves cannot
+      // both replace a task. Connection changes already invalidate its generation.
+      if (!inFlight)
+        await startModelEntryDiscovery(entry.id, {
+          ...discoveryOptions,
+          background: true,
+        });
+      return entry;
+    },
+  );
   const limits = resolveEntryTokenLimits(entry);
   let warning: string | undefined;
   try {
@@ -514,7 +531,6 @@ export async function currentDiscoveryState(
 export async function startModelEntryDiscovery(
   id: string,
   options: ModelSettingsOptions & {
-    allowActiveProbe?: boolean;
     forceActiveProbe?: boolean;
     background?: boolean;
   } = {},
@@ -646,7 +662,6 @@ export async function startModelEntryDiscovery(
           !manualOrBuiltin &&
           !effectiveEvidence(fresh) &&
           !cached &&
-          options.allowActiveProbe &&
           !blocked
         ) {
           const active = await probeReasoningCapabilities(input);

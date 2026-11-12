@@ -228,7 +228,6 @@ it.each([4096, 16384])(
         {
           generation: 0,
           routeKey: modelProfileRouteKey(entry, entry.provider),
-          contextWindowTokens: entry.contextWindowTokens,
         },
         {
           reasoningCapabilities: {

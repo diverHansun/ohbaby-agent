@@ -288,33 +288,6 @@ export function groupModels(
   return [...groups].map(([provider, rows]) => ({ provider, models: rows }));
 }
 
-const KEY_FAILURES: ReadonlySet<string> = new Set([
-  "authentication",
-  "missing-credential",
-]);
-const RETRY_FAILURES: ReadonlySet<string> = new Set([
-  "rate-limit",
-  "http-error",
-  "timeout",
-  "network-error",
-  "invalid-json",
-  "discovery-failed",
-]);
-
-/**
- * A detection `reason` in words, when the last attempt failed. Other codes
- * (the provider simply doesn't report it, or a newer attempt replaced this
- * one) read as "not detected", so raw codes never reach the page.
- */
-export function detectionFailure(
-  reason: string | undefined,
-): string | undefined {
-  if (reason === undefined) return undefined;
-  if (KEY_FAILURES.has(reason)) return "Detection failed. Check the API key.";
-  if (RETRY_FAILURES.has(reason)) return "Detection failed. Try again.";
-  return undefined;
-}
-
 /** Context or reasoning discovery is running for this entry. */
 export function modelDetecting(model: UiSettingsModel): boolean {
   return (

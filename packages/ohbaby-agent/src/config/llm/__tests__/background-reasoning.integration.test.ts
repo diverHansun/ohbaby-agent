@@ -70,7 +70,6 @@ it("discovers reasoning strengths in the background when model metadata only say
     modelJsonPath: join(root, "model.json"),
     envPath: join(root, "env"),
     apiKey: "fixture",
-    deferMetadata: true,
     onDiscovery: discovered,
   });
   expect(saved.saved).toBe(true);
@@ -125,7 +124,6 @@ it("reports saved without waiting and retains independent previous-entry results
     projectRoot: root,
     modelJsonPath: join(root, "model.json"),
     envPath: join(root, "env"),
-    deferMetadata: true,
   };
   const saved = await applyActiveModelConfig({
     ...common,
@@ -207,7 +205,6 @@ it("clears an incompatible persisted global intent after confirmed capability di
   await applyActiveModelConfig({
     ...common,
     reasoning: { effort: "high" },
-    deferMetadata: true,
     onDiscovery: done,
   });
   await detected;
@@ -243,7 +240,6 @@ it("explicit retry publishes identified capability and preserves verified eviden
   });
   await applyActiveModelConfig({
     ...input,
-    deferMetadata: true,
     onDiscovery: complete,
   });
   await done;
@@ -289,7 +285,6 @@ it("explicit retry publishes identified capability and preserves verified eviden
   });
   await applyActiveModelConfig({
     ...input,
-    deferMetadata: true,
     onDiscovery: backgroundDone,
   });
   await backgroundFinished;

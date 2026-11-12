@@ -95,6 +95,199 @@ describe("applyActiveModelConfig", () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
+  it.each(["metadata", "reasoning"] as const)(
+    "keeps the in-flight %s discovery when connect only changes numeric overrides",
+    async (phase) => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const signals: AbortSignal[] = [];
+      fetchMock.mockImplementation(
+        async (url: string | URL, init?: RequestInit) => {
+          if (init?.signal) signals.push(init.signal);
+          if (String(url).endsWith("/models")) {
+            if (phase === "metadata") {
+              await gate;
+              return Response.json({
+                data: [
+                  {
+                    id: "connect-draft",
+                    context_length: 131072,
+                    reasoning: false,
+                  },
+                ],
+              });
+            }
+            return new Response(null, { status: 404 });
+          }
+          const body = JSON.parse(init?.body as string) as {
+            reasoning_effort?: string;
+          };
+          await gate;
+          return new Response(null, {
+            status: body.reasoning_effort === "high" ? 200 : 400,
+          });
+        },
+      );
+      const input = {
+        provider: "custom",
+        model: "connect-draft",
+        baseUrl: "https://connect.example/v1",
+        interfaceProvider: "openai-compatible" as const,
+        projectRoot: tempRoot,
+        modelJsonPath,
+        envPath,
+      };
+      try {
+        await applyActiveModelConfig(input);
+        await vi.waitFor(() => {
+          expect(fetchMock).toHaveBeenCalledTimes(phase === "metadata" ? 1 : 2);
+        });
+        const originalSignal = signals[0];
+        await applyActiveModelConfig({
+          ...input,
+          contextWindowTokens: 200000,
+          maxOutputTokens: 4000,
+        });
+        expect(originalSignal.aborted).toBe(false);
+        expect(fetchMock).toHaveBeenCalledTimes(phase === "metadata" ? 1 : 2);
+      } finally {
+        release();
+        await discoveryFinished();
+      }
+      const saved = (await readModelSettings({ modelJsonPath, envPath }))
+        .models[0];
+      expect(saved).toMatchObject({
+        contextWindowTokens: 200000,
+        maxOutputTokens: 4000,
+        reasoning: { status: "identified" },
+      });
+    },
+  );
+
+  it("starts only one discovery for concurrent numeric-only connect saves", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const signals: AbortSignal[] = [];
+    fetchMock.mockImplementation(
+      async (_url: string | URL, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal);
+        await gate;
+        return Response.json({
+          data: [
+            { id: "connect-draft", context_length: 131072, reasoning: false },
+          ],
+        });
+      },
+    );
+    const input = {
+      provider: "custom",
+      model: "connect-draft",
+      baseUrl: "https://connect.example/v1",
+      interfaceProvider: "openai-compatible" as const,
+      projectRoot: tempRoot,
+      modelJsonPath,
+      envPath,
+    };
+    try {
+      await Promise.all([
+        applyActiveModelConfig({ ...input, maxOutputTokens: 4000 }),
+        applyActiveModelConfig({ ...input, maxOutputTokens: 5000 }),
+      ]);
+      await vi.waitFor(() => {
+        expect(signals.length).toBeGreaterThan(0);
+      });
+      expect(signals.some((signal) => signal.aborted)).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await discoveryFinished();
+    }
+    expect(
+      (await readModelSettings({ modelJsonPath, envPath })).models[0],
+    ).toMatchObject({
+      maxOutputTokens: 5000,
+      detectedContextWindowTokens: 131072,
+      reasoning: { status: "identified" },
+    });
+  });
+
+  it("replaces an in-flight connect discovery after credential rotation", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const signals: AbortSignal[] = [];
+    fetchMock.mockImplementation(
+      async (_url: string | URL, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal);
+        await gate;
+        return Response.json({
+          data: [
+            { id: "connect-draft", context_length: 131072, reasoning: false },
+          ],
+        });
+      },
+    );
+    const input = {
+      provider: "custom",
+      model: "connect-draft",
+      baseUrl: "https://connect.example/v1",
+      interfaceProvider: "openai-compatible" as const,
+      projectRoot: tempRoot,
+      modelJsonPath,
+      envPath,
+    };
+    try {
+      await applyActiveModelConfig(input);
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
+      await applyActiveModelConfig({ ...input, apiKey: "rotated-fixture" });
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      });
+      expect(signals[0]?.aborted).toBe(true);
+      expect(signals[1]?.aborted).toBe(false);
+    } finally {
+      release();
+      await discoveryFinished();
+    }
+  });
+
+  it("reuses known reasoning during metadata refresh and retries an unknown result", async () => {
+    const input = {
+      provider: "custom",
+      model: "connect-draft",
+      baseUrl: "https://connect.example/v1",
+      interfaceProvider: "openai-compatible" as const,
+      projectRoot: tempRoot,
+      modelJsonPath,
+      envPath,
+    };
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+    await applyActiveModelConfig(input);
+    await discoveryFinished();
+    fetchMock.mockClear().mockResolvedValue(
+      Response.json({
+        data: [
+          { id: "connect-draft", context_length: 131072, reasoning: false },
+        ],
+      }),
+    );
+    await applyActiveModelConfig({ ...input, maxOutputTokens: 4000 });
+    await discoveryFinished();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockClear();
+    await applyActiveModelConfig({ ...input, maxOutputTokens: 5000 });
+    await discoveryFinished();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/models$/u);
+  });
+
   it("reports saved with a warning when persistence succeeds but reload fails", async () => {
     const reload = vi
       .spyOn(LLMConfigManager.getInstance(), "reload")
@@ -630,7 +823,6 @@ describe("applyActiveModelConfig", () => {
         contextWindowTokens: target.contextWindowTokens,
         modelJsonPath,
         projectRoot: tempRoot,
-        deferMetadata: true,
         onDiscovery: notifyDiscovery,
       });
       await discoveryStarted;
@@ -707,7 +899,6 @@ describe("applyActiveModelConfig", () => {
       contextWindowTokens: 100_000,
       modelJsonPath,
       projectRoot: tempRoot,
-      deferMetadata: true,
       onDiscovery: notifyDiscovery,
     });
     await discoveryStarted;
@@ -789,7 +980,6 @@ describe("applyActiveModelConfig", () => {
       contextWindowTokens: 100_000,
       modelJsonPath,
       projectRoot: tempRoot,
-      deferMetadata: true,
       onDiscovery: notifyDiscovery,
     });
     await discoveryStarted;

@@ -80,6 +80,7 @@ function fixture(overrides: Partial<ComponentProps<typeof Composer>> = {}): {
     onSetPermission: vi.fn(),
     onStructuredCommand: vi.fn(),
     onStop: vi.fn(),
+    onOpenModelSettings: vi.fn(),
     onSubmit: vi.fn(),
     onEditRevision: (value) => {
       revision = value;
@@ -1085,4 +1086,128 @@ it("keeps the goal directly against the input below queued prompts and steer rec
   expect(strip.nextElementSibling).toBe(
     f.input().closest(".ohb-composer-input"),
   );
+});
+
+const incompatibleModel: NonNullable<
+  ComponentProps<typeof Composer>["modelEntry"]
+> = {
+  id: "small",
+  provider: "custom",
+  model: "small-model",
+  baseUrl: "https://model.invalid/v1",
+  interfaceProvider: "openai-compatible",
+  apiKeyConfigured: true,
+  configurationComplete: true,
+  effectiveContextWindowTokens: 16384,
+  effectiveMaxOutputTokens: 32768,
+  contextDiscovery: { status: "identified" },
+  reasoning: { status: "unknown", efforts: [] },
+  tokenBudgetIssue: {
+    code: "MODEL_TOKEN_LIMITS_INCOMPATIBLE",
+    contextWindowTokens: 16384,
+    maxOutputTokens: 32768,
+  },
+};
+
+it("keeps an incompatible model's draft until settings are corrected", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(true);
+  const onOpenModelSettings = vi.fn();
+  const f = fixture({
+    modelEntry: incompatibleModel,
+    onSubmit,
+    onOpenModelSettings,
+  });
+  f.type("Keep this draft");
+  const send = document.querySelector<HTMLButtonElement>(
+    '[aria-label="Send message"]',
+  );
+  expect(send?.disabled).toBe(true);
+  const check = [...document.querySelectorAll("button")].find(
+    (button) => button.textContent === "Check settings",
+  );
+  expect(check).toBeDefined();
+  await act(async () => {
+    send?.click();
+    f.input().dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }),
+    );
+    check?.click();
+    await Promise.resolve();
+  });
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(onOpenModelSettings).toHaveBeenCalledOnce();
+  expect(f.input().value).toBe("Keep this draft");
+  expect(f.input().disabled).toBe(false);
+  const { tokenBudgetIssue: _issue, ...fixed } = incompatibleModel;
+  f.update({ modelEntry: { ...fixed, effectiveMaxOutputTokens: 4096 } });
+  expect(send?.disabled).toBe(false);
+  expect(document.body.textContent).not.toContain("Check settings");
+  await act(async () => {
+    send?.click();
+    await Promise.resolve();
+  });
+  expect(onSubmit).toHaveBeenCalledWith(
+    "Keep this draft",
+    expect.any(String),
+    undefined,
+  );
+});
+
+it("blocks slash submission while model token limits are incompatible", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(true);
+  const f = fixture({ modelEntry: incompatibleModel, onSubmit });
+  await act(async () => {
+    f.type("/status");
+    await Promise.resolve();
+  });
+  await act(async () => {
+    f.input().dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }),
+    );
+    await Promise.resolve();
+  });
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(f.input().value).toBe("/status");
+});
+
+it("keeps Stop available when a model's discovered budget becomes incompatible", () => {
+  const onStop = vi.fn();
+  const f = fixture({
+    modelEntry: incompatibleModel,
+    onStop,
+    model: {
+      canSend: true,
+      canStop: true,
+      disabled: false,
+      isRunning: true,
+      mode: "auto",
+      permissionLevel: "default",
+    },
+  });
+  f.type("Draft for the next turn");
+  const stop = document.querySelector<HTMLButtonElement>(
+    '[aria-label="Stop run"]',
+  );
+  expect(stop?.disabled).toBe(false);
+  act(() => stop?.click());
+  expect(onStop).toHaveBeenCalledOnce();
+});
+
+it("blocks recovered steer resends while the selected model budget is incompatible", () => {
+  const resend = vi.fn();
+  fixture({
+    modelEntry: incompatibleModel,
+    unconsumedSteers,
+    client: {
+      resendSteerInput: resend,
+      getCurrentModel: () => Promise.resolve(null),
+      subscribeEvents: (): (() => void) => (): void => undefined,
+    } as unknown as UiBackendClient,
+  });
+  const button = document.querySelector<HTMLButtonElement>(
+    '[aria-label="Resend steer 1: Keep my requirement"]',
+  );
+  expect(button?.disabled).toBe(true);
+  act(() => button?.click());
+  expect(resend).not.toHaveBeenCalled();
 });

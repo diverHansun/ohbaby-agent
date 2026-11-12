@@ -65,7 +65,6 @@ it("starts discovery for a hand-edited route on a label Save while the old route
     );
     oldDiscovery = startModelEntryDiscovery(route.id, {
       ...options,
-      allowActiveProbe: true,
     });
     await aRequested.promise;
     const editedRoute = { ...route, baseUrl: "https://route-b.invalid/v1" };

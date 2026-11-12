@@ -199,3 +199,15 @@ it("keeps both automatic numeric fields empty and omits them from an unrelated e
     label: "Research",
   });
 });
+
+it.each(fields)(
+  "associates the $label input with its visible label",
+  async ({ label }) => {
+    const editor = await renderModelEditor();
+    const control = editor.field(label);
+    expect(control.labels).toHaveLength(1);
+    expect(control.labels?.[0].firstChild?.textContent).toBe(label);
+    expect(control.getAttribute("aria-label")).toBeNull();
+    expect(control.getAttribute("aria-labelledby")).toBeNull();
+  },
+);

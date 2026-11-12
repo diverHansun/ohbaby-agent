@@ -20,6 +20,7 @@
 - [03 dsh、kimi-code、ZCode 对照](improve-1/03-reference-projects.md)
 - [04 测试与验收标准](improve-1/04-test-and-acceptance.md)
 - [05 实施与验收记录](improve-1/05-implementation-acceptance.md)
+- [06 外部审查后的修复与复核](improve-1/06-review-followup.md)
 
 02 是行为契约，04 是验收标准。后端由主代理承担；Web 前端主体由 Pi `anthropic/claude-opus-5-5`、`xhigh` 完成，主代理负责复核、后续精简和集成验收。具体分工及供应商 429 对续跑的影响见 05。
 

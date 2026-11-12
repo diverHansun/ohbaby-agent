@@ -468,6 +468,9 @@ export function SessionScreen({
             />
           }
           modelEntry={modelEntry}
+          onOpenModelSettings={() => {
+            onOpenModelSettings(false);
+          }}
           activeGoal={view.activeGoal}
           onExecuteGoalCommand={(input) => runtime.executeSlashCommand(input)}
           onOpenGoalPanel={overlays.openGoalPanel}

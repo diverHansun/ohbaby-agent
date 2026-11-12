@@ -7828,3 +7828,36 @@ it("explains surviving children after confirmed main Stop, then clears on a new 
   });
   expect(app.container.textContent).not.toContain("Main agent stopped.");
 });
+
+it("opens model settings instead of losing a draft to incompatible token limits", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  await fake.runtime.settings.updateModel("m1", { contextWindowTokens: 16384 });
+  const app = mountApp(fake.runtime);
+  await flushTimers();
+  await setTextareaValue(app.container, "Keep this small-model draft");
+  await pressTextareaKey(app.container, "Enter");
+  expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
+  expect(textareaValue(app.container)).toBe("Keep this small-model draft");
+  expect(
+    app.container.querySelector<HTMLButtonElement>(".ohb-send-button")
+      ?.disabled,
+  ).toBe(true);
+  const check = [
+    ...app.container.querySelectorAll<HTMLButtonElement>(".ohb-banner-action"),
+  ].find((button) => button.textContent === "Check settings");
+  expect(check).toBeDefined();
+  await act(async () => {
+    check?.click();
+    await Promise.resolve();
+  });
+  await flushTimers();
+  expect(
+    document.querySelector('.ohb-settings-dialog[aria-modal="true"]'),
+  ).not.toBeNull();
+  expect(
+    document.querySelector('.ohb-settings-nav [aria-current="page"]')
+      ?.textContent,
+  ).toBe("Models");
+});

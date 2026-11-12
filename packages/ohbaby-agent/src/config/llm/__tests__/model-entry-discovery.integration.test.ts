@@ -277,7 +277,6 @@ it("concurrent legacy saves discover their atomically saved entries without reta
     model: "same",
     interfaceProvider: "openai-compatible" as const,
     projectRoot: dir,
-    deferMetadata: true,
   };
   const saves = Promise.all(
     ["a", "b"].map((name) =>
@@ -355,9 +354,9 @@ it("contains discovery preparation failure after a successful save without losin
     .spyOn(modelDocument, "readModelDocument")
     .mockRejectedValueOnce(new Error("fixture read I/O failure"));
   try {
-    await expect(
-      startModelEntryDiscovery(entry.id, { ...opts, allowActiveProbe: true }),
-    ).resolves.toEqual({ reasoningReason: "network-error" });
+    await expect(startModelEntryDiscovery(entry.id, opts)).resolves.toEqual({
+      reasoningReason: "network-error",
+    });
     expect((await readModelDocument(opts)).models[0].id).toBe(entry.id);
     expect(requests).toHaveLength(1);
   } finally {

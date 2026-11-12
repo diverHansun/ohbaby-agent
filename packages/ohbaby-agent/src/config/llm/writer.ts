@@ -78,10 +78,6 @@ export interface SetActiveLLMConfigInput {
   readonly clearTemperature?: boolean;
   readonly reasoning?: ReasoningConfig;
   readonly clearReasoning?: boolean;
-  readonly discoveredReasoningCapabilities?: ReasoningCapabilities;
-  readonly discoveredReasoningCapabilitySource?:
-    | "model-metadata"
-    | "active-probe";
   readonly clearDiscoveredReasoning?: boolean;
   readonly maxTokens?: number | null;
   readonly contextWindowTokens?: number | null;
@@ -405,7 +401,6 @@ export function createModelEntry(
     bumpGeneration(entry.id, options);
     await startModelEntryDiscovery(entry.id, {
       ...options,
-      allowActiveProbe: true,
       background: true,
     });
     return projectSettings(document, options);
@@ -469,7 +464,6 @@ export function updateModelEntry(
     )
       await startModelEntryDiscovery(id, {
         ...options,
-        allowActiveProbe: true,
         background: true,
       });
     return projectSettings(document, options);
@@ -488,7 +482,6 @@ export function selectModelEntry(
     await persistDocument(document, options);
     await startModelEntryDiscovery(id, {
       ...options,
-      allowActiveProbe: true,
       background: true,
     });
     return projectSettings(document, options);
@@ -506,7 +499,6 @@ export async function probeModelEntry(
   });
   await startModelEntryDiscovery(id, {
     ...options,
-    allowActiveProbe: true,
     forceActiveProbe: true,
   });
   const result = await readModelSettings(options);
@@ -627,15 +619,6 @@ export async function setActiveLLMConfig(
       delete entry.contextWindowTokens;
       clearAutomaticCapabilities(entry);
     }
-    if (
-      input.discoveredReasoningCapabilities &&
-      (!entry.reasoningCapabilities || entry.reasoningCapabilitySource)
-    ) {
-      entry.reasoningCapabilities = input.discoveredReasoningCapabilities;
-      entry.reasoningCapabilitySource =
-        input.discoveredReasoningCapabilitySource ?? "model-metadata";
-      entry.detectedRouteKey = modelProfileRouteKey(entry, entry.provider);
-    }
     document.activeProfileId = entry.id;
     const output =
       input.maxOutputTokens !== undefined
@@ -680,7 +663,6 @@ export function writeModelEntryMetadata(
   expected: {
     generation: number;
     routeKey: string;
-    contextWindowTokens?: number;
   },
   metadata: {
     contextWindowTokens?: number;
