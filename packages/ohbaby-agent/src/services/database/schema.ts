@@ -94,6 +94,7 @@ export const schema = {
     data: "data",
   }),
   subagentExecution: table("subagent_execution", {
+    goalId: "goal_id",
     rewoundAt: "rewound_at",
     executionId: "execution_id",
     requestId: "request_id",

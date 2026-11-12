@@ -2615,48 +2615,54 @@ describe("idle session operations", () => {
   });
 });
 
-it("settles preparation cancellation when permission revocation throws", async () => {
-  const preparing = createDeferred();
-  const release = createDeferred();
-  const lifecycle = new CompletingLifecycle();
-  let revocations = 0;
-  let inputClosed = false;
-  const { manager, ledger } = createManagerWithOverrides({
-    lifecycle,
-    sandboxManager: {
-      async acquire(input) {
-        preparing.resolve();
-        await release.promise;
-        return createTestSandboxLease(input);
+it.each([undefined, "user-stop", "goal budget exhausted"])(
+  "settles preparation cancellation %s when permission revocation throws",
+  async (reason) => {
+    const preparing = createDeferred();
+    const release = createDeferred();
+    const lifecycle = new CompletingLifecycle();
+    let revocations = 0;
+    let inputClosed = false;
+    const { manager, ledger } = createManagerWithOverrides({
+      lifecycle,
+      sandboxManager: {
+        async acquire(input) {
+          preparing.resolve();
+          await release.promise;
+          return createTestSandboxLease(input);
+        },
+        release: () => Promise.resolve(),
       },
-      release: () => Promise.resolve(),
-    },
-    currentRunInputs: {
-      close: () => {
-        inputClosed = true;
-        return Promise.resolve();
+      currentRunInputs: {
+        close: () => {
+          inputClosed = true;
+          return Promise.resolve();
+        },
       },
-    },
-    revokePermissionsForRun: () => {
-      if (++revocations === 1)
-        throw new Error("transient permission revocation failure");
-    },
-  });
-  const controller = new AbortController();
-  const run = await manager.create({
-    directory: "D:/repo",
-    modelId: "fake-model",
-    sessionId: "session_1",
-    triggerSource: "user",
-    preparationSignal: controller.signal,
-  });
-  await preparing.promise;
-  controller.abort();
-  release.resolve();
-  expect(await manager.waitForCompletion(run.runId)).toMatchObject({
-    status: "interrupted",
-  });
-  expect((await ledger.get(run.runId))?.status).toBe("interrupted");
-  expect(inputClosed).toBe(true);
-  expect(lifecycle.calls).toHaveLength(0);
-});
+      revokePermissionsForRun: () => {
+        if (++revocations === 1)
+          throw new Error("transient permission revocation failure");
+      },
+    });
+    const controller = new AbortController();
+    const run = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+      preparationSignal: controller.signal,
+    });
+    await preparing.promise;
+    controller.abort(reason);
+    release.resolve();
+    expect(await manager.waitForCompletion(run.runId)).toMatchObject({
+      status: "interrupted",
+    });
+    expect((await ledger.get(run.runId))?.status).toBe("interrupted");
+    expect((await ledger.get(run.runId))?.error).toBe(
+      reason ?? "run preparation cancelled",
+    );
+    expect(inputClosed).toBe(true);
+    expect(lifecycle.calls).toHaveLength(0);
+  },
+);

@@ -21,6 +21,7 @@ import { subscribeApprovalExecutionChanges } from "../../agents/subagents/approv
 import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import { createSubagentResultArtifacts } from "../../agents/subagents/result-artifacts.js";
 import { createSubagentContinuationCoordinator } from "../../agents/subagents/continuation-coordinator.js";
+import { createSubagentDelivery } from "../../agents/subagents/delivery.js";
 import { createExecutionMessageChannel } from "../../agents/subagents/execution-message-channel.js";
 import { createSubagentMonitor } from "../../agents/subagents/monitor.js";
 import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js";
@@ -369,8 +370,6 @@ export async function createUiRuntimeComposition(
         now: options.now,
       })
     : undefined;
-  // A pending automatic wake constraint is consumed once by its input port.
-  const excludedSubagentRoots = new Map<string, readonly string[]>();
   const resultArtifacts = createSubagentResultArtifacts({
     async readDeliveryContext(execution) {
       const instance = await subagentInstanceStore.get(execution);
@@ -398,15 +397,40 @@ export async function createUiRuntimeComposition(
       permissions: options.permissionManager,
       now: options.now,
     });
-  const continuation = options.currentRunInputStore
-    ? createSubagentContinuationCoordinator({
-        inputs: options.currentRunInputStore,
+  const goalPersistence =
+    options.goalPersistence ?? new InMemoryGoalPersistence();
+  const delivery = options.currentRunInputStore
+    ? createSubagentDelivery({
         executions: subagentExecutionStore,
-        prepareResult: (execution, signal) =>
-          resultArtifacts.prepare(execution, { signal }),
+        inputs: options.currentRunInputStore,
+        runs: runLedger,
+        goalHistory: goalPersistence,
+        receivingGoal(sessionId, runId) {
+          const ticket = goalService.getTicketForRun(sessionId, runId);
+          return ticket &&
+            goalService.isExecutionCurrent(
+              sessionId,
+              ticket.goalId,
+              ticket.executionEpoch,
+            ) &&
+            goalService.peekSnapshot(sessionId)?.status === "active"
+            ? ticket.goalId
+            : undefined;
+        },
         now: options.now,
       })
     : undefined;
+  const continuation =
+    options.currentRunInputStore && delivery
+      ? createSubagentContinuationCoordinator({
+          inputs: options.currentRunInputStore,
+          executions: subagentExecutionStore,
+          delivery,
+          prepareResult: (execution, signal) =>
+            resultArtifacts.prepare(execution, { signal }),
+          now: options.now,
+        })
+      : undefined;
   const subagentInstanceStore =
     options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
   const runtimeGeneration = randomUUID();
@@ -787,7 +811,6 @@ export async function createUiRuntimeComposition(
     },
     currentRunInputs: {
       async close(runId, reason): Promise<void> {
-        excludedSubagentRoots.delete(runId);
         shellJobRegistry.sealRootRun(runId);
         // Observe both operations immediately: lookup/cancellation can fail while
         // the already sealed input store is still persisting its closure.
@@ -797,6 +820,12 @@ export async function createUiRuntimeComposition(
           })(),
           (async (): Promise<void> => {
             const run = await runLedger.get(runId);
+            if (run && (reason === "user-stop" || reason === "cancelled"))
+              await subagentExecutionStore.stopWakeups(
+                run.sessionId,
+                runId,
+                options.now?.() ?? Date.now(),
+              );
             // Natural child failure may leave a detached shell alive. Primary
             // interruption stops its own shell jobs; agents keep running.
             if (
@@ -816,18 +845,7 @@ export async function createUiRuntimeComposition(
       },
     },
     createCurrentRunInputPort: continuation
-      ? (
-          identity,
-        ): ReturnType<NonNullable<typeof continuation>["createPort"]> => {
-          const excludedSubagentRootRunIds = excludedSubagentRoots.get(
-            identity.runId,
-          );
-          excludedSubagentRoots.delete(identity.runId);
-          return continuation.createPort({
-            ...identity,
-            excludedSubagentRootRunIds,
-          });
-        }
+      ? (identity) => continuation.createPort(identity)
       : undefined,
     revokePermissionsForRun: (runId, reason): void => {
       options.permissionManager?.revokeByRun(runId, reason);
@@ -967,9 +985,11 @@ export async function createUiRuntimeComposition(
     subscribeExecution: (sessionId, runId, wake) =>
       subscribeApprovalExecutionChanges(options.bus, sessionId, runId, wake),
     executionStore: subagentExecutionStore,
-    async resolveRequester(
-      input,
-    ): Promise<{ rootRunId: string; rootSessionId: string }> {
+    async resolveRequester(input): Promise<{
+      rootRunId: string;
+      rootSessionId: string;
+      goalId: string | null;
+    }> {
       const run = await runLedger.get(input.requesterRunId);
       const session = await sessionManager.get(input.parentSessionId);
       if (
@@ -982,7 +1002,12 @@ export async function createUiRuntimeComposition(
       ) {
         throw new Error("Invalid or inactive primary subagent requester run");
       }
-      return { rootRunId: run.runId, rootSessionId: run.sessionId };
+      return {
+        rootRunId: run.runId,
+        rootSessionId: run.sessionId,
+        goalId:
+          goalService.getTicketForRun(run.sessionId, run.runId)?.goalId ?? null,
+      };
     },
     onFatal(error, rootRunId): void {
       runManager.fail(rootRunId, error);
@@ -1116,7 +1141,7 @@ export async function createUiRuntimeComposition(
           title: "Goal execution control failed",
         });
       },
-      persistence: options.goalPersistence ?? new InMemoryGoalPersistence(),
+      persistence: goalPersistence,
     });
 
   for (const tool of createBuiltinTools({
@@ -1319,52 +1344,42 @@ export async function createUiRuntimeComposition(
         return Promise.reject(
           new Error("Runtime wake-up input store is unavailable"),
         );
-      if (runtimeInput?.excludedSubagentRootRunIds?.length)
-        excludedSubagentRoots.set(runId, [
-          ...runtimeInput.excludedSubagentRootRunIds,
-        ]);
-      return agentService
-        .startSession({
-          ...input,
-          ...(runtimeInput && inputStore
-            ? {
-                prompt: "",
-                onInputReady: async (): Promise<void> => {
-                  const inputId = `${runtimeInput.sourceId}:${runId}`;
-                  const messageId =
-                    input.initialUserMessageId ?? `runtime:${inputId}`;
-                  await inputStore.acceptRuntimeInput({
-                    inputId,
-                    runId,
+      return agentService.startSession({
+        ...input,
+        ...(runtimeInput && inputStore
+          ? {
+              prompt: "",
+              onInputReady: async (): Promise<void> => {
+                const inputId = `${runtimeInput.sourceId}:${runId}`;
+                const messageId = `runtime:${inputId}`;
+                await inputStore.acceptRuntimeInput({
+                  inputId,
+                  runId,
+                  sessionId: input.sessionId,
+                  source: runtimeInput.kind,
+                  sourceId: runtimeInput.sourceId,
+                  message: buildRuntimeInputMessage({
+                    messageId,
                     sessionId: input.sessionId,
-                    source: runtimeInput.kind,
-                    sourceId: runtimeInput.sourceId,
-                    message: buildRuntimeInputMessage({
-                      messageId,
-                      sessionId: input.sessionId,
-                      agent: input.agentName,
-                      createdAt: options.now?.() ?? Date.now(),
-                      origin: {
-                        kind: runtimeInput.kind,
-                        inputId,
-                        targetRunId: runId,
-                        sourceId: runtimeInput.sourceId,
-                      },
-                      text: runtimeInput.body,
-                    }),
-                  });
-                  await input.onInputReady?.();
-                },
-              }
-            : {}),
-          environment:
-            input.environment ?? createHostLocalEnvironment(input.projectRoot),
-          runId,
-        })
-        .catch((error: unknown) => {
-          excludedSubagentRoots.delete(runId);
-          throw error;
-        });
+                    agent: input.agentName,
+                    createdAt: options.now?.() ?? Date.now(),
+                    origin: {
+                      kind: runtimeInput.kind,
+                      inputId,
+                      targetRunId: runId,
+                      sourceId: runtimeInput.sourceId,
+                    },
+                    text: runtimeInput.body,
+                  }),
+                });
+                await input.onInputReady?.();
+              },
+            }
+          : {}),
+        environment:
+          input.environment ?? createHostLocalEnvironment(input.projectRoot),
+        runId,
+      });
     },
 
     setSessionWorkdir(sessionId, workdir): Promise<void> {

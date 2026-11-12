@@ -81,35 +81,42 @@ describe("InProcessRuntimeController", () => {
     ]);
   });
 
-  it("only aborts the local active run", async (): Promise<void> => {
-    const cancelled: { readonly reason?: string; readonly runId: string }[] =
-      [];
-    const cleared: string[] = [];
-    const controller = new InProcessRuntimeController({
-      clearPendingPermissionsForRun: (runId): Promise<void> => {
-        cleared.push(runId);
-        return Promise.resolve();
-      },
-      createRuntime: (): Promise<UiRuntimeComposition> =>
-        Promise.resolve(
-          runtime({
-            interruptRunTree(runId, reason): Promise<void> {
-              cancelled.push({ reason, runId });
-              return Promise.resolve();
-            },
-          }),
-        ),
-      publishNotice: (): void => undefined,
-      updateStatus: (): Promise<void> => Promise.resolve(),
-    });
-    controller.setActiveRunId("run_active", "session_1");
+  it.each([undefined, "goal budget exhausted"])(
+    "only aborts the local active run with reason %s",
+    async (reason): Promise<void> => {
+      const cancelled: { readonly reason?: string; readonly runId: string }[] =
+        [];
+      const cleared: string[] = [];
+      const controller = new InProcessRuntimeController({
+        clearPendingPermissionsForRun: (runId): Promise<void> => {
+          cleared.push(runId);
+          return Promise.resolve();
+        },
+        createRuntime: (): Promise<UiRuntimeComposition> =>
+          Promise.resolve(
+            runtime({
+              interruptRunTree(runId, reason): Promise<void> {
+                cancelled.push({ reason, runId });
+                return Promise.resolve();
+              },
+            }),
+          ),
+        publishNotice: (): void => undefined,
+        updateStatus: (): Promise<void> => Promise.resolve(),
+      });
+      controller.setActiveRunId("run_active", "session_1");
 
-    await expect(controller.abortPromptRun("run_other")).resolves.toBe(false);
-    await expect(controller.abortPromptRun("run_active")).resolves.toBe(true);
+      await expect(controller.abortPromptRun("run_other")).resolves.toBe(false);
+      await expect(
+        controller.abortPromptRun("run_active", reason),
+      ).resolves.toBe(true);
 
-    expect(cancelled).toEqual([{ reason: "user-stop", runId: "run_active" }]);
-    expect(cleared).toEqual(["run_active"]);
-  });
+      expect(cancelled).toEqual([
+        { reason: reason ?? "user-stop", runId: "run_active" },
+      ]);
+      expect(cleared).toEqual(["run_active"]);
+    },
+  );
 
   it("tracks and aborts active runs independently by session", async () => {
     const cancelled: string[] = [];

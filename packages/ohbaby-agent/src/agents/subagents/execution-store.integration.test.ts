@@ -1,7 +1,16 @@
+import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSubagentDelivery } from "./delivery.js";
+import { createDatabaseRunLedger } from "../../runtime/run-ledger/index.js";
+import {
+  createDatabaseMessageStore,
+  createMessageManager,
+  buildRuntimeInputMessage,
+} from "../../core/message/index.js";
+import { createBus } from "../../bus/index.js";
 import {
   closeDatabase,
   getDatabase,
@@ -20,6 +29,7 @@ import { DatabaseCurrentRunInputStore } from "../../runtime/prompt-scheduler/cur
 
 const directories: string[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   closeDatabase();
   await Promise.all(
     directories
@@ -56,6 +66,175 @@ const lookup = {
   parentSessionId: "parent",
   requesterScopeId: "main",
 };
+async function requiredExecution(
+  store: SubagentExecutionStore,
+  identity: { executionId: string; parentSessionId: string },
+) {
+  const record = await store.get(identity);
+  assert(record);
+  return record;
+}
+it("recovers accepted result and successful request across a real database reopen without another wake", async () => {
+  const dbPath = await database();
+  getDatabase()
+    .prepare(
+      "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES('parent','p','/tmp','test','active',1,1,'{}')",
+    )
+    .run();
+  const executions = new DatabaseSubagentExecutionStore();
+  const execution = (
+    await executions.accept(
+      input({ requesterScopeId: "primary", goalId: null }),
+    )
+  ).record;
+  await executions.finish(execution, {
+    status: "completed",
+    output: "done",
+    completedAt: 2,
+  });
+  const runs = createDatabaseRunLedger();
+  await runs.createPending({
+    runId: "wake",
+    sessionId: "parent",
+    triggerSource: "subagent",
+  });
+  await runs.markRunning("wake");
+  const inputs = new DatabaseCurrentRunInputStore();
+  const sourceId = "subagent-result:exec-1";
+  const inputId = `${sourceId}:wake`;
+  await inputs.acceptRuntimeInput({
+    inputId,
+    sourceId,
+    source: "subagent-result",
+    sessionId: "parent",
+    runId: "wake",
+    message: buildRuntimeInputMessage({
+      messageId: `runtime:${inputId}`,
+      sessionId: "parent",
+      agent: "default",
+      createdAt: 3,
+      origin: {
+        kind: "subagent-result",
+        sourceId,
+        inputId,
+        targetRunId: "wake",
+      },
+      text: "done",
+    }),
+  });
+  const messages = createMessageManager({
+    bus: createBus(),
+    store: createDatabaseMessageStore(),
+  });
+  await messages.createMessage({
+    id: "assistant",
+    sessionId: "parent",
+    runId: "wake",
+    role: "assistant",
+    agent: "default",
+  });
+  const request = {
+    requestId: "success",
+    messageId: "assistant",
+    runId: "wake",
+    purpose: "agent-step" as const,
+    step: 1,
+    attempt: 1,
+    startedAt: 4,
+    outcome: "running" as const,
+    inputIds: [inputId],
+  };
+  await inputs.admitRequestAttempt(request);
+  await messages.updateMessage("assistant", {
+    modelRequests: [{ ...request, outcome: "success", endedAt: 5 }],
+  });
+  await inputs.close("wake", "process-interrupted");
+  await runs.markRunInterrupted("wake", "process-interrupted");
+  closeDatabase();
+  initDatabase({ dbPath });
+  const reopened = new DatabaseSubagentExecutionStore();
+  const delivery = createSubagentDelivery({
+    executions: reopened,
+    inputs: new DatabaseCurrentRunInputStore(),
+    runs: createDatabaseRunLedger(),
+    goalHistory: { list: () => Promise.resolve([]) },
+    receivingGoal: () => undefined,
+  });
+  expect(
+    await delivery.checkWakeup(await requiredExecution(reopened, execution)),
+  ).toEqual({
+    ready: false,
+  });
+  expect((await reopened.get(execution))?.delivery).toMatchObject({
+    state: "processed",
+    inputId,
+    processedRequestId: "success",
+  });
+  expect(
+    await delivery.checkWakeup(await requiredExecution(reopened, execution)),
+  ).toEqual({
+    ready: false,
+  });
+});
+
+it("retains the 5/10/20 second entrance retry schedule and its limit across database reopens", async () => {
+  const dbPath = await database();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(100);
+  let executions = new DatabaseSubagentExecutionStore();
+  await executions.accept(input({ goalId: null }));
+  await executions.finish(lookup, { status: "completed", completedAt: 100 });
+  await executions.claimWakeup(lookup, Date.now(), { runId: "wake-0" });
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    closeDatabase();
+    initDatabase({ dbPath });
+    executions = new DatabaseSubagentExecutionStore();
+    const delivery = createSubagentDelivery({
+      executions,
+      inputs: new DatabaseCurrentRunInputStore(),
+      runs: createDatabaseRunLedger(),
+      goalHistory: { list: () => Promise.resolve([]) },
+      receivingGoal: () => undefined,
+    });
+    const delay = 5_000 * 2 ** (attempt - 1);
+    expect(
+      await delivery.checkWakeup(await requiredExecution(executions, lookup)),
+    ).toEqual({ ready: false, retryAt: Date.now() + delay });
+    await vi.advanceTimersByTimeAsync(delay - 1);
+    expect(
+      (await delivery.checkWakeup(await requiredExecution(executions, lookup)))
+        .ready,
+    ).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(
+      await delivery.checkWakeup(await requiredExecution(executions, lookup)),
+    ).toEqual({ ready: true });
+    expect(
+      await executions.claimWakeup(lookup, Date.now(), {
+        runId: `wake-${String(attempt)}`,
+        previousRunId: `wake-${String(attempt - 1)}`,
+      }),
+    ).toBe(true);
+    expect(
+      (await executions.get(lookup))?.delivery.wakeupRetriesRemaining,
+    ).toBe(3 - attempt);
+  }
+  closeDatabase();
+  initDatabase({ dbPath });
+  const delivery = createSubagentDelivery({
+    executions: new DatabaseSubagentExecutionStore(),
+    inputs: new DatabaseCurrentRunInputStore(),
+    runs: createDatabaseRunLedger(),
+    goalHistory: { list: () => Promise.resolve([]) },
+    receivingGoal: () => undefined,
+  });
+  await vi.advanceTimersByTimeAsync(600_000);
+  expect(
+    await delivery.checkWakeup(
+      await requiredExecution(new DatabaseSubagentExecutionStore(), lookup),
+    ),
+  ).toEqual({ ready: false });
+});
 for (const backend of ["memory", "sqlite"] as const)
   describe(`${backend} execution ledger`, () => {
     async function store(): Promise<SubagentExecutionStore> {
@@ -63,6 +242,90 @@ for (const backend of ["memory", "sqlite"] as const)
       await database();
       return new DatabaseSubagentExecutionStore({ db: getDatabase() });
     }
+    it.each(["process-interrupted", "service-shutdown"])(
+      "retains a parent notification for %s without changing the terminal fact",
+      async (reason) => {
+        const s = await store();
+        await s.accept(input());
+        await s.finish(lookup, {
+          status: "interrupted",
+          reason,
+          completedAt: 2,
+        });
+        expect((await s.get(lookup))?.delivery).toMatchObject({
+          state: "pending",
+          notificationId: "subagent-result:exec-1",
+        });
+        await s.finish(lookup, {
+          status: "completed",
+          output: "late",
+          completedAt: 3,
+        });
+        expect(await s.get(lookup)).toMatchObject({
+          status: "interrupted",
+          reason,
+        });
+      },
+    );
+    it("persists bounded retry claims and stops only the batch that triggered a run", async () => {
+      const s = await store();
+      await s.accept(input());
+      await s.finish(lookup, { status: "completed", completedAt: 2 });
+      expect(await s.claimWakeup(lookup, 3, { runId: "wake-0" })).toBe(true);
+      expect(
+        await s.claimWakeup(lookup, 4, {
+          runId: "wrong",
+          previousRunId: "stale",
+        }),
+      ).toBe(false);
+      for (let retry = 1; retry <= 3; retry++)
+        expect(
+          await s.claimWakeup(lookup, 4 + retry, {
+            runId: `wake-${String(retry)}`,
+            previousRunId: `wake-${String(retry - 1)}`,
+          }),
+        ).toBe(true);
+      expect(
+        await s.claimWakeup(lookup, 9, {
+          runId: "wake-4",
+          previousRunId: "wake-3",
+        }),
+      ).toBe(false);
+      expect((await s.get(lookup))?.delivery.wakeupRetriesRemaining).toBe(0);
+      const second = (
+        await s.accept(input({ executionId: "second", requestId: "second" }))
+      ).record;
+      await s.finish(second, { status: "completed", completedAt: 10 });
+      await s.claimWakeup(second, 11, { runId: "another-run" });
+      await s.stopWakeups("parent", "another-run", 12);
+      const reader =
+        backend === "sqlite"
+          ? new DatabaseSubagentExecutionStore({ db: getDatabase() })
+          : s;
+      expect((await reader.get(second))?.delivery.wakeupRetriesRemaining).toBe(
+        0,
+      );
+      expect((await reader.get(lookup))?.delivery.wakeupRunId).toBe("wake-3");
+    });
+    it("keeps Goal, ordinary and legacy ownership distinct after reopening", async () => {
+      const s = await store();
+      for (const [index, goalId] of ["goal-1", null, undefined].entries()) {
+        const original = input({
+          executionId: `owner-${String(index)}`,
+          requestId: `owner-${String(index)}`,
+          goalId,
+        });
+        const accepted = (await s.accept(original)).record;
+        const reader =
+          backend === "sqlite"
+            ? new DatabaseSubagentExecutionStore({ db: getDatabase() })
+            : s;
+        expect((await reader.get(accepted))?.goalId).toBe(goalId);
+        await expect(
+          s.accept({ ...original, goalId: goalId === null ? undefined : null }),
+        ).rejects.toThrow(/conflict/i);
+      }
+    });
     it("rebinds an unprocessed delivery to a new run without reopening its wakeup claim", async () => {
       const s = await store();
       await s.accept(input());

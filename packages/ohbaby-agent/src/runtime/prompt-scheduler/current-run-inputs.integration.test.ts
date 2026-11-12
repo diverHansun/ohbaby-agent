@@ -107,6 +107,58 @@ for (const backend of ["memory", "sqlite"] as const)
       };
       return { ledger, queue, messages, messageStore, inputs, steer };
     }
+    it("recovers confirmation from a later successful attempt after the input was closed", async () => {
+      const f = await fixture();
+      const { receipt } = requireSteered(await f.inputs.steerQueued(f.steer));
+      for (const [index, outcome] of ["error", "success"].entries()) {
+        const id = `attempt-${String(index)}`;
+        await f.messages.createMessage({
+          id,
+          sessionId: "session",
+          runId: "run-a",
+          role: "assistant",
+          agent: "default",
+        });
+        const request = {
+          requestId: id,
+          messageId: id,
+          runId: "run-a",
+          purpose: "agent-step" as const,
+          step: 1,
+          attempt: index + 1,
+          startedAt: index + 1,
+          outcome: "running" as const,
+          inputIds: [receipt.inputId],
+        };
+        await f.inputs.admitRequestAttempt(request);
+        await f.messages.updateMessage(id, {
+          modelRequests: [
+            {
+              ...request,
+              outcome: outcome as "error" | "success",
+              endedAt: index + 2,
+            },
+          ],
+        });
+      }
+      await f.inputs.close("run-a", "process-interrupted");
+      const reader =
+        backend === "sqlite"
+          ? new DatabaseCurrentRunInputStore({ db: getDatabase() })
+          : f.inputs;
+      expect(
+        (await reader.getInput(receipt.inputId))?.processedRequestId,
+      ).toBeUndefined();
+      expect(
+        await reader.reconcileRequestSuccess(receipt.inputId),
+      ).toMatchObject({
+        firstAttemptRequestId: "attempt-0",
+        processedRequestId: "attempt-1",
+      });
+      expect(
+        await reader.reconcileRequestSuccess(receipt.inputId),
+      ).toMatchObject({ processedRequestId: "attempt-1" });
+    });
     it("persists slash provenance on the actual steer body across store reopen", async () => {
       const f = await fixture("review");
       const result = requireSteered(await f.inputs.steerQueued(f.steer));

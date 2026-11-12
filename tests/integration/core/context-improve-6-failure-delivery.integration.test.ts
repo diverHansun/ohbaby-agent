@@ -18,6 +18,7 @@ import type { ToolSchedulerInstance } from "../../../packages/ohbaby-agent/src/c
 import { InMemorySubagentExecutionStore } from "../../../packages/ohbaby-agent/src/agents/subagents/execution-store.js";
 import { createSubagentResultArtifacts } from "../../../packages/ohbaby-agent/src/agents/subagents/result-artifacts.js";
 import { createSubagentContinuationCoordinator } from "../../../packages/ohbaby-agent/src/agents/subagents/continuation-coordinator.js";
+import { createSubagentDelivery } from "../../../packages/ohbaby-agent/src/agents/subagents/delivery.js";
 import { createStorage } from "../../../packages/ohbaby-agent/src/services/storage/index.js";
 import { createInMemoryRunLedger } from "../../../packages/ohbaby-agent/src/runtime/run-ledger/in-memory.js";
 import { InMemoryCurrentRunInputStore } from "../../../packages/ohbaby-agent/src/runtime/prompt-scheduler/current-run-inputs.js";
@@ -135,6 +136,13 @@ it("delivers a child compaction failure through the ordinary background result i
   const coordinator = createSubagentContinuationCoordinator({
     executions,
     inputs,
+    delivery: createSubagentDelivery({
+      executions,
+      inputs,
+      runs: runLedger,
+      goalHistory: { list: () => Promise.resolve([]) },
+      receivingGoal: () => undefined,
+    }),
     prepareResult: (execution, signal) =>
       artifacts.prepare(execution, { signal }),
     collectFacts: async () => {

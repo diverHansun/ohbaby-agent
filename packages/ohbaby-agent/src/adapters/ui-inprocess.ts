@@ -3,6 +3,7 @@ import { isUserFacingSession } from "../services/session/types.js";
 import { createSessionSubagentSupervisor } from "../agents/subagents/session-supervisor.js";
 import { listSessionExecutions } from "../agents/subagents/continuation-coordinator.js";
 import { createSubagentWakeup } from "./ui-inprocess/subagent-wakeup.js";
+import { createSubagentDelivery } from "../agents/subagents/delivery.js";
 import { SubagentInstanceProjection } from "./ui-inprocess/subagent-instances.js";
 import type {
   SubagentStatusResult,
@@ -331,17 +332,19 @@ type InternalSubmitPromptOptions = SubmitPromptOptions & {
     readonly kind: "subagent-status";
     readonly sourceId: string;
     readonly body: string;
-    readonly excludedSubagentRootRunIds?: readonly string[];
   };
   readonly goalId?: string;
   readonly goalTicket?: GoalTurnTicket;
   /** Display value from the same admission snapshot as goalTicket. */
   readonly displayText?: string;
   readonly reservedUserMessageId?: string;
+  readonly reservedRunId?: string;
   readonly onRunStarted?: (runId: string) => Promise<void>;
 };
 
 interface ActivePromptState {
+  readonly preparation: AbortController;
+  stopPersistence?: Promise<void>;
   readonly owner: PromptOwner;
   readonly sessionId: string;
   readonly goalId?: string;
@@ -1524,62 +1527,93 @@ export function createInProcessUiBackendClient(
       !compactingSessions.has(sessionId)
     );
   }
-  const wakeFromSubagent = createSubagentWakeup({
-    executions: subagentExecutionStore,
-    gate: sessionExecution,
-    now: () => now().getTime(),
-    withSessionControl: (id, operation) =>
-      sourceProjection.owner.runControl(id, operation),
-    goals: sharedGoalService,
-    submit: submitPromptInternal,
-    runGoalTurn: executeAdmittedGoalTurn,
-    finishGoalTurn,
-    goalHasRunningSubagents,
-    onReleased(sessionId): void {
-      promptScheduler.wake();
-      settleSubagentIdle(sessionId);
-    },
-    onError(sourceId, title, error): void {
-      publishNotice({
-        key: `subagent:wakeup:${sourceId}:${title}`,
-        level: "error",
-        title,
-        message: getErrorMessage(error),
-      });
-    },
-    prepareSession: async (sessionId) => {
-      if (
-        disposed ||
-        !currentRunInputStore ||
-        rewindingSessions.has(sessionId) ||
-        !isMainSessionIdle(sessionId) ||
-        promptScheduler.getRecoveryState(sessionId).status !== "ready" ||
-        (await movedSessionTarget(sessionId)) !== undefined
-      )
-        return undefined;
-      const session = await stateStore.getSession(sessionId);
-      if (
-        !session ||
-        (await options.sessionManager?.get(sessionId))?.status === "archived"
-      )
-        return undefined;
-      if (
-        (await promptSubmissionStore.listQueued(promptScopeKey)).some(
-          (prompt) => prompt.sessionId === sessionId,
-        )
-      )
-        return undefined;
-      return {
-        modelEntryId: session.modelEntryId,
-        reasoning: session.reasoning,
-      };
-    },
-  });
+  const subagentDelivery = currentRunInputStore
+    ? createSubagentDelivery({
+        executions: subagentExecutionStore,
+        inputs: currentRunInputStore,
+        runs: sourceLedger,
+        goalHistory: goalPersistence,
+        now: () => now().getTime(),
+      })
+    : undefined;
+  const wakeFromSubagent = subagentDelivery
+    ? createSubagentWakeup({
+        executions: subagentExecutionStore,
+        delivery: subagentDelivery,
+        runs: sourceLedger,
+        reserveRunId: nextRunId,
+        gate: sessionExecution,
+        now: () => now().getTime(),
+        withSessionControl: (id, operation) =>
+          sourceProjection.owner.runControl(id, operation),
+        goals: sharedGoalService,
+        submit: submitPromptInternal,
+        runGoalTurn: executeAdmittedGoalTurn,
+        finishGoalTurn,
+        goalHasRunningSubagents,
+        onReleased(sessionId): void {
+          promptScheduler.wake();
+          settleSubagentIdle(sessionId);
+        },
+        onError(sourceId, title, error): void {
+          publishNotice({
+            key: `subagent:wakeup:${sourceId}:${title}`,
+            level: "error",
+            title,
+            message: getErrorMessage(error),
+          });
+        },
+        prepareSession: async (sessionId) => {
+          if (
+            disposed ||
+            archivingSessions.has(sessionId) ||
+            closingSideChats.has(sessionId) ||
+            !currentRunInputStore ||
+            rewindingSessions.has(sessionId) ||
+            !isMainSessionIdle(sessionId) ||
+            promptScheduler.getRecoveryState(sessionId).status !== "ready" ||
+            (await movedSessionTarget(sessionId)) !== undefined
+          )
+            return undefined;
+          try {
+            await assertCanUseAsPrimarySession(sessionId);
+          } catch (error) {
+            if (
+              error instanceof SessionRunBusyError ||
+              error instanceof SessionArchiveError ||
+              error instanceof SessionMovedError
+            )
+              return undefined;
+            throw error;
+          }
+          const session = await stateStore.getSession(sessionId);
+          if (
+            !session ||
+            (await options.sessionManager?.get(sessionId))?.status ===
+              "archived"
+          )
+            return undefined;
+          if (
+            (await promptSubmissionStore.listQueued(promptScopeKey)).some(
+              (prompt) => prompt.sessionId === sessionId,
+            )
+          )
+            return undefined;
+          return {
+            modelEntryId: session.modelEntryId,
+            reasoning: session.reasoning,
+          };
+        },
+      })
+    : (): Promise<boolean> => Promise.resolve(false);
   const subagentSupervisor = createSessionSubagentSupervisor({
     executions: subagentExecutionStore,
     isIdle: isMainSessionIdle,
     now: () => now().getTime(),
     wake: wakeFromSubagent,
+    checkWakeup: subagentDelivery
+      ? (record) => subagentDelivery.checkWakeup(record)
+      : undefined,
     onError(error): void {
       publishNotice({
         key: `subagent:supervision:${getErrorMessage(error)}`,
@@ -1623,12 +1657,11 @@ export function createInProcessUiBackendClient(
     sessionId: string,
     goalId: string,
   ): Promise<boolean> {
-    const roots = new Set(sharedGoalService.getOwnedRunIds(goalId));
     return (
       await listSessionExecutions(subagentExecutionStore, sessionId)
     ).some(
       (execution) =>
-        roots.has(execution.rootRunId) &&
+        execution.goalId === goalId &&
         execution.mode === "background" &&
         (execution.status === "queued" || execution.status === "running"),
     );
@@ -1722,6 +1755,10 @@ export function createInProcessUiBackendClient(
       );
       return {
         ...goalOutcomeFromRunCompletion(completion),
+        ...(admitted.stopIntent?.includePrimary &&
+        completion?.status !== "succeeded"
+          ? { status: "cancelled" as const }
+          : {}),
         ticket: admitted,
         release,
       };
@@ -3486,7 +3523,7 @@ export function createInProcessUiBackendClient(
       if (session.sideChat.ownerId !== processOwnerId)
         throw new SessionRunBusyError(sessionId, []);
       await stopSideChatWork(storage.db, sessionId, {
-        abort: (runId) => runtimeController.abortPromptRun(runId),
+        abort: abortPromptRun,
         cancel: (promptId, leaseId) =>
           promptScheduler.cancelQueued(promptId, leaseId),
         hasLocalWork: () =>
@@ -4268,6 +4305,7 @@ export function createInProcessUiBackendClient(
     submitOptions?.signal?.throwIfAborted();
     await options.beforePromptSubmit?.();
     let activePrompt: ActivePromptState = {
+      preparation: new AbortController(),
       owner,
       sessionId: promptSessionId,
       ...(submitOptions?.goalId === undefined
@@ -4397,12 +4435,16 @@ export function createInProcessUiBackendClient(
 
       observeSubagentSession(session.id);
       subagentSupervisor.active(session.id);
+      const runId = submitOptions?.reservedRunId ?? (await nextRunId());
+      submittedRunId = runId;
       if (submitOptions?.reservedUserMessageId) {
         messageIds.reserve(submitOptions.reservedUserMessageId);
       }
       const userMessage: UiMessage = {
         ...createTextMessage({
-          id: submitOptions?.reservedUserMessageId ?? messageIds.next(),
+          id: submitOptions?.runtimeInput
+            ? `runtime:${submitOptions.runtimeInput.sourceId}:${runId}`
+            : (submitOptions?.reservedUserMessageId ?? messageIds.next()),
           role: "user",
           text: submitOptions?.displayText ?? text,
           createdAt,
@@ -4411,8 +4453,6 @@ export function createInProcessUiBackendClient(
           ? { runtimeInputKind: submitOptions.runtimeInput.kind }
           : {}),
       };
-      const runId = await nextRunId();
-      submittedRunId = runId;
       submitOptions?.signal?.throwIfAborted();
       if (submitOptions?.goalTicket)
         sharedGoalService.bindTicketRun(submitOptions.goalTicket, runId);
@@ -4452,12 +4492,12 @@ export function createInProcessUiBackendClient(
       session = (await stateStore.getSession(session.id)) ?? session;
 
       runtimeController.setActiveRunId(runId, session.id);
+      activePrompt.runId = runId;
       todoWorkScopeLease = runtime.todoWorkScopes.acquire(
         session.id,
         todoWorkScopeId,
       );
       await showTodoForRun(session.id, runtime.todos, todoWorkScopeId);
-      activePrompt.runId = runId;
       projection = runtimeController.startRunStreamProjection({
         projectMessages: false,
         autoStart: false,
@@ -4495,7 +4535,13 @@ export function createInProcessUiBackendClient(
             submitOptions?.runtimeInput?.kind === "subagent-status"
               ? "subagent"
               : owner,
-          preparationSignal: submitOptions?.goalTicket?.controller.signal,
+          preparationSignal: AbortSignal.any([
+            activePrompt.preparation.signal,
+            ...(submitOptions?.goalTicket
+              ? [submitOptions.goalTicket.controller.signal]
+              : []),
+            ...(submitOptions?.signal ? [submitOptions.signal] : []),
+          ]),
           agentName,
           reasoning,
           runModel,
@@ -4556,6 +4602,11 @@ export function createInProcessUiBackendClient(
         } finally {
           await projection.stop();
         }
+        if (
+          activePrompt.preparation.signal.aborted &&
+          startedRuntimeRunId === undefined
+        )
+          return { status: "cancelled" };
         throw error;
       }
 
@@ -4670,17 +4721,18 @@ export function createInProcessUiBackendClient(
           }
         }
       }
-      if (activePromptsBySession.get(promptSessionId) === activePrompt) {
-        activePromptsBySession.delete(promptSessionId);
-      }
-      if (submittedRunId) {
-        runtimeController.clearActiveRunId(submittedRunId);
-      }
       try {
-        await options.afterPromptSubmitSettled?.();
+        await activePrompt.stopPersistence;
       } finally {
-        notifyPromptIdle(promptSessionId);
-        admission.release();
+        if (activePromptsBySession.get(promptSessionId) === activePrompt)
+          activePromptsBySession.delete(promptSessionId);
+        if (submittedRunId) runtimeController.clearActiveRunId(submittedRunId);
+        try {
+          await options.afterPromptSubmitSettled?.();
+        } finally {
+          notifyPromptIdle(promptSessionId);
+          admission.release();
+        }
       }
     }
   }
@@ -4691,6 +4743,31 @@ export function createInProcessUiBackendClient(
     for (const resolve of waiters) {
       resolve();
     }
+  }
+
+  async function abortPromptRun(
+    runId: string,
+    reason = "user-stop",
+  ): Promise<boolean> {
+    const active = [...activePromptsBySession.values()].find(
+      (prompt) => prompt.runId === runId,
+    );
+    if (active) {
+      if (reason === "user-stop")
+        active.stopPersistence ??= subagentExecutionStore.stopWakeups(
+          active.sessionId,
+          runId,
+          now().getTime(),
+        );
+      active.preparation.abort(reason);
+      // The reserved ID already owns the triggering batch, even before run creation.
+      subagentSupervisor.idle(active.sessionId);
+    }
+    const [, cancelled] = await Promise.all([
+      active?.stopPersistence,
+      runtimeController.abortPromptRun(runId, reason),
+    ]);
+    return active !== undefined || cancelled;
   }
 
   function notifyPromptRunReady(sessionId: string): void {
@@ -4725,7 +4802,7 @@ export function createInProcessUiBackendClient(
     const sessionId = input.sessionId;
     if (input.preserveBackground) subagentSupervisor.idle(sessionId);
     await executeGoalExecutionInterrupt(input, {
-      abortPromptRun: (runId) => runtimeController.abortPromptRun(runId),
+      abortPromptRun: (runId) => abortPromptRun(runId, input.reason),
       activeRunId: () => runtimeController.getActiveRunId(sessionId),
       interruptSubagentsByRootRun: (runId, reason) =>
         runtime.interruptSubagentsByRootRun(runId, reason),
@@ -4880,16 +4957,20 @@ export function createInProcessUiBackendClient(
     completion: RunCompletion | undefined,
   ): GoalTurnOutcome {
     const usage = completion?.usage;
+    const stopped =
+      completion?.status === "cancelled" ||
+      (completion?.status === "interrupted" &&
+        completion.error === "user-stop");
     const cachedInputTokens = usage?.inputBreakdown?.observed.cacheRead
       ? usage.inputBreakdown.cacheRead
       : usage?.cachedInputTokens;
     return {
-      status:
-        completion?.status === "succeeded" || completion?.status === "cancelled"
-          ? completion.status
+      status: stopped
+        ? "cancelled"
+        : completion?.status === "succeeded"
+          ? "succeeded"
           : "failed",
-      ...(completion?.status === "succeeded" ||
-      completion?.status === "cancelled"
+      ...(completion?.status === "succeeded" || stopped
         ? {}
         : {
             error: completion?.error ?? `Run ${completion?.status ?? "failed"}`,
@@ -5923,11 +6004,7 @@ export function createInProcessUiBackendClient(
     },
 
     async abortRun(runId: string): Promise<void> {
-      const active = [...activePromptsBySession.values()].find(
-        (prompt) => prompt.runId === runId,
-      );
-      if (active) subagentSupervisor.idle(active.sessionId);
-      if (!(await runtimeController.abortPromptRun(runId)))
+      if (!(await abortPromptRun(runId)))
         throw Object.assign(new Error("The requested run has already ended"), {
           code: "SESSION_SCOPE_CHANGED",
         });

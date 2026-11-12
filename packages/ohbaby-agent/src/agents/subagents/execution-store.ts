@@ -18,6 +18,7 @@ export type ExecutionTerminalStatus =
   | "cancelled"
   | "interrupted"
   | "timed_out";
+export const SUBAGENT_ENTRANCE_RETRIES = 3;
 export interface AcceptSubagentExecution {
   readonly executionId: string;
   /** Stable tool call ID or caller supplied request ID within requesterRunId. */
@@ -27,6 +28,8 @@ export interface AcceptSubagentExecution {
   readonly requesterRunId: string;
   readonly rootSessionId: string;
   readonly rootRunId: string;
+  /** Trusted dispatch ownership: null is ordinary; absent is legacy/unknown. */
+  readonly goalId?: string | null;
   readonly rootPromptId?: string;
   readonly subagentId: string;
   readonly mode: "foreground" | "background";
@@ -100,6 +103,9 @@ export interface ExecutionDelivery {
   readonly processedAt?: number;
   /** A result gets one automatic activation; failed consumption waits for a new trigger. */
   readonly wakeupAttemptedAt?: number;
+  readonly wakeupRunId?: string;
+  /** Remaining entrance retries, not a count of model attempts. Stop sets this to zero. */
+  readonly wakeupRetriesRemaining?: number;
 }
 export interface SubagentExecutionRecord extends AcceptSubagentExecution {
   readonly rewoundAt?: string;
@@ -164,7 +170,12 @@ export interface SubagentExecutionStore {
     at: number,
     previousInputId?: string,
   ): Promise<SubagentExecutionRecord>;
-  claimWakeup(input: ExecutionLookup, at: number): Promise<boolean>;
+  claimWakeup(
+    input: ExecutionLookup,
+    at: number,
+    attempt?: { readonly runId: string; readonly previousRunId?: string },
+  ): Promise<boolean>;
+  stopWakeups(sessionId: string, runId: string, at: number): Promise<void>;
   markProcessed(
     input: ExecutionLookup,
     requestId: string,
@@ -193,6 +204,7 @@ function receiptIdentity(r: AcceptSubagentExecution): string {
     r.rootSessionId,
     r.rootRunId,
     r.rootPromptId ?? null,
+    r.goalId === undefined ? [] : [r.goalId],
     r.subagentId,
     r.mode,
     r.prompt,
@@ -226,11 +238,15 @@ function finishRecord(
     delivery:
       r.mode === "foreground"
         ? { state: "foreground" }
-        : result.status === "interrupted" || result.status === "cancelled"
+        : result.status === "cancelled" ||
+            (result.status === "interrupted" &&
+              result.reason !== "process-interrupted" &&
+              result.reason !== "service-shutdown")
           ? { state: "none" }
           : {
               state: "pending",
               notificationId: `${SUBAGENT_RESULT_SOURCE_PREFIX}${r.executionId}`,
+              wakeupRetriesRemaining: SUBAGENT_ENTRANCE_RETRIES,
             },
   };
 }
@@ -420,6 +436,7 @@ abstract class ExecutionStore implements SubagentExecutionStore {
           "Execution not found in requester scope",
         );
       const next = change(r);
+      if (next === r) return r;
       this.save(next);
       return next;
     });
@@ -562,7 +579,12 @@ abstract class ExecutionStore implements SubagentExecutionStore {
       };
     });
   }
-  async claimWakeup(input: ExecutionLookup, at: number): Promise<boolean> {
+  async claimWakeup(
+    input: ExecutionLookup,
+    at: number,
+    attempt?: { readonly runId: string; readonly previousRunId?: string },
+  ): Promise<boolean> {
+    if (attempt) required(attempt.runId);
     let claimed = false;
     await this.mutate(input, (r) => {
       if (
@@ -570,14 +592,60 @@ abstract class ExecutionStore implements SubagentExecutionStore {
         !terminal(r) ||
         r.mode !== "background" ||
         r.delivery.state === "none" ||
-        r.delivery.state === "processed" ||
-        r.delivery.wakeupAttemptedAt !== undefined
+        r.delivery.state === "processed"
       )
         return r;
+      const retry = r.delivery.wakeupAttemptedAt !== undefined;
+      if (
+        retry &&
+        (!attempt ||
+          !r.delivery.wakeupRunId ||
+          attempt.previousRunId !== r.delivery.wakeupRunId ||
+          attempt.runId === r.delivery.wakeupRunId ||
+          (r.delivery.wakeupRetriesRemaining ?? 0) <= 0)
+      )
+        return r;
+      if (!retry && attempt?.previousRunId !== undefined) return r;
       claimed = true;
-      return { ...r, delivery: { ...r.delivery, wakeupAttemptedAt: at } };
+      return {
+        ...r,
+        updatedAt: at,
+        delivery: {
+          ...r.delivery,
+          wakeupAttemptedAt: at,
+          ...(attempt
+            ? {
+                wakeupRunId: attempt.runId,
+                wakeupRetriesRemaining: retry
+                  ? (r.delivery.wakeupRetriesRemaining ?? 0) - 1
+                  : SUBAGENT_ENTRANCE_RETRIES,
+              }
+            : {}),
+        },
+      };
     });
     return claimed;
+  }
+  async stopWakeups(
+    sessionId: string,
+    runId: string,
+    at: number,
+  ): Promise<void> {
+    await this.transaction(() => {
+      for (const record of this.sessionRecords(sessionId)) {
+        if (
+          record.rootSessionId !== sessionId ||
+          record.delivery.wakeupRunId !== runId ||
+          record.delivery.wakeupRetriesRemaining === 0
+        )
+          continue;
+        this.save({
+          ...record,
+          updatedAt: at,
+          delivery: { ...record.delivery, wakeupRetriesRemaining: 0 },
+        });
+      }
+    });
   }
   markProcessed(
     input: ExecutionLookup,
@@ -807,7 +875,7 @@ function toRow(record: SubagentExecutionRecord): Row {
     row[column] =
       value === undefined
         ? null
-        : typeof value === "object"
+        : key === "goalId" || typeof value === "object"
           ? JSON.stringify(value)
           : value;
   }
@@ -820,7 +888,7 @@ function fromRow(row: Row): SubagentExecutionRecord {
     record[key] =
       value === null
         ? undefined
-        : ["artifact", "delivery", "lateResult"].includes(key)
+        : ["artifact", "delivery", "lateResult", "goalId"].includes(key)
           ? JSON.parse(value as string)
           : value;
   }

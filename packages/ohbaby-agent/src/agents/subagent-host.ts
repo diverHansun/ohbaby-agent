@@ -103,6 +103,7 @@ export interface SessionSubagentHostOptions {
     readonly rootSessionId: string;
     readonly rootRunId: string;
     readonly rootPromptId?: string;
+    readonly goalId?: string | null;
   }>;
   readonly onTerminal?: (
     record: SubagentExecutionRecord,
@@ -1798,7 +1799,10 @@ export class SessionSubagentHost {
           status: "interrupted",
           updatedAt: this.now(),
         },
-        "cancelled",
+        this.leaseFor(record.parentSessionId, record.subagentId)?.stopReason ===
+          "service-shutdown"
+          ? "service-shutdown"
+          : "cancelled",
       );
 
     try {

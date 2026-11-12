@@ -104,6 +104,10 @@ export interface CurrentRunInputStore {
   getInput(inputId: string): Promise<CurrentRunInputRecord | undefined>;
   /** Saved input facts, including processed and closed records; never reopens a run. */
   listByRun(runId: string): Promise<readonly CurrentRunInputRecord[]>;
+  listBySource(
+    sessionId: string,
+    sourceId: string,
+  ): Promise<readonly CurrentRunInputRecord[]>;
   listPending(runId: string): Promise<readonly CurrentRunInputRecord[]>;
   getMessages(runId: string): Promise<readonly MessageWithParts[]>;
   filterModelHistory(
@@ -114,6 +118,10 @@ export interface CurrentRunInputStore {
     signal?: AbortSignal,
   ): Promise<void>;
   confirmRequestSuccess(requestId: string): Promise<readonly string[]>;
+  /** Repair a missing acknowledgement using exact persisted successful request membership. */
+  reconcileRequestSuccess(
+    inputId: string,
+  ): Promise<CurrentRunInputRecord | undefined>;
   close(runId: string, reason: string): Promise<void>;
   tryCloseForCompletion(runId: string): Promise<boolean>;
   dismissObservations(runId: string, reason: string): Promise<void>;
@@ -194,6 +202,9 @@ abstract class CurrentInputs implements CurrentRunInputStore {
     requestId: string,
   ): MessageWithParts | undefined;
   protected abstract indexRequest(requestId: string, messageId: string): void;
+  protected abstract findSuccessfulRequest(
+    input: CurrentRunInputRecord,
+  ): string | undefined;
   protected effectiveInput(
     record: CurrentRunInputRecord,
   ): CurrentRunInputRecord {
@@ -504,6 +515,14 @@ abstract class CurrentInputs implements CurrentRunInputStore {
   async listByRun(runId: string): Promise<readonly CurrentRunInputRecord[]> {
     return this.inputs(runId);
   }
+  async listBySource(
+    sessionId: string,
+    sourceId: string,
+  ): Promise<readonly CurrentRunInputRecord[]> {
+    return this.sessionInputs(sessionId).filter(
+      (input) => input.sourceId === sourceId,
+    );
+  }
   async listUnconsumedSteers(
     sessionId: string,
   ): Promise<readonly CurrentRunInputRecord[]> {
@@ -605,6 +624,16 @@ abstract class CurrentInputs implements CurrentRunInputStore {
             firstAttemptAt: at,
           });
     });
+  }
+  async reconcileRequestSuccess(
+    inputId: string,
+  ): Promise<CurrentRunInputRecord | undefined> {
+    const input = this.readInput(inputId);
+    if (!input || input.processedRequestId || !input.firstAttemptRequestId)
+      return input;
+    const requestId = this.findSuccessfulRequest(input);
+    if (requestId) await this.confirmRequestSuccess(requestId);
+    return this.readInput(inputId);
   }
   async confirmRequestSuccess(requestId: string): Promise<readonly string[]> {
     const result = await this.transaction(() => {
@@ -800,6 +829,28 @@ export class InMemoryCurrentRunInputStore extends CurrentInputs {
   protected indexRequest(id: string, messageId: string): void {
     this.requestOwners.set(id, messageId);
   }
+  protected findSuccessfulRequest(
+    input: CurrentRunInputRecord,
+  ): string | undefined {
+    for (const messageId of new Set(this.requestOwners.values())) {
+      const message = this.readMessage(messageId)?.info;
+      if (
+        message?.role !== "assistant" ||
+        message.sessionId !== input.sessionId ||
+        message.contextScopeId !== input.contextScopeId
+      )
+        continue;
+      const request = message.modelRequests?.find(
+        (request) =>
+          request.purpose === "agent-step" &&
+          request.runId === input.runId &&
+          request.outcome === "success" &&
+          request.inputIds?.includes(input.inputId),
+      );
+      if (request) return request.requestId;
+    }
+    return undefined;
+  }
 }
 
 export class DatabaseCurrentRunInputStore extends CurrentInputs {
@@ -890,6 +941,19 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
         "SELECT data FROM current_run_input WHERE session_id=? ORDER BY accepted_at,input_id",
       )
       .all(sessionId)
+      .map((row) =>
+        this.effectiveInput(JSON.parse(row.data) as CurrentRunInputRecord),
+      );
+  }
+  override async listBySource(
+    sessionId: string,
+    sourceId: string,
+  ): Promise<readonly CurrentRunInputRecord[]> {
+    return this.db
+      .prepare<{ data: string }>(
+        "SELECT data FROM current_run_input WHERE session_id=? AND source_id=? ORDER BY accepted_at,input_id",
+      )
+      .all(sessionId, sourceId)
       .map((row) =>
         this.effectiveInput(JSON.parse(row.data) as CurrentRunInputRecord),
       );
@@ -1013,5 +1077,32 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
         "INSERT INTO current_run_request_owner(request_id,message_id) VALUES(?,?) ON CONFLICT(request_id) DO NOTHING",
       )
       .run(id, messageId);
+  }
+  protected findSuccessfulRequest(
+    input: CurrentRunInputRecord,
+  ): string | undefined {
+    // Query all attempts, not only firstAttemptRequestId or the UI transcript window.
+    return this.db
+      .prepare<{ request_id: string }>(
+        `
+      SELECT owner.request_id FROM message m
+      JOIN current_run_request_owner owner ON owner.message_id = m.id
+      JOIN json_each(m.data, '$.modelRequests') request
+        ON json_extract(request.value, '$.requestId') = owner.request_id
+      WHERE m.session_id = ? AND m.context_scope_id IS ? AND json_extract(m.data, '$.runId') = ? AND m.rewound_at IS NULL
+        AND m.role = 'assistant' AND json_extract(request.value, '$.runId') = ?
+        AND json_extract(request.value, '$.purpose') = 'agent-step'
+        AND json_extract(request.value, '$.outcome') = 'success'
+        AND EXISTS (SELECT 1 FROM json_each(request.value, '$.inputIds') member WHERE member.value = ?)
+      ORDER BY json_extract(request.value, '$.startedAt'), owner.request_id LIMIT 1
+    `,
+      )
+      .get(
+        input.sessionId,
+        input.contextScopeId ?? null,
+        input.runId,
+        input.runId,
+        input.inputId,
+      )?.request_id;
   }
 }

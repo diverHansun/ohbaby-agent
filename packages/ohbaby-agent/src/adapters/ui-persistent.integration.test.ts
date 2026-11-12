@@ -4289,7 +4289,7 @@ describe("persistent conversation rewind", () => {
     });
   }
 
-  it("pauses an idle goal and defers its retained child's wake until rewind releases the gate", async () => {
+  it("pauses an idle goal and keeps its retained result pending after rewind until a user request", async () => {
     const releaseChild = createDeferred<undefined>();
     const inCleanup = createDeferred<undefined>();
     const releaseCleanup = createDeferred<undefined>();
@@ -4386,13 +4386,28 @@ describe("persistent conversation rewind", () => {
         releaseCleanup.resolve(undefined);
         barrier.mockRestore();
       }
-      await vi.waitFor(async () => {
-        expect(await mainRuns()).toMatchObject([
-          { triggerSource: "subagent", status: "succeeded" },
-          { triggerSource: "user" },
-          { triggerSource: "goal" },
-        ]);
-      });
+      expect(await mainRuns()).toMatchObject([
+        { triggerSource: "user" },
+        { triggerSource: "goal" },
+      ]);
+      expect(
+        getDatabase()
+          .prepare<{
+            delivery: string;
+          }>("SELECT delivery FROM subagent_execution WHERE root_session_id=?")
+          .get(sessionId)?.delivery,
+      ).toContain('"state":"pending"');
+      await client.submitPromptAndWait(
+        "Read the retained result without resuming the Goal",
+        { sessionId },
+      );
+      expect(
+        getDatabase()
+          .prepare<{
+            delivery: string;
+          }>("SELECT delivery FROM subagent_execution WHERE root_session_id=?")
+          .get(sessionId)?.delivery,
+      ).toContain('"state":"processed"');
       expect(
         (await client.getSessionView?.({ sessionId }))?.goal,
       ).toMatchObject({

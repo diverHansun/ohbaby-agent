@@ -233,6 +233,52 @@ async function runAndObserve(
 }
 
 describe("SessionSubagentHost", () => {
+  it("preserves shutdown notification when the aborted turn settles before dispose", async () => {
+    const executionStore = new InMemorySubagentExecutionStore();
+    const { host, turn } = createHostFixture({ executionStore });
+    turn.mockImplementation(
+      (input) =>
+        new Promise((resolve) => {
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              resolve({
+                mode: "waitForCompletion",
+                sessionId: "child_1",
+                success: false,
+                error: "service-shutdown",
+              });
+            },
+            { once: true },
+          );
+        }),
+    );
+    try {
+      const accepted = await host.run({
+        requesterRunId: "shutdown-root",
+        requesterMessageId: "message",
+        requestId: "shutdown-call",
+        parentSessionId: "parent_1",
+        prompt: "background work",
+        role: "explore",
+      });
+      await vi.waitFor(() => {
+        expect(turn).toHaveBeenCalledOnce();
+      });
+      host.closeAdmission();
+      await vi.waitFor(async () => {
+        expect((await executionStore.get(accepted.execution))?.status).toBe(
+          "interrupted",
+        );
+      });
+      expect(await executionStore.get(accepted.execution)).toMatchObject({
+        reason: "service-shutdown",
+        delivery: { state: "pending" },
+      });
+    } finally {
+      await host.dispose();
+    }
+  });
   it.each([
     ["model", "provider/legacy"],
     ["maxTokens", 100],

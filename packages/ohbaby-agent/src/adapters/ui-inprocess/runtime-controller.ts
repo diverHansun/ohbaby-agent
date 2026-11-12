@@ -300,20 +300,20 @@ export class InProcessRuntimeController {
     return startRunStreamProjection(options);
   }
 
-  async cancelPromptRun(runId: string): Promise<void> {
+  async cancelPromptRun(runId: string, reason = "user-stop"): Promise<void> {
     try {
       const runtime = await this.getRuntime();
-      await runtime.interruptRunTree(runId, "user-stop");
+      await runtime.interruptRunTree(runId, reason);
     } finally {
       await this.options.clearPendingPermissionsForRun(runId);
     }
   }
 
-  async abortPromptRun(runId: string): Promise<boolean> {
+  async abortPromptRun(runId: string, reason = "user-stop"): Promise<boolean> {
     if (!this.activeRunSessionById.has(runId)) {
       return false;
     }
-    await this.cancelPromptRun(runId);
+    await this.cancelPromptRun(runId, reason);
     return true;
   }
 }

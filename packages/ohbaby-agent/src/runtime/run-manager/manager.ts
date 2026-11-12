@@ -382,7 +382,12 @@ export class RunManager {
     const preparationSignal = record.options.preparationSignal;
     const cancelPreparation = (): void => {
       try {
-        this.cancel(record.runId, "run preparation cancelled");
+        this.cancel(
+          record.runId,
+          typeof preparationSignal?.reason === "string"
+            ? preparationSignal.reason
+            : "run preparation cancelled",
+        );
       } catch {
         // cancel delivers the abort in finally; finalization retries revocation.
         // An AbortSignal listener must not throw outside the managed run.

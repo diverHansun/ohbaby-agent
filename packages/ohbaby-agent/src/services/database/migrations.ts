@@ -686,4 +686,9 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       ALTER TABLE subagent_execution ADD COLUMN rewound_at TEXT;
     `,
   },
+  {
+    // JSON string/null preserves explicit Goal/ordinary ownership; SQL NULL is legacy.
+    version: "030_subagent_goal_ownership",
+    sql: `ALTER TABLE subagent_execution ADD COLUMN goal_id TEXT;`,
+  },
 ];

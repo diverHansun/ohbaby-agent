@@ -1,6 +1,7 @@
 import { createBus } from "../../bus/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSubagentContinuationCoordinator } from "./continuation-coordinator.js";
+import { createSubagentDelivery } from "./delivery.js";
 import { InMemorySubagentExecutionStore } from "./execution-store.js";
 import { InMemoryCurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import { InMemoryPromptSubmissionStore } from "../../runtime/prompt-scheduler/in-memory-store.js";
@@ -10,7 +11,7 @@ import {
   createInMemoryMessageStore,
 } from "../../core/message/index.js";
 
-async function setup() {
+async function setup(goalId?: string) {
   const executions = new InMemorySubagentExecutionStore();
   const runLedger = createInMemoryRunLedger();
   await runLedger.createPending({
@@ -30,6 +31,7 @@ async function setup() {
   });
   const execution = (
     await executions.accept({
+      goalId,
       executionId: "execution",
       requestId: "call",
       parentSessionId: "parent",
@@ -46,6 +48,13 @@ async function setup() {
   const coordinator = createSubagentContinuationCoordinator({
     executions,
     inputs,
+    delivery: createSubagentDelivery({
+      executions,
+      inputs,
+      runs: runLedger,
+      goalHistory: { list: () => Promise.resolve([]) },
+      receivingGoal: () => undefined,
+    }),
     prepareResult: () => Promise.resolve({ body: "complete result" }),
   });
   const port = coordinator.createPort({ runId: "root", sessionId: "parent" });
@@ -94,17 +103,34 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("subagent continuation", () => {
-  it("leaves excluded Goal results pending for a later explicit user run", async () => {
+  it("does not spend an incidental result's automatic opportunity before a request", async () => {
     const s = await setup();
+    await s.executions.finish(s.execution, {
+      status: "completed",
+      output: "result",
+      completedAt: 10,
+    });
+    expect(await s.port.beforeStep()).toHaveLength(1);
+    await s.inputs.close("root", "user-stop");
+    expect(
+      (await s.executions.get(s.execution))?.delivery.wakeupAttemptedAt,
+    ).toBeUndefined();
+  });
+  it("leaves Goal results pending on an ordinary automatic run but allows a new user request", async () => {
+    const s = await setup("goal");
+    await s.runLedger.createPending({
+      runId: "auto",
+      sessionId: "parent",
+      triggerSource: "subagent",
+    });
     await s.executions.finish(s.execution, {
       status: "completed",
       output: "Goal result",
       completedAt: 10,
     });
     const automatic = s.coordinator.createPort({
-      runId: "root",
+      runId: "auto",
       sessionId: "parent",
-      excludedSubagentRootRunIds: ["root"],
     });
     expect(await automatic.beforeStep()).toEqual([]);
     expect((await s.executions.get(s.execution))?.delivery.state).toBe(

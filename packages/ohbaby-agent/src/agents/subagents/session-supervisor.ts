@@ -3,6 +3,7 @@ import type {
   SubagentExecutionStore,
 } from "./execution-store.js";
 import { listSessionExecutions } from "./continuation-coordinator.js";
+import type { SubagentWakeupDecision } from "./delivery.js";
 
 export interface SessionSubagentSnapshot {
   readonly results: readonly SubagentExecutionRecord[];
@@ -16,6 +17,9 @@ export interface SessionSubagentSupervisorOptions {
   ) => Promise<boolean>;
   readonly isIdle: (sessionId: string) => boolean;
   readonly now?: () => number;
+  readonly checkWakeup?: (
+    record: SubagentExecutionRecord,
+  ) => Promise<SubagentWakeupDecision>;
   readonly onError?: (error: unknown) => void;
 }
 export interface SessionSubagentSupervisor {
@@ -107,12 +111,24 @@ export function createSessionSubagentSupervisor(
       (record) => record.status === "running" || record.status === "queued",
     );
     if (!options.isIdle(state.sessionId) || state.pendingActivation) return;
-    const results = executions.filter(
-      (record) =>
-        (record.delivery.state === "pending" ||
-          record.delivery.state === "delivered") &&
-        record.delivery.wakeupAttemptedAt === undefined,
-    );
+    const results: SubagentExecutionRecord[] = [];
+    let retryAt: number | undefined;
+    for (const record of executions) {
+      if (
+        record.delivery.state !== "pending" &&
+        record.delivery.state !== "delivered"
+      )
+        continue;
+      const decision = options.checkWakeup
+        ? await options.checkWakeup(record)
+        : { ready: record.delivery.wakeupAttemptedAt === undefined };
+      if (!valid(state, signal)) return;
+      if (decision.ready) results.push(record);
+      else if (decision.retryAt !== undefined)
+        retryAt = Math.min(retryAt ?? Infinity, decision.retryAt);
+    }
+    // A fresh result can wake immediately; an older entrance retry must not hold it back.
+    if (retryAt !== undefined) arm(state, retryAt);
     if (
       results.length > 0 &&
       (await options.wake(state.sessionId, { results, signal })) &&

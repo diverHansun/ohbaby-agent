@@ -10,6 +10,7 @@ import type {
   SubagentExecutionRecord,
 } from "./execution-store.js";
 import type { PreparedSubagentResult } from "./result-artifacts.js";
+import type { SubagentDelivery } from "./delivery.js";
 
 export interface SubagentWaitState {
   readonly waiting: boolean;
@@ -20,7 +21,6 @@ interface RunIdentity {
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly isSubagent?: boolean;
-  readonly excludedSubagentRootRunIds?: readonly string[];
 }
 export interface SubagentContinuationCoordinator {
   createPort(identity: RunIdentity): LifecycleRunInputPort;
@@ -50,6 +50,7 @@ export async function listSessionExecutions(
 export function createSubagentContinuationCoordinator(options: {
   readonly executions: SubagentExecutionStore;
   readonly inputs: CurrentRunInputStore;
+  readonly delivery: Pick<SubagentDelivery, "reconcile" | "canDeliver">;
   readonly prepareResult: (
     execution: SubagentExecutionRecord,
     signal?: AbortSignal,
@@ -58,7 +59,6 @@ export function createSubagentContinuationCoordinator(options: {
 }): SubagentContinuationCoordinator {
   const now = options.now ?? Date.now;
   function createPort(identity: RunIdentity): LifecycleRunInputPort {
-    const excludedRoots = new Set(identity.excludedSubagentRootRunIds);
     async function reconcile(signal?: AbortSignal): Promise<void> {
       signal?.throwIfAborted();
       if (identity.isSubagent) return;
@@ -67,8 +67,7 @@ export function createSubagentContinuationCoordinator(options: {
       ).filter(
         (record) =>
           record.parentSessionId === identity.sessionId &&
-          record.requesterScopeId === (identity.contextScopeId ?? "primary") &&
-          !excludedRoots.has(record.rootRunId),
+          record.requesterScopeId === (identity.contextScopeId ?? "primary"),
       );
       const executions = sessionExecutions.filter(
         (record) =>
@@ -89,20 +88,16 @@ export function createSubagentContinuationCoordinator(options: {
         );
       for (const execution of executions) {
         signal?.throwIfAborted();
+        if (!(await options.delivery.canDeliver(execution, identity.runId)))
+          continue;
+        const reconciled = await options.delivery.reconcile(execution);
+        if (reconciled.delivery.state === "processed") continue;
         const sourceId = execution.delivery.notificationId;
         if (!sourceId)
           throw new Error("Terminal execution has no notification identity");
-        const old = execution.delivery.inputId
-          ? await options.inputs.getInput(execution.delivery.inputId)
+        const old = reconciled.delivery.inputId
+          ? await options.inputs.getInput(reconciled.delivery.inputId)
           : undefined;
-        if (old?.processedRequestId) {
-          await options.executions.markProcessed(
-            execution,
-            old.processedRequestId,
-            old.processedAt ?? now(),
-          );
-          continue;
-        }
         // Another live run must finish owning its request before a retry can bind elsewhere.
         if (old && old.runId !== identity.runId && old.closedAt === undefined)
           continue;
@@ -149,10 +144,8 @@ export function createSubagentContinuationCoordinator(options: {
           execution,
           inputId,
           now(),
-          execution.delivery.inputId,
+          reconciled.delivery.inputId,
         );
-        // Delivery to a busy run is already its automatic opportunity to consume this result.
-        await options.executions.claimWakeup(execution, now());
       }
     }
     return {

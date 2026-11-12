@@ -11,6 +11,12 @@ import type {
   SubagentExecutionStore,
 } from "../../agents/subagents/execution-store.js";
 import type { SessionExecutionGate } from "../session-execution.js";
+import type { RunCompletion } from "../../runtime/run-manager/index.js";
+import type { RunLedger } from "../../runtime/run-ledger/types.js";
+import type {
+  SubagentDelivery,
+  SubagentWakeupDecision,
+} from "../../agents/subagents/delivery.js";
 export interface SubagentWakeupAdmission {
   readonly sessionId: string;
   readonly signal: AbortSignal;
@@ -18,6 +24,10 @@ export interface SubagentWakeupAdmission {
   readonly executions: Pick<SubagentExecutionStore, "claimWakeup">;
   readonly gate: SessionExecutionGate;
   readonly now: () => number;
+  readonly reserveRunId?: () => Promise<string>;
+  readonly checkWakeup?: (
+    record: SubagentExecutionRecord,
+  ) => Promise<SubagentWakeupDecision>;
   readonly canStart: () => Promise<boolean>;
   readonly reserveToken?: () => Promise<symbol | undefined>;
   readonly withSessionControl: <T>(
@@ -44,6 +54,7 @@ export function reserveSubagentWakeup(
     if (!input.gate.reserve(input.sessionId, token)) return undefined;
     let admitted = false;
     try {
+      const runId = await input.reserveRunId?.();
       for (const record of input.candidates) {
         if (isAborted()) break;
         if (
@@ -51,11 +62,19 @@ export function reserveSubagentWakeup(
           record.mode !== "background" ||
           (record.delivery.state !== "pending" &&
             record.delivery.state !== "delivered") ||
-          record.delivery.wakeupAttemptedAt !== undefined
+          (input.checkWakeup
+            ? !(await input.checkWakeup(record)).ready
+            : record.delivery.wakeupAttemptedAt !== undefined)
         )
           continue;
         admitted =
-          (await input.executions.claimWakeup(record, input.now())) || admitted;
+          (await input.executions.claimWakeup(
+            record,
+            input.now(),
+            runId
+              ? { runId, previousRunId: record.delivery.wakeupRunId }
+              : undefined,
+          )) || admitted;
       }
       return admitted ? token : undefined;
     } catch (error) {
@@ -73,17 +92,20 @@ export interface SubagentWakeupSubmission {
   readonly modelEntryId?: string;
   readonly reasoning?: ReasoningConfig;
   readonly hasModelSnapshot: true;
+  readonly reservedRunId: string;
   readonly runtimeInput: {
     readonly kind: "subagent-status";
     readonly sourceId: string;
     readonly body: string;
-    readonly excludedSubagentRootRunIds?: readonly string[];
   };
 }
 interface SubagentWakeupOptions {
+  readonly runs: Pick<RunLedger, "get">;
   readonly executions: SubagentExecutionStore;
   readonly gate: SessionExecutionGate;
   readonly now: () => number;
+  readonly reserveRunId: () => Promise<string>;
+  readonly delivery: Pick<SubagentDelivery, "checkWakeup" | "resolveGoal">;
   readonly withSessionControl: SubagentWakeupAdmission["withSessionControl"];
   readonly prepareSession: (
     sessionId: string,
@@ -94,7 +116,6 @@ interface SubagentWakeupOptions {
   readonly goals: Pick<
     GoalService,
     | "peekSnapshot"
-    | "getOwnedRunIds"
     | "isAutomaticRunBudgetExhausted"
     | "admitTurnInBoundary"
     | "currentExecutionEpoch"
@@ -105,7 +126,7 @@ interface SubagentWakeupOptions {
   readonly submit: (
     body: string,
     input: SubagentWakeupSubmission,
-  ) => Promise<unknown>;
+  ) => Promise<RunCompletion | undefined>;
   readonly runGoalTurn: (
     sessionId: string,
     ticket: GoalTurnTicket,
@@ -133,7 +154,7 @@ export function createSubagentWakeup(
     let session: Awaited<ReturnType<SubagentWakeupOptions["prepareSession"]>>;
     let goalTicket: GoalTurnTicket | undefined;
     let goalToAdmit: string | undefined;
-    let excludedRoots: readonly string[] = [];
+    let runId: string | undefined;
     const candidates: SubagentExecutionRecord[] = [];
     let token: symbol | undefined;
     try {
@@ -144,15 +165,28 @@ export function createSubagentWakeup(
         executions: options.executions,
         gate: options.gate,
         now: options.now,
+        checkWakeup: options.delivery.checkWakeup,
+        reserveRunId: async () => {
+          runId = await options.reserveRunId();
+          return runId;
+        },
         withSessionControl: options.withSessionControl,
         canStart: async () => {
           session = await options.prepareSession(sessionId);
           if (!session) return false;
           const goal = goals.peekSnapshot(sessionId);
-          const roots = new Set(goal ? goals.getOwnedRunIds(goal.goalId) : []);
-          const hasGoalWork = snapshot.results.some((record) =>
-            roots.has(record.rootRunId),
-          );
+          const goalResults: SubagentExecutionRecord[] = [];
+          for (const record of snapshot.results) {
+            const owner = await options.delivery.resolveGoal(record);
+            if (owner === null) candidates.push(record);
+            else if (
+              owner !== undefined &&
+              owner === goal?.goalId &&
+              goal.status === "active"
+            )
+              goalResults.push(record);
+          }
+          const hasGoalWork = goalResults.length > 0;
           const budgetExhausted =
             goals.isAutomaticRunBudgetExhausted(sessionId);
           if (goal?.status === "active" && hasGoalWork && budgetExhausted) {
@@ -163,16 +197,10 @@ export function createSubagentWakeup(
               goals.currentExecutionEpoch(sessionId),
             );
           }
-          if (goal?.status === "active" && hasGoalWork && !budgetExhausted)
+          if (goal?.status === "active" && hasGoalWork && !budgetExhausted) {
             goalToAdmit = goal.goalId;
-          else if (budgetExhausted || goal?.status === "active")
-            excludedRoots = [...roots];
-          const excluded = new Set(excludedRoots);
-          candidates.push(
-            ...snapshot.results.filter(
-              (record) => !excluded.has(record.rootRunId),
-            ),
-          );
+            candidates.push(...goalResults);
+          }
           return candidates.length > 0;
         },
         reserveToken: async () => {
@@ -193,7 +221,7 @@ export function createSubagentWakeup(
           usage: { totalTokens: 0, usageComplete: true },
         });
     }
-    if (!token) return false;
+    if (!token || !runId) return false;
     const sourceId = `subagent-result:${randomUUID()}`;
     const body =
       "Runtime subagent result wake-up. Process the delivered child results for the existing task. This is a runtime observation, not a new user request.";
@@ -202,13 +230,11 @@ export function createSubagentWakeup(
       sessionId,
       ...session,
       hasModelSnapshot: true,
+      reservedRunId: runId,
       runtimeInput: {
         kind: "subagent-status",
         sourceId,
         body: goalTicket ? `${goalTicket.modelText}\n${body}` : body,
-        ...(excludedRoots.length > 0
-          ? { excludedSubagentRootRunIds: excludedRoots }
-          : {}),
       },
     };
     const admittedGoal = goalTicket;
@@ -217,6 +243,12 @@ export function createSubagentWakeup(
       ? options
           .runGoalTurn(sessionId, admittedGoal, wakeOptions)
           .then(async (outcome) => {
+            if (outcome.status === "cancelled" && !admittedGoal.stopIntent)
+              await options.executions.stopWakeups(
+                sessionId,
+                wakeOptions.reservedRunId,
+                options.now(),
+              );
             await options.finishGoalTurn(sessionId, admittedGoal, outcome);
             goalTurnSucceeded = outcome.status === "succeeded";
             if (outcome.status === "cancelled" || outcome.status === "failed") {
@@ -232,7 +264,30 @@ export function createSubagentWakeup(
               );
             }
           })
-      : options.submit(body, wakeOptions);
+      : options.submit(body, wakeOptions).then(async (outcome) => {
+          const run = await options.runs.get(wakeOptions.reservedRunId);
+          const stopped =
+            outcome?.status === "cancelled" ||
+            run?.inputsCloseReason === "user-stop" ||
+            run?.inputsCloseReason === "cancelled";
+          if (stopped)
+            await options.executions.stopWakeups(
+              sessionId,
+              wakeOptions.reservedRunId,
+              options.now(),
+            );
+          else if (
+            !outcome ||
+            outcome.status === "failed" ||
+            outcome.status === "interrupted"
+          )
+            options.onError(
+              sourceId,
+              "Subagent result processing failed",
+              outcome?.error ??
+                new Error("Automatic result processing did not start"),
+            );
+        });
     const isCurrentGoal = (): boolean =>
       admittedGoal !== undefined &&
       goals.isExecutionCurrent(
