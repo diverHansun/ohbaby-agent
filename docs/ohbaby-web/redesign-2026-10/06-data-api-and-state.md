@@ -45,7 +45,7 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 | `DELETE /v1/settings/models/profiles/:id` | 行菜单、ModelEditor | 返回的列表里已经按顺延规则换好默认 |
 | `DELETE /v1/settings/models/providers/:providerId` | provider 组菜单 | provider 名做 URL 编码 |
 | `POST /v1/settings/models/active` | 行菜单 Set as default | `{ id }`；返回完整列表。ModelMenu 不再调用（D15，2026-10-26 改） |
-| `POST /v1/settings/models/probe` | ModelEditor 的 Detect again | `{ id }`；返回 `{ ok, reasoning }`，随后重读模型列表 |
+| `POST /v1/settings/models/probe` | ModelEditor 的 Detect again | `{ id }`；返回 `{ ok, reasoning }`，随后重读模型列表。可以重复点击，服务端取消旧任务，页面只认最后一次点击的结果。保存后的自动检测不需要点击，开始和结束都通过 `settings.changed` 让列表重读，前端不轮询 |
 | `PATCH /v1/sessions/:id/model` | ModelMenu（已打开的会话） | `{ modelEntryId }`；返回会话，`session.updated` 事件同步到其他窗口。草稿的选择随第一条 `POST /v1/prompts` 的 `modelEntryId` 提交 |
 | `GET /v1/model?sessionId=` | 思考强度 | 读这个会话下一轮要用的模型及其推理能力 |
 | `GET /v1/settings/search`、`PUT /v1/settings/search` | SearchSection | PUT 只提交改过的字段 |
@@ -132,8 +132,8 @@ interface ModelForm {                  // 与 UiSettingsModelCreate / UiSettings
   label: string;                       // 空字符串表示没有备注；编辑时清空 → PATCH 传 null
   secret: SecretChange;                // 见下
   apiKeyEnv: string;                   // More options；空 = 由后端生成
-  contextWindowTokens: string;         // More options；空 = 后端默认
-  maxOutputTokens: string;
+  contextWindowTokens: string;         // More options；只放用户覆盖值，空 = 自动
+  maxOutputTokens: string;             // 同上；检测值和有效值都不进表单
   promptCache: "" | "auto" | "enabled" | "disabled";
 }
 
@@ -154,9 +154,13 @@ interface McpServerRow {
 - 模型和搜索表单只提交改过的字段。`SecretChange` 的映射：`keep` 不传 `apiKey`；`{ replace }` 传新值；`clear` 传 `apiKey: ""`（后端里清除 key 与无 key 模式相同，没有单独选项）。MCP 没有表单。
 - 新增模型时 Label 为空就不传（传空字符串会保存成空备注）；编辑时把已有备注清空，PATCH 传 `label: null`。
 - 已支持的清空：备注传 `label: null`，key 传 `apiKey: ""`，搜索 Base URL 传 `baseUrl: null`。Key variable 的 `null` 会解除凭据引用，不能把普通空输入自动解释为“生成一个新变量名”；清除凭据统一走 SecretField。
-- 模型的 Context window、Max output、Prompt cache 没有清除协议。本次暂采用前端校验：已有值被清空时在字段下说明并阻止保存，提供恢复原值；新增时可选字段留空则省略。不能静默忽略用户的清空操作后报告保存成功。这是模型表单的处理建议，不涉及 MCP。
+- 模型的 Context window、Max output 只表示用户覆盖（model-settings-automation improve-1 R7/R8）：新增时留空就不传；编辑时把已有值清空，PATCH 传 `null`，恢复自动；没改就不传。用户填了与检测值相同的数字，也按覆盖提交。
+- Context window 输入框旁用只读提示显示检测值（“Auto: 128,000 tokens, detected”），检测中显示动效，没检测到就写“not detected”，不显示后端兜底值。Max output 为空时，旁边显示服务端返回的 `effectiveMaxOutputTokens`。
+- 后台检测结果只更新这些只读提示和推理能力，不改输入草稿，也不重置打开编辑页时的基线。
+- `tokenBudgetIssue` 和 `reasoningNotice` 在模型行显示“Check settings”，在编辑页显示可修复的提示；设置页照常可以打开和保存。
+- Prompt cache 和 Key variable 仍没有清除协议：已有值被清空时在字段下说明并阻止保存，提供恢复原值。
 - MCP 的 URL、命令、参数和其他配置都只用于展示；Environment / Headers 只列名字，不回显值，不构造任何配置写请求。
-- 数字字段为空就不传；不在前端补默认值，以服务端返回为准。
+- 不在前端补默认值，也不在前端算有效值；需要有效数字时读服务端返回的 `effective*` 字段。
 - MCP 状态由全局列表和实例状态按名字合并：配置里 `enabled === false` → `off`；配置启用但状态是 `disabled` 或 `disconnected` → `not-connected`；状态里没有这个名字或状态读取失败 → `unknown`，显示 `—`。
 - MCP 的 Args 每行显示一个参数，Include / Exclude tools 显示为只读名称列表。
 - 单位和范围跟后端一致：MCP 的 Timeout 是毫秒（默认 10000）；搜索的 Timeout 是秒（1–600，默认 60），Max results 是 1–20。标签里写明单位。

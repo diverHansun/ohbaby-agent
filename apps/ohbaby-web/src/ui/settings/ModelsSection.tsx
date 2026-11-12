@@ -10,7 +10,11 @@ import { anchorBelow, Menu, type MenuAnchor } from "../shared/Menu.js";
 import { SettingsRow } from "../shared/SettingsRow.js";
 import { Spinner } from "../shared/Spinner.js";
 import { ModelEditor } from "./ModelEditor.js";
-import { groupModels, modelDeleteDescription } from "./model-form.js";
+import {
+  groupModels,
+  modelDeleteDescription,
+  modelDetecting,
+} from "./model-form.js";
 import { SectionHeader, SectionStatus } from "./SectionFrame.js";
 import { errorText, useSettingsResource } from "./useSettingsResource.js";
 
@@ -180,12 +184,6 @@ export function ModelsSection(props: {
           </button>
         }
       />
-      {models && models.models.length > 0 ? (
-        <p className="ohb-settings-lede">
-          New chats and chats that haven&apos;t picked a model use the default.
-          Pick one for a chat from the menu next to the message box.
-        </p>
-      ) : null}
       <SectionStatus
         resource={resource}
         empty={models?.models.length === 0 ? "No models yet." : undefined}
@@ -235,9 +233,9 @@ export function ModelsSection(props: {
                       <Spinner size={12} label="Setting as default" />
                     ) : !model.configurationComplete ? (
                       "Needs setup"
-                    ) : isDefault ? (
-                      <span className="ohb-settings-badge">Default</span>
-                    ) : undefined
+                    ) : (
+                      modelRowStatus(model, isDefault)
+                    )
                   }
                   onClick={() => {
                     setView({ kind: "edit", id: model.id });
@@ -344,6 +342,26 @@ export function ModelsSection(props: {
         />
       ) : null}
     </section>
+  );
+}
+
+/** Detection, a repairable config warning, and the Default badge. */
+function modelRowStatus(
+  model: UiSettingsModel,
+  isDefault: boolean,
+): ReactElement | undefined {
+  const detecting = modelDetecting(model);
+  const warning =
+    model.tokenBudgetIssue !== undefined || model.reasoningNotice !== undefined;
+  if (!detecting && !warning && !isDefault) return undefined;
+  return (
+    <>
+      {detecting ? <Spinner size={12} label="Detecting" /> : null}
+      {warning ? (
+        <span className="ohb-settings-row-warning">Check settings</span>
+      ) : null}
+      {isDefault ? <span className="ohb-settings-badge">Default</span> : null}
+    </>
   );
 }
 

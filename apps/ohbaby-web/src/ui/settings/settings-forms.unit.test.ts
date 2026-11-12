@@ -30,6 +30,9 @@ const saved: UiSettingsModel = {
   configurationComplete: true,
   contextWindowTokens: 128_000,
   maxOutputTokens: 8_000,
+  effectiveContextWindowTokens: 128_000,
+  effectiveMaxOutputTokens: 8_000,
+  contextDiscovery: { status: "identified" },
   promptCache: "auto",
   reasoning: { status: "unknown", efforts: [] },
 };
@@ -77,20 +80,58 @@ describe("model form", () => {
 
   it("blocks clearing a saved value that has no clear protocol", () => {
     const base = modelFormFrom(saved);
-    for (const field of [
-      "apiKeyEnv",
-      "contextWindowTokens",
-      "maxOutputTokens",
-    ] as const) {
-      const form = { ...base, [field]: "" };
-      expect(validateModelForm(form, base)[field]).toContain(
-        "can't be cleared",
-      );
-      expect(modelFormSavable(form, base, false)).toBe(false);
-    }
+    const form = { ...base, apiKeyEnv: "" };
+    expect(validateModelForm(form, base).apiKeyEnv).toContain(
+      "can't be cleared",
+    );
+    expect(modelFormSavable(form, base, false)).toBe(false);
     expect(
       validateModelForm({ ...base, promptCache: "" }, base).promptCache,
     ).toBeDefined();
+  });
+
+  it("fills token fields with overrides only, never detected or effective values", () => {
+    const automatic = modelFormFrom({
+      ...saved,
+      contextWindowTokens: undefined,
+      maxOutputTokens: undefined,
+      detectedContextWindowTokens: 1_000_000,
+      effectiveContextWindowTokens: 1_000_000,
+      effectiveMaxOutputTokens: 32_768,
+    });
+    expect(automatic.contextWindowTokens).toBe("");
+    expect(automatic.maxOutputTokens).toBe("");
+    // Only label changed: the detected context is not sent as an override.
+    expect(
+      modelPatchRequest({ ...automatic, label: "Home" }, automatic),
+    ).toEqual({ label: "Home" });
+    // Typing the detected number is still the user's override.
+    expect(
+      modelPatchRequest(
+        { ...automatic, contextWindowTokens: "1000000" },
+        automatic,
+      ),
+    ).toEqual({ contextWindowTokens: 1_000_000 });
+  });
+
+  it("clears token overrides with null and keeps Save off without changes", () => {
+    const base = modelFormFrom(saved);
+    expect(modelFormSavable(base, base, false)).toBe(false);
+    const cleared = { ...base, contextWindowTokens: "", maxOutputTokens: " " };
+    expect(validateModelForm(cleared, base)).toEqual({});
+    expect(modelFormSavable(cleared, base, false)).toBe(true);
+    expect(modelPatchRequest(cleared, base)).toEqual({
+      contextWindowTokens: null,
+      maxOutputTokens: null,
+    });
+    // Empty was empty: nothing to clear.
+    const automatic = { ...base, contextWindowTokens: "", maxOutputTokens: "" };
+    expect(modelPatchRequest(automatic, automatic)).toEqual({});
+    expect(modelFormSavable(automatic, automatic, false)).toBe(false);
+    expect(
+      validateModelForm({ ...base, maxOutputTokens: "0" }, base)
+        .maxOutputTokens,
+    ).toBe("Must be a whole number greater than 0");
   });
 
   it.each(["[REDACTED]", "%5BREDACTED%5D"])(

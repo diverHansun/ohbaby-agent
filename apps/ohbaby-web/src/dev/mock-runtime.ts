@@ -1,9 +1,11 @@
 import type {
   UiBackendClient,
+  UiCurrentModelConfig,
   UiGlobalSessionPage,
   UiSnapshot,
   UiSessionSearchPage,
   UiSessionSearchResult,
+  UiSettingsModel,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import type { OhbabyWebRuntime } from "../runtime/index.js";
@@ -90,6 +92,50 @@ function seedPins(pins: Readonly<Record<string, number>> | undefined): void {
  * Dev-only runtime that renders a fixed scenario without a daemon. Mutating
  * sidebar operations update in-memory fixtures; prompts never reach a model.
  */
+/** The current-model view of a settings entry, as `GET /v1/model` returns it. */
+function currentModelFrom(
+  entry: UiSettingsModel,
+  source: UiCurrentModelConfig["source"],
+): UiCurrentModelConfig {
+  const {
+    id,
+    provider,
+    model,
+    baseUrl,
+    interfaceProvider,
+    apiKeyEnv,
+    contextWindowTokens,
+    detectedContextWindowTokens,
+    effectiveContextWindowTokens,
+    maxOutputTokens,
+    effectiveMaxOutputTokens,
+    contextDiscovery,
+    tokenBudgetIssue,
+    reasoningNotice,
+    reasoning,
+  } = entry;
+  return {
+    id,
+    source,
+    provider,
+    model,
+    baseUrl: baseUrl ?? "",
+    interfaceProvider: interfaceProvider ?? "openai-compatible",
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
+    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+    ...(detectedContextWindowTokens === undefined
+      ? {}
+      : { detectedContextWindowTokens }),
+    effectiveContextWindowTokens,
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+    effectiveMaxOutputTokens,
+    contextDiscovery,
+    ...(tokenBudgetIssue === undefined ? {} : { tokenBudgetIssue }),
+    ...(reasoningNotice === undefined ? {} : { reasoningNotice }),
+    reasoning,
+  };
+}
+
 export function createMockRuntime(name: string): OhbabyWebRuntime {
   const scenario = (mockScenarios[name] ?? mockScenarios.typical)();
   const store = createOhbabyWebStore();
@@ -137,10 +183,16 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   const delayMs = Number(
     new URLSearchParams(location.search).get("delay") ?? 0,
   );
-  const settings = new SettingsLayer(
+  const settings: SettingsLayer = new SettingsLayer(
     createMockSettingsApi(
       name,
       () => new Promise((resolve) => setTimeout(resolve, delayMs)),
+      {
+        // Background detection reports through `settings.changed`, as the server.
+        notify: (domains) => {
+          settings.invalidate(domains);
+        },
+      },
     ),
     () => DEFAULT_WORKSPACE,
   );
@@ -156,19 +208,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
       (store.getSnapshot().currentModel?.model ?? null)
     )
       return;
-    store.setCurrentModel(
-      active
-        ? {
-            id: active.id,
-            source: "default",
-            provider: active.provider,
-            model: active.model,
-            baseUrl: active.baseUrl ?? "",
-            contextWindowTokens: active.contextWindowTokens,
-            interfaceProvider: active.interfaceProvider ?? "openai-compatible",
-          }
-        : null,
-    );
+    store.setCurrentModel(active ? currentModelFrom(active, "default") : null);
   });
   const client = new Proxy<Record<string, unknown>>(
     {},
@@ -239,18 +279,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
               explicit ??
               models?.models.find((entry) => entry.id === models.active?.id);
             return entry
-              ? {
-                  id: entry.id,
-                  source: explicit ? "explicit" : "default",
-                  provider: entry.provider,
-                  model: entry.model,
-                  baseUrl: entry.baseUrl ?? "",
-                  interfaceProvider:
-                    entry.interfaceProvider ?? "openai-compatible",
-                  contextWindowTokens: entry.contextWindowTokens,
-                  maxOutputTokens: entry.maxOutputTokens,
-                  reasoning: entry.reasoning,
-                }
+              ? currentModelFrom(entry, explicit ? "explicit" : "default")
               : null;
           };
         if (key === "listCommands")

@@ -7,16 +7,26 @@ import type {
 } from "ohbaby-sdk";
 import { useEffect, useRef, useState } from "react";
 
+/** No known levels yet: why, and a chosen level that is kept but not sent. */
+interface PendingReasoning {
+  readonly reason?: string;
+  readonly inactive?: string;
+}
+
 export type ReasoningClient = Pick<
   UiBackendClient,
   "getCurrentModel" | "subscribeEvents" | "updateSessionReasoning"
 >;
 
-/** What the thinking control shows; one state feeds both the desktop select and the phone More menu. */
+/**
+ * What the Reasoning Effort control shows; one state feeds both the desktop
+ * select and the phone More menu. Without known levels a chosen level is
+ * kept but not sent (`inactive`), so it must not read as in effect.
+ */
 export type ReasoningState =
   | { readonly kind: "hidden" }
-  | { readonly kind: "detecting"; readonly reason?: string }
-  | { readonly kind: "unknown"; readonly reason?: string }
+  | ({ readonly kind: "detecting" } & PendingReasoning)
+  | ({ readonly kind: "unknown" } & PendingReasoning)
   | {
       readonly kind: "choice";
       readonly value: string;
@@ -27,6 +37,11 @@ export type ReasoningState =
       readonly error?: string;
       readonly select: (value: string) => void;
     };
+
+function levelLabel(chosen: UiReasoningConfig | undefined): string | undefined {
+  if (chosen === undefined) return undefined;
+  return chosen.enabled === false ? "off" : (chosen.effort ?? "on");
+}
 
 /**
  * The chat's model's reasoning capability (from `GET /v1/model?sessionId`,
@@ -164,18 +179,19 @@ export function useReasoning(
           );
       });
   };
-  if (!view || (view.status === "identified" && view.mode === "none"))
+  if (!view || (view.status !== "unknown" && view.mode === "none"))
     return { kind: "hidden" };
-  if (view.status === "detecting")
-    return {
-      kind: "detecting",
+  // Levels already found stay in effect while detection runs again.
+  if (view.status === "unknown" || view.mode === undefined) {
+    const inactive = levelLabel(preference ?? entry?.reasoningDefault);
+    const pending: PendingReasoning = {
       ...(view.reason === undefined ? {} : { reason: view.reason }),
+      ...(inactive === undefined ? {} : { inactive }),
     };
-  if (view.status !== "identified")
-    return {
-      kind: "unknown",
-      ...(view.reason === undefined ? {} : { reason: view.reason }),
-    };
+    return view.status === "detecting"
+      ? { kind: "detecting", ...pending }
+      : { kind: "unknown", ...pending };
+  }
   const compatible =
     preference &&
     (preference.enabled !== false || view.supportsDisabled) &&

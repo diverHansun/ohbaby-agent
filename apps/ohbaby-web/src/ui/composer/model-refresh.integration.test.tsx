@@ -5,8 +5,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { createMockSettingsApi } from "../../dev/mock-settings.js";
 import { SettingsLayer } from "../../runtime/settings-layer.js";
+import { AUTO_LIMITS } from "../../runtime/model-limits.test-support.js";
 import { resolveModelEntry, useSettingsModels } from "./model-choice.js";
+import { ComposerMoreMenu } from "./ComposerMoreMenu.js";
 import { ModelMenu } from "./ModelMenu.js";
+import { ReasoningControl } from "./ReasoningControl.js";
 import { useReasoning, type ReasoningClient } from "./useReasoning.js";
 
 (
@@ -117,6 +120,7 @@ it("refreshes thinking on focus and tab visibility when there was no event", asy
     baseUrl: "http://127.0.0.1:9/v1",
     interfaceProvider: "openai-compatible",
     model: "reasoning",
+    ...AUTO_LIMITS,
     contextWindowTokens: 32000,
     reasoning: {
       status: "identified",
@@ -426,3 +430,90 @@ it.each(["identified", "unknown"] as const)(
     expect(client.updateSessionReasoning).not.toHaveBeenCalled();
   },
 );
+
+it.each(["detecting", "unknown"] as const)(
+  "keeps a chosen level visible but inactive while Reasoning Effort is %s",
+  async (status) => {
+    const client: ReasoningClient = {
+      getCurrentModel: () => Promise.resolve(null),
+      subscribeEvents: () => () => undefined,
+      updateSessionReasoning: vi.fn(),
+    };
+    const first = (
+      await createMockSettingsApi("settings", () =>
+        Promise.resolve(),
+      ).getModels()
+    ).models.at(0);
+    if (!first) throw new Error("Expected a model");
+    const entry: UiSettingsModel = {
+      ...first,
+      reasoning: { status, efforts: [] },
+      reasoningDefault: { enabled: true, effort: "high" },
+    };
+    const onChange = vi.fn();
+    function Control(): ReactElement {
+      const state = useReasoning(client, null, onChange, entry);
+      return (
+        <>
+          <ReasoningControl state={state} />
+          <ComposerMoreMenu
+            reasoning={state}
+            permissionLevel="default"
+            permissionDisabled={false}
+            onSetPermission={() => undefined}
+          />
+        </>
+      );
+    }
+    await render(<Control />);
+    // Not presented as a working selection, and the preference is kept.
+    expect(
+      document.querySelector("[aria-label='Reasoning effort']"),
+    ).toBeNull();
+    const control = document.querySelector<HTMLElement>(
+      ".ohb-reasoning-status",
+    );
+    expect(control?.title ?? "").toContain("high isn't active");
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>("[aria-label='More controls']")
+        ?.click();
+    });
+    expect(document.body.textContent).toContain(
+      "Reasoning Effort: high (inactive)",
+    );
+    expect(onChange).not.toHaveBeenCalled();
+  },
+);
+
+it("keeps known levels usable while Reasoning Effort is detected again", async () => {
+  const client: ReasoningClient = {
+    getCurrentModel: () => Promise.resolve(null),
+    subscribeEvents: () => () => undefined,
+    updateSessionReasoning: vi.fn(),
+  };
+  const first = (
+    await createMockSettingsApi("settings", () => Promise.resolve()).getModels()
+  ).models.at(0);
+  if (!first) throw new Error("Expected a model");
+  const entry: UiSettingsModel = {
+    ...first,
+    reasoning: {
+      status: "detecting",
+      mode: "effort",
+      efforts: ["low", "high"],
+      supportsDisabled: false,
+      default: { enabled: true, effort: "low" },
+    },
+    reasoningDefault: { enabled: true, effort: "high" },
+  };
+  function Control(): ReactElement {
+    const state = useReasoning(client, null, () => undefined, entry);
+    return <ReasoningControl state={state} />;
+  }
+  await render(<Control />);
+  const select = document.querySelector<HTMLSelectElement>(
+    "[aria-label='Reasoning effort']",
+  );
+  expect(select?.value).toBe("high");
+});

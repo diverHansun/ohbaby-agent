@@ -8,8 +8,8 @@ import { anchorBelow, Menu, type MenuAnchor } from "../shared/Menu.js";
 import type { ReasoningState } from "./useReasoning.js";
 
 /**
- * Phones (< 640px) fold thinking effort and the permission mode into one
- * More menu (D29, as pi-web). Thinking opens its options in place and returns
+ * Phones (< 640px) fold Reasoning Effort and the permission mode into one
+ * More menu (D29, as pi-web). Reasoning Effort opens its options in place and returns
  * to the first level after a choice; Full access is a switch that still asks
  * through the existing "Enable full access?" dialog. CSS shows this only on
  * phones; desktop keeps its own controls.
@@ -45,9 +45,13 @@ export function ComposerMoreMenu(props: {
     reasoning.kind === "choice"
       ? (reasoning.options.find((option) => option.value === reasoning.value)
           ?.label ?? reasoning.value)
-      : reasoning.kind === "detecting"
-        ? "detecting…"
-        : "unknown";
+      : reasoning.kind === "hidden"
+        ? ""
+        : reasoning.inactive !== undefined
+          ? `${reasoning.inactive} (inactive)`
+          : reasoning.kind === "detecting"
+            ? "detecting…"
+            : "unknown";
 
   return (
     <>
@@ -67,7 +71,7 @@ export function ComposerMoreMenu(props: {
       {anchor && level === "thinking" && reasoning.kind === "choice" ? (
         <Menu
           anchor={anchor}
-          label="Thinking"
+          label="Reasoning Effort"
           level="thinking"
           focusSelector="[aria-current='true']"
           onClose={close}
@@ -84,7 +88,7 @@ export function ComposerMoreMenu(props: {
             }}
           >
             <ChevronLeft aria-hidden="true" size={13} />
-            <span>Thinking</span>
+            <span>Reasoning Effort</span>
           </button>
           {reasoning.options.map((option) => {
             const current = option.value === reasoning.value;
@@ -128,7 +132,7 @@ export function ComposerMoreMenu(props: {
               }}
             >
               <span className="ohb-menu-item-text">
-                Thinking: {thinkingLabel}
+                Reasoning Effort: {thinkingLabel}
               </span>
               <ChevronRight
                 aria-hidden="true"

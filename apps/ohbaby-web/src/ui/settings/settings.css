@@ -342,6 +342,36 @@
   margin: 0;
 }
 
+/* Read-only automatic values and status beside a field. */
+.ohb-field-note {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  gap: 6px;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 400px;
+}
+
+/* A model setting that still works but needs the user's attention. */
+.ohb-settings-warning {
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
+  color: var(--warning-ink);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+}
+
+.ohb-settings-row-warning {
+  color: var(--warning-ink);
+  font-size: 12.5px;
+}
+
 .ohb-field-error .ohb-text-button {
   height: 22px;
   padding: 0 6px;

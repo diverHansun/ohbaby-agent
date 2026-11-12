@@ -15,7 +15,10 @@ export const PROTOCOLS: readonly { value: ModelProtocol; label: string }[] = [
   { value: "anthropic", label: "Anthropic" },
 ];
 
-/** Field values as typed; numbers stay text until submit (06 §2.2). */
+/**
+ * Field values as typed; numbers stay text until submit (06 §2.2). The two
+ * token fields hold only the user's overrides: empty means automatic.
+ */
 export interface ModelForm {
   readonly provider: string;
   readonly model: string;
@@ -55,22 +58,41 @@ export function modelFormFrom(entry: UiSettingsModel): ModelForm {
     label: entry.label ?? "",
     secret: "keep",
     apiKeyEnv: entry.apiKeyEnv ?? "",
-    contextWindowTokens: String(entry.contextWindowTokens),
-    maxOutputTokens:
-      entry.maxOutputTokens === undefined ? "" : String(entry.maxOutputTokens),
+    contextWindowTokens: override(entry.contextWindowTokens),
+    maxOutputTokens: override(entry.maxOutputTokens),
     promptCache: entry.promptCache ?? "",
   };
 }
 
+function override(value: number | undefined): string {
+  return value === undefined ? "" : String(value);
+}
+
 /** Fields with no clear protocol: an emptied saved value cannot be sent. */
-const UNCLEARABLE = [
+export const UNCLEARABLE = [
   "apiKeyEnv",
-  "contextWindowTokens",
-  "maxOutputTokens",
   "promptCache",
 ] as const satisfies readonly (keyof ModelForm)[];
 
+/** Token overrides: empty means automatic, otherwise a positive integer. */
+export const TOKEN_FIELDS = [
+  "contextWindowTokens",
+  "maxOutputTokens",
+] as const satisfies readonly (keyof ModelForm)[];
+
 const POSITIVE_INTEGER = /^[1-9]\d*$/u;
+
+/** Why a token override can't be sent, or undefined when it can. */
+function tokenError(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed === "") return undefined;
+  if (!POSITIVE_INTEGER.test(trimmed))
+    return "Must be a whole number greater than 0";
+  // Digits beyond this lose precision or become Infinity as a number.
+  return Number.isSafeInteger(Number(trimmed))
+    ? undefined
+    : "Number is too large";
+}
 
 /**
  * Format checks only; the server validates the rest (D19). Returns the
@@ -93,9 +115,10 @@ export function validateModelForm(
     errors.baseUrl =
       "Replace the entire URL; hidden credentials cannot be reused.";
   if (form.interfaceProvider === "") errors.interfaceProvider = "Required";
-  for (const field of ["contextWindowTokens", "maxOutputTokens"] as const)
-    if (form[field].trim() !== "" && !POSITIVE_INTEGER.test(form[field].trim()))
-      errors[field] = "Must be a whole number greater than 0";
+  for (const field of TOKEN_FIELDS) {
+    const error = tokenError(form[field]);
+    if (error) errors[field] = error;
+  }
   if (
     form.apiKeyEnv.trim() !== "" &&
     !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(form.apiKeyEnv.trim())
@@ -145,9 +168,9 @@ export function modelCreateRequest(form: ModelForm): UiSettingsModelCreate {
 }
 
 /**
- * Only the fields that differ from `saved`. An emptied label is `null`; a
- * cleared key is `apiKey: ""`. Unclearable fields never reach here empty
- * because validation blocks them.
+ * Only the fields that differ from `saved`. An emptied label or token
+ * override is `null`; a cleared key is `apiKey: ""`. Unclearable fields
+ * never reach here empty because validation blocks them.
  */
 export function modelPatchRequest(
   form: ModelForm,
@@ -178,9 +201,9 @@ export function modelPatchRequest(
     !secretChanged(form.secret)
   )
     patch.apiKeyEnv = null;
-  for (const field of ["contextWindowTokens", "maxOutputTokens"] as const)
-    if (form[field].trim() !== saved[field] && form[field].trim() !== "")
-      patch[field] = Number(form[field].trim());
+  for (const field of TOKEN_FIELDS)
+    if (form[field].trim() !== saved[field])
+      patch[field] = count(form[field]) ?? null;
   if (form.promptCache !== saved.promptCache && form.promptCache !== "")
     patch.promptCache = form.promptCache;
   return patch;
@@ -263,6 +286,41 @@ export function groupModels(
     else groups.set(model.provider, [model]);
   }
   return [...groups].map(([provider, rows]) => ({ provider, models: rows }));
+}
+
+const KEY_FAILURES: ReadonlySet<string> = new Set([
+  "authentication",
+  "missing-credential",
+]);
+const RETRY_FAILURES: ReadonlySet<string> = new Set([
+  "rate-limit",
+  "http-error",
+  "timeout",
+  "network-error",
+  "invalid-json",
+  "discovery-failed",
+]);
+
+/**
+ * A detection `reason` in words, when the last attempt failed. Other codes
+ * (the provider simply doesn't report it, or a newer attempt replaced this
+ * one) read as "not detected", so raw codes never reach the page.
+ */
+export function detectionFailure(
+  reason: string | undefined,
+): string | undefined {
+  if (reason === undefined) return undefined;
+  if (KEY_FAILURES.has(reason)) return "Detection failed. Check the API key.";
+  if (RETRY_FAILURES.has(reason)) return "Detection failed. Try again.";
+  return undefined;
+}
+
+/** Context or reasoning discovery is running for this entry. */
+export function modelDetecting(model: UiSettingsModel): boolean {
+  return (
+    model.contextDiscovery.status === "detecting" ||
+    model.reasoning.status === "detecting"
+  );
 }
 
 /** "model-x · Work", or the model name alone without a label. */

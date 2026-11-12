@@ -18,6 +18,7 @@ import type { OhbabyWebRuntime } from "../runtime/index.js";
 import type { OhbabyWebStore } from "../store/store.js";
 import { createMockSettingsApi } from "../dev/mock-settings.js";
 import { SettingsLayer } from "../runtime/settings-layer.js";
+import { AUTO_LIMITS } from "../runtime/model-limits.test-support.js";
 import { createDraftStore } from "../store/draft.js";
 import { createGlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore } from "../store/store.js";
@@ -4882,6 +4883,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       fake.store.setCurrentModel({
         id: "test-model",
         source: "default",
+        ...AUTO_LIMITS,
         provider: "zhipu",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
         interfaceProvider: "openai-compatible",
@@ -5937,6 +5939,7 @@ it("shows raw reasoning labels inside the input and persists session preference"
   vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
     id: "test-model",
     source: "default",
+    ...AUTO_LIMITS,
     provider: "p",
     model: "m",
     baseUrl: "https://p",
@@ -5989,6 +5992,7 @@ it("unknown capability keeps send available and labels the control unknown witho
   vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
     id: "test-model",
     source: "default",
+    ...AUTO_LIMITS,
     provider: "p",
     model: "m",
     baseUrl: "https://p",
@@ -6018,6 +6022,7 @@ it("shows only a spinning brain while reasoning capability is detecting", async 
   vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
     id: "test-model",
     source: "default",
+    ...AUTO_LIMITS,
     provider: "p",
     model: "m",
     baseUrl: "https://p",
@@ -6042,6 +6047,7 @@ it("keeps the reasoning selector for an identified model that cannot disable rea
   vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
     id: "test-model",
     source: "default",
+    ...AUTO_LIMITS,
     provider: "p",
     model: "m",
     baseUrl: "https://p",
@@ -6072,6 +6078,7 @@ it("clears old workspace reasoning while the new client metadata is pending", as
   vi.mocked(first.client.getCurrentModel).mockResolvedValue({
     id: "test-model",
     source: "default",
+    ...AUTO_LIMITS,
     provider: "old",
     model: "old",
     baseUrl: "https://old.test",
@@ -6126,6 +6133,7 @@ it.each(["pending", "acknowledged"])(
     vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
       id: "test-model",
       source: "default",
+      ...AUTO_LIMITS,
       provider: "p",
       model: "m",
       baseUrl: "https://p",

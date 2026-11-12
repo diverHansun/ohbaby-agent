@@ -2,6 +2,7 @@ import type { UiSettingsModels, UiSettingsSearch } from "ohbaby-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { selectSettings } from "../store/settings-cache.js";
 import { DEFAULT, fakeDaemon } from "./fake-daemon.test-support.js";
+import { AUTO_LIMITS } from "./model-limits.test-support.js";
 import { createOhbabyWebRuntime, type OhbabyWebRuntime } from "./index.js";
 
 const runtimes: OhbabyWebRuntime[] = [];
@@ -23,6 +24,7 @@ function models(
       model: id,
       apiKeyConfigured: false,
       configurationComplete: true,
+      ...AUTO_LIMITS,
       contextWindowTokens: 1000,
       reasoning: { status: "unknown", efforts: [] },
     })),

@@ -12,6 +12,8 @@ import { OhbabyWebApp } from "../App.js";
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 const roots: Root[] = [];
+// Any http(s) address passes the form check; the mock never calls it.
+const BASE_URL = ["https:/", "model.invalid", "v1"].join("/");
 
 afterEach(() => {
   act(() => {
@@ -386,11 +388,148 @@ describe("settings dialog", () => {
     );
     await click(button(dialog(), "Edit gpt-5.2"));
     await click(button(dialog(), "More options"));
-    await type(field("Max output") as HTMLInputElement, "");
+    await type(field("Key variable") as HTMLInputElement, "");
     expect(button(dialog(), "Save").disabled).toBe(true);
     expect(dialog().textContent).toContain("This can't be cleared");
     await click(button(dialog(), "Restore"));
-    expect((field("Max output") as HTMLInputElement).value).toBe("32000");
+    expect((field("Key variable") as HTMLInputElement).value).toBe(
+      "OPENAI_API_KEY",
+    );
+  });
+
+  it("clears a token override with null, and a reopened editor stays empty", async () => {
+    const runtime = createMockRuntime("settings");
+    const update = vi.spyOn(runtime.settings, "updateModel");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("gpt-5.2"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit gpt-5.2"));
+    await click(button(dialog(), "More options"));
+    const max = field("Max output") as HTMLInputElement;
+    expect(max.value).toBe("32000");
+    // No context override: empty, with the detected value beside it.
+    expect((field("Context window") as HTMLInputElement).value).toBe("");
+    expect(dialog().textContent).toContain("Detected: 128,000 tokens");
+    await type(max, "");
+    expect(dialog().textContent).not.toContain("This can't be cleared");
+    await click(button(dialog(), "Save"));
+    expect(update).toHaveBeenCalledWith("m3", { maxOutputTokens: null });
+    await until(
+      () => dialog().querySelector(".ohb-settings-editor") === null,
+      "the list after saving",
+    );
+    await click(button(dialog(), "Edit gpt-5.2"));
+    await click(button(dialog(), "More options"));
+    expect((field("Max output") as HTMLInputElement).value).toBe("");
+    expect((field("Context window") as HTMLInputElement).value).toBe("");
+    expect(button(dialog(), "Save").disabled).toBe(true);
+  });
+
+  it("detects after saving a new model, without filling its token fields", async () => {
+    const runtime = createMockRuntime("settings-empty");
+    const create = vi.spyOn(runtime.settings, "createModel");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("No models yet."),
+      "the empty list",
+    );
+    await click(button(dialog(), "Add model"));
+    await type(field("Provider") as HTMLInputElement, "acme");
+    await type(field("Model") as HTMLInputElement, "acme-1");
+    await type(field("Base URL") as HTMLInputElement, BASE_URL);
+    await click(button(dialog(), "Save"));
+    expect(create).toHaveBeenCalledWith({
+      provider: "acme",
+      model: "acme-1",
+      baseUrl: BASE_URL,
+      interfaceProvider: "openai-compatible",
+    });
+    // The save returns before detection; its end arrives as a change event.
+    await until(
+      () => dialog().querySelector("[aria-label='Detecting']") !== null,
+      "the detecting row",
+    );
+    await until(
+      () => dialog().querySelector("[aria-label='Detecting']") === null,
+      "detection to finish",
+    );
+    await click(button(dialog(), "Edit acme-1"));
+    expect(field("Reasoning Effort")).toBeInstanceOf(HTMLSelectElement);
+    await click(button(dialog(), "More options"));
+    expect((field("Context window") as HTMLInputElement).value).toBe("");
+    expect((field("Max output") as HTMLInputElement).value).toBe("");
+    expect(dialog().textContent).toContain("Detected: 128,000 tokens");
+    expect(dialog().textContent).not.toContain("300,000");
+  });
+
+  it("keeps the draft and its baseline while detection updates the entry", async () => {
+    const runtime = createMockRuntime("settings");
+    const update = vi.spyOn(runtime.settings, "updateModel");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("gpt-5.2"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit gpt-5.2"));
+    await click(button(dialog(), "More options"));
+    await type(field("Context window") as HTMLInputElement, "64000");
+    await type(field("Max output") as HTMLInputElement, "");
+    await click(button(dialog(), "Detect again"));
+    await until(
+      () =>
+        dialog().querySelector("[aria-label='Detecting Reasoning Effort']") ===
+        null,
+      "detection to finish",
+    );
+    expect(field("Reasoning Effort")).toBeInstanceOf(HTMLSelectElement);
+    expect((field("Context window") as HTMLInputElement).value).toBe("64000");
+    expect((field("Max output") as HTMLInputElement).value).toBe("");
+    update.mockClear();
+    await click(button(dialog(), "Save"));
+    expect(update).toHaveBeenCalledWith("m3", {
+      contextWindowTokens: 64000,
+      maxOutputTokens: null,
+    });
+  });
+
+  it("shows the cleared Reasoning Effort notice and a repairable token budget", async () => {
+    const runtime = createMockRuntime("settings");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("claude-haiku-5-5"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit claude-haiku-5-5"));
+    expect(dialog().textContent).toContain(
+      "Unsupported minimal effort was cleared",
+    );
+    await click(button(dialog(), "Back to Models"));
+    await act(async () => {
+      await runtime.settings.updateModel("m3", { contextWindowTokens: 16_384 });
+    });
+    await until(
+      () => dialog().textContent.includes("Check settings"),
+      "the row warning",
+    );
+    // The entry still opens and can be repaired.
+    await click(button(dialog(), "Edit gpt-5.2"));
+    expect(dialog().textContent).toContain("doesn't fit the context window");
+    await type(field("Max output") as HTMLInputElement, "8000");
+    await click(button(dialog(), "Save"));
+    await until(
+      () => dialog().querySelector(".ohb-settings-editor") === null,
+      "the list after saving",
+    );
+    await click(button(dialog(), "Edit gpt-5.2"));
+    expect(dialog().textContent).not.toContain(
+      "doesn't fit the context window",
+    );
   });
 
   it("asks before every model delete and says what happens to its chats", async () => {
@@ -401,7 +540,7 @@ describe("settings dialog", () => {
       () => dialog().textContent.includes("deepseek-v4.1-pro"),
       "the model list",
     );
-    expect(dialog().textContent).toContain(
+    expect(dialog().textContent).not.toContain(
       "New chats and chats that haven't picked a model use the default.",
     );
     await click(button(dialog(), "deepseek-v4.1-pro actions"));
@@ -431,7 +570,7 @@ describe("settings dialog", () => {
     expect(dialogOpen()).toBe(true);
   });
 
-  it("shows a model's thinking, detects it again and saves its default level", async () => {
+  it("shows a model's Reasoning Effort, detects it again and saves its default level", async () => {
     const runtime = createMockRuntime("settings");
     const update = vi.spyOn(runtime.settings, "updateModel");
     const probe = vi.spyOn(runtime.settings, "probeModel");
@@ -442,14 +581,14 @@ describe("settings dialog", () => {
       "the model list",
     );
     await click(button(dialog(), "Edit gpt-5.2"));
-    expect(dialog().textContent).toContain("Not probed in the mock");
+    expect(dialog().textContent).toContain("Detection failed. Try again.");
     await click(button(dialog(), "Detect again"));
     await until(
       () => dialog().querySelector("select option[value='high']") !== null,
       "the detected levels",
     );
     expect(probe).toHaveBeenCalledWith("m3");
-    const level = field("Thinking");
+    const level = field("Reasoning Effort");
     expect(level.value).toBe("");
     expect(level.textContent).toContain("Model default (medium)");
     await act(async () => {
@@ -462,6 +601,43 @@ describe("settings dialog", () => {
     expect(update).toHaveBeenCalledWith("m3", {
       reasoning: { enabled: true, effort: "high" },
     });
+  });
+
+  it("lets Detect again restart detection and settles only on the latest press", async () => {
+    const runtime = createMockRuntime("settings");
+    const original = runtime.settings.probeModel.bind(runtime.settings);
+    let failFirst: ((error: Error) => void) | undefined;
+    vi.spyOn(runtime.settings, "probeModel")
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            failFirst = reject;
+          }),
+      )
+      .mockImplementationOnce((id) => original(id));
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("gpt-5.2"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit gpt-5.2"));
+    await click(button(dialog(), "Detect again"));
+    // Still pressable: the server cancels the older task.
+    expect(button(dialog(), "Detect again").disabled).toBe(false);
+    await click(button(dialog(), "Detect again"));
+    await until(
+      () => dialog().querySelector("select option[value='high']") !== null,
+      "the detected levels",
+    );
+    await act(async () => {
+      failFirst?.(new Error("cancelled"));
+      await Promise.resolve();
+    });
+    expect(dialog().textContent).not.toContain("cancelled");
+    expect(
+      dialog().querySelector("[aria-label='Detecting Reasoning Effort']"),
+    ).toBeNull();
   });
 
   it("finishes a keyless Needs setup entry on Save and makes it the default", async () => {
@@ -786,7 +962,7 @@ describe("composer controls", () => {
     expect(submit.mock.calls[1]?.[1]).not.toHaveProperty("modelEntryId");
   });
 
-  it("puts thinking and full access in the phone More menu", async () => {
+  it("puts Reasoning Effort and full access in the phone More menu", async () => {
     const runtime = createMockRuntime("settings");
     const container = mount(runtime);
     const more = button(container, "More controls");
@@ -800,7 +976,7 @@ describe("composer controls", () => {
     await until(() => document.activeElement === more, "focus back on More");
   });
 
-  it("opens Thinking options in place and returns to the first level", async () => {
+  it("opens Reasoning Effort options in place and returns to the first level", async () => {
     const base = createMockRuntime("running");
     const mock = base.client;
     if (!mock) throw new Error("mock client missing");
@@ -842,12 +1018,14 @@ describe("composer controls", () => {
       if (!element) throw new Error("menu not found");
       return element;
     };
-    await click(button(menu(), "Thinking: low"));
-    expect(button(menu(), "Thinking").className).toContain("ohb-menu-back");
+    await click(button(menu(), "Reasoning Effort: low"));
+    expect(button(menu(), "Reasoning Effort").className).toContain(
+      "ohb-menu-back",
+    );
     await click(button(menu(), "high"));
     expect(updates).toEqual([{ enabled: true, effort: "high" }]);
     // Back on the first level, with the draft untouched.
-    expect(button(menu(), "Thinking: high")).toBeDefined();
+    expect(button(menu(), "Reasoning Effort: high")).toBeDefined();
     await key(menu(), "Escape");
     expect(document.querySelector(".ohb-menu")).toBeNull();
   });

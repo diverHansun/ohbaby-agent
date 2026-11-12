@@ -2,19 +2,32 @@ import { Brain, ChevronDown } from "lucide-react";
 import type { ReactElement } from "react";
 import type { ReasoningState } from "./useReasoning.js";
 
-/** The desktop thinking-effort control: a native select inside the composer row. */
+/** Why a chosen level is not sent yet, for titles and screen readers. */
+function inactiveReasoningText(level: string): string {
+  return `${level} isn't active until Reasoning Effort is detected; the service default is used`;
+}
+
+/** The desktop Reasoning Effort control: a native select inside the composer row. */
 export function ReasoningControl(props: {
   readonly state: ReasoningState;
 }): ReactElement | null {
   const { state } = props;
   if (state.kind === "hidden") return null;
+  const inactive =
+    state.kind !== "choice" && state.inactive !== undefined
+      ? inactiveReasoningText(state.inactive)
+      : undefined;
   if (state.kind === "detecting")
     return (
       <span
         className="ohb-reasoning-status ohb-reasoning-detecting"
-        aria-label="Detecting reasoning effort"
+        aria-label={
+          inactive
+            ? `Detecting Reasoning Effort; ${inactive}`
+            : "Detecting Reasoning Effort"
+        }
         role="status"
-        title={state.reason}
+        title={inactive ?? state.reason}
       >
         <Brain className="ohb-reasoning-pending" aria-hidden="true" size={14} />
       </span>
@@ -23,10 +36,10 @@ export function ReasoningControl(props: {
     return (
       <span
         className="ohb-reasoning-status ohb-reasoning-unknown"
-        title={state.reason}
+        title={inactive ?? state.reason}
       >
         <Brain aria-hidden="true" size={14} />
-        unknown
+        {state.inactive ? `${state.inactive} · inactive` : "unknown"}
       </span>
     );
   return (

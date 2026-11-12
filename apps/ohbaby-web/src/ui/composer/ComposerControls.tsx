@@ -12,8 +12,8 @@ import { useReasoning, type ReasoningClient } from "./useReasoning.js";
 
 /**
  * Bottom row inside the composer card: permission control on the left; model,
- * thinking effort and the round send (or Stop) button on the right (D22).
- * Below 640px CSS swaps the permission and thinking controls for one More
+ * Reasoning Effort and the round send (or Stop) button on the right (D22).
+ * Below 640px CSS swaps the permission and Reasoning Effort controls for one More
  * menu (D29); both read the same reasoning state, so nothing is fetched twice.
  */
 export function ComposerControls(props: {

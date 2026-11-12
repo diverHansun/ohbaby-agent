@@ -35,7 +35,10 @@ const model: UiCurrentModelConfig = {
   baseUrl: "https://api.deepseek.com/v1",
   interfaceProvider: "openai-compatible",
   model: "deepseek-v4.1-flash",
-  contextWindowTokens: 128_000,
+  detectedContextWindowTokens: 128_000,
+  effectiveContextWindowTokens: 128_000,
+  effectiveMaxOutputTokens: 32_768,
+  contextDiscovery: { status: "identified" },
 };
 
 const workspace: WorkspaceSnapshot = {

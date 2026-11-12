@@ -1,9 +1,11 @@
 import type {
   UiReasoningCapabilityView,
+  UiSettingsChangedEvent,
   UiSettingsGlobalMcpServer,
   UiSettingsMcpServer,
   UiSettingsModel,
   UiSettingsModelCreate,
+  UiSettingsModelPatch,
   UiSettingsModels,
   UiSettingsSearch,
   UiSettingsSkill,
@@ -29,13 +31,51 @@ const effortReasoning: UiReasoningCapabilityView = {
   default: { enabled: true, effort: "medium" },
 };
 
+/**
+ * Mock-only stand-ins for the server's runtime defaults and a detected
+ * context. The page never computes these; it reads `effective*` fields.
+ */
+const MOCK_DEFAULT_CONTEXT = 300_000;
+const MOCK_DEFAULT_MAX_OUTPUT = 32_768;
+const MOCK_SAFETY_MARGIN = 1_024;
+const MOCK_DETECTED_CONTEXT = 128_000;
+
+/** The server's numeric projection: overrides, detection, effective values. */
+function withLimits(model: UiSettingsModel): UiSettingsModel {
+  const {
+    tokenBudgetIssue: _issue,
+    effectiveContextWindowTokens: _context,
+    effectiveMaxOutputTokens: _max,
+    ...rest
+  } = model;
+  const contextWindowTokens =
+    model.contextWindowTokens ??
+    model.detectedContextWindowTokens ??
+    MOCK_DEFAULT_CONTEXT;
+  const maxOutputTokens = model.maxOutputTokens ?? MOCK_DEFAULT_MAX_OUTPUT;
+  return {
+    ...rest,
+    effectiveContextWindowTokens: contextWindowTokens,
+    effectiveMaxOutputTokens: maxOutputTokens,
+    ...(contextWindowTokens > maxOutputTokens + MOCK_SAFETY_MARGIN
+      ? {}
+      : {
+          tokenBudgetIssue: {
+            code: "MODEL_TOKEN_LIMITS_INCOMPATIBLE",
+            contextWindowTokens,
+            maxOutputTokens,
+          },
+        }),
+  };
+}
+
 function entry(
   id: string,
   provider: string,
   model: string,
   extra: Partial<UiSettingsModel> = {},
 ): UiSettingsModel {
-  return {
+  return withLimits({
     id,
     provider,
     model,
@@ -44,10 +84,13 @@ function entry(
     apiKeyEnv: `${provider.toUpperCase().replace(/\W/gu, "_")}_API_KEY`,
     apiKeyConfigured: true,
     configurationComplete: true,
-    contextWindowTokens: 128_000,
+    detectedContextWindowTokens: MOCK_DETECTED_CONTEXT,
+    effectiveContextWindowTokens: MOCK_DETECTED_CONTEXT,
+    effectiveMaxOutputTokens: MOCK_DEFAULT_MAX_OUTPUT,
+    contextDiscovery: { status: "identified" },
     reasoning,
     ...extra,
-  };
+  });
 }
 
 interface MockSettingsState {
@@ -98,6 +141,7 @@ function fullState(): MockSettingsState {
       }),
       entry("m6", "anthropic", "claude-haiku-5-5", {
         interfaceProvider: "anthropic",
+        reasoningNotice: "unsupported-anthropic-effort-cleared",
       }),
     ],
     activeId: "m1",
@@ -277,14 +321,44 @@ function notFound(): Error {
   });
 }
 
+type NumericPatch = Pick<
+  UiSettingsModelPatch,
+  "contextWindowTokens" | "maxOutputTokens"
+>;
+
+/** A Patch number sets an override; `null` removes it (back to automatic). */
+function applyOverrides(
+  model: UiSettingsModel,
+  patch: NumericPatch,
+): UiSettingsModel {
+  let next = model;
+  for (const field of ["contextWindowTokens", "maxOutputTokens"] as const) {
+    const value = patch[field];
+    if (value === undefined) continue;
+    const { [field]: _removed, ...rest } = next;
+    next = value === null ? rest : { ...rest, [field]: value };
+  }
+  return next;
+}
+
+export interface MockSettingsEvents {
+  /** Stands in for `settings.changed`, sent as background detection moves. */
+  readonly notify?: (domains: UiSettingsChangedEvent["domains"]) => void;
+  /** How long one background detection takes; defaults to `delay`. */
+  readonly detection?: () => Promise<void>;
+}
+
 /**
  * In-memory settings for `?mock=settings`, `settings-empty` and
  * `settings-errors` (06 §5). The errors scenario rejects model and search
- * saves with field errors and fails the MCP status read.
+ * saves with field errors and fails the MCP status read. Like the server,
+ * a save returns at once and detection finishes in the background; a newer
+ * detection of the same entry replaces an older one.
  */
 export function createMockSettingsApi(
   scenario: string,
   delay: () => Promise<void>,
+  events: MockSettingsEvents = {},
 ): SettingsApi {
   const state =
     scenario === "settings-empty" || scenario === "fresh"
@@ -327,6 +401,42 @@ export function createMockSettingsApi(
     state.activeId =
       state.models.find((model) => model.configurationComplete)?.id ?? null;
   };
+  const replace = (
+    id: string,
+    change: (model: UiSettingsModel) => UiSettingsModel,
+  ): void => {
+    state.models = state.models.map((model) =>
+      model.id === id ? withLimits(change(model)) : model,
+    );
+  };
+  const notify = events.notify ?? ((): void => undefined);
+  const detection = events.detection ?? delay;
+  const detections = new Map<string, number>();
+  /** Marks both stages detecting, then settles them unless replaced. */
+  const detect = async (id: string): Promise<void> => {
+    const run = (detections.get(id) ?? 0) + 1;
+    detections.set(id, run);
+    replace(id, (model) => ({
+      ...model,
+      contextDiscovery: { status: "detecting" },
+      // Levels already found stay usable while detection runs again.
+      reasoning:
+        model.reasoning.mode === undefined
+          ? { status: "detecting", efforts: [] }
+          : { ...model.reasoning, status: "detecting" },
+    }));
+    notify(["model"]);
+    await detection();
+    if (detections.get(id) !== run || !state.models.some((m) => m.id === id))
+      return;
+    replace(id, (model) => ({
+      ...model,
+      detectedContextWindowTokens: MOCK_DETECTED_CONTEXT,
+      contextDiscovery: { status: "identified" },
+      reasoning: effortReasoning,
+    }));
+    notify(["model"]);
+  };
   return {
     getModels: () => after(models),
     createModel: (input: UiSettingsModelCreate) =>
@@ -339,20 +449,27 @@ export function createMockSettingsApi(
           reasoning: reasoningDefault,
           ...fields
         } = input;
+        const id = `m${String(nextId++)}`;
         state.models = [
           ...state.models,
-          complete({
-            ...fields,
-            id: `m${String(nextId++)}`,
-            apiKeyConfigured: apiKey !== undefined && apiKey !== "",
-            ...(apiKeyEnv ? { apiKeyEnv } : {}),
-            configurationComplete: true,
-            contextWindowTokens: input.contextWindowTokens ?? 128_000,
-            reasoning,
-            reasoningDefault,
-          }),
+          withLimits(
+            complete({
+              ...fields,
+              id,
+              apiKeyConfigured: apiKey !== undefined && apiKey !== "",
+              ...(apiKeyEnv ? { apiKeyEnv } : {}),
+              configurationComplete: true,
+              // As the server: no override and no detection yet.
+              effectiveContextWindowTokens: MOCK_DEFAULT_CONTEXT,
+              effectiveMaxOutputTokens: MOCK_DEFAULT_MAX_OUTPUT,
+              contextDiscovery: { status: "unknown" },
+              reasoning,
+              ...(reasoningDefault === undefined ? {} : { reasoningDefault }),
+            }),
+          ),
         ];
         nextDefault();
+        void detect(id);
         return models();
       }),
     updateModel: (id, patch) =>
@@ -365,14 +482,38 @@ export function createMockSettingsApi(
           label,
           apiKeyEnv,
           reasoning: reasoningDefault,
+          contextWindowTokens,
+          maxOutputTokens,
           ...fields
         } = patch;
+        // A new route drops what was detected for the old one (02 §3.1).
+        const routeChanged = (
+          ["provider", "model", "baseUrl", "interfaceProvider"] as const
+        ).some(
+          (field) =>
+            fields[field] !== undefined && fields[field] !== current[field],
+        );
+        const keyChanged = apiKey !== undefined || apiKeyEnv !== undefined;
+        const { detectedContextWindowTokens: _detected, ...undetected } =
+          current;
+        const base: UiSettingsModel = routeChanged
+          ? {
+              ...undetected,
+              contextDiscovery: { status: "unknown" },
+              reasoning,
+            }
+          : keyChanged
+            ? { ...current, reasoning }
+            : current;
         const merged: UiSettingsModel = {
-          ...current,
+          ...applyOverrides(base, { contextWindowTokens, maxOutputTokens }),
           ...fields,
           ...(reasoningDefault === undefined
             ? {}
-            : { reasoningDefault: reasoningDefault ?? undefined }),
+            : {
+                reasoningDefault: reasoningDefault ?? undefined,
+                reasoningNotice: undefined,
+              }),
           ...(apiKeyEnv ? { apiKeyEnv } : {}),
           apiKeyConfigured:
             apiKey === undefined ? current.apiKeyConfigured : apiKey !== "",
@@ -390,27 +531,31 @@ export function createMockSettingsApi(
                   current.apiKeyEnv !== undefined),
             };
         const { label: _label, ...unlabelled } = next;
-        state.models = state.models.map((model) =>
-          model.id === id
-            ? label === null
-              ? unlabelled
-              : label === undefined
-                ? next
-                : { ...next, label }
-            : model,
+        replace(id, () =>
+          label === null
+            ? unlabelled
+            : label === undefined
+              ? next
+              : { ...next, label },
         );
         nextDefault();
+        if (
+          next.configurationComplete &&
+          (routeChanged ||
+            keyChanged ||
+            next.contextDiscovery.status === "unknown" ||
+            next.reasoning.status === "unknown")
+        )
+          void detect(id);
         return models();
       }),
-    probeModel: (id) =>
-      after(() => {
-        // As if the provider answered: the mock settles on effort levels.
-        find(id);
-        state.models = state.models.map((model) =>
-          model.id === id ? { ...model, reasoning: effortReasoning } : model,
-        );
-        return effortReasoning;
-      }),
+    probeModel: async (id): Promise<UiReasoningCapabilityView> => {
+      await delay();
+      // As if the provider answered: the mock settles on effort levels.
+      find(id);
+      await detect(id);
+      return find(id).reasoning;
+    },
     selectModel: (id) =>
       after(() => {
         const model = find(id);

@@ -2,6 +2,7 @@ import type { UiCurrentModelConfig, UiPermissionState } from "ohbaby-sdk";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { selectViewModel } from "../ui/session/selectors.js";
 import { DEFAULT, fakeDaemon } from "./fake-daemon.test-support.js";
+import { AUTO_LIMITS } from "./model-limits.test-support.js";
 import { createOhbabyWebRuntime, type OhbabyWebRuntime } from "./index.js";
 
 const runtimes: OhbabyWebRuntime[] = [];
@@ -146,6 +147,7 @@ it("shares an invalidation read with model subscribers and refreshes on focus wi
     baseUrl: "http://127.0.0.1:9/v1",
     interfaceProvider: "openai-compatible",
     model: "first",
+    ...AUTO_LIMITS,
     contextWindowTokens: 32000,
   };
   const before = reads;

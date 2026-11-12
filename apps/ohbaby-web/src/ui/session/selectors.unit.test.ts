@@ -2,6 +2,7 @@ import type { UiMessage, UiSessionView, UiSnapshot } from "ohbaby-sdk";
 import { describe, expect, it } from "vitest";
 import type { StoreSnapshot } from "../../api/daemon/wire.js";
 import { createOhbabyWebStore } from "../../store/store.js";
+import { AUTO_LIMITS } from "../../runtime/model-limits.test-support.js";
 import { messageText, selectViewModel } from "./selectors.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
@@ -300,6 +301,7 @@ describe("ohbaby-web ui selectors", () => {
         interfaceProvider: "anthropic",
         model: "deepseek-v4-pro",
         provider: "zenmux",
+        ...AUTO_LIMITS,
       }),
     );
 

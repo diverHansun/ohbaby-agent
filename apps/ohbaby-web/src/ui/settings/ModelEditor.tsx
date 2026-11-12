@@ -5,11 +5,12 @@ import type {
   UiSettingsModels,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { isDaemonRequestError } from "../../api/daemon/http.js";
 import type { SettingsLayer } from "../../runtime/settings-layer.js";
 import { ConfirmDialog } from "../shared/ConfirmDialog.js";
 import { IconButton } from "../shared/IconButton.js";
+import { Spinner } from "../shared/Spinner.js";
 import { FieldRow, fieldErrorId, MoreOptions } from "./FieldRow.js";
 import {
   EMPTY_MODEL_FORM,
@@ -20,26 +21,114 @@ import {
   modelDeleteDescription,
   modelPatchRequest,
   PROTOCOLS,
+  UNCLEARABLE,
+  TOKEN_FIELDS,
   validateModelForm,
   type FieldErrors,
   type ModelField,
   type ModelForm,
 } from "./model-form.js";
 import { SecretField } from "./SecretField.js";
+import { errorText } from "./useSettingsResource.js";
 
-/** The More options fields; none has a clear protocol (06 §2.2). */
-const UNCLEARABLE_FIELDS = [
+/** The More options fields. */
+const MORE_OPTIONS_FIELDS = [
   "apiKeyEnv",
   "contextWindowTokens",
   "maxOutputTokens",
   "promptCache",
 ] as const;
-type UnclearableField = (typeof UNCLEARABLE_FIELDS)[number];
+type UnclearableField = (typeof UNCLEARABLE)[number];
 
 function isUnclearable(field: ModelField): field is UnclearableField {
-  return (UNCLEARABLE_FIELDS as readonly string[]).includes(field);
+  return (UNCLEARABLE as readonly string[]).includes(field);
 }
-import { errorText } from "./useSettingsResource.js";
+
+function tokens(value: number): string {
+  return `${value.toLocaleString("en-US")} tokens`;
+}
+
+/**
+ * What an empty Context window uses: the detected value, read-only. The
+ * runtime fallback is not a detection result, so it is never shown here.
+ */
+function AutoContextNote(props: {
+  readonly entry: UiSettingsModel;
+}): ReactElement {
+  const { contextDiscovery: discovery, detectedContextWindowTokens: detected } =
+    props.entry;
+  const detecting = discovery.status === "detecting";
+  const failure = detectionFailure(discovery.reason);
+  const text =
+    detected !== undefined
+      ? `Detected: ${tokens(detected)}`
+      : detecting
+        ? "Detecting…"
+        : "Not detected";
+  return (
+    <p className="ohb-field-note">
+      {detecting ? (
+        <Spinner size={12} label="Detecting context window" />
+      ) : null}
+      {text}
+      {!detecting && discovery.reason
+        ? detected !== undefined
+          ? " · Couldn’t refresh. Using previous value."
+          : failure
+            ? ` · ${failure}`
+            : null
+        : null}
+    </p>
+  );
+}
+
+function detectionFailure(reason: string | undefined): string | undefined {
+  if (
+    !reason ||
+    [
+      "missing-fields",
+      "model-not-found",
+      "ignored-reasoning",
+      "unsupported-efforts",
+    ].includes(reason)
+  )
+    return undefined;
+  if (reason === "authentication" || reason === "missing-credential")
+    return "Check API key.";
+  if (reason === "rate-limit") return "Rate limited. Try again.";
+  return "Detection failed. Try again.";
+}
+
+/** Repairable problems with this entry; Settings stays usable. */
+function ModelWarnings(props: {
+  readonly entry: UiSettingsModel;
+}): ReactElement {
+  const { reasoningNotice, tokenBudgetIssue: issue } = props.entry;
+  return (
+    <>
+      {reasoningNotice ? (
+        <p className="ohb-settings-warning" role="status">
+          {REASONING_NOTICE[reasoningNotice]}
+        </p>
+      ) : null}
+      {issue ? (
+        <p className="ohb-settings-warning" role="status">
+          Max output ({tokens(issue.maxOutputTokens)}) doesn&apos;t fit the
+          context window ({tokens(issue.contextWindowTokens)}). Lower Max output
+          or correct Context window.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+const REASONING_NOTICE: Record<
+  NonNullable<UiSettingsModel["reasoningNotice"]>,
+  string
+> = {
+  "unsupported-anthropic-effort-cleared":
+    "Unsupported minimal effort was cleared. Using model default.",
+};
 
 /** `""` keeps the model's own default; the rest map to a saved preference. */
 function reasoningValue(reasoning: UiReasoningConfig | undefined): string {
@@ -48,11 +137,19 @@ function reasoningValue(reasoning: UiReasoningConfig | undefined): string {
   return reasoning.effort ?? "on";
 }
 
-/** The levels a capability offers, or `null` while there is nothing to pick. */
+/**
+ * The levels a capability offers, or `null` while there is nothing to pick.
+ * Levels already found stay usable while detection runs again.
+ */
 function thinkingOptions(
   view: UiSettingsModel["reasoning"],
 ): readonly { readonly value: string; readonly label: string }[] | null {
-  if (view.status !== "identified" || view.mode === "none") return null;
+  if (
+    view.status === "unknown" ||
+    view.mode === undefined ||
+    view.mode === "none"
+  )
+    return null;
   return [
     ...(view.supportsDisabled ? [{ value: "off", label: "Off" }] : []),
     ...(view.mode === "binary"
@@ -73,8 +170,10 @@ function reasoningFrom(value: string): UiReasoningConfig | null {
  * Key variable, Context window, Max output and Prompt cache sit under More
  * options. Only changed fields are sent. The server makes the first complete
  * entry the default when there is none (session-model 02 P16). Editing a
- * complete entry also shows what thinking it supports, with Detect again and
- * the thinking level its chats start from (D13).
+ * complete entry also shows its Reasoning Effort levels, with Detect again
+ * and the level its chats start from (D13). The two token fields hold the
+ * user's overrides only; detection results are shown beside them read-only
+ * and never enter the form.
  */
 export function ModelEditor(props: {
   readonly settings: SettingsLayer;
@@ -96,7 +195,9 @@ export function ModelEditor(props: {
   );
   const [touched, setTouched] = useState<ReadonlySet<ModelField>>(new Set());
   const [serverErrors, setServerErrors] = useState<FieldErrors>({});
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(
+    () => entry?.tokenBudgetIssue !== undefined,
+  );
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -105,19 +206,26 @@ export function ModelEditor(props: {
     reasoningValue(entry?.reasoningDefault),
   );
   const [picked, setReasoning] = useState(baselineReasoning);
-  // Detect again can drop a level; one no longer offered reads as the model
-  // default, and saving then clears it.
+  // Display compatibility does not change the user's draft or its baseline.
   const offered = entry ? thinkingOptions(entry.reasoning) : null;
-  const reasoning =
-    offered && !offered.some((option) => option.value === picked) ? "" : picked;
+  const reasoningChanged = picked !== baselineReasoning;
+  const unavailablePick =
+    entry?.reasoning.status === "identified" &&
+    picked !== "" &&
+    !offered?.some((option) => option.value === picked);
+  const invalidReasoningDraft = reasoningChanged && unavailablePick;
+  const reasoning = unavailablePick && !reasoningChanged ? "" : picked;
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
-  const reasoningChanged = reasoning !== baselineReasoning;
+  // Detect again may be pressed again; the server cancels the older task,
+  // and only the latest press settles this page.
+  const probeRun = useRef(0);
   const needsSetup = entry?.configurationComplete === false;
   const busy = saving || deleting;
   const localErrors = validateModelForm(form, baseline);
   const savable =
     !busy &&
+    !invalidReasoningDraft &&
     (modelFormSavable(form, baseline, needsSetup) ||
       (reasoningChanged && Object.keys(localErrors).length === 0));
   const providers = useMemo(
@@ -177,7 +285,7 @@ export function ModelEditor(props: {
             // A refresh may have supplied a key reference during this edit.
             needsSetup && entry.apiKeyEnv === undefined,
           ),
-          ...(reasoningChanged ? { reasoning: reasoningFrom(reasoning) } : {}),
+          ...(reasoningChanged ? { reasoning: reasoningFrom(picked) } : {}),
         });
       }
       props.onSaved();
@@ -214,17 +322,24 @@ export function ModelEditor(props: {
 
   const input = (
     field: Exclude<ModelField, "apiKey" | "interfaceProvider" | "promptCache">,
-    options: { readonly type?: string; readonly list?: string } = {},
+    options: {
+      readonly type?: string;
+      readonly list?: string;
+      readonly placeholder?: string;
+    } = {},
   ): ReactElement => {
     const id = `${baseId}-${field}`;
     const error = errorFor(field);
+    const tokenField = TOKEN_FIELDS.some((token) => token === field);
     return (
       <input
         id={id}
         className="ohb-settings-input"
-        type={options.type ?? "text"}
-        inputMode={options.type === "number" ? "numeric" : undefined}
+        type={tokenField ? "text" : (options.type ?? "text")}
+        inputMode={tokenField ? "numeric" : undefined}
+        pattern={tokenField ? "[1-9][0-9]*" : undefined}
         list={options.list}
+        placeholder={options.placeholder}
         autoComplete="off"
         spellCheck={false}
         aria-invalid={error ? true : undefined}
@@ -232,6 +347,7 @@ export function ModelEditor(props: {
         value={form[field]}
         onChange={(event) => {
           set(field, event.target.value);
+          if (tokenField) touch(field);
         }}
         onBlur={() => {
           touch(field);
@@ -241,14 +357,15 @@ export function ModelEditor(props: {
   };
   const probe = async (): Promise<void> => {
     if (!entry) return;
+    const run = ++probeRun.current;
     setProbing(true);
     setProbeError(null);
     try {
       await settings.probeModel(entry.id);
     } catch (error) {
-      setProbeError(errorText(error));
+      if (run === probeRun.current) setProbeError(errorText(error));
     } finally {
-      setProbing(false);
+      if (run === probeRun.current) setProbing(false);
     }
   };
   const id = (field: ModelField): string => `${baseId}-${field}`;
@@ -355,32 +472,32 @@ export function ModelEditor(props: {
               }}
             />
           </FieldRow>
-          <FieldRow
-            id={id("label")}
-            label="Label"
-            hint="optional, shown after the model name"
-            error={errorFor("label")}
-          >
+          <FieldRow id={id("label")} label="Label" error={errorFor("label")}>
             {input("label")}
           </FieldRow>
           {entry?.configurationComplete ? (
-            <ThinkingRow
+            <ReasoningEffortRow
               id={`${baseId}-reasoning`}
               entry={entry}
               value={reasoning}
               onChange={setReasoning}
               probing={probing}
-              error={probeError}
+              error={
+                invalidReasoningDraft
+                  ? "Choose an available effort."
+                  : probeError
+              }
               onProbe={() => {
                 void probe();
               }}
             />
           ) : null}
+          {entry ? <ModelWarnings entry={entry} /> : null}
           <MoreOptions
             // It opens by itself while one of its fields has an error.
             open={
               moreOpen ||
-              UNCLEARABLE_FIELDS.some((field) => errorFor(field) !== undefined)
+              MORE_OPTIONS_FIELDS.some((field) => errorFor(field) !== undefined)
             }
             onToggle={() => {
               setMoreOpen((open) => !open);
@@ -399,18 +516,23 @@ export function ModelEditor(props: {
               label="Context window"
               hint="tokens"
               error={errorFor("contextWindowTokens")}
-              errorAction={restore("contextWindowTokens")}
             >
-              {input("contextWindowTokens", { type: "number" })}
+              {input("contextWindowTokens", {
+                type: "number",
+                placeholder: "Auto",
+              })}
+              {entry ? <AutoContextNote entry={entry} /> : null}
             </FieldRow>
             <FieldRow
               id={id("maxOutputTokens")}
               label="Max output"
               hint="tokens per request"
               error={errorFor("maxOutputTokens")}
-              errorAction={restore("maxOutputTokens")}
             >
-              {input("maxOutputTokens", { type: "number" })}
+              {input("maxOutputTokens", {
+                type: "number",
+                placeholder: "Auto",
+              })}
             </FieldRow>
             <FieldRow
               id={id("promptCache")}
@@ -490,10 +612,11 @@ export function ModelEditor(props: {
 }
 
 /**
- * Thinking for a complete entry: what detection found, Detect again, and,
- * once levels are known, the level its chats start from.
+ * Reasoning Effort for a complete entry: what detection found, Detect again,
+ * and, once levels are known, the level its chats start from. Known levels
+ * stay usable while detection runs again.
  */
-function ThinkingRow(props: {
+function ReasoningEffortRow(props: {
   readonly id: string;
   readonly entry: UiSettingsModel;
   readonly value: string;
@@ -505,19 +628,34 @@ function ThinkingRow(props: {
   const view = props.entry.reasoning;
   const detecting = props.probing || view.status === "detecting";
   const options = thinkingOptions(view);
-  const modelDefault =
-    view.status === "identified" ? reasoningValue(view.default) : "";
+  const modelDefault = options ? reasoningValue(view.default) : "";
+  const unavailable =
+    view.status === "identified" &&
+    props.value !== "" &&
+    !options?.some((option) => option.value === props.value);
+  // Without known levels a saved level is kept but not sent (D3).
+  const saved = reasoningValue(props.entry.reasoningDefault);
   const status = detecting
     ? "Detecting…"
     : view.status === "identified"
       ? view.mode === "none"
-        ? "This model doesn't think."
+        ? "Not supported"
         : null
-      : (view.reason ?? "Not detected yet.");
+      : (detectionFailure(view.reason) ?? "Not detected");
+  const note =
+    !options && saved !== ""
+      ? `Saved ${saved} is inactive.`
+      : options && view.reason && !detecting
+        ? "Couldn’t refresh. Using previous levels."
+        : null;
   return (
-    <FieldRow id={props.id} label="Thinking" error={props.error ?? undefined}>
+    <FieldRow
+      id={props.id}
+      label="Reasoning Effort"
+      error={props.error ?? undefined}
+    >
       <div className="ohb-thinking-row">
-        {options ? (
+        {options || unavailable ? (
           <select
             id={props.id}
             className="ohb-settings-select"
@@ -532,7 +670,12 @@ function ThinkingRow(props: {
                 ? `Model default (${modelDefault})`
                 : "Model default"}
             </option>
-            {options.map((option) => (
+            {unavailable ? (
+              <option value={props.value} disabled>
+                {props.value} (unavailable)
+              </option>
+            ) : null}
+            {options?.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -543,15 +686,18 @@ function ThinkingRow(props: {
             {status}
           </span>
         )}
+        {detecting ? (
+          <Spinner size={12} label="Detecting Reasoning Effort" />
+        ) : null}
         <button
           type="button"
           className="ohb-text-button"
-          disabled={detecting}
           onClick={props.onProbe}
         >
           Detect again
         </button>
       </div>
+      {note ? <p className="ohb-field-note">{note}</p> : null}
     </FieldRow>
   );
 }
