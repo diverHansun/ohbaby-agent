@@ -164,3 +164,52 @@ F7 取代了 02 §3.4 原先的设想（输入框显示 `Draft while disconnecte
 - 遮罩只由主连接驱动：Side Chat 与主会话连同一个 daemon，主连接断了侧聊也不可用；侧聊在 10 秒内仍显示自己的 `Reconnecting…`。`Reconnect now` 只唤醒主连接的重连循环。
 - 401 / 409 立即显示“服务已重启”的遮罩，不等 10 秒，因为重连循环此时已经停止。这个状态不会被 10 秒计时覆盖。
 - 断线后连接恢复、会话同步结束（就绪或出错）即撤掉遮罩；同步出错时由会话顶部现有的同步失败提示和重试入口接手，不被遮罩盖住。
+
+## 14. TUI 讨论（Claude，2026-11-12）
+
+Web 完成后进入 TUI。Claude 用 tmux 驱动真实的进程内 TUI，接上可控的假模型，记录到以下现状：
+
+| 编号 | 问题 | 实际表现 |
+| --- | --- | --- |
+| A | 重试期间没有等待提示 | `WorkingSpinner` 只认“当前请求未结束”。假模型的 429 立即返回，12 秒重试期间屏幕上始终没有等待行；先失败后成功的请求同样如此。 |
+| B | 失败原因不留在历史里 | 失败后输入框上方出现临时状态 `error: Requests are temporarily limited…`，下一次发送后消失，历史里只剩 `failed · Total 12s`。 |
+| C | Side Chat 失败无说明 | `/btw` 侧聊整轮显示静态 `Thinking…`（有正文时也显示），失败后这一行消失，不给任何原因。 |
+| D | 远程模式断线 | 用 `--remote-port` 连 daemon 时，断线后状态栏一直是 `Reconnecting…`。默认的进程内 TUI 没有 daemon 连接，不涉及此项。 |
+
+参考：kimi-code TUI 复用同一个 spinner 实例、只换文字，错误作为永久的滚动区文本保留（见 [03](03-reference-projects.md) §7），与 Web 方向一致。
+
+### 用户指示：照搬 pi
+
+用户确认 T-F1 后改为：
+
+> 不用向我逐一确认，抄 pi 的实现即可：/Users/hansun025/Projects/code-cli/pi 必要的地方提出你的建议和实现方案
+
+pi（`code-cli/pi/packages/coding-agent/src/modes/interactive`）的做法：
+
+- **状态槽**：输入框上方只有一个状态位置（`statusContainer`，或嵌进输入框边框），同一时间只放一个指示器。整轮运行期间显示 `WorkingStatusIndicator`（转圈 + `Working`），正文流式输出时也不撤下；重试等待时换成 `RetryStatusIndicator`：警示色转圈，文字 `Retrying (n/max) in Ns... (Esc to cancel)`，带倒计时；重试开始后回到 Working（`status-indicator.ts`，`interactive-mode.ts` 的 `auto_retry_start / auto_retry_end / turn_start`）。
+- **错误**：失败的助手消息在已输出内容之后追加红色 `Error: <原因>`，永久留在滚动区（`assistant-message.ts` 约 L252）；重试耗尽时再追加一行 `Error: Retry failed after N attempts: …`（`showError`）。
+- 没有 Side Chat，也没有 daemon 断线处理（本地进程）。
+
+### 已确认（按 pi 定稿，取代上文 T-F1）
+
+| ID  | 决策 |
+| --- | --- |
+| T-F1 | 等待行照 pi 的状态槽：运行中（等待审批、等待子代理除外）始终占同一行，正文输出时也不撤下，不再按单次请求显隐。平时用现有趣味短句和闪光效果，加本轮已用时间；`modelActivity.phase` 为 `retrying` 时同一行改为警示色的 `Retrying #n`，不显示秒数。 |
+| T-F2 | 错误照 pi 写进历史：在失败轮次的 `failed · Total …` 下面追加红色 `Error: <安全说明>`，有状态码时同一行末尾用暗色加 `HTTP 429`。永久保留，不提供关闭。模型失败不再在状态栏显示临时 `error:`。已输出的部分内容保留，应用自己的中断说明不重复；用户主动停止不显示。 |
+| T-F3 | Side Chat（pi 没有）与主会话同规则：等待行用同一个组件，失败在侧聊内追加同样的错误行。 |
+| T-F4 | 远程模式断线（pi 没有）：沿用 Web 的 10 秒规则。10 秒内状态栏保持 `Reconnecting…`；超过后改为静态的 `Disconnected. Retrying in the background.`，不转圈，并隐藏旧的等待行。daemon 重启的单独提示本轮未做，原因见下方“实施细节”。不做全屏遮罩：终端没有误点问题，断线时发送本来就被拦住。 |
+
+与 pi 的差异及理由：
+
+- 不做 `(n/max) in Ns` 倒计时：后端快照没有重试上限和等待时长，补字段要改 SDK 与持久化；与 Web 的 `Retrying #n` 保持一致。
+- 不另加 `Retry failed after N attempts` 行：后端的安全说明已经说明原因，再加一行是重复信息。
+- 先前确认的“数字变化加粗闪 1 秒”改为 pi 的警示色整行，少一个定时器。
+
+交接文档提到的“审批时 Ctrl+C 偶发无法确认当前 run”，实施时顺带核查，能小改就改，否则记录事实另议。
+
+### 实施细节（2026-11-12）
+
+- 远程模式的 daemon 重启检测没有做：TUI 远程连接走 `ohbaby-server` 的 `jsonrpc` 客户端，它只发出“已断开”，不透出 401 / 409；要区分“重启”需改该客户端，属于后端范围。daemon 重启后 TUI 同样显示静态 `Disconnected. Retrying in the background.`，重启 TUI 即可恢复。
+- 应用自己的中断说明（如 `[Response interrupted…]`）在 TUI 里保留：TUI 历史一经输出不能再改，且被取消和失败的消息状态都是 `error`，只能靠文本区分，不值得。只有无正文的中断才会出现这句，与 `Error:` 行语义相近但不完全重复。
+- 状态栏的临时 `error:` 只在该轮错误已经写进历史时隐藏；没有形成轮次的失败（比如启动失败）照旧显示在状态栏，不会丢。
+- 交接文档里“审批时 Ctrl+C 偶发无法确认当前 run”已查明并修复：`refreshControl` 在等待进行中的读取后递归调用自己，换了新的 ticket，使正在等待它的 `stop()` 误以为被别的刷新取代。改为在同一 ticket 下循环等待，补了复现测试。

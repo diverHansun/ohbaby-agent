@@ -138,3 +138,29 @@ Claude 按 00 §13（F1–F10）实施 Web；TUI 按用户安排在 Web 验收�
 - **轻**：读屏改为只播报 `Thinking` / `Retrying #n` 的变化，不播报每秒计时；本页看着运行后失败的轮次，用一次 polite 播报说出原因，历史错误不重复播报。遮罩撤下后焦点回到原来的位置。等待 hello 的尝试中按 `Reconnect now` 会立即放弃该尝试并重连。重试期间不再每秒重渲染。常量注释位置、未使用的类名和不必要的导出已清理。
 
 提交：`d1a1dcbb`（等待行与轮次错误）、`de8ce134`（断线遮罩）。修复后 `apps/ohbaby-web` 全部 950 项测试、`tsc -b`、ESLint 通过。
+
+## TUI 实施与走查（2026-11-12）
+
+按用户“照搬 pi”的指示实施，决策见 00 §14（T-F1–T-F4）。
+
+改动范围：
+
+- **等待行**：`WorkingSpinner` 改为 pi 式状态槽，按整个 agent run 显示（正文输出时不撤下），计时为本轮已用时间；`phase` 为 `retrying` 时同一行显示警示色的 `Retrying #n`，不计时。命令 run、上下文压缩、等待审批、等待子代理、断线时不显示。
+- **轮次错误**：`PromptCompletion` 在失败轮次的结束行下追加红色 `Error: <说明>` 和暗色 `HTTP 状态码`，永久保留；用户主动停止不显示。状态栏的临时 `error:` 在该轮错误已写进历史时隐藏。
+- **Side Chat**：使用同一个等待行组件，失败后在该轮最后一条消息下追加同样的错误行。
+- **远程断线**：`session-recovery` 在断线约 10 秒后发布 `connectionLost`，状态栏改为静态 `Disconnected. Retrying in the background.`；连上且会话同步结束后恢复。
+- **Stop 修复**：`refreshControl` 等待进行中的读取后不再换新 ticket，修复审批时 Ctrl+C 偶发“Stop unavailable”。
+
+自动化验证：`packages/ohbaby-cli` 全部 861 项测试通过（含新增的重试状态槽、轮次错误行、断线计时、远程断线文案和 Stop 复现测试），`tsc`、ESLint 无错误。
+
+真实终端走查（tmux 驱动 `node packages/ohbaby-cli/dist/bin.js`，接可控假模型）：
+
+| 场景 | 改前 | 改后 |
+| --- | --- | --- |
+| 连续 429 直到重试耗尽 | 12 秒内没有任何等待提示 | 同一行 `Retrying #1` 到 `#5`，结束后历史里留下 `Error: Requests are temporarily limited. Please try again later. HTTP 429`（红色，状态码暗色） |
+| 再发下一条消息 | 临时 `error:` 行消失，历史只剩 `failed · Total 12s` | 上一轮的 `Error:` 行仍在 |
+| 普通等待 | 有正文后消失 | 趣味短句加 `2s` 一类的已用时间 |
+| Side Chat 连续 429 | 静态 `Thinking…`，失败后什么都没有 | `Retrying #2`，失败后显示错误行 |
+| 远程模式停掉 daemon | 一直显示 `Reconnecting…`（据代码，改前未实测） | 3 秒时 `Reconnecting…`，12 秒时静态 `Disconnected. Retrying in the background.` |
+
+未覆盖：远程模式 daemon 重启的单独提示（见 00 §14 实施细节）；减少动画环境变量下的视觉未单独截图。
