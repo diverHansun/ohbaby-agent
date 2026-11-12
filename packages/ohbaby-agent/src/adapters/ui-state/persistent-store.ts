@@ -340,6 +340,9 @@ function runStatusToUiStatus(record: RunLedgerRecord): UiRunStatus {
 
 export function runToUiRun(record: RunLedgerRecord): UiRun {
   return {
+    ...(record.errorData === undefined
+      ? {}
+      : { error: { ...record.errorData } }),
     trigger: record.triggerSource,
     ...(record.status === "pending" || record.status === "running"
       ? {}

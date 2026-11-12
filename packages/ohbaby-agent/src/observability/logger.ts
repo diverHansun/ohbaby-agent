@@ -1,3 +1,9 @@
+import {
+  PROVIDER_ERROR_KINDS,
+  SAFE_PROVIDER_ERROR_CODES,
+  SAFE_PROVIDER_ERROR_TYPES,
+  SAFE_PROVIDER_NETWORK_CODES,
+} from "ohbaby-llm";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
@@ -137,6 +143,10 @@ const SAFE_NUMERIC_CONTENT_FIELD_NAMES = new Set([
   "cacheWriteTokens",
 ]);
 const DIAGNOSTIC_ENUM_VALUES = new Set([
+  ...PROVIDER_ERROR_KINDS,
+  ...SAFE_PROVIDER_ERROR_CODES,
+  ...SAFE_PROVIDER_ERROR_TYPES,
+  ...SAFE_PROVIDER_NETWORK_CODES,
   "aborted",
   "anthropic",
   "cache_creation_input_tokens",

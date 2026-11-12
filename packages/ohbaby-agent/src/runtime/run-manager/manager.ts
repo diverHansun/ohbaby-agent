@@ -464,16 +464,17 @@ export class RunManager {
         };
       }
     } catch (error) {
+      const errorData = record.abortController.signal.aborted
+        ? undefined
+        : normalizeRunError(error);
       outcome = {
         status: record.abortController.signal.aborted
           ? (record.cancelStatus ?? "cancelled")
           : "failed",
         error: record.abortController.signal.aborted
           ? (record.cancelReason ?? "run cancelled")
-          : errorToMessage(error),
-        ...(record.abortController.signal.aborted
-          ? {}
-          : { errorData: normalizeRunError(error) }),
+          : (errorData?.message ?? errorToMessage(error)),
+        ...(errorData ? { errorData } : {}),
       };
     }
 

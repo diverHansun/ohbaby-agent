@@ -14,7 +14,10 @@ import {
   type UiUnsubscribe,
 } from "ohbaby-sdk";
 import type { OhbabyWebStore } from "../../store/store.js";
-import type { FetchDaemonEventStream } from "./events.js";
+import {
+  DaemonEventsRejectedError,
+  type FetchDaemonEventStream,
+} from "./events.js";
 import type { DaemonHttpClient } from "./http.js";
 import type { OhbabyBootstrapConfig, WebSseEvent } from "./wire.js";
 
@@ -35,6 +38,9 @@ function reportEventSubscriberFailure(): void {
   }
 }
 
+/** How long the connection may stay down before the page says it is lost. */
+export const CONNECTION_LOST_AFTER_MS = 10_000;
+
 /**
  * Connection, SSE delivery, the selected-session binding and its derived
  * views (session view, history, control, index, model). The prompt and
@@ -48,6 +54,11 @@ export class ClientSync {
   readonly sessionSync: SessionSync;
   private readonly events: FetchDaemonEventStream;
   private readonly hooks: ClientSyncHooks;
+  /** Pending "lost" notice for the current outage; see `trackOutage`. */
+  private outageTimer: ReturnType<typeof setTimeout> | undefined;
+  private outageOpen = false;
+  private everLive = false;
+  private stopOutageTracking: (() => void) | undefined;
   private recoverySupportedValue = false;
   private subagentConversationSupportedValue = false;
   private scopeTicketValue = 0;
@@ -178,6 +189,9 @@ export class ClientSync {
 
   private async doConnect(): Promise<void> {
     this.connected = true;
+    this.stopOutageTracking ??= this.store.subscribe(() => {
+      this.trackOutage();
+    });
     this.store.setConnectionState("connecting");
     this.store.setError(null);
     try {
@@ -204,6 +218,11 @@ export class ClientSync {
         },
         onError: (error) => {
           if (this.closedValue) return;
+          if (error instanceof DaemonEventsRejectedError) {
+            // Set first: clearing "lost" before it would reopen an outage.
+            this.store.setConnectionNotice("restarted");
+            this.endOutage();
+          }
           this.transportLive = false;
           this.permissionSync.disconnect();
           this.sessionSync.disconnect();
@@ -230,9 +249,55 @@ export class ClientSync {
     // History and model failures do not own the transport or approval readiness.
   }
 
+  /** Tries the event stream again now, on the same loop. */
+  reconnectNow(): void {
+    this.events.wake();
+  }
+
+  /**
+   * The page says the connection is lost only after it has stayed down for a
+   * while: brief drops keep the header's Reconnecting. The outage starts at
+   * the first drop after the page was live and ends once the transport is
+   * live and the conversation is no longer re-syncing, so a hello that drops
+   * again does not restart the clock. The stream keeps retrying throughout.
+   */
+  private trackOutage(): void {
+    if (this.closedValue) return;
+    const snapshot = this.store.getSnapshot();
+    if (snapshot.connectionNotice === "restarted") return;
+    // The transport flag flips before the store hears about a drop.
+    if (this.transportLive && snapshot.connectionState === "live") {
+      this.everLive = true;
+      if (snapshot.sessionSync.status !== "syncing") this.endOutage();
+      return;
+    }
+    if (!this.everLive || this.outageOpen) return;
+    this.outageOpen = true;
+    this.outageTimer = setTimeout(() => {
+      this.outageTimer = undefined;
+      if (
+        !this.closedValue &&
+        this.store.getSnapshot().connectionNotice !== "restarted"
+      )
+        this.store.setConnectionNotice("lost");
+    }, CONNECTION_LOST_AFTER_MS);
+  }
+
+  private endOutage(): void {
+    clearTimeout(this.outageTimer);
+    this.outageTimer = undefined;
+    this.outageOpen = false;
+    if (this.store.getSnapshot().connectionNotice === "lost")
+      this.store.setConnectionNotice(null);
+  }
+
   async close(): Promise<void> {
     this.closedValue = true;
     this.connected = false;
+    clearTimeout(this.outageTimer);
+    this.stopOutageTracking?.();
+    this.stopOutageTracking = undefined;
+    this.store.setConnectionNotice(null);
     this.lifecycleController.abort();
     this.permissionSync.dispose();
     this.sessionSync.dispose();

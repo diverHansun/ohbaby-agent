@@ -21,8 +21,23 @@ export { createLLMClientFromConfig } from "./client.js";
 export {
   isAbortError,
   isContextOverflowError,
+  ProviderRequestError,
   ToolCallParseError,
 } from "./errors.js";
+export {
+  providerErrorDetail,
+  PROVIDER_ERROR_KINDS,
+  SAFE_PROVIDER_ERROR_CODES,
+  SAFE_PROVIDER_ERROR_TYPES,
+  SAFE_PROVIDER_NETWORK_CODES,
+} from "./provider-error.js";
+export type {
+  ProviderErrorDetail,
+  ProviderErrorKind,
+  SafeProviderErrorCode,
+  SafeProviderErrorType,
+  SafeProviderNetworkCode,
+} from "./provider-error.js";
 export {
   DEFAULT_PROVIDER_RETRY_POLICY,
   ProviderRetryExhaustedError,

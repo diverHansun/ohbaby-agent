@@ -23,13 +23,6 @@ import {
   normalizeRunError,
 } from "./error-detail.js";
 
-function errorToMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
-
 function abortReason(signal: AbortSignal): string {
   if (typeof signal.reason === "string" && signal.reason.length > 0) {
     return signal.reason;
@@ -195,6 +188,7 @@ export class RunWorker {
                   error,
                   terminalReason,
                   result.failureCause,
+                  this.context.runModel.client.config.provider,
                 ),
               }
             : {}),
@@ -218,7 +212,7 @@ export class RunWorker {
         fatalError?.message ??
         (status === "cancelled"
           ? abortReason(this.context.abortSignal)
-          : errorToMessage(error));
+          : normalizeRunError(error).message);
 
       await this.executeHook(
         "post-run",
@@ -231,7 +225,14 @@ export class RunWorker {
       return {
         status,
         error: message,
-        ...(status === "failed" ? { errorData: normalizeRunError(error) } : {}),
+        ...(status === "failed"
+          ? {
+              errorData: normalizeRunError(
+                error,
+                this.context.runModel.client.config.provider,
+              ),
+            }
+          : {}),
       };
     }
   }

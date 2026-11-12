@@ -1796,7 +1796,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const banner = app.container.querySelector(".ohb-banner-error");
     expect(banner?.textContent).toBe(
-      "Can't reach ohbaby. Check that it's still running.",
+      "Can't reach your services. Check that they're still running.",
     );
     // A state error clears itself, so it offers no Dismiss that cannot work.
     expect(banner?.querySelector(".ohb-banner-close")).toBeNull();
@@ -2322,9 +2322,11 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
+    // It reads as part of the history, under its message, not as an alert.
     expect(
-      app.container.querySelector('[role="alert"]')?.textContent,
+      app.container.querySelector(".ohb-turn-error")?.textContent,
     ).toContain("Provider rejected the request");
+    expect(app.container.querySelector('[role="alert"]')).toBeNull();
     expect(
       app.container.textContent.match(/server projected prompt/gu),
     ).toHaveLength(1);
@@ -2705,7 +2707,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     expect(app.container.querySelector(".ohb-thinking")?.textContent).toContain(
-      "· 12s",
+      "12s",
     );
   });
 
@@ -5263,6 +5265,7 @@ function createFakeRuntime(input: {
     runtime: {
       retryPermissions: vi.fn(),
       retrySession: vi.fn(),
+      reconnectNow: vi.fn(),
       loadEarlierHistory: vi.fn(() => Promise.resolve()),
       retryUnknownPrompts: vi.fn(() => Promise.resolve()),
       forgetUnknownPrompt: vi.fn(),
@@ -6468,7 +6471,7 @@ it("keeps Stop uncertain across disconnect without repeating RPC and permits dra
   expect(app.container.textContent).toContain("offline");
 });
 
-it("hides model waiting permanently after first text and resets for the next attempt", () => {
+it("hides model waiting once the step shows text and resets for the next step", () => {
   const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
   const request = {
     requestId: "r1",
@@ -6480,6 +6483,20 @@ it("hides model waiting permanently after first text and resets for the next att
     startedAt: 1000,
     outcome: "running" as const,
   };
+  const withAssistant = (id: string, text: string): UiSnapshot["sessions"] =>
+    initial.sessions.map((session) => ({
+      ...session,
+      messages: [
+        ...session.messages,
+        {
+          createdAt: timestamp,
+          id,
+          parts: [{ text, type: "text" }],
+          role: "assistant",
+          runId: "run_1",
+        },
+      ],
+    }));
   const fake = createFakeRuntime({
     snapshot: {
       ...initial,
@@ -6491,33 +6508,26 @@ it("hides model waiting permanently after first text and resets for the next att
   expect(app.container.querySelector(".ohb-thinking")?.textContent).toContain(
     "3s",
   );
+  // Blank text is not progress the reader can see.
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 5000,
+        sessions: withAssistant("m", "  "),
+        runs: [{ ...initial.runs[0], modelActivity: request }],
+      },
+      2,
+    );
+  });
+  expect(app.container.querySelector(".ohb-thinking")).not.toBeNull();
   act(() => {
     fake.store.replaceSnapshot(
       {
         ...initial,
         serverNow: 8000,
-        runs: [
-          {
-            ...initial.runs[0],
-            modelActivity: { ...request, firstTextAt: 4500 },
-          },
-        ],
-      },
-      2,
-    );
-  });
-  expect(app.container.querySelector(".ohb-thinking")).toBeNull();
-  act(() => {
-    fake.store.replaceSnapshot(
-      {
-        ...initial,
-        serverNow: 10000,
-        runs: [
-          {
-            ...initial.runs[0],
-            modelActivity: { ...request, firstTextAt: 4500 },
-          },
-        ],
+        sessions: withAssistant("m", "hello"),
+        runs: [{ ...initial.runs[0], modelActivity: request }],
       },
       3,
     );
@@ -6528,10 +6538,17 @@ it("hides model waiting permanently after first text and resets for the next att
       {
         ...initial,
         serverNow: 11000,
+        sessions: withAssistant("m", "hello"),
         runs: [
           {
             ...initial.runs[0],
-            modelActivity: { ...request, requestId: "r2", startedAt: 11000 },
+            modelActivity: {
+              ...request,
+              requestId: "r2",
+              messageId: "m2",
+              step: 2,
+              startedAt: 11000,
+            },
           },
         ],
       },
@@ -6541,6 +6558,115 @@ it("hides model waiting permanently after first text and resets for the next att
   expect(app.container.querySelector(".ohb-thinking")?.textContent).toContain(
     "0s",
   );
+});
+
+it("keeps one waiting row through retries and counts them without a timer", () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const failed = {
+    requestId: "r1",
+    runId: "run_1",
+    messageId: "m",
+    step: 1,
+    attempt: 1,
+    purpose: "agent-step" as const,
+    startedAt: 1000,
+    endedAt: 2000,
+    outcome: "error" as const,
+    retryScheduled: true as const,
+    phase: "retrying" as const,
+    waitingStartedAt: 1000,
+  };
+  const fake = createFakeRuntime({
+    snapshot: {
+      ...initial,
+      serverNow: 3000,
+      runs: [{ ...initial.runs[0], modelActivity: failed }],
+    },
+  });
+  const app = mountApp(fake.runtime);
+  const row = (): Element | null =>
+    app.container.querySelector(".ohb-thinking");
+  const first = row();
+  expect(first?.getAttribute("aria-label")).toBe("Retrying #1");
+  expect(first?.textContent).not.toMatch(/\ds/u);
+  // The retry request itself is still retry #1, in the same row.
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 4000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: {
+              ...failed,
+              requestId: "r2",
+              attempt: 2,
+              startedAt: 3500,
+              endedAt: undefined,
+              outcome: "running",
+              retryScheduled: undefined,
+            },
+          },
+        ],
+      },
+      2,
+    );
+  });
+  expect(row()).toBe(first);
+  expect(row()?.getAttribute("aria-label")).toBe("Retrying #1");
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 5000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: {
+              ...failed,
+              requestId: "r2",
+              attempt: 2,
+              startedAt: 3500,
+              endedAt: 4500,
+            },
+          },
+        ],
+      },
+      3,
+    );
+  });
+  expect(row()).toBe(first);
+  expect(row()?.getAttribute("aria-label")).toBe("Retrying #2");
+  expect(row()?.querySelector(".ohb-flip-roll")?.textContent).toBe("12");
+  // Hidden progress puts the wait back to Thinking, timed from the chain's start.
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 9000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: {
+              ...failed,
+              requestId: "r3",
+              attempt: 3,
+              startedAt: 6000,
+              endedAt: undefined,
+              outcome: "running",
+              retryScheduled: undefined,
+              phase: "requesting",
+            },
+          },
+        ],
+      },
+      4,
+    );
+  });
+  expect(row()).toBe(first);
+  expect(row()?.getAttribute("aria-label")).toBe("Thinking");
+  expect(row()?.textContent).toContain("8s");
 });
 
 it("does not resurrect A's unresolved Stop after B reaches a reliable terminal", async () => {
@@ -7372,8 +7498,8 @@ it.each([
     const fake = createFakeRuntime({ snapshot: stopped });
     const app = mountApp(fake.runtime);
     const assertPresentation = (): void => {
-      expect(Boolean(app.container.querySelector('[role="alert"]'))).toBe(
-        isError,
+      expect(app.container.querySelectorAll(".ohb-turn-error").length).toBe(
+        isError ? 1 : 0,
       );
       expect(app.container.textContent).toContain("server projected prompt");
     };
@@ -7555,3 +7681,46 @@ it.each([false, true])(
       });
   },
 );
+
+it("covers the app once the services stay out of reach, keeping the draft underneath", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "half-written thought");
+  act(() => {
+    fake.store.setConnectionState("reconnecting");
+    fake.store.setConnectionNotice("lost");
+  });
+  // A modal dialog on the top layer, outside the app root.
+  const overlay = document.querySelector(".ohb-connection-overlay");
+  expect(overlay?.getAttribute("role")).toBe("alertdialog");
+  expect(overlay?.textContent).toContain("Disconnected");
+  expect(overlay?.textContent).toContain("Your services");
+  expect(overlay?.textContent).not.toMatch(/ohbaby/iu);
+  expect(overlay?.querySelectorAll("button")).toHaveLength(1);
+  expect(
+    app.container.querySelector(".ohb-shell-main")?.hasAttribute("inert"),
+  ).toBe(true);
+  // No spinner on the static state.
+  expect(overlay?.querySelector(".ohb-spinner")).toBeNull();
+  act(() => {
+    overlay?.querySelector("button")?.click();
+  });
+  expect(fake.runtime.reconnectNow).toHaveBeenCalledOnce();
+  act(() => {
+    fake.store.setConnectionNotice("restarted");
+  });
+  expect(
+    document.querySelector(".ohb-connection-overlay button")?.textContent,
+  ).toBe("Refresh");
+  act(() => {
+    fake.store.setConnectionState("live");
+    fake.store.setConnectionNotice(null);
+  });
+  expect(document.querySelector(".ohb-connection-overlay")).toBeNull();
+  expect(
+    app.container.querySelector(".ohb-shell-main")?.hasAttribute("inert"),
+  ).toBe(false);
+  expect(textareaValue(app.container)).toBe("half-written thought");
+});

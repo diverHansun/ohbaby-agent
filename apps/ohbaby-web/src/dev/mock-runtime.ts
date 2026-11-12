@@ -276,6 +276,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     settings,
     retryPermissions: () => undefined,
     retrySession: () => undefined,
+    reconnectNow: () => undefined,
     loadEarlierHistory: resolved,
     retryUnknownPrompts: resolved,
     forgetUnknownPrompt: () => undefined,
@@ -292,7 +293,9 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     listArchivedSessions: async (cursor): Promise<UiGlobalSessionPage> => {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       if (name === "archived-error" && archivedReads++ === 0)
-        throw new Error("Can't reach ohbaby. Check that it's still running.");
+        throw new Error(
+          "Can't reach your services. Check that they're still running.",
+        );
       const archived = sessions
         .filter((row) => row.status === "archived")
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

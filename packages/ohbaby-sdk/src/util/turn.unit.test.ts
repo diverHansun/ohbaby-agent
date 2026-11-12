@@ -40,6 +40,52 @@ const answer = (id: string, runId: string): UiMessage => ({
 });
 
 describe("listEndedTurns", () => {
+  it("chooses one error per visible failed turn with session and terminal boundaries", () => {
+    const error = {
+      code: "PROVIDER_API",
+      message: "Limited",
+      source: "provider" as const,
+      retryable: true,
+    };
+    const runs = [
+      run("r1", { outcome: "failed", error }),
+      run("wake", { outcome: "failed", error }),
+      run("empty", { outcome: "failed", error }),
+      run("foreign", { sessionId: "side", outcome: "failed", error }),
+      run("stopped", { outcome: "cancelled", error }),
+    ];
+    const messages = [
+      answer("wake-message", "wake"),
+      answer("stop-message", "stopped"),
+    ];
+    const input = {
+      sessionId: "s",
+      runs,
+      messages,
+      prompts: [
+        prompt({
+          status: "failed",
+          error: { ...error, message: "Prompt error" },
+        }),
+      ],
+    };
+    expect(
+      listEndedTurns(input).map((turn) => [turn.runId, turn.error?.message]),
+    ).toEqual([
+      ["r1", "Prompt error"],
+      ["stopped", undefined],
+      ["wake", "Limited"],
+    ]);
+    expect(
+      listEndedTurns({
+        ...input,
+        prompts: [prompt({ status: "running" })],
+      }).map((turn) => turn.runId),
+    ).toEqual(["stopped", "wake"]);
+    expect(
+      listEndedTurns({ ...input, runs: [], prompts: [], messages: [] }),
+    ).toEqual([]);
+  });
   it("waits for a run's prompt to end, then times the turn by the prompt", () => {
     const input = {
       sessionId: "s",

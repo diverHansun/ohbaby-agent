@@ -459,3 +459,156 @@ it("derives recovery markers from matching message IDs and clears them with the 
     h.close();
   }
 });
+
+describe("failed turn reason", () => {
+  const user: UiMessage = {
+    id: "u1",
+    role: "user",
+    runId: "run_1",
+    createdAt: "2026-09-28T00:00:00Z",
+    parts: [{ type: "text", text: "Summarize the repo" }],
+  };
+  const assistant: UiMessage = {
+    id: "a1",
+    role: "assistant",
+    runId: "run_1",
+    status: "error",
+    createdAt: "2026-09-28T00:00:01Z",
+    parts: [
+      {
+        type: "text",
+        text: "[Response interrupted: the saved text below may be incomplete.]",
+        metadata: { kind: "lifecycle-interruption" },
+      },
+    ],
+  };
+  const run = {
+    id: "run_1",
+    sessionId: "session",
+    startedAt: "2026-09-28T00:00:00Z",
+    updatedAt: "2026-09-28T00:00:09Z",
+    endedAt: "2026-09-28T00:00:09Z",
+    outcome: "failed" as const,
+    status: { kind: "idle" as const },
+    error: {
+      code: "PROVIDER_RETRY_EXHAUSTED",
+      message: "Requests are temporarily limited. Please try again later.",
+      retryable: true,
+      source: "provider" as const,
+      providerId: "zenmux",
+      statusCode: 429,
+      attempts: 5,
+    },
+  };
+
+  function renderStream(runs: readonly (typeof run)[]): HTMLElement {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <ConversationStream
+          historyState="ready"
+          historyHasMore={false}
+          historyStale={false}
+          onLoadHistory={() => Promise.resolve()}
+          promptRows={[]}
+          messages={[user, assistant]}
+          sessionId="session"
+          prompts={[]}
+          runs={runs}
+          activeRun={undefined}
+          isRunning={false}
+          reasoningByMessageId={{}}
+          commandNotices={null}
+        />,
+      );
+    });
+    return container;
+  }
+
+  it("says why once at the turn's end, with only the HTTP status as detail", () => {
+    const container = renderStream([run]);
+    const errors = container.querySelectorAll(".ohb-turn-error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].textContent).toBe(
+      "Requests are temporarily limited. Please try again later.HTTP 429",
+    );
+    expect(errors[0].querySelector("button")).toBeNull();
+    // The app's own interruption note would repeat the same reason.
+    expect(container.textContent).not.toContain("[Response interrupted");
+    expect(container.textContent).not.toContain("zenmux");
+    expect(container.textContent).not.toContain("PROVIDER_RETRY_EXHAUSTED");
+  });
+
+  it("announces a failure once, only for a turn seen running", () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = (
+      runs: readonly (typeof run)[],
+      running: boolean,
+      messages: readonly UiMessage[],
+    ): void => {
+      act(() => {
+        root.render(
+          <ConversationStream
+            historyState="ready"
+            historyHasMore={false}
+            historyStale={false}
+            onLoadHistory={() => Promise.resolve()}
+            promptRows={[]}
+            messages={messages}
+            sessionId="session"
+            prompts={[]}
+            runs={runs}
+            activeRun={running ? runs[0] : undefined}
+            isRunning={running}
+            reasoningByMessageId={{}}
+            commandNotices={null}
+          />,
+        );
+      });
+    };
+    const live = (): string | null | undefined =>
+      container.querySelector('.ohb-visually-hidden[role="status"]')
+        ?.textContent;
+    // Already in the history: quiet.
+    render([run], false, [user, assistant]);
+    expect(live()).toBe("");
+    // Seen running, then failing: said once.
+    const running = {
+      ...run,
+      id: "run_2",
+      outcome: undefined,
+      endedAt: undefined,
+      error: undefined,
+      status: { kind: "running" },
+    } as never;
+    render([running], true, [{ ...user, id: "u2", runId: "run_2" }]);
+    render([{ ...run, id: "run_2" }], false, [
+      { ...user, id: "u2", runId: "run_2" },
+    ]);
+    expect(live()).toBe(run.error.message);
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("leaves a stop the user asked for without a failure line", () => {
+    const container = renderStream([
+      {
+        ...run,
+        outcome: "interrupted" as never,
+        error: {
+          code: "RUN_INTERRUPTED",
+          message: "user-stop",
+          retryable: true,
+          source: "runtime",
+          terminalReason: "user-stop",
+        } as never,
+      },
+    ]);
+    expect(container.querySelector(".ohb-turn-error")).toBeNull();
+  });
+});

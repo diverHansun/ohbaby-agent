@@ -169,6 +169,99 @@ it("moves between tabs with the arrow keys and closes the selected tab with Dele
   expect(controls?.state.tabs).toHaveLength(1);
 });
 
+/** Lays the tabs out 100px wide in DOM order inside a 300px strip. */
+function layOutTabs(element: HTMLElement): HTMLElement[] {
+  const list = element.querySelector<HTMLElement>('[role="tablist"]');
+  if (!list) throw new Error("missing tab list");
+  list.getBoundingClientRect = (): DOMRect => new DOMRect(0, 0, 300, 28);
+  const tabs = [...list.querySelectorAll<HTMLElement>("[data-side-tab]")];
+  for (const tab of tabs) {
+    tab.getBoundingClientRect = (): DOMRect =>
+      new DOMRect([...list.children].indexOf(tab) * 100, 0, 100, 28);
+  }
+  return tabs;
+}
+
+/** jsdom has no PointerEvent; React reads these fields from any event. */
+function pointer(target: EventTarget, type: string, clientX: number): void {
+  const event = new MouseEvent(type, { bubbles: true, button: 0, clientX });
+  Object.defineProperties(event, {
+    pointerId: { value: 1 },
+    pointerType: { value: "mouse" },
+  });
+  act(() => {
+    target.dispatchEvent(event);
+  });
+}
+
+function tabOrder(): string[] {
+  return controls?.state.tabs.map((tab) => tab.id) ?? [];
+}
+
+it("drags the selected tab past a neighbour's middle without remounting its page", () => {
+  const { element } = mount();
+  act(() => {
+    controls?.openPage("subagents");
+    controls?.openPage("subagents");
+    controls?.openPage("subagents");
+  });
+  const [first, second, third] = tabOrder();
+  const tabs = layOutTabs(element);
+  const dragged = tabs[2]?.querySelector('[role="tab"]');
+  if (!dragged) throw new Error("missing tab");
+  const page = element.querySelector('[data-testid="page"]');
+
+  pointer(dragged, "pointerdown", 250);
+  // Less than 4px is still a click.
+  pointer(window, "pointermove", 252);
+  expect(tabs[2]?.classList.contains("is-dragging")).toBe(false);
+  // Its middle (190) has not crossed the second tab's (150) yet.
+  pointer(window, "pointermove", 190);
+  expect(tabOrder()).toEqual([first, second, third]);
+  expect(tabs[2]?.style.transform).toBe("translateX(-60px)");
+  pointer(window, "pointermove", 140);
+  expect(tabOrder()).toEqual([first, third, second]);
+  // Still under the pointer after taking the second slot at 100px.
+  expect(tabs[2]?.style.transform).toBe("translateX(-10px)");
+  pointer(window, "pointerup", 140);
+
+  expect(tabs[2]?.classList.contains("is-dragging")).toBe(false);
+  expect(tabs[2]?.style.transform).toBe("");
+  expect(controls?.state.activeTabId).toBe(third);
+  expect(element.querySelector('[data-testid="page"]')).toBe(page);
+  expect(document.activeElement).toBe(dragged);
+});
+
+it("selects a tab once it is dragged, keeps it in the strip and never drags from close", () => {
+  const { element } = mount();
+  act(() => {
+    controls?.openPage("subagents");
+    controls?.openPage("subagents");
+  });
+  const [first, second] = tabOrder();
+  const tabs = layOutTabs(element);
+  const close = tabs[0]?.querySelector(".ohb-side-panel-tab-close");
+  const tab = tabs[0]?.querySelector('[role="tab"]');
+  if (!close || !tab) throw new Error("missing tab controls");
+
+  pointer(close, "pointerdown", 80);
+  pointer(window, "pointermove", 180);
+  pointer(window, "pointerup", 180);
+  expect(tabOrder()).toEqual([first, second]);
+  expect(controls?.state.activeTabId).toBe(second);
+
+  pointer(tab, "pointerdown", 50);
+  pointer(window, "pointermove", 60);
+  expect(controls?.state.activeTabId).toBe(first);
+  expect(tabs[0]?.classList.contains("is-dragging")).toBe(true);
+  // Far past the strip's end, it stops at the last slot.
+  pointer(window, "pointermove", 900);
+  expect(tabOrder()).toEqual([second, first]);
+  expect(tabs[0]?.style.transform).toBe("translateX(100px)");
+  pointer(window, "pointerup", 900);
+  expect(tabs[0]?.classList.contains("is-dragging")).toBe(false);
+});
+
 it("starts closed on a narrow window even when it was open before", () => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: true, width: 500 }));
   const original = window.matchMedia;

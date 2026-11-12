@@ -1,3 +1,9 @@
+import {
+  PROVIDER_ERROR_KINDS,
+  SAFE_PROVIDER_ERROR_CODES,
+  SAFE_PROVIDER_ERROR_TYPES,
+  SAFE_PROVIDER_NETWORK_CODES,
+} from "ohbaby-llm";
 import { defineDiagnosticEvent, diagnosticField } from "./logger.js";
 
 const unusedSummaryReasons = [
@@ -185,4 +191,34 @@ export const sessionStoragePreparationFailed = defineDiagnosticEvent({
   event: "session.storage.preparation_failed",
   fields: { error: diagnosticField.externalError() },
   level: "warn",
+});
+
+/** Per-attempt facts only. IDs use the existing stable diagnostic fingerprints. */
+export const modelRequestFailed = defineDiagnosticEvent({
+  component: "llm",
+  event: "llm.request.failed",
+  level: "warn",
+  fields: {
+    operationId: diagnosticField.externalId("operation"),
+    runId: diagnosticField.externalId("operation"),
+    entryId: diagnosticField.externalId("operation"),
+    sessionId: diagnosticField.externalId("session"),
+    providerId: diagnosticField.externalId("provider"),
+    modelId: diagnosticField.externalId("provider"),
+    step: diagnosticField.integer(),
+    attempt: diagnosticField.integer(),
+    kind: diagnosticField.stringEnum(PROVIDER_ERROR_KINDS),
+    statusCode: diagnosticField.optional(diagnosticField.integer()),
+    upstreamCode: diagnosticField.optional(
+      diagnosticField.stringEnum(SAFE_PROVIDER_ERROR_CODES),
+    ),
+    upstreamType: diagnosticField.optional(
+      diagnosticField.stringEnum(SAFE_PROVIDER_ERROR_TYPES),
+    ),
+    networkCode: diagnosticField.optional(
+      diagnosticField.stringEnum(SAFE_PROVIDER_NETWORK_CODES),
+    ),
+    retryScheduled: diagnosticField.boolean(),
+    retryDelayMs: diagnosticField.optional(diagnosticField.number()),
+  },
 });

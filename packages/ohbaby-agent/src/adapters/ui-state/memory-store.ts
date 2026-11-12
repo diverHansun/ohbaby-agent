@@ -38,6 +38,7 @@ export function cloneRun(run: UiRun): UiRun {
   return {
     ...run,
     status: { ...run.status },
+    ...(run.error === undefined ? {} : { error: { ...run.error } }),
   };
 }
 

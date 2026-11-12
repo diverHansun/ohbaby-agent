@@ -11,6 +11,8 @@ export interface UiAgentStepRequest {
   readonly startedAt: number;
   readonly firstTextAt?: number;
   readonly endedAt?: number;
+  /** The failed attempt ended with a decision to retry, not a replay instruction. */
+  readonly retryScheduled?: true;
   readonly outcome: "running" | "success" | "error" | "aborted";
 }
 export type UiSummaryRequest = Omit<
@@ -21,6 +23,10 @@ export type UiSummaryRequest = Omit<
   readonly compactionId: string;
 };
 export type UiModelRequest = UiAgentStepRequest | UiSummaryRequest;
+export type UiModelActivity = UiModelRequest & {
+  readonly phase?: "requesting" | "retrying";
+  readonly waitingStartedAt?: number;
+};
 export interface UiToolExecution {
   readonly runId?: string;
   readonly phase:
@@ -51,24 +57,67 @@ export interface UiToolExecution {
 export function projectModelActivity(
   run: UiRun,
   messages: readonly UiMessage[],
-): UiModelRequest | undefined {
-  if (run.status.kind !== "running") return undefined;
-  return messages
+): UiModelActivity | undefined {
+  if (run.status.kind !== "running" || run.outcome !== undefined)
+    return undefined;
+  const requests = messages
     .filter(
       (message) => message.runId === run.id && message.role === "assistant",
     )
     .flatMap((message) =>
       (message.modelRequests ?? []).filter(
-        (request) =>
+        (request): request is UiAgentStepRequest =>
           request.purpose === "agent-step" &&
           request.runId === run.id &&
-          request.messageId === message.id &&
-          request.endedAt === undefined &&
-          request.outcome === "running",
+          request.messageId === message.id,
       ),
     )
-    .sort((a, b) => b.startedAt - a.startedAt)
-    .at(0);
+    .sort((a, b) => a.startedAt - b.startedAt);
+  const latest = requests.at(-1);
+  if (!latest) return undefined;
+  const active = latest.outcome === "running" && latest.endedAt === undefined;
+  const backingOff =
+    latest.outcome === "error" && latest.retryScheduled === true;
+  if (!active && !backingOff) return undefined;
+
+  // A reset to attempt 1 (including overflow recovery) starts a new wait.
+  let first = requests.length - 1;
+  while (first > 0 && requests[first].attempt !== 1) {
+    const previous = requests[first - 1];
+    if (
+      previous.messageId !== latest.messageId ||
+      previous.step !== latest.step
+    )
+      break;
+    first--;
+  }
+  const chain = requests.slice(first);
+  const message = messages.find(
+    (candidate) => candidate.id === latest.messageId,
+  );
+  const hasProgress =
+    message?.hiddenToolCalls === true ||
+    message?.parts.some((part) => {
+      if (
+        part.metadata?.kind === "lifecycle-interruption" ||
+        part.metadata?.kind === "context-compaction"
+      )
+        return false;
+      return part.type === "text" || part.type === "reasoning"
+        ? part.text.trim().length > 0
+        : part.type === "tool-call" &&
+            part.call.id.length > 0 &&
+            part.call.name.length > 0;
+    });
+  return {
+    ...latest,
+    phase:
+      backingOff ||
+      (chain.some((request) => request.retryScheduled) && !hasProgress)
+        ? "retrying"
+        : "requesting",
+    waitingStartedAt: requests[first].startedAt,
+  };
 }
 /** Copy only public facts; internal admission owners never cross this boundary. */
 export function projectToolExecution(

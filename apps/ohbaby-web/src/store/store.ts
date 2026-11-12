@@ -13,6 +13,7 @@ import {
 } from "../api/daemon/eventReducer.js";
 import type {
   CommandNotice,
+  ConnectionNotice,
   ConnectionState,
   StoreSnapshot,
   UnknownPromptRequest,
@@ -59,6 +60,7 @@ export interface OhbabyWebStore {
   replaceSnapshot(snapshot: UiSnapshot, seqNum: number): void;
   reset(): void;
   setConnectionState(state: ConnectionState): void;
+  setConnectionNotice(notice: ConnectionNotice | null): void;
   setCurrentModel(model: UiCurrentModelConfig | null): void;
   setError(error: string | null): void;
   subscribe(listener: StoreListener): () => void;
@@ -82,6 +84,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     },
     sessionIndex: [],
     connectionState: "connecting",
+    connectionNotice: null,
     currentModel: null,
     currentModelLoaded: false,
     error: null,
@@ -698,6 +701,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         return;
       }
       publish({ ...snapshot, connectionState: state });
+    },
+    setConnectionNotice(notice): void {
+      if (snapshot.connectionNotice === notice) return;
+      publish({ ...snapshot, connectionNotice: notice });
     },
     setCurrentModel(model): void {
       if (snapshot.currentModel === model && snapshot.currentModelLoaded) {

@@ -35,6 +35,8 @@ export function AppShell(props: {
   /** The right panel covers the main area, like a maximized pane. */
   readonly asideExpanded?: boolean;
   readonly overlays?: ReactNode;
+  /** Covers everything and makes it inert, e.g. while the services are gone. */
+  readonly blocking?: ReactNode;
   readonly onSearch?: () => void;
 }): ReactElement {
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
@@ -71,11 +73,12 @@ export function AppShell(props: {
       document.removeEventListener("keydown", shortcut);
     };
   }, [open, props.onSearch]);
+  const blocked = props.blocking !== undefined && props.blocking !== null;
   return (
     <div
       className={`ohb-shell${sidebarOpen ? " is-sidebar-open" : ""}${props.aside !== undefined && props.asideExpanded ? " is-aside-expanded" : ""}`}
     >
-      <div className="ohb-shell-sidebar" inert={!sidebarOpen}>
+      <div className="ohb-shell-sidebar" inert={!sidebarOpen || blocked}>
         {props.renderSidebar(close, dismissDrawer)}
       </div>
       {sidebarOpen ? (
@@ -89,14 +92,20 @@ export function AppShell(props: {
       <main
         className="ohb-shell-main"
         inert={
-          props.aside !== undefined && (narrow || props.asideExpanded === true)
+          blocked ||
+          (props.aside !== undefined &&
+            (narrow || props.asideExpanded === true))
         }
       >
         {props.renderHeader(sidebarOpen, open)}
         {props.main}
       </main>
-      {props.aside}
-      {props.overlays}
+      {/* Always wrapped, so blocking never remounts the panel or its pages. */}
+      <div className="ohb-shell-rest" inert={blocked}>
+        {props.aside}
+        {props.overlays}
+      </div>
+      {props.blocking}
     </div>
   );
 }

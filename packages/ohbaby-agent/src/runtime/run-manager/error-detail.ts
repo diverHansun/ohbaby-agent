@@ -1,10 +1,11 @@
 import type { UiPromptError } from "ohbaby-sdk";
 import {
-  isRetryableProviderError,
+  ModelObservationError,
+  providerErrorDetail,
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
-  providerErrorStatus,
 } from "ohbaby-llm";
+import { ToolDeliveryError } from "../../core/tool-scheduler/delivery.js";
 
 function message(error: unknown): string {
   if (error instanceof Error) {
@@ -21,145 +22,41 @@ function message(error: unknown): string {
   return String(error);
 }
 
-function providerCause(error: unknown): unknown {
-  if (
-    error instanceof ProviderRetryExhaustedError ||
-    error instanceof ProviderStreamInterruptedError
-  ) {
-    return error.cause;
-  }
-  return error;
-}
-
-const NETWORK_ERROR_CODES = new Set([
-  "ECONNREFUSED",
-  "ECONNRESET",
-  "ENOTFOUND",
-  "EAI_AGAIN",
-  "ETIMEDOUT",
-  "EHOSTUNREACH",
-  "ENETUNREACH",
-  "UND_ERR_CONNECT_TIMEOUT",
-  "CERT_HAS_EXPIRED",
-  "DEPTH_ZERO_SELF_SIGNED_CERT",
-  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
-  "ERR_TLS_CERT_ALTNAME_INVALID",
-]);
-
-// Only expose allowlisted codes, never messages, URLs or connection options.
-function networkCauseMessage(error: unknown): string | undefined {
-  const seen = new Set<object>();
-  let current = error;
-  let proxyCode: string | undefined;
-  let networkCode: string | undefined;
-  for (let depth = 0; depth < 16; depth++) {
-    if (typeof current !== "object" || current === null || seen.has(current))
-      break;
-    seen.add(current);
-    const value = current as { code?: unknown; cause?: unknown };
-    if (value.code === "OHBABY_PROXY_CONFIG") {
-      proxyCode ??= value.code;
-    } else if (
-      typeof value.code === "string" &&
-      NETWORK_ERROR_CODES.has(value.code)
-    ) {
-      networkCode ??= value.code;
-    }
-    current = value.cause;
-  }
-  if (proxyCode === "OHBABY_PROXY_CONFIG")
-    return "Proxy configuration is invalid";
-  const suffix = networkCode === undefined ? "" : ` (${networkCode})`;
-  return networkCode === undefined
-    ? undefined
-    : `LLM provider connection failed${suffix}`;
-}
-
-function providerErrorText(error: unknown): string | undefined {
-  if (typeof error !== "object" || error === null) return undefined;
-  const value = error as { error?: unknown; message?: unknown };
-  const nested = value.error;
-  if (typeof nested === "object" && nested !== null && "message" in nested) {
-    const nestedMessage = nested.message;
-    if (typeof nestedMessage === "string") return nestedMessage;
-  }
-  return typeof value.message === "string" ? value.message : undefined;
-}
-
-function providerMessage(
+export function normalizeRunError(
   error: unknown,
-  statusCode: number | undefined,
-): string {
-  const networkDetail = networkCauseMessage(error);
-  if (error instanceof ProviderRetryExhaustedError) {
-    return `LLM provider request failed after ${String(error.attempts)} retries${networkDetail === undefined ? "" : `: ${networkDetail}`}`;
-  }
-  if (error instanceof ProviderStreamInterruptedError) {
-    return `LLM provider stream was interrupted${networkDetail === undefined ? "" : `: ${networkDetail}`}`;
-  }
-  if (networkDetail !== undefined) return networkDetail;
-  if (statusCode === 400) {
-    const detail = providerErrorText(providerCause(error));
-    if (detail && /\btemperature\b.*\bdeprecated\b/iu.test(detail)) {
-      return "HTTP 400: temperature is deprecated for this model";
-    }
-    return "LLM provider rejected request (HTTP 400)";
-  }
-  if (statusCode === 402) {
-    const detail = providerErrorText(providerCause(error));
-    if (detail && /\binsufficient balance\b/iu.test(detail)) {
-      return "HTTP 402: Insufficient balance";
-    }
-    return "LLM provider billing failed (HTTP 402)";
-  }
-  if (statusCode === 401 || statusCode === 403) {
-    return `LLM provider authentication failed (HTTP ${String(statusCode)})`;
-  }
-  if (statusCode === 429) {
-    return "LLM provider rate limit was exceeded (HTTP 429)";
-  }
-  if (statusCode === 408) {
-    return "LLM provider request timed out";
-  }
-  if (statusCode !== undefined && statusCode >= 500) {
-    return "LLM provider is unavailable";
-  }
-  return "LLM provider request failed";
-}
-
-export function normalizeRunError(error: unknown): UiPromptError {
-  const cause = providerCause(error);
-  const statusCode = providerErrorStatus(cause);
-  const isProvider =
-    error instanceof ProviderRetryExhaustedError ||
-    error instanceof ProviderStreamInterruptedError ||
-    statusCode !== undefined ||
-    isRetryableProviderError(cause);
-  if (!isProvider) {
+  providerId?: string,
+): UiPromptError {
+  // These owners may wrap HTTP/network failures from saving or delivery.
+  // Their causes do not identify a failed model request.
+  const detail =
+    error instanceof ModelObservationError || error instanceof ToolDeliveryError
+      ? undefined
+      : providerErrorDetail(error);
+  if (!detail) {
     return {
       code: "RUNTIME_ERROR",
-      message: networkCauseMessage(error) ?? message(error),
+      message: message(error),
       retryable: false,
       source: "runtime",
     };
   }
-
   const code =
     error instanceof ProviderRetryExhaustedError
       ? "PROVIDER_RETRY_EXHAUSTED"
       : error instanceof ProviderStreamInterruptedError
         ? "PROVIDER_STREAM_INTERRUPTED"
-        : statusCode === 401 || statusCode === 403
+        : detail.statusCode === 401 || detail.statusCode === 403
           ? "PROVIDER_AUTH"
           : "PROVIDER_API";
   return {
     code,
-    message: providerMessage(error, statusCode),
-    retryable:
-      error instanceof ProviderRetryExhaustedError ||
-      isRetryableProviderError(cause),
+    message: detail.message,
+    retryable: detail.retryable,
     source: "provider",
-    ...(statusCode === undefined ? {} : { statusCode }),
+    ...(providerId === undefined ? {} : { providerId }),
+    ...(detail.statusCode === undefined
+      ? {}
+      : { statusCode: detail.statusCode }),
     ...(error instanceof ProviderRetryExhaustedError
       ? { attempts: error.attempts }
       : {}),
@@ -170,14 +67,33 @@ export function normalizeLifecycleRunError(
   error: string,
   terminalReason: string | undefined,
   failureCause?: unknown,
+  providerId?: string,
 ): UiPromptError {
+  if (
+    terminalReason === "model_persistence_failure" ||
+    terminalReason === "model_state_persistence_failure" ||
+    terminalReason === "tool_persistence_failure"
+  ) {
+    return {
+      code: "RUNTIME_ERROR",
+      message: error,
+      retryable: false,
+      source: "runtime",
+      terminalReason,
+    };
+  }
   if (failureCause !== undefined) {
-    return normalizeRunError(failureCause);
+    const detail = normalizeRunError(failureCause, providerId);
+    return {
+      ...detail,
+      ...(detail.source === "runtime" ? { message: error } : {}),
+      ...(terminalReason === undefined ? {} : { terminalReason }),
+    };
   }
   if (terminalReason === "provider_retry_exhausted") {
     return {
       code: "PROVIDER_RETRY_EXHAUSTED",
-      message: "LLM provider request failed after retries",
+      message: "The response could not be completed. Please try again.",
       retryable: true,
       source: "provider",
       terminalReason,
@@ -186,7 +102,7 @@ export function normalizeLifecycleRunError(
   if (terminalReason === "provider_stream_interrupted") {
     return {
       code: "PROVIDER_STREAM_INTERRUPTED",
-      message: "LLM provider stream was interrupted",
+      message: "The response was interrupted. You can try again.",
       retryable: true,
       source: "provider",
       terminalReason,

@@ -1,14 +1,78 @@
 import { describe, expect, it } from "vitest";
 import {
+  ModelObservationError,
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
 } from "ohbaby-llm";
+import { ToolDeliveryError } from "../../core/tool-scheduler/delivery.js";
 import {
   normalizeLifecycleRunError,
   normalizeRunError,
 } from "./error-detail.js";
 
 describe("normalizeRunError", () => {
+  it("keeps the lifecycle's persistence summary even for raw HTTP-shaped storage causes", () => {
+    for (const cause of [
+      new Error("storage detail"),
+      Object.assign(new Error("storage detail"), { status: 503 }),
+    ]) {
+      expect(
+        normalizeLifecycleRunError(
+          "Model response could not be saved",
+          "model_state_persistence_failure",
+          cause,
+          "test-provider",
+        ),
+      ).toEqual({
+        code: "RUNTIME_ERROR",
+        message: "Model response could not be saved",
+        source: "runtime",
+        retryable: false,
+        terminalReason: "model_state_persistence_failure",
+      });
+    }
+    expect(
+      normalizeLifecycleRunError(
+        "Prepared runtime summary",
+        undefined,
+        new Error("raw detail"),
+      ),
+    ).toMatchObject({ source: "runtime", message: "Prepared runtime summary" });
+  });
+
+  it.each([
+    {
+      error: new ModelObservationError(
+        Object.assign(new Error("storage unavailable"), { status: 503 }),
+      ),
+      terminalReason: "model_persistence_failure",
+    },
+    {
+      error: new ToolDeliveryError(
+        Object.assign(new Error("delivery connection lost"), {
+          code: "ECONNRESET",
+        }),
+      ),
+      terminalReason: "tool_persistence_failure",
+    },
+  ])("keeps $terminalReason owned by runtime", ({ error, terminalReason }) => {
+    const expected = {
+      code: "RUNTIME_ERROR",
+      message: error.message,
+      source: "runtime",
+      retryable: false,
+    };
+    expect(normalizeRunError(error, "test-provider")).toEqual(expected);
+    expect(
+      normalizeLifecycleRunError(
+        error.message,
+        terminalReason,
+        error,
+        "test-provider",
+      ),
+    ).toEqual({ ...expected, terminalReason });
+  });
+
   it("keeps provider status and retryability without serializing the raw error", () => {
     expect(
       normalizeRunError({
@@ -17,11 +81,40 @@ describe("normalizeRunError", () => {
       }),
     ).toEqual({
       code: "PROVIDER_API",
-      message: "LLM provider rate limit was exceeded (HTTP 429)",
+      message: "Requests are temporarily limited. Please try again later.",
       retryable: true,
       source: "provider",
       statusCode: 429,
     });
+  });
+
+  it("retains the actual rate-limit reason after exhaustion and keeps diagnostics off public errors", () => {
+    const cause = {
+      status: 429,
+      code: "rate_limit_exceeded",
+      request_id: "req_0123456789abcdef",
+      message: "Authorization: Bearer secret",
+    };
+    const error = new ProviderRetryExhaustedError(cause, 5);
+    const detail = normalizeLifecycleRunError(
+      "wrapped",
+      "provider_retry_exhausted",
+      error,
+      "zenmux",
+    );
+    expect(detail).toEqual({
+      code: "PROVIDER_RETRY_EXHAUSTED",
+      source: "provider",
+      message: "Requests are temporarily limited. Please try again later.",
+      retryable: true,
+      statusCode: 429,
+      attempts: 5,
+      providerId: "zenmux",
+      terminalReason: "provider_retry_exhausted",
+    });
+    expect(JSON.stringify(detail)).not.toMatch(
+      /secret|req_|rate_limit_exceeded/u,
+    );
   });
 
   it("preserves retry exhaustion allowlist fields without the provider cause message", () => {
@@ -33,7 +126,8 @@ describe("normalizeRunError", () => {
     ).toMatchObject({
       attempts: 5,
       code: "PROVIDER_RETRY_EXHAUSTED",
-      message: "LLM provider request failed after 5 retries",
+      message:
+        "The model service is temporarily unavailable. Please try again later.",
       retryable: true,
       source: "provider",
       statusCode: 503,
@@ -56,8 +150,7 @@ describe("normalizeRunError", () => {
     );
     expect(normalizeRunError(new ProviderRetryExhaustedError(sdk, 3))).toEqual({
       code: "PROVIDER_RETRY_EXHAUSTED",
-      message:
-        "LLM provider request failed after 3 retries: LLM provider connection failed (ECONNREFUSED)",
+      message: "Could not reach the model. Check the connection and try again.",
       source: "provider",
       retryable: true,
       statusCode: 408,
@@ -74,7 +167,7 @@ describe("normalizeRunError", () => {
     ).toEqual({
       code: "PROVIDER_STREAM_INTERRUPTED",
       message:
-        "LLM provider stream was interrupted: LLM provider connection failed (CERT_HAS_EXPIRED)",
+        "The response was interrupted. Could not establish a secure connection to the model. Check the certificates and proxy settings.",
       retryable: false,
       source: "provider",
     });
@@ -88,7 +181,9 @@ describe("normalizeRunError", () => {
     };
     cause.cause = cause;
     const detail = normalizeRunError({ status: 408, cause });
-    expect(detail.message).toBe("LLM provider connection failed (ENOTFOUND)");
+    expect(detail.message).toBe(
+      "Could not reach the model. Check the connection and try again.",
+    );
     expect(JSON.stringify(detail)).not.toMatch(/sk-secret|password|http:/u);
   });
 
@@ -98,11 +193,11 @@ describe("normalizeRunError", () => {
         code: "OHBABY_PROXY_CONFIG",
         message: "http://secret@host",
       }).message,
-    ).toBe("Proxy configuration is invalid");
+    ).toBe("The proxy configuration is invalid. Check the proxy settings.");
     let cause: unknown = { code: "ENOTFOUND" };
     for (let i = 0; i < 40; i++) cause = { cause };
     expect(normalizeRunError({ status: 408, cause }).message).toBe(
-      "LLM provider request timed out",
+      "The model did not respond in time. Check the connection and try again.",
     );
   });
 
@@ -115,7 +210,7 @@ describe("normalizeRunError", () => {
       ),
     ).toEqual({
       code: "PROVIDER_AUTH",
-      message: "LLM provider authentication failed (HTTP 401)",
+      message: "Authentication failed. Check the model configuration.",
       retryable: false,
       source: "provider",
       statusCode: 401,
@@ -132,7 +227,7 @@ describe("normalizeRunError", () => {
       ),
     );
     expect(detail.message).toBe(
-      "HTTP 400: temperature is deprecated for this model",
+      "This model no longer accepts temperature. Remove it from the model configuration.",
     );
     expect(JSON.stringify(detail)).not.toContain("sk-secret");
   });
@@ -145,7 +240,8 @@ describe("normalizeRunError", () => {
       }),
     ).toMatchObject({
       code: "PROVIDER_API",
-      message: "HTTP 402: Insufficient balance",
+      message:
+        "The model service has insufficient credit or quota. Check billing or choose another model.",
       retryable: false,
       statusCode: 402,
     });
@@ -156,7 +252,9 @@ describe("normalizeRunError", () => {
       status: 400,
       error: { message: "invalid credential zm-private-example" },
     });
-    expect(detail.message).toBe("LLM provider rejected request (HTTP 400)");
+    expect(detail.message).toBe(
+      "The model rejected the request. Check the model configuration.",
+    );
     expect(JSON.stringify(detail)).not.toContain("zm-private-example");
   });
 

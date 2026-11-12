@@ -91,6 +91,8 @@ export const NEW_SESSION_CLEAR_SEQUENCE = SESSION_VIEW_CLEAR_SEQUENCE;
 
 export const ESC_INTERRUPT_WINDOW_MS = 1500;
 const ESC_INTERRUPT_HINT = "Press Esc again to interrupt";
+/** A connection that stayed down; the stream keeps retrying behind it. */
+const DISCONNECTED_LABEL = "Disconnected. Retrying in the background.";
 const EMPTY_INITIAL_NOTICES: readonly string[] = [];
 
 type TranscriptSurfaceResetReason = "new-session" | "switch-session";
@@ -473,6 +475,25 @@ export function OhbabyTerminalApp({
     [activeSessionId, prompts],
   );
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
+  // Runs whose failure the transcript already states; the status line then
+  // stays calm instead of repeating it (and losing it on the next prompt).
+  const turnErrorRunKey = useTuiStoreSelector(store, (state) =>
+    selectCommittedItems(state)
+      .flatMap((item) =>
+        item.turnCompletion?.error ? [item.turnCompletion.runId] : [],
+      )
+      .join("\n"),
+  );
+  const turnErrorRunIds = useMemo(
+    () => new Set(turnErrorRunKey.split("\n")),
+    [turnErrorRunKey],
+  );
+  const runtimeErrorRunId = useTuiStoreSelector(
+    store,
+    (state) => state.runtimeErrorRunId,
+  );
+  const runtimeErrorFromRun =
+    runtimeErrorRunId !== undefined && turnErrorRunIds.has(runtimeErrorRunId);
   const hasBackendDialog = permissions.length > 0 || interactions.length > 0;
   const hasDialog = hasBackendDialog || commandPanel !== null || rewindOpen;
   const rewindPrompts = useMemo(
@@ -637,7 +658,7 @@ export function OhbabyTerminalApp({
     recoveryState.control?.runId &&
     escInterruptArmedRunId === recoveryState.control.runId
       ? ESC_INTERRUPT_HINT
-      : effectiveRuntime.kind === "error"
+      : effectiveRuntime.kind === "error" && !runtimeErrorFromRun
         ? formatRuntimeLabel(permissions, runtime)
         : runtime.kind === "idle" &&
             !(
@@ -653,7 +674,12 @@ export function OhbabyTerminalApp({
                 Date.parse(latestPrompt.acceptedAt ?? latestPrompt.createdAt)
             ) &&
             (latestPrompt?.status === "failed" ||
-              latestPrompt?.status === "interrupted")
+              latestPrompt?.status === "interrupted") &&
+            // A prompt whose turn ended says why in the transcript instead.
+            !(
+              latestPrompt.runId !== undefined &&
+              turnErrorRunIds.has(latestPrompt.runId)
+            )
           ? `error: ${formatError(latestPrompt.error)}`
           : undefined;
   const setActiveCommandPanel = useCallback(
@@ -1316,6 +1342,10 @@ export function OhbabyTerminalApp({
                     store={store}
                     toolsExpanded={toolsExpanded}
                     waitingForSubagents={subagentState.list?.waiting}
+                    offline={
+                      recoveryState.connected === false ||
+                      recoveryState.connectionLost === true
+                    }
                   />
                 </DurationDiagnosticContext.Provider>
               </>
@@ -1369,22 +1399,24 @@ export function OhbabyTerminalApp({
               approvalRetryHint={
                 recoveryState.error
                   ? undefined
-                  : recoveryState.connected === false
-                    ? "Reconnecting…"
-                    : recoveryState.pending.length > 0
-                      ? recoveryState.pending.some(
-                          (item) =>
-                            item.runtimeEpoch !== undefined &&
-                            item.runtimeEpoch !== recoveryState.runtimeEpoch,
-                        )
-                        ? "Submission unconfirmed"
-                        : "Confirming submission…"
-                      : recoveryState.sync.status === "error"
-                        ? "Syncing session…"
-                        : undefined
+                  : recoveryState.connectionLost
+                    ? DISCONNECTED_LABEL
+                    : recoveryState.connected === false
+                      ? "Reconnecting…"
+                      : recoveryState.pending.length > 0
+                        ? recoveryState.pending.some(
+                            (item) =>
+                              item.runtimeEpoch !== undefined &&
+                              item.runtimeEpoch !== recoveryState.runtimeEpoch,
+                          )
+                          ? "Submission unconfirmed"
+                          : "Confirming submission…"
+                        : recoveryState.sync.status === "error"
+                          ? "Syncing session…"
+                          : undefined
               }
               approvalStatus={
-                runtime.kind === "error"
+                runtime.kind === "error" && !runtimeErrorFromRun
                   ? formatError(runtime)
                   : recoveryState.error
               }
@@ -1496,24 +1528,26 @@ export function OhbabyTerminalApp({
                 : (catalogError ??
                   recoveryState.error ??
                   executionRecoveryLabel ??
-                  (recoveryState.connected === false
-                    ? `Reconnecting…${recoveryState.sync.error ? ` ${recoveryState.sync.error}` : ""}`
-                    : recoveryState.sync.status === "error"
-                      ? `Syncing session… ${recoveryState.sync.error ?? ""}`
-                      : !recoveryState.initialized ||
-                          recoveryState.runtimeEpoch === undefined ||
-                          recoveryState.sync.status === "syncing"
-                        ? "Syncing session…"
-                        : recoveryState.pending.length > 0
-                          ? recoveryState.pending.some(
-                              (item) =>
-                                item.runtimeEpoch !== undefined &&
-                                item.runtimeEpoch !==
-                                  recoveryState.runtimeEpoch,
-                            )
-                            ? "Submission unconfirmed · Ctrl+X forget all (may still run)"
-                            : "Confirming submission… · Ctrl+X forget all (may still run)"
-                          : runtimeStatusLabel))
+                  (recoveryState.connectionLost
+                    ? DISCONNECTED_LABEL
+                    : recoveryState.connected === false
+                      ? `Reconnecting…${recoveryState.sync.error ? ` ${recoveryState.sync.error}` : ""}`
+                      : recoveryState.sync.status === "error"
+                        ? `Syncing session… ${recoveryState.sync.error ?? ""}`
+                        : !recoveryState.initialized ||
+                            recoveryState.runtimeEpoch === undefined ||
+                            recoveryState.sync.status === "syncing"
+                          ? "Syncing session…"
+                          : recoveryState.pending.length > 0
+                            ? recoveryState.pending.some(
+                                (item) =>
+                                  item.runtimeEpoch !== undefined &&
+                                  item.runtimeEpoch !==
+                                    recoveryState.runtimeEpoch,
+                              )
+                              ? "Submission unconfirmed · Ctrl+X forget all (may still run)"
+                              : "Confirming submission… · Ctrl+X forget all (may still run)"
+                            : runtimeStatusLabel))
             }
           />
         </Box>
@@ -1539,9 +1573,12 @@ function TranscriptViewportContainer({
   store,
   toolsExpanded,
   waitingForSubagents,
+  offline,
 }: {
   readonly store: TuiStore;
   readonly waitingForSubagents?: boolean;
+  /** The connection to the services is down; a cached run is not live. */
+  readonly offline?: boolean;
   readonly toolsExpanded?: boolean;
 }): ReactElement {
   const activeSessionId = useTuiStoreSelector(
@@ -1562,15 +1599,13 @@ function TranscriptViewportContainer({
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
 
   const sample = useTuiStoreSelector(store, (state) => state.durationSample);
-  const modelActivity = useTuiStoreSelector(
-    store,
-    (state) =>
-      state.runs.find(
-        (run) =>
-          run.sessionId === state.activeSessionId &&
-          state.runtime.kind === "running" &&
-          run.id === state.runtime.runId,
-      )?.modelActivity,
+  const activeRun = useTuiStoreSelector(store, (state) =>
+    state.runs.find(
+      (run) =>
+        run.sessionId === state.activeSessionId &&
+        state.runtime.kind === "running" &&
+        run.id === state.runtime.runId,
+    ),
   );
   return (
     <DurationSampleContext.Provider value={sample}>
@@ -1584,7 +1619,8 @@ function TranscriptViewportContainer({
         liveReasoning={liveReasoning}
         notices={notices}
         runtime={runtime}
-        modelActivity={waitingForSubagents ? undefined : modelActivity}
+        // Waiting on subagents has its own status; so does a lost connection.
+        run={waitingForSubagents || offline ? undefined : activeRun}
       />
     </DurationSampleContext.Provider>
   );

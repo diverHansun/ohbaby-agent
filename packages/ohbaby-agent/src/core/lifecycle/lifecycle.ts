@@ -1,3 +1,5 @@
+import { emitDiagnostic, NOOP_LOGGER } from "../../observability/logger.js";
+import { modelRequestFailed } from "../../observability/events.js";
 import { renderReminderText } from "../message/origin.js";
 import { isRuntimeInputSnapshotChanged } from "./runtime-input-error.js";
 import type { AgentStepRequestRecord } from "../message/types.js";
@@ -15,10 +17,9 @@ import {
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
   ToolCallParseError,
-  isRetryableProviderError,
+  providerErrorDetail,
   streamResponse,
   resolvePreparedRequestSettings,
-  providerErrorStatus,
 } from "ohbaby-llm";
 import type {
   ModelMessage,
@@ -127,14 +128,17 @@ function providerFailure(error: unknown):
     };
   if (error instanceof ProviderRetryExhaustedError) {
     return {
-      finalResponse: `LLM provider is unavailable after ${String(error.attempts)} retries. Retry or resume this run when the connection recovers.`,
+      finalResponse:
+        providerErrorDetail(error)?.message ??
+        "The response could not be completed. Please try again.",
       terminalReason: "provider_retry_exhausted",
     };
   }
   if (error instanceof ProviderStreamInterruptedError) {
     return {
       finalResponse:
-        "LLM provider stream was interrupted after partial output. Retry or resume this run to continue.",
+        providerErrorDetail(error)?.message ??
+        "The response was interrupted. You can try again.",
       terminalReason: "provider_stream_interrupted",
     };
   }
@@ -144,7 +148,13 @@ function providerFailure(error: unknown):
       terminalReason: "tool_parse_failure",
     };
   }
-  return undefined;
+  // Overflow keeps its existing forced-compaction recovery path.
+  const detail = isContextOverflowError(error)
+    ? undefined
+    : providerErrorDetail(error);
+  return detail
+    ? { finalResponse: detail.message, terminalReason: undefined }
+    : undefined;
 }
 
 function contextPreparationFailure(
@@ -326,14 +336,9 @@ async function markAssistantMessageError(
     return;
   }
   const failure = providerFailure(error);
-  const statusCode = providerErrorStatus(error);
-  const providerMessage =
-    failure?.finalResponse ??
-    (statusCode === 401 || statusCode === 403
-      ? `LLM provider authentication failed (HTTP ${String(statusCode)})`
-      : statusCode === 429
-        ? "LLM provider rate limit was exceeded (HTTP 429)"
-        : undefined);
+  const detail = providerErrorDetail(error);
+  const statusCode = detail?.statusCode;
+  const providerMessage = detail?.message ?? failure?.finalResponse;
   const interrupted =
     error instanceof ProviderStreamInterruptedError &&
     (error.source === "transport" || error.source === "eof");
@@ -344,18 +349,17 @@ async function markAssistantMessageError(
       : statusCode === 401 || statusCode === 403
         ? {
             name: "ProviderAuthError" as const,
-            providerId: "unknown",
+            providerId: message.providerId ?? "unknown",
             message:
               providerMessage ??
-              "LLM provider authentication failed (HTTP 401)",
+              "Authentication failed. Check the model configuration.",
           }
         : providerMessage !== undefined
           ? {
               name: "APIError" as const,
               message: providerMessage,
               ...(statusCode === undefined ? {} : { statusCode }),
-              isRetryable:
-                failure !== undefined || isRetryableProviderError(error),
+              isRetryable: detail?.retryable ?? false,
             }
           : {
               name: "Unknown" as const,
@@ -1527,6 +1531,31 @@ export class Lifecycle {
                   }
                   if (request.endedAt !== undefined)
                     this.activeModelRequests.delete(request.requestId);
+                  if (fact.failure) {
+                    emitDiagnostic(
+                      this.deps.logger ?? NOOP_LOGGER,
+                      modelRequestFailed,
+                      {
+                        operationId: request.requestId,
+                        runId: request.runId,
+                        entryId: assistantMessage.id,
+                        sessionId: params.sessionId,
+                        providerId: requestClient.config.provider,
+                        modelId:
+                          input.request.settings?.model ??
+                          requestClient.config.model,
+                        step,
+                        attempt: request.attempt,
+                        kind: fact.failure.kind,
+                        statusCode: fact.failure.statusCode,
+                        upstreamCode: fact.failure.upstreamCode,
+                        upstreamType: fact.failure.upstreamType,
+                        networkCode: fact.failure.networkCode,
+                        retryScheduled: request.retryScheduled === true,
+                        retryDelayMs: fact.failure.retryDelayMs,
+                      },
+                    );
+                  }
                 },
               }),
           reasoning: mergeReasoningIntent(params.reasoning),

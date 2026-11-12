@@ -26,6 +26,7 @@ export type {
 } from "./types.js";
 
 export { createAnthropicProvider } from "./anthropic.js";
+export { ModelRequestValidationError } from "./request-validation-error.js";
 export { createOpenAICompatibleProvider } from "./openai-compatible.js";
 export { createOpenAIResponsesProvider } from "./openai-responses.js";
 export type {

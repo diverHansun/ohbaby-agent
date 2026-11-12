@@ -44,6 +44,11 @@ export interface SidePanelControls {
     state: SidePageStates[K],
   ) => void;
   readonly selectTab: (id: string) => void;
+  /**
+   * Puts tab `id` where tab `targetId` is, shifting the tabs between them one
+   * place (a drag in the tab strip). Only the order changes, so no page remounts.
+   */
+  readonly moveTab: (id: string, targetId: string) => void;
   readonly closeTab: (id: string) => void;
   /** Replaces one tab's page state; the kind guards against a mismatched shape. */
   readonly setTabState: <K extends SidePageKind>(
@@ -168,6 +173,17 @@ export function useSidePanel(
   const selectTab = useCallback((id: string): void => {
     setState((current) => ({ ...current, activeTabId: id }));
   }, []);
+  const moveTab = useCallback((id: string, targetId: string): void => {
+    setState((current) => {
+      // Indices in the full list, which also holds side chats of other chats.
+      const from = current.tabs.findIndex((tab) => tab.id === id);
+      const to = current.tabs.findIndex((tab) => tab.id === targetId);
+      if (from < 0 || to < 0 || from === to) return current;
+      const tabs = [...current.tabs];
+      tabs.splice(to, 0, ...tabs.splice(from, 1));
+      return { ...current, tabs };
+    });
+  }, []);
   const closeTab = useCallback((id: string): void => {
     setState((current) => {
       const index = current.tabs.findIndex((tab) => tab.id === id);
@@ -270,6 +286,7 @@ export function useSidePanel(
     openPage,
     revealPage,
     selectTab,
+    moveTab,
     closeTab,
     setTabState,
     addTabs,

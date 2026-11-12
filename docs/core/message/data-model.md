@@ -121,6 +121,7 @@ interface AssistantMessage {
   // ======== 结束状态 ========
   finish?: string               // 结束原因: stop | tool-calls | length | ...
   error?: MessageError          // 错误信息（如有）
+  modelRequests?: readonly ModelRequestRecord[] // 请求事实，含可选 retryScheduled
   
   // ======== 压缩标识 ========
   summary?: boolean             // 是否为压缩摘要消息（由 Context 模块创建）
@@ -128,7 +129,7 @@ interface AssistantMessage {
 
 
 type MessageError = 
-  | { name: 'ProviderAuthError'; providerID: string; message: string }
+  | { name: 'ProviderAuthError'; providerId: string; message: string }
   | { name: 'MessageOutputLengthError' }
   | { name: 'MessageContentFilterError' }
   | { name: 'MessageStreamInterruptedError' }
@@ -136,6 +137,12 @@ type MessageError =
   | { name: 'APIError'; message: string; statusCode?: number; isRetryable: boolean }
   | { name: 'Unknown'; message: string }
 ```
+
+2026-11-11 请求反馈补充：`modelRequests` 的 `retryScheduled?: true` 随失败结束事实一次保存；终态仍不可补写。详细诊断仅在观测回调中传递，不存入此字段。旧 JSON 缺少新字段时不推测历史重试。
+
+SDK 的 `UiRun.modelActivity` 从当前 run 最新请求和对应 assistant 内容推导，增加可选 `phase`、`waitingStartedAt`。退避时仍关联真实已结束的失败请求；同一链计时连续，新的 attempt=1 重新计时。非空正文、reasoning 或工具进展更新阶段；运行结束时清空，旧重试不会复活。
+
+`MessageError` 保留已有判别类型；provider 的安全原因与 runtime 共用 LLM 层提取器。`UiRun.error` 从已有 ledger.errorData 投影；`listEndedTurns` 的可选 `UiTurn.error` 对失败/中断轮次优先取 prompt.error，再取 run.error，不改变轮次可见性。前端显示与关闭状态不写回后端。
 
 ### 3.3 SystemMessage（系统消息）
 

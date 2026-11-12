@@ -1,8 +1,19 @@
 /* eslint-disable @typescript-eslint/require-await -- Fake adapters exercise eager calls and lazy async iterators without external I/O. */
 import type { InterfaceProviderStreamEvent } from "../providers/types.js";
+import type { ResponseStreamEvent } from "openai/resources/responses/responses";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mapResponsesStream } from "../providers/openai-responses-stream.js";
+import {
+  createInterfaceProvider,
+  ModelRequestValidationError,
+} from "../providers/index.js";
+import { providerErrorDetail } from "./provider-error.js";
 import { streamResponse } from "./streaming.js";
-import type { LLMClientInstance, ModelRequestObservation } from "./types.js";
+import type {
+  LLMClientInstance,
+  ModelRequestObservation,
+  StreamingResponse,
+} from "./types.js";
 
 function deferred<T = void>(): {
   promise: Promise<T>;
@@ -24,6 +35,54 @@ const config: LLMClientInstance["config"] = {
 
 describe("request attempt observations", () => {
   afterEach(() => vi.restoreAllMocks());
+  it.each(["anthropic", "openai-compatible", "openai-responses"] as const)(
+    "preserves local %s request validation without sending or retrying",
+    async (kind) => {
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new Error("unexpected HTTP"));
+      const provider = createInterfaceProvider({
+        id: "test",
+        interfaceProvider: kind,
+        apiKey: "fake-test-key",
+        baseUrl: "http://localhost",
+      });
+      const open = vi.spyOn(provider, "streamResponse");
+      const facts: ModelRequestObservation[] = [];
+      let failure: unknown;
+      try {
+        for await (const _ of streamResponse(
+          { config: { ...config, interfaceProvider: kind }, provider },
+          [
+            {
+              role: "user",
+              content: "test",
+              ...(kind === "anthropic" ? {} : { tool_calls: [] }),
+            },
+          ],
+          {
+            tools: [{ name: "x", inputSchema: { type: "string" } }],
+            onRequestObservation: async (fact) => {
+              facts.push(fact);
+            },
+          },
+        )) {
+          /* consume */
+        }
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(ModelRequestValidationError);
+      expect((failure as Error).message).toMatch(
+        /object JSON schema|legacy model message|unsupported field/,
+      );
+      expect(providerErrorDetail(failure)).toBeUndefined();
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(facts.at(-1)?.request.outcome).toBe("error");
+      expect(facts.at(-1)?.request.retryScheduled).toBeUndefined();
+    },
+  );
   it.each([false, true])(
     "waits for durable attempt admission before provider I/O (cancel=%s)",
     async (cancel) => {
@@ -116,6 +175,62 @@ describe("request attempt observations", () => {
     await expect(result).rejects.toThrow("input ledger unavailable");
     expect(calls).toBe(0);
   });
+  it.each(["response.failed", "response.private-provider-payload"])(
+    "retains safe provider provenance for early Responses mapper failures (%s)",
+    async (type) => {
+      let calls = 0;
+      const facts: ModelRequestObservation[] = [];
+      const chunks: StreamingResponse[] = [];
+      const client: LLMClientInstance = {
+        config: { ...config, interfaceProvider: "openai-responses" },
+        provider: {
+          id: "test",
+          kind: "openai-responses",
+          client: {},
+          async streamResponse() {
+            calls++;
+            return mapResponsesStream(
+              (async function* (): AsyncGenerator<ResponseStreamEvent> {
+                yield { type } as ResponseStreamEvent;
+              })(),
+            );
+          },
+          isAbortError: () => false,
+        },
+      };
+      let failure: unknown;
+      try {
+        for await (const chunk of streamResponse(client, [], {
+          onRequestObservation: async (fact) => {
+            facts.push(fact);
+          },
+        }))
+          chunks.push(chunk);
+      } catch (error) {
+        failure = error;
+      }
+      expect(calls).toBe(1);
+      expect(failure).toMatchObject({ name: "ProviderRequestError" });
+      expect(providerErrorDetail(failure)).toEqual({
+        kind: "unknown",
+        message: "The response could not be completed. Please try again.",
+        retryable: false,
+      });
+      expect(chunks.some((chunk) => chunk.isComplete || chunk.retry)).toBe(
+        false,
+      );
+      const ended = facts.filter((fact) => fact.type === "request-ended");
+      expect(ended).toHaveLength(1);
+      expect(ended[0]).toMatchObject({
+        request: { outcome: "error" },
+        failure: { kind: "unknown" },
+      });
+      expect(ended[0].request).not.toHaveProperty("retryScheduled");
+      expect(JSON.stringify(ended[0])).not.toContain(
+        "private-provider-payload",
+      );
+    },
+  );
   it("closes a late-opening iterator once after cancellation, observing close rejection", async () => {
     const opening = deferred<AsyncIterable<InterfaceProviderStreamEvent>>();
     const started = deferred();
@@ -263,6 +378,7 @@ describe("request attempt observations", () => {
       outcome: "aborted",
       endedAt: abortedAt,
     });
+    expect(facts[1].request).not.toHaveProperty("retryScheduled");
   });
   it("does not invoke an adapter after cancellation during request preparation", async () => {
     const abort = new AbortController();
@@ -396,6 +512,9 @@ describe("request attempt observations", () => {
       ["request-ended", 2, "success"],
     ]);
     expect(new Set(facts.map((f) => f.request.requestId)).size).toBe(2);
+    expect(facts[1].request).toHaveProperty("retryScheduled", true);
+    for (const fact of [facts[0], facts[2], facts[3]])
+      expect(fact.request).not.toHaveProperty("retryScheduled");
     calls = 0;
     await expect(
       (async (): Promise<void> => {
@@ -410,4 +529,105 @@ describe("request attempt observations", () => {
     ).rejects.toThrow("save failed");
     expect(calls).toBe(1);
   });
+
+  it.each(["retry", "abort", "save-error", "abort-save-error"] as const)(
+    "seals the retry plan before end persistence completes (%s)",
+    async (completion) => {
+      const saved = deferred();
+      const ending = deferred();
+      const abort = new AbortController();
+      const facts: ModelRequestObservation[] = [];
+      const chunks: StreamingResponse[] = [];
+      let calls = 0;
+      const client: LLMClientInstance = {
+        config,
+        provider: {
+          id: "test",
+          kind: "openai-compatible",
+          client: {},
+          async streamResponse() {
+            calls++;
+            if (calls === 1)
+              throw Object.assign(new Error("busy"), { status: 503 });
+            return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              yield { finishReason: "stop" };
+            })();
+          },
+          isAbortError: () => false,
+        },
+      };
+      const running = (async (): Promise<unknown> => {
+        try {
+          for await (const chunk of streamResponse(client, [], {
+            signal: abort.signal,
+            retry: { initialDelayMs: 0 },
+            onRequestObservation: async (fact) => {
+              facts.push(fact);
+              if (fact.type !== "request-ended" || fact.request.attempt !== 1)
+                return;
+              ending.resolve();
+              await saved.promise;
+              if (completion.includes("save-error"))
+                throw Object.assign(new Error("end save failed"), {
+                  status: 503,
+                });
+            },
+          }))
+            chunks.push(chunk);
+          return undefined;
+        } catch (error) {
+          return error;
+        }
+      })();
+      try {
+        await ending.promise;
+        const ended = facts.at(-1);
+        expect(ended?.request).toMatchObject({
+          attempt: 1,
+          outcome: "error",
+          retryScheduled: true,
+        });
+        expect(calls).toBe(1);
+        expect(
+          chunks.some(
+            (chunk) =>
+              chunk.requestObservation?.type === "request-ended" ||
+              chunk.retry !== undefined,
+          ),
+        ).toBe(false);
+        if (completion.includes("abort")) abort.abort();
+        saved.resolve();
+        const result = await running;
+        expect(facts.find((fact) => fact.type === "request-ended")).toBe(ended);
+        expect(ended?.request).toMatchObject({
+          outcome: "error",
+          retryScheduled: true,
+        });
+        if (completion.includes("save-error")) {
+          expect(result).toMatchObject({
+            name: "ModelObservationError",
+            cause: { message: "end save failed" },
+          });
+          expect(
+            chunks.some(
+              (chunk) => chunk.requestObservation?.type === "request-ended",
+            ),
+          ).toBe(false);
+        } else {
+          expect(result).toBeUndefined();
+          expect(chunks.at(-1)?.streamStopReason).toBe(
+            completion === "abort" ? "user_aborted" : "provider_finished",
+          );
+        }
+        expect(calls).toBe(completion === "retry" ? 2 : 1);
+        expect(chunks.filter((chunk) => chunk.retry)).toHaveLength(
+          completion === "retry" ? 1 : 0,
+        );
+      } finally {
+        saved.resolve();
+        abort.abort();
+        await running;
+      }
+    },
+  );
 });

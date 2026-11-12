@@ -1,4 +1,9 @@
 import {
+  encodeDiagnosticEvent,
+  type Logger,
+} from "../../../../packages/ohbaby-agent/src/observability/logger.js";
+import { normalizeRunError } from "../../../../packages/ohbaby-agent/src/runtime/run-manager/error-detail.js";
+import {
   TestLifecycle as Lifecycle,
   type TestContextManager as ContextManager,
   type TestLifecycleSessionParams as LifecycleSessionParams,
@@ -1417,8 +1422,11 @@ describe("Lifecycle.run", () => {
       );
       expect(result).toMatchObject({
         success: false,
-        finalResponse: "unclassified failure",
-        failureCause: new Error("unclassified failure"),
+        finalResponse: "The response could not be completed. Please try again.",
+        failureCause: {
+          name: "ProviderRequestError",
+          cause: new Error("unclassified failure"),
+        },
         usage: {
           inputTokens: 40,
           outputTokens: 4,
@@ -2973,8 +2981,11 @@ describe("Lifecycle.run", () => {
     );
     expect(result).toMatchObject({
       success: false,
-      finalResponse: "network down",
-      failureCause: new Error("network down"),
+      finalResponse: "The response could not be completed. Please try again.",
+      failureCause: {
+        name: "ProviderRequestError",
+        cause: new Error("network down"),
+      },
       usage: { usageComplete: false },
     });
 
@@ -2984,6 +2995,20 @@ describe("Lifecycle.run", () => {
 
   it("returns a structured result when retryable provider errors exhaust retries", async () => {
     const requests: InterfaceProviderRequest[] = [];
+    const diagnostics: Readonly<Record<string, unknown>>[] = [];
+    const logger: Logger = {
+      emit(definition, payload): void {
+        diagnostics.push(
+          encodeDiagnosticEvent(
+            definition,
+            payload,
+            { roots: {} },
+            "2026-11-11",
+          ).record,
+        );
+        throw new Error("unavailable diagnostic sink");
+      },
+    };
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -2996,12 +3021,15 @@ describe("Lifecycle.run", () => {
         preparedTurn([{ role: "user", content: "Say hello" }]),
       );
     const retryableErrors = Array.from({ length: 6 }, () =>
-      Object.assign(new Error("provider unavailable"), {
+      Object.assign(new Error("Authorization: Bearer sk-test-secret"), {
         headers: { "retry-after-ms": "0" },
-        status: 503,
+        status: 429,
+        code: "rate_limit_exceeded",
+        request_id: "req_0123456789abcdef",
       }),
     );
     const lifecycle = new Lifecycle({
+      logger,
       contextManager: createContextManagerMock(prepareTurn),
       llmClient: createRejectingSequenceLLMClient({
         errors: retryableErrors,
@@ -3016,6 +3044,7 @@ describe("Lifecycle.run", () => {
     const { events, result } = await consumeLifecycleEvents(
       lifecycle.run({
         directory: "D:/repo",
+        runId: "provider-test",
         modelId: "fake-model",
         sessionId: "session_test",
       }),
@@ -3032,11 +3061,49 @@ describe("Lifecycle.run", () => {
       ),
     ).toBe(true);
     expect(result).toMatchObject({
-      finalResponse: expect.stringContaining("after 5 retries") as string,
+      finalResponse:
+        "Requests are temporarily limited. Please try again later.",
       finishReason: "error",
       success: false,
       terminalReason: "provider_retry_exhausted",
     });
+    const records = await messageManager.listBySession("session_test");
+    const saved = records.find((record) => record.info.role === "assistant");
+    expect(saved?.info).toMatchObject({
+      error: {
+        name: "APIError",
+        statusCode: 429,
+        message: result.finalResponse,
+      },
+    });
+    expect(normalizeRunError(result.failureCause).message).toBe(
+      result.finalResponse,
+    );
+    expect(diagnostics).toHaveLength(6);
+    expect(diagnostics.map((record) => record.retryScheduled)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
+    expect(new Set(diagnostics.map((record) => record.operationId)).size).toBe(
+      6,
+    );
+    expect(diagnostics[0]).toMatchObject({
+      event: "llm.request.failed",
+      kind: "rate_limit",
+      statusCode: 429,
+      upstreamCode: "rate_limit_exceeded",
+      retryDelayMs: 0,
+    });
+    expect(JSON.stringify(diagnostics)).not.toMatch(
+      /sk-test-secret|Bearer|req_012345|upstreamId|Say hello/u,
+    );
+    expect(JSON.stringify(records)).not.toMatch(
+      /upstreamCode|retryDelayMs|sk-test-secret/u,
+    );
   });
 
   it("fails clearly when a final-step overflow retry also overflows", async () => {

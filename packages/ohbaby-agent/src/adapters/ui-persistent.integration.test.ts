@@ -1122,12 +1122,22 @@ describe("createPersistentUiBackendClient", () => {
         status: "failed",
         error: {
           code: "PROVIDER_AUTH",
-          message: "LLM provider authentication failed (HTTP 401)",
+          message: "Authentication failed. Check the model configuration.",
           retryable: false,
           source: "provider",
           statusCode: 401,
         },
       });
+      const snapshot = await client.getSnapshot();
+      expect(
+        snapshot.runs.find((run) => run.id === completion.prompt.runId)?.error,
+      ).toEqual(completion.prompt.error);
+      const view = await client.getSessionView?.({
+        sessionId: "session_provider_error",
+      });
+      expect(
+        view?.runs.find((run) => run.id === completion.prompt.runId)?.error,
+      ).toEqual(completion.prompt.error);
     } finally {
       await client.dispose();
       await rm(directory, { force: true, recursive: true });

@@ -298,11 +298,11 @@ describe("Files page", () => {
     const view = await render(files, fakeClient().client);
     fail = true;
     await click(button(view, "Refresh files"));
-    expect(view.textContent).toContain("Can't reach ohbaby");
+    expect(view.textContent).toContain("Can't reach your services");
     expect(view.querySelector("[data-file-path='a.txt']")).not.toBeNull();
     fail = false;
     await click(button(view, "Retry"));
-    expect(view.textContent).not.toContain("Can't reach ohbaby");
+    expect(view.textContent).not.toContain("Can't reach your services");
   });
   it("re-reads the list when a read finds the file gone, and focuses the list on return", async () => {
     let current = [entry("old.txt")];

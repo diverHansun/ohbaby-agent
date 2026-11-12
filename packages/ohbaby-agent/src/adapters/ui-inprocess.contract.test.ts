@@ -2222,6 +2222,100 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("keeps retry recovery consistent in live views and legacy snapshots before reasoning is saved", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const retryStarted = createDeferred<undefined>();
+    const releaseReasoning = createDeferred<undefined>();
+    const reasoningCommitted = createDeferred<undefined>();
+    const releaseFinish = createDeferred<undefined>();
+    const base = createFakeLLMClient([], { contextWindowTokens: 1_000_000 });
+    let attempts = 0;
+    const client = createInProcessUiBackendClient({
+      bus,
+      messageManager,
+      llmClient: {
+        ...base,
+        provider: {
+          ...base.provider,
+          streamResponse(request) {
+            if (isTitleGenerationRequest(request))
+              return base.provider.streamResponse(request);
+            attempts++;
+            if (attempts === 1)
+              return Promise.reject(
+                Object.assign(new Error("temporarily unavailable"), {
+                  status: 503,
+                  headers: { "retry-after-ms": "0" },
+                }),
+              );
+            return Promise.resolve(
+              (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+                retryStarted.resolve(undefined);
+                await releaseReasoning.promise;
+                yield { reasoningTextDelta: "Checking the request" };
+                reasoningCommitted.resolve(undefined);
+                await releaseFinish.promise;
+                yield { textDelta: "Recovered", finishReason: "stop" };
+              })(),
+            );
+          },
+        },
+      },
+    });
+    try {
+      const receipt = await client.submitPromptAccepted("Recover the request");
+      await retryStarted.promise;
+      const waiting = await client.getSessionView({
+        sessionId: receipt.sessionId,
+      });
+      expect(waiting.runs[0].modelActivity).toMatchObject({
+        phase: "retrying",
+        attempt: 2,
+        outcome: "running",
+      });
+      expect((await client.getSnapshot()).runs[0].modelActivity).toEqual(
+        waiting.runs[0].modelActivity,
+      );
+      releaseReasoning.resolve(undefined);
+      await reasoningCommitted.promise;
+      const recovered = await client.getSessionView({
+        sessionId: receipt.sessionId,
+      });
+      expect(recovered.runs[0].modelActivity).toMatchObject({
+        phase: "requesting",
+        requestId: waiting.runs[0].modelActivity?.requestId,
+        waitingStartedAt: waiting.runs[0].modelActivity?.waitingStartedAt,
+      });
+      expect(
+        (await messageManager.listBySession(receipt.sessionId))
+          .flatMap((message) => message.parts)
+          .some((part) => part.type === "reasoning"),
+      ).toBe(false);
+      const legacy = await client.getSnapshot();
+      expect(legacy.runs[0].modelActivity).toEqual(
+        recovered.runs[0].modelActivity,
+      );
+      expect(
+        legacy.sessions[0].messages
+          .flatMap((message) => message.parts)
+          .filter((part) => part.type === "reasoning"),
+      ).toMatchObject([{ text: "Checking the request" }]);
+      releaseFinish.resolve(undefined);
+      await client.waitForPrompt(receipt.promptId);
+      expect(
+        (await client.getSnapshot()).runs[0].modelActivity,
+      ).toBeUndefined();
+    } finally {
+      releaseReasoning.resolve(undefined);
+      releaseFinish.resolve(undefined);
+      await client.dispose();
+    }
+  });
+
   it("connects a model through a safe structured backend payload", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-connect-"));
     const homeDir = await mkdtemp(join(tmpdir(), "ohbaby-connect-home-"));
@@ -5460,9 +5554,9 @@ describe("createInProcessUiBackendClient", () => {
     ).resolves.toMatchObject({
       prompt: {
         error: {
-          code: "RUNTIME_ERROR",
-          message: "stream exploded",
-          source: "runtime",
+          code: "PROVIDER_API",
+          message: "The response could not be completed. Please try again.",
+          source: "provider",
         },
         status: "failed",
       },
@@ -5472,7 +5566,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshot.status).toEqual({ kind: "idle" });
     expect(snapshot.runs[0].status).toEqual({
       kind: "error",
-      message: "stream exploded",
+      message: "The response could not be completed. Please try again.",
       recoverable: true,
     });
   });

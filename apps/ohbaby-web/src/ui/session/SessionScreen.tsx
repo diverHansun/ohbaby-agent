@@ -5,7 +5,7 @@ import {
   type UiSubagentInstanceReaderState,
 } from "ohbaby-sdk";
 import type { ReactElement, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { CommandNoticeList } from "../commands/CommandResultModal.js";
 import { StructuredCommandOverlay } from "../commands/StructuredCommandOverlay.js";
@@ -26,7 +26,6 @@ import {
   type StoredComposerDraft,
 } from "../composer/draft-storage.js";
 import { DraftHero } from "./DraftHero.js";
-import { selectPersistedPromptError } from "./prompt-projection.js";
 import { isConnectionAbnormal } from "./selectors.js";
 import { SessionBanners, SessionSyncNotice } from "./SessionBanners.js";
 import { SessionConversation } from "./SessionConversation.js";
@@ -88,9 +87,6 @@ export function SessionScreen({
   const follow = useCallback(() => {
     setFollowToken((token) => token + 1);
   }, []);
-  const [dismissedPromptErrorId, setDismissedPromptErrorId] = useState<
-    string | null
-  >(null);
   const overlays = useCommandOverlays({
     runtime,
     client,
@@ -110,31 +106,21 @@ export function SessionScreen({
     view.composer.activeSessionId ?? view.activeSession?.id,
     setActionError,
   );
-  const persistedPromptError = useMemo(
-    () => selectPersistedPromptError(view),
-    [view],
-  );
-  const promptErrorMessage =
-    persistedPromptError?.promptId === dismissedPromptErrorId
-      ? null
-      : (persistedPromptError?.message ?? null);
   // While the transport is down the header shows it; its errors stay quiet.
   const stateError = isConnectionAbnormal(view.header.connectionKind)
     ? null
     : view.error;
-  // State errors clear themselves, so only action and prompt errors dismiss.
+  // State errors clear themselves, so only action errors dismiss. A failed
+  // turn says why at its own end in the conversation, not up here.
   const errorBanner =
     actionError !== null
       ? { message: actionError, dismissable: true }
       : stateError
         ? { message: stateError, dismissable: false }
-        : promptErrorMessage
-          ? { message: promptErrorMessage, dismissable: true }
-          : null;
+        : null;
   const clearActionError = useCallback(() => {
     setActionError(null);
-    setDismissedPromptErrorId(persistedPromptError?.promptId ?? null);
-  }, [persistedPromptError]);
+  }, []);
   const runAction = useCallback(
     async (action: () => Promise<void>): Promise<boolean> => {
       try {

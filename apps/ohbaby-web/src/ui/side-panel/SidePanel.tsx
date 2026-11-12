@@ -22,6 +22,7 @@ import {
   type SidePanelTab,
 } from "./side-pages.js";
 import type { SidePanelControls } from "./use-side-panel.js";
+import { useTabDrag } from "./use-tab-drag.js";
 
 const KEYBOARD_STEP = 24;
 
@@ -65,9 +66,16 @@ export function SidePanel(props: {
     setExpanded,
     openPage,
     selectTab,
+    moveTab,
     closeTab,
   } = props.controls;
   const [addMenu, setAddMenu] = useState<MenuAnchor | null>(null);
+  const tabList = useRef<HTMLDivElement>(null);
+  const tabDrag = useTabDrag({
+    list: tabList,
+    select: selectTab,
+    move: moveTab,
+  });
   const addButton = useRef<HTMLButtonElement>(null);
   const drag = useRef<{
     startX: number;
@@ -208,6 +216,7 @@ export function SidePanel(props: {
       />
       <header className="ohb-side-panel-header">
         <div
+          ref={tabList}
           className="ohb-side-panel-tabs"
           role="tablist"
           aria-label="Side panel pages"
@@ -244,11 +253,16 @@ export function SidePanel(props: {
             const label = sideTabLabel(tab);
             const closing = tab.kind === "terminal" && tab.state.closing;
             const selected = tab.id === state.activeTabId;
+            const dragging = tab.id === tabDrag.draggingId;
             return (
               <div
                 key={tab.id}
                 role="presentation"
-                className={`ohb-side-panel-tab${selected ? " is-active" : ""}`}
+                data-side-tab={tab.id}
+                className={`ohb-side-panel-tab${selected ? " is-active" : ""}${dragging ? " is-dragging" : ""}`}
+                onPointerDown={(event) => {
+                  tabDrag.onPointerDown(tab.id, event);
+                }}
               >
                 <button
                   type="button"
@@ -283,6 +297,10 @@ export function SidePanel(props: {
                   tabIndex={-1}
                   title={`Close ${label.title}`}
                   disabled={closing}
+                  // A press on close never starts a drag of its tab.
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                  }}
                   onClick={() => {
                     requestClose(tab);
                   }}

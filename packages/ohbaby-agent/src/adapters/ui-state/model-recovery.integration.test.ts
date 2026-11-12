@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   applySessionChange,
   type UiSessionChangedEvent,
+  type UiSession,
+  type UiPromptSubmission,
   type UiRun,
 } from "ohbaby-sdk";
 import { createBus } from "../../bus/index.js";
@@ -86,7 +88,11 @@ describe("model observation recovery", () => {
         },
       ],
     });
-    expect(source.owner.read("s").runs[0].modelActivity).toEqual(request);
+    expect(source.owner.read("s").runs[0].modelActivity).toEqual({
+      ...request,
+      phase: "requesting",
+      waitingStartedAt: 100,
+    });
     expect(
       source.owner.read("s").session.messages.map((value) => value.id),
     ).toEqual([message.id]);
@@ -126,4 +132,137 @@ describe("model observation recovery", () => {
       applySessionChange(recovered.owner.read("s"), events[0]),
     ).toBeUndefined();
   });
+
+  it.each(["reasoning", "text", "tool"] as const)(
+    "recovers retry waiting and publishes one activity change for %s progress",
+    async (progress) => {
+      const manager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      });
+      const events: UiSessionChangedEvent[] = [];
+      const run: UiRun = {
+        id: "run",
+        sessionId: "s",
+        status: { kind: "running", runId: "run" },
+        startedAt: "2026",
+        updatedAt: "2026",
+      };
+      const source = new SourceSessionProjection({
+        runtimeEpoch: "e",
+        messageManager: manager,
+        metadata: async (): Promise<Omit<UiSession, "messages">> => ({
+          id: "s",
+          title: "s",
+          createdAt: "2026",
+          updatedAt: "2026",
+        }),
+        currentRuns: async (): Promise<readonly UiRun[]> => [run],
+        runsByIds: async (): Promise<readonly UiRun[]> => [run],
+        prompts: async (): Promise<readonly UiPromptSubmission[]> => [],
+        publish: (event): void => {
+          if (event.type === "session.changed") events.push(event);
+        },
+      });
+      try {
+        await source.owner.initialize("s");
+        const message = await manager.createMessage({
+          role: "assistant",
+          agent: "default",
+          runId: "run",
+          sessionId: "s",
+        });
+        const failed = {
+          requestId: "first",
+          runId: "run",
+          messageId: message.id,
+          step: 1,
+          attempt: 1,
+          purpose: "agent-step" as const,
+          startedAt: 100,
+          endedAt: 150,
+          outcome: "error" as const,
+          retryScheduled: true as const,
+        };
+        await manager.updateMessage(message.id, { modelRequests: [failed] });
+        const waiting = source.owner.read("s").runs[0].modelActivity;
+        expect(waiting).toMatchObject({
+          requestId: "first",
+          outcome: "error",
+          endedAt: 150,
+          phase: "retrying",
+          waitingStartedAt: 100,
+        });
+        await source.owner.rebuild("s");
+        expect(source.owner.read("s").runs[0].modelActivity).toEqual(waiting);
+        const seed = source.owner.read("s");
+        events.length = 0;
+        const retry = {
+          ...failed,
+          requestId: "retry",
+          attempt: 2,
+          startedAt: 200,
+          endedAt: undefined,
+          outcome: "running" as const,
+          retryScheduled: undefined,
+        };
+        await manager.updateMessage(message.id, { modelRequests: [retry] });
+        expect(source.owner.read("s").runs[0].modelActivity).toMatchObject({
+          requestId: "retry",
+          phase: "retrying",
+          waitingStartedAt: 100,
+        });
+        const beforeProgress = events.length;
+        if (progress === "reasoning") {
+          const identity = {
+            sessionId: "s",
+            messageId: message.id,
+            partId: "reasoning",
+          };
+          await source.reasoning.update(identity, "Thinking");
+          await source.reasoning.update(identity, "Thinking further");
+          expect((await manager.listBySession("s"))[0].parts).toEqual([]);
+        } else if (progress === "text") {
+          const part = await manager.appendPart(message.id, {
+            type: "text",
+            text: "Answer",
+          });
+          await manager.updatePart(part.id, { text: "Answer continues" });
+        } else {
+          const part = await manager.appendPart(message.id, {
+            type: "tool",
+            tool: "bash",
+            callId: "call",
+            state: { status: "pending", input: {}, raw: "{}" },
+          });
+          await manager.updatePart(part.id, {
+            state: { status: "running", input: {} },
+          });
+        }
+        expect(source.owner.read("s").runs[0].modelActivity).toMatchObject({
+          requestId: "retry",
+          phase: "requesting",
+          waitingStartedAt: 100,
+        });
+        expect(
+          events.slice(beforeProgress).filter((event) => event.runs),
+        ).toHaveLength(1);
+        let replay = seed;
+        for (const event of events) {
+          const next = applySessionChange(replay, event);
+          if (!next) throw new Error("Expected consecutive session revision");
+          replay = next;
+        }
+        expect(replay).toEqual(source.owner.read("s"));
+        await source.commitEvent({
+          type: "run.updated",
+          run: { ...run, status: { kind: "idle" }, outcome: "cancelled" },
+        });
+        expect(source.owner.read("s").runs[0].modelActivity).toBeUndefined();
+      } finally {
+        source.reasoning.dispose();
+        source.owner.dispose();
+      }
+    },
+  );
 });

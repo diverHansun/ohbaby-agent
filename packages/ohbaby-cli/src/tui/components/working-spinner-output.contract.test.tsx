@@ -87,8 +87,17 @@ describe("working indicator real Ink stdout", () => {
                       title: "Checking the implementation",
                     }
               }
-              modelActivity={
-                state === "hidden" ? { ...request, firstTextAt: 3000 } : request
+              run={
+                state === "hidden"
+                  ? undefined
+                  : {
+                      id: "run",
+                      sessionId: "session",
+                      status: { kind: "running", runId: "run" },
+                      startedAt: new Date(1000).toISOString(),
+                      updatedAt: new Date(1000).toISOString(),
+                      modelActivity: request,
+                    }
               }
             />
           </DurationSampleContext.Provider>

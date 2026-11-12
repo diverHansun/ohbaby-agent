@@ -27,7 +27,7 @@ import {
   delegationNotStarted,
   isDelegationCall,
 } from "./DelegationRow.js";
-import type { ViewModel } from "./selectors.js";
+import { isConnectionAbnormal, type ViewModel } from "./selectors.js";
 import type { useSessionInteractions } from "./useSessionInteractions.js";
 
 /** The message stream of the active conversation, with command results. */
@@ -124,11 +124,16 @@ export function SessionConversation(props: {
             runs={(view.snapshot?.runs ?? []).filter(
               (run) => run.sessionId === sessionId,
             )}
-            activeRun={view.snapshot?.runs.find(
-              (run) =>
-                run.sessionId === view.composer.activeSessionId &&
-                run.id === view.composer.activeRunId,
-            )}
+            // A cached run is not live progress while the transport is down.
+            activeRun={
+              isConnectionAbnormal(view.header.connectionKind)
+                ? undefined
+                : view.snapshot?.runs.find(
+                    (run) =>
+                      run.sessionId === view.composer.activeSessionId &&
+                      run.id === view.composer.activeRunId,
+                  )
+            }
             isRunning={
               view.composer.isRunning &&
               !interactions.subagentState.list?.waiting
