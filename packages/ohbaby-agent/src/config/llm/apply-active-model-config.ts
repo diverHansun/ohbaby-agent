@@ -131,6 +131,16 @@ export async function probeActiveModelContextWindow(
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     envPath,
   });
+  if (apiKey.warning)
+    return {
+      ...resolveContextWindow({ userContextWindowTokens: contextWindowTokens }),
+      warning: "Configured API key was not found; model detection was skipped.",
+      reasoning: {
+        status: "unknown",
+        efforts: [],
+        reason: "missing-credential",
+      },
+    };
   let current;
   try {
     const raw = await loadProjectedModelJson({
@@ -613,7 +623,11 @@ export async function startModelEntryDiscovery(
         ): Promise<boolean> =>
           writeModelEntryMetadata(
             id,
-            { generation: state.generation, routeKey: state.routeKey },
+            {
+              generation: state.generation,
+              routeKey: state.routeKey,
+              signal: state.controller.signal,
+            },
             data,
             options,
           );

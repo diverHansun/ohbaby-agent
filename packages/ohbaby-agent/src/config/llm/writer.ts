@@ -654,6 +654,7 @@ export function writeModelEntryMetadata(
   expected: {
     generation: number;
     routeKey: string;
+    signal?: AbortSignal;
   },
   metadata: {
     contextWindowTokens?: number;
@@ -663,9 +664,12 @@ export function writeModelEntryMetadata(
   options: ModelSettingsOptions = {},
 ): Promise<boolean> {
   return coordinateModelConfig(options.modelJsonPath, async () => {
+    // A replacement refresh can cancel this task while its write awaits the lock.
+    if (expected.signal?.aborted) return false;
     const document = await readModelDocument(options);
     const entry = document.models.find((e) => e.id === id);
     if (
+      expected.signal?.aborted ||
       !entry ||
       !configurationComplete(entry) ||
       modelEntryGeneration(id, options) !== expected.generation ||

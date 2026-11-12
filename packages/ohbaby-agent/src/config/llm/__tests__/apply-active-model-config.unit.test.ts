@@ -594,6 +594,63 @@ describe("applyActiveModelConfig", () => {
     );
   });
 
+  it.each([
+    { contextWindowTokens: undefined, source: "default", expected: 300_000 },
+    { contextWindowTokens: 96_000, source: "user", expected: 96_000 },
+  ])(
+    "skips standalone probing with a missing credential reference and keeps the $source context",
+    async ({ contextWindowTokens, source, expected }) => {
+      const result = await probeActiveModelContextWindow({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.ai/api/anthropic",
+        interfaceProvider: "anthropic",
+        model: "anthropic/claude-sonnet-4.6",
+        contextWindowTokens,
+        modelJsonPath,
+        envPath,
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        contextWindowSource: source,
+        contextWindowTokens: expected,
+        reasoning: {
+          status: "unknown",
+          efforts: [],
+          reason: "missing-credential",
+        },
+      });
+      expect(result.warning).toMatch(/key/i);
+      expect(result.warning).not.toMatch(/placeholder/i);
+      await expect(fs.stat(modelJsonPath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
+  it("allows standalone probing without a credential reference", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        data: [{ id: "local-model", context_length: 65_536 }],
+      }),
+    );
+
+    const result = await probeActiveModelContextWindow({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
+      model: "local-model",
+      modelJsonPath,
+      envPath,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      contextWindowSource: "detected",
+      contextWindowTokens: 65_536,
+    });
+    expect(result.warning).toBeUndefined();
+  });
+
   it("saves a missing credential and reports it in terminal discovery state", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response("unauthorized", { status: 401 }),
