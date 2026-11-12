@@ -1428,6 +1428,7 @@ export function OhbabyTerminalApp({
               )}
             />
             <CommandPanelManager
+              subscribeEvents={subscribeEvents}
               fullscreen={fullscreen}
               catalog={catalog}
               client={client}

@@ -22,6 +22,9 @@ describe("prompt two-line footer", () => {
             model={{
               id: "test",
               source: "default",
+              effectiveContextWindowTokens: 100000,
+              effectiveMaxOutputTokens: 4096,
+              contextDiscovery: { status: "unknown" },
               provider: "test",
               baseUrl: "https://example.test",
               interfaceProvider: "anthropic",

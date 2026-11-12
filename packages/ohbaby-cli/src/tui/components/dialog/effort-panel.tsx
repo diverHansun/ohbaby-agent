@@ -48,6 +48,7 @@ export function EffortPanel({
   onClose,
 }: EffortPanelProps): ReactElement {
   const theme = useTheme();
+  const [notice, setNotice] = useState<string | undefined>();
   const [view, setView] = useState<UiReasoningCapabilityView | null>(null);
   const [current, setCurrent] = useState<UiReasoningConfig | null>(
     pendingReasoning,
@@ -90,6 +91,7 @@ export function EffortPanel({
                 option.reasoning.effort === active.effort,
           );
           setView(capability);
+          setNotice(model?.reasoningNotice);
           setCurrent(preference);
           selectedIndexRef.current = Math.max(0, index);
           setSelectedIndex(selectedIndexRef.current);
@@ -177,6 +179,14 @@ export function EffortPanel({
       {choices.length > 0 ? (
         <Text dimColor>
           ↑↓ select · Enter save · Esc close{saving ? " · Saving..." : ""}
+        </Text>
+      ) : null}
+      {view?.reason ? (
+        <Text color={theme.status.warning}>{view.reason}</Text>
+      ) : null}
+      {notice === "unsupported-anthropic-effort-cleared" ? (
+        <Text color={theme.status.warning}>
+          Reasoning Effort: unsupported Anthropic preference cleared.
         </Text>
       ) : null}
       {error ? <Text color={theme.status.error}>{error}</Text> : null}

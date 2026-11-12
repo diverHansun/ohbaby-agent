@@ -4310,9 +4310,11 @@ describe("OhbabyTerminalApp", () => {
     client.getCurrentModel.mockResolvedValue({
       apiKeyEnv: "ZENMUX_API_KEY",
       baseUrl: "https://zenmux.ai/api/anthropic",
-      contextWindowTokens: 128_000,
+      detectedContextWindowTokens: 128_000,
+      contextDiscovery: { status: "identified" },
+      effectiveContextWindowTokens: 128_000,
+      effectiveMaxOutputTokens: 32768,
       interfaceProvider: "anthropic",
-      maxOutputTokens: 8192,
       model: "glm-5.1",
       provider: "zenmux",
     });
@@ -4342,9 +4344,10 @@ describe("OhbabyTerminalApp", () => {
     expect(frame).toContain("API key value");
     expect(frame).toMatch(/Model name\s+glm-5\.1/u);
     expect(frame).toContain("Context window");
-    expect(frame).toContain("optional 128000");
+    expect(frame).toContain("Automatic: 128000 tokens");
+    expect(frame).toMatch(/Context window\s+optional\s+· Automatic:/u);
     expect(frame).toContain("Max output tokens");
-    expect(frame).toContain("optional 8192");
+    expect(frame).toMatch(/Max output tokens\s+optional\s+│/u);
     expect(client.connectModel).not.toHaveBeenCalled();
     app.unmount();
   });

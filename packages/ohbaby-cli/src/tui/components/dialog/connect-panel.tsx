@@ -6,6 +6,8 @@ import type {
   UiConnectModelInput,
   UiConnectModelInterfaceProvider,
   UiRunStatus,
+  UiEventHandler,
+  UiUnsubscribe,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useContext, useEffect, useRef, useState } from "react";
@@ -82,16 +84,24 @@ const EMPTY_DRAFT: ConnectDraft = {
 
 export interface ConnectPanelProps {
   readonly client: CoreAPI;
+  readonly subscribeEvents?: (handler: UiEventHandler) => UiUnsubscribe;
   readonly onClose: () => void;
   readonly runtime: UiRunStatus;
 }
 
 export function ConnectPanel({
   client,
+  subscribeEvents,
   onClose,
 }: ConnectPanelProps): ReactElement {
   const theme = useTheme();
   const bodyRows = useContext(OverlayBodyRowsContext);
+  const [currentModel, setCurrentModel] = useState<UiCurrentModelConfig | null>(
+    null,
+  );
+  const clearedOverridesRef = useRef(
+    new Set<"contextWindowTokens" | "maxOutputTokens">(),
+  );
   const [draft, setDraft] = useState<ConnectDraft>(EMPTY_DRAFT);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editingField, setEditingField] = useState<ConnectFieldKey | null>(
@@ -142,21 +152,33 @@ export function ConnectPanel({
   };
 
   useEffect(() => {
-    let isStale = false;
-    void client
-      .getCurrentModel()
-      .then((current) => {
-        if (isStale || current === null || hasLocalEditRef.current) {
-          return;
-        }
-        replaceDraft(draftFromCurrentModel(current));
-      })
-      .catch(() => undefined);
-
-    return (): void => {
-      isStale = true;
+    let active = true;
+    let generation = 0;
+    let initialized = false;
+    const refresh = (): void => {
+      const request = ++generation;
+      void client
+        .getCurrentModel()
+        .then((current) => {
+          if (!active || request !== generation) return;
+          setCurrentModel(current);
+          if (!initialized && current !== null && !hasLocalEditRef.current) {
+            replaceDraft(draftFromCurrentModel(current));
+          }
+          initialized = true;
+        })
+        .catch(() => undefined);
     };
-  }, [client]);
+    const unsubscribe = subscribeEvents?.((event) => {
+      if (event.type === "model.invalidated") refresh();
+    });
+    refresh();
+    return (): void => {
+      active = false;
+      generation++;
+      unsubscribe?.();
+    };
+  }, [client, subscribeEvents]);
 
   const startSave = (save: PendingSave): void => {
     inFlightSaveKeyRef.current = save.key;
@@ -202,7 +224,7 @@ export function ConnectPanel({
   };
 
   const maybeSave = (nextDraft: ConnectDraft): void => {
-    const payload = buildPayload(nextDraft);
+    const payload = buildPayload(nextDraft, clearedOverridesRef.current);
     if (payload.kind === "incomplete") {
       latestSaveKeyRef.current = null;
       pendingSaveRef.current = null;
@@ -260,11 +282,23 @@ export function ConnectPanel({
             activeEditingField,
             editValueRef.current,
           );
+          const changed =
+            nextDraft[activeEditingField] !==
+            draftRef.current[activeEditingField];
+          if (
+            changed &&
+            (activeEditingField === "contextWindowTokens" ||
+              activeEditingField === "maxOutputTokens")
+          ) {
+            if (nextDraft[activeEditingField] === "")
+              clearedOverridesRef.current.add(activeEditingField);
+            else clearedOverridesRef.current.delete(activeEditingField);
+          }
           hasLocalEditRef.current = true;
           replaceDraft(nextDraft);
           replaceEditingField(null);
           replaceEditValue("");
-          maybeSave(nextDraft);
+          if (changed) maybeSave(nextDraft);
           return;
         }
         if (activeEditingField === "interfaceProvider") {
@@ -332,7 +366,8 @@ export function ConnectPanel({
           bodyRows -
             2 -
             (editingField === "interfaceProvider" ? PROTOCOLS.length : 0) -
-            (urlPathWarning ? 1 : 0),
+            (urlPathWarning ? 1 : 0) -
+            (currentModel?.reasoningNotice ? 1 : 0),
         );
   const fieldStart = Math.max(0, selectedIndex - fieldRows + 1);
   return (
@@ -342,6 +377,7 @@ export function ConnectPanel({
           (field, index) => (
             <ConnectFieldRow
               draft={draft}
+              currentModel={currentModel}
               editValue={editValue}
               editingField={editingField}
               field={field}
@@ -373,6 +409,15 @@ export function ConnectPanel({
           {urlPathWarning}
         </Text>
       ) : null}
+      {currentModel?.reasoningNotice ===
+      "unsupported-anthropic-effort-cleared" ? (
+        <Text
+          color={theme.status.warning}
+          wrap={bodyRows === undefined ? "wrap" : "truncate-end"}
+        >
+          Reasoning Effort: unsupported Anthropic preference cleared.
+        </Text>
+      ) : null}
       {bodyRows !== undefined ? (
         <Text dimColor wrap="truncate-end">
           ↑↓ fields · Enter edit · Esc back · {fieldStart + 1}–
@@ -393,12 +438,14 @@ export function ConnectPanel({
 
 function ConnectFieldRow({
   draft,
+  currentModel,
   editValue,
   editingField,
   field,
   isSelected,
 }: {
   readonly draft: ConnectDraft;
+  readonly currentModel: UiCurrentModelConfig | null;
   readonly editValue: string;
   readonly editingField: ConnectFieldKey | null;
   readonly field: ConnectField;
@@ -427,6 +474,16 @@ function ConnectFieldRow({
       <Text bold>{label}</Text>
       {field.optional ? <Text dimColor>optional </Text> : null}
       {displayValue}
+      {field.key === "contextWindowTokens" && currentModel ? (
+        <Text dimColor>
+          {currentModel.detectedContextWindowTokens === undefined
+            ? ` · Automatic: ${currentModel.contextDiscovery.status === "detecting" ? "detecting" : "unknown"}`
+            : ` · Automatic: ${String(currentModel.detectedContextWindowTokens)} tokens`}
+          {currentModel.contextDiscovery.reason
+            ? ` (${currentModel.contextDiscovery.reason})`
+            : ""}
+        </Text>
+      ) : null}
       {isEditing ? <Text>▏ [editing]</Text> : null}
       {isEditing && field.key === "interfaceProvider" ? (
         <Text dimColor> ↑/↓ choose · Enter commit · Esc cancel</Text>
@@ -496,7 +553,10 @@ function draftFromCurrentModel(current: UiCurrentModelConfig): ConnectDraft {
   };
 }
 
-function buildPayload(draft: ConnectDraft): PayloadBuildResult {
+function buildPayload(
+  draft: ConnectDraft,
+  clearedOverrides: ReadonlySet<"contextWindowTokens" | "maxOutputTokens">,
+): PayloadBuildResult {
   const provider = draft.provider.trim();
   const baseUrl = draft.baseUrl.trim();
   const interfaceProvider =
@@ -529,9 +589,17 @@ function buildPayload(draft: ConnectDraft): PayloadBuildResult {
       ...(apiKey === "" ? {} : { apiKey }),
       ...(apiKeyEnv === "" ? {} : { apiKeyEnv }),
       baseUrl,
-      contextWindowTokens: contextWindowTokens.value,
+      ...(contextWindowTokens.value !== undefined
+        ? { contextWindowTokens: contextWindowTokens.value }
+        : clearedOverrides.has("contextWindowTokens")
+          ? { contextWindowTokens: null }
+          : {}),
       interfaceProvider,
-      maxOutputTokens: maxOutputTokens.value,
+      ...(maxOutputTokens.value !== undefined
+        ? { maxOutputTokens: maxOutputTokens.value }
+        : clearedOverrides.has("maxOutputTokens")
+          ? { maxOutputTokens: null }
+          : {}),
       model,
       provider,
     },
@@ -553,7 +621,7 @@ function parseOptionalPositiveInteger(
     return { kind: "error", message: `${label} must be a positive integer` };
   }
   const parsed = Number.parseInt(trimmed, 10);
-  return parsed > 0
+  return Number.isSafeInteger(parsed) && parsed > 0
     ? { kind: "ok", value: parsed }
     : { kind: "error", message: `${label} must be a positive integer` };
 }

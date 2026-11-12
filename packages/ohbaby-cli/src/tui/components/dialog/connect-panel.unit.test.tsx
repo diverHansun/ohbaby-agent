@@ -1,5 +1,5 @@
 import { render } from "ink-testing-library";
-import type { CoreAPI } from "ohbaby-sdk";
+import type { CoreAPI, UiEventHandler } from "ohbaby-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { ConnectPanel } from "./connect-panel.js";
 
@@ -12,6 +12,151 @@ async function key(
 }
 
 describe("ConnectPanel protocols", () => {
+  it("refreshes automatic evidence without replacing an in-progress override draft", async () => {
+    let handler: UiEventHandler = () => undefined;
+    let detected = 100000;
+    const connectModel = vi.fn((_input: unknown) =>
+      Promise.resolve({ saved: true }),
+    );
+    const client = {
+      connectModel,
+      getCurrentModel: vi.fn(() =>
+        Promise.resolve({
+          provider: "fixture",
+          model: "model",
+          baseUrl: "https://fixture.test/v1",
+          interfaceProvider: "openai-compatible",
+          detectedContextWindowTokens: detected,
+          contextDiscovery: { status: "identified" },
+          effectiveContextWindowTokens: detected,
+          effectiveMaxOutputTokens: 32768,
+        }),
+      ),
+    } as unknown as CoreAPI;
+    const app = render(
+      <ConnectPanel
+        client={client}
+        subscribeEvents={(next) => {
+          handler = next;
+          return (): void => undefined;
+        }}
+        onClose={vi.fn()}
+        runtime={{ kind: "idle" }}
+      />,
+    );
+    await until(() => (app.lastFrame() ?? "").includes("100000 tokens"));
+    for (let index = 0; index < 5; index += 1) await key(app, "\u001b[B");
+    await key(app, "\r");
+    await key(app, "100000");
+    detected = 200000;
+    handler({ type: "model.invalidated" });
+    await until(() => (app.lastFrame() ?? "").includes("200000 tokens"));
+    expect(app.lastFrame()).toContain("100000");
+    await key(app, "\r");
+    expect(connectModel).toHaveBeenLastCalledWith(
+      expect.objectContaining({ contextWindowTokens: 100000 }),
+    );
+    app.unmount();
+  });
+
+  it("shows automatic capacity and cleanup notice without saving effective values", async () => {
+    const connectModel = vi.fn((_input: unknown) =>
+      Promise.resolve({ saved: true }),
+    );
+    const client = {
+      connectModel,
+      getCurrentModel: vi.fn(() =>
+        Promise.resolve({
+          provider: "fixture",
+          model: "model",
+          baseUrl: "https://fixture.test/v1",
+          interfaceProvider: "anthropic",
+          effectiveContextWindowTokens: 1000000,
+          effectiveMaxOutputTokens: 32768,
+          detectedContextWindowTokens: 1000000,
+          contextDiscovery: {
+            status: "identified",
+            reason: "Latest lookup failed",
+          },
+          reasoningNotice: "unsupported-anthropic-effort-cleared",
+        }),
+      ),
+    } as unknown as CoreAPI;
+    const app = render(
+      <ConnectPanel
+        client={client}
+        onClose={vi.fn()}
+        runtime={{ kind: "idle" }}
+      />,
+    );
+    await until(() => (app.lastFrame() ?? "").includes("fixture"));
+    expect(app.lastFrame()).toContain("Automatic: 1000000 tokens");
+    expect(app.lastFrame()).toContain("Latest lookup failed");
+    expect(app.lastFrame()).toMatch(/Reasoning Effort.*cleared/);
+    expect(app.lastFrame()).not.toContain("32768");
+    await key(app, "\r");
+    await key(app, "\r");
+    expect(connectModel).not.toHaveBeenCalled();
+    await key(app, "\r");
+    await key(app, "2");
+    await key(app, "\r");
+    expect(connectModel).toHaveBeenCalledWith(
+      expect.not.objectContaining({ contextWindowTokens: 1000000 }),
+    );
+    expect(connectModel.mock.calls[0]?.[0]).not.toHaveProperty(
+      "maxOutputTokens",
+    );
+    app.unmount();
+  });
+
+  it("sends null when saved token overrides are cleared and preserves the other override", async () => {
+    const connectModel = vi.fn((_input: unknown) =>
+      Promise.resolve({ saved: true }),
+    );
+    const client = {
+      connectModel,
+      getCurrentModel: vi.fn(() =>
+        Promise.resolve({
+          provider: "fixture",
+          model: "model",
+          baseUrl: "https://fixture.test/v1",
+          interfaceProvider: "openai-compatible",
+          contextWindowTokens: 48000,
+          maxOutputTokens: 4096,
+          effectiveContextWindowTokens: 48000,
+          effectiveMaxOutputTokens: 4096,
+          contextDiscovery: { status: "unknown" },
+        }),
+      ),
+    } as unknown as CoreAPI;
+    const app = render(
+      <ConnectPanel
+        client={client}
+        onClose={vi.fn()}
+        runtime={{ kind: "idle" }}
+      />,
+    );
+    await until(() => (app.lastFrame() ?? "").includes("fixture"));
+    for (let index = 0; index < 5; index += 1) await key(app, "\u001b[B");
+    await key(app, "\r");
+    for (let index = 0; index < 5; index += 1) await key(app, "\b");
+    await key(app, "\r");
+    expect(connectModel).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        contextWindowTokens: null,
+        maxOutputTokens: 4096,
+      }),
+    );
+    await key(app, "\u001b[B");
+    await key(app, "\r");
+    for (let index = 0; index < 4; index += 1) await key(app, "\b");
+    await key(app, "\r");
+    expect(connectModel).toHaveBeenLastCalledWith(
+      expect.objectContaining({ maxOutputTokens: null }),
+    );
+    app.unmount();
+  });
+
   it("shows a request-path warning before saving and still passes the URL through", async () => {
     const connectModel = vi.fn(() => Promise.resolve({ saved: true }));
     const client = {
@@ -23,6 +168,9 @@ describe("ConnectPanel protocols", () => {
           baseUrl: "https://fixture.test/v1",
           interfaceProvider: "openai-compatible",
           contextWindowTokens: 8192,
+          effectiveContextWindowTokens: 8192,
+          effectiveMaxOutputTokens: 4096,
+          contextDiscovery: { status: "unknown" },
         }),
       ),
     } as unknown as CoreAPI;
@@ -152,6 +300,9 @@ describe("ConnectPanel protocols", () => {
           baseUrl: "https://fixture.test/v1",
           interfaceProvider: "openai-responses",
           contextWindowTokens: 8192,
+          effectiveContextWindowTokens: 8192,
+          effectiveMaxOutputTokens: 4096,
+          contextDiscovery: { status: "unknown" },
         }),
       ),
     } as unknown as CoreAPI;

@@ -7,6 +7,9 @@ import { useFooterModel } from "./use-footer-model.js";
 const model = (name: string): UiCurrentModelConfig => ({
   id: name,
   source: "default",
+  effectiveContextWindowTokens: 100000,
+  effectiveMaxOutputTokens: 4096,
+  contextDiscovery: { status: "unknown" },
   provider: "test",
   baseUrl: "https://example.test",
   interfaceProvider: "anthropic",

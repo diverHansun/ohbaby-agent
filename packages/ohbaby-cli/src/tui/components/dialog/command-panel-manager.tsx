@@ -5,6 +5,8 @@ import type {
   UiContextWindowUsage,
   UiRunStatus,
   UiReasoningConfig,
+  UiEventHandler,
+  UiUnsubscribe,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useRef, useState } from "react";
@@ -54,6 +56,7 @@ export interface CommandPanelManagerProps {
   readonly fullscreen?: boolean;
   readonly catalog: UiCommandCatalog | null;
   readonly client: CoreAPI;
+  readonly subscribeEvents?: (handler: UiEventHandler) => UiUnsubscribe;
   readonly contextWindowUsage: UiContextWindowUsage | null;
   readonly onClose: () => void;
   readonly onEffortSelect: (reasoning: UiReasoningConfig) => Promise<void>;
@@ -70,6 +73,7 @@ export function CommandPanelManager({
   fullscreen = false,
   catalog,
   client,
+  subscribeEvents,
   contextWindowUsage,
   onClose,
   onEffortSelect,
@@ -179,7 +183,12 @@ export function CommandPanelManager({
           runtime={runtime}
         />
       ) : (
-        <ConnectPanel client={client} onClose={onClose} runtime={runtime} />
+        <ConnectPanel
+          client={client}
+          subscribeEvents={subscribeEvents}
+          onClose={onClose}
+          runtime={runtime}
+        />
       );
     return (
       <OverlayCard

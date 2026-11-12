@@ -26,7 +26,7 @@ export function footerEffort(
   preference?: UiReasoningConfig | null,
 ): string {
   const view = model?.reasoning;
-  if (view?.status !== "identified" || view.stale) return "unknown";
+  if (view?.status !== "identified") return "unknown";
   if (view.mode === "none") return "n/a";
   const resolve = (choice?: UiReasoningConfig | null): string | undefined => {
     if (!choice) return undefined;

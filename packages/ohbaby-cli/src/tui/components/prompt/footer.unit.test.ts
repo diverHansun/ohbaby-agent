@@ -6,6 +6,9 @@ import { visibleWidth } from "../../render/wrap.js";
 const model: UiCurrentModelConfig = {
   id: "test",
   source: "default",
+  effectiveContextWindowTokens: 100000,
+  effectiveMaxOutputTokens: 4096,
+  contextDiscovery: { status: "unknown" },
   provider: "test",
   baseUrl: "https://example.test",
   interfaceProvider: "anthropic",
