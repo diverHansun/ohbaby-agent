@@ -20,12 +20,14 @@ import { InMemoryShellJobStore } from "../shell-jobs/store.js";
 import { createBuiltinTools } from "./index.js";
 
 class FakeChildProcess extends EventEmitter {
+  treeState: "running" | "stopped" = "running";
   readonly pid = 123;
   readonly stdin = { end: vi.fn() };
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
 
   override emit(eventName: string | symbol, ...args: unknown[]): boolean {
+    if (eventName === "exit") this.treeState = "stopped";
     const emitted = super.emit(eventName, ...args);
     if (eventName === "exit") {
       super.emit("close", ...args);
@@ -34,6 +36,7 @@ class FakeChildProcess extends EventEmitter {
   }
 
   emitExit(exitCode: number | null, signal: NodeJS.Signals | null): void {
+    this.treeState = "stopped";
     super.emit("exit", exitCode, signal);
     super.emit("close", exitCode, signal);
   }
@@ -813,6 +816,7 @@ describe("bash builtin tool", () => {
       const store = new InMemoryShellJobStore();
       const jobId = `timeout-case-${String(index)}`;
       const registry = new ShellJobRegistry({
+        probeTree: () => child.treeState,
         store,
         createJobId: (): string => jobId,
         killTree: vi.fn(),
@@ -848,7 +852,10 @@ describe("bash builtin tool", () => {
 
   it("returns a single dispatch receipt when the promoted command has no output", async () => {
     const child = new FakeChildProcess();
-    const registry = new ShellJobRegistry({ killTree: vi.fn() });
+    const registry = new ShellJobRegistry({
+      probeTree: () => child.treeState,
+      killTree: vi.fn(),
+    });
     const bash = createBashTool({
       registry,
       spawn: () => child as unknown as ChildProcess,
@@ -875,6 +882,7 @@ describe("bash builtin tool", () => {
     const store = new InMemoryShellJobStore();
     vi.spyOn(store, "promote").mockRejectedValue(new Error("write failed"));
     const registry = new ShellJobRegistry({
+      probeTree: () => child.treeState,
       store,
       killTree: (): void => {
         child.emitExit(null, "SIGTERM");

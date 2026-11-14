@@ -13,12 +13,14 @@ import type { KillTreeResult } from "../shell/process.js";
 import { ShellJobRegistry } from "./registry.js";
 
 class FakeChild extends EventEmitter {
+  treeState: "running" | "stopped" = "running";
   readonly pid = 42;
   readonly stdin = { end: vi.fn() };
   readonly stdout = Object.assign(new EventEmitter(), { destroy: vi.fn() });
   readonly stderr = Object.assign(new EventEmitter(), { destroy: vi.fn() });
 
   override emit(eventName: string | symbol, ...args: unknown[]): boolean {
+    if (eventName === "exit") this.treeState = "stopped";
     const emitted = super.emit(eventName, ...args);
     if (eventName === "exit") {
       super.emit("close", ...args);
@@ -27,6 +29,7 @@ class FakeChild extends EventEmitter {
   }
 
   emitExit(exitCode: number | null, signal: NodeJS.Signals | null): void {
+    this.treeState = "stopped";
     super.emit("exit", exitCode, signal);
     super.emit("close", exitCode, signal);
   }
@@ -1232,6 +1235,7 @@ describe("foreground promotion", () => {
       const child = new FakeChild();
       const detached = vi.fn();
       const registry = new ShellJobRegistry({
+        probeTree: () => child.treeState,
         killTree: (): ReturnType<ShellJobRegistryOptions["killTree"]> => {
           child.emitExit(null, "SIGTERM");
         },
@@ -1262,6 +1266,7 @@ describe("foreground promotion", () => {
     const child = new FakeChild();
     const detached = vi.fn();
     const registry = new ShellJobRegistry({
+      probeTree: () => child.treeState,
       killTree: (): ReturnType<ShellJobRegistryOptions["killTree"]> => {
         child.emitExit(null, "SIGTERM");
       },
@@ -1403,7 +1408,11 @@ describe("promotion commit ordering", () => {
       child.emitExit(null, "SIGTERM");
     });
     const detached = vi.fn();
-    const registry = new ShellJobRegistry({ store, killTree });
+    const registry = new ShellJobRegistry({
+      probeTree: () => child.treeState,
+      store,
+      killTree,
+    });
     try {
       const started = await registry.start({
         child: () => child as unknown as ChildProcess,
