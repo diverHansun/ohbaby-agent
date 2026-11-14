@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import type { UiBackendClient } from "ohbaby-sdk";
 import { createMockRuntime } from "../../../dev/mock-runtime.js";
 import { OhbabyWebApp } from "../../App.js";
+import { STOP_REQUEST_TIMEOUT_MS } from "../../shared/stop-request.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -15,7 +16,39 @@ afterEach(() => {
   for (const cleanup of mounted.splice(0)) cleanup();
   localStorage.clear();
   sessionStorage.clear();
+  vi.restoreAllMocks();
 });
+
+type StopInput = Parameters<NonNullable<UiBackendClient["stopShellJob"]>>[0];
+
+/** A stop that never answers: like fetch, it fails once its timeout fires. */
+function unanswered(input: StopInput): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    input.signal?.addEventListener("abort", () => {
+      reject(new DOMException("signal timed out", "TimeoutError"));
+    });
+  });
+}
+
+/** Takes over the next `AbortSignal.timeout`; the test decides when it fires. */
+function controlTimeout(): {
+  readonly spy: MockInstance<(milliseconds: number) => AbortSignal>;
+  readonly fire: () => Promise<void>;
+} {
+  const timeout = new AbortController();
+  const spy = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockReturnValueOnce(timeout.signal);
+  return {
+    spy,
+    fire: async (): Promise<void> => {
+      await act(async () => {
+        timeout.abort();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    },
+  };
+}
 
 /** Lets the mock's timers and React settle until `check` passes. */
 async function until(check: () => boolean, timeout = 3000): Promise<void> {
@@ -189,6 +222,55 @@ describe("Background tasks page", () => {
       rowFor(element, "Watch tests").querySelector(".ohb-bgtask-cancel"),
     ).toBeNull();
     expect(rowFor(element, "Watch tests").textContent).not.toContain("Failed");
+  });
+
+  it("gives Cancel back with a notice when the stop gets no answer", async () => {
+    const timeout = controlTimeout();
+    const { element, stop } = await mount("bg-running");
+    await openTasksPage(element);
+    stop.mockImplementationOnce(unanswered);
+    await click(button(element, "Cancel Watch tests"));
+    expect(timeout.spy).toHaveBeenCalledWith(STOP_REQUEST_TIMEOUT_MS);
+    expect(button(element, "Cancelling Watch tests")?.disabled).toBe(true);
+
+    await timeout.fire();
+    expect(element.querySelector('[role="alert"]')?.textContent).toBe(
+      "System didn't respond to Cancel. Try again.",
+    );
+    const cancel = button(element, "Cancel Watch tests");
+    expect(cancel?.disabled).toBe(false);
+
+    // Trying again sends a new request and clears the notice.
+    await click(cancel);
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(element.querySelector('[role="alert"]')).toBeNull();
+    await until(() =>
+      [...element.querySelectorAll(".ohb-bgtask-group h3")].some(
+        (heading) => heading.textContent === "Done4",
+      ),
+    );
+  });
+
+  it("says nothing when the list saw the task end before the stop timed out", async () => {
+    const timeout = controlTimeout();
+    const { element, stop } = await mount("bg-running");
+    await openTasksPage(element);
+    const backend = stop.getMockImplementation();
+    if (!backend) throw new Error("missing stop");
+    // The backend stops the task, but its answer never comes back.
+    stop.mockImplementationOnce(async (input: StopInput) => {
+      await backend(input);
+      return unanswered(input);
+    });
+    await click(button(element, "Cancel Watch tests"));
+    await until(() =>
+      [...element.querySelectorAll(".ohb-bgtask-group h3")].some(
+        (heading) => heading.textContent === "Done4",
+      ),
+    );
+
+    await timeout.fire();
+    expect(element.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("shows nothing for a chat that only ran foreground commands", async () => {

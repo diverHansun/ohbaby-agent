@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, useState, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import type {
   UiBackendClient,
   UiEvent,
@@ -17,6 +17,7 @@ import type { SubagentReadingCache } from "../../session/SubagentConversationBod
 import { createMockRuntime } from "../../../dev/mock-runtime.js";
 import { OhbabyWebApp } from "../../App.js";
 import type { SubagentAnchor } from "../side-pages.js";
+import { STOP_REQUEST_TIMEOUT_MS } from "../../shared/stop-request.js";
 import { useSubagentInstances } from "../../shared/subagent-instances.js";
 import { SubagentsPage } from "./SubagentsPage.js";
 
@@ -29,7 +30,38 @@ afterEach(() => {
   for (const cleanup of mounted.splice(0)) cleanup();
   localStorage.clear();
   sessionStorage.clear();
+  vi.restoreAllMocks();
 });
+
+/** A stop that never answers: like fetch, it fails once its timeout fires. */
+function unanswered(input: UiSubagentStopInput): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    input.signal?.addEventListener("abort", () => {
+      reject(new DOMException("signal timed out", "TimeoutError"));
+    });
+  });
+}
+
+/** Takes over the next `AbortSignal.timeout`; the test decides when it fires. */
+function controlTimeout(): {
+  readonly spy: MockInstance<(milliseconds: number) => AbortSignal>;
+  readonly fire: () => Promise<void>;
+} {
+  const timeout = new AbortController();
+  const spy = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockReturnValueOnce(timeout.signal);
+  return {
+    spy,
+    fire: async (): Promise<void> => {
+      await act(async () => {
+        timeout.abort();
+        await Promise.resolve();
+      });
+      await flush();
+    },
+  };
+}
 
 function instance(
   subagentId: string,
@@ -464,6 +496,7 @@ describe("Subagents page", () => {
       rootSessionId: "root",
       subagentId: "reviewer",
       expectedExecutionId: "reviewer-exec",
+      signal: expect.any(AbortSignal) as AbortSignal,
     });
     expect(find(element, "Stopping…").disabled).toBe(true);
     fake.list.mockResolvedValue(
@@ -569,6 +602,73 @@ describe("Subagents page", () => {
     await click(find(element, "Stop"));
     expect(find(element, "Stop").disabled).toBe(false);
     expect(element.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("gives Stop back with a notice when the stop gets no answer", async () => {
+    const fake = fakeClient();
+    const running = instance("reviewer", {
+      status: "running",
+      currentExecutionId: "reviewer-exec",
+    });
+    fake.list.mockResolvedValue(snapshot(1, [running]));
+    const { element } = await mount(fake.client);
+    await click(find(element, "reviewer"));
+    const timeout = controlTimeout();
+    fake.stop.mockImplementationOnce(unanswered);
+    await click(find(element, "Stop"));
+    expect(timeout.spy).toHaveBeenCalledWith(STOP_REQUEST_TIMEOUT_MS);
+    expect(find(element, "Stopping…").disabled).toBe(true);
+
+    await timeout.fire();
+    expect(element.querySelector('[role="alert"]')?.textContent).toBe(
+      "System didn't respond to Stop. Try again.",
+    );
+    expect(find(element, "Stop").disabled).toBe(false);
+
+    // Trying again sends a new request and clears the notice.
+    fake.stop.mockResolvedValueOnce({
+      rootSessionId: "root",
+      subagentId: "reviewer",
+      expectedExecutionId: "reviewer-exec",
+      outcome: "accepted",
+      instance: running,
+    });
+    await click(find(element, "Stop"));
+    expect(fake.stop).toHaveBeenCalledTimes(2);
+    expect(element.querySelector('[role="alert"]')).toBeNull();
+    expect(find(element, "Stopping…").disabled).toBe(true);
+  });
+
+  it("says nothing when the list shows the stop before it timed out", async () => {
+    const fake = fakeClient();
+    const running = instance("reviewer", {
+      status: "running",
+      currentExecutionId: "reviewer-exec",
+    });
+    fake.list.mockResolvedValue(snapshot(1, [running]));
+    const { element } = await mount(fake.client);
+    await click(find(element, "reviewer"));
+    const timeout = controlTimeout();
+    // The backend takes the stop, but its answer never comes back.
+    fake.stop.mockImplementationOnce(unanswered);
+    await click(find(element, "Stop"));
+    fake.list.mockResolvedValue(
+      snapshot(2, [{ ...running, status: "interrupted", settling: true }]),
+    );
+    await act(async () => {
+      fake.emit({
+        type: "subagent.instances.invalidated",
+        rootSessionId: "root",
+        runtimeEpoch: "epoch",
+        revision: 2,
+      });
+      await Promise.resolve();
+    });
+    await flush();
+
+    await timeout.fire();
+    expect(element.querySelector('[role="alert"]')).toBeNull();
+    expect(find(element, "Stopping…").disabled).toBe(true);
   });
 
   it("does not carry one chat's instances into another", async () => {

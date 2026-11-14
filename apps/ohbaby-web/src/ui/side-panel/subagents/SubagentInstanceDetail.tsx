@@ -20,6 +20,10 @@ import {
 } from "../../session/SubagentConversationBody.js";
 import { readableError } from "../../shared/error-text.js";
 import { IconButton } from "../../shared/IconButton.js";
+import {
+  isTimeout,
+  STOP_REQUEST_TIMEOUT_MS,
+} from "../../shared/stop-request.js";
 import { useDelayed } from "../../shared/use-delayed.js";
 import type { SubagentAnchor } from "../side-pages.js";
 import { stoppableExecutionId } from "./instance-status.js";
@@ -126,6 +130,9 @@ export function SubagentInstanceDetail(props: {
   // Stopping lasts until this execution has ended and cleaned up.
   const [stoppingExecutionId, setStoppingExecutionId] = useState<string>();
   const [stopError, setStopError] = useState<string>();
+  // A late answer reads this to see whether the list already shows the stop.
+  const latestInstance = useRef(instance);
+  latestInstance.current = instance;
   const executionId = stoppableExecutionId(instance);
   const stopping =
     instance.settling ||
@@ -141,6 +148,7 @@ export function SubagentInstanceDetail(props: {
         rootSessionId,
         subagentId: instance.subagentId,
         expectedExecutionId: target,
+        signal: AbortSignal.timeout(STOP_REQUEST_TIMEOUT_MS),
       });
       if (
         result.outcome === "not_running" ||
@@ -152,7 +160,12 @@ export function SubagentInstanceDetail(props: {
       // on (improve-2 B4); the refreshed list says what really happened.
       if (errorCode(error) !== "SUBAGENT_SNAPSHOT_CHANGED") {
         setStoppingExecutionId(undefined);
-        setStopError(errorText(error));
+        // An unanswered stop is worth retrying only while the list still
+        // shows this execution running with no stop under way.
+        const latest = latestInstance.current;
+        if (!isTimeout(error)) setStopError(errorText(error));
+        else if (!latest.settling && stoppableExecutionId(latest) === target)
+          setStopError("System didn't respond to Stop. Try again.");
       }
     } finally {
       props.onRefresh();

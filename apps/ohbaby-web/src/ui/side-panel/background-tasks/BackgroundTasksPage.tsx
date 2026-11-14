@@ -9,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -16,6 +17,10 @@ import {
   useShellJobReaderState,
   useShellJobRefresh,
 } from "../../shared/background-tasks.js";
+import {
+  isTimeout,
+  STOP_REQUEST_TIMEOUT_MS,
+} from "../../shared/stop-request.js";
 import { BackgroundTaskDetail } from "./BackgroundTaskDetail.js";
 import {
   BackgroundTaskList,
@@ -114,6 +119,9 @@ export function BackgroundTasksPage(props: {
   const [cancelling, setCancelling] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  // A late answer reads this to see whether the list has settled the task.
+  const cancellingRef = useRef(cancelling);
+  cancellingRef.current = cancelling;
   const [cancelError, setCancelError] = useState<string>();
   const [stopRefusals, setStopRefusals] = useState<
     ReadonlyMap<string, "not-found" | "other-backend">
@@ -176,7 +184,11 @@ export function BackgroundTasksPage(props: {
       return;
     }
     client
-      .stopShellJob({ rootSessionId, jobId: row.jobId })
+      .stopShellJob({
+        rootSessionId,
+        jobId: row.jobId,
+        signal: AbortSignal.timeout(STOP_REQUEST_TIMEOUT_MS),
+      })
       .then((result) => {
         if (result.outcome === "already-terminal") release(row.jobId);
         else settle([result.job]);
@@ -194,7 +206,12 @@ export function BackgroundTasksPage(props: {
           );
         } else if (code === "SHELL_JOB_CLEANUP_BUSY")
           setCancelError("ohbaby is already cleaning up this task.");
-        else if (code !== "SESSION_SCOPE_CHANGED")
+        else if (isTimeout(error)) {
+          // The list may have seen the task end meanwhile; then there is
+          // nothing to try again.
+          if (cancellingRef.current.has(row.jobId))
+            setCancelError("System didn't respond to Cancel. Try again.");
+        } else if (code !== "SESSION_SCOPE_CHANGED")
           setCancelError(
             error instanceof Error ? error.message : String(error),
           );

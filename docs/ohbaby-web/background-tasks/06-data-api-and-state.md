@@ -133,6 +133,8 @@ interface BackgroundTaskOutputView {
 - 返回 `accepted`：继续保持 cancelling，等列表或输出里这个任务的状态不再是 `running`，再从集合里移除。
 - 返回 `already-terminal`：从集合里移除，刷新列表。
 - 请求出错：从集合里移除，按 §4 显示。
+- 请求 10 秒没有回应：中止请求，从集合里移除，按钮恢复成 `Cancel`。后端正常 2 秒内就会回应（直接停止约 1.2 秒，接管旧任务也有上限），10 秒没回应说明请求丢了或服务卡住了。没有超时的话，按钮会一直停在 `Cancelling…`，用户也没法重试。
+- 超时前列表或输出已经看到任务结束（任务已经不在集合里），说明取消已经生效，只是响应没回来，这时不提示；否则按 §4 显示一行提示。重试是安全的：任务已结束时后端返回 `already-terminal`。
 - 这个集合挂在 Background tasks Tab 页面上，列表和详情共用。切换会话时清空。
 
 ### 3.6 时钟
@@ -148,6 +150,7 @@ interface BackgroundTaskOutputView {
 | `SHELL_JOB_CLEANUP_BUSY` | stop | 显示一行 `ohbaby is already cleaning up this task.`，刷新列表 | 2.2 / 2.3 取消失败 |
 | `SHELL_JOB_NOT_READY` | output | 不提示，下一次轮询再试 | 2.3 运行中 |
 | `SHELL_JOB_NOT_READY` | stop | 按网络错误处理（列表里的任务都已登记完成，正常情况下不会遇到） | 2.2 / 2.3 取消失败 |
+| 请求超时（10 秒没有回应） | stop | 恢复 Cancel，显示一行 `System didn't respond to Cancel. Try again.`，刷新列表；列表已经看到任务结束时不提示（§3.5） | 2.2 / 2.3 取消失败 |
 | `SESSION_SCOPE_CHANGED` | 所有接口 | 不提示，丢掉结果，等切换会话后的新请求 | — |
 | `SHELL_JOB_INVALID_QUERY` | 所有接口 | 按未知错误处理。出现它说明前端有缺陷，开发阶段就应该修掉 | 未知错误 |
 | 网络错误、断线、未知错误 | 所有接口 | 出错的位置显示一行 `readableError` 文案。加载类错误带 `Retry`；取消类错误不带，用户可以直接再点 Cancel。不能吞掉错误不提示 | 2.2、2.3 失败行 |

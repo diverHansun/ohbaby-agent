@@ -47,6 +47,8 @@
 - [ ] 在列表点 Cancel 后进入详情，详情里也是 `Cancelling…`。
 - [ ] `bg-cancel-errors`：`OTHER_BACKEND` 后 Cancel 消失并出现说明行；`CLEANUP_BUSY` 显示 `ohbaby is already cleaning up this task.`；`NOT_FOUND` 在详情里显示不存在；网络错误恢复 Cancel，列表顶部或标题区下方显示一行错误，没有 Retry。
 - [ ] 取消成功没有任何 Toast。
+- [ ] stop 请求 10 秒没有回应时，`Cancelling…` 恢复成可点的 `Cancel`，并显示一行 `System didn't respond to Cancel. Try again.`；再点会重新发请求，提示随之消失。
+- [ ] stop 已经生效、只是响应没回来时，行照常移到 Done，10 秒后也不出现上面的提示。
 
 ### UC-BGT-05 从 bash 工具卡打开
 
@@ -85,6 +87,7 @@
 | 没有任务的会话完全看不到入口；探测未知时不闪 | D1、04 §2.1 | 集成 |
 | 失效事件密集时请求节流且能完成 | 06 §3.1、§3.2 | 单元 + 集成 |
 | 取消只发一次请求，状态以后端为准 | UC-BGT-04、06 §3.4 | 集成 |
+| 取消请求没有回应时 10 秒后恢复按钮；已生效时不误报 | UC-BGT-04、06 §3.5 | 集成 |
 | 详情离开或任务结束后不再轮询 | 06 §3.3 | 集成 |
 | 任务结果消息不出现在对话里 | UC-BGT-06 | 集成 |
 | 筛选快速切换不串数据 | UC-BGT-02、06 §3.1 | 单元 + 集成 |
