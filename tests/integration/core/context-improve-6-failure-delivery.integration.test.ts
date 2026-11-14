@@ -1,3 +1,4 @@
+import { createRunInputCoordinator } from "../../../packages/ohbaby-agent/src/runtime/prompt-scheduler/run-input-coordinator.js";
 import {
   createTestContextManager as createContextManager,
   TestLifecycle as Lifecycle,
@@ -145,9 +146,6 @@ it("delivers a child compaction failure through the ordinary background result i
     }),
     prepareResult: (execution, signal) =>
       artifacts.prepare(execution, { signal }),
-    collectFacts: async () => {
-      throw new Error("Terminal child must not require running facts");
-    },
   });
   try {
     for (let group = 0; group < 8; group++) {
@@ -203,9 +201,15 @@ it("delivers a child compaction failure through the ordinary background result i
       runId: "parent-run",
       directory: rootDir,
       modelId: "fake-model",
-      currentRunInputs: coordinator.createPort({
-        sessionId: "parent",
+      currentRunInputs: createRunInputCoordinator({
         runId: "parent-run",
+        inputs,
+        sources: [
+          coordinator.createSource({
+            sessionId: "parent",
+            runId: "parent-run",
+          }),
+        ],
       }),
     });
     let parentNext = await parentLoop.next();

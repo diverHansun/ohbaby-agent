@@ -24,9 +24,19 @@ export async function deleteOrphanSideChats(
   for (const { id, pid, ownerId } of sessions) {
     const previousInstance = pid === process.pid && ownerId !== processOwnerId;
     if (!previousInstance && isPidAlive(pid)) continue;
-    const deleted = await deleteSideChatSession(db, id, {
-      skipBusyCheck: true,
-    });
-    await cleanupDeletedSessionFiles(deleted, cleanup);
+    try {
+      const deleted = await deleteSideChatSession(db, id, {
+        skipBusyCheck: true,
+      });
+      await cleanupDeletedSessionFiles(deleted, cleanup);
+    } catch (error) {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        error.code !== "SHELL_JOB_CLEANUP_UNCONFIRMED"
+      )
+        throw error;
+    }
   }
 }

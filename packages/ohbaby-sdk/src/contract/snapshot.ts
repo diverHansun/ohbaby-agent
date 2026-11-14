@@ -135,6 +135,7 @@ export interface UiMessage {
   /** Preserves runtime provenance independently of the presentation role. */
   readonly runtimeInputKind?:
     | "user-steer"
+    | "background-task-result"
     | "subagent-result"
     | "subagent-status"
     | "subagent-message";

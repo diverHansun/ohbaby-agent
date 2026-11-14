@@ -1006,6 +1006,7 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
     } catch (error) {
       const sessionOperation = [
         "rewindSession",
+        "archiveSession",
         "forkSession",
         "openSideChat",
         "listSideChats",

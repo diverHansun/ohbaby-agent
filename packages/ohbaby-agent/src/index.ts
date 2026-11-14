@@ -256,6 +256,7 @@ export { startModelEntryDiscovery } from "./config/llm/apply-active-model-config
 export {
   restoreArchivedSession,
   deleteArchivedSession,
+  recoverArchivedSessionShellJobs,
   SessionArchiveError,
   type SessionArchiveErrorCode,
   type RestoreArchivedSessionInput,

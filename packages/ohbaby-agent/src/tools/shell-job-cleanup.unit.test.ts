@@ -30,9 +30,65 @@ const start = (
   });
 afterEach(() => vi.useRealTimers());
 describe("shell job cleanup ownership", () => {
+  it("refreshes an unconfirmed local group before admitting a new background job", async () => {
+    let stopped = false;
+    const store = new InMemoryShellJobStore();
+    const killTree = vi.fn(() => ({ status: "unconfirmed" as const }));
+    const registry = new ShellJobRegistry({
+      store,
+      killTree,
+      backgroundLimit: () => Promise.resolve(1),
+      probeTree: () => (stopped ? "stopped" : "running"),
+    });
+    const first = new Child();
+    const job = await start(registry, first, { background: true });
+    first.emit("close", 0, null);
+    await registry.kill(job.jobId, "cleanup-test");
+    await vi.waitFor(() => {
+      expect(store.get(job.jobId)?.cleanup).toBe("unconfirmed");
+    });
+    stopped = true;
+    const second = new Child();
+    await start(registry, second, { background: true });
+    expect(store.get(job.jobId)?.cleanup).toBe("confirmed");
+    expect(killTree).toHaveBeenCalledTimes(1);
+    second.emit("close", 0, null);
+    await registry.dispose();
+  });
+
+  it("rechecks a retained group on a later rewind cleanup without another signal", async () => {
+    let stopped = false;
+    const killTree = vi.fn(() => ({ status: "unconfirmed" as const }));
+    const registry = new ShellJobRegistry({
+      killTree,
+      probeTree: () => (stopped ? "stopped" : "running"),
+    });
+    const child = new Child();
+    await start(registry, child, {
+      owner: {
+        rootRunId: "run",
+        sessionId: "cleanup-test",
+        messageId: "m",
+        callId: "c",
+      },
+    });
+    child.emit("close", 0, null);
+    expect((await registry.stopByRootRun("run", "rewound")).confirmed).toBe(
+      false,
+    );
+    stopped = true;
+    expect((await registry.stopByRootRun("run", "rewound")).confirmed).toBe(
+      true,
+    );
+    expect(killTree).toHaveBeenCalledTimes(1);
+    await registry.dispose();
+  });
+
   it("keeps naturally completed foreground descendants and resource release in the lease, excluding detached jobs", async () => {
     let stopped = false;
+    const store = new InMemoryShellJobStore();
     const registry = new ShellJobRegistry({
+      store,
       killTree: (): { status: "unconfirmed" } => ({ status: "unconfirmed" }),
       probeTree: (): "stopped" | "running" => (stopped ? "stopped" : "running"),
     });
@@ -48,21 +104,22 @@ describe("shell job cleanup ownership", () => {
     });
     const child = new Child();
     const detached = new Child();
-    await start(registry, child, { owner, release: () => released });
+    const foreground = await start(registry, child, {
+      owner,
+      release: () => released,
+    });
     await start(registry, detached, { owner, background: true });
     child.emit("close", 0, null);
-    const cleanup = await registry.observeExecutionCleanup("run");
-    expect(cleanup.confirmed).toBe(false);
+    await vi.waitFor(() => {
+      expect(store.get(foreground.jobId)?.settledAt).toBeNull();
+    });
     stopped = true;
     child.emit("exit", 0, null);
-    expect((await registry.observeExecutionCleanup("run")).confirmed).toBe(
-      false,
-    );
+    expect(store.get(foreground.jobId)?.settledAt).toBeNull();
     release();
-    await cleanup.settled;
-    expect((await registry.observeExecutionCleanup("run")).confirmed).toBe(
-      true,
-    );
+    await vi.waitFor(() => {
+      expect(store.get(foreground.jobId)?.settledAt).not.toBeNull();
+    });
     expect(registry.hasActiveWork("run")).toBe(true);
     detached.emit("close", 0, null);
     await registry.dispose();
@@ -141,7 +198,7 @@ describe("shell job cleanup ownership", () => {
     const other = await start(registry, sibling, {
       owner: { ...owner, rootRunId: "sibling-run" },
     });
-    const cleanup = await registry.cleanupRootRun("child-run");
+    const cleanup = await registry.stopByRootRun("child-run", "owner-ended");
     expect(cleanup.confirmed).toBe(false);
     let confirmed = false;
     void cleanup.settled?.then(() => {
@@ -154,7 +211,9 @@ describe("shell job cleanup ownership", () => {
     child.emit("close", null, "SIGKILL");
     await cleanup.settled;
     expect(confirmed).toBe(true);
-    expect((await registry.cleanupRootRun("child-run")).confirmed).toBe(true);
+    expect(
+      (await registry.stopByRootRun("child-run", "owner-ended")).confirmed,
+    ).toBe(true);
     sibling.emit("close", 0, null);
     await registry.dispose();
   });
@@ -360,7 +419,7 @@ describe("shell job cleanup ownership", () => {
     expect(registry.get(job.jobId, "cleanup-test").metadata.cleanup).toBe(
       "confirmed",
     );
-    const cleanup = await registry.cleanupRootRun("root");
+    const cleanup = await registry.stopByRootRun("root", "owner-ended");
     expect(cleanup.confirmed).toBe(false);
     expect(registry.hasActiveWork("root")).toBe(true);
     await expect(registry.dispose()).rejects.toThrow("unconfirmed");
@@ -369,7 +428,9 @@ describe("shell job cleanup ownership", () => {
     await manager.destroyContext("cleanup-test");
     await manager.dispose();
     expect(destroy).toHaveBeenCalledTimes(1);
-    expect((await registry.cleanupRootRun("root")).confirmed).toBe(false);
+    expect(
+      (await registry.stopByRootRun("root", "owner-ended")).confirmed,
+    ).toBe(false);
   });
 
   it("reports environment disposal failure without retracting confirmed process cleanup", async () => {

@@ -555,7 +555,8 @@ abstract class CurrentInputs implements CurrentRunInputStore {
         return false;
       return (
         input.processedRequestId !== undefined ||
-        (input.source !== "subagent-result" &&
+        (input.source !== "background-task-result" &&
+          input.source !== "subagent-result" &&
           input.source !== "subagent-message" &&
           input.closedAt !== undefined &&
           input.firstAttemptRequestId !== undefined)

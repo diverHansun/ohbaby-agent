@@ -107,6 +107,8 @@ export type WorkspaceBackend = UiBackendClient &
   Partial<InstanceSettingsReader & InstanceSettingsControl> & {
     /** Persistent workspaces take over a moved session's queued prompts. */
     adoptSessionWorkspaceMove?(plan: SessionWorkspaceMovePlan): Promise<void>;
+    preflightSideChatShell?(sessionId: string): Promise<void>;
+    releaseSideChatShell?(sessionId: string): void;
     closeAdmission?(): void;
     dispose?(
       options?: ShutdownOptions,
@@ -118,6 +120,14 @@ export interface DaemonHttpServerHandle {
   readonly port: number;
   readonly url: string;
   start(): Promise<void>;
+  releaseSideChatShellInWorkspace(
+    directory: string,
+    sideChatId: string,
+  ): Promise<void>;
+  preflightSideChatInWorkspace(
+    directory: string,
+    sideChatId: string,
+  ): Promise<void>;
   closeSideChatInWorkspace(
     directory: string,
     sideChatId: string,
@@ -926,6 +936,24 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       const canonical = await resolveWorkspaceScope(scopeKey);
       await this.instanceStore.loadScope(canonical);
     }
+  }
+
+  async releaseSideChatShellInWorkspace(
+    directory: string,
+    sideChatId: string,
+  ): Promise<void> {
+    const instance = await this.instanceStore?.get(directory);
+    instance?.backend.releaseSideChatShell?.(sideChatId);
+  }
+
+  async preflightSideChatInWorkspace(
+    directory: string,
+    sideChatId: string,
+  ): Promise<void> {
+    const instance = await this.instanceStore?.get(directory);
+    if (!instance?.backend.preflightSideChatShell)
+      throw new SessionMovedError(sideChatId, directory);
+    await instance.backend.preflightSideChatShell(sideChatId);
   }
 
   async closeSideChatInWorkspace(

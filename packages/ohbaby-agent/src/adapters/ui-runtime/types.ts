@@ -81,6 +81,19 @@ export interface UiRuntimeComposition {
   ): Promise<void>;
   resetRewoundSessionState(sessionId: string): void;
   stopRewoundRunWork(rootRunId: string): Promise<void>;
+  preflightShellRuns?(runIds: readonly string[]): Promise<readonly string[]>;
+  markRewoundShellRuns?(runIds: readonly string[]): void;
+  stopShellJob?(
+    rootSessionId: string,
+    jobId: string,
+  ): Promise<import("../../tools/shell-job-registry.js").ShellJobSnapshot>;
+  abandonShellJob?(
+    rootSessionId: string,
+    jobId: string,
+    confirm: boolean,
+  ): Promise<import("../../tools/shell-job-store.js").ShellJobRecord>;
+  preflightShellSessions?(sessionIds: readonly string[]): Promise<void>;
+  stopShellSessions?(sessionIds: readonly string[]): Promise<void>;
   getActivityReasons(): readonly string[];
   closeAdmission?(): void;
   dispose(options?: ShutdownOptions): Promise<CleanupTaskResult>;

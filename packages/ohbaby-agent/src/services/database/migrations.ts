@@ -708,6 +708,28 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       CREATE INDEX idx_shell_job_owner_status ON shell_job(session_id,context_scope_id,status);
       CREATE INDEX idx_shell_job_root_history ON shell_job(root_session_id,mode,started_at,job_id);
       CREATE INDEX idx_shell_job_root_run ON shell_job(root_run_id);
+      CREATE INDEX idx_shell_job_notice_batch ON shell_job(notice_batch_id);
+    `,
+  },
+  {
+    version: "032_background_task_input",
+    requiresOfflineBackup: true,
+    sql: `
+      CREATE TABLE current_run_input_next (
+        input_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES run_ledger(run_id),
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        source TEXT NOT NULL CHECK(source IN ('user-steer','subagent-result','subagent-status','subagent-message','background-task-result')),
+        source_id TEXT NOT NULL, message_id TEXT NOT NULL UNIQUE REFERENCES message(id) ON DELETE CASCADE,
+        accepted_at INTEGER NOT NULL, data TEXT NOT NULL,
+        UNIQUE(run_id,source,source_id)
+      );
+      INSERT INTO current_run_input_next(input_id,run_id,session_id,source,source_id,message_id,accepted_at,data)
+      SELECT input_id,run_id,session_id,source,source_id,message_id,accepted_at,data FROM current_run_input;
+      DROP TABLE current_run_input;
+      ALTER TABLE current_run_input_next RENAME TO current_run_input;
+      CREATE INDEX idx_current_run_input_run ON current_run_input(run_id,accepted_at,input_id);
+      CREATE INDEX idx_current_run_input_source ON current_run_input(session_id,source_id);
     `,
   },
 ];

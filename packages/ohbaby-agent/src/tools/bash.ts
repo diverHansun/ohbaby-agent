@@ -37,6 +37,7 @@ import {
 
 const DEFAULT_TIMEOUT_MS = DEFAULT_SHELL_JOB_TIMEOUT_MS;
 const MAX_TIMEOUT_MS = MAX_SHELL_JOB_TIMEOUT_MS;
+const MAX_BACKGROUND_TIMEOUT_MS = 86_400_000;
 
 export interface BashShell {
   acceptable(): string;
@@ -177,14 +178,14 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
   return withToolAdmission(
     {
       name: "bash",
-      description: `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged; no interpreter fallback occurs after preparation. On Windows, select Git Bash only with a usable native full SHELL path; WSL launchers are unsupported. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; foreground defaults to 120000ms, background has no default timeout, and the maximum is 600000ms.`,
+      description: `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged; no interpreter fallback occurs after preparation. On Windows, select Git Bash only with a usable native full SHELL path; WSL launchers are unsupported. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; foreground defaults to 120000ms, background has no default timeout, the foreground maximum is 600000ms, and the background maximum is 86400000ms.`,
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
           command: { type: "string" },
           description: { type: "string" },
           timeout: {
-            maximum: MAX_TIMEOUT_MS,
+            maximum: MAX_BACKGROUND_TIMEOUT_MS,
             minimum: 1,
             type: "integer",
           },
@@ -198,12 +199,6 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
       timeoutOwner: "tool",
       async execute(params, context): Promise<ToolExecutionResult> {
         const command = getStringParam(params, "command");
-        const timeoutValue = getNumberParam(params, "timeout", {
-          defaultValue: DEFAULT_TIMEOUT_MS,
-          integer: true,
-          max: MAX_TIMEOUT_MS,
-          min: 1,
-        });
         const runInBackground = params.run_in_background ?? false;
         if (typeof runInBackground !== "boolean") {
           throw new ToolParameterError(
@@ -214,7 +209,14 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           runInBackground &&
           (params.timeout === undefined || params.timeout === null)
             ? null
-            : timeoutValue;
+            : getNumberParam(params, "timeout", {
+                defaultValue: DEFAULT_TIMEOUT_MS,
+                integer: true,
+                max: runInBackground
+                  ? MAX_BACKGROUND_TIMEOUT_MS
+                  : MAX_TIMEOUT_MS,
+                min: 1,
+              });
         throwIfCancelled(context.signal);
 
         if (
@@ -309,7 +311,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           throw error;
         }
         // Cancellation may have happened synchronously during registration/spawn.
-        if (context.signal.aborted) {
+        if (!runInBackground && context.signal.aborted) {
           await registry.kill(
             snapshot.jobId,
             context.sessionId,
@@ -330,6 +332,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           );
         };
         context.signal.addEventListener("abort", abortHandler, { once: true });
+        if (context.signal.aborted) abortHandler();
         try {
           const result = await registry.waitForTerminal(
             snapshot.jobId,

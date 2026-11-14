@@ -124,6 +124,9 @@ export function globalSessionErrorStatus(
     case "SESSION_NOT_ROOT":
     case "SESSION_ARCHIVED":
     case "SESSION_NOT_ARCHIVED":
+    case "SHELL_JOB_OTHER_BACKEND":
+    case "SHELL_JOB_CLEANUP_BUSY":
+    case "SHELL_JOB_CLEANUP_UNCONFIRMED":
     case "SESSION_RUNNING":
       return 409;
     default:

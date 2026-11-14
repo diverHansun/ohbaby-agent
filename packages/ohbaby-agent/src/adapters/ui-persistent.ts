@@ -1,3 +1,5 @@
+import { ShellJobRecovery } from "../tools/shell-job-recovery.js";
+import { readProcessIdentity } from "../shell/process-identity.js";
 import { DatabaseShellJobStore } from "../tools/shell-job-store.js";
 import {
   isLocalPrimarySession,
@@ -120,6 +122,8 @@ export interface PersistentUiBackendClient
   releaseSubagentConversation: NonNullable<
     UiBackendClient["releaseSubagentConversation"]
   >;
+  preflightSideChatShell(sessionId: string): Promise<void>;
+  releaseSideChatShell(sessionId: string): void;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
   /**
@@ -271,6 +275,13 @@ function withStartupRecovery(
   }
 
   return {
+    async preflightSideChatShell(sessionId): Promise<void> {
+      await ready();
+      await client.preflightSideChatShell(sessionId);
+    },
+    releaseSideChatShell: (sessionId) => {
+      client.releaseSideChatShell(sessionId);
+    },
     notifySettingsChanged: (domains) => client.notifySettingsChanged(domains),
     reconnectSettingsMcp: () => client.reconnectSettingsMcp(),
     getSettingsMcpStatus: () => client.getSettingsMcpStatus(),
@@ -864,7 +875,19 @@ export function createPersistentUiBackendClient(
     log: (error: unknown): void =>
       options.logger?.emit(sessionFilesCleanupFailed, { error }),
   };
+  const shellJobStore = new DatabaseShellJobStore({ db });
   const startupReady = Promise.resolve().then(async () => {
+    const identity = await readProcessIdentity(process.pid);
+    const recovery = new ShellJobRecovery({
+      store: shellJobStore,
+      backend: {
+        ownerId: backendOwnerId,
+        pid: process.pid,
+        startToken: identity.state === "present" ? identity.startToken : null,
+      },
+    });
+    for (const row of shellJobStore.listUnsettled())
+      await recovery.recover(row.jobId);
     await deleteOrphanSideChats(db, undefined, deletedSessionFiles);
     const sessions = await sessionManager.listByWorkingDirectory(
       await projectRoot,
@@ -890,6 +913,8 @@ export function createPersistentUiBackendClient(
   const inProcessClient = createInProcessUiBackendClient({
     sideChatStorage: { db, deletedSessionFiles },
     closeSideChatInWorkspace: options.closeSideChatInWorkspace,
+    preflightSideChatInWorkspace: options.preflightSideChatInWorkspace,
+    releaseSideChatShellInWorkspace: options.releaseSideChatShellInWorkspace,
     agentManager: options.agentManager,
     bus,
     ...(options.createSubagentId
@@ -923,7 +948,7 @@ export function createPersistentUiBackendClient(
     streamBridge: options.streamBridge,
     subagentInstanceStore,
     subagentExecutionStore,
-    shellJobStore: new DatabaseShellJobStore({ db }),
+    shellJobStore,
     subagentOwnerId: backendOwnerId,
     subagentOwnerPid: process.pid,
     workdir: options.workdir,

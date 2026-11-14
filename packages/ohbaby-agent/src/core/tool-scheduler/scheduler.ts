@@ -915,6 +915,8 @@ export function createToolScheduler(
     // No await, notification callback, or storage write between the timestamp
     // and invoking the actual tool. A cancelled preparation has no start fact.
     call.startedAt = now();
+    const toolRunId = call.runId;
+    const subscribeSteer = options.subscribeRunSteer;
     let operation: Promise<ToolExecutionResult>;
     try {
       operation = Promise.resolve(
@@ -927,6 +929,10 @@ export function createToolScheduler(
           messageId: call.messageId,
           sessionId: call.sessionId,
           signal: controller.signal,
+          subscribeSteer:
+            toolRunId && subscribeSteer
+              ? (wake) => subscribeSteer(toolRunId, wake, controller.signal)
+              : undefined,
           resourceLease,
           owner,
           reportCleanupError: toolOwnsCleanup

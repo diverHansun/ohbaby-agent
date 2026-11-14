@@ -97,7 +97,14 @@ export class ShellJobRecovery {
 
   async assertCanManage(jobId: string): Promise<void> {
     const row = this.require(jobId);
-    if (row.trackingReleasedAt !== null || row.settledAt !== null) return;
+    if (
+      row.trackingReleasedAt !== null ||
+      (row.settledAt !== null &&
+        row.cleanup === "confirmed" &&
+        row.status !== null &&
+        row.status !== "running")
+    )
+      return;
     if (row.ownerId === this.options.backend.ownerId) return;
     if (await this.ownerDead(row)) return;
     throw new ShellJobManagementError(

@@ -351,7 +351,9 @@ describe("shell job persistence", () => {
     });
     expect(reportCleanupError).toHaveBeenCalled();
     expect(registry.hasActiveWork()).toBe(true);
-    expect((await registry.cleanupRootRun("run")).confirmed).toBe(false);
+    expect((await registry.stopByRootRun("run", "owner-ended")).confirmed).toBe(
+      false,
+    );
     await expect(registry.dispose()).rejects.toThrow();
     expect(release).toHaveBeenCalledOnce();
   });
@@ -462,19 +464,27 @@ describe("shell job persistence", () => {
       killTree,
       cleanupObservationMs: 5,
     });
-    const job = await registry.start({
-      sessionId: "session",
-      timeoutMs: 10000,
-      release,
-      child: () => spawn("/bin/sh", ["-c", "sleep 10"], { detached: true }),
-    });
-    expect(job.status).toBe("cancelled");
+    let pid: number | undefined;
+    await expect(
+      registry.start({
+        sessionId: "session",
+        timeoutMs: 10000,
+        release,
+        child: () => {
+          const child = spawn("/bin/sh", ["-c", "sleep 10"], {
+            detached: true,
+          });
+          pid = child.pid;
+          return child;
+        },
+      }),
+    ).rejects.toThrow("disk failed");
     await vi.waitFor(() => {
       expect(killTree).toHaveBeenCalled();
     });
     expect(release).not.toHaveBeenCalled();
     expect(registry.hasActiveWork()).toBe(true);
-    process.kill(-Number(job.metadata.pid), "SIGKILL");
+    process.kill(-Number(pid), "SIGKILL");
   });
 });
 async function viWait(assertion: () => void): Promise<void> {

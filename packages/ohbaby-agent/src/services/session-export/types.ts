@@ -58,6 +58,7 @@ export interface ExportMessage {
   readonly role: "user" | "assistant" | "system";
   readonly kind?: "compaction-summary" | "abort" | "error" | "info";
   readonly runtimeInput?:
+    | "background-task-result"
     | "subagent-result"
     | "subagent-status"
     | "subagent-message";

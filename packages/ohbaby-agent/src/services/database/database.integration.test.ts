@@ -211,6 +211,7 @@ describe("services/database", () => {
       { version: "029_message_rewind" },
       { version: "030_subagent_goal_ownership" },
       { version: "031_shell_job" },
+      { version: "032_background_task_input" },
     ]);
   });
 

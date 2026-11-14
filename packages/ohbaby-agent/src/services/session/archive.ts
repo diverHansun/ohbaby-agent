@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
+import { ShellJobRecovery } from "../../tools/shell-job-recovery.js";
+import { readProcessIdentity } from "../../shell/process-identity.js";
 import {
   getDatabase,
   runWriteTransaction,
@@ -62,6 +66,31 @@ const SESSION_TREE = `WITH RECURSIVE tree(id) AS (
   UNION SELECT s.id FROM session s JOIN tree ON s.parent_id = tree.id
 )`;
 
+/** Preflight the entire archived tree before attempting any recovery signals. */
+export async function recoverArchivedSessionShellJobs(
+  sessionId: string,
+  db: DatabaseConnection = getDatabase(),
+): Promise<void> {
+  archivedRoot(db, sessionId);
+  const store = new DatabaseShellJobStore({ db });
+  const identity = await readProcessIdentity(process.pid);
+  const recovery = new ShellJobRecovery({
+    store,
+    backend: {
+      ownerId: `archive-${randomUUID()}`,
+      pid: process.pid,
+      startToken: identity.state === "present" ? identity.startToken : null,
+    },
+  });
+  const rows = store.listUnsettled(sessionId);
+  for (const row of rows) await recovery.assertCanManage(row.jobId);
+  for (const row of rows) await recovery.recover(row.jobId);
+  if (store.listUnsettled(sessionId).length)
+    throw Object.assign(new Error("Shell resource cleanup is unconfirmed"), {
+      code: "SHELL_JOB_CLEANUP_UNCONFIRMED",
+    });
+}
+
 /** Checks and all relational deletes share one write transaction. */
 export function deleteArchivedSession(
   sessionId: string,
@@ -113,11 +142,32 @@ export function deleteSideChatSession(
     if (!session.sideChat)
       throw new SideChatUnsupportedError("Only a side chat can be closed");
     if (!options.skipBusyCheck) assertTreeIdle(tx, sessionId);
+    else assertShellTreeSettled(tx, sessionId);
     return deleteTree(tx, sessionId);
   });
 }
 
+function assertShellTreeSettled(
+  db: DatabaseConnection,
+  sessionId: string,
+): void {
+  const columns = db
+    .prepare<{ name: string }>("PRAGMA table_info(shell_job)")
+    .all();
+  if (!columns.some((column) => column.name === "tracking_released_at")) return;
+  const pending = db
+    .prepare(
+      `${SESSION_TREE} SELECT 1 FROM shell_job WHERE session_id IN (SELECT id FROM tree) AND tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed' OR settled_at IS NULL) LIMIT 1`,
+    )
+    .get(sessionId);
+  if (pending)
+    throw Object.assign(new Error("Shell resource cleanup is unconfirmed"), {
+      code: "SHELL_JOB_CLEANUP_UNCONFIRMED",
+    });
+}
+
 function assertTreeIdle(db: DatabaseConnection, sessionId: string): void {
+  assertShellTreeSettled(db, sessionId);
   // Older versions allowed archiving busy sessions. Do not destroy their work.
   const activeRuns = db
     .prepare<{

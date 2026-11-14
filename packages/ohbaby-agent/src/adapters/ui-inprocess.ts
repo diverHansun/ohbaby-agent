@@ -359,6 +359,14 @@ interface ActivePromptState {
 
 export interface InProcessUiBackendOptions {
   /** Archive uses the owning workspace's scheduler and permission state. */
+  readonly releaseSideChatShellInWorkspace?: (
+    directory: string,
+    sideChatId: string,
+  ) => Promise<void>;
+  readonly preflightSideChatInWorkspace?: (
+    directory: string,
+    sideChatId: string,
+  ) => Promise<void>;
   readonly closeSideChatInWorkspace?: (
     directory: string,
     sideChatId: string,
@@ -473,6 +481,8 @@ export interface InProcessUiBackendClient
   releaseSubagentConversation: NonNullable<
     UiBackendClient["releaseSubagentConversation"]
   >;
+  preflightSideChatShell(sessionId: string): Promise<void>;
+  releaseSideChatShell(sessionId: string): void;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
   /** Re-reads the durable prompt queue after another workspace handed prompts over. */
@@ -1281,6 +1291,15 @@ export function createInProcessUiBackendClient(
         subagentInstanceStore,
         subagentExecutionStore,
         shellJobStore: options.shellJobStore,
+        shellAdmission: (owner) =>
+          !shellAdmissionFences.has(owner.sessionId) &&
+          !shellAdmissionFences.has(owner.rootSessionId ?? owner.sessionId) &&
+          !closingSideChats.has(owner.sessionId) &&
+          !closingSideChats.has(owner.rootSessionId ?? owner.sessionId) &&
+          !rewindingSessions.has(owner.sessionId) &&
+          !rewindingSessions.has(owner.rootSessionId ?? owner.sessionId) &&
+          !archivingSessions.has(owner.sessionId) &&
+          !archivingSessions.has(owner.rootSessionId ?? owner.sessionId),
         onSubagentStateChanged: (rootSessionId): void => {
           subagentInstances.invalidate(rootSessionId);
         },
@@ -3518,6 +3537,23 @@ export function createInProcessUiBackendClient(
     todoProjectionScopesBySession.delete(sessionId);
   }
 
+  async function shellSessionTree(
+    rootIds: readonly string[],
+  ): Promise<string[]> {
+    const seen = new Set<string>();
+    const pending = [...rootIds];
+    while (pending.length) {
+      const id = pending.pop();
+      if (id === undefined) break;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const children = (await options.sessionManager?.listChildren(id)) ?? [];
+      pending.push(...children.map((child) => child.id));
+    }
+    return [...seen];
+  }
+
+  const shellAdmissionFences = new Set<string>();
   const closingSideChats = new Map<string, Promise<void>>();
   function closeSideChatInternal(sessionId: string): Promise<void> {
     const existing = closingSideChats.get(sessionId);
@@ -3536,6 +3572,10 @@ export function createInProcessUiBackendClient(
         throw new SideChatUnsupportedError("Only a side chat can be closed");
       if (session.sideChat.ownerId !== processOwnerId)
         throw new SessionRunBusyError(sessionId, []);
+      const shellIds = await shellSessionTree([sessionId]);
+      const shellRuntime = await runtimeController.getRuntime();
+      await shellRuntime.preflightShellSessions?.(shellIds);
+      await shellRuntime.stopShellSessions?.(shellIds);
       await stopSideChatWork(storage.db, sessionId, {
         abort: abortPromptRun,
         cancel: (promptId, leaseId) =>
@@ -3604,25 +3644,86 @@ export function createInProcessUiBackendClient(
 
     if (options.sideChatStorage) {
       const children = sideChatsForMain(options.sideChatStorage.db, sessionId);
+      const localChildren = children.filter((child) =>
+        sameSessionDirectory(child.workingDirectory, promptScopeKey),
+      );
+      const remoteChildren = children.filter(
+        (child) =>
+          !sameSessionDirectory(child.workingDirectory, promptScopeKey),
+      );
       if (children.some((child) => child.ownerId !== processOwnerId))
         throw new SessionRunBusyError(sessionId, []);
-      for (const child of children) {
-        if (sameSessionDirectory(child.workingDirectory, promptScopeKey))
-          await closeSideChatInternal(child.sideChatId);
-        else if (options.closeSideChatInWorkspace)
-          await options.closeSideChatInWorkspace(
+      if (
+        remoteChildren.length &&
+        (!options.closeSideChatInWorkspace ||
+          !options.releaseSideChatShellInWorkspace ||
+          !options.preflightSideChatInWorkspace)
+      ) {
+        const child = remoteChildren[0];
+        throw new SessionMovedError(child.sideChatId, child.workingDirectory);
+      }
+      const shellIds = await shellSessionTree([
+        sessionId,
+        ...localChildren.map((child) => child.sideChatId),
+      ]);
+      const shellRuntime = await runtimeController.getRuntime();
+      if (
+        localChildren.some(
+          (child) =>
+            shellAdmissionFences.has(child.sideChatId) ||
+            closingSideChats.has(child.sideChatId),
+        )
+      )
+        throw new SessionRunBusyError(sessionId, []);
+      for (const child of localChildren)
+        shellAdmissionFences.add(child.sideChatId);
+      const reserved: typeof remoteChildren = [];
+      try {
+        await shellRuntime.preflightShellSessions?.(shellIds);
+        for (const child of remoteChildren) {
+          if (!options.preflightSideChatInWorkspace)
+            throw new SessionMovedError(
+              child.sideChatId,
+              child.workingDirectory,
+            );
+          await options.preflightSideChatInWorkspace(
             child.workingDirectory,
             child.sideChatId,
           );
-        else
-          throw new SessionMovedError(child.sideChatId, child.workingDirectory);
+          reserved.push(child);
+        }
+        await shellRuntime.stopShellSessions?.(shellIds);
+        for (const child of children) {
+          if (sameSessionDirectory(child.workingDirectory, promptScopeKey))
+            await closeSideChatInternal(child.sideChatId);
+          else if (options.closeSideChatInWorkspace)
+            await options.closeSideChatInWorkspace(
+              child.workingDirectory,
+              child.sideChatId,
+            );
+          else
+            throw new SessionMovedError(
+              child.sideChatId,
+              child.workingDirectory,
+            );
+        }
+        const archived = await archiveIdleRoot(
+          options.sideChatStorage.db,
+          sessionId,
+          now().getTime(),
+        );
+        bus.publish(SessionEvent.Updated, { session: archived });
+      } finally {
+        for (const child of localChildren)
+          shellAdmissionFences.delete(child.sideChatId);
+        const releaseRemote = options.releaseSideChatShellInWorkspace;
+        if (releaseRemote)
+          await Promise.allSettled(
+            reserved.map((child) =>
+              releaseRemote(child.workingDirectory, child.sideChatId),
+            ),
+          );
       }
-      const archived = await archiveIdleRoot(
-        options.sideChatStorage.db,
-        sessionId,
-        now().getTime(),
-      );
-      bus.publish(SessionEvent.Updated, { session: archived });
     } else {
       await options.sessionManager.update(sessionId, { status: "archived" });
     }
@@ -3985,6 +4086,16 @@ export function createInProcessUiBackendClient(
     try {
       const before = readRewindCut(db, input, promptScopeKey);
       assertReady();
+      assertRewindShellOwners(
+        db,
+        sessionId,
+        [...before.runIds],
+        options.subagentOwnerId,
+      );
+      const rewindRuntime = await runtimeController.getRuntime();
+      const affectedShellRuns = (await rewindRuntime.preflightShellRuns?.([
+        ...before.runIds,
+      ])) ?? [...before.runIds];
       queue();
       if (text !== undefined) {
         const model =
@@ -3993,6 +4104,7 @@ export function createInProcessUiBackendClient(
         else await resolveSessionModel(sessionId);
       }
       await initializeSessionView(sessionId);
+      rewindRuntime.markRewoundShellRuns?.(affectedShellRuns);
       await stopForRewind({
         sessionId,
         token,
@@ -4027,7 +4139,16 @@ export function createInProcessUiBackendClient(
           for (const runId of cut.runIds)
             await runtime.stopRewoundRunWork(runId);
         } catch (error) {
-          if (error instanceof SessionRunBusyError) throw error;
+          if (
+            error instanceof SessionRunBusyError ||
+            (typeof error === "object" &&
+              error !== null &&
+              "code" in error &&
+              (error.code === "SHELL_JOB_OTHER_BACKEND" ||
+                error.code === "SHELL_JOB_CLEANUP_UNCONFIRMED" ||
+                error.code === "SHELL_JOB_CLEANUP_BUSY"))
+          )
+            throw error;
           throw Object.assign(busy(), { cause: error });
         }
         const changed = await commitRewind(
@@ -5249,6 +5370,29 @@ export function createInProcessUiBackendClient(
   // The eager startup promise remains observable through initialize and writes.
   void ready.catch(() => undefined);
   return {
+    async preflightSideChatShell(sessionId): Promise<void> {
+      const session = readSessionRow(sideChatStorage().db, sessionId);
+      if (!session?.sideChat || session.sideChat.ownerId !== processOwnerId)
+        throw new SessionRunBusyError(sessionId, []);
+      if (
+        shellAdmissionFences.has(sessionId) ||
+        closingSideChats.has(sessionId)
+      )
+        throw new SessionRunBusyError(sessionId, []);
+      shellAdmissionFences.add(sessionId);
+      try {
+        const runtime = await runtimeController.getRuntime();
+        await runtime.preflightShellSessions?.(
+          await shellSessionTree([sessionId]),
+        );
+      } catch (error) {
+        shellAdmissionFences.delete(sessionId);
+        throw error;
+      }
+    },
+    releaseSideChatShell(sessionId): void {
+      shellAdmissionFences.delete(sessionId);
+    },
     async notifySettingsChanged(domains): Promise<void> {
       publish({ type: "settings.changed", domains });
       if (domains.includes("model")) await publishModelInvalidation();

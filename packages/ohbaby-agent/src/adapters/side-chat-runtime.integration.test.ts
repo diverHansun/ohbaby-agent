@@ -397,7 +397,7 @@ describe("conversation copies through the persistent backend", () => {
   });
 
   it.skipIf(process.platform === "win32")(
-    "leaves history visible on cleanup failure and stops the detached process on retry",
+    "leaves history visible on cleanup failure and retries after stopping the detached process",
     async () => {
       await client.setPermission({ level: "full-access" });
       calls.push({
@@ -433,13 +433,13 @@ describe("conversation copies through the persistent backend", () => {
       await executions.finish(record, { status: "completed", completedAt: 2 });
       vi.spyOn(
         ShellJobRegistry.prototype,
-        "cleanupRootRun",
+        "stopByRootRun",
       ).mockResolvedValueOnce({ confirmed: false });
       await expect(
         client.rewindSession({ sessionId, promptId }),
       ).rejects.toMatchObject({
-        code: "SESSION_RUNNING",
-        cause: { message: "Shell cleanup is unconfirmed" },
+        code: "SHELL_JOB_CLEANUP_UNCONFIRMED",
+        message: "Shell cleanup is unconfirmed",
       });
       for (const table of [
         "message",
@@ -452,10 +452,41 @@ describe("conversation copies through the persistent backend", () => {
             .get(),
         ).toBeUndefined();
       }
-      expect(isOwnerProcessAlive(pid)).toBe(true);
+      expect(isOwnerProcessAlive(pid)).toBe(false);
       await client.rewindSession({ sessionId, promptId });
       expect(isOwnerProcessAlive(pid)).toBe(false);
       expect((await executions.get(record))?.rewoundAt).toBeDefined();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "records rewound when an active foreground bash is interrupted by rewind",
+    async () => {
+      await client.setPermission({ level: "full-access" });
+      calls.push({
+        name: "bash",
+        args: { command: "echo $$ > foreground-rewind.pid; exec sleep 30" },
+      });
+      const prompt = await client.submitPromptAccepted("run foreground");
+      const readPid = async (): Promise<number> =>
+        Number(
+          await readFile(join(directory, "foreground-rewind.pid"), "utf8"),
+        );
+      await expect.poll(readPid).toBeGreaterThan(1);
+      await client.rewindSession({
+        sessionId: prompt.sessionId,
+        promptId: prompt.promptId,
+      });
+      const row = getDatabase()
+        .prepare<{
+          stop_reason: string;
+          status: string;
+        }>("SELECT stop_reason,status FROM shell_job WHERE session_id=?")
+        .get(prompt.sessionId);
+      expect(row).toMatchObject({
+        stop_reason: "rewound",
+        status: "cancelled",
+      });
     },
   );
 
@@ -892,6 +923,28 @@ describe("conversation copies through the persistent backend", () => {
       (await client.submitPromptAndWait("repeat write", { sessionId })).prompt
         .status,
     ).toBe("succeeded");
+    let sideShellPid: number | undefined;
+    if (process.platform !== "win32") {
+      calls.push({
+        name: "bash",
+        args: {
+          command: "echo $$ > side-shell.pid; exec sleep 30",
+          run_in_background: true,
+        },
+      });
+      const shellPrompt = await client.submitPromptAccepted(
+        "start side shell",
+        { sessionId },
+      );
+      await client.respondPermission((await waitApproval()).id, {
+        choiceId: "allow_once",
+      });
+      await client.waitForPrompt(shellPrompt.promptId);
+      const readPid = async (): Promise<number> =>
+        Number(await readFile(join(directory, "side-shell.pid"), "utf8"));
+      await expect.poll(readPid).toBeGreaterThan(1);
+      sideShellPid = await readPid();
+    }
     write("private");
     const pending = await client.submitPromptAccepted("another write", {
       sessionId,
@@ -910,6 +963,14 @@ describe("conversation copies through the persistent backend", () => {
       dbPath: join(directory, "agent.db"),
       workdir: destination,
       enableSnapshots: false,
+      releaseSideChatShellInWorkspace: (_workingDirectory, sideChatId) => {
+        client.releaseSideChatShell(sideChatId);
+        return Promise.resolve();
+      },
+      preflightSideChatInWorkspace: (workingDirectory, sideChatId) => {
+        expect(workingDirectory).toBe(directory);
+        return client.preflightSideChatShell(sideChatId);
+      },
       closeSideChatInWorkspace: (workingDirectory, sideChatId) => {
         expect(workingDirectory).toBe(directory);
         return client.closeSideChat({ sideChatId });
@@ -926,6 +987,8 @@ describe("conversation copies through the persistent backend", () => {
     } finally {
       await moved.dispose();
     }
+    if (sideShellPid !== undefined)
+      expect(isOwnerProcessAlive(sideShellPid)).toBe(false);
     expect((await outcomes).map((r) => r.prompt.status)).toEqual([
       "interrupted",
       "cancelled",
@@ -979,6 +1042,43 @@ describe("conversation copies through the persistent backend", () => {
         .all(mainSessionId),
     ).toEqual([]);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "does not stop main jobs when a side chat has a foreign owner",
+    async () => {
+      await client.setPermission({ level: "full-access" });
+      calls.push({
+        name: "bash",
+        args: {
+          command: "echo $$ > preflight-shell.pid; exec sleep 30",
+          run_in_background: true,
+        },
+      });
+      const mainSessionId = (
+        await client.submitPromptAndWait("start main shell")
+      ).prompt.sessionId;
+      const readPid = async (): Promise<number> =>
+        Number(await readFile(join(directory, "preflight-shell.pid"), "utf8"));
+      await expect.poll(readPid).toBeGreaterThan(1);
+      const pid = await readPid();
+      const side = await client.openSideChat({ mainSessionId });
+      const db = getDatabase();
+      const owner = db.prepare(
+        "UPDATE session SET data = json_set(data, '$.sideChat.ownerId', ?) WHERE id = ?",
+      );
+      owner.run("foreign-owner", side.sideChatId);
+      try {
+        await expect(
+          client.archiveSession({ sessionId: mainSessionId }),
+        ).rejects.toMatchObject({ code: "SESSION_RUNNING" });
+        expect(isOwnerProcessAlive(pid)).toBe(true);
+      } finally {
+        owner.run(processOwnerId, side.sideChatId);
+        await client.archiveSession({ sessionId: mainSessionId });
+      }
+      expect(isOwnerProcessAlive(pid)).toBe(false);
+    },
+  );
 
   it("retains foreign-owned side chats, times out for a busy run and recovers it on next startup", async () => {
     const mainSessionId = (await client.submitPromptAndWait("hello")).prompt

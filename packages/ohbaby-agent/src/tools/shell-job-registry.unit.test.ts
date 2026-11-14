@@ -65,8 +65,10 @@ describe("ShellJobRegistry", () => {
   it("seals a cancelled root before invoking a later spawn while allowing another root", async () => {
     const child = new FakeChild();
     const spawn = vi.fn(() => child as unknown as ChildProcess);
+    let admitted = true;
     const registry = new ShellJobRegistry({
       killTree: vi.fn(),
+      admitsOwner: (owner) => owner.runId !== "A" || admitted,
       probeTree: (): "stopped" => "stopped",
     });
     const input = {
@@ -81,7 +83,7 @@ describe("ShellJobRegistry", () => {
         callId: "call",
       },
     };
-    registry.cancelByRootRun("A");
+    admitted = false;
     await expect(registry.start(input)).rejects.toThrow(/root run.*closed/i);
     expect(spawn).not.toHaveBeenCalled();
     expect(registry.hasActiveWork("A")).toBe(false);
@@ -107,8 +109,10 @@ describe("ShellJobRegistry", () => {
       let stopped = false;
       const release = vi.fn();
       const killTree = vi.fn();
+      let admitted = true;
       const registry = new ShellJobRegistry({
         killTree,
+        admitsOwner: () => admitted,
         probeTree: (): "running" | "stopped" =>
           stopped ? "stopped" : "running",
       });
@@ -119,9 +123,9 @@ describe("ShellJobRegistry", () => {
         messageId: "message",
         callId: "call",
       };
-      if (race === "already-spawned") registry.cancelByRootRun("A");
+      if (race === "already-spawned") admitted = false;
       const launch = (): ChildProcess => {
-        registry.cancelByRootRun("A");
+        admitted = false;
         return child as unknown as ChildProcess;
       };
       try {
@@ -139,7 +143,7 @@ describe("ShellJobRegistry", () => {
         expect(killTree).toHaveBeenCalledTimes(1);
         expect(registry.hasActiveWork("A")).toBe(true);
         expect(release).not.toHaveBeenCalled();
-        registry.cancelByRootRun("A");
+        registry.markRootRunStopped("A", "owner-ended");
         expect(killTree).toHaveBeenCalledTimes(1);
       } finally {
         stopped = true;
@@ -210,12 +214,17 @@ describe("ShellJobRegistry", () => {
     );
     try {
       expect(registry.hasActiveWork("missing")).toBe(false);
-      expect(registry.cancelByRootRun("missing")).toEqual([]);
-      const cancelled = registry.cancelByRootRun("A");
-      expect(cancelled.map((job) => job.status)).toEqual([
-        "cancelled",
-        "cancelled",
-      ]);
+      registry.markRootRunStopped("missing", "owner-ended");
+      registry.markRootRunStopped("A", "owner-ended");
+      expect(
+        jobs
+          .slice(0, 2)
+          .map(
+            ({ snapshot }) =>
+              registry.get(snapshot.jobId, "reused-child", "reused-instance")
+                .status,
+          ),
+      ).toEqual(["cancelled", "cancelled"]);
       await vi.waitFor(() => {
         expect(killed).toHaveLength(2);
       });
@@ -226,7 +235,7 @@ describe("ShellJobRegistry", () => {
       ).toBe("running");
       expect(registry.hasActiveWork("A")).toBe(true);
       expect(jobs[0].release).not.toHaveBeenCalled();
-      registry.cancelByRootRun("A");
+      registry.markRootRunStopped("A", "owner-ended");
       expect(killTree).toHaveBeenCalledTimes(2);
       finishCleanup();
       await vi.waitFor(() => {
@@ -234,7 +243,7 @@ describe("ShellJobRegistry", () => {
         expect(jobs[0].release).toHaveBeenCalledTimes(1);
         expect(jobs[1].release).toHaveBeenCalledTimes(1);
       });
-      registry.cancelByRootRun("A");
+      registry.markRootRunStopped("A", "owner-ended");
       expect(killTree).toHaveBeenCalledTimes(2);
       expect(registry.hasActiveWork("B")).toBe(true);
     } finally {

@@ -1,3 +1,9 @@
+import { subscribeRunSteer } from "../../runtime/prompt-scheduler/steer-subscription.js";
+import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
+import { createRunInputCoordinator } from "../../runtime/prompt-scheduler/run-input-coordinator.js";
+import { createBackgroundTaskInputSource } from "./background-task-inputs.js";
+import { loadShellConfig } from "../../config/tools/shell/index.js";
+import { ShellJobRecovery } from "../../tools/shell-job-recovery.js";
 import { readProcessIdentity } from "../../shell/process-identity.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -212,6 +218,9 @@ export interface UiRuntimeCompositionOptions {
   readonly onTodoWrite?: (event: TodoWriteEvent) => void;
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentExecutionStore?: SubagentExecutionStore;
+  readonly shellAdmission?: (
+    owner: import("../../core/tool-scheduler/types.js").ToolExecutionOwner,
+  ) => boolean;
   readonly shellJobStore?: import("../../tools/shell-job-store.js").ShellJobStore;
   readonly currentRunInputStore?: CurrentRunInputStore;
   readonly subagentOwnerId?: string;
@@ -422,6 +431,7 @@ export async function createUiRuntimeComposition(
         now: options.now,
       })
     : undefined;
+  const inputStore = options.currentRunInputStore;
   const continuation =
     options.currentRunInputStore && delivery
       ? createSubagentContinuationCoordinator({
@@ -455,6 +465,10 @@ export async function createUiRuntimeComposition(
   });
   const goalTools = new Set<string>(Object.values(GOAL_TOOL_NAMES));
   const toolScheduler = createToolScheduler({
+    subscribeRunSteer: inputStore
+      ? (runId, wake, signal) =>
+          subscribeRunSteer(inputStore, runId, wake, signal)
+      : undefined,
     async accessGuard({ request, tool }) {
       if (
         (tool.name === "agent" || goalTools.has(tool.name)) &&
@@ -487,7 +501,23 @@ export async function createUiRuntimeComposition(
       if (!source) throw new Error("Tool owner resolution was cancelled");
       const rootRunId = request.runId;
       let executionId: string | undefined;
-      if (source.rootSessionId !== request.sessionId) {
+      const ticket = request.runId
+        ? goalService.getTicketForRun(request.sessionId, request.runId)
+        : undefined;
+      let goalId =
+        ticket &&
+        goalService.isExecutionCurrent(
+          request.sessionId,
+          ticket.goalId,
+          ticket.executionEpoch,
+        ) &&
+        goalService.peekSnapshot(request.sessionId)?.status === "active"
+          ? ticket.goalId
+          : null;
+      if (
+        request.contextScopeId !== undefined ||
+        source.rootSessionId !== request.sessionId
+      ) {
         if (!request.runId || !request.contextScopeId)
           throw new Error("Subagent tool execution ownership is missing");
         const execution = await subagentExecutionStore.getByChildRun({
@@ -502,12 +532,14 @@ export async function createUiRuntimeComposition(
         // Shell ownership follows the actual execution; rootRunId on the
         // execution record is provenance, not a cancellation boundary.
         executionId = execution.executionId;
+        goalId = execution.goalId ?? null;
       }
       return {
         sessionId: request.sessionId,
         runId: request.runId,
         rootRunId,
         executionId,
+        goalId,
         messageId: request.messageId,
         callId: request.callId,
         contextScopeId: request.contextScopeId,
@@ -562,8 +594,36 @@ export async function createUiRuntimeComposition(
     onWrite: options.onTodoWrite,
   });
   const todoWorkScopes = new TodoWorkScopeRegistry();
+  const shellJobStore = options.shellJobStore ?? new InMemoryShellJobStore();
+  const shellConfig = await loadShellConfig();
+  const shellIdentity = await readProcessIdentity(process.pid);
+  const shellRecovery = options.subagentOwnerId
+    ? new ShellJobRecovery({
+        store: shellJobStore,
+        backend: {
+          ownerId: options.subagentOwnerId,
+          pid: process.pid,
+          startToken:
+            shellIdentity.state === "present" ? shellIdentity.startToken : null,
+        },
+      })
+    : undefined;
   const shellJobRegistry = new ShellJobRegistry({
-    store: options.shellJobStore,
+    recovery: shellRecovery,
+    admitsOwner: (owner) =>
+      runManager.admitsTool(owner) && (options.shellAdmission?.(owner) ?? true),
+    backgroundLimit: (owner) =>
+      Promise.resolve(
+        owner?.executionId
+          ? shellConfig.maxRunningSubagentBackgroundJobs
+          : shellConfig.maxRunningBackgroundJobs,
+      ),
+    refreshOwner: async (sessionId, scopeId) => {
+      for (const row of shellJobStore.listByOwner(sessionId, scopeId))
+        if (row.cleanup === "unconfirmed" && row.trackingReleasedAt === null)
+          await shellRecovery?.refresh(row.jobId);
+    },
+    store: shellJobStore,
     ownerId: options.subagentOwnerId,
     readProcessIdentity,
     terminationManagesObservation: true,
@@ -816,7 +876,10 @@ export async function createUiRuntimeComposition(
     },
     currentRunInputs: {
       async close(runId, reason): Promise<void> {
-        shellJobRegistry.sealRootRun(runId);
+        shellJobRegistry.stopForeground(
+          runId,
+          reason === "user-stop" ? "user" : "owner-ended",
+        );
         // Observe both operations immediately: lookup/cancellation can fail while
         // the already sealed input store is still persisting its closure.
         const results = await Promise.allSettled([
@@ -831,14 +894,6 @@ export async function createUiRuntimeComposition(
                 runId,
                 options.now?.() ?? Date.now(),
               );
-            // Natural child failure may leave a detached shell alive. Primary
-            // interruption stops its own shell jobs; agents keep running.
-            if (
-              run?.contextScopeId === undefined &&
-              reason !== "succeeded" &&
-              reason !== "completed"
-            )
-              shellJobRegistry.cancelByRootRun(runId);
           })(),
         ]);
         const errors = results.flatMap((result) =>
@@ -849,8 +904,48 @@ export async function createUiRuntimeComposition(
           throw new AggregateError(errors, "Run input closure failed");
       },
     },
-    createCurrentRunInputPort: continuation
-      ? (identity) => continuation.createPort(identity)
+    createCurrentRunInputPort: inputStore
+      ? (identity) =>
+          createRunInputCoordinator({
+            runId: identity.runId,
+            inputs: inputStore,
+            sources: [
+              ...(continuation ? [continuation.createSource(identity)] : []),
+              createBackgroundTaskInputSource({
+                store: shellJobStore,
+                inputs: inputStore,
+                deliverySelection: async () => {
+                  if (
+                    identity.contextScopeId ||
+                    (await runLedger.get(identity.runId))?.triggerSource ===
+                      "user"
+                  )
+                    return {};
+                  const ticket = goalService.getTicketForRun(
+                    identity.sessionId,
+                    identity.runId,
+                  );
+                  const goalId =
+                    ticket &&
+                    goalService.isExecutionCurrent(
+                      identity.sessionId,
+                      ticket.goalId,
+                      ticket.executionEpoch,
+                    ) &&
+                    goalService.peekSnapshot(identity.sessionId)?.status ===
+                      "active"
+                      ? ticket.goalId
+                      : null;
+                  return { deliveryGoalId: goalId, includeLost: false };
+                },
+                identity: {
+                  sessionId: identity.sessionId,
+                  contextScopeId: identity.contextScopeId ?? null,
+                  runId: identity.runId,
+                },
+              }),
+            ],
+          })
       : undefined,
     revokePermissionsForRun: (runId, reason): void => {
       options.permissionManager?.revokeByRun(runId, reason);
@@ -956,21 +1051,15 @@ export async function createUiRuntimeComposition(
       messages: options.messageManager,
       readExecutionInputs: messageChannel?.readExecutionInputs,
     }),
-    async cleanupExecution({ execution, reason }): Promise<RunCleanupSnapshot> {
+    async cleanupExecution({ execution }): Promise<RunCleanupSnapshot> {
       if (!execution.childRunId) return { confirmed: true };
-      shellJobRegistry.sealRootRun(execution.childRunId);
-      let shell: import("../../tools/shell-job-registry.js").ShellCleanupResult =
-        { confirmed: true };
-      if (
-        reason === "closed" ||
-        execution.status === "interrupted" ||
-        execution.status === "cancelled"
-      )
-        shell = await shellJobRegistry.cleanupRootRun(execution.childRunId);
-      else
-        shell = await shellJobRegistry.observeExecutionCleanup(
-          execution.childRunId,
-        );
+      const shell =
+        execution.childSessionId && execution.childScopeId
+          ? await shellJobRegistry.cleanupScope(
+              execution.childSessionId,
+              execution.childScopeId,
+            )
+          : { confirmed: true };
       return combineCleanup([
         shell,
         toolScheduler.getRunCleanup(execution.childRunId),
@@ -1061,7 +1150,10 @@ export async function createUiRuntimeComposition(
     runManager.withFinalizationWriteBudget(runId, async () => {
       // UI Stop is already bound to a concrete root identity. Seal its local
       // execution before any storage read can wait behind a busy database.
-      shellJobRegistry.cancelByRootRun(runId);
+      shellJobRegistry.stopForeground(
+        runId,
+        reason === "user-stop" ? "user" : "owner-ended",
+      );
       if (runManager.get(runId))
         runManager.cancel(runId, reason ?? "user-stop");
       const run = await runLedger.get(runId);
@@ -1317,8 +1409,8 @@ export async function createUiRuntimeComposition(
   const closeAdmission = (): void => {
     if (admissionClosed) return;
     admissionClosed = true;
-    subagentHost.closeAdmission();
     shellJobRegistry.closeAdmission();
+    subagentHost.closeAdmission();
     toolScheduler.cancelAll();
   };
 
@@ -1522,17 +1614,119 @@ export async function createUiRuntimeComposition(
 
     resetRewoundSessionState,
 
+    async preflightShellRuns(runIds): Promise<readonly string[]> {
+      const ids = new Set(runIds);
+      for (const rootRunId of runIds)
+        for (const execution of await subagentExecutionStore.listByRootRun(
+          rootRunId,
+        ))
+          if (execution.childRunId) ids.add(execution.childRunId);
+      const rows = [...ids].flatMap(
+        (id) => options.shellJobStore?.listByRootRun(id) ?? [],
+      );
+      for (const row of rows)
+        if (
+          row.trackingReleasedAt === null &&
+          (row.status === null ||
+            row.status === "running" ||
+            row.cleanup !== "confirmed" ||
+            row.settledAt === null)
+        )
+          await shellRecovery?.assertCanManage(row.jobId);
+      return [...ids];
+    },
+    markRewoundShellRuns(runIds): void {
+      for (const id of runIds)
+        shellJobRegistry.markRootRunStopped(id, "rewound");
+    },
+
     async stopRewoundRunWork(rootRunId): Promise<void> {
-      const childRunIds = await subagentHost.stopRewoundRoot(rootRunId);
-      for (const id of [rootRunId, ...childRunIds]) {
-        if (!shellJobRegistry.hasActiveWork(id)) continue;
-        const cleanup = await shellJobRegistry.cleanupRootRun(id);
+      const executions = await subagentExecutionStore.listByRootRun(rootRunId);
+      const ids = [
+        rootRunId,
+        ...executions.flatMap((execution) =>
+          execution.childRunId ? [execution.childRunId] : [],
+        ),
+      ];
+      const rows = ids
+        .flatMap((id) => shellJobStore.listByRootRun(id))
+        .filter(
+          (row) => row.trackingReleasedAt === null && row.settledAt === null,
+        );
+      for (const row of rows) await shellRecovery?.assertCanManage(row.jobId);
+      for (const id of ids) {
+        const cleanup = await shellJobRegistry.stopByRootRun(id, "rewound");
         if (
           !cleanup.confirmed &&
           (!cleanup.settled || !(await waitForCleanup(cleanup.settled)))
         )
-          throw new Error("Shell cleanup is unconfirmed");
+          throw Object.assign(new Error("Shell cleanup is unconfirmed"), {
+            code: "SHELL_JOB_CLEANUP_UNCONFIRMED",
+          });
       }
+      for (const row of rows) await shellRecovery?.recover(row.jobId);
+      if (
+        rows.some((row) => {
+          const current = shellJobStore.get(row.jobId);
+          return (
+            current?.trackingReleasedAt === null && current.settledAt === null
+          );
+        })
+      )
+        throw Object.assign(new Error("Shell cleanup is unconfirmed"), {
+          code: "SHELL_JOB_CLEANUP_UNCONFIRMED",
+        });
+      await subagentHost.stopRewoundRoot(rootRunId);
+    },
+
+    async stopShellJob(rootSessionId, jobId) {
+      const row = shellJobStore.get(jobId);
+      if (row?.rootSessionId !== rootSessionId)
+        throw new Error("Shell job not found in session tree");
+      return shellJobRegistry.kill(
+        jobId,
+        row.sessionId,
+        row.contextScopeId ?? undefined,
+        "user",
+      );
+    },
+    async abandonShellJob(rootSessionId, jobId, confirm) {
+      const row = shellJobStore.get(jobId);
+      if (row?.rootSessionId !== rootSessionId || !shellRecovery)
+        throw new Error("Shell job not found in session tree");
+      return shellRecovery.abandon(jobId, confirm);
+    },
+
+    async preflightShellSessions(sessionIds): Promise<void> {
+      const ids = new Set(sessionIds);
+      for (const row of shellJobStore.listUnsettled()) {
+        if (ids.has(row.sessionId))
+          await shellRecovery?.assertCanManage(row.jobId);
+      }
+    },
+    async stopShellSessions(sessionIds): Promise<void> {
+      const ids = new Set(sessionIds);
+      const rows = shellJobStore
+        .listUnsettled()
+        .filter((row) => ids.has(row.sessionId));
+      for (const row of rows) await shellRecovery?.assertCanManage(row.jobId);
+      for (const row of rows) await shellRecovery?.recover(row.jobId);
+      for (const id of sessionIds) {
+        const cleanup = await shellJobRegistry.cleanupSession(id);
+        if (
+          !cleanup.confirmed &&
+          (!cleanup.settled || !(await waitForCleanup(cleanup.settled)))
+        )
+          throw Object.assign(
+            new Error("Shell resource cleanup is unconfirmed"),
+            { code: "SHELL_JOB_CLEANUP_UNCONFIRMED" },
+          );
+      }
+      if (shellJobStore.listUnsettled().some((row) => ids.has(row.sessionId)))
+        throw Object.assign(
+          new Error("Shell resource cleanup is unconfirmed"),
+          { code: "SHELL_JOB_CLEANUP_UNCONFIRMED" },
+        );
     },
 
     getActivityReasons(): readonly string[] {

@@ -380,27 +380,33 @@ describe("session-owned subagent lifecycle", () => {
     });
   });
 
-  it("returns a naturally completed execution slot with detached shells, seals its commands, and closes every shell of the instance", async () => {
+  it("stops shells when each subagent execution ends and rejects late commands", async () => {
     const stopped = new WeakSet<ChildProcess>();
     const killTree = vi.fn((child: ChildProcess) => {
       stopped.add(child);
       child.emit("close", null, "SIGTERM");
       return { status: "confirmed" as const };
     });
+    const admitted = new Set<string>();
     const registry = new ShellJobRegistry({
+      admitsOwner: (owner) => admitted.has(owner.rootRunId ?? ""),
       killTree,
       probeTree: (child): "stopped" | "running" =>
         stopped.has(child) ? "stopped" : "running",
     });
     const f = fixture({
-      cleanupExecution: ({ execution, reason }) => {
-        if (!execution.childRunId) return Promise.resolve({ confirmed: true });
-        registry.sealRootRun(execution.childRunId);
-        return reason === "closed" ||
-          execution.status === "interrupted" ||
-          execution.status === "cancelled"
-          ? registry.cleanupRootRun(execution.childRunId)
-          : registry.observeExecutionCleanup(execution.childRunId);
+      cleanupExecution: ({ execution }) => {
+        if (
+          !execution.childRunId ||
+          !execution.childSessionId ||
+          !execution.childScopeId
+        )
+          return Promise.resolve({ confirmed: true });
+        admitted.delete(execution.childRunId);
+        return registry.cleanupScope(
+          execution.childSessionId,
+          execution.childScopeId,
+        );
       },
       onClosed: ({ sessionId, contextScopeId }) =>
         registry.cleanupScope(sessionId, contextScopeId),
@@ -415,6 +421,7 @@ describe("session-owned subagent lifecycle", () => {
       ).find((entry) => entry.childRunId === input.runId);
       if (!input.runId || !execution?.childScopeId || !execution.childSessionId)
         throw new Error("missing child identity");
+      admitted.add(input.runId);
       await registry.start({
         child: createChild,
         background: true,
@@ -439,7 +446,7 @@ describe("session-owned subagent lifecycle", () => {
     await vi.waitFor(() => {
       expect(f.host.hasActiveWork()).toBe(false);
     });
-    expect(registry.hasActiveWork(first.execution.childRunId)).toBe(true);
+    expect(registry.hasActiveWork(first.execution.childRunId)).toBe(false);
     if (!first.execution.childRunId) throw new Error("missing child run");
     const launch = vi.fn(createChild);
     await expect(
@@ -474,8 +481,8 @@ describe("session-owned subagent lifecycle", () => {
         })
       ).cleanup,
     ).toBe("confirmed");
-    expect(killTree).toHaveBeenCalledTimes(2);
-    expect(registry.hasActiveWork(sibling.execution.childRunId)).toBe(true);
+    expect(killTree).toHaveBeenCalledTimes(3);
+    expect(registry.hasActiveWork(sibling.execution.childRunId)).toBe(false);
     await f.host.close({
       parentSessionId: "parent",
       subagentId: sibling.execution.subagentId,

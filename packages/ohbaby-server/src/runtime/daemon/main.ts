@@ -7,6 +7,7 @@ import {
   commitSessionWorkspaceMove,
   restoreArchivedSession,
   deleteArchivedSession,
+  recoverArchivedSessionShellJobs,
   cleanupDeletedSessionFiles,
   sessionFilesCleanupFailed,
   getGlobalSession,
@@ -541,6 +542,10 @@ async function startFreshDaemon(input: {
             : { llmClient: input.options.llmClient }),
           workdir,
           logger,
+          releaseSideChatShellInWorkspace: (directory, sideChatId) =>
+            daemon.releaseSideChatShellInWorkspace(directory, sideChatId),
+          preflightSideChatInWorkspace: (directory, sideChatId) =>
+            daemon.preflightSideChatInWorkspace(directory, sideChatId),
           closeSideChatInWorkspace: (directory, sideChatId) =>
             daemon.closeSideChatInWorkspace(directory, sideChatId),
         });
@@ -560,6 +565,7 @@ async function startFreshDaemon(input: {
           restore: (sessionId, restoreInput) =>
             restoreArchivedSession(sessionId, restoreInput),
           delete: async (sessionId) => {
+            await recoverArchivedSessionShellJobs(sessionId);
             const result = await deleteArchivedSession(sessionId);
             // Defaults share the persistent backend's OHBABY_STORAGE_ROOT/data root.
             await cleanupDeletedSessionFiles(result, {

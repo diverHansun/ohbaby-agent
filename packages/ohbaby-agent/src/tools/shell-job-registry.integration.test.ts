@@ -283,9 +283,7 @@ const timer = setInterval(() => {
         registry.get(jobB.jobId, b.sessionId, b.contextScopeId).status,
       ).toBe("running");
 
-      expect(
-        registry.cancelByRootRun("root-a").map((job) => job.jobId),
-      ).toEqual([jobA.jobId]);
+      registry.markRootRunStopped("root-a", "owner-ended");
       await vi.waitFor(
         () => {
           expect(

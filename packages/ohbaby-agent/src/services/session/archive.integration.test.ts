@@ -1,3 +1,5 @@
+import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
+import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +39,28 @@ const restoreInput = {
 };
 
 describe("archived session lifecycle", () => {
+  it("preserves archived data while shell cleanup is unresolved or explicitly releases tracking", async () => {
+    addSession("root");
+    const store = new DatabaseShellJobStore();
+    await store.insert(
+      shellJobFixture({
+        jobId: "unresolved",
+        sessionId: "root",
+        rootSessionId: "root",
+        status: "lost",
+        cleanup: "unconfirmed",
+        settledAt: null,
+      }),
+    );
+    await expect(deleteArchivedSession("root")).rejects.toThrow(
+      "Shell resource cleanup is unconfirmed",
+    );
+    expect(readSessionRow(getDatabase(), "root")).not.toBeNull();
+    await store.update("unresolved", { trackingReleasedAt: Date.now() });
+    await deleteArchivedSession("root");
+    expect(readSessionRow(getDatabase(), "root")).toBeNull();
+  });
+
   it.each([
     [true, true, "/workspace", "/next"],
     [false, true, undefined, "/next"],

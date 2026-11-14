@@ -349,6 +349,26 @@ describe("bash builtin tool", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("keeps a background process when the turn aborts during spawn", async () => {
+    const abort = new AbortController();
+    const child = new FakeChildProcess();
+    const killTree = vi.fn();
+    const bash = getBashTool({
+      shell: { acceptable: () => "/bin/bash", killTree },
+      spawn: () => {
+        abort.abort();
+        return child as unknown as ChildProcess;
+      },
+    });
+    const result = await bash.execute(
+      { command: "echo hello", run_in_background: true },
+      createContext({ signal: abort.signal }),
+    );
+    expect(result.metadata?.status).toBe("running");
+    expect(killTree).not.toHaveBeenCalled();
+    child.emitExit(0, null);
+  });
+
   it("executes command prefixes as wrappers around the resolved shell", async () => {
     const child = new FakeChildProcess();
     const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
@@ -704,6 +724,33 @@ describe("bash builtin tool", () => {
       truncated: false,
     });
     child.emit("exit", 0, null);
+  });
+
+  it("accepts a 24 hour background timeout and keeps the foreground cap", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = getBashTool({
+      shell: { acceptable: () => "/bin/bash", killTree: vi.fn() },
+      spawn,
+    });
+    await bash.execute(
+      { command: "echo hello", run_in_background: true, timeout: 86_400_000 },
+      createContext(),
+    );
+    child.emit("exit", 0, null);
+    await expect(
+      bash.execute(
+        { command: "echo hello", timeout: 600_001 },
+        createContext(),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      bash.execute(
+        { command: "echo hello", run_in_background: true, timeout: 86_400_001 },
+        createContext(),
+      ),
+    ).rejects.toThrow();
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 
   it("kills the process tree on timeout", async () => {

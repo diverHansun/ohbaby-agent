@@ -1,3 +1,7 @@
+import { createBackgroundTaskInputSource } from "../../adapters/ui-runtime/background-task-inputs.js";
+import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
+import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+import { createRunInputCoordinator } from "../../runtime/prompt-scheduler/run-input-coordinator.js";
 import { createBus } from "../../bus/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSubagentContinuationCoordinator } from "./continuation-coordinator.js";
@@ -57,7 +61,15 @@ async function setup(goalId?: string) {
     }),
     prepareResult: () => Promise.resolve({ body: "complete result" }),
   });
-  const port = coordinator.createPort({ runId: "root", sessionId: "parent" });
+  const createPort = (
+    identity: Parameters<typeof coordinator.createSource>[0],
+  ) =>
+    createRunInputCoordinator({
+      runId: identity.runId,
+      inputs,
+      sources: [coordinator.createSource(identity)],
+    });
+  const port = createPort({ runId: "root", sessionId: "parent" });
   let requestNumber = 0;
   async function processPending(): Promise<void> {
     const protectedMessages = await port.beforeStep();
@@ -94,7 +106,9 @@ async function setup(goalId?: string) {
     execution,
     inputs,
     port,
-    coordinator,
+    createPort,
+    createSource: (identity: Parameters<typeof coordinator.createSource>[0]) =>
+      coordinator.createSource(identity),
     processPending,
     messages,
   };
@@ -103,6 +117,91 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("subagent continuation", () => {
+  it("keeps both real result sources pending when the run closes during acceptance", async () => {
+    const s = await setup();
+    await s.executions.finish(s.execution, {
+      status: "completed",
+      output: "child result",
+      completedAt: 10,
+    });
+    const jobs = new InMemoryShellJobStore();
+    await jobs.insert(
+      shellJobFixture({
+        sessionId: "parent",
+        rootSessionId: "parent",
+        status: "completed",
+        resultReadyAt: 10,
+        noticeState: "pending",
+      }),
+    );
+    const background = createBackgroundTaskInputSource({
+      store: jobs,
+      inputs: s.inputs,
+      identity: { sessionId: "parent", contextScopeId: null, runId: "root" },
+    });
+    const port = createRunInputCoordinator({
+      runId: "root",
+      inputs: s.inputs,
+      sources: [
+        s.createSource({ sessionId: "parent", runId: "root" }),
+        background,
+      ],
+    });
+    const accept = s.inputs.acceptRuntimeInput.bind(s.inputs);
+    vi.spyOn(s.inputs, "acceptRuntimeInput").mockImplementationOnce(
+      async (input) => {
+        await s.inputs.close("root", "user-stop");
+        return accept(input);
+      },
+    );
+    await expect(port.beforeStep()).resolves.toEqual([]);
+    expect((await s.executions.get(s.execution))?.delivery.state).toBe(
+      "pending",
+    );
+    expect(jobs.get("job")?.noticeState).toBe("pending");
+    expect(await s.inputs.listByRun("root")).toHaveLength(0);
+  });
+  it("shares the finish barrier for actual child and shell results", async () => {
+    const s = await setup();
+    await s.executions.finish(s.execution, {
+      status: "completed",
+      output: "child result",
+      completedAt: 10,
+    });
+    const jobs = new InMemoryShellJobStore();
+    await jobs.insert(
+      shellJobFixture({
+        sessionId: "parent",
+        rootSessionId: "parent",
+        status: "completed",
+        resultReadyAt: 10,
+        noticeState: "pending",
+      }),
+    );
+    const port = createRunInputCoordinator({
+      runId: "root",
+      inputs: s.inputs,
+      sources: [
+        s.createSource({ sessionId: "parent", runId: "root" }),
+        createBackgroundTaskInputSource({
+          store: jobs,
+          inputs: s.inputs,
+          identity: {
+            sessionId: "parent",
+            contextScopeId: null,
+            runId: "root",
+          },
+        }),
+      ],
+    });
+    const close = vi.spyOn(s.inputs, "tryCloseForCompletion");
+    expect(await port.beforeFinish()).toBe("continue");
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(
+      (await s.inputs.listByRun("root")).map((row) => row.source).sort(),
+    ).toEqual(["background-task-result", "subagent-result"]);
+  });
+
   it("does not spend an incidental result's automatic opportunity before a request", async () => {
     const s = await setup();
     await s.executions.finish(s.execution, {
@@ -128,7 +227,7 @@ describe("subagent continuation", () => {
       output: "Goal result",
       completedAt: 10,
     });
-    const automatic = s.coordinator.createPort({
+    const automatic = s.createPort({
       runId: "auto",
       sessionId: "parent",
     });
@@ -198,7 +297,7 @@ describe("subagent continuation", () => {
       triggerSource: "user",
     });
     await s.runLedger.markRunning("next");
-    const port = s.coordinator.createPort({
+    const port = s.createPort({
       runId: "next",
       sessionId: "parent",
     });
@@ -230,7 +329,7 @@ describe("subagent continuation", () => {
       triggerSource: "user",
     });
     await s.runLedger.markRunning("next");
-    const port = s.coordinator.createPort({
+    const port = s.createPort({
       runId: "next",
       sessionId: "parent",
     });

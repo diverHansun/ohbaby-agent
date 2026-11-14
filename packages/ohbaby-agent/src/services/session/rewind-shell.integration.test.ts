@@ -1,11 +1,12 @@
 import { afterEach, expect, it } from "vitest";
 import { closeDatabase, getDatabase, initDatabase } from "../database/index.js";
-import { assertRewindShellOwners } from "./rewind-shell.js";
+import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
+import { ShellJobRecovery } from "../../tools/shell-job-recovery.js";
 
 afterEach(() => {
   closeDatabase();
 });
-it("blocks rewind for a live foreign owner with an unsettled persisted shell job", () => {
+it("blocks a live foreign owner with an unsettled persisted shell job", async () => {
   initDatabase({ dbPath: ":memory:" });
   const db = getDatabase();
   db.prepare(
@@ -14,17 +15,19 @@ it("blocks rewind for a live foreign owner with an unsettled persisted shell job
   db.prepare(
     "INSERT INTO shell_job(job_id,session_id,root_session_id,root_run_id,mode,command,cwd,shell,created_at,owner_pid,owner_id,status,output_bytes,output_truncated) VALUES('j','s','s','r','background','sleep','/tmp','/bin/sh',1,?,'foreign','running',0,0)",
   ).run(process.pid);
-  expect(() => {
-    assertRewindShellOwners(db, "s", ["r"], "current");
-  }).toThrow();
+  const recovery = new ShellJobRecovery({
+    store: new DatabaseShellJobStore({ db }),
+    backend: { ownerId: "current", pid: process.pid, startToken: null },
+  });
+  await expect(recovery.assertCanManage("j")).rejects.toMatchObject({
+    code: "SHELL_JOB_OTHER_BACKEND",
+  });
   db.prepare(
     "UPDATE shell_job SET status='completed',cleanup='confirmed',settled_at=2 WHERE job_id='j'",
   ).run();
-  expect(() => {
-    assertRewindShellOwners(db, "s", ["r"], "current");
-  }).not.toThrow();
+  await expect(recovery.assertCanManage("j")).resolves.toBeUndefined();
 });
-it("blocks rewind for an unsettled child-run job owned by a live foreign backend", () => {
+it("blocks an unsettled child-run job owned by a live foreign backend", async () => {
   initDatabase({ dbPath: ":memory:" });
   const db = getDatabase();
   const insertSession = db.prepare(
@@ -38,13 +41,17 @@ it("blocks rewind for an unsettled child-run job owned by a live foreign backend
   db.prepare(
     `INSERT INTO shell_job(job_id,session_id,root_session_id,root_run_id,run_id,mode,command,cwd,shell,created_at,owner_pid,owner_id,status,output_bytes,output_truncated) VALUES('j','child','parent','child-run','child-run','background','sleep','/tmp','/bin/sh',1,?,'foreign','running',0,0)`,
   ).run(process.pid);
-  expect(() => {
-    assertRewindShellOwners(db, "parent", ["parent-run"], "current");
-  }).toThrow();
+  const store = new DatabaseShellJobStore({ db });
+  const recovery = new ShellJobRecovery({
+    store,
+    backend: { ownerId: "current", pid: process.pid, startToken: null },
+  });
+  expect(store.listByRootRun("child-run")).toHaveLength(1);
+  await expect(recovery.assertCanManage("j")).rejects.toMatchObject({
+    code: "SHELL_JOB_OTHER_BACKEND",
+  });
   db.prepare(
     "UPDATE shell_job SET status='completed',cleanup='confirmed',settled_at=2 WHERE job_id='j'",
   ).run();
-  expect(() => {
-    assertRewindShellOwners(db, "parent", ["parent-run"], "current");
-  }).not.toThrow();
+  await expect(recovery.assertCanManage("j")).resolves.toBeUndefined();
 });

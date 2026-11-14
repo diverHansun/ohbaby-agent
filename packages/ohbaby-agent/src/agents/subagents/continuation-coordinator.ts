@@ -1,5 +1,5 @@
 import { SUBAGENT_RESULT_SOURCE_PREFIX } from "./execution-store.js";
-import type { LifecycleRunInputPort } from "../../core/lifecycle/types.js";
+import type { RunInputSource } from "../../runtime/prompt-scheduler/run-input-coordinator.js";
 import { buildRuntimeInputMessage } from "../../core/message/index.js";
 import {
   CurrentRunInputConflictError,
@@ -23,7 +23,7 @@ interface RunIdentity {
   readonly isSubagent?: boolean;
 }
 export interface SubagentContinuationCoordinator {
-  createPort(identity: RunIdentity): LifecycleRunInputPort;
+  createSource(identity: RunIdentity): RunInputSource;
 }
 
 /** Page the durable session ledger; the history API's default 50 is not a lifecycle boundary. */
@@ -58,7 +58,7 @@ export function createSubagentContinuationCoordinator(options: {
   readonly now?: () => number;
 }): SubagentContinuationCoordinator {
   const now = options.now ?? Date.now;
-  function createPort(identity: RunIdentity): LifecycleRunInputPort {
+  function createSource(identity: RunIdentity): RunInputSource {
     async function reconcile(signal?: AbortSignal): Promise<void> {
       signal?.throwIfAborted();
       if (identity.isSubagent) return;
@@ -134,6 +134,11 @@ export function createSubagentContinuationCoordinator(options: {
           } catch (error) {
             if (
               error instanceof CurrentRunInputConflictError &&
+              error.reason === "target-closed"
+            )
+              return;
+            if (
+              error instanceof CurrentRunInputConflictError &&
               error.reason === "source-rewound"
             )
               continue;
@@ -149,30 +154,10 @@ export function createSubagentContinuationCoordinator(options: {
       }
     }
     return {
-      async beforeStep(
-        signal,
-        finalStep,
-      ): ReturnType<LifecycleRunInputPort["beforeStep"]> {
-        await reconcile(signal);
-        if (finalStep) await options.inputs.sealSteer(identity.runId);
-        return options.inputs.getMessages(identity.runId);
-      },
-      async beforeFinish(
-        signal,
-      ): ReturnType<LifecycleRunInputPort["beforeFinish"]> {
-        await reconcile(signal);
-        signal?.throwIfAborted();
-        return (await options.inputs.tryCloseForCompletion(identity.runId))
-          ? "finish"
-          : "continue";
-      },
-      admitRequestAttempt: (request, signal) =>
-        options.inputs.admitRequestAttempt(request, signal),
-      async confirmRequestSuccess(requestId): Promise<void> {
-        const ids = await options.inputs.confirmRequestSuccess(requestId);
-        for (const inputId of ids) {
-          const input = await options.inputs.getInput(inputId);
-          if (input?.source !== "subagent-result") continue;
+      reconcile,
+      async confirmRequestSuccess(records, requestId): Promise<void> {
+        for (const input of records) {
+          if (input.source !== "subagent-result") continue;
           const executionId = input.sourceId.slice(
             SUBAGENT_RESULT_SOURCE_PREFIX.length,
           );
@@ -190,5 +175,5 @@ export function createSubagentContinuationCoordinator(options: {
       },
     };
   }
-  return { createPort };
+  return { createSource };
 }

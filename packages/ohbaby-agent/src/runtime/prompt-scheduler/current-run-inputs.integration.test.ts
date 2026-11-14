@@ -1,3 +1,5 @@
+import { subscribeRunSteer } from "./steer-subscription.js";
+import { buildRuntimeInputMessage } from "../../core/message/index.js";
 import { WorkspacePromptScheduler } from "./scheduler.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -107,6 +109,74 @@ for (const backend of ["memory", "sqlite"] as const)
       };
       return { ledger, queue, messages, messageStore, inputs, steer };
     }
+    it("interrupts a wait only for new user steer, not task results or input bookkeeping", async () => {
+      const f = await fixture();
+      const wake = vi.fn();
+      const dispose = await subscribeRunSteer(f.inputs, "run-a", wake);
+      try {
+        await f.inputs.acceptRuntimeInput({
+          inputId: "bg",
+          runId: "run-a",
+          sessionId: "session",
+          source: "background-task-result",
+          sourceId: "batch",
+          message: buildRuntimeInputMessage({
+            messageId: "bg-message",
+            sessionId: "session",
+            agent: "default",
+            createdAt: 1,
+            origin: {
+              kind: "background-task-result",
+              inputId: "bg",
+              targetRunId: "run-a",
+              sourceId: "batch",
+            },
+            text: "result",
+          }),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(wake).not.toHaveBeenCalled();
+        await f.inputs.steerQueued(f.steer);
+        await vi.waitFor(() => {
+          expect(wake).toHaveBeenCalledTimes(1);
+        });
+        await f.inputs.close("run-a", "done");
+        expect(wake).toHaveBeenCalledTimes(1);
+      } finally {
+        dispose();
+      }
+    });
+    it("ignores old steers and closes the read/subscription registration race", async () => {
+      const f = await fixture();
+      const wake = vi.fn();
+      const original = f.inputs.subscribe.bind(f.inputs);
+      let accepting: Promise<unknown> | undefined;
+      vi.spyOn(f.inputs, "subscribe").mockImplementationOnce(
+        (runId, listener) => {
+          accepting = f.inputs.steerQueued(f.steer);
+          return original(runId, listener);
+        },
+      );
+      const dispose = await subscribeRunSteer(f.inputs, "run-a", wake);
+      await accepting;
+      await vi.waitFor(() => {
+        expect(wake).toHaveBeenCalledTimes(1);
+      });
+      dispose();
+      const oldWake = vi.fn();
+      const controller = new AbortController();
+      const disposeOld = await subscribeRunSteer(
+        f.inputs,
+        "run-a",
+        oldWake,
+        controller.signal,
+      );
+      controller.abort();
+      await f.inputs.close("run-a", "done");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(oldWake).not.toHaveBeenCalled();
+      disposeOld();
+    });
     it("recovers confirmation from a later successful attempt after the input was closed", async () => {
       const f = await fixture();
       const { receipt } = requireSteered(await f.inputs.steerQueued(f.steer));

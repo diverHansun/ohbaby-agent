@@ -92,6 +92,7 @@ export interface ToolExecutionEnvironment {
 }
 
 export interface ToolExecutionContext {
+  readonly subscribeSteer?: (wake: () => void) => Promise<() => void>;
   readonly shellExecution?: ShellExecutionBinding;
   /** Trusted tool cleanup owner reports process lifetime independently of its result. */
   readonly reportCleanup?: (state: ToolCleanupState) => void;
@@ -329,6 +330,7 @@ export interface ToolScheduler {
 }
 
 export interface ToolExecutionOwner {
+  readonly goalId?: string | null;
   readonly workspaceKey?: string;
   readonly sessionId: string;
   readonly runId?: string;
@@ -360,6 +362,11 @@ export interface ToolExecutionFact {
   readonly outcome?: ToolCallResult;
 }
 export interface ToolSchedulerOptions {
+  readonly subscribeRunSteer?: (
+    runId: string,
+    wake: () => void,
+    signal: AbortSignal,
+  ) => Promise<() => void>;
   readonly resolveOwner?: (
     request: ToolCallRequest,
   ) => ToolExecutionOwner | Promise<ToolExecutionOwner>;

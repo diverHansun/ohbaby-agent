@@ -106,6 +106,15 @@ export interface ShellJobRegistryOptions {
   readonly ownerId?: string;
   readonly readProcessIdentity?: (pid: number) => Promise<ProcessIdentity>;
   readonly createJobId?: () => string;
+  readonly admitsOwner?: (owner: ToolExecutionOwner) => boolean;
+  readonly backgroundLimit?: (
+    owner: ToolExecutionOwner | undefined,
+  ) => Promise<number>;
+  readonly recovery?: import("./shell-job-recovery.js").ShellJobRecovery;
+  readonly refreshOwner?: (
+    sessionId: string,
+    contextScopeId: string | null,
+  ) => Promise<void>;
 }
 
 interface UnspawnedJob {
@@ -261,7 +270,6 @@ export class ShellJobRegistry {
     { snapshot: ShellJobSnapshot; sessionId: string; contextScopeId?: string }
   >();
   private readonly store: ShellJobStore;
-  private readonly sealedRoots = new Set<string>();
   private checkpointTimer?: ReturnType<typeof setTimeout>;
   private ownerIdentity?: Promise<ProcessIdentity>;
   private readonly createJobId: () => string;
@@ -281,8 +289,8 @@ export class ShellJobRegistry {
     if (
       typeof input.child === "function" &&
       (this.admissionClosed ||
-        (input.owner?.rootRunId !== undefined &&
-          this.sealedRoots.has(input.owner.rootRunId)))
+        (input.owner !== undefined &&
+          this.options.admitsOwner?.(input.owner) === false))
     )
       throw new Error("Shell root run is closed.");
     const now = Date.now();
@@ -327,7 +335,7 @@ export class ShellJobRegistry {
       ownerId: this.options.ownerId ?? null,
       ownerStartToken:
         identity?.state === "present" ? identity.startToken : null,
-      goalId: null,
+      goalId: input.owner?.goalId ?? null,
       createdAt: now,
       startedAt: null,
       endedAt: null,
@@ -347,18 +355,27 @@ export class ShellJobRegistry {
       noticeInputId: null,
       noticeWakeRunId: null,
     };
+    if (input.background) {
+      await this.refreshLocalOwner(record.sessionId, record.contextScopeId);
+      await this.options.refreshOwner?.(
+        record.sessionId,
+        record.contextScopeId,
+      );
+    }
+    const maxBackgroundJobs = input.background
+      ? await this.options.backgroundLimit?.(owner)
+      : undefined;
     const assertAdmitted = (): undefined => {
       if (typeof input.child !== "function") return undefined;
       if (input.signal?.aborted) throw new Error("Command was cancelled.");
       if (
         this.admissionClosed ||
-        (owner?.rootRunId !== undefined &&
-          this.sealedRoots.has(owner.rootRunId))
+        (owner !== undefined && this.options.admitsOwner?.(owner) === false)
       )
         throw new Error("Shell root run is closed.");
       return undefined;
     };
-    await this.store.insert(record, { assertAdmitted });
+    await this.store.insert(record, { assertAdmitted, maxBackgroundJobs });
     input.onReserved?.();
     let child: ChildProcess;
     let cancelledBeforeSpawn = false;
@@ -367,8 +384,7 @@ export class ShellJobRegistry {
         cancelledBeforeSpawn =
           input.signal?.aborted === true ||
           this.admissionClosed ||
-          (owner?.rootRunId !== undefined &&
-            this.sealedRoots.has(owner.rootRunId));
+          (owner !== undefined && this.options.admitsOwner?.(owner) === false);
         assertAdmitted();
       }
       child = typeof input.child === "function" ? input.child() : input.child;
@@ -477,6 +493,7 @@ export class ShellJobRegistry {
       pid: child.pid ?? null,
       pgid: process.platform !== "win32" ? (child.pid ?? null) : null,
     });
+    const registration = job.persist;
 
     child.stdout?.on("data", (chunk: unknown) => {
       this.capture(job, chunk);
@@ -557,10 +574,18 @@ export class ShellJobRegistry {
     // Register its cleanup owner before terminating it; never abandon the process.
     if (
       this.admissionClosed ||
-      (job.owner?.rootRunId !== undefined &&
-        this.sealedRoots.has(job.owner.rootRunId))
+      (!job.background &&
+        job.owner !== undefined &&
+        this.options.admitsOwner?.(job.owner) === false)
     )
       this.terminate(job, "cancelled");
+    try {
+      await registration;
+    } catch (error) {
+      job.identityPending = false;
+      this.terminate(job, "cancelled", "owner-ended");
+      throw error;
+    }
     if (child.pid && this.options.readProcessIdentity) {
       try {
         const processIdentity = await this.options.readProcessIdentity(
@@ -580,10 +605,11 @@ export class ShellJobRegistry {
     }
     try {
       await job.persist;
-    } catch {
-      // The process already exists. Keep its cleanup owner and terminate it;
-      // throwing here would make bash release resources while it is still alive.
+    } catch (error) {
+      // The reservation transferred resource ownership before spawn. Keep that
+      // responsibility while reporting that startup could not be persisted.
       this.terminate(job, "cancelled", "owner-ended");
+      throw error;
     }
     return this.snapshot(job);
   }
@@ -612,43 +638,52 @@ export class ShellJobRegistry {
     );
   }
 
-  /** Signal cancellation immediately; the registry retains each job's cleanup task and lease. */
-  sealRootRun(rootRunId: string): void {
-    this.sealedRoots.add(rootRunId);
+  stopForeground(rootRunId: string, reason: ShellJobStopReason): void {
+    for (const job of this.jobs.values())
+      if (
+        job.owner?.rootRunId === rootRunId &&
+        !job.background &&
+        job.cleanup !== "confirmed"
+      )
+        this.terminate(job, "cancelled", reason);
   }
 
-  cancelByRootRun(rootRunId: string): readonly ShellJobSnapshot[] {
-    this.sealedRoots.add(rootRunId);
+  markRootRunStopped(rootRunId: string, reason: ShellJobStopReason): void {
+    for (const job of this.jobs.values())
+      if (job.owner?.rootRunId === rootRunId && job.cleanup !== "confirmed")
+        this.terminate(job, "cancelled", reason);
+  }
+
+  async stopByRootRun(
+    rootRunId: string,
+    reason: ShellJobStopReason,
+  ): Promise<ShellCleanupResult> {
     const jobs = [...this.jobs.values()].filter(
       (job) => job.owner?.rootRunId === rootRunId,
     );
     for (const job of jobs)
-      if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
-    return jobs.map((job) => this.snapshot(job));
-  }
-
-  async cleanupRootRun(rootRunId: string): Promise<ShellCleanupResult> {
-    this.cancelByRootRun(rootRunId);
+      if (job.cleanup === "unconfirmed") this.observeStopped(job);
+    await this.disposeJobs(jobs, reason);
     return this.confirmCleanup(
-      [...this.jobs.values()].filter(
-        (job) => job.owner?.rootRunId === rootRunId,
-      ),
+      jobs,
       [...this.unspawnedJobs.values()].filter(
         (job) => job.rootRunId === rootRunId,
       ),
     );
   }
 
-  /** Natural completion exempts only explicitly detached shell jobs. */
-  observeExecutionCleanup(rootRunId: string): Promise<ShellCleanupResult> {
-    return this.confirmCleanup(
-      [...this.jobs.values()].filter(
-        (job) => job.owner?.rootRunId === rootRunId && !job.background,
-      ),
-      [...this.unspawnedJobs.values()].filter(
-        (job) => job.rootRunId === rootRunId && !job.background,
-      ),
+  async refreshLocalOwner(
+    sessionId: string,
+    contextScopeId: string | null,
+  ): Promise<void> {
+    const jobs = [...this.jobs.values()].filter(
+      (job) =>
+        job.sessionId === sessionId &&
+        (job.contextScopeId ?? null) === contextScopeId &&
+        job.cleanup === "unconfirmed",
     );
+    for (const job of jobs) this.observeStopped(job);
+    await Promise.all(jobs.map((job) => job.persist.catch(() => undefined)));
   }
 
   async cleanupScope(
@@ -659,6 +694,7 @@ export class ShellJobRegistry {
       (job) =>
         job.sessionId === sessionId && job.contextScopeId === contextScopeId,
     );
+    await this.refreshLocalOwner(sessionId, contextScopeId);
     await this.disposeJobs(jobs, "owner-ended");
     return this.confirmCleanup(
       jobs,
@@ -779,16 +815,38 @@ export class ShellJobRegistry {
     stopReason: ShellJobStopReason = "model",
   ): Promise<ShellJobSnapshot> {
     const job = this.jobs.get(jobId);
-    if (!job)
+    if (!job) {
+      this.getOwnedRecord(jobId, sessionId, contextScopeId);
+      if (this.options.recovery) {
+        await this.options.recovery.assertCanManage(jobId);
+        return this.snapshotRecord(await this.options.recovery.recover(jobId));
+      }
       return this.snapshotRecord(
         this.getOwnedRecord(jobId, sessionId, contextScopeId),
       );
+    }
     this.getOwnedJob(jobId, sessionId, contextScopeId);
+    if (job.cleanup === "unconfirmed") this.observeStopped(job);
     if (job.cleanup !== "confirmed") {
       this.terminate(job, "cancelled", stopReason);
     }
     await job.terminal;
     return this.snapshot(job);
+  }
+
+  async cleanupSession(sessionId: string): Promise<ShellCleanupResult> {
+    const jobs = [...this.jobs.values()].filter(
+      (job) => job.sessionId === sessionId,
+    );
+    for (const job of jobs)
+      if (job.cleanup === "unconfirmed") this.observeStopped(job);
+    await this.disposeJobs(jobs, "session-closed");
+    return this.confirmCleanup(
+      jobs,
+      [...this.unspawnedJobs.values()].filter(
+        (job) => job.sessionId === sessionId,
+      ),
+    );
   }
 
   async disposeSession(sessionId: string): Promise<void> {

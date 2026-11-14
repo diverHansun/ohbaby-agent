@@ -36,6 +36,7 @@ const MessageErrorSchema = z.discriminatedUnion("name", [
 const RuntimeInputSchema = z.object({
   kind: z.enum([
     "user-steer",
+    "background-task-result",
     "subagent-result",
     "subagent-status",
     "subagent-message",

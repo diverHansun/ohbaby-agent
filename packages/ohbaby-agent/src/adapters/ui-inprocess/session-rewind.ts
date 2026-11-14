@@ -192,6 +192,16 @@ export function commitRewind(
       throw new SessionRunBusyError(input.sessionId, []);
     }
     assertRewindShellOwners(tx, input.sessionId, [...runIds], backendOwner);
+    const unsettledShell = tx
+      .prepare(
+        `WITH roots(id) AS (SELECT value FROM json_each(?)),
+      affected(id) AS (SELECT id FROM roots UNION SELECT child_run_id FROM subagent_execution
+        WHERE root_session_id = ? AND root_run_id IN roots AND child_run_id IS NOT NULL)
+      SELECT 1 FROM shell_job WHERE root_session_id = ? AND root_run_id IN affected
+        AND tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed' OR settled_at IS NULL) LIMIT 1`,
+      )
+      .get(JSON.stringify([...runIds]), input.sessionId, input.sessionId);
+    if (unsettledShell) throw new SessionRunBusyError(input.sessionId, []);
     const messageIds = markMessagesRewound(
       tx,
       input.sessionId,

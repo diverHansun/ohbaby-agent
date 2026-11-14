@@ -277,6 +277,24 @@ export class RunManager {
     void record.inputClosure.catch(() => undefined);
   }
 
+  /** A missing or closing execution never admits late tool calls. */
+  admitsTool(owner: {
+    runId?: string;
+    sessionId: string;
+    contextScopeId?: string;
+  }): boolean {
+    if (!owner.runId) return false;
+    const record = this.recordsById.get(owner.runId);
+    return Boolean(
+      record &&
+      isActive(record) &&
+      !record.inputCloseReason &&
+      !record.abortController.signal.aborted &&
+      record.sessionId === owner.sessionId &&
+      record.options.contextScopeId === owner.contextScopeId,
+    );
+  }
+
   async waitForInputClosure(runId: string): Promise<void> {
     await this.recordsById.get(runId)?.inputClosure;
   }

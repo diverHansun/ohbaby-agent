@@ -215,6 +215,19 @@ function prepareOfflineMigration(
       .all())
       pids.add(row.owner_pid);
   }
+  const shellColumns = connection
+    .prepare<{ name: string }>("PRAGMA table_info(shell_job)")
+    .all();
+  if (shellColumns.some((column) => column.name === "owner_pid")) {
+    for (const row of connection
+      .prepare<{
+        owner_pid: number;
+      }>(
+        "SELECT DISTINCT owner_pid FROM shell_job WHERE owner_pid IS NOT NULL AND tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed' OR settled_at IS NULL)",
+      )
+      .all())
+      pids.add(row.owner_pid);
+  }
   for (const pid of pids) {
     if (!Number.isInteger(pid) || pid <= 0) continue;
     try {

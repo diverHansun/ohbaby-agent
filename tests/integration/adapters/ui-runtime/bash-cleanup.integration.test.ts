@@ -219,7 +219,7 @@ describe("composition Bash cleanup ownership", () => {
         expect(denied.error?.message).toContain("execution ownership");
       }
       expect(children).toHaveLength(3);
-      registry.cancelByRootRun("root-A");
+      registry.markRootRunStopped("root-A", "owner-ended");
       await vi.waitFor(() => {
         expect(killTree).toHaveBeenCalledTimes(1);
       });
@@ -235,9 +235,9 @@ describe("composition Bash cleanup ownership", () => {
         registry.get(String(b.metadata?.jobId), "child", "reused-instance")
           .status,
       ).toBe("running");
-      registry.cancelByRootRun("root-A");
+      registry.markRootRunStopped("root-A", "owner-ended");
       expect(killTree).toHaveBeenCalledTimes(1);
-      registry.cancelByRootRun("child-A");
+      registry.markRootRunStopped("child-A", "owner-ended");
       await vi.waitFor(() => {
         expect(killTree).toHaveBeenCalledTimes(2);
       });
@@ -454,7 +454,11 @@ describe("composition Bash cleanup ownership", () => {
           const rejected = await composition.toolScheduler.execute(
             request(`blocked-${sessionId}`, { sessionId, runId: "new-run" }),
           );
-          expect(rejected.error?.message).toContain("unconfirmed");
+          expect(rejected.error?.message).toContain(
+            sessionId === primary.id
+              ? "ownership does not match"
+              : "unconfirmed",
+          );
         }
         expect(children).toHaveLength(2);
         expect(killTree).toHaveBeenCalledTimes(1);

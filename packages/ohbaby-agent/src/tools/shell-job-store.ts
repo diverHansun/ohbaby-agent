@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { freezeShellJobNoticeBatch } from "./shell-job-notice.js";
 import {
   getDatabase,
   runWriteTransaction,
@@ -102,7 +104,134 @@ function holdsBackgroundSlot(row: ShellJobRecord): boolean {
       row.cleanup !== "confirmed")
   );
 }
+export interface ShellJobNoticeOwner {
+  readonly sessionId: string;
+  readonly contextScopeId: string | null;
+  /** Required for child delivery: a scope can be reused by a later execution. */
+  readonly runId?: string;
+}
+export interface ShellJobNoticeSelection {
+  readonly deliveryGoalId?: string | null;
+  readonly includeLost?: boolean;
+  /** When present, allocate only main-agent results eligible for this Goal (null means ordinary run). */
+  readonly wakeGoalId?: string | null;
+}
+function matchesNoticeOwner(
+  row: ShellJobRecord,
+  owner: ShellJobNoticeOwner,
+): boolean {
+  return (
+    row.sessionId === owner.sessionId &&
+    row.contextScopeId === owner.contextScopeId &&
+    (owner.contextScopeId === null ||
+      (owner.runId !== undefined && row.rootRunId === owner.runId))
+  );
+}
+function noticeCandidates(
+  rows: readonly ShellJobRecord[],
+  owner: ShellJobNoticeOwner,
+  options: ShellJobNoticeSelection,
+): ShellJobRecord[] {
+  const candidates = rows
+    .filter(
+      (row) =>
+        matchesNoticeOwner(row, owner) &&
+        row.noticeState === "pending" &&
+        row.noticeBatchId === null &&
+        row.resultReadyAt !== null &&
+        row.status !== null &&
+        row.status !== "running" &&
+        (options.includeLost !== false || row.status !== "lost") &&
+        (options.deliveryGoalId === undefined ||
+          row.goalId === null ||
+          row.goalId === options.deliveryGoalId) &&
+        (options.wakeGoalId === undefined ||
+          (row.contextScopeId === null &&
+            row.status !== "lost" &&
+            row.goalId === options.wakeGoalId &&
+            row.noticeWakeRunId === null)),
+    )
+    .sort(
+      (a, b) =>
+        (a.resultReadyAt ?? 0) - (b.resultReadyAt ?? 0) ||
+        Buffer.compare(Buffer.from(a.jobId), Buffer.from(b.jobId)),
+    );
+  const first = candidates[0];
+  // A frozen batch must remain independently wakeable after a pre-accept crash.
+  return candidates
+    .slice(0, 20)
+    .filter(
+      (row) =>
+        row.goalId === first.goalId &&
+        (row.status === "lost") === (first.status === "lost"),
+    )
+    .slice(0, 20);
+}
+function canClaimNoticeWake(
+  rows: readonly ShellJobRecord[],
+  goalId: string | null,
+): boolean {
+  return (
+    rows.length > 0 &&
+    rows.every(
+      (row) =>
+        row.contextScopeId === null &&
+        row.goalId === goalId &&
+        row.status !== "lost" &&
+        row.resultReadyAt !== null &&
+        row.noticeState === "pending" &&
+        row.noticeInputId === null &&
+        row.noticeWakeRunId === null,
+    )
+  );
+}
+/** Local committed changes only; readers on another backend query the shared database. */
+class ShellJobChanges {
+  private readonly listeners = new Set<(record: ShellJobRecord) => void>();
+  subscribe(listener: (record: ShellJobRecord) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  emit(record: ShellJobRecord): void {
+    for (const listener of this.listeners) {
+      try {
+        listener({ ...record });
+      } catch {
+        /* Observer failures cannot undo committed facts. */
+      }
+    }
+  }
+}
 export interface ShellJobStore {
+  subscribe(listener: (record: ShellJobRecord) => void): () => void;
+  allocateNoticeBatch(
+    owner: ShellJobNoticeOwner,
+    options?: ShellJobNoticeSelection,
+  ): Promise<string | null>;
+  getNoticeBatch(batchId: string): readonly ShellJobRecord[];
+  /** Only after a deterministic admission rejection and proof this unique run ID never started. */
+  releaseUnstartedNoticeWake(
+    batchId: string,
+    wakeRunId: string,
+  ): Promise<boolean>;
+  listNoticeBatches(owner: ShellJobNoticeOwner): readonly string[];
+  listWakeableNoticeSessions(
+    afterSessionId?: string,
+    limit?: number,
+  ): readonly string[];
+  bindNoticeBatch(
+    batchId: string,
+    expectedInputId: string | null,
+    inputId: string,
+  ): Promise<boolean>;
+  claimNoticeWake(
+    batchId: string,
+    wakeRunId: string,
+    goalId: string | null,
+  ): Promise<boolean>;
+
   insert(
     record: ShellJobRecord,
     options?: ShellJobReservationOptions,
@@ -121,8 +250,161 @@ export interface ShellJobStore {
     contextScopeId: string | null,
   ): readonly ShellJobRecord[];
 }
+function requireShellJob(
+  store: Pick<ShellJobStore, "get">,
+  jobId: string,
+): ShellJobRecord {
+  const row = store.get(jobId);
+  if (!row) throw new Error(`Unknown shell job "${jobId}".`);
+  return row;
+}
+/* eslint-disable @typescript-eslint/require-await -- Atomic synchronous memory transitions implement the asynchronous persistence contract. */
 export class InMemoryShellJobStore implements ShellJobStore {
   private readonly records = new Map<string, ShellJobRecord>();
+  private readonly changes = new ShellJobChanges();
+  subscribe(listener: (record: ShellJobRecord) => void): () => void {
+    return this.changes.subscribe(listener);
+  }
+  async allocateNoticeBatch(
+    owner: ShellJobNoticeOwner,
+    options: ShellJobNoticeSelection = {},
+  ): Promise<string | null> {
+    const batchId = randomUUID();
+    const selected = freezeShellJobNoticeBatch(
+      batchId,
+      noticeCandidates([...this.records.values()], owner, options),
+    );
+    if (selected.length === 0) return null;
+    for (const item of selected)
+      this.records.set(item.jobId, {
+        ...requireShellJob(this, item.jobId),
+        noticeBatchId: batchId,
+        noticePayload: item.payload,
+      });
+    for (const item of selected)
+      this.changes.emit(requireShellJob(this, item.jobId));
+    return batchId;
+  }
+  async releaseUnstartedNoticeWake(
+    batchId: string,
+    wakeRunId: string,
+  ): Promise<boolean> {
+    const rows = this.getNoticeBatch(batchId);
+    if (
+      !rows.length ||
+      !rows.every(
+        (row) =>
+          row.noticeState === "pending" &&
+          row.noticeInputId === null &&
+          row.noticeWakeRunId === wakeRunId,
+      )
+    )
+      return false;
+    for (const row of rows)
+      this.records.set(row.jobId, { ...row, noticeWakeRunId: null });
+    for (const row of rows)
+      this.changes.emit({ ...row, noticeWakeRunId: null });
+    return true;
+  }
+  listWakeableNoticeSessions(
+    afterSessionId?: string,
+    limit = 100,
+  ): readonly string[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+      throw new Error("Notice session limit must be 1..100.");
+    return [
+      ...new Set(
+        [...this.records.values()]
+          .filter(
+            (row) =>
+              row.contextScopeId === null &&
+              row.noticeState === "pending" &&
+              row.resultReadyAt !== null &&
+              row.status !== null &&
+              row.status !== "running" &&
+              row.status !== "lost" &&
+              row.noticeWakeRunId === null,
+          )
+          .map((row) => row.sessionId),
+      ),
+    ]
+      .filter(
+        (id) =>
+          afterSessionId === undefined ||
+          Buffer.compare(Buffer.from(id), Buffer.from(afterSessionId)) > 0,
+      )
+      .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+      .slice(0, limit);
+  }
+  listNoticeBatches(owner: ShellJobNoticeOwner): readonly string[] {
+    const batches = new Map<string, number>();
+    for (const row of this.records.values()) {
+      if (
+        matchesNoticeOwner(row, owner) &&
+        row.noticeBatchId &&
+        row.noticeState !== "suppressed"
+      )
+        batches.set(
+          row.noticeBatchId,
+          Math.min(
+            batches.get(row.noticeBatchId) ?? Infinity,
+            row.resultReadyAt ?? 0,
+          ),
+        );
+    }
+    return [...batches]
+      .sort(
+        (a, b) =>
+          a[1] - b[1] || Buffer.compare(Buffer.from(a[0]), Buffer.from(b[0])),
+      )
+      .map(([id]) => id);
+  }
+  getNoticeBatch(batchId: string): readonly ShellJobRecord[] {
+    return [...this.records.values()]
+      .filter((row) => row.noticeBatchId === batchId)
+      .sort(
+        (a, b) =>
+          (a.resultReadyAt ?? 0) - (b.resultReadyAt ?? 0) ||
+          Buffer.compare(Buffer.from(a.jobId), Buffer.from(b.jobId)),
+      )
+      .map((row) => ({ ...row }));
+  }
+  async bindNoticeBatch(
+    batchId: string,
+    expectedInputId: string | null,
+    inputId: string,
+  ): Promise<boolean> {
+    const rows = this.getNoticeBatch(batchId);
+    if (
+      !rows.length ||
+      !rows.every(
+        (row) =>
+          row.noticeInputId === expectedInputId &&
+          row.noticeState !== "suppressed",
+      )
+    )
+      return false;
+    for (const row of rows)
+      this.records.set(row.jobId, {
+        ...row,
+        noticeState: "accepted",
+        noticeInputId: inputId,
+      });
+    for (const row of rows) this.changes.emit(requireShellJob(this, row.jobId));
+    return true;
+  }
+  async claimNoticeWake(
+    batchId: string,
+    wakeRunId: string,
+    goalId: string | null,
+  ): Promise<boolean> {
+    const rows = this.getNoticeBatch(batchId);
+    if (!canClaimNoticeWake(rows, goalId)) return false;
+    for (const row of rows)
+      this.records.set(row.jobId, { ...row, noticeWakeRunId: wakeRunId });
+    for (const row of rows) this.changes.emit(requireShellJob(this, row.jobId));
+    return true;
+  }
   insert(
     record: ShellJobRecord,
     options: ShellJobReservationOptions = {},
@@ -143,6 +425,7 @@ export class InMemoryShellJobStore implements ShellJobStore {
       if (this.records.has(record.jobId))
         throw new Error("Shell job identity already exists.");
       this.records.set(record.jobId, { ...record });
+      this.changes.emit(record);
     });
   }
   update(jobId: string, patch: ShellJobPatch): Promise<void> {
@@ -150,6 +433,7 @@ export class InMemoryShellJobStore implements ShellJobStore {
     if (!current)
       return Promise.reject(new Error(`Unknown shell job "${jobId}".`));
     this.records.set(jobId, { ...current, ...definedPatch(patch) });
+    this.changes.emit(requireShellJob(this, jobId));
     return Promise.resolve();
   }
   compareAndUpdate(
@@ -170,6 +454,7 @@ export class InMemoryShellJobStore implements ShellJobStore {
     )
       return Promise.resolve(false);
     this.records.set(jobId, { ...row, ...patch });
+    this.changes.emit(requireShellJob(this, jobId));
     return Promise.resolve(true);
   }
   listUnsettled(rootSessionId?: string): readonly ShellJobRecord[] {
@@ -206,6 +491,7 @@ export class InMemoryShellJobStore implements ShellJobStore {
       .map((r) => ({ ...r }));
   }
 }
+/* eslint-enable @typescript-eslint/require-await */
 const columns = schema.shellJob.columns;
 type Key = keyof typeof columns;
 const keys = Object.keys(columns) as Key[];
@@ -222,6 +508,181 @@ function fromRow(row: Record<string, unknown>): ShellJobRecord {
 }
 export class DatabaseShellJobStore implements ShellJobStore {
   private readonly db: DatabaseConnection;
+  private readonly changes = new ShellJobChanges();
+  subscribe(listener: (record: ShellJobRecord) => void): () => void {
+    return this.changes.subscribe(listener);
+  }
+  async allocateNoticeBatch(
+    owner: ShellJobNoticeOwner,
+    options: ShellJobNoticeSelection = {},
+  ): Promise<string | null> {
+    const batchId = randomUUID();
+    const changed = await runWriteTransaction(this.db, (tx) => {
+      if (owner.contextScopeId !== null && owner.runId === undefined) return [];
+      const conditions = [
+        "session_id = ?",
+        "context_scope_id IS ?",
+        "notice_state = 'pending'",
+        "notice_batch_id IS NULL",
+        "result_ready_at IS NOT NULL",
+        "status IS NOT NULL",
+        "status != 'running'",
+      ];
+      const parameters: SqliteValue[] = [owner.sessionId, owner.contextScopeId];
+      if (owner.contextScopeId !== null) {
+        conditions.push("root_run_id = ?");
+        parameters.push(owner.runId ?? null);
+      }
+      if (options.includeLost === false) conditions.push("status != 'lost'");
+      if (options.deliveryGoalId !== undefined) {
+        conditions.push("(goal_id IS NULL OR goal_id = ?)");
+        parameters.push(options.deliveryGoalId);
+      }
+      if (options.wakeGoalId !== undefined) {
+        conditions.push(
+          "context_scope_id IS NULL",
+          "status != 'lost'",
+          "goal_id IS ?",
+          "notice_wake_run_id IS NULL",
+        );
+        parameters.push(options.wakeGoalId);
+      }
+      const rows = tx
+        .prepare(
+          `SELECT * FROM shell_job WHERE ${conditions.join(" AND ")} ORDER BY result_ready_at,job_id LIMIT 20`,
+        )
+        .all(...parameters)
+        .map(fromRow);
+      const selected = freezeShellJobNoticeBatch(
+        batchId,
+        noticeCandidates(rows, owner, options),
+      );
+      for (const item of selected)
+        tx.prepare(
+          "UPDATE shell_job SET notice_batch_id = ?, notice_payload = ? WHERE job_id = ?",
+        ).run(batchId, item.payload, item.jobId);
+      return this.getNoticeBatch(batchId);
+    });
+    if (changed.length === 0) return null;
+    for (const row of changed) this.changes.emit(row);
+    return batchId;
+  }
+  async releaseUnstartedNoticeWake(
+    batchId: string,
+    wakeRunId: string,
+  ): Promise<boolean> {
+    const changed = await runWriteTransaction(this.db, (tx) => {
+      // Recheck the caller's no-admission proof under the shared writer lock.
+      if (
+        tx
+          .prepare("SELECT run_id FROM run_ledger WHERE run_id = ?")
+          .get(wakeRunId)
+      )
+        return [];
+      const rows = this.getNoticeBatch(batchId);
+      if (
+        !rows.length ||
+        !rows.every(
+          (row) =>
+            row.noticeState === "pending" &&
+            row.noticeInputId === null &&
+            row.noticeWakeRunId === wakeRunId,
+        )
+      )
+        return [];
+      tx.prepare(
+        "UPDATE shell_job SET notice_wake_run_id = NULL WHERE notice_batch_id = ?",
+      ).run(batchId);
+      return this.getNoticeBatch(batchId);
+    });
+    for (const row of changed) this.changes.emit(row);
+    return changed.length > 0;
+  }
+  listWakeableNoticeSessions(
+    afterSessionId?: string,
+    limit = 100,
+  ): readonly string[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+      throw new Error("Notice session limit must be 1..100.");
+    return this.db
+      .prepare<{ session_id: string }>(
+        `SELECT DISTINCT session_id FROM shell_job WHERE context_scope_id IS NULL AND notice_state = 'pending' AND result_ready_at IS NOT NULL AND status IS NOT NULL AND status NOT IN ('running','lost') AND notice_wake_run_id IS NULL ${afterSessionId === undefined ? "" : "AND session_id > ?"} ORDER BY session_id LIMIT ?`,
+      )
+      .all(...(afterSessionId === undefined ? [] : [afterSessionId]), limit)
+      .map((row) => row.session_id);
+  }
+  listNoticeBatches(owner: ShellJobNoticeOwner): readonly string[] {
+    if (owner.contextScopeId !== null && owner.runId === undefined) return [];
+    return this.db
+      .prepare<{ batch_id: string }>(
+        `
+      SELECT j.notice_batch_id AS batch_id FROM shell_job j
+      WHERE j.session_id = ? AND j.context_scope_id IS ? AND j.notice_batch_id IS NOT NULL
+        AND j.notice_state IN ('pending','accepted')
+        ${owner.contextScopeId === null ? "" : "AND j.root_run_id = ?"}
+        AND NOT EXISTS (
+          SELECT 1 FROM current_run_input i WHERE i.session_id = j.session_id
+            AND i.source_id = 'background-task:' || j.notice_batch_id AND i.source = 'background-task-result'
+            AND j.notice_state = 'accepted' AND i.input_id = j.notice_input_id
+            AND json_extract(i.data,'$.processedRequestId') IS NOT NULL
+        )
+      GROUP BY j.notice_batch_id ORDER BY min(j.result_ready_at),j.notice_batch_id
+    `,
+      )
+      .all(
+        owner.sessionId,
+        owner.contextScopeId,
+        ...(owner.contextScopeId === null ? [] : [owner.runId ?? null]),
+      )
+      .map((row) => row.batch_id);
+  }
+  getNoticeBatch(batchId: string): readonly ShellJobRecord[] {
+    return this.db
+      .prepare(
+        "SELECT * FROM shell_job WHERE notice_batch_id = ? ORDER BY result_ready_at,job_id",
+      )
+      .all(batchId)
+      .map(fromRow);
+  }
+  async bindNoticeBatch(
+    batchId: string,
+    expectedInputId: string | null,
+    inputId: string,
+  ): Promise<boolean> {
+    const changed = await runWriteTransaction(this.db, (tx) => {
+      const rows = this.getNoticeBatch(batchId);
+      if (
+        !rows.length ||
+        !rows.every(
+          (row) =>
+            row.noticeInputId === expectedInputId &&
+            row.noticeState !== "suppressed",
+        )
+      )
+        return [];
+      tx.prepare(
+        "UPDATE shell_job SET notice_state = 'accepted', notice_input_id = ? WHERE notice_batch_id = ?",
+      ).run(inputId, batchId);
+      return this.getNoticeBatch(batchId);
+    });
+    for (const row of changed) this.changes.emit(row);
+    return changed.length > 0;
+  }
+  async claimNoticeWake(
+    batchId: string,
+    wakeRunId: string,
+    goalId: string | null,
+  ): Promise<boolean> {
+    const changed = await runWriteTransaction(this.db, (tx) => {
+      if (!canClaimNoticeWake(this.getNoticeBatch(batchId), goalId)) return [];
+      tx.prepare(
+        "UPDATE shell_job SET notice_wake_run_id = ? WHERE notice_batch_id = ?",
+      ).run(wakeRunId, batchId);
+      return this.getNoticeBatch(batchId);
+    });
+    for (const row of changed) this.changes.emit(row);
+    return changed.length > 0;
+  }
   constructor(options: { db?: DatabaseConnection } = {}) {
     this.db = options.db ?? getDatabase();
   }
@@ -229,7 +690,7 @@ export class DatabaseShellJobStore implements ShellJobStore {
     record: ShellJobRecord,
     options: ShellJobReservationOptions = {},
   ): Promise<void> {
-    await runWriteTransaction(this.db, (tx) => {
+    const saved = await runWriteTransaction(this.db, (tx) => {
       options.assertAdmitted?.();
       if (
         record.mode === "background" &&
@@ -251,13 +712,15 @@ export class DatabaseShellJobStore implements ShellJobStore {
       tx.prepare(
         `INSERT INTO shell_job (${keys.map((key) => columns[key]).join(",")}) VALUES (${keys.map(() => "?").join(",")})`,
       ).run(...keys.map((key) => value(record[key])));
+      return { ...record };
     });
+    this.changes.emit(saved);
   }
   async update(jobId: string, patch: ShellJobPatch): Promise<void> {
     patch = definedPatch(patch);
     const changed = Object.keys(patch) as Exclude<Key, "jobId">[];
     if (changed.length === 0) return;
-    await runWriteTransaction(this.db, (tx) => {
+    const saved = await runWriteTransaction(this.db, (tx) => {
       const result = tx
         .prepare(
           `UPDATE shell_job SET ${changed.map((key) => `${columns[key]} = ?`).join(",")} WHERE job_id = ?`,
@@ -265,7 +728,9 @@ export class DatabaseShellJobStore implements ShellJobStore {
         .run(...changed.map((key) => value(patch[key] ?? null)), jobId);
       if (result.changes !== 1)
         throw new Error(`Unknown shell job "${jobId}".`);
+      return requireShellJob(this, jobId);
     });
+    this.changes.emit(saved);
   }
   get(jobId: string): ShellJobRecord | null {
     const row = this.db
@@ -284,7 +749,7 @@ export class DatabaseShellJobStore implements ShellJobStore {
     const compared = Object.keys(expected) as (keyof ShellJobPatch)[];
     if (changed.length === 0)
       throw new Error("Shell job CAS requires an update.");
-    return runWriteTransaction(this.db, (tx) => {
+    const changedRow = await runWriteTransaction(this.db, (tx) => {
       const result = tx
         .prepare(
           `UPDATE shell_job SET ${changed.map((key) => `${columns[key]} = ?`).join(",")} WHERE job_id = ?${compared.map((key) => ` AND ${columns[key]} IS ?`).join("")}`,
@@ -294,8 +759,10 @@ export class DatabaseShellJobStore implements ShellJobStore {
           jobId,
           ...compared.map((key) => value(expected[key] ?? null)),
         );
-      return result.changes === 1;
+      return result.changes === 1 ? requireShellJob(this, jobId) : null;
     });
+    if (changedRow) this.changes.emit(changedRow);
+    return changedRow !== null;
   }
   listUnsettled(rootSessionId?: string): readonly ShellJobRecord[] {
     return this.db
