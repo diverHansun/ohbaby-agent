@@ -146,7 +146,7 @@ Last output:
 
 | 接口 | 契约 |
 | --- | --- |
-| listShellJobs | rootSessionId 必填；默认后台及清理异常前台；启动者（主代理/全部子代理/具体实例）、六状态、命令/说明文本筛选；limit 默认20、最大100；不透明 cursor 绑定范围和筛选。返回有界 rows、nextCursor、pendingStartCount、当前筛选计数及未放弃追踪的清理未确认数量。 |
+| listShellJobs | rootSessionId 必填；默认后台及清理异常前台；启动者（主代理/全部子代理/具体实例）、六状态筛选；limit 默认20、最大100；不透明 cursor 绑定范围和筛选。返回有界 rows、nextCursor、pendingStartCount、当前筛选计数及未放弃追踪的清理未确认数量。2026-11-14 精简时删除了命令/说明文本搜索，它没有经过确认，留到前端规划时再定。 |
 | getShellJobOutput | rootSessionId + jobId；立即返回状态、cleanup、捕获/日志/检查点完整性和日志可用性；后台附最多 32 KiB 尾部，前台未保存则 tailAvailable=false，不阻塞。 |
 | readShellJobLog | rootSessionId + jobId + offset + maxBytes（最多64KiB）；只读该记录绑定的日志，返回 nextOffset/hasMore/截断和完整性；不接受客户端文件路径。 |
 | stopShellJob | rootSessionId + jobId；停止原因为 user，返回操作受理情况与真实快照；不直接停止所属子代理，foreign-live-owner 返回明确错误。 |
