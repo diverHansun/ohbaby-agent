@@ -357,7 +357,6 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             release,
             reportCleanup: context.reportCleanup,
             reportCleanupError: context.reportCleanupError,
-            captureMode: runInBackground ? "tail" : "head",
             child: (): ChildProcess => {
               throwIfCancelled(context.signal);
               return spawn(spawnFile, spawnArgs, {
@@ -390,22 +389,23 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           return { metadata: snapshot.metadata, output: snapshot.output };
         }
 
-        const result = await registry.waitForForeground(
-          snapshot.jobId,
-          context.sessionId,
-          {
-            waitMs,
-            signal: context.signal,
-            onBackground: () => context.detachCleanupOwnership?.(),
-          },
-          context.contextScopeId,
-        );
+        const { snapshot: result, promotion } =
+          await registry.waitForForeground(
+            snapshot.jobId,
+            context.sessionId,
+            {
+              waitMs,
+              signal: context.signal,
+              onBackground: () => context.detachCleanupOwnership?.(),
+            },
+            context.contextScopeId,
+          );
         const { outputBytes } = result.metadata;
         const outputSuffix =
           typeof outputBytes === "number" && outputBytes > 0
             ? `\n\n${result.output}`
             : "";
-        if (result.metadata.mode === "background") {
+        if (promotion === "converted") {
           const summary = command.trim().replace(/\s+/gu, " ");
           const preview =
             summary.length > 120 ? `${summary.slice(0, 120)}…` : summary;
@@ -420,11 +420,11 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             output: `${receipt}${outputSuffix}`,
           };
         }
-        const { stopReason, cleanup, error } = result.metadata;
+        const { cleanup, error } = result.metadata;
         const stopMessage =
-          stopReason === "capacity-limit"
+          promotion === "capacity_rejected"
             ? "Cancellation requested because the background job limit was reached."
-            : stopReason === "internal-error"
+            : promotion === "persistence_error"
               ? `Cancellation requested because the move to the background could not be saved.${typeof error === "string" ? ` ${error}` : ""}`
               : undefined;
         return {

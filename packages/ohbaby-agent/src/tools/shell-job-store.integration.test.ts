@@ -171,6 +171,18 @@ describe.each(["memory", "database"] as const)("%s shell job store", (kind) => {
     });
   });
 
+  it("applies the owner limit only when one is configured", async () => {
+    await store.insert(foreground);
+    await store.insert({ ...record, jobId: "active" });
+    await expect(
+      store.promote("job", {
+        prepare: () => ({ promotedAt: 4 }),
+        onCommitted: () => undefined,
+      }),
+    ).resolves.toBe(true);
+    expect(store.get("job")).toMatchObject({ mode: "background" });
+  });
+
   it("skips promotion when the runtime recheck declines, even at capacity", async () => {
     await store.insert(foreground);
     await store.insert({ ...record, jobId: "active" });
@@ -249,28 +261,26 @@ describe.each(["memory", "database"] as const)("%s shell job store", (kind) => {
   });
 });
 
-it("rereads a job after queued database writes before attempting promotion", async () => {
+it("rereads a job after queued writes and rejects a row that no longer matches the runtime", async () => {
   initDatabase({ dbPath: ":memory:" });
   seedSession();
   const store = new DatabaseShellJobStore();
   await store.insert(foreground);
-  let prepared = false;
   let committed = false;
-  const [, promoted] = await Promise.all([
+  const [, promoted] = await Promise.allSettled([
     store.update("job", { status: "cancelled", stopReason: "user" }),
     store.promote("job", {
       maxBackgroundJobs: 1,
-      prepare: () => {
-        prepared = true;
-        return { promotedAt: 4 };
-      },
+      prepare: () => ({ promotedAt: 4 }),
       onCommitted: () => {
         committed = true;
       },
     }),
   ]);
-  expect(promoted).toBe(false);
-  expect(prepared).toBe(false);
+  expect(promoted).toMatchObject({
+    status: "rejected",
+    reason: { message: 'Shell job "job" record no longer allows promotion.' },
+  });
   expect(committed).toBe(false);
   expect(store.get("job")).toMatchObject({
     mode: "foreground",

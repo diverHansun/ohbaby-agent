@@ -11,6 +11,7 @@ import {
   type ShellJobStore,
   type ShellJobRecord,
   type ShellJobPatch,
+  type ShellJobPromotionPatch,
   type ShellJobStatus,
   type ShellJobStopReason,
 } from "./shell-job-store.js";
@@ -45,7 +46,7 @@ import {
   ToolParameterError,
 } from "./utils/params.js";
 
-export const MAX_TASK_OUTPUT_WAIT_MS = 600_000;
+const MAX_TASK_OUTPUT_WAIT_MS = 600_000;
 export const DEFAULT_TASK_OUTPUT_WAIT_MS = 30_000;
 export const OUTPUT_CAPTURE_CHAR_LIMIT = DEFAULT_OUTPUT_TOKEN_LIMIT * 4 + 1;
 export const SHELL_JOB_TERMINATION_GRACE_MS = 1_000;
@@ -53,6 +54,29 @@ export const SHELL_JOB_TERMINATION_GRACE_MS = 1_000;
 export type { ShellJobStatus };
 
 type TerminationReason = "cancelled" | "timed_out";
+
+/** How a foreground wait's promotion attempt ended. */
+export type ShellJobPromotion =
+  | "converted"
+  | "already_finished"
+  /** Stopped before commit by Stop, closed owner admission or the hard deadline. */
+  | "cancelled_before_commit"
+  | "capacity_rejected"
+  | "persistence_error";
+
+export interface ForegroundWaitResult {
+  readonly snapshot: ShellJobSnapshot;
+  /** Absent when this call did not try to move the job to the background. */
+  readonly promotion?: ShellJobPromotion;
+}
+
+type PromotionBlock =
+  | { readonly kind: "finished" | "stopping" }
+  | {
+      readonly kind: "stop";
+      readonly reason: TerminationReason;
+      readonly stopReason: ShellJobStopReason;
+    };
 
 export interface ShellJobStartInput {
   /** Already prepared by the caller; the registry owns only jobId.log and capture. */
@@ -66,7 +90,6 @@ export interface ShellJobStartInput {
   readonly release?: () => void | Promise<void>;
   readonly reportCleanupError?: (error: unknown) => void;
   readonly reportCleanup?: (state: ToolCleanupState) => void;
-  readonly captureMode?: "head" | "tail";
   readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly timeoutMs: number | null;
@@ -162,13 +185,11 @@ interface ShellJob {
   exited: boolean;
   terminationSucceeded: boolean;
   readonly child: ChildProcess;
-  readonly captureMode: "head" | "tail";
   readonly contextScopeId?: string;
   readonly jobId: string;
   readonly startedAt: number;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
-  output: string;
   stdout: string;
   stderr: string;
   truncated: boolean;
@@ -185,20 +206,6 @@ interface ShellJob {
 
 function chunkToString(chunk: unknown): string {
   return Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-}
-
-function appendTail(
-  current: string,
-  chunk: string,
-): { readonly output: string; readonly truncated: boolean } {
-  const next = current + chunk;
-  if (next.length <= OUTPUT_CAPTURE_CHAR_LIMIT) {
-    return { output: next, truncated: false };
-  }
-  return {
-    output: next.slice(-OUTPUT_CAPTURE_CHAR_LIMIT),
-    truncated: true,
-  };
 }
 
 function appendHead(
@@ -246,23 +253,12 @@ function renderOutput(job: ShellJob): {
     const truncated = job.truncated || job.outputBytes > job.tail.length;
     return { output: tail || emptyOutputMessage(job), truncated };
   }
-  if (job.captureMode === "head") {
-    const combined = [job.stdout.trimEnd(), job.stderr.trimEnd()]
-      .filter((part) => part.length > 0)
-      .join("\n");
-    const baseOutput = combined || emptyOutputMessage(job);
-    const output = truncateOutput(baseOutput);
-    return { output, truncated: job.truncated || output !== baseOutput };
-  }
-
-  const output = job.output.trimEnd();
-  if (output.length === 0) {
-    return { output: emptyOutputMessage(job), truncated: job.truncated };
-  }
-  return {
-    output: job.truncated ? `${output}\n\n... [results truncated]` : output,
-    truncated: job.truncated,
-  };
+  const combined = [job.stdout.trimEnd(), job.stderr.trimEnd()]
+    .filter((part) => part.length > 0)
+    .join("\n");
+  const baseOutput = combined || emptyOutputMessage(job);
+  const output = truncateOutput(baseOutput);
+  return { output, truncated: job.truncated || output !== baseOutput };
 }
 
 /** Selects jobs by owner; applies to launched and never-launched jobs alike. */
@@ -330,15 +326,12 @@ export class ShellJobRegistry {
       createdAt,
       identity?.state === "present" ? identity.startToken : null,
     );
-    if (input.background) {
-      await this.refreshLocalOwner(record.sessionId, record.contextScopeId);
-      await this.options.refreshOwner?.(
-        record.sessionId,
-        record.contextScopeId,
-      );
-    }
     const maxBackgroundJobs = input.background
-      ? await this.options.backgroundLimit?.(owner)
+      ? await this.backgroundCapacity(
+          record.sessionId,
+          record.contextScopeId,
+          owner,
+        )
       : undefined;
     const assertAdmitted = (): undefined => {
       if (input.signal?.aborted) throw new Error("Command was cancelled.");
@@ -556,12 +549,10 @@ export class ShellJobRegistry {
       closing: false,
       exited: false,
       terminationSucceeded: false,
-      captureMode: input.captureMode ?? "tail",
       contextScopeId: input.contextScopeId,
       jobId,
       startedAt: Date.now(),
       metadata: { ...input.metadata, pid: child.pid },
-      output: "",
       stderr: "",
       stdout: "",
       resolveTerminal,
@@ -588,14 +579,10 @@ export class ShellJobRegistry {
       (stream: "stdout" | "stderr") =>
       (chunk: unknown): void => {
         this.capture(job, chunk);
+        // Background output is rendered from the shared byte tail only.
         if (job.background) return;
-        // Tail capture interleaves both streams; head capture keeps them apart.
-        const target = job.captureMode === "tail" ? "output" : stream;
-        const next =
-          job.captureMode === "tail"
-            ? appendTail(job[target], chunkToString(chunk))
-            : appendHead(job[target], chunkToString(chunk));
-        job[target] = next.output;
+        const next = appendHead(job[stream], chunkToString(chunk));
+        job[stream] = next.output;
         job.truncated ||= next.truncated;
       };
     child.stdout?.on("data", onOutput("stdout"));
@@ -801,6 +788,17 @@ export class ShellJobRegistry {
     return this.stopJobs(this.jobsWhere(filter), filter, reason);
   }
 
+  /** Refreshes the owner's stale rows, then reads its limit; none is enforced without one. */
+  private async backgroundCapacity(
+    sessionId: string,
+    contextScopeId: string | null,
+    owner: ToolExecutionOwner | undefined,
+  ): Promise<number | undefined> {
+    await this.refreshLocalOwner(sessionId, contextScopeId);
+    await this.options.refreshOwner?.(sessionId, contextScopeId);
+    return this.options.backgroundLimit?.(owner);
+  }
+
   async refreshLocalOwner(
     sessionId: string,
     contextScopeId: string | null,
@@ -881,9 +879,12 @@ export class ShellJobRegistry {
       readonly onBackground: () => void;
     },
     contextScopeId?: string,
-  ): Promise<ShellJobSnapshot> {
+  ): Promise<ForegroundWaitResult> {
     const job = this.jobs.get(jobId);
-    if (!job) return this.waitForTerminal(jobId, sessionId, contextScopeId);
+    if (!job)
+      return {
+        snapshot: await this.waitForTerminal(jobId, sessionId, contextScopeId),
+      };
     this.getOwnedJob(jobId, sessionId, contextScopeId);
     const abort = (): void => {
       if (!job.background) this.terminate(job, "cancelled", "user");
@@ -907,10 +908,18 @@ export class ShellJobRegistry {
             contextScopeId,
           );
         }
-        if (await this.promote(job, input.signal, detach))
-          return this.snapshot(job);
+        const promotion = await this.promote(job, input.signal, detach);
+        return {
+          snapshot:
+            promotion === "converted"
+              ? this.snapshot(job)
+              : await this.waitForTerminal(jobId, sessionId, contextScopeId),
+          promotion,
+        };
       }
-      return await this.waitForTerminal(jobId, sessionId, contextScopeId);
+      return {
+        snapshot: await this.waitForTerminal(jobId, sessionId, contextScopeId),
+      };
     } finally {
       if (!job.background) input.signal.removeEventListener("abort", abort);
     }
@@ -920,82 +929,96 @@ export class ShellJobRegistry {
     job: ShellJob,
     signal: AbortSignal,
     onCommitted: () => void,
-  ): Promise<boolean> {
-    const prepare = (): ShellJobPatch | null => {
-      // Exit precedes close/output drainage; it is already too late to detach.
-      if (
-        job.status !== "running" ||
-        job.exited ||
-        job.closed ||
-        job.terminationStarted
-      )
-        return null;
-      if (signal.aborted) {
-        this.terminate(job, "cancelled", "user");
-        return null;
-      }
-      if (
-        this.admissionClosed ||
-        (job.owner && this.options.admitsOwner?.(job.owner) === false)
-      ) {
-        this.terminate(job, "cancelled", "owner-ended");
-        return null;
-      }
-      const now = Date.now();
-      if (job.timeoutMs !== null && now >= job.startedAt + job.timeoutMs) {
-        this.terminate(job, "timed_out");
-        return null;
-      }
-      return {
-        promotedAt: now,
-        outputTail: this.tailText(job),
-        outputBytes: job.outputBytes,
-        outputCheckpointAt: now,
-        ...this.outputFilePatch(job),
-        noticeState: null,
-      };
-    };
-    if (prepare() === null) return false;
+  ): Promise<ShellJobPromotion> {
+    const early = this.promotionBlock(job, signal, Date.now());
+    if (early) return this.applyPromotionBlock(job, early);
+    // Decided under the write lock but applied after it, because stopping a job
+    // reports cleanup to its caller and must not run inside the transaction.
+    let blocked = null as PromotionBlock | null;
     try {
-      await this.refreshLocalOwner(job.sessionId, job.contextScopeId ?? null);
-      await this.options.refreshOwner?.(
+      const maxBackgroundJobs = await this.backgroundCapacity(
         job.sessionId,
         job.contextScopeId ?? null,
+        job.owner,
       );
-      const maxBackgroundJobs =
-        (await this.options.backgroundLimit?.(job.owner)) ??
-        (job.contextScopeId ? 5 : 10);
-      let promotedAt: number | null = null;
       const promotion = job.persist.then(() =>
         this.store.promote(job.jobId, {
           maxBackgroundJobs,
           prepare: () => {
-            const patch = prepare();
-            promotedAt = patch?.promotedAt ?? null;
-            return patch;
+            const now = Date.now();
+            blocked = this.promotionBlock(job, signal, now);
+            return blocked ? null : this.promotionCheckpoint(job, now);
           },
-          onCommitted: () => {
+          onCommitted: (record) => {
             job.background = true;
-            job.promotedAt = promotedAt;
+            job.promotedAt = record.promotedAt;
             onCommitted();
           },
         }),
       );
       job.persist = promotion.then(() => undefined);
-      if (!(await promotion)) return false;
-      this.scheduleCheckpoint();
-      return true;
+      if (await promotion) {
+        this.scheduleCheckpoint();
+        return "converted";
+      }
     } catch (error) {
       job.error = error instanceof Error ? error.message : String(error);
+      const capacity = error instanceof ShellJobCapacityError;
       this.terminate(
         job,
         "cancelled",
-        error instanceof ShellJobCapacityError
-          ? "capacity-limit"
-          : "internal-error",
+        capacity ? "capacity-limit" : "internal-error",
       );
-      return false;
+      return capacity ? "capacity_rejected" : "persistence_error";
     }
+    // The store declines only when the runtime recheck did, so blocked is set.
+    return this.applyPromotionBlock(job, blocked ?? { kind: "finished" });
+  }
+
+  /** Pure check: why this job can no longer move to the background, if at all. */
+  private promotionBlock(
+    job: ShellJob,
+    signal: AbortSignal,
+    now: number,
+  ): PromotionBlock | null {
+    if (job.terminationStarted) return { kind: "stopping" };
+    // Exit precedes close/output drainage; it is already too late to detach.
+    if (job.status !== "running" || job.exited || job.closed)
+      return { kind: "finished" };
+    if (signal.aborted)
+      return { kind: "stop", reason: "cancelled", stopReason: "user" };
+    if (
+      this.admissionClosed ||
+      (job.owner && this.options.admitsOwner?.(job.owner) === false)
+    )
+      return { kind: "stop", reason: "cancelled", stopReason: "owner-ended" };
+    if (job.timeoutMs !== null && now >= job.startedAt + job.timeoutMs)
+      return { kind: "stop", reason: "timed_out", stopReason: "timeout" };
+    return null;
+  }
+
+  private applyPromotionBlock(
+    job: ShellJob,
+    block: PromotionBlock,
+  ): ShellJobPromotion {
+    if (block.kind === "finished") return "already_finished";
+    if (block.kind === "stop")
+      this.terminate(job, block.reason, block.stopReason);
+    return "cancelled_before_commit";
+  }
+
+  private promotionCheckpoint(
+    job: ShellJob,
+    now: number,
+  ): ShellJobPromotionPatch {
+    return {
+      promotedAt: now,
+      outputTail: this.tailText(job),
+      outputBytes: job.outputBytes,
+      outputCheckpointAt: now,
+      ...this.outputFilePatch(job),
+      noticeState: null,
+    };
   }
 
   async waitForTerminal(
@@ -1322,7 +1345,9 @@ export class ShellJobRegistry {
     };
   }
 
-  private outputFilePatch(job: ShellJob): ShellJobPatch {
+  private outputFilePatch(
+    job: ShellJob,
+  ): Pick<ShellJobPatch, "outputPath" | "outputTruncated"> {
     const file = job.outputFile.snapshot();
     return {
       outputPath: file.status === "unavailable" ? null : file.path,

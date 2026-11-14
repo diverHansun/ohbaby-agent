@@ -91,12 +91,23 @@ export interface ShellJobReservationOptions {
   /** Synchronous check inside the acquired write lock, before reserving capacity. */
   readonly assertAdmitted?: () => undefined;
 }
+/** The first background checkpoint, captured by the runtime when it allows promotion. */
+export type ShellJobPromotionPatch = Pick<
+  ShellJobPatch,
+  | "outputBytes"
+  | "outputTail"
+  | "outputCheckpointAt"
+  | "outputPath"
+  | "outputTruncated"
+  | "noticeState"
+> & { readonly promotedAt: number };
 export interface ShellJobPromotionOptions {
-  readonly maxBackgroundJobs: number;
-  /** Recheck runtime eligibility and capture the first background checkpoint under the write lock. */
-  readonly prepare: () => ShellJobPatch | null;
+  /** Omitted when the owner has no configured limit, as for background insertion. */
+  readonly maxBackgroundJobs?: number;
+  /** Pure runtime recheck under the write lock; null declines promotion. */
+  readonly prepare: () => ShellJobPromotionPatch | null;
   /** Apply the runtime transition synchronously after commit. Must not throw or publish events. */
-  readonly onCommitted: () => void;
+  readonly onCommitted: (record: ShellJobRecord) => void;
 }
 export class ShellJobCapacityError extends Error {
   readonly code = "SHELL_JOB_CAPACITY_LIMIT";
@@ -120,42 +131,29 @@ function holdsBackgroundSlot(row: ShellJobRecord): boolean {
   );
 }
 function preparePromotion(
-  row: ShellJobRecord,
+  jobId: string,
+  row: ShellJobRecord | null,
   options: ShellJobPromotionOptions,
+  countActive: (owner: ShellJobRecord) => number,
 ): ShellJobPatch | null {
+  // The live runtime decides first. Its own lifecycle writes always follow its
+  // in-memory state, so a running job whose row disagrees is a persistence fault.
+  const checkpoint = options.prepare();
+  if (!checkpoint) return null;
   if (
-    row.mode !== "foreground" ||
+    row?.mode !== "foreground" ||
     row.status !== "running" ||
     row.stopReason !== null ||
     row.endedAt !== null ||
     row.trackingReleasedAt !== null
   )
-    return null;
-  const snapshot = options.prepare();
-  if (!snapshot) return null;
-  const {
-    promotedAt,
-    outputBytes,
-    outputTail,
-    outputCheckpointAt,
-    outputPath,
-    outputTruncated,
-    outputComplete,
-    noticeState,
-  } = snapshot;
-  if (promotedAt === undefined || promotedAt === null)
-    throw new Error("Shell job promotion requires a timestamp.");
-  return definedPatch({
-    mode: "background",
-    promotedAt,
-    outputBytes,
-    outputTail,
-    outputCheckpointAt,
-    outputPath,
-    outputTruncated,
-    outputComplete,
-    noticeState,
-  });
+    throw new Error(`Shell job "${jobId}" record no longer allows promotion.`);
+  if (options.maxBackgroundJobs !== undefined) {
+    const active = countActive(row);
+    if (active >= options.maxBackgroundJobs)
+      throw new ShellJobCapacityError(options.maxBackgroundJobs, active);
+  }
+  return definedPatch({ ...checkpoint, mode: "background" });
 }
 export interface ShellJobNoticeOwner {
   readonly sessionId: string;
@@ -489,18 +487,20 @@ export class InMemoryShellJobStore implements ShellJobStore {
   }
   promote(jobId: string, options: ShellJobPromotionOptions): Promise<boolean> {
     return Promise.resolve().then(() => {
-      const row = this.records.get(jobId);
-      if (!row) return false;
-      const patch = preparePromotion(row, options);
-      if (!patch) return false;
-      const active = this.listByOwner(row.sessionId, row.contextScopeId).filter(
-        holdsBackgroundSlot,
-      ).length;
-      if (active >= options.maxBackgroundJobs)
-        throw new ShellJobCapacityError(options.maxBackgroundJobs, active);
+      const row = this.records.get(jobId) ?? null;
+      const patch = preparePromotion(
+        jobId,
+        row,
+        options,
+        (owner) =>
+          this.listByOwner(owner.sessionId, owner.contextScopeId).filter(
+            holdsBackgroundSlot,
+          ).length,
+      );
+      if (!patch || !row) return false;
       const saved = { ...row, ...patch };
       this.records.set(jobId, saved);
-      options.onCommitted();
+      options.onCommitted(saved);
       this.changes.emit(saved);
       return true;
     });
@@ -849,17 +849,16 @@ export class DatabaseShellJobStore implements ShellJobStore {
     const saved = await runWriteTransaction(
       this.db,
       (tx) => {
-        const row = findShellJob(tx, jobId);
-        if (!row) return null;
-        const patch = preparePromotion(row, options);
-        if (!patch) return null;
-        const active = countBackgroundSlots(tx, row);
-        if (active >= options.maxBackgroundJobs)
-          throw new ShellJobCapacityError(options.maxBackgroundJobs, active);
-        return writeShellJobPatch(tx, jobId, patch);
+        const patch = preparePromotion(
+          jobId,
+          findShellJob(tx, jobId),
+          options,
+          (owner) => countBackgroundSlots(tx, owner),
+        );
+        return patch ? writeShellJobPatch(tx, jobId, patch) : null;
       },
       (row) => {
-        if (row) options.onCommitted();
+        if (row) options.onCommitted(row);
       },
     );
     if (!saved) return false;

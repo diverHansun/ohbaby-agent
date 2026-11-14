@@ -6,7 +6,11 @@ import type {
   ShellJobSnapshot,
   ShellJobRegistryOptions,
 } from "./shell-job-registry.js";
-import type { ToolExecutionContext } from "../core/tool-scheduler/index.js";
+import type {
+  ToolExecutionContext,
+  ToolExecutionOwner,
+} from "../core/tool-scheduler/index.js";
+import type { KillTreeResult } from "../shell/process.js";
 import {
   createTaskKillTool,
   createTaskOutputTool,
@@ -304,17 +308,14 @@ describe("ShellJobRegistry", () => {
         {
           rootRunId: "A",
           executionId: "execution-A",
-          captureMode: "head" as const,
         },
         {
           rootRunId: "A",
           executionId: "execution-A2",
-          captureMode: "tail" as const,
         },
         {
           rootRunId: "B",
           executionId: "execution-B",
-          captureMode: "tail" as const,
         },
       ].map(async (identity, index) => {
         const child = new FakeChild();
@@ -323,7 +324,6 @@ describe("ShellJobRegistry", () => {
           child: () => child as unknown as ChildProcess,
           sessionId: "reused-child",
           contextScopeId: "reused-instance",
-          captureMode: identity.captureMode,
           timeoutMs: 10_000,
           release,
           owner: {
@@ -396,16 +396,21 @@ describe("ShellJobRegistry", () => {
     });
   });
 
-  it("keeps a bounded tail and marks it truncated", async () => {
+  it("keeps a bounded background tail and marks it truncated", async () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({
       probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "job_1",
       killTree: vi.fn(),
     });
-    const started = await startJob(registry, child);
+    const started = await registry.start({
+      child: () => child as unknown as ChildProcess,
+      sessionId: "session_1",
+      background: true,
+      timeoutMs: null,
+    });
 
-    child.stdout.emit("data", "a".repeat(32_000));
+    child.stdout.emit("data", "a".repeat(40_000));
     child.stdout.emit("data", "tail");
 
     const snapshot = registry.get(started.jobId, "session_1");
@@ -888,7 +893,6 @@ describe("foreground promotion", () => {
         child: () => child as unknown as ChildProcess,
         sessionId: "session_1",
         background: false,
-        captureMode: "head",
         timeoutMs: 200,
         release,
       });
@@ -899,7 +903,8 @@ describe("foreground promotion", () => {
         onBackground: detached,
       });
       await vi.advanceTimersByTimeAsync(100);
-      const receipt = await waiting;
+      const { snapshot: receipt, promotion } = await waiting;
+      expect(promotion).toBe("converted");
       expect(receipt.jobId).toBe(started.jobId);
       expect(receipt.metadata.mode).toBe("background");
       expect(receipt.output).toContain("actual-tail");
@@ -948,7 +953,10 @@ describe("foreground promotion", () => {
           onBackground: detached,
         });
         await vi.advanceTimersByTimeAsync(100);
-        expect((await waiting).status).toBe("timed_out");
+        await expect(waiting).resolves.toMatchObject({
+          snapshot: { status: "timed_out" },
+          promotion: "cancelled_before_commit",
+        });
         expect(detached).not.toHaveBeenCalled();
       } finally {
         child.emitExit(0, null);
@@ -987,7 +995,7 @@ describe("foreground promotion", () => {
       await vi.advanceTimersByTimeAsync(99);
       expect(detached).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect((await waiting).status).toBe("timed_out");
+      expect((await waiting).snapshot.status).toBe("timed_out");
       expect(detached).not.toHaveBeenCalled();
     } finally {
       child.emitExit(0, null);
@@ -1016,7 +1024,10 @@ describe("foreground promotion", () => {
       await vi.advanceTimersByTimeAsync(100);
       expect(detached).not.toHaveBeenCalled();
       child.emit("close", 0, null);
-      expect((await waiting).status).toBe("completed");
+      await expect(waiting).resolves.toMatchObject({
+        snapshot: { status: "completed" },
+        promotion: "already_finished",
+      });
     } finally {
       child.emitExit(0, null);
       await registry.dispose();
@@ -1073,7 +1084,7 @@ describe("promotion commit ordering", () => {
         if (event === "timeout") await vi.advanceTimersByTimeAsync(100);
         if (event === "late-timer") vi.setSystemTime(Date.now() + 100);
         unlock();
-        const result = await waiting;
+        const { snapshot: result } = await waiting;
         expect(result.status).toBe(
           event === "exit"
             ? "completed"
@@ -1117,7 +1128,7 @@ describe("promotion commit ordering", () => {
         onBackground: detached,
       });
       await vi.advanceTimersByTimeAsync(100);
-      expect((await waiting).metadata.mode).toBe("background");
+      expect((await waiting).snapshot.metadata.mode).toBe("background");
       expect(controller.signal.aborted).toBe(true);
       expect(detached).toHaveBeenCalledTimes(1);
       expect(killTree).not.toHaveBeenCalled();
@@ -1160,7 +1171,8 @@ describe("promotion commit ordering", () => {
         onBackground: detached,
       });
       await vi.advanceTimersByTimeAsync(100);
-      const result = await waiting;
+      const { snapshot: result, promotion } = await waiting;
+      expect(promotion).toBe("persistence_error");
       expect(result.status).toBe("cancelled");
       expect(result.metadata.stopReason).toBe("internal-error");
       expect(result.metadata.error).toBe("promotion write failed");
@@ -1175,6 +1187,182 @@ describe("promotion commit ordering", () => {
       child.emitExit(0, null);
       await registry.dispose();
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("promotion outcomes and ownership", () => {
+  const owner = (rootRunId: string): ToolExecutionOwner => ({
+    sessionId: "session_1",
+    rootSessionId: "session_1",
+    rootRunId,
+    runId: rootRunId,
+    messageId: "message",
+    callId: `call-${rootRunId}`,
+  });
+  const confirmKill = (child: ChildProcess): KillTreeResult => {
+    (child as unknown as FakeChild).emitExit(null, "SIGTERM");
+    return { status: "confirmed", terminationSucceeded: true };
+  };
+
+  it("stops a promoted job through its original root run", async () => {
+    const store = new InMemoryShellJobStore();
+    const killTree = vi.fn(confirmKill);
+    const registry = new ShellJobRegistry({ store, killTree });
+    const children = [new FakeChild(), new FakeChild()];
+    try {
+      const [promoted, other] = await Promise.all(
+        (["A", "B"] as const).map((rootRunId, index) =>
+          registry.start({
+            child: () => children[index] as unknown as ChildProcess,
+            sessionId: "session_1",
+            timeoutMs: null,
+            owner: owner(rootRunId),
+          }),
+        ),
+      );
+      const result = await registry.waitForForeground(
+        promoted.jobId,
+        "session_1",
+        {
+          waitMs: 10,
+          signal: new AbortController().signal,
+          onBackground: vi.fn(),
+        },
+      );
+      expect(result.promotion).toBe("converted");
+
+      registry.markRootRunStopped("A", "rewound");
+      const cleanup = await registry.stopByRootRun("A", "rewound");
+      if (!cleanup.confirmed) await cleanup.settled;
+
+      expect(store.get(promoted.jobId)).toMatchObject({
+        mode: "background",
+        rootRunId: "A",
+        status: "cancelled",
+        stopReason: "rewound",
+        cleanup: "confirmed",
+      });
+      expect(store.get(other.jobId)).toMatchObject({
+        mode: "foreground",
+        status: "running",
+      });
+      expect(killTree).toHaveBeenCalledTimes(1);
+    } finally {
+      for (const child of children) child.emitExit(0, null);
+      await registry.dispose();
+    }
+  });
+
+  it.each(["before", "during"] as const)(
+    "stops with owner-ended instead of promoting when admission closes %s the capacity lookup",
+    async (when) => {
+      let admitted = true;
+      let insidePromotion = false;
+      const cleanupInsidePromotion: boolean[] = [];
+      const store = new InMemoryShellJobStore();
+      const promote = store.promote.bind(store);
+      const promoteSpy = vi
+        .spyOn(store, "promote")
+        .mockImplementation((jobId, options) =>
+          promote(jobId, {
+            ...options,
+            prepare: (): ReturnType<typeof options.prepare> => {
+              insidePromotion = true;
+              try {
+                return options.prepare();
+              } finally {
+                insidePromotion = false;
+              }
+            },
+          }),
+        );
+      const child = new FakeChild();
+      const detached = vi.fn();
+      const registry = new ShellJobRegistry({
+        store,
+        killTree: confirmKill,
+        admitsOwner: (): boolean => admitted,
+        backgroundLimit: (): Promise<number> => {
+          if (when === "during") admitted = false;
+          return Promise.resolve(10);
+        },
+      });
+      try {
+        const started = await registry.start({
+          child: () => child as unknown as ChildProcess,
+          sessionId: "session_1",
+          timeoutMs: null,
+          owner: owner("A"),
+          reportCleanup: () => {
+            cleanupInsidePromotion.push(insidePromotion);
+          },
+        });
+        if (when === "before") admitted = false;
+        const result = await registry.waitForForeground(
+          started.jobId,
+          "session_1",
+          {
+            waitMs: 10,
+            signal: new AbortController().signal,
+            onBackground: detached,
+          },
+        );
+        expect(result).toMatchObject({
+          promotion: "cancelled_before_commit",
+          snapshot: {
+            status: "cancelled",
+            metadata: { mode: "foreground", stopReason: "owner-ended" },
+          },
+        });
+        expect(detached).not.toHaveBeenCalled();
+        expect(store.get(started.jobId)?.mode).toBe("foreground");
+        expect(cleanupInsidePromotion.length).toBeGreaterThan(0);
+        expect(cleanupInsidePromotion).not.toContain(true);
+        expect(promoteSpy).toHaveBeenCalledTimes(when === "during" ? 1 : 0);
+      } finally {
+        child.emitExit(0, null);
+        await registry.dispose();
+      }
+    },
+  );
+
+  it("stops a running job whose durable row no longer allows promotion", async () => {
+    const store = new InMemoryShellJobStore();
+    const child = new FakeChild();
+    const detached = vi.fn();
+    const registry = new ShellJobRegistry({ store, killTree: confirmKill });
+    try {
+      const started = await registry.start({
+        child: () => child as unknown as ChildProcess,
+        sessionId: "session_1",
+        timeoutMs: null,
+      });
+      await store.update(started.jobId, { trackingReleasedAt: 1 });
+      const result = await registry.waitForForeground(
+        started.jobId,
+        "session_1",
+        {
+          waitMs: 10,
+          signal: new AbortController().signal,
+          onBackground: detached,
+        },
+      );
+      expect(result).toMatchObject({
+        promotion: "persistence_error",
+        snapshot: {
+          status: "cancelled",
+          metadata: {
+            mode: "foreground",
+            stopReason: "internal-error",
+            error: `Shell job "${started.jobId}" record no longer allows promotion.`,
+          },
+        },
+      });
+      expect(detached).not.toHaveBeenCalled();
+    } finally {
+      child.emitExit(0, null);
+      await registry.dispose();
     }
   });
 });

@@ -54,6 +54,70 @@ const timer = setInterval(() => {
 }
 
 describe("shell job persistence", () => {
+  it("keeps failed SQLite promotion foreground and suppresses its background notice", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shell-job-promotion-failure-"));
+    let registry: ShellJobRegistry | undefined;
+    try {
+      initDatabase({ dbPath: ":memory:" });
+      const db = getDatabase();
+      db.prepare(
+        "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES('s','p','/tmp','test','active',1,1,'{}')",
+      ).run();
+      const store = new DatabaseShellJobStore();
+      const killTree = vi.fn(killShellTree);
+      const release = vi.fn();
+      const detached = vi.fn();
+      const jobs = new ShellJobRegistry({ store, killTree });
+      registry = jobs;
+      const started = await jobs.start({
+        sessionId: "s",
+        timeoutMs: 5000,
+        release,
+        child: () => spawnUntilReleased(join(dir, "release")),
+      });
+      await vi.waitFor(() => {
+        expect(jobs.get(started.jobId, "s").output).toContain("durable-tail");
+      });
+      db.exec(`CREATE TRIGGER reject_promotion BEFORE UPDATE OF mode ON shell_job
+        WHEN NEW.mode = 'background'
+        BEGIN SELECT RAISE(ABORT, 'promotion update rejected'); END`);
+
+      const result = await jobs.waitForForeground(started.jobId, "s", {
+        waitMs: 1,
+        signal: new AbortController().signal,
+        onBackground: detached,
+      });
+      expect(result).toMatchObject({
+        promotion: "persistence_error",
+        snapshot: {
+          status: "cancelled",
+          metadata: { mode: "foreground", stopReason: "internal-error" },
+        },
+      });
+      expect(result.snapshot.output).toContain("durable-tail");
+      expect(result.snapshot.metadata.error).toContain(
+        "promotion update rejected",
+      );
+      expect(detached).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(store.get(started.jobId)).toMatchObject({
+          mode: "foreground",
+          promotedAt: null,
+          status: "cancelled",
+          stopReason: "internal-error",
+          noticeState: "suppressed",
+          cleanup: "confirmed",
+        });
+        expect(release).toHaveBeenCalledTimes(1);
+      });
+      expect(killTree).toHaveBeenCalledTimes(1);
+    } finally {
+      await registry?.dispose();
+      closeDatabase();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["Stop", "cancelled", "user"],
     ["hard timeout", "timed_out", "timeout"],
@@ -140,9 +204,15 @@ describe("shell job persistence", () => {
           locked = false;
 
           await expect(waiting).resolves.toMatchObject({
-            jobId: started.jobId,
-            status,
-            metadata: { mode: "foreground", stopReason },
+            snapshot: {
+              jobId: started.jobId,
+              status,
+              metadata: { mode: "foreground", stopReason },
+            },
+            promotion:
+              event === "natural exit"
+                ? "already_finished"
+                : "cancelled_before_commit",
           });
           expect(detached).not.toHaveBeenCalled();
           await vi.waitFor(() => {
@@ -319,11 +389,16 @@ describe("shell job persistence", () => {
           "durable-tail",
         );
       });
-      const receipt = await jobs.waitForForeground(started.jobId, "session", {
-        signal: new AbortController().signal,
-        waitMs: 1,
-        onBackground: () => undefined,
-      });
+      const { snapshot: receipt, promotion } = await jobs.waitForForeground(
+        started.jobId,
+        "session",
+        {
+          signal: new AbortController().signal,
+          waitMs: 1,
+          onBackground: () => undefined,
+        },
+      );
+      expect(promotion).toBe("converted");
       const { startedAt, promotedAt, deadline } = receipt.metadata;
       expect(promotedAt).toBeTypeOf("number");
       expect(deadline).toBe(Number(startedAt) + 10_000);
