@@ -1669,7 +1669,6 @@ export function createToolScheduler(
         : undefined;
       const sourceSensitive =
         capacityKind !== "control" &&
-        capacityKind !== "dispatch" &&
         (access.resources.some((resource) => resource.kind === "file") ||
           (plannedResources === undefined &&
             admission?.resolve === undefined) ||

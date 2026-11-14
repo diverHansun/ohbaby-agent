@@ -3,7 +3,7 @@ import { ConcurrencyController } from "./concurrency.js";
 import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
 
 describe("session execution capacity", () => {
-  it("limits ordinary work per session and keeps dispatch/control independent", async () => {
+  it("limits ordinary work per session and keeps control independent", async () => {
     const controller = new ConcurrencyController(
       DEFAULT_TOOL_SCHEDULER_CONFIG.concurrency,
     );
@@ -12,18 +12,10 @@ describe("session execution capacity", () => {
     );
     expect(controller.canExecute("ordinary", "a")).toBe(false);
     expect(controller.canExecute("ordinary", "b")).toBe(true);
-    expect(controller.canExecute("dispatch", "a")).toBe(true);
-    const dispatch = Array.from({ length: 3 }, () =>
-      controller.acquire("dispatch", "a"),
-    );
-    expect(controller.canExecute("dispatch", "a")).toBe(false);
     const control = await controller.waitForSlot("control", "control", "a");
     expect(control).toBeDefined();
     control?.release();
     leases.forEach((lease) => {
-      lease.release();
-    });
-    dispatch.forEach((lease) => {
       lease.release();
     });
     expect(controller.canExecute("ordinary", "a")).toBe(true);
@@ -32,12 +24,10 @@ describe("session execution capacity", () => {
   it("uses legacy limits and explicit ordinary limits without overflow", () => {
     const legacy = new ConcurrencyController({
       maxReadConcurrency: 1,
-      maxSubagentConcurrency: 1,
     });
     const current = new ConcurrencyController({
       maxConcurrency: 2,
       maxReadConcurrency: 1,
-      maxSubagentConcurrency: 1,
     });
     legacy.acquire("ordinary", "s");
     expect(legacy.canExecute("ordinary", "s")).toBe(false);
@@ -51,7 +41,6 @@ describe("session execution capacity", () => {
   it("transfers freed slots in FIFO order and duplicate release cannot free the next owner's slot", async () => {
     const controller = new ConcurrencyController({
       maxReadConcurrency: 1,
-      maxSubagentConcurrency: 1,
     });
     const initial = controller.acquire("ordinary", "s");
     const order: string[] = [];
@@ -89,7 +78,6 @@ describe("session execution capacity", () => {
   it("cancels queued work without returning an occupied slot or cancelling another session", async () => {
     const controller = new ConcurrencyController({
       maxReadConcurrency: 1,
-      maxSubagentConcurrency: 1,
     });
     const a = controller.acquire("ordinary", "a");
     const b = controller.acquire("ordinary", "b");
@@ -110,7 +98,6 @@ describe("session execution capacity", () => {
   it("notifies admission waiters only once per release and removes listeners", () => {
     const controller = new ConcurrencyController({
       maxReadConcurrency: 1,
-      maxSubagentConcurrency: 1,
     });
     const initial = controller.tryAcquire("ordinary", "s");
     expect(initial).toBeDefined();
@@ -136,21 +123,12 @@ describe("session execution capacity", () => {
         () =>
           new ConcurrencyController({
             maxReadConcurrency: limit,
-            maxSubagentConcurrency: 1,
           }),
       ).toThrow();
       expect(
         () =>
           new ConcurrencyController({
             maxConcurrency: limit,
-            maxSubagentConcurrency: 1,
-          }),
-      ).toThrow();
-      expect(
-        () =>
-          new ConcurrencyController({
-            maxReadConcurrency: 1,
-            maxSubagentConcurrency: limit,
           }),
       ).toThrow();
     },

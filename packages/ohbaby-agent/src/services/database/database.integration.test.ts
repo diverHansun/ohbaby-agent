@@ -210,6 +210,7 @@ describe("services/database", () => {
       { version: "028_subagent_message_input" },
       { version: "029_message_rewind" },
       { version: "030_subagent_goal_ownership" },
+      { version: "031_shell_job" },
     ]);
   });
 

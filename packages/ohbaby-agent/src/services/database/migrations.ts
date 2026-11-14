@@ -691,4 +691,23 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
     version: "030_subagent_goal_ownership",
     sql: `ALTER TABLE subagent_execution ADD COLUMN goal_id TEXT;`,
   },
+  {
+    version: "031_shell_job",
+    sql: `
+      CREATE TABLE shell_job (
+        job_id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        context_scope_id TEXT, root_session_id TEXT NOT NULL, root_run_id TEXT, run_id TEXT, message_id TEXT, call_id TEXT,
+        mode TEXT NOT NULL, command TEXT NOT NULL, description TEXT, cwd TEXT NOT NULL, shell TEXT NOT NULL, timeout_ms INTEGER,
+        status TEXT, stop_reason TEXT, exit_code INTEGER, signal TEXT, error TEXT, pid INTEGER, pgid INTEGER,
+        process_start_token TEXT, recovery_claim TEXT, owner_pid INTEGER, owner_id TEXT, owner_start_token TEXT, goal_id TEXT,
+        created_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER, settled_at INTEGER, result_ready_at INTEGER,
+        output_path TEXT, output_bytes INTEGER NOT NULL DEFAULT 0, output_truncated INTEGER NOT NULL DEFAULT 0,
+        output_tail TEXT, output_checkpoint_at INTEGER, output_complete INTEGER, cleanup TEXT, tracking_released_at INTEGER,
+        notice_state TEXT, notice_batch_id TEXT, notice_payload TEXT, notice_input_id TEXT, notice_wake_run_id TEXT
+      );
+      CREATE INDEX idx_shell_job_owner_status ON shell_job(session_id,context_scope_id,status);
+      CREATE INDEX idx_shell_job_root_history ON shell_job(root_session_id,mode,started_at,job_id);
+      CREATE INDEX idx_shell_job_root_run ON shell_job(root_run_id);
+    `,
+  },
 ];

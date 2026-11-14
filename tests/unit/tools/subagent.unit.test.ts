@@ -440,7 +440,7 @@ describe("agent builtin tool", () => {
         bus,
         initialLevel: "full-access",
       }),
-      config: { concurrency: { maxSubagentConcurrency: 6 } },
+      config: { concurrency: { maxConcurrency: 6 } },
     });
     scheduler.register(tool(host));
     const request = {
@@ -529,7 +529,7 @@ describe("agent builtin tool", () => {
         bus,
         initialLevel: "full-access",
       }),
-      config: { concurrency: { maxSubagentConcurrency: 1 } },
+      config: { concurrency: { maxConcurrency: 1 } },
     });
     scheduler.register(tool(host));
     const request = {

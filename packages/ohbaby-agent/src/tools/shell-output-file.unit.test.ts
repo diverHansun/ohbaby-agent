@@ -37,7 +37,7 @@ describe("shell output files", () => {
     await registry.dispose();
     await fsp.rm(directory, { recursive: true, force: true });
   });
-  function start(): ShellJobSnapshot {
+  function start(): Promise<ShellJobSnapshot> {
     return registry.start({
       child: child as unknown as ChildProcess,
       sessionId: "session",
@@ -50,7 +50,7 @@ describe("shell output files", () => {
     child.emit("close", 0, null);
   }
   it("writes raw split UTF-8 and both streams before publishing a complete pointer", async () => {
-    start();
+    await start();
     const bytes = Buffer.from("😀");
     child.stdout.emit("data", Buffer.from("a".repeat(40_000)));
     child.stdout.emit("data", bytes.subarray(0, 2));
@@ -70,7 +70,7 @@ describe("shell output files", () => {
     );
   });
   it("retains a partial file within 10 MiB, including its marker, at a multibyte boundary", async () => {
-    start();
+    await start();
     child.stdout.emit("data", Buffer.from("😀".repeat(3_000_000)));
     child.stderr.emit("data", Buffer.from("unpersisted-tail"));
     close();
@@ -88,7 +88,7 @@ describe("shell output files", () => {
     expect(text).not.toContain("unpersisted-tail");
   });
   it("does not label a logical cancellation complete before late stdio closes", async () => {
-    start();
+    await start();
     child.stdout.emit("data", "a".repeat(40_000));
     const killed = await registry.kill("job", "session");
     expect(killed.status).toBe("cancelled");
@@ -103,7 +103,7 @@ describe("shell output files", () => {
     ).toContain("late-stream");
   });
   it("ends an abandoned split UTF-8 character before its incomplete marker", async () => {
-    start();
+    await start();
     child.stdout.emit("data", "a".repeat(40_000));
     child.stdout.emit("data", Buffer.from("😀").subarray(0, 2));
     await registry.dispose();
@@ -130,7 +130,7 @@ describe("shell output files", () => {
         return write(fd, buffer, offset, Math.min(length, 16_384), position);
       },
     );
-    start();
+    await start();
     child.stdout.emit("data", Buffer.alloc(10_485_760, 120));
     close();
     expect(registry.get("job", "session").metadata.outputFile).toMatchObject({
@@ -143,7 +143,7 @@ describe("shell output files", () => {
   });
   it("caps the first byte beyond exactly 10 MiB and closes its writer", async () => {
     const fd = observeLogDescriptor();
-    start();
+    await start();
     child.stdout.emit("data", Buffer.alloc(10_485_760, 120));
     child.stdout.emit("data", Buffer.from("!"));
     expect(() => fs.fstatSync(fd())).toThrow(/bad file descriptor|EBADF/i);
@@ -179,7 +179,7 @@ describe("shell output files", () => {
       probeTree: (): "running" => "running",
     });
     const fd = observeLogDescriptor();
-    start();
+    await start();
     child.stdout.emit("data", "x".repeat(40_000));
     await expect(registry.dispose()).rejects.toThrow("cleanup is unconfirmed");
     expect(() => fs.fstatSync(fd())).toThrow(/bad file descriptor|EBADF/i);
@@ -193,7 +193,7 @@ describe("shell output files", () => {
     child.emit("close", 0, null);
     registry = new ShellJobRegistry({ killTree: vi.fn() });
   });
-  it("seals an unfinished log before pruning its terminal job and retains the file", async () => {
+  it("retains responsibility for an unfinished log until its output drains", async () => {
     let next = 0;
     registry = new ShellJobRegistry({
       createJobId: (): string => `job-${String(next++)}`,
@@ -202,12 +202,12 @@ describe("shell output files", () => {
       outputDrainMs: 1000,
     });
     const fd = observeLogDescriptor("job-0.log");
-    start();
+    await start();
     child.stdout.emit("data", "x".repeat(40_000));
     await registry.kill("job-0", "session");
     for (let index = 0; index < 100; index++) {
       const later = new Child();
-      registry.start({
+      await registry.start({
         child: later as unknown as ChildProcess,
         sessionId: "session",
         timeoutMs: 1000,
@@ -216,17 +216,16 @@ describe("shell output files", () => {
       later.emit("exit", 0, null);
       later.emit("close", 0, null);
     }
-    expect(() => registry.get("job-0", "session")).toThrow("Unknown shell job");
-    expect(() => fs.fstatSync(fd())).toThrow(/bad file descriptor|EBADF/i);
+    expect(registry.get("job-0", "session").status).toBe("cancelled");
+    expect(fs.fstatSync(fd()).isFile()).toBe(true);
     const file = path.join(directory, "job-0.log");
     const before = await fsp.readFile(file);
-    expect(before.toString("utf8")).toContain("output incomplete");
-    child.stdout.emit("data", "too-late");
+    expect(before.toString("utf8")).toContain("x");
     child.emit("close", 0, null);
-    expect(await fsp.readFile(file)).toEqual(before);
+    expect(() => fs.fstatSync(fd())).toThrow(/bad file descriptor|EBADF/i);
   });
   it("closes an incomplete log when the existing output-drain budget expires", async () => {
-    start();
+    await start();
     child.stdout.emit("data", "a".repeat(40_000));
     child.emit("exit", 0, null);
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -244,7 +243,7 @@ describe("shell output files", () => {
   });
   it.each(["openSync", "writeSync", "closeSync"] as const)(
     "keeps command success truthful after %s fails",
-    (method) => {
+    async (method) => {
       const original = fs[method];
       let failed = false;
       vi.spyOn(fs, method).mockImplementationOnce((...args: unknown[]) => {
@@ -252,7 +251,7 @@ describe("shell output files", () => {
         if (method === "closeSync") Reflect.apply(original, fs, args);
         throw new Error("disk failure");
       });
-      start();
+      await start();
       child.stdout.emit("data", "a".repeat(40_000));
       close();
       const result = registry.get("job", "session");
@@ -266,7 +265,7 @@ describe("shell output files", () => {
   );
   it("stops writing after a partial write failure and releases its descriptor", async () => {
     const fd = observeLogDescriptor();
-    start();
+    await start();
     child.stdout.emit("data", Buffer.from("saved-prefix"));
     vi.spyOn(fs, "writeSync").mockImplementationOnce((): number => {
       throw new Error("disk full");
@@ -289,7 +288,7 @@ describe("shell output files", () => {
     const target = path.join(directory, "untouched");
     await fsp.writeFile(target, "original");
     await fsp.symlink(target, path.join(directory, "job.log"));
-    start();
+    await start();
     child.stdout.emit("data", "a".repeat(40_000));
     close();
     expect(registry.get("job", "session").metadata.outputFile).toEqual({

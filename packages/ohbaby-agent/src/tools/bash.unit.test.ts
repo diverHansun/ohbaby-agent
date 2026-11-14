@@ -16,6 +16,7 @@ import type { Tool } from "../core/tool-scheduler/index.js";
 import { createBashTool, type SpawnCommand } from "./bash.js";
 import { installSystemProxy } from "../utils/network-proxy/index.js";
 import { ShellJobRegistry } from "./shell-job-registry.js";
+import { InMemoryShellJobStore } from "./shell-job-store.js";
 import { createBuiltinTools } from "./index.js";
 
 class FakeChildProcess extends EventEmitter {
@@ -112,6 +113,46 @@ async function waitForSpawn(spawn: ReturnType<typeof vi.fn>): Promise<void> {
 }
 
 describe("bash builtin tool", () => {
+  it("keeps failed-spawn resource ownership when release rejects", async () => {
+    const store = new InMemoryShellJobStore();
+    const release = vi.fn(() => Promise.reject(new Error("release failed")));
+    const reportCleanupError = vi.fn();
+    const registry = new ShellJobRegistry({
+      store,
+      createJobId: (): string => "failed-spawn",
+      killTree: (): { status: "confirmed" } => ({ status: "confirmed" }),
+    });
+    const context = createEnvironmentContext();
+    if (!context.environment) throw new Error("Missing environment fixture");
+    const bash = createBashTool({
+      registry,
+      preflight: () => Promise.resolve({ cdTargets: [], resolvedPaths: [] }),
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: (): Promise<void> => Promise.resolve(),
+      },
+      spawn: () => {
+        throw new Error("spawn failed");
+      },
+    });
+    await expect(
+      bash.execute(
+        { command: "echo hello" },
+        {
+          ...context,
+          reportCleanupError,
+          environment: { ...context.environment, retain: () => release },
+        },
+      ),
+    ).rejects.toThrow("spawn failed");
+    expect(release).toHaveBeenCalledOnce();
+    expect(reportCleanupError).toHaveBeenCalled();
+    expect(store.get("failed-spawn")).toMatchObject({
+      status: "failed",
+      settledAt: null,
+    });
+    expect(registry.hasActiveWork()).toBe(true);
+  });
   it("rejects interactive execution without a trusted owner before starting a process", async () => {
     const spawn = vi.fn<SpawnCommand>();
     const bash = createBashTool({ spawn });
@@ -685,10 +726,11 @@ describe("bash builtin tool", () => {
     );
     expect(result.metadata).toMatchObject({
       exitCode: null,
-      signal: "SIGTERM",
       status: "timed_out",
     });
-    expect(killTree).toHaveBeenCalledWith(child);
+    await vi.waitFor(() => {
+      expect(killTree).toHaveBeenCalledWith(child);
+    });
   });
 
   it("rejects with the command error even if process cleanup fails", async () => {
@@ -710,7 +752,9 @@ describe("bash builtin tool", () => {
       createContext(),
     );
     expect(result.metadata).toMatchObject({ status: "timed_out" });
-    expect(killTree).toHaveBeenCalledWith(child);
+    await vi.waitFor(() => {
+      expect(killTree).toHaveBeenCalledWith(child);
+    });
   });
 
   it("kills the process tree on abort", async () => {
@@ -738,11 +782,12 @@ describe("bash builtin tool", () => {
     await expect(resultPromise).resolves.toMatchObject({
       metadata: {
         exitCode: null,
-        signal: "SIGTERM",
         status: "cancelled",
       },
     });
-    expect(killTree).toHaveBeenCalledWith(child);
+    await vi.waitFor(() => {
+      expect(killTree).toHaveBeenCalledWith(child);
+    });
   });
 });
 

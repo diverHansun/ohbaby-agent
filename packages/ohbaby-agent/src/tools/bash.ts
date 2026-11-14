@@ -177,11 +177,12 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
   return withToolAdmission(
     {
       name: "bash",
-      description: `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged; no interpreter fallback occurs after preparation. On Windows, select Git Bash only with a usable native full SHELL path; WSL launchers are unsupported. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; the default is 120000ms and the maximum is 600000ms.`,
+      description: `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged; no interpreter fallback occurs after preparation. On Windows, select Git Bash only with a usable native full SHELL path; WSL launchers are unsupported. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; foreground defaults to 120000ms, background has no default timeout, and the maximum is 600000ms.`,
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
           command: { type: "string" },
+          description: { type: "string" },
           timeout: {
             maximum: MAX_TIMEOUT_MS,
             minimum: 1,
@@ -197,7 +198,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
       timeoutOwner: "tool",
       async execute(params, context): Promise<ToolExecutionResult> {
         const command = getStringParam(params, "command");
-        const timeout = getNumberParam(params, "timeout", {
+        const timeoutValue = getNumberParam(params, "timeout", {
           defaultValue: DEFAULT_TIMEOUT_MS,
           integer: true,
           max: MAX_TIMEOUT_MS,
@@ -209,6 +210,11 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             'Expected parameter "run_in_background" to be a boolean.',
           );
         }
+        const timeout =
+          runInBackground &&
+          (params.timeout === undefined || params.timeout === null)
+            ? null
+            : timeoutValue;
         throwIfCancelled(context.signal);
 
         if (
@@ -242,6 +248,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
         );
         const release = context.environment?.retain?.();
         let snapshot: ShellJobSnapshot;
+        const releaseOwnership = { registry: false };
         try {
           throwIfCancelled(context.signal);
           const env = stateEnvironment({
@@ -252,9 +259,13 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             sessionId: context.sessionId,
             shellPath,
           });
-          snapshot = registry.start({
+          snapshot = await registry.start({
             outputDirectory,
             background: runInBackground,
+            signal: context.signal,
+            onReserved: () => {
+              releaseOwnership.registry = true;
+            },
             owner: context.owner ?? {
               sessionId: context.sessionId,
               rootSessionId: context.sessionId,
@@ -281,6 +292,11 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             contextScopeId: context.contextScopeId,
             metadata: {
               ...binding.metadata,
+              command,
+              description:
+                typeof params.description === "string"
+                  ? params.description
+                  : undefined,
               cwd: binding.cwd,
               shell: shellPath,
               shellKind,
@@ -289,7 +305,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             timeoutMs: timeout,
           });
         } catch (error) {
-          await release?.();
+          if (!releaseOwnership.registry) await release?.();
           throw error;
         }
         // Cancellation may have happened synchronously during registration/spawn.
@@ -298,6 +314,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             snapshot.jobId,
             context.sessionId,
             context.contextScopeId,
+            "user",
           );
         }
         if (runInBackground) {
@@ -309,6 +326,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             snapshot.jobId,
             context.sessionId,
             context.contextScopeId,
+            "user",
           );
         };
         context.signal.addEventListener("abort", abortHandler, { once: true });

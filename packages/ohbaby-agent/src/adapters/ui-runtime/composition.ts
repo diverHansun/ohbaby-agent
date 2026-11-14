@@ -1,3 +1,4 @@
+import { readProcessIdentity } from "../../shell/process-identity.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -211,6 +212,7 @@ export interface UiRuntimeCompositionOptions {
   readonly onTodoWrite?: (event: TodoWriteEvent) => void;
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentExecutionStore?: SubagentExecutionStore;
+  readonly shellJobStore?: import("../../tools/shell-job-store.js").ShellJobStore;
   readonly currentRunInputStore?: CurrentRunInputStore;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
@@ -561,6 +563,9 @@ export async function createUiRuntimeComposition(
   });
   const todoWorkScopes = new TodoWorkScopeRegistry();
   const shellJobRegistry = new ShellJobRegistry({
+    store: options.shellJobStore,
+    ownerId: options.subagentOwnerId,
+    readProcessIdentity,
     terminationManagesObservation: true,
     killTree: (child): ReturnType<typeof Shell.killTree> =>
       Shell.killTree(child),

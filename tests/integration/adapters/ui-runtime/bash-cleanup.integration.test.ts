@@ -220,7 +220,9 @@ describe("composition Bash cleanup ownership", () => {
       }
       expect(children).toHaveLength(3);
       registry.cancelByRootRun("root-A");
-      expect(killTree).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => {
+        expect(killTree).toHaveBeenCalledTimes(1);
+      });
       expect(await foreground).toMatchObject({
         executionOutcome: "cancelled",
         metadata: { status: "cancelled" },
@@ -236,7 +238,9 @@ describe("composition Bash cleanup ownership", () => {
       registry.cancelByRootRun("root-A");
       expect(killTree).toHaveBeenCalledTimes(1);
       registry.cancelByRootRun("child-A");
-      expect(killTree).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => {
+        expect(killTree).toHaveBeenCalledTimes(2);
+      });
       expect(registry.hasActiveWork("root-A")).toBe(true);
       children[0].finish();
       children[2].finish();

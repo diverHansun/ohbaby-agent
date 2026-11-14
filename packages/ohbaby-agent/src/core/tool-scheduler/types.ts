@@ -281,7 +281,6 @@ export interface ConcurrencyConfig {
   readonly maxConcurrency?: number;
   /** Legacy name for ordinary capacity; used when maxConcurrency is absent. */
   readonly maxReadConcurrency?: number;
-  readonly maxSubagentConcurrency: number;
 }
 
 export interface TimeoutPolicy {

@@ -52,7 +52,7 @@ function startJob(
   timeoutMs = 1_000,
   sessionId = "session_1",
   contextScopeId?: string,
-): ShellJobSnapshot {
+): Promise<ShellJobSnapshot> {
   return registry.start({
     child: child as unknown as ChildProcess,
     ...(contextScopeId === undefined ? {} : { contextScopeId }),
@@ -82,15 +82,17 @@ describe("ShellJobRegistry", () => {
       },
     };
     registry.cancelByRootRun("A");
-    expect(() => registry.start(input)).toThrow(/root run.*closed/i);
+    await expect(registry.start(input)).rejects.toThrow(/root run.*closed/i);
     expect(spawn).not.toHaveBeenCalled();
     expect(registry.hasActiveWork("A")).toBe(false);
     try {
       expect(
-        registry.start({
-          ...input,
-          owner: { ...input.owner, rootRunId: "B", runId: "B" },
-        }).status,
+        (
+          await registry.start({
+            ...input,
+            owner: { ...input.owner, rootRunId: "B", runId: "B" },
+          })
+        ).status,
       ).toBe("running");
       expect(spawn).toHaveBeenCalledTimes(1);
     } finally {
@@ -123,7 +125,7 @@ describe("ShellJobRegistry", () => {
         return child as unknown as ChildProcess;
       };
       try {
-        const job = registry.start({
+        const job = await registry.start({
           child:
             race === "during-spawn"
               ? launch
@@ -166,44 +168,46 @@ describe("ShellJobRegistry", () => {
       probeTree: (child): "stopped" | "running" =>
         stopped.has(child) ? "stopped" : "running",
     });
-    const jobs = [
-      {
-        rootRunId: "A",
-        executionId: "execution-A",
-        captureMode: "head" as const,
-      },
-      {
-        rootRunId: "A",
-        executionId: "execution-A2",
-        captureMode: "tail" as const,
-      },
-      {
-        rootRunId: "B",
-        executionId: "execution-B",
-        captureMode: "tail" as const,
-      },
-    ].map((identity, index) => {
-      const child = new FakeChild();
-      const release = vi.fn();
-      const snapshot = registry.start({
-        child: child as unknown as ChildProcess,
-        sessionId: "reused-child",
-        contextScopeId: "reused-instance",
-        captureMode: identity.captureMode,
-        timeoutMs: 10_000,
-        release,
-        owner: {
-          ...identity,
-          rootSessionId: "primary",
+    const jobs = await Promise.all(
+      [
+        {
+          rootRunId: "A",
+          executionId: "execution-A",
+          captureMode: "head" as const,
+        },
+        {
+          rootRunId: "A",
+          executionId: "execution-A2",
+          captureMode: "tail" as const,
+        },
+        {
+          rootRunId: "B",
+          executionId: "execution-B",
+          captureMode: "tail" as const,
+        },
+      ].map(async (identity, index) => {
+        const child = new FakeChild();
+        const release = vi.fn();
+        const snapshot = await registry.start({
+          child: child as unknown as ChildProcess,
           sessionId: "reused-child",
           contextScopeId: "reused-instance",
-          runId: `child-${String(index)}`,
-          messageId: "message",
-          callId: `call-${String(index)}`,
-        },
-      });
-      return { child, release, snapshot };
-    });
+          captureMode: identity.captureMode,
+          timeoutMs: 10_000,
+          release,
+          owner: {
+            ...identity,
+            rootSessionId: "primary",
+            sessionId: "reused-child",
+            contextScopeId: "reused-instance",
+            runId: `child-${String(index)}`,
+            messageId: "message",
+            callId: `call-${String(index)}`,
+          },
+        });
+        return { child, release, snapshot };
+      }),
+    );
     try {
       expect(registry.hasActiveWork("missing")).toBe(false);
       expect(registry.cancelByRootRun("missing")).toEqual([]);
@@ -212,7 +216,9 @@ describe("ShellJobRegistry", () => {
         "cancelled",
         "cancelled",
       ]);
-      expect(killed).toHaveLength(2);
+      await vi.waitFor(() => {
+        expect(killed).toHaveLength(2);
+      });
       expect(killed).not.toContain(jobs[2].child);
       expect(
         registry.get(jobs[2].snapshot.jobId, "reused-child", "reused-instance")
@@ -236,7 +242,7 @@ describe("ShellJobRegistry", () => {
       await registry.dispose();
     }
   });
-  it("counts background work until close drains its pipes, but ignores completed records", () => {
+  it("counts background work until close drains its pipes, but ignores completed records", async () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({
       probeTree: (): "stopped" => "stopped",
@@ -244,22 +250,24 @@ describe("ShellJobRegistry", () => {
       killTree: vi.fn(),
     });
     expect(registry.hasActiveWork()).toBe(false);
-    startJob(registry, child);
+    await startJob(registry, child);
     expect(registry.hasActiveWork()).toBe(true);
     child.emitExitOnly(0, null);
     expect(registry.hasActiveWork()).toBe(true);
     child.emit("close", 0, null);
-    expect(registry.hasActiveWork()).toBe(false);
+    await vi.waitFor(() => {
+      expect(registry.hasActiveWork()).toBe(false);
+    });
   });
 
-  it("keeps a bounded tail and marks it truncated", () => {
+  it("keeps a bounded tail and marks it truncated", async () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({
       probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "job_1",
       killTree: vi.fn(),
     });
-    const started = startJob(registry, child);
+    const started = await startJob(registry, child);
 
     child.stdout.emit("data", "a".repeat(32_000));
     child.stdout.emit("data", "tail");
@@ -285,16 +293,18 @@ describe("ShellJobRegistry", () => {
       createJobId: (): string => "job_1",
       killTree,
     });
-    const started = startJob(registry, child, 10);
+    const started = await startJob(registry, child, 10);
 
     const result = await registry.kill(started.jobId, "session_1");
 
     expect(result.metadata).toMatchObject({
       exitCode: null,
-      signal: "SIGTERM",
+      signal: null,
       status: "cancelled",
     });
-    expect(killTree).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(killTree).toHaveBeenCalledTimes(1);
+    });
     child.emitExit(0, null);
     expect(registry.get(started.jobId, "session_1").status).toBe("cancelled");
   });
@@ -314,7 +324,7 @@ describe("ShellJobRegistry", () => {
       createJobId: (): string => "job_1",
       killTree,
     });
-    const started = startJob(registry, child);
+    const started = await startJob(registry, child);
 
     const first = registry.kill(started.jobId, "session_1");
     const second = registry.kill(started.jobId, "session_1");
@@ -341,19 +351,19 @@ describe("ShellJobRegistry", () => {
       createJobId: (): string => `job_${String(++nextJobId)}`,
       killTree,
     });
-    const removedSessionJob = startJob(
+    const removedSessionJob = await startJob(
       registry,
       removedSessionChild,
       1_000_000,
       "session_removed",
     );
-    const retainedSessionJob = startJob(
+    const retainedSessionJob = await startJob(
       registry,
       retainedSessionChild,
       1_000_000,
       "session_retained",
     );
-    const removedTerminalJob = startJob(
+    const removedTerminalJob = await startJob(
       registry,
       removedTerminalChild,
       1_000_000,
@@ -364,12 +374,12 @@ describe("ShellJobRegistry", () => {
     try {
       await registry.disposeSession("session_removed");
 
-      expect(() =>
-        registry.get(removedSessionJob.jobId, "session_removed"),
-      ).toThrow("Unknown shell job");
-      expect(() =>
-        registry.get(removedTerminalJob.jobId, "session_removed"),
-      ).toThrow("Unknown shell job");
+      expect(
+        registry.get(removedSessionJob.jobId, "session_removed").status,
+      ).toBe("cancelled");
+      expect(
+        registry.get(removedTerminalJob.jobId, "session_removed").status,
+      ).toBe("completed");
       expect(
         registry.get(retainedSessionJob.jobId, "session_retained").status,
       ).toBe("running");
@@ -391,14 +401,14 @@ describe("ShellJobRegistry", () => {
       createJobId: (): string => `job_${String(++nextJobId)}`,
       killTree,
     });
-    const closedScopeJob = startJob(
+    const closedScopeJob = await startJob(
       registry,
       closedScopeChild,
       1_000_000,
       "child_session",
       "subagent_1",
     );
-    const siblingScopeJob = startJob(
+    const siblingScopeJob = await startJob(
       registry,
       siblingScopeChild,
       1_000_000,
@@ -409,9 +419,10 @@ describe("ShellJobRegistry", () => {
     try {
       await registry.disposeScope("child_session", "subagent_1");
 
-      expect(() =>
-        registry.get(closedScopeJob.jobId, "child_session", "subagent_1"),
-      ).toThrow("Unknown shell job");
+      expect(
+        registry.get(closedScopeJob.jobId, "child_session", "subagent_1")
+          .status,
+      ).toBe("cancelled");
       expect(
         registry.get(siblingScopeJob.jobId, "child_session", "subagent_2")
           .status,
@@ -440,7 +451,7 @@ describe("ShellJobRegistry", () => {
         createJobId: (): string => "job_1",
         killTree,
       });
-      const started = startJob(registry, child, 10);
+      const started = await startJob(registry, child, 10);
 
       await vi.advanceTimersByTimeAsync(10);
 
@@ -467,7 +478,7 @@ describe("ShellJobRegistry", () => {
         createJobId: (): string => "job_1",
         killTree,
       });
-      const started = startJob(registry, child, 10);
+      const started = await startJob(registry, child, 10);
 
       child.emitExitOnly(0, null);
       await vi.advanceTimersByTimeAsync(10);
@@ -490,7 +501,7 @@ describe("ShellJobRegistry", () => {
       createJobId: (): string => "job_1",
       killTree: vi.fn(),
     });
-    const started = startJob(registry, child);
+    const started = await startJob(registry, child);
     const outputTool = createTaskOutputTool(registry);
 
     const pending = outputTool.execute(
@@ -517,7 +528,7 @@ describe("ShellJobRegistry", () => {
       createJobId: (): string => "job_1",
       killTree: vi.fn(),
     });
-    const started = startJob(registry, child, 1_000_000);
+    const started = await startJob(registry, child, 1_000_000);
     const outputTool = createTaskOutputTool(registry);
     try {
       const assertion = expect(
@@ -546,7 +557,7 @@ describe("ShellJobRegistry", () => {
         createJobId: (): string => "job_1",
         killTree: vi.fn(),
       });
-      const started = startJob(registry, child, 10);
+      const started = await startJob(registry, child, 10);
 
       await vi.advanceTimersByTimeAsync(1_010);
 
@@ -571,8 +582,8 @@ describe("ShellJobRegistry", () => {
         (child as unknown as FakeChild).emit("close", null, "SIGTERM");
       },
     });
-    const failed = startJob(registry, failedChild);
-    const cancelled = startJob(registry, cancelledChild);
+    const failed = await startJob(registry, failedChild);
+    const cancelled = await startJob(registry, cancelledChild);
 
     failedChild.emitExit(1, null);
     const cancelledResult = await registry.kill(cancelled.jobId, "session_1");
@@ -585,63 +596,6 @@ describe("ShellJobRegistry", () => {
     );
   });
 
-  it("evicts the oldest terminal jobs after the retention limit", () => {
-    let nextJobId = 0;
-    const registry = new ShellJobRegistry({
-      probeTree: (): "stopped" => "stopped",
-      createJobId: (): string => `job_${String(++nextJobId)}`,
-      killTree: vi.fn(),
-    });
-
-    for (let index = 0; index < 101; index += 1) {
-      const child = new FakeChild();
-      startJob(registry, child);
-      child.emitExit(0, null);
-    }
-
-    expect(() => registry.get("job_1", "session_1")).toThrow(
-      "Unknown shell job",
-    );
-    expect(registry.get("job_101", "session_1").status).toBe("completed");
-  });
-
-  it("evicts terminal jobs by completion order", () => {
-    vi.useFakeTimers();
-    const children: FakeChild[] = [];
-    try {
-      let nextJobId = 0;
-      const registry = new ShellJobRegistry({
-        probeTree: (): "stopped" => "stopped",
-        createJobId: (): string => `job_${String(++nextJobId)}`,
-        killTree: vi.fn(),
-      });
-      const firstChild = new FakeChild();
-      children.push(firstChild);
-      const first = startJob(registry, firstChild, 1_000_000);
-      const oldestTerminalChild = new FakeChild();
-      children.push(oldestTerminalChild);
-      const oldestTerminal = startJob(registry, oldestTerminalChild, 1_000_000);
-      oldestTerminalChild.emitExit(0, null);
-      for (let index = 0; index < 99; index += 1) {
-        const child = new FakeChild();
-        children.push(child);
-        startJob(registry, child, 1_000_000);
-      }
-
-      firstChild.emitExit(0, null);
-
-      expect(() => registry.get(oldestTerminal.jobId, "session_1")).toThrow(
-        "Unknown shell job",
-      );
-      expect(registry.get(first.jobId, "session_1").status).toBe("completed");
-    } finally {
-      for (const child of children) {
-        child.emitExit(0, null);
-      }
-      vi.useRealTimers();
-    }
-  });
-
   it("enforces session ownership and makes terminal kill idempotent", async () => {
     const child = new FakeChild();
     const killTree = vi.fn((): void => {
@@ -652,7 +606,7 @@ describe("ShellJobRegistry", () => {
       createJobId: (): string => "job_1",
       killTree,
     });
-    const started = startJob(registry, child);
+    const started = await startJob(registry, child);
     child.emitExit(0, null);
     const killTool = createTaskKillTool(registry);
 

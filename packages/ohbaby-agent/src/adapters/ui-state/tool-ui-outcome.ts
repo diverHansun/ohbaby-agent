@@ -1,6 +1,11 @@
 import type { UiToolCall } from "ohbaby-sdk";
 
-const FAILED_METADATA_STATUSES = new Set(["failed", "timed_out", "cancelled"]);
+const FAILED_METADATA_STATUSES = new Set([
+  "failed",
+  "timed_out",
+  "cancelled",
+  "lost",
+]);
 
 export interface ToolUiOutcomeInput {
   readonly error?: string;

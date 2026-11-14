@@ -58,7 +58,8 @@ export function projectToolResultDetails(
       shellStatus === "completed" ||
       shellStatus === "failed" ||
       shellStatus === "timed_out" ||
-      shellStatus === "cancelled"
+      shellStatus === "cancelled" ||
+      shellStatus === "lost"
         ? shellStatus
         : undefined;
     return {
@@ -66,6 +67,13 @@ export function projectToolResultDetails(
       exitCode: integer("exitCode", -2147483648),
       jobId: text("jobId", 256),
       status: knownStatus,
+      stopReason: text("stopReason", 64),
+      cleanup:
+        metadata.cleanup === "in-progress" ||
+        metadata.cleanup === "confirmed" ||
+        metadata.cleanup === "unconfirmed"
+          ? metadata.cleanup
+          : undefined,
       outputTruncated: bool("truncated"),
     };
   }

@@ -1,3 +1,4 @@
+import { DatabaseShellJobStore } from "../tools/shell-job-store.js";
 import {
   isLocalPrimarySession,
   isUserFacingSession,
@@ -922,6 +923,7 @@ export function createPersistentUiBackendClient(
     streamBridge: options.streamBridge,
     subagentInstanceStore,
     subagentExecutionStore,
+    shellJobStore: new DatabaseShellJobStore({ db }),
     subagentOwnerId: backendOwnerId,
     subagentOwnerPid: process.pid,
     workdir: options.workdir,

@@ -1,7 +1,7 @@
 import type { ConcurrencyConfig } from "./types.js";
 
 /** Assigned by the scheduler from trusted tool capabilities, never by category. */
-export type CapacityKind = "ordinary" | "dispatch" | "control";
+export type CapacityKind = "ordinary" | "control";
 
 export interface CapacityLease {
   /** Returns this acquisition once; late completion/cancellation may call it again. */
@@ -17,7 +17,6 @@ interface QueuedSlot {
 
 interface SessionCapacity {
   ordinary: number;
-  dispatch: number;
 }
 
 export class ConcurrencyController {
@@ -25,7 +24,6 @@ export class ConcurrencyController {
   private readonly queue: QueuedSlot[] = [];
   private readonly availabilityListeners = new Set<() => void>();
   private readonly ordinaryLimit: number;
-  private readonly dispatchLimit: number;
 
   constructor(config: ConcurrencyConfig) {
     for (const [name, limit] of Object.entries(config)) {
@@ -35,7 +33,6 @@ export class ConcurrencyController {
     }
     this.ordinaryLimit =
       config.maxConcurrency ?? config.maxReadConcurrency ?? 10;
-    this.dispatchLimit = config.maxSubagentConcurrency;
   }
 
   canExecute(kind: CapacityKind, sessionId: string): boolean {
@@ -105,9 +102,7 @@ export class ConcurrencyController {
       return true;
     }
     const count = this.sessions.get(sessionId)?.[kind] ?? 0;
-    return (
-      count < (kind === "ordinary" ? this.ordinaryLimit : this.dispatchLimit)
-    );
+    return count < this.ordinaryLimit;
   }
 
   private createLease(kind: CapacityKind, sessionId: string): CapacityLease {
@@ -118,7 +113,7 @@ export class ConcurrencyController {
         },
       };
     }
-    const counts = this.sessions.get(sessionId) ?? { ordinary: 0, dispatch: 0 };
+    const counts = this.sessions.get(sessionId) ?? { ordinary: 0 };
     this.sessions.set(sessionId, counts);
     counts[kind] += 1;
     let released = false;
@@ -129,7 +124,7 @@ export class ConcurrencyController {
         }
         released = true;
         counts[kind] -= 1;
-        if (counts.ordinary === 0 && counts.dispatch === 0) {
+        if (counts.ordinary === 0) {
           this.sessions.delete(sessionId);
         }
         this.processQueue();

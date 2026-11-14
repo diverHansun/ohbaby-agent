@@ -88,7 +88,6 @@ function fixture(): {
     }),
   });
   add("control", { capacity: "control" });
-  add("dispatch", { capacity: "dispatch" });
   const execute = (
     toolName: string,
     callId = toolName,
@@ -140,7 +139,7 @@ describe("C3 source cleanup admission", () => {
           true,
         );
       });
-      for (const tool of ["independent", "control", "dispatch"])
+      for (const tool of ["independent", "control"])
         expect((await f.execute(tool)).status).toBe("success");
       expect(
         (await f.execute("unknown", "other-root", "independent")).status,

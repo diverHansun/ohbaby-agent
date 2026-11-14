@@ -1,3 +1,16 @@
+import type { ProcessIdentity } from "../shell/process-identity.js";
+import fs from "node:fs";
+import {
+  shellJobStatusLine,
+  initialShellJobNoticeState,
+} from "./shell-job-notice.js";
+import {
+  InMemoryShellJobStore,
+  type ShellJobStore,
+  type ShellJobRecord,
+  type ShellJobPatch,
+  type ShellJobStopReason,
+} from "./shell-job-store.js";
 import type {
   RunCleanupSnapshot,
   ToolCleanupState,
@@ -33,14 +46,14 @@ export const MAX_SHELL_JOB_TIMEOUT_MS = 600_000;
 export const DEFAULT_TASK_OUTPUT_WAIT_MS = 30_000;
 export const OUTPUT_CAPTURE_CHAR_LIMIT = DEFAULT_OUTPUT_TOKEN_LIMIT * 4 + 1;
 export const SHELL_JOB_TERMINATION_GRACE_MS = 1_000;
-export const MAX_RETAINED_SHELL_JOBS = 100;
 
 export type ShellJobStatus =
   | "running"
   | "completed"
   | "failed"
   | "cancelled"
-  | "timed_out";
+  | "timed_out"
+  | "lost";
 
 type TerminationReason = "cancelled" | "timed_out";
 
@@ -48,6 +61,9 @@ export interface ShellJobStartInput {
   /** Already prepared by the caller; the registry owns only jobId.log and capture. */
   readonly outputDirectory?: string;
   readonly background?: boolean;
+  readonly signal?: AbortSignal;
+  /** Called once the reservation is committed and registry owns the release. */
+  readonly onReserved?: () => void;
   readonly child: ChildProcess | (() => ChildProcess);
   readonly owner?: ToolExecutionOwner;
   readonly release?: () => void | Promise<void>;
@@ -56,7 +72,7 @@ export interface ShellJobStartInput {
   readonly captureMode?: "head" | "tail";
   readonly contextScopeId?: string;
   readonly sessionId: string;
-  readonly timeoutMs: number;
+  readonly timeoutMs: number | null;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -85,11 +101,38 @@ export interface ShellJobRegistryOptions {
   /** The built-in terminator owns TERM and post-KILL observation budgets. */
   readonly terminationManagesObservation?: boolean;
   readonly outputDrainMs?: number;
+  readonly maxOutputBytes?: number;
+  readonly store?: ShellJobStore;
+  readonly ownerId?: string;
+  readonly readProcessIdentity?: (pid: number) => Promise<ProcessIdentity>;
   readonly createJobId?: () => string;
+}
+
+interface UnspawnedJob {
+  readonly jobId: string;
+  readonly sessionId: string;
+  readonly contextScopeId?: string;
+  readonly rootRunId?: string;
+  readonly background: boolean;
+  readonly reportCleanupError?: (error: unknown) => void;
+  pendingPatch: ShellJobPatch;
+  writing: boolean;
+  releaseComplete: boolean;
+  readonly waiters: Set<() => void>;
 }
 
 interface ShellJob {
   readonly outputFile: CappedOutputFile;
+  outputBytes: number;
+  tail: Buffer;
+  persist: Promise<void>;
+  pendingPatch: ShellJobPatch;
+  identityPending: boolean;
+  settling: boolean;
+  resultPublished: boolean;
+  foregroundObserved: boolean;
+  outputComplete: boolean | null;
+  stopReason: ShellJobStopReason | null;
   readonly background: boolean;
   releaseComplete: boolean;
   releaseTask?: Promise<void>;
@@ -105,12 +148,14 @@ interface ShellJob {
   observation?: ReturnType<typeof setTimeout>;
   outputDrain?: ReturnType<typeof setTimeout>;
   closed: boolean;
+  closing: boolean;
   exited: boolean;
   terminationSucceeded: boolean;
   readonly child: ChildProcess;
   readonly captureMode: "head" | "tail";
   readonly contextScopeId?: string;
   readonly jobId: string;
+  readonly startedAt: number;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
   output: string;
@@ -123,7 +168,7 @@ interface ShellJob {
   error?: string;
   terminationStarted: boolean;
   terminationReason?: TerminationReason;
-  timeoutId: ReturnType<typeof setTimeout>;
+  timeoutId?: ReturnType<typeof setTimeout>;
   terminal: Promise<void>;
   resolveTerminal: () => void;
 }
@@ -175,6 +220,8 @@ function emptyOutputMessage(job: ShellJob): string {
       return "Command was cancelled with no output.";
     case "timed_out":
       return "Command timed out with no output.";
+    case "lost":
+      return "Command result is unknown.";
   }
 }
 
@@ -208,17 +255,25 @@ function isTerminal(status: ShellJobStatus): boolean {
 export class ShellJobRegistry {
   private admissionClosed = false;
   private readonly jobs = new Map<string, ShellJob>();
+  private readonly unspawnedJobs = new Map<string, UnspawnedJob>();
+  private readonly foregroundResults = new Map<
+    string,
+    { snapshot: ShellJobSnapshot; sessionId: string; contextScopeId?: string }
+  >();
+  private readonly store: ShellJobStore;
   private readonly sealedRoots = new Set<string>();
-  private readonly terminalJobIds: string[] = [];
+  private checkpointTimer?: ReturnType<typeof setTimeout>;
+  private ownerIdentity?: Promise<ProcessIdentity>;
   private readonly createJobId: () => string;
   private readonly killTree: ShellJobRegistryOptions["killTree"];
 
   constructor(private readonly options: ShellJobRegistryOptions) {
+    this.store = options.store ?? new InMemoryShellJobStore();
     this.createJobId = options.createJobId ?? randomUUID;
     this.killTree = options.killTree;
   }
 
-  start(input: ShellJobStartInput): ShellJobSnapshot {
+  async start(input: ShellJobStartInput): Promise<ShellJobSnapshot> {
     // Allocate identity before launch: registration failure must not orphan work.
     const jobId = this.createJobId();
     if (this.jobs.has(jobId))
@@ -230,8 +285,139 @@ export class ShellJobRegistry {
           this.sealedRoots.has(input.owner.rootRunId)))
     )
       throw new Error("Shell root run is closed.");
-    const child =
-      typeof input.child === "function" ? input.child() : input.child;
+    const now = Date.now();
+    const identity = this.options.readProcessIdentity
+      ? await (this.ownerIdentity ??= this.options.readProcessIdentity(
+          process.pid,
+        ))
+      : undefined;
+    const owner = input.owner;
+    const record: ShellJobRecord = {
+      jobId,
+      sessionId: input.sessionId,
+      contextScopeId: input.contextScopeId ?? null,
+      rootSessionId: owner?.rootSessionId ?? input.sessionId,
+      rootRunId: owner?.rootRunId ?? null,
+      runId: owner?.runId ?? null,
+      messageId: owner?.messageId ?? null,
+      callId: owner?.callId ?? null,
+      mode: input.background ? "background" : "foreground",
+      command:
+        typeof input.metadata?.command === "string"
+          ? input.metadata.command
+          : "",
+      description:
+        typeof input.metadata?.description === "string"
+          ? input.metadata.description
+          : null,
+      cwd: typeof input.metadata?.cwd === "string" ? input.metadata.cwd : "",
+      shell:
+        typeof input.metadata?.shell === "string" ? input.metadata.shell : "",
+      timeoutMs: input.timeoutMs,
+      status: null,
+      stopReason: null,
+      exitCode: null,
+      signal: null,
+      error: null,
+      pid: null,
+      pgid: null,
+      processStartToken: null,
+      recoveryClaim: null,
+      ownerPid: process.pid,
+      ownerId: this.options.ownerId ?? null,
+      ownerStartToken:
+        identity?.state === "present" ? identity.startToken : null,
+      goalId: null,
+      createdAt: now,
+      startedAt: null,
+      endedAt: null,
+      settledAt: null,
+      resultReadyAt: null,
+      outputPath: null,
+      outputBytes: 0,
+      outputTruncated: false,
+      outputTail: null,
+      outputCheckpointAt: null,
+      outputComplete: null,
+      cleanup: null,
+      trackingReleasedAt: null,
+      noticeState: input.background ? null : "suppressed",
+      noticeBatchId: null,
+      noticePayload: null,
+      noticeInputId: null,
+      noticeWakeRunId: null,
+    };
+    const assertAdmitted = (): undefined => {
+      if (typeof input.child !== "function") return undefined;
+      if (input.signal?.aborted) throw new Error("Command was cancelled.");
+      if (
+        this.admissionClosed ||
+        (owner?.rootRunId !== undefined &&
+          this.sealedRoots.has(owner.rootRunId))
+      )
+        throw new Error("Shell root run is closed.");
+      return undefined;
+    };
+    await this.store.insert(record, { assertAdmitted });
+    input.onReserved?.();
+    let child: ChildProcess;
+    let cancelledBeforeSpawn = false;
+    try {
+      if (typeof input.child === "function") {
+        cancelledBeforeSpawn =
+          input.signal?.aborted === true ||
+          this.admissionClosed ||
+          (owner?.rootRunId !== undefined &&
+            this.sealedRoots.has(owner.rootRunId));
+        assertAdmitted();
+      }
+      child = typeof input.child === "function" ? input.child() : input.child;
+    } catch (error) {
+      cancelledBeforeSpawn ||= input.signal?.aborted === true;
+      const pending: UnspawnedJob = {
+        jobId,
+        sessionId: input.sessionId,
+        contextScopeId: input.contextScopeId,
+        rootRunId: owner?.rootRunId,
+        background: input.background ?? false,
+        reportCleanupError: input.reportCleanupError,
+        pendingPatch: {},
+        writing: false,
+        releaseComplete: false,
+        waiters: new Set(),
+      };
+      this.unspawnedJobs.set(jobId, pending);
+      await this.persistUnspawned(pending, {
+        status: cancelledBeforeSpawn ? "cancelled" : "failed",
+        stopReason: cancelledBeforeSpawn
+          ? input.signal?.aborted
+            ? "user"
+            : "owner-ended"
+          : null,
+        error: cancelledBeforeSpawn
+          ? null
+          : error instanceof Error
+            ? error.message
+            : String(error),
+        cleanup: "confirmed",
+        outputComplete: true,
+        noticeState:
+          input.background && !cancelledBeforeSpawn ? "pending" : "suppressed",
+        resultReadyAt: Date.now(),
+      });
+      try {
+        await input.release?.();
+        pending.releaseComplete = true;
+        await this.persistUnspawned(pending, {});
+      } catch (releaseError) {
+        try {
+          input.reportCleanupError?.(releaseError);
+        } catch {
+          /* Observer does not own cleanup. */
+        }
+      }
+      throw error;
+    }
     let resolveTerminal!: () => void;
     const terminal = new Promise<void>((resolve) => {
       resolveTerminal = resolve;
@@ -243,6 +429,16 @@ export class ShellJobRegistry {
           : undefined,
       ),
       child,
+      outputBytes: 0,
+      tail: Buffer.alloc(0),
+      persist: Promise.resolve(),
+      pendingPatch: {},
+      identityPending: Boolean(child.pid && this.options.readProcessIdentity),
+      settling: false,
+      resultPublished: false,
+      foregroundObserved: false,
+      outputComplete: null,
+      stopReason: null,
       background: input.background ?? false,
       releaseComplete: false,
       owner: input.owner,
@@ -250,11 +446,13 @@ export class ShellJobRegistry {
       reportCleanup: input.reportCleanup,
       reportCleanupError: input.reportCleanupError,
       closed: false,
+      closing: false,
       exited: false,
       terminationSucceeded: false,
       captureMode: input.captureMode ?? "tail",
       contextScopeId: input.contextScopeId,
       jobId,
+      startedAt: Date.now(),
       metadata: { ...input.metadata, pid: child.pid },
       output: "",
       stderr: "",
@@ -264,16 +462,24 @@ export class ShellJobRegistry {
       status: "running",
       terminal,
       terminationStarted: false,
-      timeoutId: setTimeout(() => {
-        this.terminate(job, "timed_out");
-      }, input.timeoutMs),
+      timeoutId:
+        input.timeoutMs === null
+          ? undefined
+          : setTimeout(() => {
+              this.terminate(job, "timed_out");
+            }, input.timeoutMs),
       truncated: false,
     };
     this.jobs.set(job.jobId, job);
-    this.pruneTerminalJobs();
+    this.persist(job, {
+      status: "running",
+      startedAt: job.startedAt,
+      pid: child.pid ?? null,
+      pgid: process.platform !== "win32" ? (child.pid ?? null) : null,
+    });
 
     child.stdout?.on("data", (chunk: unknown) => {
-      job.outputFile.append(chunk);
+      this.capture(job, chunk);
       const next =
         job.captureMode === "tail"
           ? appendTail(job.output, chunkToString(chunk))
@@ -286,7 +492,7 @@ export class ShellJobRegistry {
       job.truncated ||= next.truncated;
     });
     child.stderr?.on("data", (chunk: unknown) => {
-      job.outputFile.append(chunk);
+      this.capture(job, chunk);
       const next =
         job.captureMode === "tail"
           ? appendTail(job.output, chunkToString(chunk))
@@ -298,17 +504,27 @@ export class ShellJobRegistry {
       }
       job.truncated ||= next.truncated;
     });
+    const outputError = (error: Error): void => {
+      job.outputComplete = false;
+      job.outputFile.finish(false);
+      job.reportCleanupError?.(error);
+    };
+    child.stdout?.on("error", outputError);
+    child.stderr?.on("error", outputError);
     child.once("error", (error: Error) => {
       job.error = error.message;
     });
     child.once("exit", (exitCode, signal) => {
       job.exited = true;
+      this.persist(job, { endedAt: Date.now(), exitCode, signal });
       job.exitCode = exitCode;
       job.signal = signal;
       this.observeStopped(job);
     });
     child.once("close", (exitCode, signal) => {
+      job.closing = true;
       job.closed = true;
+      job.outputComplete ??= true;
       job.outputFile.finish(job.terminationReason === undefined);
       job.exitCode ??= exitCode;
       job.signal ??= signal;
@@ -317,6 +533,18 @@ export class ShellJobRegistry {
       else this.observeStopped(job);
       // The shell exit result is distinct from proof that descendants stopped.
       this.finishFromChild(job, job.exitCode ?? null, job.signal ?? null);
+      this.persist(job, {
+        exitCode: job.exitCode ?? null,
+        signal: job.signal ?? null,
+        outputBytes: job.outputBytes,
+        outputComplete: job.outputComplete,
+        ...this.outputFilePatch(job),
+        ...this.resultReadyPatch(job),
+        outputTail: job.background ? this.tailText(job) : null,
+        outputCheckpointAt: job.background ? Date.now() : null,
+      });
+      job.closing = false;
+      this.settle(job);
     });
 
     try {
@@ -333,6 +561,30 @@ export class ShellJobRegistry {
         this.sealedRoots.has(job.owner.rootRunId))
     )
       this.terminate(job, "cancelled");
+    if (child.pid && this.options.readProcessIdentity) {
+      try {
+        const processIdentity = await this.options.readProcessIdentity(
+          child.pid,
+        );
+        if (processIdentity.state === "present")
+          this.persist(job, {
+            pgid: processIdentity.pgid,
+            processStartToken: processIdentity.startToken,
+          });
+      } catch (error) {
+        job.reportCleanupError?.(error);
+      } finally {
+        job.identityPending = false;
+        this.settle(job);
+      }
+    }
+    try {
+      await job.persist;
+    } catch {
+      // The process already exists. Keep its cleanup owner and terminate it;
+      // throwing here would make bash release resources while it is still alive.
+      this.terminate(job, "cancelled", "owner-ended");
+    }
     return this.snapshot(job);
   }
 
@@ -341,16 +593,22 @@ export class ShellJobRegistry {
     sessionId: string,
     contextScopeId?: string,
   ): ShellJobSnapshot {
-    return this.snapshot(this.getOwnedJob(jobId, sessionId, contextScopeId));
+    const job = this.jobs.get(jobId);
+    if (job)
+      return this.snapshot(this.getOwnedJob(jobId, sessionId, contextScopeId));
+    return this.snapshotRecord(
+      this.getOwnedRecord(jobId, sessionId, contextScopeId),
+    );
   }
 
   hasActiveWork(rootRunId?: string): boolean {
-    return [...this.jobs.values()].some(
-      (job) =>
-        (rootRunId === undefined || job.owner?.rootRunId === rootRunId) &&
-        (job.status === "running" ||
-          job.cleanup !== "confirmed" ||
-          !job.releaseComplete),
+    return (
+      [...this.jobs.values()].some(
+        (job) => rootRunId === undefined || job.owner?.rootRunId === rootRunId,
+      ) ||
+      [...this.unspawnedJobs.values()].some(
+        (job) => rootRunId === undefined || job.rootRunId === rootRunId,
+      )
     );
   }
 
@@ -375,6 +633,9 @@ export class ShellJobRegistry {
       [...this.jobs.values()].filter(
         (job) => job.owner?.rootRunId === rootRunId,
       ),
+      [...this.unspawnedJobs.values()].filter(
+        (job) => job.rootRunId === rootRunId,
+      ),
     );
   }
 
@@ -383,6 +644,9 @@ export class ShellJobRegistry {
     return this.confirmCleanup(
       [...this.jobs.values()].filter(
         (job) => job.owner?.rootRunId === rootRunId && !job.background,
+      ),
+      [...this.unspawnedJobs.values()].filter(
+        (job) => job.rootRunId === rootRunId && !job.background,
       ),
     );
   }
@@ -395,30 +659,46 @@ export class ShellJobRegistry {
       (job) =>
         job.sessionId === sessionId && job.contextScopeId === contextScopeId,
     );
-    await this.disposeJobs(jobs);
-    return this.confirmCleanup(jobs);
+    await this.disposeJobs(jobs, "owner-ended");
+    return this.confirmCleanup(
+      jobs,
+      [...this.unspawnedJobs.values()].filter(
+        (job) =>
+          job.sessionId === sessionId && job.contextScopeId === contextScopeId,
+      ),
+    );
   }
 
   private async confirmCleanup(
     jobs: readonly ShellJob[],
+    unspawned: readonly UnspawnedJob[] = [],
   ): Promise<ShellCleanupResult> {
     await Promise.all(
       jobs.flatMap((job) => (job.cleanupTask ? [job.cleanupTask] : [])),
     );
-    const pending = jobs.filter(
-      (job) => job.cleanup !== "confirmed" || !job.releaseComplete,
+    await Promise.all(jobs.map((job) => job.persist.catch(() => undefined)));
+    const pending = jobs.filter((job) => this.jobs.has(job.jobId));
+    const pendingUnspawned = unspawned.filter((job) =>
+      this.unspawnedJobs.has(job.jobId),
     );
-    if (pending.length === 0) return { confirmed: true };
+    if (pending.length === 0 && pendingUnspawned.length === 0)
+      return { confirmed: true };
     return {
       confirmed: false,
-      settled: Promise.all(
-        pending.map(
+      settled: Promise.all([
+        ...pending.map(
           (job) =>
             new Promise<void>((resolve) => {
               (job.confirmationWaiters ??= new Set()).add(resolve);
             }),
         ),
-      ).then(() => undefined),
+        ...pendingUnspawned.map(
+          (job) =>
+            new Promise<void>((resolve) => {
+              job.waiters.add(resolve);
+            }),
+        ),
+      ]).then(() => undefined),
     };
   }
 
@@ -427,10 +707,18 @@ export class ShellJobRegistry {
     sessionId: string,
     contextScopeId?: string,
   ): Promise<ShellJobSnapshot> {
-    const job = this.getOwnedJob(jobId, sessionId, contextScopeId);
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      const record = this.getOwnedRecord(jobId, sessionId, contextScopeId);
+      const result = this.foregroundResults.get(jobId);
+      this.foregroundResults.delete(jobId);
+      return result?.snapshot ?? this.snapshotRecord(record);
+    }
+    this.getOwnedJob(jobId, sessionId, contextScopeId);
     if (!isTerminal(job.status)) {
       await job.terminal;
     }
+    job.foregroundObserved = true;
     return this.snapshot(job);
   }
 
@@ -444,7 +732,12 @@ export class ShellJobRegistry {
     },
     contextScopeId?: string,
   ): Promise<ShellJobSnapshot> {
-    const job = this.getOwnedJob(jobId, sessionId, contextScopeId);
+    const job = this.jobs.get(jobId);
+    if (!job)
+      return this.snapshotRecord(
+        this.getOwnedRecord(jobId, sessionId, contextScopeId),
+      );
+    this.getOwnedJob(jobId, sessionId, contextScopeId);
     if (input.block && !isTerminal(job.status)) {
       if (input.signal?.aborted) {
         throw new Error("Task output wait was cancelled.");
@@ -483,10 +776,16 @@ export class ShellJobRegistry {
     jobId: string,
     sessionId: string,
     contextScopeId?: string,
+    stopReason: ShellJobStopReason = "model",
   ): Promise<ShellJobSnapshot> {
-    const job = this.getOwnedJob(jobId, sessionId, contextScopeId);
+    const job = this.jobs.get(jobId);
+    if (!job)
+      return this.snapshotRecord(
+        this.getOwnedRecord(jobId, sessionId, contextScopeId),
+      );
+    this.getOwnedJob(jobId, sessionId, contextScopeId);
     if (job.cleanup !== "confirmed") {
-      this.terminate(job, "cancelled");
+      this.terminate(job, "cancelled", stopReason);
     }
     await job.terminal;
     return this.snapshot(job);
@@ -496,7 +795,15 @@ export class ShellJobRegistry {
     const ownedJobs = [...this.jobs.values()].filter(
       (job) => job.sessionId === sessionId,
     );
-    await this.disposeJobs(ownedJobs);
+    await this.disposeJobs(ownedJobs, "session-closed");
+    if (
+      [...this.unspawnedJobs.values()].some(
+        (job) => job.sessionId === sessionId,
+      )
+    )
+      throw new Error("Shell resource cleanup is unconfirmed");
+    for (const [id, result] of this.foregroundResults)
+      if (result.sessionId === sessionId) this.foregroundResults.delete(id);
   }
 
   async disposeScope(sessionId: string, contextScopeId: string): Promise<void> {
@@ -504,30 +811,42 @@ export class ShellJobRegistry {
       (job) =>
         job.sessionId === sessionId && job.contextScopeId === contextScopeId,
     );
-    await this.disposeJobs(ownedJobs);
+    await this.disposeJobs(ownedJobs, "owner-ended");
+    if (
+      [...this.unspawnedJobs.values()].some(
+        (job) =>
+          job.sessionId === sessionId && job.contextScopeId === contextScopeId,
+      )
+    )
+      throw new Error("Shell resource cleanup is unconfirmed");
+    for (const [id, result] of this.foregroundResults)
+      if (
+        result.sessionId === sessionId &&
+        result.contextScopeId === contextScopeId
+      )
+        this.foregroundResults.delete(id);
   }
 
-  private async disposeJobs(ownedJobs: readonly ShellJob[]): Promise<void> {
+  private async disposeJobs(
+    ownedJobs: readonly ShellJob[],
+    reason: ShellJobStopReason,
+  ): Promise<void> {
     await Promise.all(
       ownedJobs.map(async (job) => {
-        if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
+        if (job.cleanup !== "confirmed")
+          this.terminate(job, "cancelled", reason);
         await job.cleanupTask;
         await job.releaseTask;
-        job.outputFile.finish(false);
-        if (job.cleanup === "confirmed" && job.releaseComplete)
-          this.jobs.delete(job.jobId);
+        this.settle(job);
       }),
     );
-    for (let index = this.terminalJobIds.length - 1; index >= 0; index -= 1) {
-      if (!this.jobs.has(this.terminalJobIds[index] ?? ""))
-        this.terminalJobIds.splice(index, 1);
-    }
   }
 
   closeAdmission(): void {
     this.admissionClosed = true;
     for (const job of this.jobs.values())
-      if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
+      if (job.cleanup !== "confirmed")
+        this.terminate(job, "cancelled", "shutdown");
   }
 
   async dispose(): Promise<void> {
@@ -537,15 +856,288 @@ export class ShellJobRegistry {
         if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
         await job.cleanupTask;
         await job.releaseTask;
-        job.outputFile.finish(false);
+        if (!job.closed) {
+          job.outputFile.finish(false);
+          job.outputComplete = false;
+          job.child.stdout?.destroy();
+          job.child.stderr?.destroy();
+          this.persist(job, {
+            outputComplete: false,
+            outputBytes: job.outputBytes,
+            outputTail: job.background ? this.tailText(job) : null,
+            ...this.resultReadyPatch(job),
+          });
+        }
+        await job.persist;
       }),
     );
     if (
+      this.unspawnedJobs.size > 0 ||
       [...this.jobs.values()].some(
-        (job) => job.cleanup !== "confirmed" || !job.releaseComplete,
+        (job) =>
+          job.cleanup !== "confirmed" ||
+          !job.releaseComplete ||
+          (job.closed &&
+            (job.settling || Object.keys(job.pendingPatch).length > 0)),
       )
     )
       throw new Error("Shell process cleanup is unconfirmed");
+  }
+
+  private async persistUnspawned(
+    job: UnspawnedJob,
+    patch: ShellJobPatch,
+  ): Promise<void> {
+    job.pendingPatch = { ...job.pendingPatch, ...patch };
+    if (job.writing) return;
+    job.writing = true;
+    try {
+      let settledWritten = false;
+      while (Object.keys(job.pendingPatch).length > 0) {
+        const pending = job.pendingPatch;
+        job.pendingPatch = {};
+        try {
+          await this.store.update(job.jobId, pending);
+          if (pending.settledAt !== undefined && pending.settledAt !== null)
+            settledWritten = true;
+        } catch (error) {
+          job.pendingPatch = { ...pending, ...job.pendingPatch };
+          throw error;
+        }
+      }
+      if (job.releaseComplete) {
+        if (!settledWritten) {
+          const settledAt = Date.now();
+          try {
+            await this.store.update(job.jobId, { settledAt });
+          } catch (error) {
+            job.pendingPatch = { ...job.pendingPatch, settledAt };
+            throw error;
+          }
+        }
+        this.unspawnedJobs.delete(job.jobId);
+        for (const resolve of job.waiters) resolve();
+        job.waiters.clear();
+      }
+    } catch (error) {
+      this.scheduleCheckpoint();
+      try {
+        job.reportCleanupError?.(error);
+      } catch {
+        /* Observer does not own cleanup. */
+      }
+    } finally {
+      job.writing = false;
+    }
+  }
+
+  private persist(job: ShellJob, patch: ShellJobPatch): void {
+    job.persist = job.persist
+      .catch(() => undefined)
+      .then(async () => {
+        const pending = { ...job.pendingPatch, ...patch };
+        job.pendingPatch = {};
+        try {
+          await this.store.update(job.jobId, pending);
+        } catch (error) {
+          job.pendingPatch = { ...pending, ...job.pendingPatch };
+          this.scheduleCheckpoint();
+          job.reportCleanupError?.(error);
+          if (patch.status === "running" && !job.terminationStarted)
+            this.terminate(job, "cancelled", "owner-ended");
+          throw error;
+        }
+      });
+    void job.persist.catch(() => undefined);
+  }
+
+  private resultReadyPatch(job: ShellJob): ShellJobPatch {
+    if (job.resultPublished) return {};
+    job.resultPublished = true;
+    return {
+      resultReadyAt: Date.now(),
+      noticeState: initialShellJobNoticeState({
+        mode: job.background ? "background" : "foreground",
+        status: job.status,
+        stopReason: job.stopReason,
+        contextScopeId: job.contextScopeId ?? null,
+      }),
+    };
+  }
+
+  private outputFilePatch(job: ShellJob): ShellJobPatch {
+    const file = job.outputFile.snapshot();
+    return {
+      outputPath: file.status === "unavailable" ? null : file.path,
+      outputTruncated:
+        file.status === "partial" && file.reason === "size-limit",
+    };
+  }
+
+  private tailText(job: ShellJob): string {
+    // Keep incomplete trailing bytes for the next chunk; checkpoints expose only
+    // valid UTF-8 rather than writing a replacement character prematurely.
+    return new TextDecoder("utf-8").decode(job.tail, { stream: true });
+  }
+
+  private scheduleCheckpoint(): void {
+    if (this.checkpointTimer) return;
+    this.checkpointTimer = setTimeout(() => {
+      this.checkpointTimer = undefined;
+      for (const job of this.unspawnedJobs.values()) {
+        if (Object.keys(job.pendingPatch).length > 0)
+          void this.persistUnspawned(job, {});
+      }
+      for (const job of this.jobs.values()) {
+        if (job.closed && Object.keys(job.pendingPatch).length > 0) {
+          if (
+            !job.settling &&
+            job.cleanup === "confirmed" &&
+            job.releaseComplete &&
+            !job.identityPending
+          )
+            this.settle(job);
+          else if (!job.settling) this.persist(job, {});
+        } else if (job.background && !job.closed) {
+          this.persist(job, {
+            outputBytes: job.outputBytes,
+            outputTail: this.tailText(job),
+            outputCheckpointAt: Date.now(),
+          });
+        } else if (Object.keys(job.pendingPatch).length > 0) {
+          this.persist(job, {});
+        }
+      }
+    }, 1000);
+    this.checkpointTimer.unref();
+  }
+
+  private capture(job: ShellJob, chunk: unknown): void {
+    job.outputFile.append(chunk);
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    job.outputBytes += bytes.length;
+    if (job.background) this.scheduleCheckpoint();
+    const tail = Buffer.concat([job.tail, bytes]);
+    let start = Math.max(0, tail.length - 32 * 1024);
+    while (start < tail.length && (tail[start] & 0xc0) === 0x80) start++;
+    job.tail = Buffer.from(tail.subarray(start));
+    if (
+      job.outputBytes >= (this.options.maxOutputBytes ?? 1024 * 1024 * 1024) &&
+      !job.terminationStarted
+    ) {
+      this.terminate(job, "cancelled", "output-limit");
+    }
+  }
+
+  private settle(job: ShellJob): void {
+    if (
+      !job.closed ||
+      job.closing ||
+      job.cleanup !== "confirmed" ||
+      !job.releaseComplete ||
+      job.identityPending ||
+      job.settling ||
+      !isTerminal(job.status)
+    )
+      return;
+    job.settling = true;
+    this.persist(job, { settledAt: Date.now(), ...this.outputFilePatch(job) });
+    void job.persist
+      .then(() => {
+        if (job.closed && job.cleanup === "confirmed" && job.releaseComplete) {
+          if (!job.background && !job.foregroundObserved) {
+            this.foregroundResults.set(job.jobId, {
+              snapshot: this.snapshot(job),
+              sessionId: job.sessionId,
+              contextScopeId: job.contextScopeId,
+            });
+          }
+          this.jobs.delete(job.jobId);
+          for (const resolve of job.confirmationWaiters ?? []) resolve();
+          job.confirmationWaiters?.clear();
+        }
+      })
+      .catch(() => {
+        job.settling = false;
+      });
+  }
+
+  private getOwnedRecord(
+    jobId: string,
+    sessionId: string,
+    contextScopeId?: string,
+  ): ShellJobRecord {
+    const record = this.store.get(jobId);
+    if (!record) throw new ToolParameterError(`Unknown shell job "${jobId}".`);
+    if (
+      record.sessionId !== sessionId ||
+      record.contextScopeId !== (contextScopeId ?? null)
+    )
+      throw new ToolParameterError(
+        `Shell job "${jobId}" is not owned by this session/context scope.`,
+      );
+    return record;
+  }
+
+  private snapshotRecord(record: ShellJobRecord): ShellJobSnapshot {
+    if (!record.status)
+      throw new ToolParameterError(`Shell job "${record.jobId}" is starting.`);
+    const output =
+      record.outputTail ??
+      (record.mode === "foreground"
+        ? "Output tail is not retained for foreground jobs."
+        : "No output tail is available.");
+    let outputFile:
+      | {
+          status: "full" | "partial";
+          path: string;
+          sizeBytes: number;
+          reason?: "size-limit" | "stdio-incomplete";
+        }
+      | undefined;
+    if (record.outputPath) {
+      try {
+        const stat = fs.statSync(record.outputPath);
+        if (stat.isFile())
+          outputFile = {
+            status:
+              record.outputTruncated || record.outputComplete === false
+                ? "partial"
+                : "full",
+            path: record.outputPath,
+            sizeBytes: stat.size,
+            ...(record.outputTruncated
+              ? { reason: "size-limit" as const }
+              : record.outputComplete === false
+                ? { reason: "stdio-incomplete" as const }
+                : {}),
+          };
+      } catch {
+        /* A disappeared or inaccessible log must not be advertised. */
+      }
+    }
+    return {
+      jobId: record.jobId,
+      status: record.status,
+      output,
+      truncated: record.outputTruncated,
+      exitCode: record.exitCode,
+      signal: record.signal as NodeJS.Signals | null,
+      metadata: {
+        jobId: record.jobId,
+        status: record.status,
+        cleanup: record.cleanup,
+        stopReason: record.stopReason,
+        outputBytes: record.outputBytes,
+        startedAt: record.startedAt,
+        endedAt: record.endedAt,
+        outputComplete: record.outputComplete,
+        outputCheckpointAt: record.outputCheckpointAt,
+        outputFile,
+        exitCode: record.exitCode,
+        signal: record.signal,
+      },
+    };
   }
 
   private getOwnedJob(
@@ -567,15 +1159,19 @@ export class ShellJobRegistry {
 
   private snapshot(job: ShellJob): ShellJobSnapshot {
     const rendered = renderOutput(job);
-    const outputFile = rendered.truncated
-      ? job.outputFile.snapshot(job.terminationReason !== undefined)
-      : undefined;
+    const outputFile = job.outputFile.snapshot(
+      job.terminationReason !== undefined,
+    );
     const metadata = {
       ...job.metadata,
+      outputBytes: job.outputBytes,
+      startedAt: job.startedAt,
+      outputComplete: job.outputComplete,
+      stopReason: job.stopReason,
       jobId: job.jobId,
       status: job.status,
       truncated: rendered.truncated,
-      ...(outputFile ? { outputFile } : {}),
+      outputFile,
       ...(job.cleanup ? { cleanup: job.cleanup } : {}),
       ...(job.error ? { error: job.error } : {}),
       ...(isTerminal(job.status)
@@ -585,7 +1181,7 @@ export class ShellJobRegistry {
     return {
       jobId: job.jobId,
       metadata,
-      output: outputFile
+      output: rendered.truncated
         ? `${rendered.output}\n\n${outputFileNotice(outputFile)}`
         : rendered.output,
       status: job.status,
@@ -628,24 +1224,22 @@ export class ShellJobRegistry {
     job.exitCode = exitCode;
     job.signal = signal;
     job.resolveTerminal();
-    this.terminalJobIds.push(job.jobId);
-    this.pruneTerminalJobs();
-  }
-
-  private pruneTerminalJobs(): void {
-    while (this.jobs.size > MAX_RETAINED_SHELL_JOBS) {
-      const index = this.terminalJobIds.findIndex(
-        (id) =>
-          this.jobs.get(id)?.cleanup === "confirmed" &&
-          this.jobs.get(id)?.releaseComplete,
-      );
-      if (index < 0) return;
-      const [id] = this.terminalJobIds.splice(index, 1);
-      if (id) {
-        this.jobs.get(id)?.outputFile.finish(false);
-        this.jobs.delete(id);
-      }
-    }
+    this.persist(job, {
+      status,
+      exitCode,
+      signal,
+      error: job.error ?? null,
+      stopReason: job.stopReason,
+      ...(job.closed
+        ? {
+            outputComplete: job.outputComplete,
+            ...this.resultReadyPatch(job),
+            outputBytes: job.outputBytes,
+            outputTail: job.background ? this.tailText(job) : null,
+            outputCheckpointAt: job.background ? Date.now() : null,
+          }
+        : {}),
+    });
   }
 
   private observeStopped(job: ShellJob): void {
@@ -676,8 +1270,7 @@ export class ShellJobRegistry {
     if (job.terminationStarted) job.reportCleanup?.("confirmed");
     const released = (): void => {
       job.releaseComplete = true;
-      for (const resolve of job.confirmationWaiters ?? []) resolve();
-      job.confirmationWaiters?.clear();
+      this.settle(job);
     };
     if (job.release)
       job.releaseTask = Promise.resolve()
@@ -698,65 +1291,149 @@ export class ShellJobRegistry {
     else {
       job.outputDrain = setTimeout(() => {
         job.outputFile.finish(false);
+        job.outputComplete = false;
         job.child.stdout?.destroy();
         job.child.stderr?.destroy();
         this.finishFromChild(job, job.exitCode ?? null, job.signal ?? null);
+        this.persist(job, {
+          outputComplete: false,
+          ...this.outputFilePatch(job),
+          ...this.resultReadyPatch(job),
+          outputBytes: job.outputBytes,
+          outputTail: job.background ? this.tailText(job) : null,
+          outputCheckpointAt: job.background ? Date.now() : null,
+        });
       }, this.options.outputDrainMs ?? SHELL_JOB_TERMINATION_GRACE_MS);
       job.outputDrain.unref();
     }
-    this.pruneTerminalJobs();
+    this.persist(job, { cleanup: "confirmed" });
+    this.settle(job);
   }
 
   private markUnconfirmed(job: ShellJob): void {
     if (job.cleanup === "confirmed" || job.cleanup === "unconfirmed") return;
     job.cleanup = "unconfirmed";
+    this.persist(job, {
+      cleanup: "unconfirmed",
+      outputComplete: false,
+      ...this.outputFilePatch(job),
+      ...this.resultReadyPatch(job),
+      outputBytes: job.outputBytes,
+      outputTail: job.background ? this.tailText(job) : null,
+    });
     if (job.observation) clearTimeout(job.observation);
     job.sourceCleanup?.markUnconfirmed();
     job.reportCleanup?.("unconfirmed");
     job.resolveCleanup?.();
   }
 
-  private terminate(job: ShellJob, reason: TerminationReason): void {
+  private terminate(
+    job: ShellJob,
+    reason: TerminationReason,
+    stopReason: ShellJobStopReason = "model",
+  ): void {
     if (job.terminationStarted || job.cleanup === "confirmed") return;
     job.terminationStarted = true;
     clearTimeout(job.timeoutId);
     job.terminationReason = reason;
+    const alreadyTerminal = isTerminal(job.status);
+    if (!alreadyTerminal)
+      job.stopReason = reason === "timed_out" ? "timeout" : stopReason;
     job.cleanup = "in-progress";
+    this.persist(job, {
+      ...(!alreadyTerminal
+        ? { status: reason, stopReason: job.stopReason }
+        : {}),
+      cleanup: "in-progress",
+    });
     if (job.owner) job.sourceCleanup = beginSourceCleanup(job.owner);
     job.reportCleanup?.("in-progress");
     job.cleanupTask = new Promise<void>((resolve) => {
       job.resolveCleanup = resolve;
     });
-    if (!this.options.terminationManagesObservation) {
-      job.observation = setTimeout(() => {
-        this.markUnconfirmed(job);
-      }, this.options.cleanupObservationMs ?? 1200);
-      job.observation.unref();
-    }
-    // Protection and the cleanup owner exist before publishing the logical result.
-    // Start the helper synchronously so cancellation is not queued behind delivery.
-    try {
-      const termination = this.killTree(job.child);
-      void Promise.resolve(termination).then(
-        (result) => {
-          if (result?.terminationSucceeded) job.terminationSucceeded = true;
-          if (result?.status === "confirmed") this.confirmStopped(job);
-          else if (result?.status === "unconfirmed") this.markUnconfirmed(job);
-          else this.observeStopped(job);
-        },
-        () => {
+    // Stop intent is durable before signalling. Keep the process and lease managed
+    // if the write fails; a failed commit is not evidence of cleanup.
+    const signalProcess = (): void => {
+      if (!this.options.terminationManagesObservation) {
+        job.observation = setTimeout(() => {
           this.markUnconfirmed(job);
-        },
-      );
-    } catch {
-      this.markUnconfirmed(job);
-    }
+        }, this.options.cleanupObservationMs ?? 1200);
+        job.observation.unref();
+      }
+      try {
+        const termination = this.killTree(job.child);
+        void Promise.resolve(termination).then(
+          (result) => {
+            if (result?.terminationSucceeded) job.terminationSucceeded = true;
+            if (result?.status === "confirmed") this.confirmStopped(job);
+            else if (result?.status === "unconfirmed")
+              this.markUnconfirmed(job);
+            else this.observeStopped(job);
+          },
+          () => {
+            this.markUnconfirmed(job);
+          },
+        );
+      } catch {
+        this.markUnconfirmed(job);
+      }
+    };
+    void job.persist.then(signalProcess, signalProcess);
     this.finish(job, reason, job.exitCode ?? null, job.signal ?? null);
   }
 }
 
-function snapshotResult(snapshot: ShellJobSnapshot): ToolExecutionResult {
-  return { metadata: snapshot.metadata, output: snapshot.output };
+function snapshotResult(
+  snapshot: ShellJobSnapshot,
+  includeStatus = false,
+): ToolExecutionResult {
+  if (!includeStatus)
+    return { metadata: snapshot.metadata, output: snapshot.output };
+  const file = snapshot.metadata.outputFile as
+    | { status?: string; path?: string }
+    | undefined;
+  let path: string | null = null;
+  if (file?.status !== "unavailable" && file?.path) {
+    try {
+      if (fs.statSync(file.path).isFile()) path = file.path;
+    } catch {
+      /* unavailable */
+    }
+  }
+  const line = shellJobStatusLine({
+    status: snapshot.status,
+    outputBytes:
+      typeof snapshot.metadata.outputBytes === "number"
+        ? snapshot.metadata.outputBytes
+        : null,
+    outputComplete:
+      typeof snapshot.metadata.outputComplete === "boolean"
+        ? snapshot.metadata.outputComplete
+        : null,
+    outputCheckpointAt:
+      typeof snapshot.metadata.outputCheckpointAt === "number"
+        ? snapshot.metadata.outputCheckpointAt
+        : null,
+    outputPath: path,
+    stopReason:
+      typeof snapshot.metadata.stopReason === "string"
+        ? snapshot.metadata.stopReason
+        : null,
+    elapsedMs:
+      typeof snapshot.metadata.startedAt === "number"
+        ? Math.max(
+            0,
+            (typeof snapshot.metadata.endedAt === "number"
+              ? snapshot.metadata.endedAt
+              : Date.now()) - snapshot.metadata.startedAt,
+          )
+        : null,
+    cleanup:
+      typeof snapshot.metadata.cleanup === "string"
+        ? snapshot.metadata.cleanup
+        : null,
+  });
+  return { metadata: snapshot.metadata, output: `${line}\n${snapshot.output}` };
 }
 
 export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
@@ -804,6 +1481,7 @@ export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
             { block, signal: context.signal, waitMs },
             context.contextScopeId,
           ),
+          true,
         );
       },
     },

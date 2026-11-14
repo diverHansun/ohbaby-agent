@@ -202,7 +202,10 @@ export type UiToolResultDetails =
         | "completed"
         | "failed"
         | "timed_out"
-        | "cancelled";
+        | "cancelled"
+        | "lost";
+      readonly stopReason?: string;
+      readonly cleanup?: "in-progress" | "confirmed" | "unconfirmed";
       readonly outputTruncated?: boolean;
     };
 

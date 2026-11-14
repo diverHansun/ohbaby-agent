@@ -415,7 +415,7 @@ describe("session-owned subagent lifecycle", () => {
       ).find((entry) => entry.childRunId === input.runId);
       if (!input.runId || !execution?.childScopeId || !execution.childSessionId)
         throw new Error("missing child identity");
-      registry.start({
+      await registry.start({
         child: createChild,
         background: true,
         timeoutMs: 10000,
@@ -442,7 +442,7 @@ describe("session-owned subagent lifecycle", () => {
     expect(registry.hasActiveWork(first.execution.childRunId)).toBe(true);
     if (!first.execution.childRunId) throw new Error("missing child run");
     const launch = vi.fn(createChild);
-    expect(() =>
+    await expect(
       registry.start({
         child: launch,
         background: true,
@@ -456,7 +456,7 @@ describe("session-owned subagent lifecycle", () => {
           callId: "late",
         },
       }),
-    ).toThrow("closed");
+    ).rejects.toThrow("closed");
     expect(launch).not.toHaveBeenCalled();
     await f.host.send({
       ...f.input("detached second"),

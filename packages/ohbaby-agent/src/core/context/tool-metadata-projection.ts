@@ -92,6 +92,8 @@ export function projectToolMetadataForModel(
       return copyMetadataFields(metadata, [
         "jobId",
         "status",
+        "stopReason",
+        "cleanup",
         "exitCode",
         "signal",
         "truncated",
@@ -101,6 +103,8 @@ export function projectToolMetadataForModel(
       return copyMetadataFields(metadata, [
         "jobId",
         "status",
+        "stopReason",
+        "cleanup",
         "truncated",
         "exitCode",
         "signal",

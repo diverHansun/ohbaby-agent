@@ -118,3 +118,22 @@ describe("built-in tool details whitelist", () => {
     });
   });
 });
+
+it("projects lost jobs and their stop and cleanup facts", () => {
+  expect(
+    projectToolResultDetails(
+      "bash",
+      {
+        uiToolSource: "builtin",
+        status: "lost",
+        stopReason: "user",
+        cleanup: "unconfirmed",
+      },
+      "success",
+    ),
+  ).toMatchObject({
+    status: "lost",
+    stopReason: "user",
+    cleanup: "unconfirmed",
+  });
+});

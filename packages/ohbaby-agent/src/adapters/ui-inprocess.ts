@@ -403,6 +403,7 @@ export interface InProcessUiBackendOptions {
   readonly streamBridge?: StreamBridge;
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentExecutionStore?: import("../agents/index.js").SubagentExecutionStore;
+  readonly shellJobStore?: import("../tools/shell-job-store.js").ShellJobStore;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
   readonly workdir?: string;
@@ -1279,6 +1280,7 @@ export function createInProcessUiBackendClient(
         streamBridge: options.streamBridge,
         subagentInstanceStore,
         subagentExecutionStore,
+        shellJobStore: options.shellJobStore,
         onSubagentStateChanged: (rootSessionId): void => {
           subagentInstances.invalidate(rootSessionId);
         },

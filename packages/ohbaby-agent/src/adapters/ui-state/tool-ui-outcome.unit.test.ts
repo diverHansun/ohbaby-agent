@@ -72,3 +72,9 @@ describe("projectToolUiOutcome", () => {
     },
   );
 });
+
+it("does not classify an unknown shell result as successful", () => {
+  expect(
+    projectToolUiOutcome({ status: "success", metadata: { status: "lost" } }),
+  ).toEqual({ status: "failed", error: "lost" });
+});

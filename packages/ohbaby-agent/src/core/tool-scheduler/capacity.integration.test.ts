@@ -170,55 +170,6 @@ describe("real scheduler session capacity", () => {
     }
   });
 
-  it("keeps three trusted dispatch slots independent from the parent's ordinary limit", async () => {
-    const f = fixture({ concurrency: { maxConcurrency: 1 } });
-    f.register("ordinary", "readonly", "ordinary");
-    f.register("subagent_run", "subagent", "dispatch");
-    const runs = [f.scheduler.execute(request("ordinary-running", "ordinary"))];
-    try {
-      await vi.waitFor(() => {
-        expect(f.started).toContain("ordinary-running");
-      });
-      for (let index = 0; index < 4; index += 1) {
-        runs.push(
-          f.scheduler.execute(
-            request(`dispatch-${String(index)}`, "subagent_run"),
-          ),
-        );
-      }
-      runs.push(f.scheduler.execute(request("ordinary-waiting", "ordinary")));
-      runs.push(
-        f.scheduler.execute(request("other-dispatch", "subagent_run", "other")),
-      );
-      await vi.waitFor(() => {
-        expect(f.started).toHaveLength(5);
-      });
-      expect(f.started).toEqual(
-        expect.arrayContaining([
-          "ordinary-running",
-          "dispatch-0",
-          "dispatch-1",
-          "dispatch-2",
-          "other-dispatch",
-        ]),
-      );
-      expect(f.started).not.toContain("dispatch-3");
-      expect(f.started).not.toContain("ordinary-waiting");
-      f.release("dispatch-0");
-      await vi.waitFor(() => {
-        expect(f.started).toContain("dispatch-3");
-      });
-      expect(f.started).not.toContain("ordinary-waiting");
-      f.release("ordinary-running");
-      await vi.waitFor(() => {
-        expect(f.started).toContain("ordinary-waiting");
-      });
-    } finally {
-      f.finish();
-      await Promise.all(runs);
-    }
-  });
-
   it.each([
     ["task_output", "subagent-control"],
     ["task_kill", "memory"],
@@ -273,7 +224,12 @@ describe("real scheduler session capacity", () => {
         process.kill();
       },
     });
-    const job = registry.start({ child, sessionId: "parent", timeoutMs: 5000 });
+    const job = await registry.start({
+      child,
+      sessionId: "parent",
+      timeoutMs: 5000,
+      background: true,
+    });
     const runs: Promise<unknown>[] = [];
     try {
       await closed;
@@ -293,10 +249,9 @@ describe("real scheduler session capacity", () => {
         await vi.waitFor(() => {
           expect(f.started).toContain(name);
         });
-        expect(await result).toMatchObject({
-          status: "success",
-          output: "capacity-job",
-        });
+        const outcome = await result;
+        expect(outcome.status).toBe("success");
+        expect(outcome.output).toContain("capacity-job");
         expect(f.scheduler.getStatus("ordinary-running")).toBe("executing");
       }
     } finally {

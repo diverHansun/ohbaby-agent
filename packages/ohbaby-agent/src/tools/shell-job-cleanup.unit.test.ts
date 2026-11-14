@@ -6,6 +6,7 @@ import {
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { InMemoryShellJobStore } from "./shell-job-store.js";
 import {
   ShellJobRegistry,
   type ShellJobSnapshot,
@@ -20,7 +21,7 @@ const start = (
   registry: ShellJobRegistry,
   child: Child,
   extra = {},
-): ShellJobSnapshot =>
+): Promise<ShellJobSnapshot> =>
   registry.start({
     child: child as unknown as ChildProcess,
     sessionId: "cleanup-test",
@@ -47,8 +48,8 @@ describe("shell job cleanup ownership", () => {
     });
     const child = new Child();
     const detached = new Child();
-    start(registry, child, { owner, release: () => released });
-    start(registry, detached, { owner, background: true });
+    await start(registry, child, { owner, release: () => released });
+    await start(registry, detached, { owner, background: true });
     child.emit("close", 0, null);
     const cleanup = await registry.observeExecutionCleanup("run");
     expect(cleanup.confirmed).toBe(false);
@@ -66,6 +67,58 @@ describe("shell job cleanup ownership", () => {
     detached.emit("close", 0, null);
     await registry.dispose();
   });
+  it.each([
+    { exitCode: 0, outcome: "completed", action: "kill" },
+    { exitCode: 1, outcome: "failed", action: "timeout" },
+  ] as const)(
+    "retains $outcome after $action requests descendant cleanup",
+    async ({ exitCode, outcome, action }) => {
+      let stopped = false;
+      const store = new InMemoryShellJobStore();
+      const killTree = vi.fn(() => ({ status: "unconfirmed" as const }));
+      const registry = new ShellJobRegistry({
+        store,
+        killTree,
+        probeTree: (): "stopped" | "running" =>
+          stopped ? "stopped" : "running",
+      });
+      const child = new Child();
+      const job = await start(registry, child, {
+        timeoutMs: action === "timeout" ? 100 : 10_000,
+      });
+      child.emit("close", exitCode, null);
+      await vi.waitFor(() => {
+        expect(store.get(job.jobId)?.status).toBe(outcome);
+      });
+      expect(registry.hasActiveWork()).toBe(true);
+      if (action === "kill") await registry.kill(job.jobId, "cleanup-test");
+      await vi.waitFor(() => {
+        expect(killTree).toHaveBeenCalledOnce();
+      });
+      await vi.waitFor(() => {
+        expect(store.get(job.jobId)).toMatchObject({
+          status: outcome,
+          stopReason: null,
+          cleanup: "unconfirmed",
+        });
+      });
+      expect(registry.get(job.jobId, "cleanup-test")).toMatchObject({
+        status: outcome,
+        metadata: { stopReason: null, cleanup: "unconfirmed" },
+      });
+      expect(registry.hasActiveWork()).toBe(true);
+      stopped = true;
+      child.emit("exit", exitCode, null);
+      await vi.waitFor(() => {
+        expect(registry.hasActiveWork()).toBe(false);
+      });
+      expect(store.get(job.jobId)).toMatchObject({
+        status: outcome,
+        stopReason: null,
+        cleanup: "confirmed",
+      });
+    },
+  );
   it("keeps execution cleanup unconfirmed until late process evidence arrives", async () => {
     let stopped = false;
     const registry = new ShellJobRegistry({
@@ -84,8 +137,8 @@ describe("shell job cleanup ownership", () => {
       messageId: "message",
       callId: "call",
     };
-    start(registry, child, { owner });
-    const other = start(registry, sibling, {
+    await start(registry, child, { owner });
+    const other = await start(registry, sibling, {
       owner: { ...owner, rootRunId: "sibling-run" },
     });
     const cleanup = await registry.cleanupRootRun("child-run");
@@ -121,7 +174,7 @@ describe("shell job cleanup ownership", () => {
       cleanupObservationMs: 50,
     });
     const child = new Child();
-    const job = start(registry, child, { release });
+    const job = await start(registry, child, { release });
     const result = await registry.kill(job.jobId, "cleanup-test");
     expect(result.metadata).toMatchObject({
       status: "cancelled",
@@ -153,7 +206,7 @@ describe("shell job cleanup ownership", () => {
       probeTree: (): "running" | "stopped" | "unknown" => state,
     });
     const child = new Child();
-    const job = start(registry, child);
+    const job = await start(registry, child);
     await registry.kill(job.jobId, "cleanup-test");
     await Promise.resolve();
     await registry.disposeSession("cleanup-test");
@@ -163,7 +216,7 @@ describe("shell job cleanup ownership", () => {
     state = "stopped";
     for (let i = 0; i < 105; i++) {
       const done = new Child();
-      start(registry, done);
+      await start(registry, done);
       done.emit("close", 0, null);
     }
     expect(registry.get(job.jobId, "cleanup-test").metadata.cleanup).toBe(
@@ -171,7 +224,9 @@ describe("shell job cleanup ownership", () => {
     );
     expect(killTree).toHaveBeenCalledTimes(1);
     child.emit("close", 0, null);
-    expect(registry.hasActiveWork()).toBe(false);
+    await vi.waitFor(() => {
+      expect(registry.hasActiveWork()).toBe(false);
+    });
   });
   it("confirms stopped processes before bounded output drain and does not kill for open pipes", async () => {
     vi.useFakeTimers();
@@ -183,7 +238,7 @@ describe("shell job cleanup ownership", () => {
       outputDrainMs: 30,
     });
     const child = new Child();
-    const job = start(registry, child, { release });
+    const job = await start(registry, child, { release });
     child.emit("exit", 0, null);
     await Promise.resolve();
     expect(release).toHaveBeenCalledTimes(1);
@@ -206,12 +261,15 @@ describe("shell job cleanup ownership", () => {
       probeTree: (): "running" => "running",
     });
     const child = new Child();
-    const job = start(registry, child);
+    const job = await start(registry, child);
     await registry.kill(job.jobId, "cleanup-test");
     await vi.advanceTimersByTimeAsync(1201);
     expect(registry.get(job.jobId, "cleanup-test").metadata.cleanup).toBe(
       "in-progress",
     );
+    await vi.waitFor(() => {
+      expect(complete).toBeTypeOf("function");
+    });
     complete({ status: "confirmed" });
     await Promise.resolve();
     child.emit("close", null, "SIGKILL");
@@ -231,7 +289,7 @@ describe("shell job cleanup ownership", () => {
       probeTree: (): "running" | "stopped" | "unknown" => state,
     });
     const child = new Child();
-    const job = start(registry, child, { timeoutMs: 50, release });
+    const job = await start(registry, child, { timeoutMs: 50, release });
     child.emit("close", 0, null);
     expect(registry.get(job.jobId, "cleanup-test").status).toBe("completed");
     expect(release).not.toHaveBeenCalled();
@@ -285,7 +343,7 @@ describe("shell job cleanup ownership", () => {
       probeTree: (): "stopped" => "stopped",
     });
     const child = new Child();
-    const job = start(registry, child, {
+    const job = await start(registry, child, {
       owner: {
         rootRunId: "root",
         sessionId: "cleanup-test",
@@ -324,7 +382,7 @@ describe("shell job cleanup ownership", () => {
       probeTree: (): "running" => "running",
     });
     const child = new Child();
-    const job = start(registry, child, {
+    const job = await start(registry, child, {
       reportCleanup,
       reportCleanupError,
       release: () => Promise.reject(failure),
@@ -353,12 +411,15 @@ describe("shell job cleanup ownership", () => {
       probeTree: (): "unknown" => "unknown",
     });
     const child = new Child();
-    const job = start(registry, child);
+    const job = await start(registry, child);
     await registry.kill(job.jobId, "cleanup-test");
     child.emit("exit", null, "SIGTERM");
     expect(registry.get(job.jobId, "cleanup-test").metadata.cleanup).toBe(
       "in-progress",
     );
+    await vi.waitFor(() => {
+      expect(complete).toBeTypeOf("function");
+    });
     complete({ status: "confirmed" });
     await Promise.resolve();
     child.emit("close", null, "SIGTERM");

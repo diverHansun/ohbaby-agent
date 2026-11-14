@@ -1855,99 +1855,10 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["write_1", "write_2"]);
   });
 
-  it("runs independent memory work without a category lock and limits trusted dispatch concurrency", async () => {
-    const blockers = [
-      deferred<{ readonly output: string }>(),
-      deferred<{ readonly output: string }>(),
-    ];
-    const started: string[] = [];
-    const { scheduler } = createScheduler({
-      config: { concurrency: { maxSubagentConcurrency: 1 } },
-    });
-    scheduler.register(
-      createTool({
-        execute: (_params, context) => {
-          started.push(context.callId);
-          return blockers[0].promise;
-        },
-        name: "edit",
-      }),
-    );
-    scheduler.register(
-      createTool({
-        category: "memory",
-        execute: (_params, context) => {
-          started.push(context.callId);
-          return Promise.resolve({ output: "remembered" });
-        },
-        name: "goal_update",
-      }),
-    );
-    scheduler.register(
-      createTool({
-        category: "subagent",
-        execute: (_params, context) => {
-          started.push(context.callId);
-          return blockers[1].promise;
-        },
-        name: "subagent_run",
-        admission: { capacity: "dispatch", plan: () => [] },
-      }),
-    );
-
-    const write = scheduler.execute({
-      runId: "test_run",
-      callId: "write_1",
-      messageId: "message_1",
-      params: {},
-      sessionId: "session_1",
-      toolName: "edit",
-    });
-    const memory = scheduler.execute({
-      runId: "test_run",
-      callId: "memory_1",
-      messageId: "message_1",
-      params: {},
-      sessionId: "session_1",
-      toolName: "goal_update",
-    });
-    const subagent1 = scheduler.execute({
-      runId: "test_run",
-      callId: "subagent_1",
-      messageId: "message_1",
-      params: {},
-      sessionId: "session_1",
-      toolName: "subagent_run",
-    });
-    const subagent2 = scheduler.execute({
-      runId: "test_run",
-      callId: "subagent_2",
-      messageId: "message_1",
-      params: {},
-      sessionId: "session_1",
-      toolName: "subagent_run",
-    });
-
-    await vi.waitFor(() => {
-      expect(started).toContain("write_1");
-      expect(started).toContain("memory_1");
-      expect(started).toContain("subagent_1");
-      expect(scheduler.getStatus("subagent_2")).toBe("queued");
-    });
-
-    blockers[1].resolve({ output: "subagent done" });
-    blockers[0].resolve({ output: "write done" });
-
-    await expect(memory).resolves.toMatchObject({ status: "success" });
-    await expect(subagent1).resolves.toMatchObject({ status: "success" });
-    await expect(subagent2).resolves.toMatchObject({ status: "success" });
-    await expect(write).resolves.toMatchObject({ status: "success" });
-  });
-
-  it("admits control actions while the same tool holds the dispatch slot", async () => {
+  it("admits control actions while the same tool holds the ordinary slot", async () => {
     const blocker = deferred<{ readonly output: string }>();
     const { scheduler } = createScheduler({
-      config: { concurrency: { maxSubagentConcurrency: 1 } },
+      config: { concurrency: { maxConcurrency: 1 } },
     });
     scheduler.register(
       createTool({
@@ -1955,7 +1866,7 @@ describe("ToolScheduler", () => {
         category: "subagent",
         admission: {
           capacity: (params) =>
-            params.action === "spawn" ? "dispatch" : "control",
+            params.action === "spawn" ? "ordinary" : "control",
           category: (params) =>
             params.action === "list" || params.action === "monitor"
               ? "readonly"
@@ -2003,14 +1914,14 @@ describe("ToolScheduler", () => {
   it("lets subagent control tools bypass the long-running subagent pool", async () => {
     const blocker = deferred<{ readonly output: string }>();
     const { scheduler } = createScheduler({
-      config: { concurrency: { maxSubagentConcurrency: 1 } },
+      config: { concurrency: { maxConcurrency: 1 } },
     });
     scheduler.register(
       createTool({
         category: "subagent",
         execute: () => blocker.promise,
         name: "subagent_run",
-        admission: { capacity: "dispatch", plan: () => [] },
+        admission: { capacity: "ordinary", plan: () => [] },
       }),
     );
     scheduler.register(
@@ -2054,7 +1965,7 @@ describe("ToolScheduler", () => {
       createJobId: (): string => "job_1",
       killTree: vi.fn(),
     });
-    const job = registry.start({
+    const job = await registry.start({
       child: child as unknown as ChildProcess,
       sessionId: "session_1",
       timeoutMs: 1_000_000,
@@ -2111,7 +2022,7 @@ describe("ToolScheduler", () => {
   it("executes batches in waves while returning results in input order", async () => {
     const started: string[] = [];
     const { scheduler } = createScheduler({
-      config: { concurrency: { maxSubagentConcurrency: 1 } },
+      config: { concurrency: { maxConcurrency: 1 } },
     });
     for (const toolName of ["read", "edit", "goal_update"]) {
       scheduler.register(
@@ -2165,7 +2076,7 @@ describe("ToolScheduler", () => {
 
   it("passes each batch call environment through waves and detached tools", async () => {
     const { scheduler } = createScheduler({
-      config: { concurrency: { maxSubagentConcurrency: 1 } },
+      config: { concurrency: { maxConcurrency: 1 } },
     });
     for (const tool of [
       { name: "read", category: "readonly" },

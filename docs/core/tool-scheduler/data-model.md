@@ -18,7 +18,7 @@
 | network   | 网络操作               | 可并行（最多5个）             | web_fetch, web_search（内置工具，背后走 search-providers） |
 | memory    | 目标/内部状态操作      | 可并行（不受读写锁限制）      | goals 工具（显式声明 `category: "memory"`）                |
 | skill     | 技能加载与技能资源读取 | 可并行（最多5个）             | skill, skill_resource                                      |
-| subagent  | 子代理操作             | 可并行（最多3个，独立计数器） | task                                                       |
+| subagent  | 子代理操作             | 由可信工具声明准入能力       | agent                                                      |
 
 **MCP工具分类规则**：通过 `annotations.readOnlyHint` 在工具注册时推断，`true` → `readonly`，其余 → `write`。
 
@@ -239,8 +239,8 @@ interface ExecutionCompletedEvent {
 ```typescript
 // 并发配置
 interface ConcurrencyConfig {
-  maxReadConcurrency: number; // 默认 5（readonly/network 类别上限）
-  maxSubagentConcurrency: number; // 默认 3（subagent 类别独立上限）
+  maxConcurrency?: number; // 每个 session 的普通调用上限，默认 10
+  maxReadConcurrency?: number; // 兼容旧名称
 }
 
 // 超时配置
@@ -388,72 +388,11 @@ function transition(
 
 ## 五、Concurrency State（并发状态）
 
-### 5.1 并发状态类型
+### 5.1 准入与容量
 
-```typescript
-interface ConcurrencyState {
-  readingCount: number; // 当前 readonly/network 操作数量
-  writeInProgress: boolean; // 是否有 write/dangerous 操作进行中
-  subagentCount: number; // 当前 subagent 操作数量（独立计数器）
-  pendingQueue: QueuedCall[]; // 等待队列
-}
-```
+调度器按 session 维护普通调用的容量计数，默认上限为 10；不同 session 的容量互不影响。可信控制操作不占普通容量，以便在容量满时仍能执行停止等操作。工具的具体资源访问另由准入计划和资源租约协调。`subagent` 是工具分类，不单独占用派发名额；并发限制以实际声明的准入能力为准。
 
-### 5.2 并发决策逻辑
-
-```typescript
-function canExecute(
-  category: ToolCategory,
-  state: ConcurrencyState,
-  config: ConcurrencyConfig,
-): boolean {
-  // memory 类别：始终可并行执行，不受读写锁限制
-  if (category === "memory") {
-    return true;
-  }
-
-  // subagent 类别：独立上限计数器，不参与读写锁，但受自身上限约束
-  // 不参与 wave 分组，在 executeBatch() 中被提前分离并立即启动
-  if (category === "subagent") {
-    return state.subagentCount < config.maxSubagentConcurrency;
-  }
-
-  const isReadLike = category === "readonly" || category === "network";
-
-  if (isReadLike) {
-    // 读操作：无写操作且未达并发上限
-    return (
-      !state.writeInProgress && state.readingCount < config.maxReadConcurrency
-    );
-  } else {
-    // write/dangerous：无任何读写操作进行中
-    return !state.writeInProgress && state.readingCount === 0;
-  }
-}
-```
-
-**subagent/memory 与 wave 调度的关系**：
-
-`subagent` 和 `memory` 类别不参与 wave 分组。在 `executeBatch()` 中它们被提前分离，直接启动执行（与 wave 并行），不阻塞也不被 wave 阻塞。
-
-- **memory**：用于显式声明该类别的内部/目标工具，不经过 CC 层准入
-- **subagent**：可能长时间运行，放入 wave 会阻塞后续 wave 。但仍经过 CC 层准入检查（`canExecute`），保持 maxSubagent = 3 的硬上限
-
-```
-executeBatch 示例（LLM 返回 6 个工具调用）：
-
-  分离步骤：
-    [task_agent_1]  → subagent, 立即启动（CC 检查 subagentCount<3）
-    [goal_update]   → memory,   立即启动（无需 CC 检查）
-
-  剩余进入 wave 分组：
-    Wave1: [read_file_A, read_file_B, web_search_C]  → 可并行
-    Wave2: [write_D]                                  → 串行
-
-  Wave1 和分离出的 subagent/memory 并发执行
-  Wave1 完成后执行 Wave2
-  最终收集所有结果（包括分离出的调用）
-```
+等待容量的调用按队列处理；租约释放是幂等的，避免重复释放影响其他调用。`maxReadConcurrency` 是普通容量的旧配置名，`maxConcurrency` 存在时优先使用后者。
 
 ---
 
@@ -464,8 +403,7 @@ executeBatch 示例（LLM 返回 6 个工具调用）：
 ```typescript
 const DEFAULT_CONFIG: ToolSchedulerConfig = {
   concurrency: {
-    maxReadConcurrency: 5, // readonly/network 类别并发上限
-    maxSubagentConcurrency: 3, // subagent 类别独立并发上限
+    maxReadConcurrency: 10, // 普通调用上限
   },
   timeout: {
     defaultTimeout: 120000, // 2 分钟
