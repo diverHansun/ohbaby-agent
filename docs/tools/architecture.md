@@ -38,6 +38,19 @@ tools/
 
 `web_search` / `web_fetch` 是 `tools` 入口，后端走 `services/search-providers/`；模块文档参见 `docs/tools/search-providers/`，源码挂在 `src/services/search-providers/`。
 
+ShellJob（bash 启动的前台、后台任务）也不放在 `tools/` 里，源码在与 `tools/` 平级的 `src/shell-jobs/`。`bash.ts` 和 `task.ts` 只是它的工具入口，adapters 和 services 也直接使用它：
+
+```
+shell-jobs/
+├── registry.ts          # ShellJobRegistry：运行中的任务、等待、停止、归属检查和清理责任
+├── store.ts             # ShellJobStore 接口，数据库实现与内存实现
+├── query.ts             # 任务状态、查询条件和分页
+├── reader.ts            # ShellJobReader：只读的任务摘要、输出和游标
+├── recovery.ts          # ShellJobRecovery：重启后把遗留任务标为 lost，并做有界清理
+├── notice.ts            # 状态行和结束通知的渲染
+└── fixtures/            # 测试用的任务记录和并发预留脚本
+```
+
 ### v1 文件工具拆分边界
 
 本轮文件工具按 `read.ts`、`write.ts`、`edit.ts`、`list.ts`、`glob.ts`、`grep.ts` 独立实现，由 `builtin.ts` 直接组合注册，不再保留旧的文件工具聚合转发层。共享文本文件内核集中在 `utils/text-files.ts`，统一处理 UTF-8 BOM、CRLF/LF metadata、前 4KB sample + 扩展名二进制检测、write 覆盖时的 mtime 校验、同目录临时文件 + rename 的原子写入。
@@ -425,7 +438,7 @@ task 与 agent 分别依赖自己的运行时：
 
 | 依赖模块 | 调用接口 | 用途 |
 |----------|----------|------|
-| tools | `ShellJobRegistry.list/output/kill()` | task 管理自己的 ShellJob |
+| shell-jobs | `ShellJobRegistry.list/output/kill()` | task 管理自己的 ShellJob |
 | agents | `SessionSubagentHost` | agent 管理子代理实例与执行，见 [现行契约](../agents/dfd-interface.md) |
 
 **依赖理由**：

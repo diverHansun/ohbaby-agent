@@ -15,8 +15,8 @@ import type { CommandContext } from "../sandbox/index.js";
 import type { Tool } from "../core/tool-scheduler/index.js";
 import { createBashTool, type SpawnCommand } from "./bash.js";
 import { installSystemProxy } from "../utils/network-proxy/index.js";
-import { ShellJobRegistry } from "./shell-job-registry.js";
-import { InMemoryShellJobStore } from "./shell-job-store.js";
+import { ShellJobRegistry } from "../shell-jobs/registry.js";
+import { InMemoryShellJobStore } from "../shell-jobs/store.js";
 import { createBuiltinTools } from "./index.js";
 
 class FakeChildProcess extends EventEmitter {

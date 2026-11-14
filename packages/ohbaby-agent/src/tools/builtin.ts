@@ -19,7 +19,7 @@ import {
 import { createSubagentTools, type SubagentToolHost } from "./subagent.js";
 import { createWebTools, type WebToolsOptions } from "./web.js";
 import { createGoalTools, type GoalToolBackend } from "../goals/tools.js";
-import { ShellJobRegistry } from "./shell-job-registry.js";
+import { ShellJobRegistry } from "../shell-jobs/registry.js";
 import { createTaskTool } from "./task.js";
 import { Shell } from "../shell/index.js";
 

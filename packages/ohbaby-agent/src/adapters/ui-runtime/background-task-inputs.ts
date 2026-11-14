@@ -4,13 +4,13 @@ import {
   type CurrentRunInputStore,
 } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import type { RunInputSource } from "../../runtime/prompt-scheduler/run-input-coordinator.js";
-import { renderShellJobNoticeBatch } from "../../tools/shell-job-notice.js";
+import { renderShellJobNoticeBatch } from "../../shell-jobs/notice.js";
 import type {
   ShellJobNoticeOwner,
   ShellJobNoticeSelection,
   ShellJobRecord,
   ShellJobStore,
-} from "../../tools/shell-job-store.js";
+} from "../../shell-jobs/store.js";
 
 const SOURCE_PREFIX = "background-task:";
 export function backgroundTaskOpening(

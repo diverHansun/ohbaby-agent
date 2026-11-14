@@ -2,7 +2,7 @@ import type {
   DatabaseConnection,
   SqliteValue,
 } from "../services/database/types.js";
-import type { ShellJobRecord } from "./shell-job-store.js";
+import type { ShellJobRecord } from "./store.js";
 
 export const SHELL_JOB_STATUSES = [
   "running",

@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { closeDatabase, getDatabase, initDatabase } from "../database/index.js";
-import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
-import { ShellJobRecovery } from "../../tools/shell-job-recovery.js";
+import { DatabaseShellJobStore } from "../../shell-jobs/store.js";
+import { ShellJobRecovery } from "../../shell-jobs/recovery.js";
 import { assertRewindShellOwners } from "./rewind-shell.js";
 import { SessionRunBusyError } from "../../runtime/run-ledger/errors.js";
 

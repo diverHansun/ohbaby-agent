@@ -59,7 +59,7 @@ export class SubagentConversationProjection {
       readonly instances?: Pick<SubagentInstanceStore, "get" | "subscribe">;
       readonly messages: MessageManager;
       readonly shellJobStore?: Pick<
-        import("../../tools/shell-job-store.js").ShellJobStore,
+        import("../../shell-jobs/store.js").ShellJobStore,
         "get"
       >;
       readonly validateRoot: (id: string) => Promise<void>;

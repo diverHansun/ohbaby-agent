@@ -1,6 +1,6 @@
-import { DatabaseShellJobStore } from "../tools/shell-job-store.js";
-import { shellJobFixture } from "../tools/fixtures/shell-job.js";
-import { ShellJobRegistry } from "../tools/shell-job-registry.js";
+import { DatabaseShellJobStore } from "../shell-jobs/store.js";
+import { shellJobFixture } from "../shell-jobs/fixtures/shell-job.js";
+import { ShellJobRegistry } from "../shell-jobs/registry.js";
 import { DatabaseSubagentExecutionStore } from "../agents/subagents/execution-store.js";
 import { isOwnerProcessAlive, processOwnerId } from "../utils/process-owner.js";
 import { SideChatUnsupportedError } from "../services/session/errors.js";

@@ -58,7 +58,7 @@ export interface PersistentUiStateStoreOptions {
   readonly messageManager: Pick<MessageManager, "listBySession">;
   readonly runLedger: RunLedger;
   readonly shellJobStore?: Pick<
-    import("../../tools/shell-job-store.js").ShellJobStore,
+    import("../../shell-jobs/store.js").ShellJobStore,
     "get"
   >;
   readonly initialActiveSessionId?: string | null;
@@ -204,7 +204,7 @@ export function compareMessagePartOrder(
 export function overlayShellJobFacts(
   message: UiMessage,
   sessionId: string,
-  store: Pick<import("../../tools/shell-job-store.js").ShellJobStore, "get">,
+  store: Pick<import("../../shell-jobs/store.js").ShellJobStore, "get">,
   owner: { rootSessionId: string; contextScopeId: string | null } = {
     rootSessionId: sessionId,
     contextScopeId: null,
@@ -354,7 +354,7 @@ function sessionToUiSession(input: {
   readonly session: Session;
   readonly messages: readonly MessageWithParts[];
   readonly shellJobStore?: Pick<
-    import("../../tools/shell-job-store.js").ShellJobStore,
+    import("../../shell-jobs/store.js").ShellJobStore,
     "get"
   >;
 }): UiSession {

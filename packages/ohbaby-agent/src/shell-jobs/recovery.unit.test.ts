@@ -1,9 +1,9 @@
-import { ShellJobRegistry } from "./shell-job-registry.js";
+import { ShellJobRegistry } from "./registry.js";
 import { getSourceCleanupState } from "../core/tool-scheduler/source-cleanup.js";
 import { shellJobFixture as record } from "./fixtures/shell-job.js";
 import { describe, expect, it, vi } from "vitest";
-import { ShellJobRecovery } from "./shell-job-recovery.js";
-import { InMemoryShellJobStore } from "./shell-job-store.js";
+import { ShellJobRecovery } from "./recovery.js";
+import { InMemoryShellJobStore } from "./store.js";
 import type { ProcessIdentity } from "../shell/process-identity.js";
 
 const RecoveryStore = InMemoryShellJobStore;

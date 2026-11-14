@@ -14,7 +14,7 @@ import {
   InMemoryShellJobStore,
   type ShellJobStore,
   type ShellJobRecord,
-} from "./shell-job-store.js";
+} from "./store.js";
 
 const record: ShellJobRecord = {
   jobId: "job",

@@ -4,12 +4,15 @@ import type {
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
-import { shellJobStatusLine, boundedText } from "./shell-job-notice.js";
-import { SHELL_JOB_STATUSES, type ShellJobStatus } from "./shell-job-query.js";
+import { shellJobStatusLine, boundedText } from "../shell-jobs/notice.js";
+import {
+  SHELL_JOB_STATUSES,
+  type ShellJobStatus,
+} from "../shell-jobs/query.js";
 import type {
   ShellJobRegistry,
   ShellJobSnapshot,
-} from "./shell-job-registry.js";
+} from "../shell-jobs/registry.js";
 import {
   getRequiredNonEmptyStringParam,
   ToolParameterError,

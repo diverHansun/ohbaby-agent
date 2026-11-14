@@ -14,7 +14,7 @@ import { createGlobTool } from "../../../packages/ohbaby-agent/src/tools/glob.js
 import { createGrepTool } from "../../../packages/ohbaby-agent/src/tools/grep.js";
 import { createHostLocalEnvironment } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/host-local-environment.js";
 import { createBashTool } from "../../../packages/ohbaby-agent/src/tools/bash.js";
-import { ShellJobRegistry } from "../../../packages/ohbaby-agent/src/tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../../packages/ohbaby-agent/src/shell-jobs/registry.js";
 import { Shell } from "../../../packages/ohbaby-agent/src/shell/index.js";
 import type { ToolExecutionContext } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import { McpClient } from "../../../packages/ohbaby-agent/src/mcp/core/client.js";

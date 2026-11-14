@@ -1,9 +1,9 @@
-import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
+import { InMemoryShellJobStore } from "../../shell-jobs/store.js";
 import {
   ShellJobRecovery,
   syncUnconfirmedSourceCleanup,
-} from "../../tools/shell-job-recovery.js";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+} from "../../shell-jobs/recovery.js";
+import { shellJobFixture } from "../../shell-jobs/fixtures/shell-job.js";
 import { ToolSchedulerEvent } from "./events.js";
 import { createHostLocalEnvironment } from "../../adapters/ui-runtime/host-local-environment.js";
 import { describe, expect, it, vi } from "vitest";

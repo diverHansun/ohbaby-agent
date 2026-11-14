@@ -12,14 +12,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { ShellJobRegistry } from "./shell-job-registry.js";
+import { ShellJobRegistry } from "./registry.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ShellJobReader,
   encodeShellJobCursor,
   decodeShellJobCursor,
-} from "./shell-job-reader.js";
-import { InMemoryShellJobStore } from "./shell-job-store.js";
+} from "./reader.js";
+import { InMemoryShellJobStore } from "./store.js";
 import { shellJobFixture } from "./fixtures/shell-job.js";
 
 const directories: string[] = [];

@@ -10,7 +10,7 @@ import {
 } from "./index.js";
 import { INITIAL_MIGRATIONS } from "./migrations.js";
 import { NodeSqliteConnection } from "./connection.js";
-import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
+import { DatabaseShellJobStore } from "../../shell-jobs/store.js";
 
 const directories: string[] = [];
 afterEach(async () => {

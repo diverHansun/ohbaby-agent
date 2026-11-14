@@ -31,7 +31,7 @@ import {
   ShellJobRegistry,
   type ShellJobRegistryOptions,
   type ShellJobSnapshot,
-} from "./shell-job-registry.js";
+} from "../shell-jobs/registry.js";
 import {
   getNumberParam,
   getStringParam,

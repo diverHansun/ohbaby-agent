@@ -1,14 +1,14 @@
-import { ShellJobManagementError } from "./shell-job-recovery.js";
+import { ShellJobManagementError } from "./recovery.js";
 import type { ProcessIdentity } from "../shell/process-identity.js";
 import fs from "node:fs";
-import { initialShellJobNoticeState } from "./shell-job-notice.js";
-import { isShellJobUnsettled } from "./shell-job-query.js";
+import { initialShellJobNoticeState } from "./notice.js";
+import { isShellJobUnsettled } from "./query.js";
 import {
   decodeShellJobCursor,
   encodeShellJobCursor,
   shellJobSummary,
   type ShellJobPublicSummary,
-} from "./shell-job-reader.js";
+} from "./reader.js";
 import {
   InMemoryShellJobStore,
   ShellJobCapacityError,
@@ -18,7 +18,7 @@ import {
   type ShellJobPromotionPatch,
   type ShellJobStatus,
   type ShellJobStopReason,
-} from "./shell-job-store.js";
+} from "./store.js";
 import {
   waitForCleanup,
   type RunCleanupSnapshot,
@@ -38,8 +38,11 @@ import {
   CappedOutputFile,
   outputFileNotice,
 } from "../utils/capped-output-file.js";
-import { DEFAULT_OUTPUT_TOKEN_LIMIT, truncateOutput } from "./utils/output.js";
-import { ToolParameterError } from "./utils/params.js";
+import {
+  DEFAULT_OUTPUT_TOKEN_LIMIT,
+  truncateOutput,
+} from "../tools/utils/output.js";
+import { ToolParameterError } from "../tools/utils/params.js";
 
 export const OUTPUT_CAPTURE_CHAR_LIMIT = DEFAULT_OUTPUT_TOKEN_LIMIT * 4 + 1;
 export const SHELL_JOB_TERMINATION_GRACE_MS = 1_000;
@@ -146,7 +149,7 @@ export interface ShellJobRegistryOptions {
   readonly backgroundLimit?: (
     owner: ToolExecutionOwner | undefined,
   ) => Promise<number>;
-  readonly recovery?: import("./shell-job-recovery.js").ShellJobRecovery;
+  readonly recovery?: import("./recovery.js").ShellJobRecovery;
   readonly refreshOwner?: (
     sessionId: string,
     contextScopeId: string | null,

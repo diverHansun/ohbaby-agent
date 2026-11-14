@@ -4,9 +4,9 @@ import type {
   UiShellJobsInvalidatedEvent,
 } from "ohbaby-sdk";
 import { ShellJobProjection } from "./shell-jobs.js";
-import { ShellJobReader } from "../../tools/shell-job-reader.js";
-import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+import { ShellJobReader } from "../../shell-jobs/reader.js";
+import { InMemoryShellJobStore } from "../../shell-jobs/store.js";
+import { shellJobFixture } from "../../shell-jobs/fixtures/shell-job.js";
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 async function setup() {

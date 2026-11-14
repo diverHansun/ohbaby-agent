@@ -1,19 +1,16 @@
-import { createTaskTool } from "./task.js";
+import { createTaskTool } from "../tools/task.js";
 import { shellJobFixture } from "./fixtures/shell-job.js";
-import { InMemoryShellJobStore } from "./shell-job-store.js";
+import { InMemoryShellJobStore } from "./store.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  ShellJobSnapshot,
-  ShellJobRegistryOptions,
-} from "./shell-job-registry.js";
+import type { ShellJobSnapshot, ShellJobRegistryOptions } from "./registry.js";
 import type {
   ToolExecutionContext,
   ToolExecutionOwner,
 } from "../core/tool-scheduler/index.js";
 import type { KillTreeResult } from "../shell/process.js";
-import { ShellJobRegistry } from "./shell-job-registry.js";
+import { ShellJobRegistry } from "./registry.js";
 
 class FakeChild extends EventEmitter {
   readonly pid = 42;

@@ -19,7 +19,7 @@ import { createBuiltinTools } from "../../tools/index.js";
 import type { ResourceAccess } from "./resources.js";
 import { withToolAdmission, type ToolAdmission } from "./tool-admission.js";
 import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
-import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../shell-jobs/registry.js";
 import type { PreflightResult } from "../../sandbox/index.js";
 import {
   createPermissionState,

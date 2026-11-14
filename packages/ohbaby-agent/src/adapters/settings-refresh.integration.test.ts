@@ -1,4 +1,4 @@
-import { InMemoryShellJobStore } from "../tools/shell-job-store.js";
+import { InMemoryShellJobStore } from "../shell-jobs/store.js";
 import { SkillLoader } from "../skill/loader.js";
 import {
   mkdir,

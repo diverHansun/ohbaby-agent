@@ -42,7 +42,7 @@ import { InMemoryPromptSubmissionStore } from "../../../../packages/ohbaby-agent
 import { InMemorySubagentExecutionStore } from "../../../../packages/ohbaby-agent/src/agents/subagents/execution-store.js";
 import type { RunCompletion } from "../../../../packages/ohbaby-agent/src/runtime/run-manager/index.js";
 import type { Tool } from "../../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
-import { ShellJobRegistry } from "../../../../packages/ohbaby-agent/src/tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../../../packages/ohbaby-agent/src/shell-jobs/registry.js";
 import type {
   SkillContent,
   SkillInfo,

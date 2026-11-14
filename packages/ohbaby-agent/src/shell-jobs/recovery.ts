@@ -8,12 +8,8 @@ import {
   type ProcessIdentity,
 } from "../shell/process-identity.js";
 import { probeProcessTree, type ProcessTreeState } from "../shell/process.js";
-import type {
-  ShellJobPatch,
-  ShellJobRecord,
-  ShellJobStore,
-} from "./shell-job-store.js";
-import { initialShellJobNoticeState } from "./shell-job-notice.js";
+import type { ShellJobPatch, ShellJobRecord, ShellJobStore } from "./store.js";
+import { initialShellJobNoticeState } from "./notice.js";
 import { randomUUID } from "node:crypto";
 
 export interface ShellBackendIdentity {

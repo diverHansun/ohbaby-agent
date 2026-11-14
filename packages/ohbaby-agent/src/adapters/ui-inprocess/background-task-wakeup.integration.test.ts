@@ -12,8 +12,8 @@ import {
   getDatabase,
   initDatabase,
 } from "../../services/database/index.js";
-import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+import { DatabaseShellJobStore } from "../../shell-jobs/store.js";
+import { shellJobFixture } from "../../shell-jobs/fixtures/shell-job.js";
 import {
   backgroundTaskOpening,
   createBackgroundTaskInputSource,

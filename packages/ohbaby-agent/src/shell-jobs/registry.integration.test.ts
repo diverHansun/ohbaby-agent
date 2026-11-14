@@ -1,8 +1,5 @@
-import { createTaskTool } from "./task.js";
-import {
-  InMemoryShellJobStore,
-  type ShellJobRecord,
-} from "./shell-job-store.js";
+import { createTaskTool } from "../tools/task.js";
+import { InMemoryShellJobStore, type ShellJobRecord } from "./store.js";
 import {
   mkdir,
   mkdtemp,
@@ -20,8 +17,8 @@ import type {
   ToolExecutionEnvironment,
 } from "../core/tool-scheduler/index.js";
 import { Shell } from "../shell/index.js";
-import { createBashTool } from "./bash.js";
-import { ShellJobRegistry } from "./shell-job-registry.js";
+import { createBashTool } from "../tools/bash.js";
+import { ShellJobRegistry } from "./registry.js";
 
 function createContext(workdir: string): ToolExecutionContext {
   const commandContext = { cwd: workdir, env: {}, kind: "host-local" as const };

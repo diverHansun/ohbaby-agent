@@ -5,10 +5,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ShellJobRegistry,
-  type ShellJobSnapshot,
-} from "./shell-job-registry.js";
+import { ShellJobRegistry, type ShellJobSnapshot } from "./registry.js";
 
 class Child extends EventEmitter {
   readonly pid = 42;

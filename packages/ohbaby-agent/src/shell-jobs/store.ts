@@ -5,9 +5,9 @@ import {
   type ShellJobQuery,
   type ShellJobPage,
   type ShellJobStatus,
-} from "./shell-job-query.js";
+} from "./query.js";
 import { randomUUID } from "node:crypto";
-import { freezeShellJobNoticeBatch } from "./shell-job-notice.js";
+import { freezeShellJobNoticeBatch } from "./notice.js";
 import {
   getDatabase,
   runWriteTransaction,

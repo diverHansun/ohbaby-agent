@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { createPermissionState } from "../../permission/index.js";
-import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../shell-jobs/registry.js";
 import { createToolScheduler, ToolSchedulerEvent } from "./index.js";
 import { withToolAdmission } from "./tool-admission.js";
 import type { CapacityKind } from "./concurrency.js";

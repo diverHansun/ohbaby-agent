@@ -1,4 +1,4 @@
-import type { ShellJobRecord, ShellJobStatus } from "./shell-job-store.js";
+import type { ShellJobRecord, ShellJobStatus } from "./store.js";
 
 export function shellJobStatusLine(input: {
   readonly status: ShellJobStatus;

@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { NodeSqliteConnection } from "../../services/database/connection.js";
-import { DatabaseShellJobStore } from "../shell-job-store.js";
+import { DatabaseShellJobStore } from "../store.js";
 import { shellJobFixture } from "./shell-job.js";
 
 const dbPath = process.argv[2];

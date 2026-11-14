@@ -11,7 +11,7 @@ import {
   initDatabase,
 } from "../services/database/index.js";
 import { NodeSqliteConnection } from "../services/database/connection.js";
-import { DatabaseShellJobStore } from "./shell-job-store.js";
+import { DatabaseShellJobStore } from "./store.js";
 import { shellJobFixture } from "./fixtures/shell-job.js";
 
 let directory: string | undefined;

@@ -84,13 +84,13 @@ export interface UiRuntimeComposition {
   preflightShellRuns?(runIds: readonly string[]): Promise<readonly string[]>;
   markRewoundShellRuns?(runIds: readonly string[]): void;
   shellJobCurrent?(
-    row: import("../../tools/shell-job-store.js").ShellJobRecord,
+    row: import("../../shell-jobs/store.js").ShellJobRecord,
   ): ReturnType<
-    import("../../tools/shell-job-registry.js").ShellJobRegistry["getCurrentRecord"]
+    import("../../shell-jobs/registry.js").ShellJobRegistry["getCurrentRecord"]
   >;
   refreshShellRoot?(rootSessionId: string): Promise<void>;
   shellJobManagement?(
-    row: import("../../tools/shell-job-store.js").ShellJobRecord,
+    row: import("../../shell-jobs/store.js").ShellJobRecord,
   ): Promise<{ managedByCurrentBackend: boolean; canStop: boolean }>;
   stopShellJob?(
     rootSessionId: string,
@@ -102,7 +102,7 @@ export interface UiRuntimeComposition {
     jobId: string,
     confirm: boolean,
     beforeAccept?: () => void,
-  ): Promise<import("../../tools/shell-job-store.js").ShellJobRecord>;
+  ): Promise<import("../../shell-jobs/store.js").ShellJobRecord>;
   preflightShellSessions?(sessionIds: readonly string[]): Promise<void>;
   stopShellSessions?(sessionIds: readonly string[]): Promise<void>;
   getActivityReasons(): readonly string[];

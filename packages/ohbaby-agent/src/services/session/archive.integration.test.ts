@@ -1,5 +1,5 @@
-import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+import { DatabaseShellJobStore } from "../../shell-jobs/store.js";
+import { shellJobFixture } from "../../shell-jobs/fixtures/shell-job.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

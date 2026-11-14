@@ -1,7 +1,7 @@
 import { overlayShellJobFacts } from "./ui-state/persistent-store.js";
 import { ShellJobProjection } from "./ui-inprocess/shell-jobs.js";
-import { ShellJobReader } from "../tools/shell-job-reader.js";
-import { InMemoryShellJobStore } from "../tools/shell-job-store.js";
+import { ShellJobReader } from "../shell-jobs/reader.js";
+import { InMemoryShellJobStore } from "../shell-jobs/store.js";
 import { createBackgroundTaskWakeup } from "./ui-inprocess/background-task-wakeup.js";
 import { processOwnerId } from "../utils/process-owner.js";
 import { isUserFacingSession } from "../services/session/types.js";
@@ -420,7 +420,7 @@ export interface InProcessUiBackendOptions {
   readonly streamBridge?: StreamBridge;
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentExecutionStore?: import("../agents/index.js").SubagentExecutionStore;
-  readonly shellJobStore?: import("../tools/shell-job-store.js").ShellJobStore;
+  readonly shellJobStore?: import("../shell-jobs/store.js").ShellJobStore;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
   readonly workdir?: string;

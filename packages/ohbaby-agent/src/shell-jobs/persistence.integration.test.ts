@@ -1,5 +1,5 @@
-import { createTaskTool } from "./task.js";
-import { ShellJobRecovery } from "./shell-job-recovery.js";
+import { createTaskTool } from "../tools/task.js";
+import { ShellJobRecovery } from "./recovery.js";
 import { shellJobFixture } from "./fixtures/shell-job.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
@@ -15,11 +15,8 @@ import {
 } from "../services/database/index.js";
 import { Shell } from "../shell/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  DatabaseShellJobStore,
-  InMemoryShellJobStore,
-} from "./shell-job-store.js";
-import { ShellJobRegistry } from "./shell-job-registry.js";
+import { DatabaseShellJobStore, InMemoryShellJobStore } from "./store.js";
+import { ShellJobRegistry } from "./registry.js";
 
 afterEach(() => {
   closeDatabase();

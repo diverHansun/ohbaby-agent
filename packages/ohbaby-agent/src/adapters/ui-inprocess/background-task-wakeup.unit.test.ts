@@ -1,7 +1,7 @@
 import { RuntimeSwitchPendingError } from "./runtime-controller.js";
 import { describe, expect, it, vi } from "vitest";
-import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+import { InMemoryShellJobStore } from "../../shell-jobs/store.js";
+import { shellJobFixture } from "../../shell-jobs/fixtures/shell-job.js";
 import { SessionExecutionGate } from "../session-execution.js";
 import { SessionRunBusyError } from "../../runtime/run-ledger/errors.js";
 import { createBackgroundTaskWakeup } from "./background-task-wakeup.js";

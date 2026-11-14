@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { ShellJobRegistry } from "../../../../packages/ohbaby-agent/src/tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../../../packages/ohbaby-agent/src/shell-jobs/registry.js";
 import {
   TestSessionSubagentHost as SessionSubagentHost,
   type TestSubagentRunInput,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UiMessage } from "ohbaby-sdk";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+import { shellJobFixture } from "../../shell-jobs/fixtures/shell-job.js";
 import { overlayShellJobFacts } from "./persistent-store.js";
 
 describe("saved shell result overlay", () => {

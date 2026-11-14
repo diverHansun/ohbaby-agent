@@ -12,8 +12,8 @@ import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import { createPermissionState } from "../permission/index.js";
 import { createHostLocalEnvironment } from "../adapters/ui-runtime/host-local-environment.js";
 import { createBashTool } from "./bash.js";
-import { ShellJobRegistry } from "./shell-job-registry.js";
-import { InMemoryShellJobStore } from "./shell-job-store.js";
+import { ShellJobRegistry } from "../shell-jobs/registry.js";
+import { InMemoryShellJobStore } from "../shell-jobs/store.js";
 
 class Child extends EventEmitter {
   readonly pid = 424242;

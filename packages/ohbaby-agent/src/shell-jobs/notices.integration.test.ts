@@ -15,8 +15,8 @@ import {
   DatabaseShellJobStore,
   InMemoryShellJobStore,
   type ShellJobStore,
-} from "./shell-job-store.js";
-import { renderShellJobNoticeBatch } from "./shell-job-notice.js";
+} from "./store.js";
+import { renderShellJobNoticeBatch } from "./notice.js";
 
 afterEach(closeDatabase);
 describe.each(["memory", "database"] as const)("%s shell notices", (kind) => {

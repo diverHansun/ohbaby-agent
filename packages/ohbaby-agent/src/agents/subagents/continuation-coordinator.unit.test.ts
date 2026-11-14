@@ -1,6 +1,6 @@
 import { createBackgroundTaskInputSource } from "../../adapters/ui-runtime/background-task-inputs.js";
-import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+import { InMemoryShellJobStore } from "../../shell-jobs/store.js";
+import { shellJobFixture } from "../../shell-jobs/fixtures/shell-job.js";
 import { createRunInputCoordinator } from "../../runtime/prompt-scheduler/run-input-coordinator.js";
 import { createBus } from "../../bus/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -59,7 +59,7 @@ function unusedLlmClient(): LLMClientInstance {
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { createBashTool } from "../../../../packages/ohbaby-agent/src/tools/bash.js";
-import { ShellJobRegistry } from "../../../../packages/ohbaby-agent/src/tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../../../packages/ohbaby-agent/src/shell-jobs/registry.js";
 
 class Child extends EventEmitter {
   readonly pid = 424242;

@@ -14,8 +14,8 @@ import {
 } from "../services/database/index.js";
 import { readProcessIdentity } from "../shell/process-identity.js";
 import { probeProcessTree } from "../shell/process.js";
-import { ShellJobRecovery } from "./shell-job-recovery.js";
-import { DatabaseShellJobStore } from "./shell-job-store.js";
+import { ShellJobRecovery } from "./recovery.js";
+import { DatabaseShellJobStore } from "./store.js";
 
 async function startProcess(): Promise<ChildProcess> {
   const child = spawn("/bin/sleep", ["30"], {

@@ -8,7 +8,7 @@ import type {
 } from "ohbaby-llm";
 import { McpManager } from "../mcp/index.js";
 import { closeDatabase, getDatabase } from "../services/database/index.js";
-import { DatabaseShellJobStore } from "../tools/shell-job-store.js";
+import { DatabaseShellJobStore } from "../shell-jobs/store.js";
 import { readProcessIdentity } from "../shell/process-identity.js";
 import { createPersistentUiBackendClient } from "./ui-persistent.js";
 

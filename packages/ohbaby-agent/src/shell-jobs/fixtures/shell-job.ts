@@ -1,4 +1,4 @@
-import type { ShellJobRecord } from "../shell-job-store.js";
+import type { ShellJobRecord } from "../store.js";
 
 export function shellJobFixture(
   patch: Partial<ShellJobRecord> = {},

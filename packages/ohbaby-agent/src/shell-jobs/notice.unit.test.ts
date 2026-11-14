@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { shellJobStatusLine } from "./shell-job-notice.js";
+import { shellJobStatusLine } from "./notice.js";
 
 it("reports captured bytes and unavailable logs without implying zero output", () => {
   expect(
@@ -26,7 +26,7 @@ import { shellJobFixture } from "./fixtures/shell-job.js";
 import {
   freezeShellJobNoticeBatch,
   renderShellJobNoticeBatch,
-} from "./shell-job-notice.js";
+} from "./notice.js";
 
 it("bounds complete notices by UTF-8 bytes and leaves whole jobs for another batch", () => {
   const jobs = Array.from({ length: 25 }, (_, index) =>

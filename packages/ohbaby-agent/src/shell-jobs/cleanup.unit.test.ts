@@ -9,12 +9,9 @@ import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { shellJobFixture } from "./fixtures/shell-job.js";
-import { ShellJobRecovery } from "./shell-job-recovery.js";
-import { InMemoryShellJobStore } from "./shell-job-store.js";
-import {
-  ShellJobRegistry,
-  type ShellJobSnapshot,
-} from "./shell-job-registry.js";
+import { ShellJobRecovery } from "./recovery.js";
+import { InMemoryShellJobStore } from "./store.js";
+import { ShellJobRegistry, type ShellJobSnapshot } from "./registry.js";
 
 class Child extends EventEmitter {
   readonly pid = 424242;

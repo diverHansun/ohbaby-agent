@@ -23,8 +23,8 @@ import {
 import {
   DatabaseShellJobStore,
   InMemoryShellJobStore,
-} from "../../tools/shell-job-store.js";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
+} from "../../shell-jobs/store.js";
+import { shellJobFixture } from "../../shell-jobs/fixtures/shell-job.js";
 import { createBackgroundTaskInputSource } from "./background-task-inputs.js";
 
 afterEach(() => {

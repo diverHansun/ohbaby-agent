@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
-import { ShellJobRecovery } from "../../tools/shell-job-recovery.js";
+import { DatabaseShellJobStore } from "../../shell-jobs/store.js";
+import { ShellJobRecovery } from "../../shell-jobs/recovery.js";
 import { readProcessIdentity } from "../../shell/process-identity.js";
 import {
   getDatabase,

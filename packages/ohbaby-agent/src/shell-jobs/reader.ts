@@ -16,13 +16,9 @@ import {
   type ShellJobOwnerFilter,
   type ShellJobPagePosition,
   type ShellJobQueryScope,
-} from "./shell-job-query.js";
-import { boundedText } from "./shell-job-notice.js";
-import type {
-  ShellJobRecord,
-  ShellJobStatus,
-  ShellJobStore,
-} from "./shell-job-store.js";
+} from "./query.js";
+import { boundedText } from "./notice.js";
+import type { ShellJobRecord, ShellJobStatus, ShellJobStore } from "./store.js";
 
 type WithoutVersion<T> = Omit<
   T,

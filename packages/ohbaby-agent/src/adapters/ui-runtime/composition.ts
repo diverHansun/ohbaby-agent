@@ -1,14 +1,14 @@
 import { acceptRuntimeOpening } from "./runtime-opening.js";
 import { subscribeRunSteer } from "../../runtime/prompt-scheduler/steer-subscription.js";
-import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
-import { isShellJobUnsettled } from "../../tools/shell-job-query.js";
+import { InMemoryShellJobStore } from "../../shell-jobs/store.js";
+import { isShellJobUnsettled } from "../../shell-jobs/query.js";
 import { createRunInputCoordinator } from "../../runtime/prompt-scheduler/run-input-coordinator.js";
 import { createBackgroundTaskInputSource } from "./background-task-inputs.js";
 import { loadShellConfig } from "../../config/tools/shell/index.js";
 import {
   ShellJobRecovery,
   syncUnconfirmedSourceCleanup,
-} from "../../tools/shell-job-recovery.js";
+} from "../../shell-jobs/recovery.js";
 import { readProcessIdentity } from "../../shell/process-identity.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -100,7 +100,7 @@ import {
   type SubagentInstanceStore,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
-import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../shell-jobs/registry.js";
 import {
   waitForCleanup,
   type RunCleanupSnapshot,
@@ -223,7 +223,7 @@ export interface UiRuntimeCompositionOptions {
   readonly shellAdmission?: (
     owner: import("../../core/tool-scheduler/types.js").ToolExecutionOwner,
   ) => boolean;
-  readonly shellJobStore?: import("../../tools/shell-job-store.js").ShellJobStore;
+  readonly shellJobStore?: import("../../shell-jobs/store.js").ShellJobStore;
   readonly currentRunInputStore?: CurrentRunInputStore;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
@@ -1020,9 +1020,7 @@ export async function createUiRuntimeComposition(
     readonly contextScopeId: string;
     readonly runId?: string;
     readonly sessionId: string;
-  }): Promise<
-    import("../../tools/shell-job-registry.js").ShellCleanupResult
-  > => {
+  }): Promise<import("../../shell-jobs/registry.js").ShellCleanupResult> => {
     if (input.runId !== undefined) {
       try {
         await runManager.waitForCompletion(input.runId);

@@ -4,13 +4,10 @@ import {
   getDatabase,
   initDatabase,
 } from "../services/database/index.js";
-import {
-  DatabaseShellJobStore,
-  InMemoryShellJobStore,
-} from "./shell-job-store.js";
+import { DatabaseShellJobStore, InMemoryShellJobStore } from "./store.js";
 import { shellJobFixture } from "./fixtures/shell-job.js";
-import { ShellJobRegistry } from "./shell-job-registry.js";
-import { SHELL_JOB_STATUSES } from "./shell-job-query.js";
+import { ShellJobRegistry } from "./registry.js";
+import { SHELL_JOB_STATUSES } from "./query.js";
 
 afterEach(closeDatabase);
 describe.each(["memory", "sqlite"] as const)(

@@ -12,7 +12,7 @@ import {
   type RunLedger,
 } from "../../runtime/run-ledger/index.js";
 import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
-import type { ShellJobStore } from "../../tools/shell-job-store.js";
+import type { ShellJobStore } from "../../shell-jobs/store.js";
 import type { SessionExecutionGate } from "../session-execution.js";
 import { backgroundTaskOpening } from "../ui-runtime/background-task-inputs.js";
 

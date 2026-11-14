@@ -1978,7 +1978,7 @@ it.each([false, true])(
     const { createBashTool } =
       await import("../../../packages/ohbaby-agent/src/tools/bash.js");
     const { ShellJobRegistry } =
-      await import("../../../packages/ohbaby-agent/src/tools/shell-job-registry.js");
+      await import("../../../packages/ohbaby-agent/src/shell-jobs/registry.js");
     const { createTaskTool } =
       await import("../../../packages/ohbaby-agent/src/tools/task.js");
     const { Shell } =
@@ -2384,7 +2384,7 @@ it("allows real foreground Bash gates in separate child batches sharing one root
   const { createBashTool } =
     await import("../../../packages/ohbaby-agent/src/tools/bash.js");
   const { ShellJobRegistry } =
-    await import("../../../packages/ohbaby-agent/src/tools/shell-job-registry.js");
+    await import("../../../packages/ohbaby-agent/src/shell-jobs/registry.js");
   const { Shell } =
     await import("../../../packages/ohbaby-agent/src/shell/index.js");
   const { createHostLocalEnvironment } =

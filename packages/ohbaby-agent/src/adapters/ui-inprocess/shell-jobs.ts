@@ -15,12 +15,9 @@ import type {
 import {
   ShellJobReadError,
   type ShellJobReader,
-} from "../../tools/shell-job-reader.js";
-import { ShellJobQueryError } from "../../tools/shell-job-query.js";
-import type {
-  ShellJobRecord,
-  ShellJobStore,
-} from "../../tools/shell-job-store.js";
+} from "../../shell-jobs/reader.js";
+import { ShellJobQueryError } from "../../shell-jobs/query.js";
+import type { ShellJobRecord, ShellJobStore } from "../../shell-jobs/store.js";
 
 /** Backend projection only; snapshots stay authoritative and queries never start model runs. */
 export class ShellJobProjection {
