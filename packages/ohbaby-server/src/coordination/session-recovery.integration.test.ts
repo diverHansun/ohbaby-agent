@@ -293,6 +293,15 @@ describe("source session recovery HTTP/RPC/SSE", () => {
     expect(
       (await request(`/v1/sessions/root/shell-jobs?${query}`)).status,
     ).toBe(200);
+    // Task panels ask for background jobs only; the route passes the filter on.
+    expect(
+      (await request(`/v1/sessions/root/shell-jobs?${query}&mode=background`))
+        .status,
+    ).toBe(200);
+    expect(backend.listShellJobs).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: "background" }),
+      expect.any(Function),
+    );
     expect(
       (await request(`/v1/sessions/other/shell-jobs?${query}`)).status,
     ).toBe(409);

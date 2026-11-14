@@ -134,6 +134,60 @@ describe.each(["memory", "sqlite"] as const)(
       expect(second.hasMore).toBe(false);
       expect(second.filteredCount).toBe(4);
     });
+    it("lists only background jobs for task panels, promoted ones included", async () => {
+      const store = await setup();
+      await store.insert(
+        shellJobFixture({
+          jobId: "unsettled-foreground",
+          mode: "foreground",
+          createdAt: 70,
+          endedAt: 71,
+          status: "completed",
+          cleanup: "confirmed",
+          settledAt: null,
+        }),
+      );
+      await store.insert(
+        shellJobFixture({
+          jobId: "promoted",
+          mode: "background",
+          createdAt: 40,
+          startedAt: 40,
+          promotedAt: 160,
+        }),
+      );
+      // Without the filter a just-ended foreground command shows until it settles.
+      expect(
+        store
+          .query({ scope: { rootSessionId: "s" }, limit: 20 })
+          .rows.map((row) => row.jobId),
+      ).toEqual(
+        expect.arrayContaining(["unsettled-foreground", "abnormal-foreground"]),
+      );
+      const panel = store.query({
+        scope: { rootSessionId: "s" },
+        backgroundOnly: true,
+        limit: 20,
+      });
+      expect(panel.rows.map((row) => row.jobId).sort()).toEqual([
+        "active-old",
+        "child",
+        "done-new",
+        "promoted",
+      ]);
+      expect(panel).toMatchObject({
+        filteredCount: 4,
+        unconfirmedCount: 0,
+        statusCounts: {
+          running: 3,
+          completed: 1,
+          cancelled: 0,
+          failed: 0,
+          timed_out: 0,
+          lost: 0,
+        },
+      });
+    });
     it("keeps status and owner filters honest and lowers abandoned cleanup priority", async () => {
       const store = await setup();
       expect(

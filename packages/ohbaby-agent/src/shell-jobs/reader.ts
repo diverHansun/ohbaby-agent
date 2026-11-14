@@ -37,6 +37,7 @@ interface NormalizedList {
   readonly owner?: ShellJobOwnerFilter;
   readonly statuses?: readonly ShellJobStatus[];
   readonly includeFinished?: boolean;
+  readonly backgroundOnly?: boolean;
   readonly limit: number;
 }
 function requiredId(value: unknown, label: string): string {
@@ -98,7 +99,15 @@ function normalizedList(input: UiShellJobListQuery): NormalizedList {
   const statuses = input.statuses?.length
     ? [...new Set(input.statuses)].sort()
     : undefined;
-  return { owner, statuses, limit };
+  const mode: unknown = input.mode;
+  if (mode !== undefined && mode !== "background")
+    throw new ShellJobQueryError("Invalid task mode filter.");
+  return {
+    owner,
+    statuses,
+    ...(mode === "background" ? { backgroundOnly: true } : {}),
+    limit,
+  };
 }
 function fingerprint(
   scope: ShellJobQueryScope,
@@ -113,6 +122,7 @@ function fingerprint(
         ...(filter.includeFinished === undefined
           ? {}
           : { includeFinished: filter.includeFinished }),
+        ...(filter.backgroundOnly ? { backgroundOnly: true } : {}),
       }),
     )
     .digest("hex");

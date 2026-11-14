@@ -29,6 +29,12 @@ export interface ShellJobQuery {
   readonly owner?: ShellJobOwnerFilter;
   readonly statuses?: readonly ShellJobStatus[];
   readonly includeFinished?: boolean;
+  /**
+   * Only jobs that run in the background, promoted ones included. User task
+   * panels set it; the model's own list also keeps foreground jobs whose
+   * cleanup is unfinished.
+   */
+  readonly backgroundOnly?: boolean;
   readonly limit: number;
   readonly before?: ShellJobPagePosition;
 }
@@ -111,6 +117,7 @@ function inScope(row: ShellJobRecord, query: ShellJobQuery): boolean {
     row.contextScopeId !== query.owner.subagentId
   )
     return false;
+  if (query.backgroundOnly && row.mode !== "background") return false;
   return defaultVisible(row);
 }
 function filtered(row: ShellJobRecord, query: ShellJobQuery): boolean {
@@ -188,6 +195,7 @@ export function queryDatabaseShellJobs(
     where.push("context_scope_id = ?");
     params.push(query.owner.subagentId);
   }
+  if (query.backgroundOnly) where.push("mode = 'background'");
   where.push(
     "(mode = 'background' OR cleanup = 'unconfirmed' OR (status IS NOT NULL AND status != 'running' AND (cleanup IS NOT 'confirmed' OR settled_at IS NULL)))",
   );

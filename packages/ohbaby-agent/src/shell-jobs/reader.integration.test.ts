@@ -385,6 +385,45 @@ describe("authorized shell job reads", () => {
     await expect(
       reader.list({ rootSessionId: "s", statuses: ["unknown"] as never }),
     ).rejects.toThrow();
+    await expect(
+      reader.list({ rootSessionId: "s", mode: "foreground" as never }),
+    ).rejects.toThrow("Invalid task mode filter.");
     expect(refreshRoot).not.toHaveBeenCalled();
+  });
+  it("leaves foreground jobs out of a background-only list and binds its cursor", async () => {
+    const { store, reader } = await setup();
+    await store.insert(
+      shellJobFixture({
+        jobId: "fg",
+        mode: "foreground",
+        status: "completed",
+        endedAt: 5,
+        settledAt: null,
+      }),
+    );
+    await store.insert(shellJobFixture({ jobId: "bg-2", createdAt: 0 }));
+    expect(
+      (await reader.list({ rootSessionId: "s" })).rows.map((row) => row.jobId),
+    ).toContain("fg");
+    const first = await reader.list({
+      rootSessionId: "s",
+      mode: "background",
+      limit: 1,
+    });
+    const second = await reader.list({
+      rootSessionId: "s",
+      mode: "background",
+      limit: 1,
+      cursor: first.nextCursor,
+    });
+    expect([...first.rows, ...second.rows].map((row) => row.mode)).toEqual([
+      "background",
+      "background",
+    ]);
+    expect(second.hasMore).toBe(false);
+    // A cursor from the panel list does not page the unfiltered one.
+    await expect(
+      reader.list({ rootSessionId: "s", limit: 1, cursor: first.nextCursor }),
+    ).rejects.toThrow();
   });
 });
