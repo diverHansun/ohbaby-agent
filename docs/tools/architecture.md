@@ -181,9 +181,9 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 #### bash（Shell 命令）
 
 ```
-输入: command, description?, timeout?, run_in_background?
+输入: command, description?, timeout?, run_in_background?, wait_ms?, auto_background?
 输出: `output` + 工具专属 metadata；后台返回 `jobId/status/truncated`
-限制: 有界输出；纯前台默认120秒/最大600秒；显式后台默认不限时/最大24小时
+限制: 有界输出；默认前台等待120秒后自动后台，硬超时与等待分离；纯前台默认120秒/最大600秒；自动或显式后台默认不限时/显式最大24小时
 特殊: 跨平台 Shell 选择、ShellJobRegistry 资源责任、ShellJobStore 权威持久事实、进程树终止
 ```
 
@@ -364,7 +364,7 @@ edit 工具使用多种替换策略，按优先级尝试：
 | read | 行数 | 2,000 |
 | read | 行长 | 2,000 字符 |
 | bash | 输出 | 30,000 字符 |
-| bash | 硬超时 | 纯前台默认120秒；显式后台默认不限时 |
+| bash | 硬超时 | 纯前台默认120秒；自动或显式后台默认不限时，自动转换不重置显式截止 |
 | glob | 结果数 | 100 |
 | grep | 匹配数 | 100 |
 | web_fetch | 响应大小 | 5 MB |

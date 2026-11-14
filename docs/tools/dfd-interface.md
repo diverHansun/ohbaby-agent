@@ -312,15 +312,17 @@ rg 包含隐藏普通文件，不读 ignore/config，始终排除 `.git / dist /
 
 **名称**：`bash`
 
-**描述**：执行 Shell 命令；`timeout` 是前后台 shell job 的最大生命周期
+**描述**：执行 Shell 命令；`timeout` 是从启动起计算的硬寿命，`wait_ms` 只控制前台等待，自动转换不重置硬截止。
 
 **参数**：
 ```typescript
 {
   command: string        // 必需，命令
-  timeout?: number       // 正整数毫秒；纯前台默认120000/最大600000，显式后台默认不限时/最大86400000
+  timeout?: number       // 正整数毫秒；纯前台默认120000/最大600000，自动或显式后台默认不限时/最大86400000
   description?: string   // 可选，任务说明
-  run_in_background?: boolean // 可选，默认 false
+  run_in_background?: boolean // true 立即后台，不能与 wait_ms/auto_background 同传
+  wait_ms?: number       // 1–600000，默认120000；禁止转换时不得提供
+  auto_background?: boolean // false 关闭本次转换；true 不得绕过全局关闭
 }
 ```
 
@@ -330,6 +332,10 @@ rg 包含隐藏普通文件，不读 ignore/config，始终排除 `.git / dist /
   output: string         // 命令输出；后台为当前尾部快照
   metadata: {
     jobId: string
+    mode: 'foreground' | 'background'
+    promotedAt: number | null // 仅自动转换成功后存在
+    timeoutMs: number | null
+    deadline: number | null // startedAt + timeoutMs；无限时为 null
     status: 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out' | 'lost'
     stopReason?: string | null
     cleanup?: 'in-progress' | 'confirmed' | 'unconfirmed'

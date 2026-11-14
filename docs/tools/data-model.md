@@ -175,11 +175,15 @@ interface BashParams {
   command: string;
   description?: string;
   timeout?: number; // 正整数毫秒；按前后台路径校验
-  run_in_background?: boolean; // 默认 false
+  run_in_background?: boolean; // 默认 false，true 立即后台
+  wait_ms?: number; // 前台等待 1–600000 ms，默认 120000
+  auto_background?: boolean; // false 禁止本次转换，不能绕过全局关闭
 }
 ```
 
-显式后台默认不限时，显式 timeout 最大 86400000 ms；纯前台默认 120000 ms，最大 600000 ms。启动前先提交持久占位并原子检查后台名额，再 spawn；主代理默认 10 个、每个子代理默认 5 个，彼此独立。配置位于 `~/.ohbaby/tools/shell.json` 顶层 `maxRunningBackgroundJobs` 与 `maxRunningSubagentBackgroundJobs`。
+允许自动转换时默认等待 120000 ms，未完成则在同一任务上申请后台名额，未传 timeout 不设硬截止；显式后台立即返回，同样默认不限时。这两条路径的显式 timeout 最大 86400000 ms。关闭转换或角色没有完整管理工具时，纯前台默认硬超时 120000 ms、最大 600000 ms。显式后台在启动前原子检查名额并提交占位，再 spawn；自动转换的前台阶段不占后台额度。主代理默认 10 个、每个子代理默认 5 个，彼此独立。配置位于 `~/.ohbaby/tools/shell.json` 顶层 `maxRunningBackgroundJobs` 与 `maxRunningSubagentBackgroundJobs`，以及 `autoBackground`（默认 true）和 `defaultForegroundWaitMs`（默认 120000）。
+
+转换提交保存 `mode=background`、`promotedAt` 和首份有界尾部，同步解除当前调用的中止关联；不重启、不改原始 owner/startedAt/timeoutMs。满额停止当前命令，报告 cancelled + capacity-limit；持久化失败报告 cancelled + internal-error，均保留真实 cleanup。转换规则见 [improve-2](2026-11-13-background-tasks/improve-2/02-optimization-plan-and-change-scope.md)。
 
 当前 `task_output` 使用 `job_id`、`block?`、`wait_ms?`；wait_ms 只限制读取等待，不改变进程寿命。`task_kill` 使用 job_id，主动停止对应 cancelled，硬超时对应 timed_out。两者在 improve-3 统一为 task 三动作；当前阶段不提供临时 task_list 工厂。
 
