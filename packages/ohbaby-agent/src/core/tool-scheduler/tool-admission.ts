@@ -19,8 +19,12 @@ export interface ToolAdmission {
     context: ToolExecutionContext,
   ) => Promise<BashPreparation>;
   readonly cleanupOwner?: "tool";
-  /** The registered owner retains detached work beyond natural run completion. */
-  readonly detachedCleanup?: (params: Record<string, unknown>) => boolean;
+  /** Bash and both task controls must share the same job registry. */
+  readonly bashBackground?: {
+    readonly registry: object;
+    readonly describe: (canManageBackground: boolean) => string;
+  };
+  readonly shellJobController?: object;
   /** After cancellation, local request settlement cannot prove remote work stopped. */
   readonly settlementConfirmsCleanup?: false;
   readonly capacity?:

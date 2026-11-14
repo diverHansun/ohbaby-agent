@@ -4,8 +4,19 @@ import { z } from "zod";
 import { resolveOhbabyHome } from "../../../paths/index.js";
 
 const limit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+export const DEFAULT_AUTO_BACKGROUND = true;
+export const DEFAULT_FOREGROUND_WAIT_MS = 120_000;
+export const MAX_FOREGROUND_WAIT_MS = 600_000;
+
 const ShellConfigSchema = z
   .object({
+    autoBackground: z.boolean().default(DEFAULT_AUTO_BACKGROUND),
+    defaultForegroundWaitMs: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_FOREGROUND_WAIT_MS)
+      .default(DEFAULT_FOREGROUND_WAIT_MS),
     maxRunningBackgroundJobs: limit.default(10),
     maxRunningSubagentBackgroundJobs: limit.default(5),
   })

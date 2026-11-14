@@ -13,7 +13,7 @@ import { readProcessIdentity } from "../shell/process-identity.js";
 import { createPersistentUiBackendClient } from "./ui-persistent.js";
 
 it.skipIf(process.platform === "win32")(
-  "enforces configured main/child quotas independently through the real persistent runtime",
+  "uses the configured wait and independent main and child quotas through the persistent runtime",
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-runtime-quota-"));
     const home = join(directory, "home");
@@ -26,6 +26,7 @@ it.skipIf(process.platform === "win32")(
       await writeFile(
         join(home, "tools", "shell.json"),
         JSON.stringify({
+          defaultForegroundWaitMs: 50,
           maxRunningBackgroundJobs: 2,
           maxRunningSubagentBackgroundJobs: 1,
         }),
@@ -39,7 +40,7 @@ it.skipIf(process.platform === "win32")(
       const mainCalls = [
         {
           name: "bash",
-          args: { command: "sleep 30", run_in_background: true },
+          args: { command: "sleep 30" },
         },
         {
           name: "bash",
@@ -96,13 +97,20 @@ it.skipIf(process.platform === "win32")(
               | undefined;
             let hold = false;
             if (request.purpose === "agent-step") {
+              expect(
+                request.tools?.find((tool) => tool.name === "bash")
+                  ?.description,
+              ).toContain("after 50ms");
               if (request.contextScopeId) {
                 const step = (childSteps.get(request.contextScopeId) ?? 0) + 1;
                 childSteps.set(request.contextScopeId, step);
                 if (step <= 2)
                   call = {
                     name: "bash",
-                    args: { command: "sleep 30", run_in_background: true },
+                    args:
+                      step === 1
+                        ? { command: "sleep 30" }
+                        : { command: "sleep 30", run_in_background: true },
                   };
                 else if (step === 3)
                   call = {
@@ -181,13 +189,19 @@ it.skipIf(process.platform === "win32")(
           pid: number | null;
           context_scope_id: string | null;
           mode: string;
+          promoted_at: number | null;
           status: string;
           command: string;
         }>(
-          "SELECT job_id,pid,context_scope_id,mode,status,command FROM shell_job WHERE root_session_id=?",
+          "SELECT job_id,pid,context_scope_id,mode,promoted_at,status,command FROM shell_job WHERE root_session_id=?",
         )
         .all(prompt.sessionId);
       expect(all.filter((row) => row.mode === "background")).toHaveLength(4);
+      expect(
+        all.filter(
+          (row) => row.mode === "background" && row.promoted_at !== null,
+        ),
+      ).toHaveLength(3);
       expect(
         new Set(
           all
@@ -223,6 +237,7 @@ it.skipIf(process.platform === "win32")(
         )
         .all(prompt.sessionId, prompt.sessionId);
       const text = parts.map((row) => row.data).join("\n");
+      expect(text).toContain("moved to the background automatically");
       expect(text).toContain(
         "Background task capacity reached (2/2 tasks for this owner)",
       );

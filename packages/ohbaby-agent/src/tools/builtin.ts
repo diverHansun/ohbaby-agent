@@ -1,5 +1,9 @@
 import type { Tool } from "../core/tool-scheduler/index.js";
-import { createBashTool, type BashShell, type SpawnCommand } from "./bash.js";
+import {
+  createBashTool,
+  type BashShell,
+  type BashToolOptions,
+} from "./bash.js";
 import { createEditTool } from "./edit.js";
 import { createGlobTool } from "./glob.js";
 import { createGrepTool } from "./grep.js";
@@ -22,9 +26,10 @@ import {
 } from "./shell-job-registry.js";
 import { Shell } from "../shell/index.js";
 
-export interface BuiltinToolsOptions {
-  readonly shell?: BashShell;
-  readonly spawn?: SpawnCommand;
+export interface BuiltinToolsOptions extends Pick<
+  BashToolOptions,
+  "autoBackground" | "defaultForegroundWaitMs" | "shell" | "spawn"
+> {
   readonly searchProvider?: WebToolsOptions;
   readonly todoStore?: TodoStore;
   readonly todoToolOptions?: TodoToolOptions;
@@ -52,6 +57,8 @@ export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
     ...createTodoTools(todoStore, options.todoToolOptions),
     ...createWebTools(options.searchProvider),
     createBashTool({
+      autoBackground: options.autoBackground,
+      defaultForegroundWaitMs: options.defaultForegroundWaitMs,
       registry: shellJobRegistry,
       shell: options.shell,
       spawn: options.spawn,

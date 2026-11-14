@@ -73,13 +73,19 @@ describe("authorized shell job reads", () => {
   it("isolates roots and binds cursor filters without treating the cursor as authority", async () => {
     const { store, reader } = await setup();
     await store.insert(
-      shellJobFixture({ jobId: "second", createdAt: 5, startedAt: 5 }),
+      shellJobFixture({
+        jobId: "second",
+        createdAt: 5,
+        startedAt: 5,
+        promotedAt: 8,
+      }),
     );
     const first = await reader.list({ rootSessionId: "s", limit: 1 });
     expect(first.rows.map((row) => row.jobId)).toEqual(["second"]);
     expect(first.rows[0]).toMatchObject({
       managedByCurrentBackend: false,
       canStop: false,
+      promotedAt: 8,
     });
     expect(first.rows[0]).not.toHaveProperty("ownerStartToken");
     expect(first.rows[0]).not.toHaveProperty("pid");

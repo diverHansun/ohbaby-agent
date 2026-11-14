@@ -7,6 +7,7 @@ import {
 } from "./shell-job-notice.js";
 import {
   InMemoryShellJobStore,
+  ShellJobCapacityError,
   type ShellJobStore,
   type ShellJobRecord,
   type ShellJobPatch,
@@ -44,8 +45,7 @@ import {
   ToolParameterError,
 } from "./utils/params.js";
 
-export const DEFAULT_SHELL_JOB_TIMEOUT_MS = 120_000;
-export const MAX_SHELL_JOB_TIMEOUT_MS = 600_000;
+export const MAX_TASK_OUTPUT_WAIT_MS = 600_000;
 export const DEFAULT_TASK_OUTPUT_WAIT_MS = 30_000;
 export const OUTPUT_CAPTURE_CHAR_LIMIT = DEFAULT_OUTPUT_TOKEN_LIMIT * 4 + 1;
 export const SHELL_JOB_TERMINATION_GRACE_MS = 1_000;
@@ -140,7 +140,9 @@ interface ShellJob {
   foregroundObserved: boolean;
   outputComplete: boolean | null;
   stopReason: ShellJobStopReason | null;
-  readonly background: boolean;
+  background: boolean;
+  promotedAt: number | null;
+  readonly timeoutMs: number | null;
   releaseComplete: boolean;
   releaseTask?: Promise<void>;
   readonly owner?: ToolExecutionOwner;
@@ -215,7 +217,7 @@ function appendHead(
 
 function emptyOutputMessage(job: ShellJob): string {
   if (job.error) {
-    return `Command failed to start: ${job.error}`;
+    return `Command error: ${job.error}`;
   }
   switch (job.status) {
     case "running":
@@ -237,6 +239,13 @@ function renderOutput(job: ShellJob): {
   readonly output: string;
   readonly truncated: boolean;
 } {
+  if (job.background) {
+    const tail = new TextDecoder("utf-8")
+      .decode(job.tail, { stream: true })
+      .trimEnd();
+    const truncated = job.truncated || job.outputBytes > job.tail.length;
+    return { output: tail || emptyOutputMessage(job), truncated };
+  }
   if (job.captureMode === "head") {
     const combined = [job.stdout.trimEnd(), job.stderr.trimEnd()]
       .filter((part) => part.length > 0)
@@ -418,6 +427,7 @@ export class ShellJobRegistry {
       messageId: owner?.messageId ?? null,
       callId: owner?.callId ?? null,
       mode: input.background ? "background" : "foreground",
+      promotedAt: null,
       command: text("command") ?? "",
       description: text("description") ?? null,
       cwd: text("cwd") ?? "",
@@ -535,6 +545,8 @@ export class ShellJobRegistry {
       outputComplete: null,
       stopReason: null,
       background: input.background ?? false,
+      promotedAt: null,
+      timeoutMs: input.timeoutMs,
       releaseComplete: false,
       owner: input.owner,
       release: input.release,
@@ -576,6 +588,7 @@ export class ShellJobRegistry {
       (stream: "stdout" | "stderr") =>
       (chunk: unknown): void => {
         this.capture(job, chunk);
+        if (job.background) return;
         // Tail capture interleaves both streams; head capture keeps them apart.
         const target = job.captureMode === "tail" ? "output" : stream;
         const next =
@@ -856,6 +869,133 @@ export class ShellJobRegistry {
         for (const remove of removers) remove();
       },
     };
+  }
+
+  /** Wait belongs to this invocation; the process deadline remains with the job. */
+  async waitForForeground(
+    jobId: string,
+    sessionId: string,
+    input: {
+      readonly waitMs?: number;
+      readonly signal: AbortSignal;
+      readonly onBackground: () => void;
+    },
+    contextScopeId?: string,
+  ): Promise<ShellJobSnapshot> {
+    const job = this.jobs.get(jobId);
+    if (!job) return this.waitForTerminal(jobId, sessionId, contextScopeId);
+    this.getOwnedJob(jobId, sessionId, contextScopeId);
+    const abort = (): void => {
+      if (!job.background) this.terminate(job, "cancelled", "user");
+    };
+    const detach = (): void => {
+      input.signal.removeEventListener("abort", abort);
+      input.onBackground();
+    };
+    input.signal.addEventListener("abort", abort, { once: true });
+    if (input.signal.aborted) abort();
+    try {
+      if (input.waitMs !== undefined) {
+        const waitUntil = job.startedAt + input.waitMs;
+        while (job.status === "running" && !job.exited) {
+          const remaining = waitUntil - Date.now();
+          if (remaining <= 0) break;
+          await this.output(
+            jobId,
+            sessionId,
+            { block: true, waitMs: remaining },
+            contextScopeId,
+          );
+        }
+        if (await this.promote(job, input.signal, detach))
+          return this.snapshot(job);
+      }
+      return await this.waitForTerminal(jobId, sessionId, contextScopeId);
+    } finally {
+      if (!job.background) input.signal.removeEventListener("abort", abort);
+    }
+  }
+
+  private async promote(
+    job: ShellJob,
+    signal: AbortSignal,
+    onCommitted: () => void,
+  ): Promise<boolean> {
+    const prepare = (): ShellJobPatch | null => {
+      // Exit precedes close/output drainage; it is already too late to detach.
+      if (
+        job.status !== "running" ||
+        job.exited ||
+        job.closed ||
+        job.terminationStarted
+      )
+        return null;
+      if (signal.aborted) {
+        this.terminate(job, "cancelled", "user");
+        return null;
+      }
+      if (
+        this.admissionClosed ||
+        (job.owner && this.options.admitsOwner?.(job.owner) === false)
+      ) {
+        this.terminate(job, "cancelled", "owner-ended");
+        return null;
+      }
+      const now = Date.now();
+      if (job.timeoutMs !== null && now >= job.startedAt + job.timeoutMs) {
+        this.terminate(job, "timed_out");
+        return null;
+      }
+      return {
+        promotedAt: now,
+        outputTail: this.tailText(job),
+        outputBytes: job.outputBytes,
+        outputCheckpointAt: now,
+        ...this.outputFilePatch(job),
+        noticeState: null,
+      };
+    };
+    if (prepare() === null) return false;
+    try {
+      await this.refreshLocalOwner(job.sessionId, job.contextScopeId ?? null);
+      await this.options.refreshOwner?.(
+        job.sessionId,
+        job.contextScopeId ?? null,
+      );
+      const maxBackgroundJobs =
+        (await this.options.backgroundLimit?.(job.owner)) ??
+        (job.contextScopeId ? 5 : 10);
+      let promotedAt: number | null = null;
+      const promotion = job.persist.then(() =>
+        this.store.promote(job.jobId, {
+          maxBackgroundJobs,
+          prepare: () => {
+            const patch = prepare();
+            promotedAt = patch?.promotedAt ?? null;
+            return patch;
+          },
+          onCommitted: () => {
+            job.background = true;
+            job.promotedAt = promotedAt;
+            onCommitted();
+          },
+        }),
+      );
+      job.persist = promotion.then(() => undefined);
+      if (!(await promotion)) return false;
+      this.scheduleCheckpoint();
+      return true;
+    } catch (error) {
+      job.error = error instanceof Error ? error.message : String(error);
+      this.terminate(
+        job,
+        "cancelled",
+        error instanceof ShellJobCapacityError
+          ? "capacity-limit"
+          : "internal-error",
+      );
+      return false;
+    }
   }
 
   async waitForTerminal(
@@ -1305,6 +1445,10 @@ export class ShellJobRegistry {
   private snapshotRecord(record: ShellJobRecord): ShellJobSnapshot {
     if (!record.status)
       throw new ToolParameterError(`Shell job "${record.jobId}" is starting.`);
+    const truncated =
+      record.outputTruncated ||
+      (record.outputTail !== null &&
+        record.outputBytes > Buffer.byteLength(record.outputTail, "utf8"));
     const output =
       record.outputTail ??
       (record.mode === "foreground"
@@ -1343,12 +1487,19 @@ export class ShellJobRegistry {
       jobId: record.jobId,
       status: record.status,
       output,
-      truncated: record.outputTruncated,
+      truncated,
       exitCode: record.exitCode,
       signal: record.signal as NodeJS.Signals | null,
       metadata: {
         jobId: record.jobId,
         mode: record.mode,
+        truncated,
+        promotedAt: record.promotedAt,
+        timeoutMs: record.timeoutMs,
+        deadline:
+          record.startedAt !== null && record.timeoutMs !== null
+            ? record.startedAt + record.timeoutMs
+            : null,
         status: record.status,
         cleanup: record.cleanup,
         stopReason: record.stopReason,
@@ -1389,6 +1540,9 @@ export class ShellJobRegistry {
     const metadata = {
       ...job.metadata,
       mode: job.background ? "background" : "foreground",
+      promotedAt: job.promotedAt,
+      timeoutMs: job.timeoutMs,
+      deadline: job.timeoutMs === null ? null : job.startedAt + job.timeoutMs,
       outputBytes: job.outputBytes,
       startedAt: job.startedAt,
       outputComplete: job.outputComplete,
@@ -1680,7 +1834,7 @@ export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
           job_id: { type: "string" },
           wait_ms: {
             default: DEFAULT_TASK_OUTPUT_WAIT_MS,
-            maximum: MAX_SHELL_JOB_TIMEOUT_MS,
+            maximum: MAX_TASK_OUTPUT_WAIT_MS,
             minimum: 1,
             type: "integer",
           },
@@ -1700,7 +1854,7 @@ export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
         const waitMs = getNumberParam(params, "wait_ms", {
           defaultValue: DEFAULT_TASK_OUTPUT_WAIT_MS,
           integer: true,
-          max: MAX_SHELL_JOB_TIMEOUT_MS,
+          max: MAX_TASK_OUTPUT_WAIT_MS,
           min: 1,
         });
         return snapshotResult(
@@ -1719,7 +1873,7 @@ export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
         );
       },
     },
-    { capacity: "control", plan: () => [] },
+    { shellJobController: registry, capacity: "control", plan: () => [] },
   );
 }
 
@@ -1748,6 +1902,6 @@ export function createTaskKillTool(registry: ShellJobRegistry): Tool {
         );
       },
     },
-    { capacity: "control", plan: () => [] },
+    { shellJobController: registry, capacity: "control", plan: () => [] },
   );
 }

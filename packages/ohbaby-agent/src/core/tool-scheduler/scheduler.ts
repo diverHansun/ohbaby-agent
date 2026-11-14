@@ -20,10 +20,7 @@ import { ShellPreflightError } from "../../shell/preflight.js";
 import type { ShellAnalysisResult } from "../../shell/analysis/types.js";
 import type { BashPreparation } from "../../shell/execution.js";
 import { canonicalizePathTarget } from "../../utils/path-canonicalize.js";
-import {
-  DEFAULT_TOOL_SCHEDULER_CONFIG,
-  SUBAGENT_DISABLED_TOOLS,
-} from "./constants.js";
+import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
 import { ConcurrencyController, type CapacityLease } from "./concurrency.js";
 import {
   acquireResources,
@@ -35,7 +32,7 @@ import {
 } from "./resources.js";
 import { trustedToolAdmission } from "./tool-admission.js";
 import { ToolSchedulerEvent } from "./events.js";
-import { createToolRegistry } from "./registry.js";
+import { createToolRegistry, isToolAvailableToAgent } from "./registry.js";
 import type {
   AgentToolConfig,
   BatchToolCallRequest,
@@ -81,6 +78,7 @@ interface PreparedCall extends ScheduledCall {
   readonly tool: Tool;
   readonly controller: AbortController;
   readonly cleanup: () => void;
+  readonly canManageBackgroundShellJobs?: boolean;
   permissionContext: ToolPermissionContext;
   owner: ToolExecutionOwner;
   permissionSnapshot?: PermissionAdmissionSnapshot;
@@ -596,23 +594,6 @@ function trustedRootFromExternalPath(pathFact: PreflightExternalPath): string {
   return path.resolve(withoutTrailingSeparator);
 }
 
-function isEnabledByAgentConfig(
-  toolName: string,
-  tools: Record<string, boolean> | undefined,
-): boolean {
-  if (!tools) {
-    return true;
-  }
-  if (Object.prototype.hasOwnProperty.call(tools, toolName)) {
-    return tools[toolName];
-  }
-  if (Object.prototype.hasOwnProperty.call(tools, "*")) {
-    return tools["*"];
-  }
-
-  return true;
-}
-
 export function createToolScheduler(
   options: ToolSchedulerOptions,
 ): ToolScheduler {
@@ -881,10 +862,9 @@ export function createToolScheduler(
     const abortPromise = new Promise<never>((_resolve, reject) => {
       rejectAbort = reject;
     });
-    const toolOwnsCleanup = trustedToolAdmission(tool)?.cleanupOwner === "tool";
-    const detachedCleanup =
-      toolOwnsCleanup &&
-      trustedToolAdmission(tool)?.detachedCleanup?.(params) === true;
+    const admission = trustedToolAdmission(tool);
+    const toolOwnsCleanup = admission?.cleanupOwner === "tool";
+    let backgroundOwnsCleanup = false;
     const onAbort = (): void => {
       if (!settled && !cleaning && !toolOwnsCleanup) {
         cleaning = true;
@@ -931,10 +911,20 @@ export function createToolScheduler(
           signal: controller.signal,
           subscribeSteer:
             toolRunId && subscribeSteer
-              ? (wake) => subscribeSteer(toolRunId, wake, controller.signal)
+              ? (wake): Promise<() => void> =>
+                  subscribeSteer(toolRunId, wake, controller.signal)
               : undefined,
           resourceLease,
           owner,
+          canManageBackgroundShellJobs: prepared.canManageBackgroundShellJobs,
+          detachCleanupOwnership:
+            toolOwnsCleanup && admission.bashBackground
+              ? (): void => {
+                  backgroundOwnsCleanup = true;
+                  // Only the scheduler's environment reference is still owned by the run.
+                  cleanup.report("confirmed");
+                }
+              : undefined,
           reportCleanupError: toolOwnsCleanup
             ? (error): void => {
                 const fact: ToolExecutionFact = {
@@ -949,7 +939,8 @@ export function createToolScheduler(
             : undefined,
           reportCleanup: toolOwnsCleanup
             ? (state): void => {
-                if (!detachedCleanup) cleanup.report(state);
+                if (backgroundOwnsCleanup) return;
+                cleanup.report(state);
                 if (startPublished)
                   publish({ phase: "cleanup", cleanup: state });
                 else earlyCleanup.push(state);
@@ -1842,24 +1833,26 @@ export function createToolScheduler(
     return null;
   }
 
-  async function isToolAvailableForRequest(
-    request: ToolCallRequest,
-    tool: Tool,
-  ): Promise<boolean> {
-    const agentConfig = await options.agentTools?.getAgentConfig(
-      request.agentName,
-    );
-    const tools = normalizeAgentToolsConfig(agentConfig?.tools);
-    if (
-      !isEnabledByAgentConfig(request.toolName, tools) &&
-      !(tool.source === "mcp" && tools?.select_tools === true)
-    ) {
-      return false;
-    }
-    return (
-      request.isSubagent !== true ||
-      !SUBAGENT_DISABLED_TOOLS.has(request.toolName)
-    );
+  async function configuredToolsFor(
+    agentName: string | undefined,
+  ): Promise<Record<string, boolean> | undefined> {
+    const agentConfig = await options.agentTools?.getAgentConfig(agentName);
+    return normalizeAgentToolsConfig(agentConfig?.tools);
+  }
+
+  function canManageBackgroundShellJobs(
+    jobRegistry: object,
+    tools: Record<string, boolean> | undefined,
+    isSubagent: boolean | undefined,
+  ): boolean {
+    return ["task_output", "task_kill"].every((name) => {
+      const tool = registry.get(name);
+      return (
+        tool !== undefined &&
+        trustedToolAdmission(tool)?.shellJobController === jobRegistry &&
+        isToolAvailableToAgent(tool, tools, isSubagent)
+      );
+    });
   }
 
   async function createPermissionContext(
@@ -2050,11 +2043,11 @@ export function createToolScheduler(
           }),
         };
       }
-      const available = await waitForAbortable(
-        () => isToolAvailableForRequest(request, tool),
+      const configuredTools = await waitForAbortable(
+        () => configuredToolsFor(request.agentName),
         controller.signal,
       );
-      if (!available) {
+      if (!isToolAvailableToAgent(tool, configuredTools, request.isSubagent)) {
         transition(call, "rejected");
         return {
           result: makeResult(call, "rejected", {
@@ -2077,11 +2070,19 @@ export function createToolScheduler(
           }),
         };
       }
+      const bashBackground = trustedToolAdmission(tool)?.bashBackground;
       transferred = true;
       return {
         prepared: {
           call,
           category,
+          canManageBackgroundShellJobs:
+            bashBackground &&
+            canManageBackgroundShellJobs(
+              bashBackground.registry,
+              configuredTools,
+              request.isSubagent,
+            ),
           controller,
           cleanup,
           index,
@@ -2551,13 +2552,25 @@ export function createToolScheduler(
     },
 
     async getAvailableTools(input = {}): Promise<ToolDefinition[]> {
-      const agentConfig = await options.agentTools?.getAgentConfig(
-        input.agentName,
-      );
-      return registry.getAvailableTools({
-        tools: normalizeAgentToolsConfig(agentConfig?.tools),
-        isSubagent: input.isSubagent,
-      });
+      const tools = await configuredToolsFor(input.agentName);
+      return registry
+        .getAvailableTools({ tools, isSubagent: input.isSubagent })
+        .map((definition) => {
+          const tool = registry.get(definition.name);
+          const bashBackground =
+            tool && trustedToolAdmission(tool)?.bashBackground;
+          if (!bashBackground) return definition;
+          return {
+            ...definition,
+            description: bashBackground.describe(
+              canManageBackgroundShellJobs(
+                bashBackground.registry,
+                tools,
+                input.isSubagent,
+              ),
+            ),
+          };
+        });
     },
 
     execute,

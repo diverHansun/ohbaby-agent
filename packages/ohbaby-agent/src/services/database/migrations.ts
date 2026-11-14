@@ -732,4 +732,8 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       CREATE INDEX idx_current_run_input_source ON current_run_input(session_id,source_id);
     `,
   },
+  {
+    version: "033_shell_job_promoted_at",
+    sql: `ALTER TABLE shell_job ADD COLUMN promoted_at INTEGER;`,
+  },
 ];

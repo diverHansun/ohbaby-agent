@@ -1972,12 +1972,12 @@ it.each(["once", "reject"] as const)(
 );
 
 it.each([false, true])(
-  "persists real Bash cleanup and keeps background=%s dispatch result stable after lifecycle end",
+  "keeps background=%s dispatch stable and persists cleanup only for foreground calls",
   async (background) => {
     const directory = await mkdtemp(join(tmpdir(), "bash-delivery-"));
     const { createBashTool } =
       await import("../../../packages/ohbaby-agent/src/tools/bash.js");
-    const { ShellJobRegistry } =
+    const { ShellJobRegistry, createTaskOutputTool, createTaskKillTool } =
       await import("../../../packages/ohbaby-agent/src/tools/shell-job-registry.js");
     const { Shell } =
       await import("../../../packages/ohbaby-agent/src/shell/index.js");
@@ -2003,6 +2003,8 @@ it.each([false, true])(
       }),
     });
     scheduler.register(createBashTool({ registry }));
+    scheduler.register(createTaskOutputTool(registry));
+    scheduler.register(createTaskKillTool(registry));
     const manager = createMessageManager({
       bus,
       store: createDatabaseMessageStore(),
@@ -2095,7 +2097,9 @@ it.each([false, true])(
       );
       await vi.waitFor(async () => {
         const latest = await readTool();
-        expect(latest?.metadata?.execution?.cleanup).toBe("confirmed");
+        expect(latest?.metadata?.execution?.cleanup).toBe(
+          background ? undefined : "confirmed",
+        );
       });
       expect((await readTool())?.state).toEqual(dispatch);
       expect(results).toEqual(["bash"]);

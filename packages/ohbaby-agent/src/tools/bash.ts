@@ -2,6 +2,11 @@ import { isShellTrustedRootKind } from "../sandbox/trusted-roots.js";
 import { mergeChildProxyEnvironment } from "../utils/network-proxy/child-environment.js";
 import { prepareToolOutputDirectory } from "../services/session-storage.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
+import {
+  DEFAULT_AUTO_BACKGROUND,
+  DEFAULT_FOREGROUND_WAIT_MS,
+  MAX_FOREGROUND_WAIT_MS,
+} from "../config/tools/shell/index.js";
 import type {
   ChildProcess,
   SpawnOptionsWithoutStdio,
@@ -23,8 +28,6 @@ import type { BashPreparation } from "../shell/execution.js";
 import { preflightSandboxShellAnalysis } from "../sandbox/preflight.js";
 import { resolveCommandContext } from "./utils/context.js";
 import {
-  DEFAULT_SHELL_JOB_TIMEOUT_MS,
-  MAX_SHELL_JOB_TIMEOUT_MS,
   ShellJobRegistry,
   type ShellJobRegistryOptions,
   type ShellJobSnapshot,
@@ -35,8 +38,8 @@ import {
   ToolParameterError,
 } from "./utils/params.js";
 
-const DEFAULT_TIMEOUT_MS = DEFAULT_SHELL_JOB_TIMEOUT_MS;
-const MAX_TIMEOUT_MS = MAX_SHELL_JOB_TIMEOUT_MS;
+const DEFAULT_FOREGROUND_TIMEOUT_MS = 120_000;
+const MAX_FOREGROUND_TIMEOUT_MS = 600_000;
 const MAX_BACKGROUND_TIMEOUT_MS = 86_400_000;
 
 export interface BashShell {
@@ -53,6 +56,8 @@ export type SpawnCommand = (
 ) => ChildProcess;
 
 export interface BashToolOptions {
+  readonly autoBackground?: boolean;
+  readonly defaultForegroundWaitMs?: number;
   readonly preflight?: typeof preflightShellCommand;
   readonly shell?: BashShell;
   readonly spawn?: SpawnCommand;
@@ -104,6 +109,10 @@ function throwIfCancelled(signal: AbortSignal): void {
 }
 
 export function createBashTool(options: BashToolOptions = {}): Tool {
+  const autoBackgroundEnabled =
+    options.autoBackground ?? DEFAULT_AUTO_BACKGROUND;
+  const defaultWaitMs =
+    options.defaultForegroundWaitMs ?? DEFAULT_FOREGROUND_WAIT_MS;
   const runPreflight = options.preflight ?? preflightShellCommand;
   const shell = options.shell ?? Shell;
   const spawn = options.spawn ?? spawnProcess;
@@ -175,13 +184,26 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
     interpreterDescription = `unavailable (${error instanceof Error ? error.message : String(error)})`;
   }
 
+  function describe(canManageBackground: boolean): string {
+    const commandDescription = `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged with no interpreter fallback after preparation. On Windows, select Git Bash only with a usable native full SHELL path. WSL launchers are unsupported.`;
+    const foregroundTimeout = `For pure foreground execution, timeout defaults to ${String(DEFAULT_FOREGROUND_TIMEOUT_MS)}ms and has a maximum of ${String(MAX_FOREGROUND_TIMEOUT_MS)}ms.`;
+    if (!canManageBackground)
+      return `${commandDescription} This role can only run foreground commands. Background task management is unavailable. Omit run_in_background, auto_background and wait_ms. ${foregroundTimeout}`;
+    const backgroundDescription = `Set run_in_background=true to start a background job immediately. Completion is reported automatically. Do not poll or sleep for completion. Use task_output when you need the job's output and task_kill to stop it. Background jobs end when their managing service stops.`;
+    const automaticDescription = autoBackgroundEnabled
+      ? `By default, a foreground command still running after ${String(defaultWaitMs)}ms moves to the background and returns its job_id. Use wait_ms to set this wait for one call, or set auto_background=false for pure foreground execution. Omit both options when starting an explicit background job.`
+      : "Automatic backgrounding is disabled. Omit wait_ms and leave auto_background unset or false.";
+    return `${commandDescription} ${backgroundDescription} ${automaticDescription} timeout is the process lifetime in milliseconds and its deadline stays fixed if the command moves to the background. Jobs allowed to run in the background have no default timeout and accept up to ${String(MAX_BACKGROUND_TIMEOUT_MS)}ms. ${foregroundTimeout}`;
+  }
+
   return withToolAdmission(
     {
       name: "bash",
-      description: `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged; no interpreter fallback occurs after preparation. On Windows, select Git Bash only with a usable native full SHELL path; WSL launchers are unsupported. Set run_in_background=true to return a job_id immediately. Completion is reported automatically; do not poll or sleep for it. Background tasks end when their managing service stops. timeout is the maximum lifetime of the shell job for both foreground and background commands; foreground defaults to 120000ms, background has no default timeout, the foreground maximum is 600000ms, and the background maximum is 86400000ms.`,
+      description: describe(true),
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
+          auto_background: { type: "boolean" },
           command: { type: "string" },
           description: { type: "string" },
           timeout: {
@@ -190,6 +212,11 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             type: "integer",
           },
           run_in_background: { default: false, type: "boolean" },
+          wait_ms: {
+            maximum: MAX_FOREGROUND_WAIT_MS,
+            minimum: 1,
+            type: "integer",
+          },
         },
         required: ["command"],
         type: "object",
@@ -199,22 +226,70 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
       timeoutOwner: "tool",
       async execute(params, context): Promise<ToolExecutionResult> {
         const command = getStringParam(params, "command");
-        const runInBackground = params.run_in_background ?? false;
+        const { run_in_background: runInBackground = false } = params;
         if (typeof runInBackground !== "boolean") {
           throw new ToolParameterError(
             'Expected parameter "run_in_background" to be a boolean.',
           );
         }
+        const requestedAuto = params.auto_background;
+        if (requestedAuto !== undefined && typeof requestedAuto !== "boolean")
+          throw new ToolParameterError(
+            'Expected parameter "auto_background" to be a boolean.',
+          );
+        const hasWait = params.wait_ms !== undefined;
+        if (runInBackground && (requestedAuto !== undefined || hasWait))
+          throw new ToolParameterError(
+            'Parameters "auto_background" and "wait_ms" cannot be used with "run_in_background=true".',
+          );
+        const canManageBackground =
+          context.canManageBackgroundShellJobs ?? true;
+        if (
+          !canManageBackground &&
+          (runInBackground || requestedAuto === true || hasWait)
+        )
+          throw new ToolParameterError(
+            "This role lacks background task management. Run Bash in the foreground.",
+          );
+        if (!autoBackgroundEnabled && (requestedAuto === true || hasWait))
+          throw new ToolParameterError(
+            'Automatic backgrounding is disabled in shell configuration. Omit "wait_ms" and leave "auto_background" unset or false.',
+          );
+        const canAutoBackground =
+          !runInBackground &&
+          canManageBackground &&
+          autoBackgroundEnabled &&
+          requestedAuto !== false;
+        if (hasWait && !canAutoBackground)
+          throw new ToolParameterError(
+            'Parameter "wait_ms" requires automatic backgrounding.',
+          );
+        if (params.wait_ms === null)
+          throw new ToolParameterError(
+            'Expected parameter "wait_ms" to be an integer.',
+          );
+        if (params.timeout === null)
+          throw new ToolParameterError(
+            'Expected parameter "timeout" to be an integer.',
+          );
+        const waitMs = canAutoBackground
+          ? getNumberParam(params, "wait_ms", {
+              defaultValue: defaultWaitMs,
+              integer: true,
+              max: MAX_FOREGROUND_WAIT_MS,
+              min: 1,
+            })
+          : undefined;
+        const canRunInBackground = runInBackground || canAutoBackground;
         const timeout =
-          runInBackground &&
-          (params.timeout === undefined || params.timeout === null)
+          canRunInBackground && params.timeout === undefined
             ? null
             : getNumberParam(params, "timeout", {
-                defaultValue: DEFAULT_TIMEOUT_MS,
+                defaultValue: DEFAULT_FOREGROUND_TIMEOUT_MS,
                 integer: true,
-                max: runInBackground
+                max: canRunInBackground
                   ? MAX_BACKGROUND_TIMEOUT_MS
-                  : MAX_TIMEOUT_MS,
+                  : MAX_FOREGROUND_TIMEOUT_MS,
                 min: 1,
               });
         throwIfCancelled(context.signal);
@@ -267,6 +342,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             signal: context.signal,
             onReserved: () => {
               releaseOwnership.registry = true;
+              if (runInBackground) context.detachCleanupOwnership?.();
             },
             owner: context.owner ?? {
               sessionId: context.sessionId,
@@ -310,55 +386,66 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           if (!releaseOwnership.registry) await release?.();
           throw error;
         }
-        // Cancellation may have happened synchronously during registration/spawn.
-        if (!runInBackground && context.signal.aborted) {
-          await registry.kill(
-            snapshot.jobId,
-            context.sessionId,
-            context.contextScopeId,
-            "user",
-          );
-        }
         if (runInBackground) {
           return { metadata: snapshot.metadata, output: snapshot.output };
         }
 
-        const abortHandler = (): void => {
-          void registry.kill(
-            snapshot.jobId,
-            context.sessionId,
-            context.contextScopeId,
-            "user",
-          );
-        };
-        context.signal.addEventListener("abort", abortHandler, { once: true });
-        if (context.signal.aborted) abortHandler();
-        try {
-          const result = await registry.waitForTerminal(
-            snapshot.jobId,
-            context.sessionId,
-            context.contextScopeId,
-          );
+        const result = await registry.waitForForeground(
+          snapshot.jobId,
+          context.sessionId,
+          {
+            waitMs,
+            signal: context.signal,
+            onBackground: () => context.detachCleanupOwnership?.(),
+          },
+          context.contextScopeId,
+        );
+        const { outputBytes } = result.metadata;
+        const outputSuffix =
+          typeof outputBytes === "number" && outputBytes > 0
+            ? `\n\n${result.output}`
+            : "";
+        if (result.metadata.mode === "background") {
+          const summary = command.trim().replace(/\s+/gu, " ");
+          const preview =
+            summary.length > 120 ? `${summary.slice(0, 120)}…` : summary;
+          const deadline = result.metadata.deadline;
+          const timeLimit =
+            typeof deadline === "number"
+              ? ` Hard deadline ${new Date(deadline).toISOString()}.`
+              : " No hard deadline.";
+          const receipt = `Shell job ${result.jobId} moved to the background automatically. Command ${JSON.stringify(preview)}. Status ${result.status}.${timeLimit} Completion is reported separately.`;
           return {
             metadata: result.metadata,
-            output: result.output,
-            executionOutcome:
-              result.status === "timed_out"
-                ? "timed-out"
-                : result.status === "cancelled"
-                  ? "cancelled"
-                  : result.status === "failed"
-                    ? "error"
-                    : "success",
+            output: `${receipt}${outputSuffix}`,
           };
-        } finally {
-          context.signal.removeEventListener("abort", abortHandler);
         }
+        const { stopReason, cleanup, error } = result.metadata;
+        const stopMessage =
+          stopReason === "capacity-limit"
+            ? "Cancellation requested because the background job limit was reached."
+            : stopReason === "internal-error"
+              ? `Cancellation requested because the move to the background could not be saved.${typeof error === "string" ? ` ${error}` : ""}`
+              : undefined;
+        return {
+          metadata: result.metadata,
+          output: stopMessage
+            ? `${stopMessage} Process cleanup ${typeof cleanup === "string" ? cleanup : "unconfirmed"}.${outputSuffix}`
+            : result.output,
+          executionOutcome:
+            result.status === "timed_out"
+              ? "timed-out"
+              : result.status === "cancelled"
+                ? "cancelled"
+                : result.status === "failed"
+                  ? "error"
+                  : "success",
+        };
       },
     },
     {
       cleanupOwner: "tool",
-      detachedCleanup: (params) => params.run_in_background === true,
+      bashBackground: { registry, describe },
       prepareShell,
     },
   );

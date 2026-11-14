@@ -44,6 +44,7 @@ export const schema = {
     goalId: "goal_id",
     createdAt: "created_at",
     startedAt: "started_at",
+    promotedAt: "promoted_at",
     endedAt: "ended_at",
     settledAt: "settled_at",
     resultReadyAt: "result_ready_at",

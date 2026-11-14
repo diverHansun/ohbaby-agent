@@ -16,6 +16,7 @@ import {
   createTaskKillTool,
   createTaskOutputTool,
 } from "./shell-job-registry.js";
+import { InMemoryShellJobStore } from "./shell-job-store.js";
 
 class Child extends EventEmitter {
   readonly pid = 424242;
@@ -33,8 +34,10 @@ class Child extends EventEmitter {
 function fixture(
   options: {
     createJobId?: () => string;
+    defaultForegroundWaitMs?: number;
     stdinEndError?: Error;
     onExecutionFact?: (fact: ToolExecutionFact) => void;
+    store?: InMemoryShellJobStore;
   } = {},
 ): {
   scheduler: ReturnType<typeof createToolScheduler>;
@@ -59,6 +62,7 @@ function fixture(
   );
   const registry = new ShellJobRegistry({
     createJobId: options.createJobId,
+    store: options.store,
     killTree,
     probeTree: (child): "stopped" | "running" =>
       (child as unknown as Child).stopped ? "stopped" : "running",
@@ -67,6 +71,10 @@ function fixture(
   const bus = createBus();
   const scheduler = createToolScheduler({
     bus,
+    agentTools: {
+      getAgentConfig: (name) =>
+        name === "foreground-only" ? { tools: { task_kill: false } } : {},
+    },
     permissionState: createPermissionState({
       bus,
       initialLevel: "full-access",
@@ -86,6 +94,7 @@ function fixture(
   });
   const bash = createBashTool({
     registry,
+    defaultForegroundWaitMs: options.defaultForegroundWaitMs,
     shell: { acceptable: () => "/bin/sh", killTree },
     preflight: () => Promise.resolve({ cdTargets: [], resolvedPaths: [] }),
     spawn: () => {
@@ -149,6 +158,172 @@ function fixture(
 afterEach(() => vi.useRealTimers());
 
 describe("Bash cleanup through scheduler", () => {
+  it("advertises and enforces foreground-only execution for roles missing a task control", async () => {
+    const f = fixture();
+    try {
+      const role = { agentName: "foreground-only", isSubagent: true };
+      const tools = await f.scheduler.getAvailableTools(role);
+      expect(tools.find((tool) => tool.name === "bash")?.description).toContain(
+        "only run foreground commands",
+      );
+      expect(tools.some((tool) => tool.name === "task_kill")).toBe(false);
+      for (const [index, params] of [
+        { run_in_background: true },
+        { auto_background: true },
+        { wait_ms: 10 },
+      ].entries()) {
+        const result = await f.scheduler.execute(
+          f.request(`unsupported-${String(index)}`, {
+            ...role,
+            params: { command: "echo fixture", ...params },
+          }),
+        );
+        expect(result.error?.message).toContain("background task management");
+        expect(f.children).toHaveLength(0);
+      }
+      const plain = f.scheduler.execute(f.request("plain", role));
+      await expect.poll(() => f.children.length).toBe(1);
+      f.children[0].finish();
+      expect((await plain).metadata).toMatchObject({
+        mode: "foreground",
+        timeoutMs: 120_000,
+      });
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it("requires the registered controls for Bash's own registry", async () => {
+    const f = fixture();
+    try {
+      f.scheduler.register({
+        name: "task_kill",
+        description: "Unrelated tool with the same name",
+        source: "builtin",
+        parametersJsonSchema: {},
+        execute: () => ({ output: "Unrelated result" }),
+      });
+      const tools = await f.scheduler.getAvailableTools();
+      expect(tools.find((tool) => tool.name === "bash")?.description).toContain(
+        "only run foreground commands",
+      );
+      const result = await f.scheduler.execute(
+        f.request("unmanaged", {
+          params: { command: "echo fixture", run_in_background: true },
+        }),
+      );
+      expect(result.error?.message).toContain("background task management");
+      expect(f.children).toHaveLength(0);
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it("uses the configured wait, releases the ordinary slot and keeps late cleanup off the launch turn", async () => {
+    const f = fixture({ defaultForegroundWaitMs: 40 });
+    const states: string[] = [];
+    const turn = new AbortController();
+    try {
+      const [launch] = await f.scheduler.executeBatch({
+        calls: [f.request("auto", { signal: turn.signal })],
+        observer: {
+          onCallState: (_request, state) => {
+            if (state.cleanup) states.push(state.cleanup);
+            return Promise.resolve();
+          },
+          onCallSettled: () => Promise.resolve(),
+        },
+      });
+      expect(launch).toMatchObject({
+        status: "success",
+        metadata: {
+          mode: "background",
+          status: "running",
+        },
+      });
+      expect(typeof launch.metadata?.promotedAt).toBe("number");
+      expect(launch.output).toContain("automatically");
+      expect(f.children).toHaveLength(1);
+      expect(f.scheduler.getRunCleanup("run-1").confirmed).toBe(true);
+      turn.abort();
+      expect(f.killTree).not.toHaveBeenCalled();
+      expect(
+        (
+          await f.scheduler.execute(
+            f.request("network", { toolName: "network_probe", params: {} }),
+          )
+        ).status,
+      ).toBe("success");
+      const kill = await f.scheduler.execute(
+        f.request("kill-converted", {
+          runId: "later-run",
+          toolName: "task_kill",
+          params: { job_id: launch.metadata?.jobId },
+        }),
+      );
+      expect(kill.metadata).toMatchObject({
+        status: "cancelled",
+        cleanup: "in-progress",
+      });
+      expect(f.killTree).toHaveBeenCalledTimes(1);
+      const blocked = await f.scheduler.execute(
+        f.request("blocked", { runId: "later-run" }),
+      );
+      expect(blocked.error?.message).toContain("unconfirmed");
+      expect(f.scheduler.getRunCleanup("run-1").confirmed).toBe(true);
+      expect(states).toEqual([]);
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it("keeps the promoted job when Stop arrives before its launch receipt settles", async () => {
+    const store = new InMemoryShellJobStore();
+    const turn = new AbortController();
+    const f = fixture({ defaultForegroundWaitMs: 10, store });
+    let jobId: string | undefined;
+    const unsubscribe = store.subscribe((row) => {
+      if (!jobId && row.mode === "background" && row.promotedAt !== null) {
+        jobId = row.jobId;
+        turn.abort();
+      }
+    });
+    try {
+      const launch = await f.scheduler.execute(
+        f.request("auto-stop", { signal: turn.signal }),
+      );
+      expect(launch.status).toBe("cancelled");
+      if (!jobId) throw new Error("Expected a promoted shell job");
+      expect(store.get(jobId)).toMatchObject({
+        mode: "background",
+        status: "running",
+      });
+      expect(f.killTree).not.toHaveBeenCalled();
+      expect(f.children).toHaveLength(1);
+      await expect
+        .poll(() => f.scheduler.getRunCleanup("run-1").confirmed)
+        .toBe(true);
+      await f.scheduler.execute(
+        f.request("stop-promoted", {
+          runId: "later-run",
+          toolName: "task_kill",
+          params: { job_id: jobId },
+        }),
+      );
+      expect(f.scheduler.getRunCleanup("run-1").confirmed).toBe(true);
+      expect(
+        f.facts.filter(
+          (fact) =>
+            fact.owner.callId === "auto-stop" && fact.phase === "cleanup",
+        ),
+      ).toEqual([]);
+      expect(f.killTree).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+      await f.dispose();
+    }
+  });
+
   it("hands off cancellation before an unresolved kill, errors queued/new source work, and recovers without replay", async () => {
     let resolveSourceWait: (() => void) | undefined;
     const sourceWait = new Promise<void>((resolve) => {

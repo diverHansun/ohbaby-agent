@@ -34,6 +34,7 @@ export function shellJobFixture(
     goalId: null,
     createdAt: 1,
     startedAt: 2,
+    promotedAt: null,
     endedAt: null,
     settledAt: null,
     resultReadyAt: null,

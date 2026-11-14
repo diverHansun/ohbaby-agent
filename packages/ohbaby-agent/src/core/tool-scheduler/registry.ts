@@ -42,14 +42,16 @@ function isEnabledByAgentConfig(
   return true;
 }
 
-function isMcpEnabledByAgentConfig(
-  tool: ToolDefinition,
+export function isToolAvailableToAgent(
+  tool: Pick<Tool, "name" | "source">,
   tools: Record<string, boolean> | undefined,
+  isSubagent: boolean | undefined,
 ): boolean {
-  if (isEnabledByAgentConfig(tool.name, tools)) {
-    return true;
-  }
-  return tool.source === "mcp" && tools?.select_tools === true;
+  return (
+    (isSubagent !== true || !SUBAGENT_DISABLED_TOOLS.has(tool.name)) &&
+    (isEnabledByAgentConfig(tool.name, tools) ||
+      (tool.source === "mcp" && tools?.select_tools === true))
+  );
 }
 
 export function createToolRegistry(): ToolRegistry {
@@ -92,13 +94,10 @@ export function createToolRegistry(): ToolRegistry {
 
     getAvailableTools(input): ToolDefinition[] {
       return Array.from(tools.values())
-        .map(toDefinition)
-        .filter((tool) => isMcpEnabledByAgentConfig(tool, input.tools))
-        .filter(
-          (tool) =>
-            input.isSubagent !== true ||
-            !SUBAGENT_DISABLED_TOOLS.has(tool.name),
-        );
+        .filter((tool) =>
+          isToolAvailableToAgent(tool, input.tools, input.isSubagent),
+        )
+        .map(toDefinition);
     },
 
     list(): ToolDefinition[] {

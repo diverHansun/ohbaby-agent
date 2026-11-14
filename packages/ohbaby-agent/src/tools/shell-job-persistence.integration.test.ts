@@ -1,15 +1,18 @@
 import { ShellJobRecovery } from "./shell-job-recovery.js";
 import { shellJobFixture } from "./fixtures/shell-job.js";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import type { ProcessIdentity } from "../shell/process-identity.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NodeSqliteConnection } from "../services/database/connection.js";
 import {
   closeDatabase,
   getDatabase,
   initDatabase,
 } from "../services/database/index.js";
+import { Shell } from "../shell/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DatabaseShellJobStore,
@@ -24,7 +27,149 @@ afterEach(() => {
   closeDatabase();
 });
 
+function killShellTree(child: ChildProcess): ReturnType<typeof Shell.killTree> {
+  return Shell.killTree(child);
+}
+
+function spawnUntilReleased(releasePath: string): ChildProcess {
+  return spawn(
+    process.execPath,
+    [
+      "-e",
+      `
+const fs = require('node:fs');
+process.stdout.write('durable-tail');
+const deadline = setTimeout(() => process.exit(2), 7000);
+const timer = setInterval(() => {
+  if (!fs.existsSync(process.argv[1])) return;
+  clearInterval(timer);
+  clearTimeout(deadline);
+  process.stdout.write('-done');
+}, 10);
+`,
+      releasePath,
+    ],
+    { detached: true },
+  );
+}
+
 describe("shell job persistence", () => {
+  it.each([
+    ["Stop", "cancelled", "user"],
+    ["hard timeout", "timed_out", "timeout"],
+    ["natural exit", "completed", null],
+  ] as const)(
+    "rechecks %s after SQLite's writer lock is released",
+    async (event, status, stopReason) => {
+      const dir = await mkdtemp(join(tmpdir(), "shell-job-promotion-lock-"));
+      const dbPath = join(dir, "store.db");
+      const releasePath = join(dir, "release");
+      const controller = new AbortController();
+      let registry: ShellJobRegistry | undefined;
+      let writer: NodeSqliteConnection | undefined;
+      let locked = false;
+      try {
+        initDatabase({ dbPath });
+        const db = getDatabase();
+        db.prepare(
+          "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES('s','p','/tmp','test','active',1,1,'{}')",
+        ).run();
+        writer = new NodeSqliteConnection(dbPath);
+        const store = new DatabaseShellJobStore();
+        const jobs = new ShellJobRegistry({
+          store,
+          killTree: killShellTree,
+        });
+        registry = jobs;
+        const child: { current?: ChildProcess } = {};
+        const started = await jobs.start({
+          sessionId: "s",
+          timeoutMs: event === "hard timeout" ? 650 : null,
+          child: () => {
+            child.current = spawnUntilReleased(releasePath);
+            return child.current;
+          },
+        });
+        writer.exec("BEGIN IMMEDIATE");
+        locked = true;
+
+        const exec = db.exec.bind(db);
+        let blocked = false;
+        const observedExec = vi
+          .spyOn(db, "exec")
+          .mockImplementation((sql): void => {
+            try {
+              exec(sql);
+            } catch (error) {
+              if (
+                sql === "BEGIN IMMEDIATE" &&
+                locked &&
+                error instanceof Error &&
+                /database is locked/i.test(error.message)
+              )
+                blocked = true;
+              throw error;
+            }
+          });
+        try {
+          const detached = vi.fn();
+          const waiting = jobs.waitForForeground(started.jobId, "s", {
+            signal: controller.signal,
+            waitMs: 50,
+            onBackground: detached,
+          });
+          await vi.waitFor(() => {
+            expect(blocked).toBe(true);
+          });
+
+          if (event === "Stop") controller.abort();
+          if (event === "natural exit") {
+            if (!child.current) throw new Error("Missing spawned process");
+            const exited = once(child.current, "exit");
+            await writeFile(releasePath, "");
+            await expect(exited).resolves.toEqual([0, null]);
+          }
+          await vi.waitFor(() => {
+            expect(jobs.get(started.jobId, "s").status).toBe(status);
+          });
+          expect(store.get(started.jobId)).toMatchObject({
+            mode: "foreground",
+            status: "running",
+          });
+          writer.exec("ROLLBACK");
+          locked = false;
+
+          await expect(waiting).resolves.toMatchObject({
+            jobId: started.jobId,
+            status,
+            metadata: { mode: "foreground", stopReason },
+          });
+          expect(detached).not.toHaveBeenCalled();
+          await vi.waitFor(() => {
+            expect(store.get(started.jobId)).toMatchObject({
+              mode: "foreground",
+              promotedAt: null,
+              status,
+              noticeState: "suppressed",
+              cleanup: "confirmed",
+            });
+          });
+        } finally {
+          observedExec.mockRestore();
+        }
+      } finally {
+        try {
+          if (locked) writer?.exec("ROLLBACK");
+          await registry?.dispose();
+        } finally {
+          writer?.close();
+          closeDatabase();
+          await rm(dir, { recursive: true, force: true });
+        }
+      }
+    },
+  );
+
   it("checks the admission guard in the actual queued SQLite write callback", async () => {
     initDatabase({ dbPath: ":memory:" });
     getDatabase()
@@ -145,9 +290,11 @@ describe("shell job persistence", () => {
     );
     await registry.dispose();
   });
-  it("reads the final background tail after reopening SQLite", async () => {
+  it("reads the promoted job and its tail before and after reopening SQLite", async () => {
     const dir = await mkdtemp(join(tmpdir(), "shell-job-persist-"));
     const dbPath = join(dir, "store.db");
+    const releasePath = join(dir, "release");
+    let registry: ShellJobRegistry | undefined;
     try {
       initDatabase({ dbPath });
       getDatabase()
@@ -156,22 +303,59 @@ describe("shell job persistence", () => {
         )
         .run();
       const store = new DatabaseShellJobStore();
-      const registry = new ShellJobRegistry({
+      registry = new ShellJobRegistry({
         store,
         createJobId: (): string => "persisted",
-        killTree: (): { status: "confirmed" } => ({ status: "confirmed" }),
+        killTree: killShellTree,
       });
-      await registry.start({
+      const jobs = registry;
+      const started = await jobs.start({
         sessionId: "session",
         timeoutMs: 10000,
-        background: true,
-        child: () =>
-          spawn("/bin/sh", ["-c", "printf 'durable-tail'"], { detached: true }),
+        child: () => spawnUntilReleased(releasePath),
       });
+      await vi.waitFor(() => {
+        expect(jobs.get(started.jobId, "session").output).toContain(
+          "durable-tail",
+        );
+      });
+      const receipt = await jobs.waitForForeground(started.jobId, "session", {
+        signal: new AbortController().signal,
+        waitMs: 1,
+        onBackground: () => undefined,
+      });
+      const { startedAt, promotedAt, deadline } = receipt.metadata;
+      expect(promotedAt).toBeTypeOf("number");
+      expect(deadline).toBe(Number(startedAt) + 10_000);
+
+      const connection = new NodeSqliteConnection(dbPath);
+      try {
+        const reader = new ShellJobRegistry({
+          store: new DatabaseShellJobStore({ db: connection }),
+          killTree: killShellTree,
+        });
+        expect(reader.get(started.jobId, "session")).toMatchObject({
+          status: "running",
+          output: "durable-tail",
+          metadata: {
+            jobId: started.jobId,
+            mode: "background",
+            startedAt,
+            promotedAt,
+            deadline,
+          },
+        });
+        await reader.dispose();
+      } finally {
+        connection.close();
+      }
+      await writeFile(releasePath, "");
       await vi.waitFor(() => {
         expect(store.get("persisted")?.settledAt).toBeTypeOf("number");
       });
+      expect(store.get(started.jobId)?.noticeState).toBe("pending");
       await registry.dispose();
+      registry = undefined;
       closeDatabase();
       initDatabase({ dbPath });
       const reopened = new ShellJobRegistry({
@@ -180,13 +364,19 @@ describe("shell job persistence", () => {
       });
       const result = reopened.get("persisted", "session");
       expect(result).toMatchObject({
+        jobId: started.jobId,
         status: "completed",
-        output: "durable-tail",
+        output: "durable-tail-done",
+        metadata: { mode: "background", startedAt, promotedAt, deadline },
       });
       await reopened.dispose();
     } finally {
-      closeDatabase();
-      await rm(dir, { recursive: true, force: true });
+      try {
+        await registry?.dispose();
+      } finally {
+        closeDatabase();
+        await rm(dir, { recursive: true, force: true });
+      }
     }
   });
   it("retries a failed final write without losing cleanup responsibility", async () => {

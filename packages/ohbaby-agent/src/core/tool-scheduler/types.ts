@@ -92,6 +92,10 @@ export interface ToolExecutionEnvironment {
 }
 
 export interface ToolExecutionContext {
+  /** Available to registered Bash after the role's task controls are resolved. */
+  readonly canManageBackgroundShellJobs?: boolean;
+  /** Registered Bash calls this when the job belongs to the background registry. */
+  readonly detachCleanupOwnership?: () => void;
   readonly subscribeSteer?: (wake: () => void) => Promise<() => void>;
   readonly shellExecution?: ShellExecutionBinding;
   /** Trusted tool cleanup owner reports process lifetime independently of its result. */

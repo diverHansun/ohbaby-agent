@@ -1,4 +1,7 @@
-import { InMemoryShellJobStore } from "./shell-job-store.js";
+import {
+  InMemoryShellJobStore,
+  type ShellJobRecord,
+} from "./shell-job-store.js";
 import {
   mkdir,
   mkdtemp,
@@ -48,6 +51,166 @@ function killShellTree(child: ChildProcess): ReturnType<typeof Shell.killTree> {
 }
 
 describe("shell job real-process integration", () => {
+  it("returns the original Bash job on promotion and keeps its hard deadline after Stop", async () => {
+    const workdir = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-promote-")),
+    );
+    const store = new InMemoryShellJobStore();
+    const registry = new ShellJobRegistry({ store, killTree: killShellTree });
+    const controller = new AbortController();
+    const context = { ...createContext(workdir), signal: controller.signal };
+    const bash = createBashTool({ registry });
+    const script = path.join(workdir, "controlled.mjs");
+    const states: ShellJobRecord[] = [];
+    const unsubscribe = store.subscribe((row) => {
+      states.push(row);
+    });
+    try {
+      await writeFile(
+        script,
+        `import fs from 'node:fs';
+fs.appendFileSync('launches', process.pid + '\\n');
+process.stdout.write('x'.repeat(65536) + 'before-promotion\\n');
+const timer = setInterval(() => {
+  if (!fs.existsSync('continue')) return;
+  clearInterval(timer);
+  console.log('after-promotion');
+  setTimeout(() => console.log('past-original-deadline'), 1200);
+}, 10);
+setTimeout(() => process.exit(0), 2300);
+`,
+      );
+      const quote = (value: string): string =>
+        `'${value.replaceAll("'", "'\\''")}'`;
+      const receipt = await bash.execute(
+        {
+          command: `exec ${quote(process.execPath)} ${quote(script)}`,
+          wait_ms: 800,
+          timeout: 1600,
+        },
+        context,
+      );
+      const foreground = states.find(
+        (row) => row.mode === "foreground" && row.status === "running",
+      );
+      if (!foreground) throw new Error("Missing foreground job");
+      if (foreground.startedAt === null)
+        throw new Error("Missing foreground job");
+      const jobId = foreground.jobId;
+      expect(receipt.metadata).toMatchObject({
+        jobId,
+        mode: "background",
+        status: "running",
+        pid: foreground.pid,
+        startedAt: foreground.startedAt,
+        deadline: foreground.startedAt + 1600,
+      });
+      expect(store.get(jobId)?.outputTail).toContain("before-promotion");
+      expect(await readFile(path.join(workdir, "launches"), "utf8")).toBe(
+        `${String(foreground.pid)}\n`,
+      );
+
+      controller.abort();
+      expect(registry.get(jobId, context.sessionId).status).toBe("running");
+      await writeFile(path.join(workdir, "continue"), "");
+      const result = await createTaskOutputTool(registry).execute(
+        { block: true, job_id: jobId, wait_ms: 3500 },
+        createContext(workdir),
+      );
+      expect(result.metadata).toMatchObject({ jobId, status: "timed_out" });
+      expect(result.output).toContain("before-promotion");
+      expect(result.output).toContain("after-promotion");
+      expect(result.output).not.toContain("past-original-deadline");
+      await vi.waitFor(() => {
+        expect(store.get(jobId)).toMatchObject({
+          mode: "background",
+          status: "timed_out",
+          noticeState: "pending",
+        });
+      });
+      expect(store.listByOwner(context.sessionId, null)).toHaveLength(1);
+    } finally {
+      unsubscribe();
+      await registry
+        .dispose()
+        .finally(() => rm(workdir, { force: true, recursive: true }));
+    }
+  });
+
+  it("lets one foreground command take the last background slot without stopping the other background jobs", async () => {
+    const workdir = await mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-promote-quota-"),
+    );
+    const store = new InMemoryShellJobStore();
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: killShellTree,
+      backgroundLimit: (): Promise<number> => Promise.resolve(2),
+    });
+    const bash = createBashTool({ registry });
+    const context = createContext(workdir);
+    try {
+      const old = await bash.execute(
+        { command: "exec sleep 15", run_in_background: true },
+        context,
+      );
+      const results = await Promise.all([
+        bash.execute(
+          { command: "echo left; exec sleep 15", wait_ms: 200 },
+          { ...context, callId: "left" },
+        ),
+        bash.execute(
+          { command: "echo right; exec sleep 15", wait_ms: 200 },
+          { ...context, callId: "right" },
+        ),
+      ]);
+      expect(results.map((result) => result.metadata)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ mode: "background", status: "running" }),
+          expect.objectContaining({
+            mode: "foreground",
+            status: "cancelled",
+            stopReason: "capacity-limit",
+          }),
+        ]),
+      );
+      const rows = store.listByOwner(context.sessionId, null);
+      expect(rows).toHaveLength(3);
+      const refused = rows.find((row) => row.mode === "foreground");
+      if (!refused) throw new Error("Missing refused job");
+      const refusedResult = results.find(
+        (result) => result.metadata?.jobId === refused.jobId,
+      );
+      expect(refusedResult?.output).toContain(String(refused.callId));
+      await vi.waitFor(() => {
+        expect(store.get(refused.jobId)).toMatchObject({
+          cleanup: "confirmed",
+          noticeState: "suppressed",
+        });
+      });
+      await expect(
+        store.allocateNoticeBatch({
+          sessionId: context.sessionId,
+          contextScopeId: null,
+        }),
+      ).resolves.toBeNull();
+
+      const running = store
+        .listByOwner(context.sessionId, null)
+        .filter((row) => row.status === "running");
+      expect(running).toHaveLength(2);
+      expect(running.map((row) => row.jobId)).toContain(old.metadata?.jobId);
+      for (const row of running) {
+        expect(row.mode).toBe("background");
+        expect(() => process.kill(Number(row.pid), 0)).not.toThrow();
+      }
+    } finally {
+      await registry
+        .dispose()
+        .finally(() => rm(workdir, { force: true, recursive: true }));
+    }
+  });
+
   it("keeps a finished shell's same-group child charged until observation confirms it is gone", async () => {
     const workdir = await mkdtemp(
       path.join(os.tmpdir(), "ohbaby-shell-descendant-"),
@@ -255,7 +418,7 @@ describe("shell job real-process integration", () => {
     }
   });
 
-  it("stops an already returned background job by root while preserving another root and scope", async () => {
+  it("cleans up a promoted command when its subagent scope closes", async () => {
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-root-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
     const bash = createBashTool({ registry });
@@ -299,17 +462,20 @@ const timer = setInterval(() => {
       const start = async (
         id: string,
         context: ToolExecutionContext,
+        promote: boolean,
       ): Promise<{ jobId: string; pid: number }> => {
         const result = await bash.execute(
           {
             command: `exec ${quote(process.execPath)} ${quote(script)} ${id}`,
-            run_in_background: true,
+            ...(promote ? { wait_ms: 50 } : { run_in_background: true }),
             timeout: 15_000,
           },
           context,
         );
         const jobId = result.metadata?.jobId;
         if (typeof jobId !== "string") throw new Error("Missing job ID");
+        expect(result.metadata).toMatchObject({ mode: "background" });
+        if (promote) expect(result.metadata?.promotedAt).toBeTypeOf("number");
         await vi.waitFor(
           async () => {
             const pid = Number(
@@ -325,7 +491,10 @@ const timer = setInterval(() => {
           pid: Number(await readFile(path.join(workdir, `${id}.pid`), "utf8")),
         };
       };
-      const [jobA, jobB] = await Promise.all([start("a", a), start("b", b)]);
+      const [jobA, jobB] = await Promise.all([
+        start("a", a, true),
+        start("b", b, false),
+      ]);
       expect(jobA.jobId).not.toBe(jobB.jobId);
       expect(jobA.pid).not.toBe(jobB.pid);
       expect(
@@ -335,14 +504,23 @@ const timer = setInterval(() => {
         registry.get(jobB.jobId, b.sessionId, b.contextScopeId).status,
       ).toBe("running");
 
-      registry.markRootRunStopped("root-a", "owner-ended");
+      if (!a.contextScopeId) throw new Error("Missing subagent scope");
+      const cleanup = await registry.cleanupScope(
+        a.sessionId,
+        a.contextScopeId,
+      );
+      if (!cleanup.confirmed) await cleanup.settled;
       await vi.waitFor(
         () => {
           expect(
             registry.get(jobA.jobId, a.sessionId, a.contextScopeId),
           ).toMatchObject({
             status: "cancelled",
-            metadata: { cleanup: "confirmed" },
+            metadata: {
+              mode: "background",
+              stopReason: "owner-ended",
+              cleanup: "confirmed",
+            },
           });
           expect(() => process.kill(jobA.pid, 0)).toThrow();
           expect(registry.hasActiveWork("root-a")).toBe(false);
@@ -378,8 +556,9 @@ const timer = setInterval(() => {
         registry.get(jobA.jobId, a.sessionId, a.contextScopeId).output,
       ).not.toContain("a-completed");
     } finally {
-      await registry.dispose();
-      await rm(workdir, { force: true, recursive: true });
+      await registry
+        .dispose()
+        .finally(() => rm(workdir, { force: true, recursive: true }));
     }
   });
 });

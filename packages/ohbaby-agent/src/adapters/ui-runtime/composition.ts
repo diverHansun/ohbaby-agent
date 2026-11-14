@@ -1257,6 +1257,8 @@ export async function createUiRuntimeComposition(
     });
 
   for (const tool of createBuiltinTools({
+    autoBackground: shellConfig.autoBackground,
+    defaultForegroundWaitMs: shellConfig.defaultForegroundWaitMs,
     goalBackend: goalService,
     searchProvider: {
       async loadConfig() {

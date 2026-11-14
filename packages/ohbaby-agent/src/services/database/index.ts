@@ -338,6 +338,8 @@ export class DatabaseShutdownError extends Error {
 export async function runWriteTransaction<T>(
   connection: DatabaseConnection,
   operation: (db: DatabaseConnection) => T,
+  /** Synchronous, non-throwing local state update before releasing the write turn. */
+  afterCommit?: (result: T) => void,
 ): Promise<T> {
   if (isAsyncFunction(operation)) {
     throw new Error("Database transactions require a synchronous callback");
@@ -417,9 +419,10 @@ export async function runWriteTransaction<T>(
       }
     }
     const scoped = createScopedTransactionConnection(connection);
+    let result: T;
     try {
       remainingBudget();
-      const result = operation(scoped.db);
+      result = operation(scoped.db);
       if (isThenable(result)) {
         // Observe a rejected accidental async callback as well as rejecting this write.
         void Promise.resolve(result).catch(() => undefined);
@@ -430,7 +433,6 @@ export async function runWriteTransaction<T>(
         `PRAGMA busy_timeout = ${String(Math.max(0, Math.min(25, Math.floor(commitBudget))))}`,
       );
       connection.exec("COMMIT");
-      return result;
     } catch (error) {
       try {
         connection.exec("ROLLBACK");
@@ -441,6 +443,8 @@ export async function runWriteTransaction<T>(
     } finally {
       scoped.deactivate();
     }
+    afterCommit?.(result);
+    return result;
   } finally {
     stopBudgetClock();
     if (acquired) finishTurn();

@@ -34,12 +34,9 @@ const request = (callId: string, resource = "a"): ToolCallRequest => ({
   params: { resource },
 });
 describe("C2 logical completion and true resource cleanup", () => {
-  it.each([
-    { name: "renamed-background", detached: true },
-    { name: "bash", detached: false },
-  ])(
-    "uses trusted cleanup admission rather than the $name tool name",
-    async ({ name, detached }) => {
+  it.each(["renamed-tool", "bash"])(
+    "uses trusted cleanup admission rather than the %s tool name",
+    async (name) => {
       const bus = createBus();
       const scheduler = createToolScheduler({
         bus,
@@ -63,7 +60,7 @@ describe("C2 logical completion and true resource cleanup", () => {
               return { output: "Logical result" };
             },
           },
-          { cleanupOwner: "tool", detachedCleanup: () => detached },
+          { cleanupOwner: "tool" },
         ),
       );
       try {
@@ -77,7 +74,7 @@ describe("C2 logical completion and true resource cleanup", () => {
             })
           ).status,
         ).toBe("success");
-        expect(scheduler.getRunCleanup("run").confirmed).toBe(detached);
+        expect(scheduler.getRunCleanup("run").confirmed).toBe(false);
       } finally {
         confirm();
         scheduler.cancelAll();

@@ -11,6 +11,8 @@ export type UiShellJobStopReason =
   | "model"
   | "owner-ended"
   | "output-limit"
+  | "capacity-limit"
+  | "internal-error"
   | "rewound"
   | "session-closed"
   | "shutdown";
@@ -55,6 +57,7 @@ export interface UiShellJobRow {
   readonly cleanup: UiShellJobCleanup | null;
   readonly createdAt: number;
   readonly startedAt: number | null;
+  readonly promotedAt: number | null;
   readonly endedAt: number | null;
   readonly resultReadyAt: number | null;
   readonly settledAt: number | null;

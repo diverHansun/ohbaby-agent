@@ -2,7 +2,10 @@ import { InMemoryShellJobStore } from "./shell-job-store.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
-import type { ShellJobSnapshot } from "./shell-job-registry.js";
+import type {
+  ShellJobSnapshot,
+  ShellJobRegistryOptions,
+} from "./shell-job-registry.js";
 import type { ToolExecutionContext } from "../core/tool-scheduler/index.js";
 import {
   createTaskKillTool,
@@ -860,5 +863,318 @@ describe("ShellJobRegistry", () => {
     expect(first.metadata).toMatchObject({ status: "completed" });
     expect(second.metadata).toMatchObject({ status: "completed" });
     expect(killTree).not.toHaveBeenCalled();
+  });
+});
+
+describe("foreground promotion", () => {
+  it("keeps the same process, tail and hard deadline after detaching", async () => {
+    vi.useFakeTimers();
+    const store = new InMemoryShellJobStore();
+    const child = new FakeChild();
+    const controller = new AbortController();
+    const release = vi.fn();
+    const detached = vi.fn();
+    const killTree = vi.fn(() => {
+      child.emitExit(null, "SIGTERM");
+      return { status: "confirmed" as const, terminationSucceeded: true };
+    });
+    const registry = new ShellJobRegistry({
+      store,
+      killTree,
+      backgroundLimit: (): Promise<number> => Promise.resolve(1),
+    });
+    try {
+      const started = await registry.start({
+        child: () => child as unknown as ChildProcess,
+        sessionId: "session_1",
+        background: false,
+        captureMode: "head",
+        timeoutMs: 200,
+        release,
+      });
+      child.stdout.emit("data", "x".repeat(40000) + "actual-tail");
+      const waiting = registry.waitForForeground(started.jobId, "session_1", {
+        waitMs: 100,
+        signal: controller.signal,
+        onBackground: detached,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      const receipt = await waiting;
+      expect(receipt.jobId).toBe(started.jobId);
+      expect(receipt.metadata.mode).toBe("background");
+      expect(receipt.output).toContain("actual-tail");
+      expect(store.get(started.jobId)?.outputTail).toContain("actual-tail");
+      expect(receipt.metadata.deadline).toBe(
+        (started.metadata.startedAt as number) + 200,
+      );
+      expect(detached).toHaveBeenCalledTimes(1);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(99);
+      expect(killTree).not.toHaveBeenCalled();
+      expect(release).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(killTree).toHaveBeenCalledTimes(1);
+      expect(store.get(started.jobId)?.status).toBe("timed_out");
+      expect(release).toHaveBeenCalledTimes(1);
+      await registry.dispose();
+      expect(registry.hasLocalHandle(started.jobId)).toBe(false);
+      const saved = registry.get(started.jobId, "session_1");
+      expect(saved.truncated).toBe(true);
+      expect(saved.metadata.truncated).toBe(true);
+      expect(saved.output).toContain("actual-tail");
+    } finally {
+      child.emitExit(0, null);
+      await registry.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([50, 100])(
+    "does not promote when hard timeout is %ims and wait is 100ms",
+    async (timeoutMs) => {
+      vi.useFakeTimers();
+      const child = new FakeChild();
+      const detached = vi.fn();
+      const registry = new ShellJobRegistry({
+        killTree: (): ReturnType<ShellJobRegistryOptions["killTree"]> => {
+          child.emitExit(null, "SIGTERM");
+        },
+      });
+      try {
+        const started = await startJob(registry, child, timeoutMs);
+        const waiting = registry.waitForForeground(started.jobId, "session_1", {
+          waitMs: 100,
+          signal: new AbortController().signal,
+          onBackground: detached,
+        });
+        await vi.advanceTimersByTimeAsync(100);
+        expect((await waiting).status).toBe("timed_out");
+        expect(detached).not.toHaveBeenCalled();
+      } finally {
+        child.emitExit(0, null);
+        await registry.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("keeps waiting when the foreground timer wakes before an equal hard deadline", async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild();
+    const detached = vi.fn();
+    const registry = new ShellJobRegistry({
+      killTree: (): ReturnType<ShellJobRegistryOptions["killTree"]> => {
+        child.emitExit(null, "SIGTERM");
+      },
+    });
+    try {
+      const started = await startJob(registry, child, 100);
+      const output = registry.output.bind(registry);
+      vi.spyOn(registry, "output").mockImplementationOnce(
+        (jobId, sessionId, input, scope) =>
+          output(
+            jobId,
+            sessionId,
+            { ...input, waitMs: input.waitMs - 1 },
+            scope,
+          ),
+      );
+      const waiting = registry.waitForForeground(started.jobId, "session_1", {
+        waitMs: 100,
+        signal: new AbortController().signal,
+        onBackground: detached,
+      });
+      await vi.advanceTimersByTimeAsync(99);
+      expect(detached).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await waiting).status).toBe("timed_out");
+      expect(detached).not.toHaveBeenCalled();
+    } finally {
+      child.emitExit(0, null);
+      await registry.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not promote an exited process while its output is draining", async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild();
+    const detached = vi.fn();
+    const registry = new ShellJobRegistry({
+      killTree: (): ReturnType<ShellJobRegistryOptions["killTree"]> =>
+        undefined,
+      probeTree: (): "stopped" => "stopped",
+    });
+    try {
+      const started = await startJob(registry, child, 1000);
+      const waiting = registry.waitForForeground(started.jobId, "session_1", {
+        waitMs: 100,
+        signal: new AbortController().signal,
+        onBackground: detached,
+      });
+      child.emitExitOnly(0, null);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(detached).not.toHaveBeenCalled();
+      child.emit("close", 0, null);
+      expect((await waiting).status).toBe("completed");
+    } finally {
+      child.emitExit(0, null);
+      await registry.dispose();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("promotion commit ordering", () => {
+  it.each(["abort", "exit", "timeout", "late-timer"] as const)(
+    "rechecks %s after promotion waits for the writer",
+    async (event) => {
+      vi.useFakeTimers();
+      const store = new InMemoryShellJobStore();
+      let enter!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      let unlock!: () => void;
+      const lock = new Promise<void>((resolve) => {
+        unlock = resolve;
+      });
+      const promote = store.promote.bind(store);
+      vi.spyOn(store, "promote").mockImplementation(async (...args) => {
+        enter();
+        await lock;
+        return promote(...args);
+      });
+      const child = new FakeChild();
+      const controller = new AbortController();
+      const detached = vi.fn();
+      const registry = new ShellJobRegistry({
+        store,
+        killTree: (): ReturnType<ShellJobRegistryOptions["killTree"]> => {
+          child.emitExit(null, "SIGTERM");
+          return { status: "confirmed", terminationSucceeded: true };
+        },
+      });
+      try {
+        const started = await registry.start({
+          child: () => child as unknown as ChildProcess,
+          sessionId: "session_1",
+          timeoutMs: event === "timeout" || event === "late-timer" ? 200 : null,
+        });
+        const waiting = registry.waitForForeground(started.jobId, "session_1", {
+          waitMs: 100,
+          signal: controller.signal,
+          onBackground: detached,
+        });
+        await vi.advanceTimersByTimeAsync(100);
+        await entered;
+        if (event === "abort") controller.abort();
+        if (event === "exit") child.emitExit(0, null);
+        if (event === "timeout") await vi.advanceTimersByTimeAsync(100);
+        if (event === "late-timer") vi.setSystemTime(Date.now() + 100);
+        unlock();
+        const result = await waiting;
+        expect(result.status).toBe(
+          event === "exit"
+            ? "completed"
+            : event === "timeout" || event === "late-timer"
+              ? "timed_out"
+              : "cancelled",
+        );
+        expect(detached).not.toHaveBeenCalled();
+        expect(store.get(started.jobId)?.mode).toBe("foreground");
+      } finally {
+        unlock();
+        child.emitExit(0, null);
+        await registry.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("detaches before a committed-change observer cancels the old call", async () => {
+    vi.useFakeTimers();
+    const store = new InMemoryShellJobStore();
+    const child = new FakeChild();
+    const controller = new AbortController();
+    const killTree = vi.fn(() => {
+      child.emitExit(null, "SIGTERM");
+    });
+    const detached = vi.fn();
+    const registry = new ShellJobRegistry({ store, killTree });
+    try {
+      const started = await registry.start({
+        child: () => child as unknown as ChildProcess,
+        sessionId: "session_1",
+        timeoutMs: null,
+      });
+      store.subscribe((row) => {
+        if (row.mode === "background") controller.abort();
+      });
+      const waiting = registry.waitForForeground(started.jobId, "session_1", {
+        waitMs: 100,
+        signal: controller.signal,
+        onBackground: detached,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await waiting).metadata.mode).toBe("background");
+      expect(controller.signal.aborted).toBe(true);
+      expect(detached).toHaveBeenCalledTimes(1);
+      expect(killTree).not.toHaveBeenCalled();
+    } finally {
+      child.emitExit(0, null);
+      await registry.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports persistence failure with existing output and retains unconfirmed cleanup", async () => {
+    vi.useFakeTimers();
+    const store = new InMemoryShellJobStore();
+    vi.spyOn(store, "promote").mockRejectedValue(
+      new Error("promotion write failed"),
+    );
+    const child = new FakeChild();
+    const release = vi.fn();
+    const detached = vi.fn();
+    let stopped = false;
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: (): ReturnType<ShellJobRegistryOptions["killTree"]> => ({
+        status: "unconfirmed",
+        terminationSucceeded: false,
+      }),
+      probeTree: (): "stopped" | "unknown" => (stopped ? "stopped" : "unknown"),
+    });
+    try {
+      const started = await registry.start({
+        child: () => child as unknown as ChildProcess,
+        sessionId: "session_1",
+        timeoutMs: null,
+        release,
+      });
+      child.stdout.emit("data", "known output");
+      const waiting = registry.waitForForeground(started.jobId, "session_1", {
+        waitMs: 100,
+        signal: new AbortController().signal,
+        onBackground: detached,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await waiting;
+      expect(result.status).toBe("cancelled");
+      expect(result.metadata.stopReason).toBe("internal-error");
+      expect(result.metadata.error).toBe("promotion write failed");
+      expect(result.output).toContain("known output");
+      expect(detached).not.toHaveBeenCalled();
+      expect(release).not.toHaveBeenCalled();
+      expect(registry.get(started.jobId, "session_1").metadata.cleanup).toBe(
+        "unconfirmed",
+      );
+    } finally {
+      stopped = true;
+      child.emitExit(0, null);
+      await registry.dispose();
+      vi.useRealTimers();
+    }
   });
 });

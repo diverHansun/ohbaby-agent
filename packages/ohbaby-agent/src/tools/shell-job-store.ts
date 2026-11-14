@@ -24,6 +24,8 @@ export type ShellJobStopReason =
   | "model"
   | "owner-ended"
   | "output-limit"
+  | "capacity-limit"
+  | "internal-error"
   | "rewound"
   | "session-closed"
   | "shutdown";
@@ -60,6 +62,7 @@ export interface ShellJobRecord {
   readonly goalId: string | null;
   readonly createdAt: number;
   readonly startedAt: number | null;
+  readonly promotedAt: number | null;
   readonly endedAt: number | null;
   readonly settledAt: number | null;
   readonly resultReadyAt: number | null;
@@ -88,6 +91,13 @@ export interface ShellJobReservationOptions {
   /** Synchronous check inside the acquired write lock, before reserving capacity. */
   readonly assertAdmitted?: () => undefined;
 }
+export interface ShellJobPromotionOptions {
+  readonly maxBackgroundJobs: number;
+  /** Recheck runtime eligibility and capture the first background checkpoint under the write lock. */
+  readonly prepare: () => ShellJobPatch | null;
+  /** Apply the runtime transition synchronously after commit. Must not throw or publish events. */
+  readonly onCommitted: () => void;
+}
 export class ShellJobCapacityError extends Error {
   readonly code = "SHELL_JOB_CAPACITY_LIMIT";
   constructor(
@@ -108,6 +118,44 @@ function holdsBackgroundSlot(row: ShellJobRecord): boolean {
       row.status === "running" ||
       row.cleanup !== "confirmed")
   );
+}
+function preparePromotion(
+  row: ShellJobRecord,
+  options: ShellJobPromotionOptions,
+): ShellJobPatch | null {
+  if (
+    row.mode !== "foreground" ||
+    row.status !== "running" ||
+    row.stopReason !== null ||
+    row.endedAt !== null ||
+    row.trackingReleasedAt !== null
+  )
+    return null;
+  const snapshot = options.prepare();
+  if (!snapshot) return null;
+  const {
+    promotedAt,
+    outputBytes,
+    outputTail,
+    outputCheckpointAt,
+    outputPath,
+    outputTruncated,
+    outputComplete,
+    noticeState,
+  } = snapshot;
+  if (promotedAt === undefined || promotedAt === null)
+    throw new Error("Shell job promotion requires a timestamp.");
+  return definedPatch({
+    mode: "background",
+    promotedAt,
+    outputBytes,
+    outputTail,
+    outputCheckpointAt,
+    outputPath,
+    outputTruncated,
+    outputComplete,
+    noticeState,
+  });
 }
 export interface ShellJobNoticeOwner {
   readonly sessionId: string;
@@ -242,6 +290,7 @@ export interface ShellJobStore {
     record: ShellJobRecord,
     options?: ShellJobReservationOptions,
   ): Promise<void>;
+  promote(jobId: string, options: ShellJobPromotionOptions): Promise<boolean>;
   update(jobId: string, patch: ShellJobPatch): Promise<void>;
   get(jobId: string): ShellJobRecord | null;
   compareAndUpdate(
@@ -438,6 +487,24 @@ export class InMemoryShellJobStore implements ShellJobStore {
       this.changes.emit(record);
     });
   }
+  promote(jobId: string, options: ShellJobPromotionOptions): Promise<boolean> {
+    return Promise.resolve().then(() => {
+      const row = this.records.get(jobId);
+      if (!row) return false;
+      const patch = preparePromotion(row, options);
+      if (!patch) return false;
+      const active = this.listByOwner(row.sessionId, row.contextScopeId).filter(
+        holdsBackgroundSlot,
+      ).length;
+      if (active >= options.maxBackgroundJobs)
+        throw new ShellJobCapacityError(options.maxBackgroundJobs, active);
+      const saved = { ...row, ...patch };
+      this.records.set(jobId, saved);
+      options.onCommitted();
+      this.changes.emit(saved);
+      return true;
+    });
+  }
   update(jobId: string, patch: ShellJobPatch): Promise<void> {
     const current = this.records.get(jobId);
     if (!current)
@@ -513,6 +580,41 @@ function fromRow(row: Record<string, unknown>): ShellJobRecord {
   if (record.outputComplete !== null)
     record.outputComplete = Boolean(record.outputComplete);
   return record as unknown as ShellJobRecord;
+}
+function findShellJob(
+  db: DatabaseConnection,
+  jobId: string,
+): ShellJobRecord | null {
+  const row = db.prepare("SELECT * FROM shell_job WHERE job_id = ?").get(jobId);
+  return row ? fromRow(row) : null;
+}
+function countBackgroundSlots(
+  db: DatabaseConnection,
+  owner: ShellJobRecord,
+): number {
+  return (
+    db
+      .prepare<{
+        count: number;
+      }>(
+        "SELECT count(*) AS count FROM shell_job WHERE session_id = ? AND context_scope_id IS ? AND mode = 'background' AND tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed')",
+      )
+      .get(owner.sessionId, owner.contextScopeId)?.count ?? 0
+  );
+}
+function writeShellJobPatch(
+  db: DatabaseConnection,
+  jobId: string,
+  patch: ShellJobPatch,
+): ShellJobRecord {
+  const changed = Object.keys(patch) as (keyof ShellJobPatch)[];
+  const row = db
+    .prepare(
+      `UPDATE shell_job SET ${changed.map((key) => `${columns[key]} = ?`).join(",")} WHERE job_id = ? RETURNING *`,
+    )
+    .get(...changed.map((key) => value(patch[key] ?? null)), jobId);
+  if (!row) throw new Error(`Unknown shell job "${jobId}".`);
+  return fromRow(row);
 }
 export class DatabaseShellJobStore implements ShellJobStore {
   get cleanupNamespace(): string | object {
@@ -729,18 +831,9 @@ export class DatabaseShellJobStore implements ShellJobStore {
         record.mode === "background" &&
         options.maxBackgroundJobs !== undefined
       ) {
-        const row = tx
-          .prepare<{
-            count: number;
-          }>(
-            "SELECT count(*) AS count FROM shell_job WHERE session_id = ? AND context_scope_id IS ? AND mode = 'background' AND tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed')",
-          )
-          .get(record.sessionId, record.contextScopeId);
-        if ((row?.count ?? 0) >= options.maxBackgroundJobs)
-          throw new ShellJobCapacityError(
-            options.maxBackgroundJobs,
-            row?.count ?? 0,
-          );
+        const active = countBackgroundSlots(tx, record);
+        if (active >= options.maxBackgroundJobs)
+          throw new ShellJobCapacityError(options.maxBackgroundJobs, active);
       }
       tx.prepare(
         `INSERT INTO shell_job (${keys.map((key) => columns[key]).join(",")}) VALUES (${keys.map(() => "?").join(",")})`,
@@ -749,27 +842,40 @@ export class DatabaseShellJobStore implements ShellJobStore {
     });
     this.changes.emit(saved);
   }
+  async promote(
+    jobId: string,
+    options: ShellJobPromotionOptions,
+  ): Promise<boolean> {
+    const saved = await runWriteTransaction(
+      this.db,
+      (tx) => {
+        const row = findShellJob(tx, jobId);
+        if (!row) return null;
+        const patch = preparePromotion(row, options);
+        if (!patch) return null;
+        const active = countBackgroundSlots(tx, row);
+        if (active >= options.maxBackgroundJobs)
+          throw new ShellJobCapacityError(options.maxBackgroundJobs, active);
+        return writeShellJobPatch(tx, jobId, patch);
+      },
+      (row) => {
+        if (row) options.onCommitted();
+      },
+    );
+    if (!saved) return false;
+    this.changes.emit(saved);
+    return true;
+  }
   async update(jobId: string, patch: ShellJobPatch): Promise<void> {
     patch = definedPatch(patch);
-    const changed = Object.keys(patch) as Exclude<Key, "jobId">[];
-    if (changed.length === 0) return;
-    const saved = await runWriteTransaction(this.db, (tx) => {
-      const result = tx
-        .prepare(
-          `UPDATE shell_job SET ${changed.map((key) => `${columns[key]} = ?`).join(",")} WHERE job_id = ?`,
-        )
-        .run(...changed.map((key) => value(patch[key] ?? null)), jobId);
-      if (result.changes !== 1)
-        throw new Error(`Unknown shell job "${jobId}".`);
-      return requireShellJob(this, jobId);
-    });
+    if (Object.keys(patch).length === 0) return;
+    const saved = await runWriteTransaction(this.db, (tx) =>
+      writeShellJobPatch(tx, jobId, patch),
+    );
     this.changes.emit(saved);
   }
   get(jobId: string): ShellJobRecord | null {
-    const row = this.db
-      .prepare("SELECT * FROM shell_job WHERE job_id = ?")
-      .get(jobId);
-    return row ? fromRow(row) : null;
+    return findShellJob(this.db, jobId);
   }
   async compareAndUpdate(
     jobId: string,

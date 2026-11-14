@@ -207,25 +207,36 @@ describe("tool metadata projection", () => {
     ).toEqual({ subagentId: "child", status: "queued" });
   });
 
-  it("projects only the shell job fields for task tools", () => {
-    expect(
-      projectToolMetadataForModel("task_output", {
-        cwd: "/workspace",
+  it.each(["bash", "task_output", "task_kill"])(
+    "projects shell job mode and deadlines for %s",
+    (tool) => {
+      expect(
+        projectToolMetadataForModel(tool, {
+          cwd: "/workspace",
+          deadline: 2_000,
+          exitCode: null,
+          jobId: "job_1",
+          mode: "background",
+          pid: 42,
+          promotedAt: 1_500,
+          signal: "SIGTERM",
+          status: "timed_out",
+          timeoutMs: 1_000,
+          truncated: true,
+        }),
+      ).toEqual({
+        deadline: 2_000,
         exitCode: null,
         jobId: "job_1",
-        pid: 42,
+        mode: "background",
+        promotedAt: 1_500,
         signal: "SIGTERM",
         status: "timed_out",
+        timeoutMs: 1_000,
         truncated: true,
-      }),
-    ).toEqual({
-      exitCode: null,
-      jobId: "job_1",
-      signal: "SIGTERM",
-      status: "timed_out",
-      truncated: true,
-    });
-  });
+      });
+    },
+  );
 
   it("projects subagent_status items", () => {
     expect(

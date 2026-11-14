@@ -58,7 +58,11 @@ function unusedLlmClient(): LLMClientInstance {
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { createBashTool } from "../../../../packages/ohbaby-agent/src/tools/bash.js";
-import { ShellJobRegistry } from "../../../../packages/ohbaby-agent/src/tools/shell-job-registry.js";
+import {
+  createTaskKillTool,
+  createTaskOutputTool,
+  ShellJobRegistry,
+} from "../../../../packages/ohbaby-agent/src/tools/shell-job-registry.js";
 
 class Child extends EventEmitter {
   readonly pid = 424242;
@@ -172,8 +176,9 @@ describe("composition Bash cleanup ownership", () => {
       if (context.owner) owners.push(context.owner);
       return execute(params, context);
     };
-    composition.toolScheduler.unregister("bash");
     composition.toolScheduler.register(bash);
+    composition.toolScheduler.register(createTaskOutputTool(registry));
+    composition.toolScheduler.register(createTaskKillTool(registry));
     const request = (callId: string, runId?: string): ToolCallRequest => ({
       callId,
       runId,
@@ -389,8 +394,9 @@ describe("composition Bash cleanup ownership", () => {
         if (context.owner) owners.push(context.owner);
         return execute(params, context);
       });
-      composition.toolScheduler.unregister("bash");
       composition.toolScheduler.register(bash);
+      composition.toolScheduler.register(createTaskOutputTool(registry));
+      composition.toolScheduler.register(createTaskKillTool(registry));
       const request = (
         callId: string,
         overrides: Partial<ToolCallRequest> = {},

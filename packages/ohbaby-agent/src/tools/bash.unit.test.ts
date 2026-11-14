@@ -740,7 +740,7 @@ describe("bash builtin tool", () => {
     child.emit("exit", 0, null);
     await expect(
       bash.execute(
-        { command: "echo hello", timeout: 600_001 },
+        { command: "echo hello", auto_background: false, timeout: 600_001 },
         createContext(),
       ),
     ).rejects.toThrow();
@@ -751,6 +751,162 @@ describe("bash builtin tool", () => {
       ),
     ).rejects.toThrow();
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [{ run_in_background: true, wait_ms: 10 }, "run_in_background"],
+    [{ run_in_background: true, auto_background: false }, "run_in_background"],
+    [{ auto_background: false, wait_ms: 10 }, "wait_ms"],
+    [{ wait_ms: 0 }, "wait_ms"],
+    [{ wait_ms: null }, "wait_ms"],
+    [{ wait_ms: 1.5 }, "wait_ms"],
+    [{ wait_ms: 600_001 }, "wait_ms"],
+    [{ timeout: 0 }, "timeout"],
+    [{ timeout: null }, "timeout"],
+    [{ timeout: 86_400_001 }, "timeout"],
+  ])(
+    "rejects invalid background options %j before spawn",
+    async (params, error) => {
+      const spawn = vi.fn<SpawnCommand>(
+        () => new FakeChildProcess() as unknown as ChildProcess,
+      );
+      const bash = createBashTool({ spawn });
+      await expect(
+        bash.execute({ command: "echo hello", ...params }, createContext()),
+      ).rejects.toThrow(error);
+      expect(spawn).not.toHaveBeenCalled();
+    },
+  );
+
+  it("sets a hard deadline only for explicit timeouts or pure foreground mode", async () => {
+    const cases = [
+      { params: {}, expectedTimeout: null, expectedMode: "foreground" },
+      {
+        params: { timeout: 86_400_000 },
+        expectedTimeout: 86_400_000,
+        expectedMode: "foreground",
+      },
+      {
+        params: { auto_background: false },
+        expectedTimeout: 120_000,
+        expectedMode: "foreground",
+      },
+      {
+        params: {},
+        autoBackground: false,
+        expectedTimeout: 120_000,
+        expectedMode: "foreground",
+      },
+      {
+        params: { run_in_background: true },
+        autoBackground: false,
+        expectedTimeout: null,
+        expectedMode: "background",
+      },
+    ];
+    for (const [
+      index,
+      { params, autoBackground, expectedTimeout, expectedMode },
+    ] of cases.entries()) {
+      const child = new FakeChildProcess();
+      const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+      const store = new InMemoryShellJobStore();
+      const jobId = `timeout-case-${String(index)}`;
+      const registry = new ShellJobRegistry({
+        store,
+        createJobId: (): string => jobId,
+        killTree: vi.fn(),
+      });
+      const bash = createBashTool({ registry, spawn, autoBackground });
+      const result = bash.execute(
+        { command: "echo hello", ...params },
+        createContext(),
+      );
+      await waitForSpawn(spawn);
+      expect
+        .soft(store.get(jobId))
+        .toMatchObject({ timeoutMs: expectedTimeout, mode: expectedMode });
+      child.emitExit(0, null);
+      await result;
+      await registry.dispose();
+    }
+  });
+
+  it.each([{ auto_background: true }, { wait_ms: 10 }])(
+    "rejects %j when automatic backgrounding is disabled globally",
+    async (params) => {
+      const spawn = vi.fn<SpawnCommand>(
+        () => new FakeChildProcess() as unknown as ChildProcess,
+      );
+      const bash = createBashTool({ spawn, autoBackground: false });
+      await expect(
+        bash.execute({ command: "echo hello", ...params }, createContext()),
+      ).rejects.toThrow("disabled");
+      expect(spawn).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns a single dispatch receipt when the promoted command has no output", async () => {
+    const child = new FakeChildProcess();
+    const registry = new ShellJobRegistry({ killTree: vi.fn() });
+    const bash = createBashTool({
+      registry,
+      spawn: () => child as unknown as ChildProcess,
+    });
+    try {
+      const result = await bash.execute(
+        { command: "sleep 10", wait_ms: 1 },
+        createContext(),
+      );
+      expect(result.metadata).toMatchObject({
+        mode: "background",
+        outputBytes: 0,
+      });
+      expect(result.output).toContain("moved to the background automatically");
+      expect(result.output).not.toContain("still running with no output");
+    } finally {
+      child.emitExit(0, null);
+      await registry.dispose();
+    }
+  });
+
+  it("reports a silent command's promotion error without claiming a start failure", async () => {
+    const child = new FakeChildProcess();
+    const store = new InMemoryShellJobStore();
+    vi.spyOn(store, "promote").mockRejectedValue(new Error("write failed"));
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: (): void => {
+        child.emitExit(null, "SIGTERM");
+      },
+    });
+    const bash = createBashTool({
+      registry,
+      spawn: () => child as unknown as ChildProcess,
+    });
+    const context = createContext();
+    try {
+      const result = await bash.execute(
+        { command: "sleep 10", wait_ms: 1 },
+        context,
+      );
+      expect(result.metadata).toMatchObject({
+        mode: "foreground",
+        stopReason: "internal-error",
+        outputBytes: 0,
+      });
+      expect(result.output).toContain(
+        "move to the background could not be saved. write failed",
+      );
+      expect(result.output).not.toContain("failed to start");
+      expect(result.output?.match(/write failed/gu)).toHaveLength(1);
+      expect(
+        registry.get(String(result.metadata?.jobId), context.sessionId).output,
+      ).not.toContain("failed to start");
+    } finally {
+      child.emitExit(0, null);
+      await registry.dispose();
+    }
   });
 
   it("kills the process tree on timeout", async () => {

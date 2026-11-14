@@ -11,7 +11,6 @@ import {
 import { INITIAL_MIGRATIONS } from "./migrations.js";
 import { NodeSqliteConnection } from "./connection.js";
 import { DatabaseShellJobStore } from "../../tools/shell-job-store.js";
-import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -124,18 +123,21 @@ describe("shell task offline schema upgrade", () => {
     "blocks 032 while an active backend owns a %s",
     async (kind) => {
       const { dbPath, backupPath } = await legacy("032");
-      const store = new DatabaseShellJobStore();
-      const record = shellJobFixture({
-        ownerPid: process.pid,
-        status: kind === "placeholder" ? null : "cancelled",
-        startedAt: kind === "placeholder" ? null : 1,
-        cleanup: kind === "placeholder" ? null : "unconfirmed",
-        settledAt: null,
-      });
-      await store.insert(record);
-      const oldInput = getDatabase()
-        .prepare("SELECT * FROM current_run_input")
-        .get();
+      const db = getDatabase();
+      db.prepare(
+        `
+        INSERT INTO shell_job(job_id,session_id,root_session_id,mode,command,cwd,shell,created_at,owner_pid,status,started_at,cleanup)
+        VALUES('job','s','s','background','sleep 30','/tmp','/bin/sh',1,?,?,?,?)
+      `,
+      ).run(
+        process.pid,
+        kind === "placeholder" ? null : "cancelled",
+        kind === "placeholder" ? null : 1,
+        kind === "placeholder" ? null : "unconfirmed",
+      );
+      const readJob = db.prepare("SELECT * FROM shell_job WHERE job_id='job'");
+      const oldJob = readJob.get();
+      const oldInput = db.prepare("SELECT * FROM current_run_input").get();
       expect(() => {
         initDatabase({ dbPath, migrationBackupPath: backupPath });
       }).toThrow(DatabaseUpgradeBlockedError);
@@ -144,23 +146,22 @@ describe("shell task offline schema upgrade", () => {
           .prepare("SELECT version FROM migration WHERE version LIKE '032%'")
           .get(),
       ).toBeUndefined();
-      expect(store.get("job")).toEqual(record);
+      expect(readJob.get()).toEqual(oldJob);
       expect(
         getDatabase().prepare("SELECT * FROM current_run_input").get(),
       ).toEqual(oldInput);
-      await store.update("job", {
-        status: "cancelled",
-        cleanup: "confirmed",
-        settledAt: 5,
-      });
+      db.prepare(
+        "UPDATE shell_job SET status='cancelled',cleanup='confirmed',settled_at=5 WHERE job_id='job'",
+      ).run();
       initDatabase({ dbPath, migrationBackupPath: backupPath });
       expect(
         getDatabase().prepare("SELECT * FROM current_run_input").get(),
       ).toEqual(oldInput);
-      expect(store.get("job")).toMatchObject({
+      expect(new DatabaseShellJobStore().get("job")).toMatchObject({
         status: "cancelled",
         cleanup: "confirmed",
         settledAt: 5,
+        promotedAt: null,
       });
     },
   );

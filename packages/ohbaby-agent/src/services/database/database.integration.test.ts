@@ -212,7 +212,36 @@ describe("services/database", () => {
       { version: "030_subagent_goal_ownership" },
       { version: "031_shell_job" },
       { version: "032_background_task_input" },
+      { version: "033_shell_job_promoted_at" },
     ]);
+  });
+
+  it("keeps existing shell jobs and their modes when adding promotion timestamps", async () => {
+    const dbPath = await tempDbPath();
+    initDatabase({
+      dbPath,
+      migrations: INITIAL_MIGRATIONS.filter(
+        (migration) => migration.version < "033",
+      ),
+    });
+    getDatabase().exec(`
+      INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data)
+      VALUES('s','p','/tmp','test','active',1,1,'{}');
+      INSERT INTO shell_job(job_id,session_id,root_session_id,mode,command,cwd,shell,created_at)
+      VALUES('old','s','s','background','sleep','/tmp','/bin/sh',1);
+    `);
+
+    closeDatabase();
+    initDatabase({ dbPath });
+
+    expect(
+      getDatabase()
+        .prepare("SELECT mode, promoted_at FROM shell_job WHERE job_id = 'old'")
+        .get(),
+    ).toEqual({
+      mode: "background",
+      promoted_at: null,
+    });
   });
 
   it("upgrades a real 014 prompt submission fixture with idempotency and lease columns", async () => {

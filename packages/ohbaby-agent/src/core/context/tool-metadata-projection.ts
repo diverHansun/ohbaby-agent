@@ -89,19 +89,14 @@ export function projectToolMetadataForModel(
     case "select_tools":
       return mcpSelectionMetadata(metadata);
     case "bash":
-      return copyMetadataFields(metadata, [
-        "jobId",
-        "status",
-        "stopReason",
-        "cleanup",
-        "exitCode",
-        "signal",
-        "truncated",
-      ]);
     case "task_output":
     case "task_kill":
       return copyMetadataFields(metadata, [
         "jobId",
+        "mode",
+        "promotedAt",
+        "timeoutMs",
+        "deadline",
         "status",
         "stopReason",
         "cleanup",

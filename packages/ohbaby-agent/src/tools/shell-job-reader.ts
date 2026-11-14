@@ -276,6 +276,7 @@ export class ShellJobReader {
       cleanup: record.cleanup,
       createdAt: record.createdAt,
       startedAt: record.startedAt,
+      promotedAt: record.promotedAt,
       endedAt: record.endedAt,
       resultReadyAt: record.resultReadyAt,
       settledAt: record.settledAt,
