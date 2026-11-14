@@ -415,6 +415,8 @@ Web search 是一页表单（API key、> More options：Key variable、Base URL�
 - **停止按钮：** 描边胶囊，带实心小方块，和输入框的停止一样是黑色，不用红色（D32）。点击后变成禁用的 `Stopping…`，直到实例的收尾结束。
 - **加载：** 不做骨架屏；首次加载超过 300ms 才显示一行 `Loading…`，和主区一致。
 
+**Background tasks 页（2026-11-14 设计中）**：只在会话有过后台任务时出现，用 `Cancel` 文字按钮，不用上面的胶囊停止按钮和状态图标。结构、文案和状态见 [Web 后台任务面板设计](../background-tasks/README.md)。
+
 **Files 页（2026-11-05，会话存储区第二期 b）**
 
 ```

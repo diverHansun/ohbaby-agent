@@ -56,5 +56,6 @@
 - [tools模块设计](../goals-duty.md)、[shell模块设计](../../shell/goals-duty.md)：实施时同步权威契约。
 - [子代理可靠投递](../../agents/2026-11-12-subagent-delivery/README.md)：复用输入存储与准入能力，保留独立业务来源。
 - [执行可靠性第二轮](../../problem-lists/2026-09-19-execution-reliability/improve-2/00-discussion.md)：本议题修订旧Bash统一寿命上限；普通工具名额与后台任务名额仍分开。
+- [Web 后台任务面板设计](../../ohbaby-web/background-tasks/README.md)：2026-11-14 开始的前端设计，承接 D02 的侧栏与单停需求；TUI 另放 `docs/ohbaby-cli/background-tasks/`。
 
 各轮实际结果见 [improve-1 实施与验收](improve-1/05-implementation-acceptance.md)（最终精简修复 8355 项通过，已集成）与 [improve-2 实施与验收](improve-2/05-implementation-acceptance.md)（用户审查后修复四项并完成收尾复审，完整检查 8407 项通过，已本地集成）。[improve-3 实施与验收](improve-3/05-implementation-acceptance.md)已本地集成：8465项取得通过结果、20项跳过，其中打包测试首轮上游502后定向重跑通过，构建通过。ShellJob 目录整理已在 improve-3 验收后以独立提交完成，只移动文件和更新引用；迁移后的完整 preflight 通过：8465项通过、20项跳过，构建通过。最终目录和main集成记录见第三轮验收文档末节。
