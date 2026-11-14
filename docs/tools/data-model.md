@@ -185,22 +185,25 @@ interface BashParams {
 
 转换提交保存 `mode=background`、`promotedAt` 和首份有界尾部，同步解除当前调用的中止关联；不重启、不改原始 owner/startedAt/timeoutMs。满额停止当前命令，报告 cancelled + capacity-limit；持久化失败或持久记录已与运行中的任务不一致时报告 cancelled + internal-error，均保留真实 cleanup，不退回无上限的前台等待。转换规则见 [improve-2](2026-11-13-background-tasks/improve-2/02-optimization-plan-and-change-scope.md)。
 
-当前 `task_output` 使用 `job_id`、`block?`、`wait_ms?`；wait_ms 只限制读取等待，不改变进程寿命。`task_kill` 使用 job_id，主动停止对应 cancelled，硬超时对应 timed_out。两者在 improve-3 统一为 task 三动作；当前阶段不提供临时 task_list 工厂。
+后台任务由 `task(list/output/stop)` 统一管理；wait_ms 只限制读取等待，不改变进程寿命。模型主动 stop 对应 cancelled，硬超时对应 timed_out；已结束任务保留原结局。旧 task_output/task_kill/task_list 不再执行，只保留迁移诊断、历史读取及显式 deny 兼容。
 
 后台任务的进程清理事实保存在任务记录中；显式启动或自动转换提交后，迟到的 cleanup 上报不再回写或重新发布原工具调用的清理状态。纯前台仍沿用调用级 cleanup。后台任务的查询、通知和资源回收以任务记录为准。
 
 ShellJobStore 保存历史与持久事实，Registry 只保留尚有进程、输出、清理或写入责任的对象；删除原先按 100 个终态淘汰的缓存。后台保存 32 KiB 尾部和检查点；纯前台不周期复制尾部到数据库。完整字段与空值语义见 [后台任务数据模型](2026-11-13-background-tasks/improve-1/design/data-model.md)。
 
-### 3.8 task 工具
+### 3.8 task 与 agent 工具
 
 ```typescript
-const TaskParams = z.object({
-  description: z.string().describe('任务简述（3-5 词）'),
-  prompt: z.string().describe('任务指令'),
-  subagent_type: z.string().describe('子代理类型（explore/research）'),
-  session_id: z.string().optional().describe('继续现有子 Session'),
-})
+type TaskStatus = 'running' | 'completed' | 'failed' | 'timed_out' | 'cancelled' | 'lost'
+type TaskParams =
+  | { action: 'list'; include_finished?: boolean; status?: TaskStatus; limit?: number; cursor?: string }
+  | { action: 'output'; job_id: string; block?: boolean; wait_ms?: number }
+  | { action: 'stop'; job_id: string }
 ```
+
+`task` 只管理可信 session/context scope 自己的 ShellJob。list 返回有界摘要与分页信息，output/stop 返回单任务快照；metadata 均带 `taskAction`，单任务还带 `jobId`。阻塞读取的 `waitReason` 为 `ready / timeout / steer`；停止的 `stopResult` 为 `requested / already_finished / tracking_released / cleanup_pending`，不替代状态与 cleanup。参数范围、互斥规则和历史兼容见 [task 接口](2026-11-13-background-tasks/improve-3/design/dfd-interface.md)。
+
+子代理由独立的 `agent(spawn/send/list/monitor/stop/close)` 管理，不能把 agent ID 传给 task。子代理参数及身份契约见 [agents 接口](../agents/dfd-interface.md)。
 
 ### 3.9 todo 工具
 

@@ -348,7 +348,15 @@ rg 包含隐藏普通文件，不读 ignore/config，始终排除 `.git / dist /
 }
 ```
 
-`task_output({ job_id, block?, wait_ms? })` 返回输出与状态；wait_ms 只限制本次等待，取消读取不会停止任务。`task_kill({ job_id })` 主动停止对应 cancelled；已经终态则保留原状态。两者将在 improve-3 统一为 task，当前不新增临时列表工具。
+`bash` 负责启动，`task` 统一管理自己的 ShellJob，`agent` 独立管理子代理，三者不混用 ID。task 按动作校验字段与可信 owner，所有动作走可信 control admission；list/output 为 readonly，stop 为 subagent-control。
+
+| task 动作 | 输入与返回 |
+| --- | --- |
+| list | 可传 include_finished（默认 true）或六态 status，二者互斥；limit 默认 20、范围 1–100，cursor 绑定 owner 和筛选。返回 jobs 摘要、filteredCount、pendingStartCount、hasMore、nextCursor；正常前台历史不列，仍有清理责任的异常项保留。 |
+| output | job_id 必填；block 默认 false。block=true 时 wait_ms 默认 30000、范围 1–600000；非阻塞不能传 wait_ms。返回尾部与快照，阻塞读取附 waitReason=ready/timeout/steer；等待到期或取消不改变任务硬截止，不停止任务。 |
+| stop | 只接受 job_id；主动停止原因固定 model，已终态保留原状态。返回快照及 stopResult=requested/already_finished/tracking_released/cleanup_pending，受理不等于清理完成。 |
+
+metadata 带 taskAction；只有 output/stop 带单任务 jobId。旧 task_output/task_kill/task_list 不注册为可执行别名，新调用返回迁移诊断；保留历史读取、回滚识别和对应动作的旧显式 deny。完整契约见 [task 接口](2026-11-13-background-tasks/improve-3/design/dfd-interface.md)；子代理工具见 [agents 接口](../agents/dfd-interface.md)。
 
 任务记录落在 shell_job 表；后台输出尾部和检查点持久保存，日志保存在任务绑定的文件。查询区分本地实时尾部、持久检查点、真实零输出与读取不可用，不用日志前缀冒充尾部。终态历史由 Store 查询，不再保留 100 个任务的内存缓存。逻辑停止反馈与进程/输出/资源收尾事实分开，确认等待到期仍未收尾时保留 unconfirmed 责任，不能报告已清理。
 

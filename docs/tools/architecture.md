@@ -30,7 +30,8 @@ tools/
 ├── grep.ts              # 内容搜索
 ├── list.ts              # 目录列表
 ├── bash.ts              # 命令执行
-├── task.ts              # 子代理调用
+├── task.ts              # ShellJob list/output/stop
+├── subagent.ts          # agent 子代理管理入口
 ├── todo.ts              # 待办事项
 └── web.ts               # web_search / web_fetch（→ search-providers）
 ```
@@ -235,36 +236,13 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 | 调用 Permission.ask() | ToolScheduler | bash 与其他工具共用调度器权限链 |
 | 执行命令 | bash 工具 | 权限通过后执行 |
 
-### 4.4 子代理工具
+### 4.4 ShellJob 与子代理管理工具
 
-#### task（子代理调用）
+`task(list/output/stop)` 是 ShellJobRegistry 的薄适配：验证动作字段和可信 owner 后查询、等待或停止，统一返回正文与 metadata，不直接启动进程、写数据库或发送信号。Bash 仍是唯一启动入口，ShellJobStore 与 Registry 保持原有事实及回收责任。
 
-```
-输入: description, prompt, subagent_type, session_id?
-输出: 子代理执行结果
-特殊: 子代理禁用此工具防止递归
-```
+task 的 list/output 为 readonly，stop 为 subagent-control；可信内置实例使用 control admission，不占普通执行槽。output 的等待由工具自身限时，取消等待不取消任务；stopResult 与任务 status/cleanup 分开报告。旧名称仅保留迁移诊断、历史读取和显式 deny 兼容，不执行别名。详见 [task 架构](2026-11-13-background-tasks/improve-3/design/architecture.md)。
 
-**task 工具执行流程**：
-
-```
-1. 接收任务参数
-   │
-   ▼
-2. 调用 SubagentExecutor.execute()
-   ├── 检查并发数 (< MAX_CONCURRENT_SUBAGENTS)
-   ├── 获取子代理配置
-   ├── 验证 mode !== 'primary'
-   ├── 创建子 Session
-   └── 调用 Lifecycle.run()
-   │
-   ▼
-3. 返回 SubagentResult
-   ├── sessionId
-   ├── success
-   ├── output
-   └── summary (工具调用记录)
-```
+`agent(spawn/send/list/monitor/stop/close)` 通过 `SessionSubagentHost` 管理独立子代理实例与执行。子代理禁用 agent 以防递归，但保留 task 管理自己的 ShellJob；task 不接受子代理 ID。具体契约见 [agents 接口](../agents/dfd-interface.md)。
 
 ### 4.5 网络工具
 
@@ -428,7 +406,7 @@ Bash 从命令开始同步保存 stdout/stderr 原始字节到同一目录的 `<
 
 工具模块原则上不依赖其他业务模块，保持纯净。
 
-**例外：bash 工具和 task 工具**
+**例外：bash、task 和 agent 工具**
 
 bash 工具需要依赖业务模块：
 
@@ -443,16 +421,16 @@ bash 工具需要依赖业务模块：
 | Permission | `ask()` | 请求命令执行确认 |
 | Policy | `isCritical()` | 检查是否为关键操作 |
 
-task 工具需要依赖 agents 模块：
+task 与 agent 分别依赖自己的运行时：
 
 | 依赖模块 | 调用接口 | 用途 |
 |----------|----------|------|
-| agents | `SubagentExecutor.execute()` | 执行子代理任务 |
-| agents | `AgentManager.get()` | 获取子代理配置 |
+| tools | `ShellJobRegistry.list/output/kill()` | task 管理自己的 ShellJob |
+| agents | `SessionSubagentHost` | agent 管理子代理实例与执行，见 [现行契约](../agents/dfd-interface.md) |
 
 **依赖理由**：
 - bash 工具的权限粒度需要到命令级别
-- task 工具是子代理的入口，必须调用 SubagentExecutor
+- task 复用 ShellJobRegistry；agent 是子代理入口，调用 SessionSubagentHost
 - ToolScheduler 无法解析 bash 命令内容
 - 这些依赖是特殊工具的需求，不适用于其他工具
 

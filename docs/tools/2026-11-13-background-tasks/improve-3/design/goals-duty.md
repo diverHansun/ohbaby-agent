@@ -1,6 +1,6 @@
 # 目标与职责
 
-状态：待实施设计。产品决定见 [00](../00-discussion.md)。
+状态：后端已完成实施与验证；实际完成范围与验证见 [05](../05-implementation-acceptance.md)。产品决定见 [00](../00-discussion.md)。
 
 ## Design Goals
 

@@ -55,7 +55,7 @@ task({ action: "output", job_id: "完整 ID", block: true, wait_ms: 30000 })
 task({ action: "stop", job_id: "完整 ID" })
 ```
 
-正文首行包含任务说明、状态和已知结果，后接有界尾部。stop 明确说停止请求受理或任务已结束，并报告 cleanup，不能只输出“停止成功”。实际字段名与 serializer 在实施时由共享契约定义，本示例不是已存在 API。
+正文首行包含任务说明、状态和已知结果，后接有界尾部。stop 返回 `stopResult: requested / already_finished / tracking_released / cleanup_pending` 并报告 cleanup，不能只输出“停止成功”。阻塞 output 返回 `waitReason: ready / timeout / steer`；取消按既有调用取消协议处理，不停止任务。所有动作带 `taskAction`；output/stop 带单任务 `jobId`，list 带分页摘要而不伪造顶层 jobId。以上接口已接入工作区，实际验证范围见 [05](../05-implementation-acceptance.md)。
 
 ## Data Ownership
 

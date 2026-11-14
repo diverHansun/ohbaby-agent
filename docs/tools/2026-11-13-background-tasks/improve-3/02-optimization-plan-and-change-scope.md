@@ -1,6 +1,6 @@
 # 改造方案与改动范围
 
-状态：给后续实施会话的契约，本轮尚未改代码。产品依据 [00](00-discussion.md)，接口依据 [design](design/dfd-interface.md)。
+状态：后端已完成实施与验证；本文保留改造契约，实际改动与验证结果见 [05](05-implementation-acceptance.md)。产品依据 [00](00-discussion.md)，接口依据 [design](design/dfd-interface.md)。
 
 ## 目标和边界
 
@@ -8,7 +8,7 @@
 
 ## 依赖与基线
 
-improve-1 提供权威任务记录、list 查询、准确快照、统一停止、结果就绪、通知及回收；这些现在仍是目标，不能标成已有能力。improve-2 提供自动转换后的同一 jobId；本轮工具不依赖其是否已开启。
+improve-1 提供权威任务记录、list 查询、准确快照、统一停止、结果就绪、通知及回收；其实际验证范围见 [improve-1 验收](../improve-1/05-implementation-acceptance.md)。improve-2 提供自动转换后的同一 jobId，实际验证范围见 [improve-2 验收](../improve-2/05-implementation-acceptance.md)；本轮工具不依赖其是否已开启。
 
 若三轮一起实施，直接交付最终 task 工具即可，不必先发布 task_list 再删除。若分开实施，先验证 improve-1 的管理语义再换入口；不能只完成改名便宣布准确状态和可靠回收已交付。前轮的持久化、恢复、通知契约以其 design 为准，不在这里复制第二套解决方案。
 
@@ -22,7 +22,7 @@ improve-1 提供权威任务记录、list 查询、准确快照、统一停止�
 
 ## 简要关键改动清单
 
-沿用前轮用户要求的简要清单；文件位置按当前源码，实施前复核。
+沿用前轮用户要求的简要清单；文件位置已按本轮工作区同步，完成情况见 05。
 
 | 文件/区域（packages/ohbaby-agent/src 下） | 改动 |
 | --- | --- |

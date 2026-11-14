@@ -9,10 +9,12 @@
 | 静态政策 | preflight.unit：根目录破坏、关机、下载进入 shell、下载后执行文件；curl -o 输出和随后读取不误判执行 |
 | 权限贯通 | analysis-permission.integration：宽 allow 不跳过 incomplete、Once/Reject、非法 Always 保留 pending、另一个 Always 不自动批准、deny 优先、模式粒度 |
 | 固定执行 | bash-binding.integration：原文、注入解释器、argv、cwd、前缀、最新 env、伪造输入无效、排队后新 deny、Full Access 变化重试、直接调用与真实 exit 2/stderr |
-| 生命周期回归 | Bash/scheduler/registry 与 process.integration：前后台、取消、超时、owner、task_output/task_kill、scope/session 清理 |
+| 生命周期回归 | Bash/scheduler/registry 与 process.integration：前后台、取消、超时、owner、task(list/output/stop)、scope/session 清理；旧工具名保留历史、deny 和迁移诊断测试，不执行旧别名 |
 | 发布资源 | packaging-smoke.integration + installed-grep fixture：脱离仓库 cwd 加载两份 grammar；移走任一 WASM 明确不可用，发布包不依赖 grammar 原生安装 |
 
 危险字面用例只分析或 stub spawn，不实际执行破坏性命令。实际 POSIX 执行用受控输出与临时目录，并根据解释器可用性跳过不适用平台；模拟平台选择不等于真实 Windows/Linux 主机验收。当前实机为 macOS，Windows PowerShell 5.1 编码和 Linux 实机运行仍需要对应主机验证。
+
+task 管理回归还需区分阻塞读取的 waitReason=ready/timeout/steer 与进程硬超时，以及 stopResult=requested/already_finished/tracking_released/cleanup_pending 与真实 cleanup；取消读取不能停止任务。统一入口的参数、权限、角色与历史测试要求见 [improve-3 验收契约](../tools/2026-11-13-background-tasks/improve-3/04-test-and-acceptance.md)，实际执行结果见 [验收记录](../tools/2026-11-13-background-tasks/improve-3/05-implementation-acceptance.md)。
 
 ```sh
 pnpm exec vitest run packages/ohbaby-agent/src/shell packages/ohbaby-agent/src/sandbox packages/ohbaby-agent/src/permission packages/ohbaby-agent/src/tools/bash.unit.test.ts packages/ohbaby-agent/src/core/tool-scheduler/scheduler.unit.test.ts tests/integration/shell-tools

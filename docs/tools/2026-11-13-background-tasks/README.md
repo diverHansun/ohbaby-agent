@@ -1,6 +1,6 @@
 # 后台任务：生命周期、自动转换与管理工具
 
-2026-11-13 开启。improve-1～3 的后端规划已收尾，improve-1 已本地集成到开发分支；2026-11-14 按用户指示从该分支建立 `codex/background-tasks-improve-2` 实施第二轮，后端实施与验收已完成，并按用户批准本地合并到开发分支；improve-3 尚未开始。代码勘测基线 `f42608d4`；实际验收以各轮实施报告为准，规划文档中的代码位置是基线快照。
+2026-11-13 开启。improve-1～3 的后端规划已收尾，improve-1 已本地集成到开发分支；2026-11-14 按用户指示从该分支建立 `codex/background-tasks-improve-2` 实施第二轮，后端实施与验收已完成，并按用户批准本地合并到开发分支；improve-3 已从开发分支 `332ec6d2` 建立 `codex/background-tasks-improve-3`，后端实现、子代理及Pi复审、完整验证均已完成，留在实施分支等待审查，未合并。代码勘测基线 `f42608d4`；实际验收以各轮实施报告为准，规划文档中的代码位置是基线快照。
 
 用户先确认显式后台管理，再明确提前讨论自动转换及工具收拢，因此保留三个独立轮次。提前规划不代表前轮已验收。当前只负责后端，前端暂缓。
 
@@ -57,4 +57,4 @@
 - [子代理可靠投递](../../agents/2026-11-12-subagent-delivery/README.md)：复用输入存储与准入能力，保留独立业务来源。
 - [执行可靠性第二轮](../../problem-lists/2026-09-19-execution-reliability/improve-2/00-discussion.md)：本议题修订旧Bash统一寿命上限；普通工具名额与后台任务名额仍分开。
 
-各轮实际结果见 [improve-1 实施与验收](improve-1/05-implementation-acceptance.md)（最终精简修复 8355 项通过，已集成）与 [improve-2 实施与验收](improve-2/05-implementation-acceptance.md)（用户审查后修复四项并完成收尾复审，完整检查 8407 项通过，已本地集成）。本轮未推送，improve-3 等待用户安排。shell-job 相关文件的目录整理延后至 improve-3 完成并验收后，再按最终职责边界单独迁移；迁移提交只移动文件和更新引用，不夹带行为修改。
+各轮实际结果见 [improve-1 实施与验收](improve-1/05-implementation-acceptance.md)（最终精简修复 8355 项通过，已集成）与 [improve-2 实施与验收](improve-2/05-implementation-acceptance.md)（用户审查后修复四项并完成收尾复审，完整检查 8407 项通过，已本地集成）。本轮未推送；improve-3 的当前实施与验收状态见 [第三轮实施记录](improve-3/05-implementation-acceptance.md)。shell-job 相关文件的目录整理延后至 improve-3 完成并验收后，再按最终职责边界单独迁移；迁移提交只移动文件和更新引用，不夹带行为修改。

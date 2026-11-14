@@ -14,7 +14,7 @@
 
 ## Module Structure & File Layout
 
-- `tools/task.ts`：建议新增薄适配文件，schema、动作校验、文本/metadata 组装及 admission。也可按实际基线留在现有 tools 文件；不为文件拆分引入第二份 Registry。
+- `tools/task.ts`：统一入口的薄适配文件，负责 schema、动作校验、文本/metadata 组装及 admission；不引入第二份 Registry。
 - `tools/shell-job-registry.ts`：保留任务事实、等待、停止和归属检查；列表/持久查询由 improve-1 提供。
 - `tools/builtin.ts`、内置角色、提示词：只发布一个管理工具。
 - permission、上下文投影、rewind：只补 task 动作识别和兼容，不重构整套授权或会话系统。
@@ -24,6 +24,6 @@
 - owner 只从可信上下文取得；输入不接受 session、owner、agent ID 或任意 PID。
 - 整个工具不能标注 `readOnlyHint: true`。schema 和运行时均校验；拒绝不认识的动作及动作无关字段。
 - output 等待取消只释放读等待器；stop 才进入统一进程清理路径。并发读取、停止和结束需依赖 Registry 的幂等终止与快照边界。
-- 读输出不等于模型已消费通知；task 不修改 notice_state。improve-1 的通知消费细则若尚未收尾，必须先解决，不能以读调用作替代。
+- 读输出不等于模型已消费通知；task 不修改 notice_state，仍由 improve-1 的通知链路确认消费，不能以读调用作替代。
 - `task` 是名称与适配层，ShellJob 是唯一事实来源。保留 ID、日志和消息，不批量改写旧历史。
 - use-case/non-functional 不另建文件：本轮是三种单步管理动作；编排、资源边界和兼容约束在本文件、接口与测试文档中覆盖。

@@ -18,7 +18,9 @@
 
 metadata 保留单任务 `jobId` 及已有消费者需要的事实，增加 `taskAction`。list 返回有界 `jobs` 摘要及截断信息，不伪造一个顶层 jobId，也不携带各任务完整日志。确切序列化字段与 improve-1 契约共用，避免 tool 与 UI 各自产生一套状态名。
 
-停止响应区分 `requested` 与 `already_finished` 等操作结果，同时附当前任务快照；这是操作是否受理，不是任务一定已经结束。不得用请求成功的 `outcome: success` 替代 job 的状态和 cleanup。
+停止响应的 `stopResult` 为 `requested / already_finished / tracking_released / cleanup_pending`，同时附当前任务快照：分别表示已受理、已结束且无剩余清理责任、已放弃追踪、仍待清理确认。不得用请求成功的 `outcome: success` 替代 job 的状态和 cleanup。
+
+阻塞读取返回 `waitReason: ready / timeout / steer`，分别表示结果就绪、读取等待到期或新用户输入使等待提前结束。非阻塞读取不附 waitReason；调用取消沿既有取消协议处理，不转换成任务停止。
 
 ## 状态与停止原因
 

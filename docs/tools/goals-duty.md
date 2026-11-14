@@ -72,18 +72,18 @@ type ToolSource = 'builtin' | 'module' | 'mcp'
 | grep | readonly | 在文件内容中搜索正则表达式 | `tools/grep.ts` |
 | list | readonly | 列出目录结构 | `tools/list.ts` |
 | bash | dangerous | 执行 Shell 命令 | `tools/bash.ts` |
+| task | 按动作 readonly / subagent-control | list/output/stop 管理自己的 ShellJob | `tools/task.ts` |
 | todo_write | write | 写入待办事项列表 | `tools/todo.ts` |
 | todo_read | readonly | 读取待办事项列表 | `tools/todo.ts` |
-| subagent_run | subagent | 创建或继续子代理实例执行任务 | `tools/subagent.ts` |
-| subagent_status | subagent | 查询当前 parent session 下子代理状态 | `tools/subagent.ts` |
-| subagent_close | subagent | 关闭子代理实例并使其进入终态 | `tools/subagent.ts` |
+| agent | 按动作分类 | spawn/send/list/monitor/stop/close 管理子代理 | `tools/subagent.ts` |
 | **web_search** | **network** | **语义 Web 搜索** | **`tools/web-search.ts` → `services/search-providers/`** |
 | **web_fetch** | **network** | **抓取 URL 内容并提取** | **`tools/web-fetch.ts` → `services/search-providers/`** |
 
 **注意**：
 - Todo 保留 `todo_write` / `todo_read` 双工具；每项只有 `content` 与三态 `status`，完整契约与 UI 生命周期见 [`todo-list/`](./todo-list/goals-duty.md)。
 - `web_search` / `web_fetch` 是内置工具入口，但执行通过 `services/search-providers/` 调用具体厂商（当前激活 Tavily）
-- `subagent_run` 是主代理召唤子代理的唯一入口；子代理运行时硬编码禁用 `subagent_run` / `subagent_status` / `subagent_close` 以防止递归召唤
+- `agent` 是主代理管理子代理的入口；子代理禁用 agent 防止递归，但保留 task 管理自己的 ShellJob。旧 subagent 工具仅兼容历史，见 [agents 契约](../agents/dfd-interface.md)。
+- `task` 不启动命令或管理子代理；bash 是唯一 Shell 启动入口。旧 task_output/task_kill/task_list 仅保留迁移诊断、历史读取和显式 deny 兼容，不执行旧别名，见 [task 契约](2026-11-13-background-tasks/improve-3/design/dfd-interface.md)。
 
 ### D3: 处理输出限制和截断
 
@@ -154,7 +154,7 @@ bash 工具是唯一需要在内部进行权限相关操作的工具，原因是
 
 ### N2: 不负责工具分类管理
 
-工具的类别（readonly/write/dangerous 等）由 ToolScheduler 的映射表管理，工具本身不声明类别。
+工具声明类别，由 ToolScheduler 执行对应策略；task 等混合动作工具通过可信 admission 按已验证动作分类，不能把整个 task 视为只读。
 
 ### N3: 不负责并发控制
 
@@ -182,7 +182,7 @@ bash 工具是唯一需要在内部进行权限相关操作的工具，原因是
 | search-providers | `src/services/search-providers/` | 依赖 | `web_search` / `web_fetch` 通过该模块调用 Tavily / Exa 等厂商 |
 | utils | `src/utils/` | 依赖 | bash 工具依赖 `command-parser`（命令解析）、`paths`（路径检查） |
 | Shell | `src/shell/` | 依赖 | bash 工具依赖 Shell 模块 |
-| agents | `src/agents/` | 依赖 | task 工具依赖 SubagentExecutor |
+| agents | `src/agents/` | 依赖 | agent 工具依赖 SessionSubagentHost |
 | Permission | `src/permission/` | 依赖 | bash 工具调用 Permission.ask() |
 | Policy | `src/policy/` | 依赖 | bash 工具调用 Policy.isCritical() |
 
@@ -195,14 +195,11 @@ bash 工具依赖 Shell 模块的以下能力：
 | `Shell.acceptable()` | 获取兼容的 shell 路径（过滤 fish/nu 等不兼容 shell） |
 | `Shell.killTree(proc)` | 清理超时或被用户取消的命令进程（包括子进程） |
 
-### task 工具与 agents 模块的依赖关系
+### task 与 agent 的依赖边界
 
-task 工具是子代理的调用入口，依赖 agents 模块的以下能力：
+task 依赖 `ShellJobRegistry` 的 list/output/kill，只管理可信 session/context scope 归属的 ShellJob；有界等待与停止共用既有结果就绪及回收流程。停止回执不能替代真实清理事实。
 
-| 调用 | 用途 |
-|------|------|
-| `SubagentExecutor.execute(params)` | 执行子代理任务 |
-| `AgentManager.get(name)` | 获取子代理配置 |
+agent 通过 `SessionSubagentHost` 管理子代理，接口与生命周期见 [agents 契约](../agents/dfd-interface.md)。两者分别持有自己的执行实体，工具合并不合并运行时，也不扩展为模型跨 owner 管理。
 
 ---
 

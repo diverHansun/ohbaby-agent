@@ -22,4 +22,4 @@
 
 ## Verification Strategy
 
-先执行受影响 unit/integration 与类型检查，再按项目要求完成必要回归。文档阶段仅做文档一致性及链接检查，不能写“测试已通过”。验收追踪见 [04](../04-test-and-acceptance.md)，每项需记录实际命令、结果与未验证限制。
+先执行受影响 unit/integration 与类型检查，再按项目要求完成必要回归。验收要求见 [04](../04-test-and-acceptance.md)，实际命令、结果与未验证限制见 [05](../05-implementation-acceptance.md)；不能用文档一致性检查代替运行证据。
