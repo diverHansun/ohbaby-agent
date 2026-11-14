@@ -33,4 +33,4 @@ AST 已解码的路径按字面值解析，保留引号字符、首尾空白、�
 
 公共状态为 running、completed、failed、timed_out、cancelled、lost。timeout 到期对应 timed_out；用户、模型、所有者结束等主动停止对应 cancelled，具体来源见 stopReason。进程退出、输出关闭、清理确认和最终持久化分别记录，逻辑终态不能冒充资源已回收。启动前事务占位的内部空状态不对外增加第七种状态。
 
-默认允许自动转后台，前台等待 120 秒后在同一任务提交 mode/promotedAt；未传 timeout 时无隐式硬截止。显式后台立即返回、默认不限时；两条后台路径显式 timeout 最长 24 小时，转换不重置。关闭转换的纯前台默认 120 秒、最长 600 秒。满额转换停止当前命令，原因 capacity-limit；转换写入失败原因 internal-error，均为 cancelled，保留真实清理状态。主代理当前轮 Stop 只停止前台；子代理本次执行结束回收该执行的全部任务。已登记任务在服务重启后根据原生进程身份保守恢复，无法核实身份时保留 unconfirmed，不按数字 PID 猜测并杀进程。详细边界见 [后台任务 improve-1](../tools/2026-11-13-background-tasks/improve-1/design/data-model.md)。
+默认允许自动转后台，前台等待 120 秒后在同一任务提交 mode/promotedAt；未传 timeout 时无隐式硬截止。显式后台立即返回、默认不限时；两条后台路径显式 timeout 最长 24 小时，转换不重置。关闭转换的纯前台默认 120 秒、最长 600 秒。满额转换停止当前命令，原因 capacity-limit；转换写入失败或持久记录不一致原因 internal-error，均为 cancelled，保留真实清理状态。主代理当前轮 Stop 只停止前台；子代理本次执行结束回收该执行的全部任务。已登记任务在服务重启后根据原生进程身份保守恢复，无法核实身份时保留 unconfirmed，不按数字 PID 猜测并杀进程。详细边界见 [后台任务 improve-1](../tools/2026-11-13-background-tasks/improve-1/design/data-model.md)。

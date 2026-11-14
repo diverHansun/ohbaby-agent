@@ -57,4 +57,4 @@
 - [子代理可靠投递](../../agents/2026-11-12-subagent-delivery/README.md)：复用输入存储与准入能力，保留独立业务来源。
 - [执行可靠性第二轮](../../problem-lists/2026-09-19-execution-reliability/improve-2/00-discussion.md)：本议题修订旧Bash统一寿命上限；普通工具名额与后台任务名额仍分开。
 
-各轮实际结果见 [improve-1 实施与验收](improve-1/05-implementation-acceptance.md)（最终精简修复 8355 项通过，已集成）与 [improve-2 实施与验收](improve-2/05-implementation-acceptance.md)（最终 8400 项通过，审查通过，等待用户审查后集成）。本轮仅在实施分支分批提交，不合并、不推送，improve-3 等待用户安排。
+各轮实际结果见 [improve-1 实施与验收](improve-1/05-implementation-acceptance.md)（最终精简修复 8355 项通过，已集成）与 [improve-2 实施与验收](improve-2/05-implementation-acceptance.md)（用户审查后修复四项并完成收尾复审，完整检查 8407 项通过，本地分批提交，尚未集成）。本轮仅在实施分支分批提交，不合并、不推送，improve-3 等待用户安排。
