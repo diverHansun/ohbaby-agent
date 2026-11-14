@@ -1,15 +1,13 @@
 import { ShellJobManagementError } from "./shell-job-recovery.js";
 import type { ProcessIdentity } from "../shell/process-identity.js";
 import fs from "node:fs";
-import { initialShellJobNoticeState, boundedText } from "./shell-job-notice.js";
-import {
-  SHELL_JOB_STATUSES,
-  ShellJobQueryError,
-  isShellJobUnsettled,
-} from "./shell-job-query.js";
+import { initialShellJobNoticeState } from "./shell-job-notice.js";
+import { isShellJobUnsettled } from "./shell-job-query.js";
 import {
   decodeShellJobCursor,
   encodeShellJobCursor,
+  shellJobSummary,
+  type ShellJobPublicSummary,
 } from "./shell-job-reader.js";
 import {
   InMemoryShellJobStore,
@@ -109,29 +107,12 @@ export interface ShellJobListOptions {
   readonly signal?: AbortSignal;
 }
 
-export type ShellJobSummary = Pick<
-  ShellJobRecord,
-  | "jobId"
-  | "command"
-  | "description"
-  | "mode"
-  | "stopReason"
-  | "cleanup"
-  | "createdAt"
-  | "startedAt"
-  | "endedAt"
-  | "promotedAt"
-  | "resultReadyAt"
-  | "settledAt"
-  | "timeoutMs"
-  | "exitCode"
-  | "signal"
-  | "trackingReleasedAt"
-  | "outputBytes"
-  | "outputComplete"
-  | "outputTruncated"
-  | "outputCheckpointAt"
-> & { readonly status: ShellJobStatus };
+/** The shared public summary plus output counters for the model's own jobs. */
+export type ShellJobSummary = ShellJobPublicSummary &
+  Pick<
+    ShellJobRecord,
+    "outputBytes" | "outputComplete" | "outputTruncated" | "outputCheckpointAt"
+  >;
 
 export interface ShellJobList {
   readonly jobs: readonly ShellJobSummary[];
@@ -849,31 +830,15 @@ export class ShellJobRegistry {
     await Promise.all(jobs.map((job) => job.persist.catch(() => undefined)));
   }
 
-  /** Model reads are always scoped to the trusted calling session and context. */
+  /**
+   * Model reads are always scoped to the trusted calling session and context.
+   * The task tool validates input; the store still enforces the page bound.
+   */
   async list(
     sessionId: string,
     options: ShellJobListOptions = {},
     contextScopeId?: string,
   ): Promise<ShellJobList> {
-    const limit = options.limit ?? 20;
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-      throw new ShellJobQueryError(
-        "Shell task page limit must be an integer from 1 to 100.",
-      );
-    if (
-      options.includeFinished !== undefined &&
-      typeof options.includeFinished !== "boolean"
-    )
-      throw new ShellJobQueryError("includeFinished must be a boolean.");
-    if (
-      options.status !== undefined &&
-      !SHELL_JOB_STATUSES.includes(options.status)
-    )
-      throw new ShellJobQueryError("Invalid task status filter.");
-    if (options.status !== undefined && options.includeFinished !== undefined)
-      throw new ShellJobQueryError(
-        "status and includeFinished cannot be combined.",
-      );
     const scope = { sessionId, contextScopeId: contextScopeId ?? null };
     const filter = {
       includeFinished: options.includeFinished ?? true,
@@ -884,40 +849,22 @@ export class ShellJobRegistry {
     await this.refreshLocalOwner(sessionId, scope.contextScopeId);
     await this.options.refreshOwner?.(sessionId, scope.contextScopeId);
     options.signal?.throwIfAborted();
-    const page = this.store.query({ scope, ...filter, limit, before });
+    const page = this.store.query({
+      scope,
+      ...filter,
+      limit: options.limit ?? 20,
+      before,
+    });
     // Project saved metadata only: listing does not open or stat individual logs.
-    const jobs = page.rows.map((record): ShellJobSummary => {
-      if (record.status === null)
-        throw new ShellJobQueryError(
-          "Task launch registration has not finished.",
-        );
-      return {
-        jobId: record.jobId,
-        command: boundedText(record.command, 1024),
-        description:
-          record.description === null
-            ? null
-            : boundedText(record.description, 512),
-        mode: record.mode,
-        status: record.status,
-        stopReason: record.stopReason,
-        cleanup: record.cleanup,
-        createdAt: record.createdAt,
-        startedAt: record.startedAt,
-        endedAt: record.endedAt,
-        promotedAt: record.promotedAt,
-        resultReadyAt: record.resultReadyAt,
-        settledAt: record.settledAt,
-        timeoutMs: record.timeoutMs,
-        exitCode: record.exitCode,
-        signal: record.signal,
-        trackingReleasedAt: record.trackingReleasedAt,
+    const jobs = page.rows.map(
+      (record): ShellJobSummary => ({
+        ...shellJobSummary(record),
         outputBytes: record.outputBytes,
         outputComplete: record.outputComplete,
         outputTruncated: record.outputTruncated,
         outputCheckpointAt: record.outputCheckpointAt,
-      };
-    });
+      }),
+    );
     return {
       jobs,
       hasMore: page.hasMore,
@@ -1322,13 +1269,12 @@ export class ShellJobRegistry {
       this.getOwnedJob(jobId, sessionId, contextScopeId);
       const accepted = await this.stopLive(job, stopReason);
       snapshot = this.snapshot(job);
+      // An earlier stop or timeout already owns termination; report its unfinished cleanup.
       stopResult = accepted
         ? "requested"
         : job.cleanup === "confirmed" && job.releaseComplete
           ? "already_finished"
-          : job.terminationStarted
-            ? "requested"
-            : "cleanup_pending";
+          : "cleanup_pending";
     } else {
       let record = this.getOwnedRecord(jobId, sessionId, contextScopeId);
       let accepted = false;

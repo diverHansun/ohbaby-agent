@@ -1,6 +1,6 @@
 # improve-3 后端实施与验收
 
-2026-11-14。实施分支 `codex/background-tasks-improve-3`，从开发分支 `codex/background-tasks-dev-20261113` 的 `332ec6d2` 建立。实现、独立子代理审查、指定Pi两轮复审及最终完整验证均已完成。未合并、未推送。只实施后端，前端与 shell-job 目录迁移仍待后续安排。
+2026-11-14。实施分支 `codex/background-tasks-improve-3`，从开发分支 `codex/background-tasks-dev-20261113` 的 `332ec6d2` 建立。实现、独立子代理审查、指定Pi审查与收尾复审及最终完整验证均已完成。未合并、未推送。只实施后端，前端与 shell-job 目录迁移仍待后续安排。
 
 ## 实施结果
 
@@ -18,7 +18,7 @@
 1. 原output在其他后端的持久记录上忽略block；现在只在该读取调用期间有界查询，退出即释放timer，不新增常驻轮询。
 2. 原output以逻辑终态结束等待，可能早于输出排空；现在沿用既有resultReady事实，等待器在结果就绪、到期、取消或steer时释放。进程硬超时仍由原Registry负责。
 3. 独立审查发现task层给status筛选补includeFinished默认值，导致底层互斥校验误拒绝。已修复，并在真实task工具入口循环验证六种状态，补足原先仅测Registry的缺口。
-4. Pi指出list正文与metadata重复完整JSON。正文改为短摘要，详细事实仅在结构化metadata中保留一份，避免重复占用模型上下文。
+4. Pi指出list正文与metadata重复完整JSON。正文改为短摘要，详细事实仅在结构化metadata中保留一份，避免重复占用模型上下文。模型投影的进一步裁剪见下文“审查后修正”第 2 条。
 
 ## 审查与取舍
 
@@ -30,6 +30,32 @@ Pi首轮的两项阻断意见经源码及真实路径验证后未采纳：
 - recovery会原子写入lost和resultReadyAt；abandon先refresh，保留就绪事实。新增测试经实际recover/abandon验证阻塞读取正确结束。不能把任意终态视为结果就绪，否则会破坏已有的foreign输出排空保证；不针对真实路径无法产生的状态加兜底。
 
 另补会话initialSnapshot恢复旧deny的公开入口验证，覆盖默认/full-access及output/stop两动作；旧allow不迁移。测试均加在已有文件，无新增测试文件。
+
+## 审查后修正
+
+2026-11-14 用户要求按 SWE 原则复审本分支。双轴子代理审查（代码工艺、对照设计文档）后，用户批准修正以下三项；其余判断题只作后续参考，本次未改。
+
+1. **本地重复 stop 的 stopResult**：任务句柄在本进程时，如果停止已由先前的 stop 或超时发起、清理尚未完成，原实现返回 `requested`，和持久记录路径的 `cleanup_pending` 不一致。现在本地路径只在本次受理时返回 `requested`，否则按 cleanup 与释放状态返回 `already_finished` 或 `cleanup_pending`。新增重复 stop 用例，验证第二次返回 `cleanup_pending` 且不再发信号；该用例在修正前失败。
+2. **list 给模型的投影**：上文第 4 条只去掉了正文里的整段 JSON，元数据投影仍为每个任务附约 24 个字段，含命令全文和多个时间戳。现在模型投影每项只保留 jobId、mode、status、stopReason、cleanup、exitCode；完整摘要仍保存在持久 metadata 中，供 UI 使用。收尾时以20项完整样例对比HEAD与工作区的实际投影函数：metadata JSON从11437字符降为2337字符，减少约80%；该测量不含正文，不代表所有命令的固定token节省。
+3. **list 重复实现**：`ShellJobRegistry.list` 和 `ShellJobReader.list` 各写了一份记录到摘要的映射，现合并为 `shellJobSummary`，Registry 只追加输出计数字段。同时删除 Registry 中与 task 入口重复的 limit/status/互斥校验：输入规则只在 task 入口检查，页大小上限仍由 store 保证。上文第 3 条的误拒问题，正是这两层规则不一致造成的。
+
+优化完成时的验证：相关测试做了两轮定向运行，42 个文件 698 项、读取层小改后 52 个文件 746 项（两组有重叠）均通过；工作区 `tsc -b` 通过；改动文件的 ESLint 警告数与修改前相同（均为原有警告），Prettier 通过。该阶段按本议题“窄修只跑相关检查”的约定未重跑完整preflight；本次收尾已补全整体验证，结果见下节。
+
+### 收尾复核
+
+本次对 HEAD `8214f52d` 之后的7份工作区改动重新独立审查。代码工艺与合同两轴均未发现确定的代码阻断问题；摘要提取保留了原UI字段与截断规则，模型正文仍包含ID与简短说明，task入口校验和Store页大小约束仍有效。
+
+Claude的其余意见没有一并改动，取舍如下：
+
+- 现有 `utils/params` 的number/boolean函数用空值合并运算，将null当默认值；task要求拒绝显式null，不能直接替换。边界严格校验不因精简Registry而删除。
+- 常量命名、等待函数拆分、结果类型、集中旧名和停止流程合并属于可维护性建议。当前共享摘要仍放在reader中，并未完成中立查询层重组；本轮只消除实际重复，不另建查询服务或动作框架。
+- `legacyDenyToolName` 包含参数解析，命名确有改进空间，但前置拒绝发生在审批前；调度器执行前再次检查旧deny。PermissionManager自身未透传旧名，但当前真实链路未发现绕过路径，不为假设增加一套权限迁移机制。
+- `task_list` 没有旧执行工厂，不应描述为已发布的历史工具。当前仅有迁移诊断与deny映射，不提供别名执行；其清理可与兼容映射整理一起处理。
+- list正文将null写为pending，以及bash历史投影字段扩展，是原实施的剩余观察项，不是本次三项优化已修正的内容。前端专用展示仍在本轮范围外。
+
+另做一次性真实task handler检查（内存持久记录，不新增测试文件）：steer订阅拒绝时错误向调用方传播、任务保持running、不发停止信号；stopped/timeout两个非法状态及timeout/agent_id/stop_all三个无关字段全部拒绝。该证据不等于新增了长期回归用例。
+
+本次指定Pi `github-copilot/gemini-4-carbon`、`high`复审当前diff，结论为Spec PASS / Craft PASS，无实证阻断问题。其将task_list称为必须兼容的说法不应作为发布历史证据；接口文档的原条件是“若曾单独发布”。本次完整验证结果见下节；修正前8464项结果单独保留为历史证据。
 
 ## 验收映射
 
@@ -57,9 +83,13 @@ DSH的独立wait取消、Kimi的管理能力门控、ZCode的转换/收尾责任
 
 ## 最终验证与交付边界
 
-最终冻结版本运行 `pnpm run preflight` 成功（退出码0）：格式、ESLint、TypeScript、完整测试及全工作区构建均通过。测试为 **720文件通过、6文件跳过；8464项通过、20项跳过**。ESLint为0错误、234个原有警告；没有增加警告。构建仍提示既有Web大chunk及外部导入警告，不影响构建成功。
+**审查后优化的本次验证**：格式检查、ESLint及TypeScript通过（0错误、234项原有警告）。完整测试首轮为719文件通过、1文件失败、6文件跳过；8464项通过、1项失败、20项跳过。唯一失败是打包测试安装依赖时，npm上游请求 `@earendil-works/pi-tui` 失败、测试代理返回502；保留该事实，不记为一次全绿preflight。未改代码，定向重跑打包测试1/1通过；随后单独执行 `pnpm run build` 通过。合计8465项测试均取得通过结果，20项按配置跳过。无需为已定位的下载失败重复运行全部测试。
 
-首轮全量曾暴露两处旧测试夹具：composition仍断言task不存在、cleanup仍读取terminalWaiters。同步新合同后，64项定向复测通过，随后完整验证通过；最终冻结后再跑完整检查得出上述8464项结果。
+当前优化在独立子代理与指定Pi复审后，本地提交在improve-3实施分支，未合并、未推送；下面保留原实施的历史验收记录。
+
+修正前代码提交 `de367e50` 运行 `pnpm run preflight` 成功（退出码0）：格式、ESLint、TypeScript、完整测试及全工作区构建均通过。测试为 **720文件通过、6文件跳过；8464项通过、20项跳过**。ESLint为0错误、234个原有警告；没有增加警告。构建仍提示既有Web大chunk及外部导入警告，不影响构建成功。
+
+首轮全量曾暴露两处旧测试夹具：composition仍断言task不存在、cleanup仍读取terminalWaiters。同步新合同后，64项定向复测通过，随后完整验证通过；原实施冻结后再跑完整检查得出上述8464项结果，不代表审查后修正的验证结果。
 
 代码/测试提交为 `de367e50`（`feat(tools): unify shell job management under task`），文档另作本地提交；留在实施分支等待用户审查，未合并开发分支、未推送。16份改动文档的本地链接检查及diff空白检查通过。
 

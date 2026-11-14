@@ -321,6 +321,47 @@ describe("tool metadata projection", () => {
       status: "timed_out",
       cleanup: "unconfirmed",
     });
+    const realistic = projectToolMetadataForModel("task", {
+      taskAction: "list",
+      hasMore: false,
+      filteredCount: 1,
+      pendingStartCount: 0,
+      jobs: [
+        {
+          jobId: "job_full",
+          command: "pnpm test ".repeat(100),
+          description: "Run the full suite",
+          mode: "background",
+          status: "failed",
+          stopReason: null,
+          cleanup: "confirmed",
+          createdAt: 1,
+          startedAt: 2,
+          endedAt: 3,
+          promotedAt: null,
+          resultReadyAt: 4,
+          settledAt: 5,
+          timeoutMs: 86_400_000,
+          exitCode: 1,
+          signal: null,
+          trackingReleasedAt: null,
+          outputBytes: 12_345,
+          outputComplete: true,
+          outputTruncated: false,
+          outputCheckpointAt: 3,
+        },
+      ],
+    });
+    expect(realistic.jobs).toEqual([
+      {
+        jobId: "job_full",
+        mode: "background",
+        status: "failed",
+        stopReason: null,
+        cleanup: "confirmed",
+        exitCode: 1,
+      },
+    ]);
     expect(
       projectToolMetadataForModel("task", {
         taskAction: "unknown",

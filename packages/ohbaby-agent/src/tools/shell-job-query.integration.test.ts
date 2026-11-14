@@ -347,10 +347,10 @@ describe.each(["memory", "sqlite"] as const)(
       await expect(
         registry.list("side", { cursor: "not-a-cursor" }),
       ).rejects.toThrow("cursor");
-      await expect(registry.list("side", { limit: 101 })).rejects.toThrow();
-      await expect(
-        registry.list("side", { status: "running", includeFinished: true }),
-      ).rejects.toThrow();
+      // The store keeps the page bound; status/include_finished rules belong to task input.
+      await expect(registry.list("side", { limit: 101 })).rejects.toThrow(
+        "page limit",
+      );
     });
     it("observes only the requested owner before querying and propagates refresh failures and cancellation", async () => {
       const store = await setup();

@@ -207,6 +207,55 @@ async function openLog(
   }
 }
 
+export type ShellJobPublicSummary = Pick<
+  ShellJobRecord,
+  | "jobId"
+  | "command"
+  | "description"
+  | "mode"
+  | "stopReason"
+  | "cleanup"
+  | "createdAt"
+  | "startedAt"
+  | "promotedAt"
+  | "endedAt"
+  | "resultReadyAt"
+  | "settledAt"
+  | "timeoutMs"
+  | "exitCode"
+  | "signal"
+  | "trackingReleasedAt"
+> & { readonly status: ShellJobStatus };
+
+/** Bounded saved facts shared by the user task view and the model task list; never log content. */
+export function shellJobSummary(record: ShellJobRecord): ShellJobPublicSummary {
+  if (record.status === null)
+    throw new ShellJobReadError(
+      "SHELL_JOB_NOT_READY",
+      "Task launch registration has not finished.",
+    );
+  return {
+    jobId: record.jobId,
+    command: boundedText(record.command, 1024),
+    description:
+      record.description === null ? null : boundedText(record.description, 512),
+    mode: record.mode,
+    status: record.status,
+    stopReason: record.stopReason,
+    cleanup: record.cleanup,
+    createdAt: record.createdAt,
+    startedAt: record.startedAt,
+    promotedAt: record.promotedAt,
+    endedAt: record.endedAt,
+    resultReadyAt: record.resultReadyAt,
+    settledAt: record.settledAt,
+    timeoutMs: record.timeoutMs,
+    exitCode: record.exitCode,
+    signal: record.signal,
+    trackingReleasedAt: record.trackingReleasedAt,
+  };
+}
+
 /** Authorized backend reads. The caller owns client/root authorization; no method accepts a filesystem path. */
 export class ShellJobReader {
   constructor(
@@ -244,14 +293,9 @@ export class ShellJobReader {
     record: ShellJobRecord,
     managementResult?: ReturnType<ShellJobReader["management"]>,
   ): Promise<UiShellJobRow> {
-    if (record.status === null)
-      throw new ShellJobReadError(
-        "SHELL_JOB_NOT_READY",
-        "Task launch registration has not finished.",
-      );
+    const summary = shellJobSummary(record);
     const management = await (managementResult ?? this.management(record));
     return {
-      jobId: record.jobId,
       rootSessionId: record.rootSessionId,
       sessionId: record.sessionId,
       ownerKind: record.contextScopeId === null ? "main" : "subagent",
@@ -269,25 +313,7 @@ export class ShellJobReader {
             subagentId: record.contextScopeId,
             ...(record.runId ? { childRunId: record.runId } : {}),
           }),
-      command: boundedText(record.command, 1024),
-      description:
-        record.description === null
-          ? null
-          : boundedText(record.description, 512),
-      mode: record.mode,
-      status: record.status,
-      stopReason: record.stopReason,
-      cleanup: record.cleanup,
-      createdAt: record.createdAt,
-      startedAt: record.startedAt,
-      promotedAt: record.promotedAt,
-      endedAt: record.endedAt,
-      resultReadyAt: record.resultReadyAt,
-      settledAt: record.settledAt,
-      timeoutMs: record.timeoutMs,
-      exitCode: record.exitCode,
-      signal: record.signal,
-      trackingReleasedAt: record.trackingReleasedAt,
+      ...summary,
     };
   }
   async list(

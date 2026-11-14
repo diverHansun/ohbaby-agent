@@ -238,6 +238,41 @@ describe("ShellJobRegistry", () => {
     }
   });
 
+  it("reports a repeated live stop as pending cleanup without sending another signal", async () => {
+    const child = new FakeChild();
+    let stopped = false;
+    const killTree = vi.fn();
+    const registry = new ShellJobRegistry({
+      killTree,
+      probeTree: (): "stopped" | "running" => (stopped ? "stopped" : "running"),
+    });
+    try {
+      const started = await startJob(registry, child, 10000);
+      const tool = createTaskTool(registry);
+      const first = await tool.execute(
+        { action: "stop", job_id: started.jobId },
+        context(),
+      );
+      const second = await tool.execute(
+        { action: "stop", job_id: started.jobId },
+        context(),
+      );
+      expect(first.metadata).toMatchObject({ stopResult: "requested" });
+      expect(second.metadata).toMatchObject({
+        taskAction: "stop",
+        stopResult: "cleanup_pending",
+        status: "cancelled",
+        cleanup: "in-progress",
+      });
+      expect(second.output).toContain("no new stop request was accepted");
+      expect(killTree).toHaveBeenCalledOnce();
+    } finally {
+      stopped = true;
+      child.emitExit(null, "SIGTERM");
+      await registry.dispose();
+    }
+  });
+
   it("waits for output drain after stop without treating logical cancellation as result readiness", async () => {
     vi.useFakeTimers();
     const child = new FakeChild();

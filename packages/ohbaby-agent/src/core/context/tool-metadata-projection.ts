@@ -23,6 +23,19 @@ const SHELL_JOB_FACT_FIELDS = [
   "trackingReleasedAt",
 ] as const;
 
+/**
+ * Enough for the model to pick its next output/stop call. Commands, timestamps
+ * and output counters stay in stored metadata instead of repeating on every page.
+ */
+const TASK_LIST_JOB_FIELDS = [
+  "jobId",
+  "mode",
+  "status",
+  "stopReason",
+  "cleanup",
+  "exitCode",
+] as const;
+
 function hasOwnMetadataValue(metadata: ToolMetadata, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(metadata, key);
 }
@@ -131,13 +144,10 @@ export function projectToolMetadataForModel(
                 .flatMap((job) =>
                   typeof job === "object" && job !== null && !Array.isArray(job)
                     ? [
-                        copyMetadataFields(job as ToolMetadata, [
-                          ...SHELL_JOB_FACT_FIELDS,
-                          "createdAt",
-                          "outputTruncated",
-                          "command",
-                          "description",
-                        ]),
+                        copyMetadataFields(
+                          job as ToolMetadata,
+                          TASK_LIST_JOB_FIELDS,
+                        ),
                       ]
                     : [],
                 )
