@@ -1,6 +1,6 @@
 # 后台任务：生命周期、自动转换与管理工具
 
-2026-11-13 开启。improve-1～3 的后端规划已收尾，improve-1 已本地集成到开发分支；2026-11-14 按用户指示从该分支建立 `codex/background-tasks-improve-2` 实施第二轮，后端实施与验收已完成，并按用户批准本地合并到开发分支；improve-3 已从开发分支 `332ec6d2` 建立 `codex/background-tasks-improve-3`，后端实现、子代理及Pi复审、完整验证均已完成；用户审查后的优化已验收，2026-11-14 按用户批准快进合并至开发分支 `8635d0bd`，未推送。代码勘测基线 `f42608d4`；实际验收以各轮实施报告为准，规划文档中的代码位置是基线快照。
+2026-11-13 开启，2026-11-14 完成 improve-1～3 后端实施、审查和验收，并按用户批准合并至 `main`。后续纯目录迁移已完成：ShellJob 生命周期模块现位于 `packages/ohbaby-agent/src/shell-jobs/`，代码提交为 `a68c7774`。本轮交付目标为 `origin/main`，本地开发分支及 improve-1/2/3 实施分支按用户要求清理。以下保留分阶段决策与验收历史；代码勘测基线 `f42608d4` 的位置属于当时快照。
 
 用户先确认显式后台管理，再明确提前讨论自动转换及工具收拢，因此保留三个独立轮次。提前规划不代表前轮已验收。当前只负责后端，前端暂缓。
 
@@ -57,4 +57,4 @@
 - [子代理可靠投递](../../agents/2026-11-12-subagent-delivery/README.md)：复用输入存储与准入能力，保留独立业务来源。
 - [执行可靠性第二轮](../../problem-lists/2026-09-19-execution-reliability/improve-2/00-discussion.md)：本议题修订旧Bash统一寿命上限；普通工具名额与后台任务名额仍分开。
 
-各轮实际结果见 [improve-1 实施与验收](improve-1/05-implementation-acceptance.md)（最终精简修复 8355 项通过，已集成）与 [improve-2 实施与验收](improve-2/05-implementation-acceptance.md)（用户审查后修复四项并完成收尾复审，完整检查 8407 项通过，已本地集成）。本轮未推送；[improve-3 实施与验收](improve-3/05-implementation-acceptance.md)已本地集成：8465项取得通过结果、20项跳过，其中打包测试首轮上游502后定向重跑通过，构建通过。shell-job 相关文件的目录整理延后至 improve-3 完成并验收后，再按最终职责边界单独迁移；迁移提交只移动文件和更新引用，不夹带行为修改。
+各轮实际结果见 [improve-1 实施与验收](improve-1/05-implementation-acceptance.md)（最终精简修复 8355 项通过，已集成）与 [improve-2 实施与验收](improve-2/05-implementation-acceptance.md)（用户审查后修复四项并完成收尾复审，完整检查 8407 项通过，已本地集成）。[improve-3 实施与验收](improve-3/05-implementation-acceptance.md)已本地集成：8465项取得通过结果、20项跳过，其中打包测试首轮上游502后定向重跑通过，构建通过。ShellJob 目录整理已在 improve-3 验收后以独立提交完成，只移动文件和更新引用；迁移后的完整 preflight 通过：8465项通过、20项跳过，构建通过。最终目录和main集成记录见第三轮验收文档末节。

@@ -1,6 +1,6 @@
 # improve-3 后端实施与验收
 
-2026-11-14。实施分支 `codex/background-tasks-improve-3`，从开发分支 `codex/background-tasks-dev-20261113` 的 `332ec6d2` 建立。实现、独立子代理审查、指定Pi审查与收尾复审及最终完整验证均已完成。2026-11-14 按用户批准快进合并到开发分支 `codex/background-tasks-dev-20261113`，集成代码为 `8635d0bd`，未推送。只实施后端，前端与 shell-job 目录迁移仍待后续安排。
+2026-11-14。实施分支 `codex/background-tasks-improve-3`，从开发分支 `codex/background-tasks-dev-20261113` 的 `332ec6d2` 建立。实现、独立子代理审查、指定Pi审查与收尾复审及最终完整验证均已完成。2026-11-14 按用户批准快进合并到开发分支 `codex/background-tasks-dev-20261113`，阶段集成代码为 `8635d0bd`。随后目录迁移提交 `a68c7774` 与开发分支一起进入 `main`；本轮用户授权推送 `origin/main` 并清理本地临时分支。只实施后端，前端专用展示仍待后续安排，最终目录与验证见末节。
 
 ## 实施结果
 
@@ -85,13 +85,13 @@ DSH的独立wait取消、Kimi的管理能力门控、ZCode的转换/收尾责任
 
 **审查后优化的本次验证**：格式检查、ESLint及TypeScript通过（0错误、234项原有警告）。完整测试首轮为719文件通过、1文件失败、6文件跳过；8464项通过、1项失败、20项跳过。唯一失败是打包测试安装依赖时，npm上游请求 `@earendil-works/pi-tui` 失败、测试代理返回502；保留该事实，不记为一次全绿preflight。未改代码，定向重跑打包测试1/1通过；随后单独执行 `pnpm run build` 通过。合计8465项测试均取得通过结果，20项按配置跳过。无需为已定位的下载失败重复运行全部测试。
 
-当前优化在独立子代理与指定Pi复审后，以 `8635d0bd` 提交并按用户批准本地集成到开发分支；未推送。下面保留原实施的历史验收记录。
+该阶段优化在独立子代理与指定Pi复审后，以 `8635d0bd` 提交并按用户批准本地集成到开发分支，当时未推送。下面保留原实施的历史验收记录。
 
 修正前代码提交 `de367e50` 运行 `pnpm run preflight` 成功（退出码0）：格式、ESLint、TypeScript、完整测试及全工作区构建均通过。测试为 **720文件通过、6文件跳过；8464项通过、20项跳过**。ESLint为0错误、234个原有警告；没有增加警告。构建仍提示既有Web大chunk及外部导入警告，不影响构建成功。
 
 首轮全量曾暴露两处旧测试夹具：composition仍断言task不存在、cleanup仍读取terminalWaiters。同步新合同后，64项定向复测通过，随后完整验证通过；原实施冻结后再跑完整检查得出上述8464项结果，不代表审查后修正的验证结果。
 
-代码/测试提交为 `de367e50`（`feat(tools): unify shell job management under task`），原验收文档提交为 `8214f52d`，审查后修正及收尾记录为 `8635d0bd`；三者现均已进入开发分支，未推送。16份改动文档的本地链接检查及diff空白检查通过。
+代码/测试提交为 `de367e50`（`feat(tools): unify shell job management under task`），原验收文档提交为 `8214f52d`，审查后修正及收尾记录为 `8635d0bd`；三者先进入开发分支，现已随开发分支集成到main。16份改动文档的本地链接检查及diff空白检查通过。
 
 真实进程验证环境为本机macOS，未进行Linux/Windows实机验收、24小时长测或外部模型驱动的ohbaby端到端验收。Pi是代码审查，不等于ohbaby真实模型验收。原D28极端强杀窗口和身份不明不误杀边界保持；跨活跃后端只读，不新增控制转发。
 
@@ -102,3 +102,15 @@ DSH的独立wait取消、Kimi的管理能力门控、ZCode的转换/收尾责任
 2026-11-14 用户明确批准将improve-3合并到开发分支并更新文档，先不推送。合并前工作区干净，开发分支 `332ec6d2` 是实施分支 `8635d0bd` 的祖先；采用 `git merge --ff-only`，无冲突、无额外业务变更。合并后验证开发分支与已验收实施分支的文件树完全一致，因此沿用上述测试及构建证据，不重复全量运行。
 
 合并后只更新议题README与验收记录，进行链接和diff空白检查，并由提交检查执行ESLint与TypeScript。前端与目录迁移仍未实施，主分支未改动；本轮没有推送。
+
+## 目录迁移与main集成
+
+2026-11-14，用户完成暂存目录迁移后，要求审查、指定Pi复核，随后合并main、推送并删除本地临时分支。采用 `src/shell-jobs/`，与 `tools/`、`shell/` 平级：该模块管理Shell命令的生命周期、持久化、恢复和通知，adapters及services也直接消费；`task` 是模型工具名，不将该模块扩大为通用task运行时。
+
+目录迁移提交 `a68c7774`：共57个文件受影响，21个文件重命名（含fixtures），`tools/bash.ts` 与 `tools/task.ts` 保留工具入口。旧 `tools/shell-job-*.ts` 对应新 `shell-jobs/*.ts`；`shell-output-file.unit.test.ts` 对应 `shell-jobs/output-file.unit.test.ts`。历史验收条目中的旧路径是原提交位置。现有tools/utils小辅助依赖保留，不在移动提交夹带行为解耦。
+
+两位只读子代理分别检查迁移及task后端合同，均未发现阻断问题；指定Pi `github-copilot/gemini-4-carbon`、`high`最终复审为 **Spec PASS / Craft PASS，无实证阻断问题**。56个TypeScript文件经路径归一化的语法树比对，无其他语法变化；动态fixture位置、测试发现、打包入口和公共exports保持有效。架构依赖表已同步为shell-jobs。
+
+迁移后运行完整 `pnpm run preflight`，退出码0：**720个测试文件通过、6个跳过；8465项通过、20项跳过**。格式、ESLint、TypeScript和全工作区构建全部通过；ESLint仍为0错误、234项原有警告。本次打包安装测试正常通过。没有新增测试文件或业务行为。
+
+远程main在集成前获取并核实为 `f42608d4`，本地main从该提交快进到 `a68c7774`，无冲突。合并后文件树与已验收开发分支完全一致；随后仅更新议题README与验收记录。交付目标为 `origin/main`，本地临时分支清理范围为 `codex/background-tasks-dev-20261113` 及 `codex/background-tasks-improve-1/2/3`。前端专用展示、Linux/Windows实机验收等原有边界保持。
