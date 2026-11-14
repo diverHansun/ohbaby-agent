@@ -150,7 +150,6 @@ describe.each(["memory", "sqlite"] as const)(
         scope: { rootSessionId: "s" },
         owner: { kind: "main" },
         statuses: ["completed"],
-        search: "BUILD",
         limit: 20,
       });
       expect(filtered.rows.map((row) => row.jobId)).toEqual(["done-new"]);
@@ -181,18 +180,35 @@ describe.each(["memory", "sqlite"] as const)(
           .rows.map((row) => row.jobId),
       ).toContain("abnormal-foreground");
     });
-    it("matches search literally and rejects unbounded page sizes", async () => {
+    it("reaches every task beyond the largest page and rejects unbounded page sizes", async () => {
       const store = await setup();
-      await store.update("done-new", { command: "print 100%_literal" });
-      expect(
-        store
-          .query({
-            scope: { rootSessionId: "s" },
-            search: "%_",
-            limit: 1,
-          })
-          .rows.map((row) => row.jobId),
-      ).toEqual(["done-new"]);
+      for (let index = 0; index < 101; index++)
+        await store.insert(
+          shellJobFixture({
+            jobId: `bulk-${String(index).padStart(3, "0")}`,
+            sessionId: "side",
+            rootSessionId: "side",
+            createdAt: 1000 + index,
+            startedAt: 1000 + index,
+          }),
+        );
+      const first = store.query({
+        scope: { rootSessionId: "side" },
+        limit: 100,
+      });
+      expect(first.rows).toHaveLength(100);
+      expect(first).toMatchObject({ hasMore: true, filteredCount: 102 });
+      const second = store.query({
+        scope: { rootSessionId: "side" },
+        limit: 100,
+        before: first.next,
+      });
+      expect(second.hasMore).toBe(false);
+      const seen = new Set(
+        [...first.rows, ...second.rows].map((row) => row.jobId),
+      );
+      expect(seen.size).toBe(102);
+      expect(seen).toContain("bulk-000");
       expect(() =>
         store.query({
           scope: { rootSessionId: "s" },

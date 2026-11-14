@@ -80,6 +80,17 @@ interface Options {
   readonly onError: (id: string, error: unknown) => void;
 }
 
+/** A turn that never ran is refunded; otherwise its usage stays unknown. */
+function notAdmitted(unstarted: boolean): GoalTurnOutcome {
+  return {
+    status: "not_admitted",
+    ...(unstarted ? { refundUnstartedTurn: true } : {}),
+    usage: unstarted
+      ? { totalTokens: 0, usageComplete: true }
+      : { usageComplete: false },
+  };
+}
+
 /** One bounded attempt per session event. Durable batch CAS owns wake identity. */
 export function createBackgroundTaskWakeup(
   options: Options,
@@ -224,13 +235,11 @@ export function createBackgroundTaskWakeup(
           if (token) options.gate.release(token);
           token = undefined;
           if (ticket)
-            await options.finishGoalTurn(sessionId, ticket, {
-              status: "not_admitted",
-              ...(unstarted ? { refundUnstartedTurn: true } : {}),
-              usage: unstarted
-                ? { totalTokens: 0, usageComplete: true }
-                : { usageComplete: false },
-            });
+            await options.finishGoalTurn(
+              sessionId,
+              ticket,
+              notAdmitted(unstarted),
+            );
         }
       }
     }
@@ -250,13 +259,11 @@ export function createBackgroundTaskWakeup(
       } finally {
         options.gate.release(heldToken);
         if (admitted)
-          await options.finishGoalTurn(sessionId, admitted, {
-            status: "not_admitted",
-            ...(unstarted ? { refundUnstartedTurn: true } : {}),
-            usage: unstarted
-              ? { totalTokens: 0, usageComplete: true }
-              : { usageComplete: false },
-          });
+          await options.finishGoalTurn(
+            sessionId,
+            admitted,
+            notAdmitted(unstarted),
+          );
       }
       throw error;
     }
@@ -319,11 +326,11 @@ export function createBackgroundTaskWakeup(
               );
           } finally {
             if (admitted)
-              await options.finishGoalTurn(sessionId, admitted, {
-                status: "not_admitted",
-                refundUnstartedTurn: true,
-                usage: { totalTokens: 0, usageComplete: true },
-              });
+              await options.finishGoalTurn(
+                sessionId,
+                admitted,
+                notAdmitted(true),
+              );
           }
         } else {
           options.onError(sessionId, error);

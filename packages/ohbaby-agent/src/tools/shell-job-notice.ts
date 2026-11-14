@@ -59,7 +59,11 @@ const MAX_NOTICE_BYTES = 32 * 1024;
 const MAX_NOTICE_JOBS = 20;
 
 /** Keep character boundaries when limiting UTF-8 output. */
-function boundedText(text: string, maxBytes: number, tail = false): string {
+export function boundedText(
+  text: string,
+  maxBytes: number,
+  tail = false,
+): string {
   const bytes = Buffer.from(text);
   if (bytes.length <= maxBytes) return text;
   if (tail) {

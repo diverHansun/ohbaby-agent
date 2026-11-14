@@ -39,7 +39,6 @@ export function registerShellJobRoutes(
           bindingGeneration: Number(raw.bindingGeneration),
           owner,
           statuses: raw.statuses?.split(","),
-          search: raw.search,
           cursor: raw.cursor,
           limit: raw.limit === undefined ? undefined : Number(raw.limit),
           offset: raw.offset === undefined ? undefined : Number(raw.offset),

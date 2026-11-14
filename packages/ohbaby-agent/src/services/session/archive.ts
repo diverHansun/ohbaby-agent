@@ -5,6 +5,7 @@ import { readProcessIdentity } from "../../shell/process-identity.js";
 import {
   getDatabase,
   runWriteTransaction,
+  SHELL_JOB_UNSETTLED_SQL,
   type DatabaseConnection,
 } from "../database/index.js";
 import { SessionRunBusyError } from "../../runtime/run-ledger/errors.js";
@@ -157,7 +158,7 @@ function assertShellTreeSettled(
   if (!columns.some((column) => column.name === "tracking_released_at")) return;
   const pending = db
     .prepare(
-      `${SESSION_TREE} SELECT 1 FROM shell_job WHERE session_id IN (SELECT id FROM tree) AND tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed' OR settled_at IS NULL) LIMIT 1`,
+      `${SESSION_TREE} SELECT 1 FROM shell_job WHERE session_id IN (SELECT id FROM tree) AND ${SHELL_JOB_UNSETTLED_SQL} LIMIT 1`,
     )
     .get(sessionId);
   if (pending)

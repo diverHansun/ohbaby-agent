@@ -1,8 +1,10 @@
 import {
+  isShellJobUnsettled,
   queryMemoryShellJobs,
   queryDatabaseShellJobs,
   type ShellJobQuery,
   type ShellJobPage,
+  type ShellJobStatus,
 } from "./shell-job-query.js";
 import { randomUUID } from "node:crypto";
 import { freezeShellJobNoticeBatch } from "./shell-job-notice.js";
@@ -10,17 +12,12 @@ import {
   getDatabase,
   runWriteTransaction,
   schema,
+  SHELL_JOB_UNSETTLED_SQL,
   type DatabaseConnection,
   type SqliteValue,
 } from "../services/database/index.js";
 
-export type ShellJobStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "timed_out"
-  | "cancelled"
-  | "lost";
+export type { ShellJobStatus };
 export type ShellJobStopReason =
   | "timeout"
   | "user"
@@ -172,8 +169,7 @@ function noticeCandidates(
       (row) =>
         row.goalId === first.goalId &&
         (row.status === "lost") === (first.status === "lost"),
-    )
-    .slice(0, 20);
+    );
 }
 function canClaimNoticeWake(
   rows: readonly ShellJobRecord[],
@@ -479,11 +475,7 @@ export class InMemoryShellJobStore implements ShellJobStore {
         (row) =>
           (rootSessionId === undefined ||
             row.rootSessionId === rootSessionId) &&
-          row.trackingReleasedAt === null &&
-          (row.status === null ||
-            row.status === "running" ||
-            row.cleanup !== "confirmed" ||
-            row.settledAt === null),
+          isShellJobUnsettled(row),
       )
       .map((row) => ({ ...row }));
   }
@@ -810,7 +802,7 @@ export class DatabaseShellJobStore implements ShellJobStore {
   listUnsettled(rootSessionId?: string): readonly ShellJobRecord[] {
     return this.db
       .prepare(
-        `SELECT * FROM shell_job WHERE tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed' OR settled_at IS NULL)${rootSessionId === undefined ? "" : " AND root_session_id = ?"} ORDER BY created_at,job_id`,
+        `SELECT * FROM shell_job WHERE ${SHELL_JOB_UNSETTLED_SQL}${rootSessionId === undefined ? "" : " AND root_session_id = ?"} ORDER BY created_at,job_id`,
       )
       .all(...(rootSessionId === undefined ? [] : [rootSessionId]))
       .map(fromRow);

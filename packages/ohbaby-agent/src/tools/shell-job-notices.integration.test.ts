@@ -7,6 +7,8 @@ import {
   closeDatabase,
   getDatabase,
   initDatabase,
+  type DatabaseConnection,
+  type DatabaseStatement,
 } from "../services/database/index.js";
 import { shellJobFixture } from "./fixtures/shell-job.js";
 import {
@@ -287,6 +289,106 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { NodeSqliteConnection } from "../services/database/connection.js";
+
+describe("database notice candidate read bounds", () => {
+  function setupObservedStore(): {
+    store: DatabaseShellJobStore;
+    readSizes: number[];
+  } {
+    initDatabase({ dbPath: ":memory:" });
+    const db = getDatabase();
+    db.prepare(
+      "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES('s','p','/tmp','test','active',1,1,'{}')",
+    ).run();
+    const readSizes: number[] = [];
+    const observed: DatabaseConnection = {
+      path: db.path,
+      exec: (sql) => {
+        db.exec(sql);
+      },
+      prepare<Row>(sql: string): DatabaseStatement<Row> {
+        const statement = db.prepare<Row>(sql);
+        return {
+          get: (...params) => statement.get(...params),
+          run: (...params) => statement.run(...params),
+          all: (...params): Row[] => {
+            const rows = statement.all(...params);
+            readSizes.push(rows.length);
+            return rows;
+          },
+        };
+      },
+      pragma: (name) => db.pragma(name),
+      close: () => {
+        db.close();
+      },
+    };
+    return { store: new DatabaseShellJobStore({ db: observed }), readSizes };
+  }
+
+  it("loads at most one bounded batch of full records from SQLite", async () => {
+    const { store, readSizes } = setupObservedStore();
+    for (let i = 0; i < 25; i++)
+      await store.insert(
+        shellJobFixture({
+          jobId: `job-${String(i)}`,
+          status: "completed",
+          resultReadyAt: i,
+          noticeState: "pending",
+          outputTail: "x".repeat(32768),
+        }),
+      );
+    readSizes.length = 0;
+    const batch = requireBatch(
+      await store.allocateNoticeBatch({ sessionId: "s", contextScopeId: null }),
+    );
+    expect(store.getNoticeBatch(batch).length).toBeGreaterThan(0);
+    expect(readSizes.length).toBeGreaterThan(0);
+    expect(readSizes.every((size) => size <= 20)).toBe(true);
+  });
+
+  it.each(["goal", "child-run"] as const)(
+    "does not let an ineligible %s prefix hide a later eligible result",
+    async (kind) => {
+      const { store, readSizes } = setupObservedStore();
+      const contextScopeId = kind === "child-run" ? "child" : null;
+      for (let i = 0; i < 25; i++)
+        await store.insert(
+          shellJobFixture({
+            jobId: `old-${String(i)}`,
+            contextScopeId,
+            rootRunId: "old-run",
+            goalId: kind === "goal" ? "old-goal" : null,
+            status: "completed",
+            resultReadyAt: i,
+            noticeState: "pending",
+          }),
+        );
+      await store.insert(
+        shellJobFixture({
+          jobId: "eligible",
+          contextScopeId,
+          rootRunId: "current-run",
+          status: "completed",
+          resultReadyAt: 100,
+          noticeState: "pending",
+        }),
+      );
+      readSizes.length = 0;
+      const batch = requireBatch(
+        await store.allocateNoticeBatch(
+          { sessionId: "s", contextScopeId, runId: "current-run" },
+          kind === "goal" ? { wakeGoalId: null } : {},
+        ),
+      );
+      expect(store.getNoticeBatch(batch).map((row) => row.jobId)).toEqual([
+        "eligible",
+      ]);
+      expect(readSizes.length).toBeGreaterThan(0);
+      expect(readSizes.every((size) => size <= 20)).toBe(true);
+    },
+  );
+});
 
 it("keeps frozen batches disjoint across independent file-backed connections and reopening", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shell-notice-"));

@@ -827,7 +827,7 @@ export function createOpenApiDocument(
               in: "query",
               schema: { enum: ["main", "subagents", "subagent"] },
             },
-            ...["subagentId", "statuses", "search", "cursor"].map((name) => ({
+            ...["subagentId", "statuses", "cursor"].map((name) => ({
               name,
               in: "query",
               schema: { type: "string" },

@@ -5,6 +5,13 @@ function table<TColumns extends Record<string, string>>(
   return { tableName, columns };
 }
 
+/**
+ * A shell_job row that still carries process, cleanup or final-write
+ * responsibility. isShellJobUnsettled states the same condition in TypeScript.
+ */
+export const SHELL_JOB_UNSETTLED_SQL =
+  "tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed' OR settled_at IS NULL)";
+
 export const schema = {
   shellJob: table("shell_job", {
     jobId: "job_id",

@@ -110,12 +110,11 @@ describe("authorized shell job reads", () => {
     };
     const cursor = encodeShellJobCursor(
       scope,
-      { search: "", owner: { kind: "main" } },
+      { owner: { kind: "main" } },
       { attention: 1, at: 1, jobId: "job" },
     );
     expect(() =>
       decodeShellJobCursor(cursor, scope, {
-        search: "",
         owner: { kind: "subagents" },
       }),
     ).toThrow("cursor");
@@ -378,7 +377,7 @@ describe("authorized shell job reads", () => {
       reader.list({ rootSessionId: "s", limit: 101 }),
     ).rejects.toThrow();
     await expect(
-      reader.list({ rootSessionId: "s", search: "x".repeat(1025) }),
+      reader.list({ rootSessionId: "s", statuses: ["unknown"] as never }),
     ).rejects.toThrow();
     expect(refreshRoot).not.toHaveBeenCalled();
   });

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NodeSqliteConnection } from "./connection.js";
 import { DatabaseNotInitializedError, MigrationError } from "./errors.js";
 import { INITIAL_MIGRATIONS } from "./migrations.js";
+import { SHELL_JOB_UNSETTLED_SQL } from "./schema.js";
 import { ensureDatabaseDirectory, resolveDatabasePath } from "./path.js";
 import { isSqliteBusy } from "./busy-retry.js";
 import { DatabaseBusyError } from "./errors.js";
@@ -32,7 +33,7 @@ export {
   DatabaseNotInitializedError,
   MigrationError,
 } from "./errors.js";
-export { schema } from "./schema.js";
+export { schema, SHELL_JOB_UNSETTLED_SQL } from "./schema.js";
 export type {
   BusyRetryOptions,
   DatabaseConnection,
@@ -223,7 +224,7 @@ function prepareOfflineMigration(
       .prepare<{
         owner_pid: number;
       }>(
-        "SELECT DISTINCT owner_pid FROM shell_job WHERE owner_pid IS NOT NULL AND tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed' OR settled_at IS NULL)",
+        `SELECT DISTINCT owner_pid FROM shell_job WHERE owner_pid IS NOT NULL AND ${SHELL_JOB_UNSETTLED_SQL}`,
       )
       .all())
       pids.add(row.owner_pid);

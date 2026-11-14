@@ -20,6 +20,7 @@ import {
 import { SessionRunBusyError } from "../../runtime/run-ledger/errors.js";
 import {
   runWriteTransaction,
+  SHELL_JOB_UNSETTLED_SQL,
   type DatabaseConnection,
 } from "../../services/database/index.js";
 import { readActiveMainSession } from "../../services/session/database-store.js";
@@ -198,7 +199,7 @@ export function commitRewind(
       affected(id) AS (SELECT id FROM roots UNION SELECT child_run_id FROM subagent_execution
         WHERE root_session_id = ? AND root_run_id IN roots AND child_run_id IS NOT NULL)
       SELECT 1 FROM shell_job WHERE root_session_id = ? AND root_run_id IN affected
-        AND tracking_released_at IS NULL AND (status IS NULL OR status = 'running' OR cleanup IS NOT 'confirmed' OR settled_at IS NULL) LIMIT 1`,
+        AND ${SHELL_JOB_UNSETTLED_SQL} LIMIT 1`,
       )
       .get(JSON.stringify([...runIds]), input.sessionId, input.sessionId);
     if (unsettledShell) throw new SessionRunBusyError(input.sessionId, []);

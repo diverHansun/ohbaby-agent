@@ -442,6 +442,114 @@ describe("ShellJobRegistry", () => {
     expect(registry.get(started.jobId, "session_1").status).toBe("cancelled");
   });
 
+  it("persists stop intent before signalling when a store subscriber immediately stops a job", async () => {
+    const child = new FakeChild();
+    const store = new InMemoryShellJobStore();
+    let recordAtSignal: ReturnType<InMemoryShellJobStore["get"]> = null;
+    let stopping: Promise<ShellJobSnapshot> | undefined;
+    const registry = new ShellJobRegistry({
+      store,
+      createJobId: (): string => "subscriber-stop",
+      probeTree: (): "stopped" => "stopped",
+      killTree: (): { status: "confirmed" } => {
+        recordAtSignal = store.get("subscriber-stop");
+        child.emitExit(null, "SIGTERM");
+        return { status: "confirmed" };
+      },
+    });
+    const unsubscribe = store.subscribe((record) => {
+      if (record.status === "running" && !stopping)
+        stopping = registry.kill(record.jobId, "session_1");
+    });
+    try {
+      await startJob(registry, child);
+      await stopping;
+      expect(recordAtSignal).toMatchObject({
+        status: "cancelled",
+        cleanup: "in-progress",
+        stopReason: "model",
+      });
+    } finally {
+      unsubscribe();
+      child.emitExit(null, "SIGTERM");
+      await registry.dispose();
+    }
+  });
+
+  it.each(["start", "stop"] as const)(
+    "does not postpone %s behind continuing output checkpoints",
+    async (operation) => {
+      vi.useFakeTimers();
+      class GatedStore extends InMemoryShellJobStore {
+        slow = operation === "start";
+        release: (() => void) | undefined;
+        override async update(
+          jobId: string,
+          patch: Parameters<InMemoryShellJobStore["update"]>[1],
+        ): Promise<void> {
+          if (this.slow)
+            await new Promise<void>((resolve) => {
+              this.release = resolve;
+            });
+          await super.update(jobId, patch);
+        }
+      }
+      const child = new FakeChild();
+      const store = new GatedStore();
+      let started = false;
+      let signalled = false;
+      const registry = new ShellJobRegistry({
+        store,
+        createJobId: (): string => "slow-writes",
+        probeTree: (): "stopped" => "stopped",
+        killTree: (): { status: "confirmed" } => {
+          signalled = true;
+          return { status: "confirmed" };
+        },
+      });
+      const starting = registry
+        .start({
+          sessionId: "session_1",
+          background: true,
+          timeoutMs: null,
+          child: () => child as unknown as ChildProcess,
+        })
+        .then(() => {
+          started = true;
+        });
+      try {
+        if (operation === "stop") await starting;
+        else await vi.advanceTimersByTimeAsync(0);
+        store.slow = true;
+        child.stdout.emit("data", "initial output");
+        await vi.advanceTimersByTimeAsync(1000);
+        if (operation === "stop")
+          await registry.kill("slow-writes", "session_1");
+        for (let i = 0; i < 5; i++) {
+          // Every pending write receives another checkpoint before it commits.
+          child.stdout.emit("data", "continuing output");
+          await vi.advanceTimersByTimeAsync(1000);
+          const release = store.release;
+          store.release = undefined;
+          release?.();
+          await vi.advanceTimersByTimeAsync(0);
+        }
+        expect(store.get("slow-writes")?.status).toBe(
+          operation === "start" ? "running" : "cancelled",
+        );
+        expect(operation === "start" ? started : signalled).toBe(true);
+      } finally {
+        store.slow = false;
+        store.release?.();
+        await vi.advanceTimersByTimeAsync(0);
+        child.emitExit(null, "SIGTERM");
+        await starting;
+        await registry.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("coalesces concurrent termination requests", async () => {
     const child = new FakeChild();
     let releaseKill: (() => void) | undefined;

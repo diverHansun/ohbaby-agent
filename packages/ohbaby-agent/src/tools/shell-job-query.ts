@@ -2,7 +2,7 @@ import type {
   DatabaseConnection,
   SqliteValue,
 } from "../services/database/types.js";
-import type { ShellJobRecord, ShellJobStatus } from "./shell-job-store.js";
+import type { ShellJobRecord } from "./shell-job-store.js";
 
 export const SHELL_JOB_STATUSES = [
   "running",
@@ -12,6 +12,7 @@ export const SHELL_JOB_STATUSES = [
   "cancelled",
   "lost",
 ] as const;
+export type ShellJobStatus = (typeof SHELL_JOB_STATUSES)[number];
 export interface ShellJobQueryScope {
   readonly rootSessionId: string;
 }
@@ -27,7 +28,6 @@ export interface ShellJobQuery {
   readonly scope: ShellJobQueryScope;
   readonly owner?: ShellJobOwnerFilter;
   readonly statuses?: readonly ShellJobStatus[];
-  readonly search?: string;
   readonly limit: number;
   readonly before?: ShellJobPagePosition;
 }
@@ -43,13 +43,22 @@ export interface ShellJobPage {
 export class ShellJobQueryError extends Error {
   readonly code = "SHELL_JOB_INVALID_QUERY";
 }
-export function shellJobNeedsAttention(row: ShellJobRecord): boolean {
+/**
+ * A record that still carries process, cleanup or final-write responsibility.
+ * SHELL_JOB_UNSETTLED_SQL states the same condition for SQL callers.
+ */
+export function isShellJobUnsettled(row: ShellJobRecord): boolean {
   return (
     row.trackingReleasedAt === null &&
-    (row.status === "running" ||
-      (row.status !== null &&
-        (row.cleanup !== "confirmed" || row.settledAt === null)))
+    (row.status === null ||
+      row.status === "running" ||
+      row.cleanup !== "confirmed" ||
+      row.settledAt === null)
   );
+}
+/** Listed first: a launched job that is still unsettled. */
+export function shellJobNeedsAttention(row: ShellJobRecord): boolean {
+  return row.status !== null && isShellJobUnsettled(row);
 }
 export function shellJobPagePosition(
   row: ShellJobRecord,
@@ -85,9 +94,6 @@ function defaultVisible(row: ShellJobRecord): boolean {
       (row.cleanup !== "confirmed" || row.settledAt === null))
   );
 }
-function asciiLower(text: string): string {
-  return text.replace(/[A-Z]/g, (char) => char.toLowerCase());
-}
 function inScope(row: ShellJobRecord, query: ShellJobQuery): boolean {
   if (row.rootSessionId !== query.scope.rootSessionId) return false;
   if (query.owner?.kind === "main" && row.contextScopeId !== null) return false;
@@ -98,13 +104,7 @@ function inScope(row: ShellJobRecord, query: ShellJobQuery): boolean {
     row.contextScopeId !== query.owner.subagentId
   )
     return false;
-  const search = asciiLower(query.search ?? "");
-  return (
-    defaultVisible(row) &&
-    (!search ||
-      asciiLower(row.command).includes(search) ||
-      asciiLower(row.description ?? "").includes(search))
-  );
+  return defaultVisible(row);
 }
 function filtered(row: ShellJobRecord, query: ShellJobQuery): boolean {
   return (
@@ -175,12 +175,6 @@ export function queryDatabaseShellJobs(
   where.push(
     "(mode = 'background' OR cleanup = 'unconfirmed' OR (status IS NOT NULL AND status != 'running' AND (cleanup IS NOT 'confirmed' OR settled_at IS NULL)))",
   );
-  if (query.search) {
-    where.push(
-      "(instr(lower(command),lower(?)) > 0 OR instr(lower(coalesce(description,'')),lower(?)) > 0)",
-    );
-    params.push(query.search, query.search);
-  }
   const visible = ["status IS NOT NULL"];
   if (query.statuses?.length) {
     visible.push(`status IN (${query.statuses.map(() => "?").join(",")})`);

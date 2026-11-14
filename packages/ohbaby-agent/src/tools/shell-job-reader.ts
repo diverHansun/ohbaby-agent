@@ -17,6 +17,7 @@ import {
   type ShellJobPagePosition,
   type ShellJobQueryScope,
 } from "./shell-job-query.js";
+import { boundedText } from "./shell-job-notice.js";
 import type {
   ShellJobRecord,
   ShellJobStatus,
@@ -39,7 +40,6 @@ export class ShellJobReadError extends Error {
 interface NormalizedList {
   readonly owner?: ShellJobOwnerFilter;
   readonly statuses?: readonly ShellJobStatus[];
-  readonly search: string;
   readonly limit: number;
 }
 function requiredId(value: unknown, label: string): string {
@@ -70,13 +70,6 @@ function integer(
 }
 function normalizedList(input: UiShellJobListQuery): NormalizedList {
   const limit = integer(input.limit, 20, 100, "limit");
-  if (
-    input.search !== undefined &&
-    (typeof input.search !== "string" || input.search.length > 1024)
-  )
-    throw new ShellJobQueryError(
-      "search must be text of at most 1024 characters.",
-    );
   let owner: ShellJobOwnerFilter | undefined;
   const ownerInput: unknown = input.owner;
   if (ownerInput !== undefined) {
@@ -108,7 +101,7 @@ function normalizedList(input: UiShellJobListQuery): NormalizedList {
   const statuses = input.statuses?.length
     ? [...new Set(input.statuses)].sort()
     : undefined;
-  return { owner, statuses, search: input.search?.trim() ?? "", limit };
+  return { owner, statuses, limit };
 }
 function fingerprint(
   scope: ShellJobQueryScope,
@@ -120,7 +113,6 @@ function fingerprint(
         scope,
         owner: filter.owner ?? null,
         statuses: filter.statuses ?? [],
-        search: filter.search,
       }),
     )
     .digest("hex");
@@ -176,19 +168,6 @@ export function decodeShellJobCursor(
       "Task cursor does not match this owner and filter, or is malformed.",
     );
   }
-}
-function bounded(text: string, maxBytes: number): string {
-  const bytes = Buffer.from(text);
-  if (bytes.length <= maxBytes) return text;
-  let end = maxBytes;
-  while ((bytes[end] & 0xc0) === 0x80) end--;
-  return bytes.subarray(0, end).toString("utf8") + "…";
-}
-function boundedTail(text: string): string {
-  const bytes = Buffer.from(text);
-  let start = Math.max(0, bytes.length - 32768);
-  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
-  return bytes.subarray(start).toString("utf8");
 }
 function sameFile(a: BigIntStats, b: BigIntStats): boolean {
   return a.dev === b.dev && a.ino === b.ino;
@@ -273,7 +252,7 @@ export class ShellJobReader {
       sessionId: record.sessionId,
       ownerKind: record.contextScopeId === null ? "main" : "subagent",
       ...management,
-      ownerName: bounded(
+      ownerName: boundedText(
         (await this.options.ownerName?.(record)) ??
           (record.contextScopeId === null
             ? "Main agent"
@@ -286,9 +265,11 @@ export class ShellJobReader {
             subagentId: record.contextScopeId,
             ...(record.runId ? { childRunId: record.runId } : {}),
           }),
-      command: bounded(record.command, 1024),
+      command: boundedText(record.command, 1024),
       description:
-        record.description === null ? null : bounded(record.description, 512),
+        record.description === null
+          ? null
+          : boundedText(record.description, 512),
       mode: record.mode,
       status: record.status,
       stopReason: record.stopReason,
@@ -393,7 +374,7 @@ export class ShellJobReader {
       sampledAt: current.sampledAt,
       output:
         record.mode === "background"
-          ? boundedTail(record.outputTail ?? "")
+          ? boundedText(record.outputTail ?? "", 32768, true)
           : "",
       tailAvailable: record.mode === "background" && record.outputTail !== null,
       outputBytes: record.outputBytes,

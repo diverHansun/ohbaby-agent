@@ -34,7 +34,6 @@ export interface UiShellJobQuery {
 export interface UiShellJobListQuery extends UiShellJobQuery {
   readonly owner?: UiShellJobOwnerFilter;
   readonly statuses?: readonly UiShellJobStatus[];
-  readonly search?: string;
   readonly limit?: number;
   readonly cursor?: string;
 }
@@ -70,9 +69,9 @@ export interface UiShellJobList extends UiShellJobVersion {
   readonly hasMore: boolean;
   readonly pendingStartCount: number;
   readonly filteredCount: number;
-  /** Counts in the owner/search scope, before the selected status filter. */
+  /** Counts in the owner scope, before the selected status filter. */
   readonly statusCounts: Readonly<Record<UiShellJobStatus, number>>;
-  /** Unreleased cleanup=unconfirmed rows in the owner/search scope. */
+  /** Unreleased cleanup=unconfirmed rows in the owner scope. */
   readonly unconfirmedCount: number;
 }
 export interface UiShellJobTarget extends UiShellJobQuery {

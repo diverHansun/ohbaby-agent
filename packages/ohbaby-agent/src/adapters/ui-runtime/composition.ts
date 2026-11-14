@@ -1,6 +1,7 @@
 import { acceptRuntimeOpening } from "./runtime-opening.js";
 import { subscribeRunSteer } from "../../runtime/prompt-scheduler/steer-subscription.js";
 import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
+import { isShellJobUnsettled } from "../../tools/shell-job-query.js";
 import { createRunInputCoordinator } from "../../runtime/prompt-scheduler/run-input-coordinator.js";
 import { createBackgroundTaskInputSource } from "./background-task-inputs.js";
 import { loadShellConfig } from "../../config/tools/shell/index.js";
@@ -1623,13 +1624,7 @@ export async function createUiRuntimeComposition(
           if (execution.childRunId) ids.add(execution.childRunId);
       const rows = [...ids].flatMap((id) => shellJobStore.listByRootRun(id));
       for (const row of rows)
-        if (
-          row.trackingReleasedAt === null &&
-          (row.status === null ||
-            row.status === "running" ||
-            row.cleanup !== "confirmed" ||
-            row.settledAt === null)
-        )
+        if (isShellJobUnsettled(row))
           await shellRecovery?.assertCanManage(row.jobId);
       return [...ids];
     },
