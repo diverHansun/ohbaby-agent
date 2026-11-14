@@ -16,6 +16,7 @@ import { SettingsLayer } from "../runtime/settings-layer.js";
 import { selectSettings } from "../store/settings-cache.js";
 import { globalSessionPinsKey } from "../ui/sidebar/session-pins.js";
 import { DEFAULT_WORKSPACE, mockScenarios } from "./mock-scenarios.js";
+import { createMockShellJobs, isTaskScenario } from "./mock-shell-jobs.js";
 import { createMockSettingsApi } from "./mock-settings.js";
 import { mockSessionFiles } from "./mock-files.js";
 
@@ -210,6 +211,10 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
       return;
     store.setCurrentModel(active ? currentModelFrom(active, "default") : null);
   });
+  // `bg-*` scenarios answer the Background tasks page (background tasks 06 §6).
+  const shellJobs = isTaskScenario(name)
+    ? createMockShellJobs(name, delayMs)
+    : undefined;
   const client = new Proxy<Record<string, unknown>>(
     {},
     {
@@ -282,6 +287,16 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
               ? currentModelFrom(entry, explicit ? "explicit" : "default")
               : null;
           };
+        if (shellJobs && key === "subscribeEvents")
+          return (handler: Parameters<typeof shellJobs.subscribe>[0]) =>
+            shellJobs.subscribe(handler);
+        if (
+          shellJobs &&
+          (key === "listShellJobs" ||
+            key === "getShellJobOutput" ||
+            key === "stopShellJob")
+        )
+          return shellJobs[key];
         if (key === "listCommands")
           return (): Promise<unknown> => Promise.resolve(MOCK_COMMANDS);
         if (key === "respondPermission" || key === "abortRun") return resolved;

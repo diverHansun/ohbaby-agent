@@ -10,6 +10,11 @@ import type {
   UiSubagentInstanceSnapshot,
   UiSubagentStopInput,
   UiSubagentStopResult,
+  UiShellJobList,
+  UiShellJobListQuery,
+  UiShellJobOutput,
+  UiShellJobStopResult,
+  UiShellJobTarget,
 } from "ohbaby-sdk";
 import type {
   UiBackendClient,
@@ -237,6 +242,47 @@ export class DaemonHttpClient {
         signal: input.signal,
       },
     );
+  }
+  listShellJobs(
+    input: UiShellJobListQuery,
+  ): Promise<{ ok: true; result: UiShellJobList }> {
+    const query = scopeQuery(input);
+    if (input.owner) {
+      query.set("owner", input.owner.kind);
+      if (input.owner.kind === "subagent")
+        query.set("subagentId", input.owner.subagentId);
+    }
+    if (input.statuses?.length) query.set("statuses", input.statuses.join(","));
+    if (input.mode) query.set("mode", input.mode);
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    if (input.cursor !== undefined) query.set("cursor", input.cursor);
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.rootSessionId)}/shell-jobs?${query}`,
+      { signal: input.signal },
+    );
+  }
+  getShellJobOutput(
+    input: UiShellJobTarget,
+  ): Promise<{ ok: true; result: UiShellJobOutput }> {
+    return this.request(
+      `${this.shellJobPath(input)}/output?${scopeQuery(input)}`,
+      { signal: input.signal },
+    );
+  }
+  stopShellJob(
+    input: UiShellJobTarget,
+  ): Promise<{ ok: true; result: UiShellJobStopResult }> {
+    return this.request(`${this.shellJobPath(input)}/stop`, {
+      body: {
+        runtimeEpoch: input.runtimeEpoch,
+        bindingGeneration: input.bindingGeneration,
+      },
+      method: "POST",
+      signal: input.signal,
+    });
+  }
+  private shellJobPath(input: UiShellJobTarget): string {
+    return `/v1/sessions/${encodeURIComponent(input.rootSessionId)}/shell-jobs/${encodeURIComponent(input.jobId)}`;
   }
   private subagentConversationPath(input: UiSubagentConversationQuery): string {
     return `/v1/sessions/${encodeURIComponent(input.rootSessionId)}/subagents/${encodeURIComponent(input.subagentId)}/conversation`;

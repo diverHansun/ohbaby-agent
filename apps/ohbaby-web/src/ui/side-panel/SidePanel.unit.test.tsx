@@ -3,6 +3,7 @@ import { act, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { SidePanel } from "./SidePanel.js";
+import type { SidePageKind } from "./side-pages.js";
 import { type SidePanelControls, useSidePanel } from "./use-side-panel.js";
 
 (
@@ -21,11 +22,18 @@ afterEach(() => {
   controls = undefined;
 });
 
+// Like the app for a chat without background tasks (background tasks D1).
+const NO_TASKS: readonly SidePageKind[] = ["backgroundTasks"];
+
 function Harness(props: {
   readonly rootSessionId: string;
   readonly focusOnOpen?: boolean;
+  readonly hiddenKinds?: readonly SidePageKind[];
 }): ReactElement {
-  const panel = useSidePanel(props.rootSessionId);
+  const panel = useSidePanel(
+    props.rootSessionId,
+    props.hiddenKinds ?? NO_TASKS,
+  );
   controls = panel;
   return panel.state.open ? (
     <SidePanel
@@ -49,14 +57,23 @@ function mount(
   focusOnOpen = false,
 ): {
   readonly element: HTMLElement;
-  readonly render: (rootSessionId: string) => void;
+  readonly render: (
+    rootSessionId: string,
+    hiddenKinds?: readonly SidePageKind[],
+  ) => void;
 } {
   const element = document.createElement("div");
   document.body.append(element);
   const root = createRoot(element);
-  const render = (id: string): void => {
+  const render = (id: string, hiddenKinds?: readonly SidePageKind[]): void => {
     act(() => {
-      root.render(<Harness rootSessionId={id} focusOnOpen={focusOnOpen} />);
+      root.render(
+        <Harness
+          rootSessionId={id}
+          focusOnOpen={focusOnOpen}
+          hiddenKinds={hiddenKinds}
+        />,
+      );
     });
   };
   render(rootSessionId);
@@ -438,4 +455,37 @@ it("resizes from the visible width with the keyboard when the chat limits the pa
   expect(controls?.state.width).toBe(532);
   press("ArrowRight");
   expect(controls?.state.width).toBe(508);
+});
+
+it("offers Background tasks only while the chat has some, hiding its tab without closing it", () => {
+  const { element, render } = mount();
+  act(() => {
+    controls?.setOpen(true);
+  });
+  expect(element.textContent).not.toContain("Background tasks");
+  render("root", []);
+  click(button(element, "Background tasks"));
+  expect(element.querySelector('[data-testid="page"]')?.textContent).toBe(
+    "backgroundTasks:list",
+  );
+  click(button(element, "Add page"));
+  click(button(document.body, "Files"));
+  click(element.querySelector('[role="tab"]'));
+  // A chat without tasks hides the tab; the other tab takes the selection.
+  render("root", ["backgroundTasks"]);
+  const tabs = [...element.querySelectorAll('[role="tab"]')];
+  expect(tabs).toHaveLength(1);
+  expect(element.querySelector('[data-testid="page"]')?.textContent).toBe(
+    "files:list",
+  );
+  click(button(element, "Add page"));
+  expect(
+    [...document.querySelectorAll('[role="menuitem"]')].map(
+      (item) => item.textContent,
+    ),
+  ).not.toContain("Background tasks");
+  click(button(element, "Add page"));
+  // Back in a chat with tasks, the same tab returns.
+  render("root", []);
+  expect(element.querySelectorAll('[role="tab"]')).toHaveLength(2);
 });

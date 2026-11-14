@@ -23,6 +23,11 @@ import {
   type UiSubagentQuery,
   type UiSubagentStopInput,
   type UiSubagentStopResult,
+  type UiShellJobList,
+  type UiShellJobListQuery,
+  type UiShellJobOutput,
+  type UiShellJobStopResult,
+  type UiShellJobTarget,
   type UiUnsubscribe,
   type UiWebCommandCatalog,
 } from "ohbaby-sdk";
@@ -194,6 +199,40 @@ export class BrowserDaemonClient implements UiBackendClient {
     if (binding !== this.sync.permissionSync.getState().binding)
       throw new Error("Session binding changed during instance query");
     return result.result;
+  }
+  /** Background tasks of the bound root session tree (Background tasks page). */
+  async listShellJobs(input: UiShellJobListQuery): Promise<UiShellJobList> {
+    const binding = this.sync.permissionSync.getState().binding;
+    const result = await this.http.listShellJobs({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.sync.permissionSync.getState().binding)
+      throw new Error("Session binding changed during task query");
+    return result.result;
+  }
+  async getShellJobOutput(input: UiShellJobTarget): Promise<UiShellJobOutput> {
+    const binding = this.sync.permissionSync.getState().binding;
+    const result = await this.http.getShellJobOutput({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.sync.permissionSync.getState().binding)
+      throw new Error("Session binding changed during task output read");
+    return result.result;
+  }
+  /** A stop may already have happened when the binding moves on; the receipt stands. */
+  async stopShellJob(input: UiShellJobTarget): Promise<UiShellJobStopResult> {
+    const binding = this.sync.permissionSync.getState().binding;
+    return (
+      await this.http.stopShellJob({
+        ...input,
+        runtimeEpoch: binding?.permissionEpoch,
+        bindingGeneration: binding?.bindingGeneration,
+      })
+    ).result;
   }
   /** Scratch files of the bound root session (Files page). */
   async listSessionFiles(

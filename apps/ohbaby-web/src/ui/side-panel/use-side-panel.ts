@@ -21,8 +21,13 @@ export interface SidePanelState {
 }
 
 export interface SidePanelControls {
-  /** What the panel shows: side chats of other main chats are left out. */
+  /**
+   * What the panel shows: side chats of other main chats and tabs of hidden
+   * kinds are left out.
+   */
   readonly state: SidePanelState;
+  /** Page kinds the open chat cannot show now; the add menu skips them. */
+  readonly hiddenKinds: readonly SidePageKind[];
   readonly setOpen: (open: boolean) => void;
   readonly setWidth: (width: number) => void;
   readonly setExpanded: (expanded: boolean) => void;
@@ -89,7 +94,13 @@ function createTab<K extends SidePageKind>(
  */
 export function useSidePanel(
   rootSessionId: string | undefined,
+  /**
+   * Kinds the open chat has nothing for (Background tasks before any task,
+   * README D1). Their tabs hide without closing and come back later.
+   */
+  hiddenKinds: readonly SidePageKind[] = [],
 ): SidePanelControls {
+  const hiddenKey = hiddenKinds.join(",");
   const [state, setState] = useState<SidePanelState>(() => ({
     ...initialSidePanel(),
     expanded: false,
@@ -266,20 +277,29 @@ export function useSidePanel(
     [],
   );
   // A side chat tab shows only beside its main chat. The others stay open
-  // (their clients too) and come back when that chat is opened again.
+  // (their clients too) and come back when that chat is opened again. Hidden
+  // kinds work the same way.
   const visible = useMemo((): SidePanelState => {
+    const hidden = new Set(hiddenKey === "" ? [] : hiddenKey.split(","));
     const tabs = state.tabs.filter(
       (tab) =>
-        tab.kind !== "sideChat" || tab.state.mainSessionId === rootSessionId,
+        !hidden.has(tab.kind) &&
+        (tab.kind !== "sideChat" || tab.state.mainSessionId === rootSessionId),
     );
     if (tabs.length === state.tabs.length) return state;
     const activeTabId = tabs.some((tab) => tab.id === state.activeTabId)
       ? state.activeTabId
       : tabs.at(-1)?.id;
     return { ...state, tabs, activeTabId };
-  }, [state, rootSessionId]);
+  }, [state, rootSessionId, hiddenKey]);
+  const hiddenList = useMemo(
+    (): readonly SidePageKind[] =>
+      hiddenKey === "" ? [] : (hiddenKey.split(",") as SidePageKind[]),
+    [hiddenKey],
+  );
   return {
     state: visible,
+    hiddenKinds: hiddenList,
     setOpen,
     setWidth,
     setExpanded,

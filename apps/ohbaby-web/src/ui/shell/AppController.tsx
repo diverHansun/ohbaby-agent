@@ -18,12 +18,17 @@ import { type NoticeItem, NoticeStack } from "../shared/Notice.js";
 import { ConnectionOverlay } from "./ConnectionOverlay.js";
 import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
 import { useSubagentInstances } from "../shared/subagent-instances.js";
+import {
+  BackgroundTaskOpener,
+  useBackgroundTaskProbe,
+} from "../shared/background-tasks.js";
 import { SidePanel } from "../side-panel/SidePanel.js";
 import {
   type SidePageContext,
   SidePanelPage,
 } from "../side-panel/SidePanelPage.js";
 import { useSidePanel } from "../side-panel/use-side-panel.js";
+import type { SidePageKind } from "../side-panel/side-pages.js";
 import { useSideChats } from "../side-chat/use-side-chats.js";
 import { useTerminalTabs } from "../side-panel/terminal/use-terminal-tabs.js";
 import { ConfirmDialog } from "../shared/ConfirmDialog.js";
@@ -38,6 +43,9 @@ import { useSettingsDialog } from "../settings/useSettingsDialog.js";
 import { DirectoryPickerDialog } from "../workspace/directory-picker/DirectoryPickerDialog.js";
 import { AppShell } from "./AppShell.js";
 import { MainHeader } from "./MainHeader.js";
+
+const NO_HIDDEN_PAGES: readonly SidePageKind[] = [];
+const HIDE_BACKGROUND_TASKS: readonly SidePageKind[] = ["backgroundTasks"];
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -223,7 +231,24 @@ export function AppController(props: {
       .catch(() => undefined);
   }, [activeId, client, hasUsage]);
 
-  const sidePanel = useSidePanel(activeId);
+  const backgroundTaskProbe = useBackgroundTaskProbe(client, activeId);
+  // An entry line in the chat proves a task exists before the probe hears of
+  // it, so opening one shows the page at once (README D1, D7).
+  const [tasksRevealedFor, setTasksRevealedFor] = useState<string>();
+  const backgroundTasksShown =
+    backgroundTaskProbe.hasTasks ||
+    (activeId !== undefined && tasksRevealedFor === activeId);
+  const sidePanel = useSidePanel(
+    activeId,
+    backgroundTasksShown ? NO_HIDDEN_PAGES : HIDE_BACKGROUND_TASKS,
+  );
+  const hasTaskDetail = sidePanel.state.tabs.some(
+    (tab) => tab.kind === "backgroundTasks" && tab.state.jobId !== undefined,
+  );
+  useEffect(() => {
+    if (tasksRevealedFor !== activeId || !hasTaskDetail)
+      setTasksRevealedFor(undefined);
+  }, [activeId, hasTaskDetail, tasksRevealedFor]);
   // Only a panel the user just opened takes focus (see SidePanel focusOnOpen).
   const [panelOpenedByUser, setPanelOpenedByUser] = useState(false);
   // Reading positions in the panel's subagent details; a new chat starts afresh.
@@ -283,6 +308,7 @@ export function AppController(props: {
     rootSessionId: activeId,
     subagentReadingCache: panelReadingCache,
     subagentInstances,
+    backgroundTaskProbe,
     setTabState: sidePanel.setTabState,
     sessionFiles: runtime.sessionFiles,
     terminals: runtime.terminals,
@@ -305,6 +331,14 @@ export function AppController(props: {
     },
     [revealPage],
   );
+  const openBackgroundTask = useCallback(
+    (jobId: string): void => {
+      setTasksRevealedFor(activeId);
+      setPanelOpenedByUser(false);
+      revealPage("backgroundTasks", { jobId });
+    },
+    [revealPage, activeId],
+  );
 
   const draftPicker = (
     <WorkspacePicker
@@ -325,186 +359,199 @@ export function AppController(props: {
   );
 
   return (
-    <AppShell
-      onSearch={openSearch}
-      renderSidebar={(close, dismissDrawer) => (
-        <Sidebar
-          serverUrl={runtime.serverUrl}
-          searchOpen={searchOpen}
-          searchFocusRequest={searchFocusRequest}
-          onSearchOpenChange={setSearchOpen}
-          searchSessions={searchSessions}
-          catalog={catalog}
-          activeSessionId={view.activeSession?.id ?? null}
-          activity={activity}
-          disabled={view.composer.disabled}
-          onCollapse={close}
-          onNewChat={(workspaceDirectory) => {
-            dismissDrawer();
-            void runWorkspaceAction(() =>
-              runtime.openDraft(workspaceDirectory),
-            );
-          }}
-          onSelectSession={(session) => {
-            dismissDrawer();
-            void runAction(() =>
-              runtime.openSession(session.id, session.requestDirectory),
-            );
-          }}
-          onArchiveSession={(session) =>
-            runAction(() =>
-              runtime.archiveSession(session.id, session.requestDirectory),
-            )
-          }
-          onExportSession={exportSession}
-          onForkSession={(session) => {
-            void forkSession(session.id, {
-              directory: session.requestDirectory,
-            });
-          }}
-          onMoveSession={(session, directory) =>
-            runAction(() => runtime.moveSession(session.id, directory))
-          }
-          onHideWorkspace={(directory) => {
-            void runAction(() => runtime.hideWorkspace(directory));
-          }}
-          onOpenFolder={() => {
-            setDirectoryPickerOpen("sidebar");
-          }}
-          onRetry={() => {
-            void runtime.refreshCatalog();
-          }}
-          onOpenSettings={(trigger) => {
-            openSettings({ trigger });
-          }}
-          onLoadMore={(enough) => runtime.loadMoreSessions(enough)}
-        />
-      )}
-      renderHeader={(sidebarOpen, openSidebar) => (
-        <MainHeader
-          sidebarOpen={sidebarOpen}
-          onOpenSidebar={openSidebar}
-          title={view.activeSession?.title}
-          header={view.header}
-          hasClient={client !== null}
-          sessionId={view.activeSession?.id ?? null}
-          sidePanelOpen={sidePanel.state.open}
-          onOpenSidePanel={() => {
-            setPanelOpenedByUser(true);
-            sidePanel.setOpen(true);
-          }}
-        />
-      )}
-      main={
-        client ? (
-          <SessionScreen
-            client={client}
-            runtime={runtime}
-            draftPicker={draftPicker}
-            onOpenModelSettings={openModelSettings}
-            onError={pushError}
-            subagentInstances={subagentInstances.state}
-            onOpenSubagent={openSubagent}
-            onAskInSideChat={sideChats.quote}
-            onFork={
-              activeId === undefined
-                ? undefined
-                : (runId): Promise<boolean> => forkSession(activeId, { runId })
-            }
-          />
-        ) : (
-          <DraftFallback
-            picker={draftPicker}
-            reason={
-              workspaceActionCount > 0
-                ? "Connecting…"
-                : "The default directory is not available. Choose a workspace to start."
-            }
-          />
-        )
-      }
-      asideExpanded={sidePanel.state.expanded}
-      aside={
-        sidePanel.state.open ? (
-          <SidePanel
-            controls={sidePanel}
-            focusOnOpen={panelOpenedByUser}
-            onNewTerminal={terminalTabs.createTerminal}
-            onCloseTerminal={(tab, remove) => {
-              terminalTabs.closeTerminal(tab, false, remove);
-            }}
-            onNewSideChat={openSideChat}
-            sideChatUnavailable={sideChats.unavailable}
-            onCloseSideChat={sideChats.close}
-            onClosed={() => {
-              setPanelOpenedByUser(false);
-              requestAnimationFrame(() => {
-                document
-                  .querySelector<HTMLElement>("[data-side-panel-toggle]")
-                  ?.focus();
-              });
-            }}
-            renderPage={(tab) => (
-              <SidePanelPage key={tab.id} tab={tab} context={sidePageContext} />
-            )}
-          />
-        ) : undefined
-      }
-      blocking={
-        client && storeSnapshot.connectionNotice ? (
-          <ConnectionOverlay
-            notice={storeSnapshot.connectionNotice}
-            onReconnect={() => {
-              runtime.reconnectNow();
-            }}
-          />
-        ) : null
-      }
-      overlays={
-        <>
-          <NoticeStack
-            notices={notices}
-            onDismiss={(id) => {
-              setNotices((current) =>
-                current.filter((notice) => notice.id !== id),
+    <BackgroundTaskOpener.Provider
+      value={client ? openBackgroundTask : undefined}
+    >
+      <AppShell
+        onSearch={openSearch}
+        renderSidebar={(close, dismissDrawer) => (
+          <Sidebar
+            serverUrl={runtime.serverUrl}
+            searchOpen={searchOpen}
+            searchFocusRequest={searchFocusRequest}
+            onSearchOpenChange={setSearchOpen}
+            searchSessions={searchSessions}
+            catalog={catalog}
+            activeSessionId={view.activeSession?.id ?? null}
+            activity={activity}
+            disabled={view.composer.disabled}
+            onCollapse={close}
+            onNewChat={(workspaceDirectory) => {
+              dismissDrawer();
+              void runWorkspaceAction(() =>
+                runtime.openDraft(workspaceDirectory),
               );
             }}
+            onSelectSession={(session) => {
+              dismissDrawer();
+              void runAction(() =>
+                runtime.openSession(session.id, session.requestDirectory),
+              );
+            }}
+            onArchiveSession={(session) =>
+              runAction(() =>
+                runtime.archiveSession(session.id, session.requestDirectory),
+              )
+            }
+            onExportSession={exportSession}
+            onForkSession={(session) => {
+              void forkSession(session.id, {
+                directory: session.requestDirectory,
+              });
+            }}
+            onMoveSession={(session, directory) =>
+              runAction(() => runtime.moveSession(session.id, directory))
+            }
+            onHideWorkspace={(directory) => {
+              void runAction(() => runtime.hideWorkspace(directory));
+            }}
+            onOpenFolder={() => {
+              setDirectoryPickerOpen("sidebar");
+            }}
+            onRetry={() => {
+              void runtime.refreshCatalog();
+            }}
+            onOpenSettings={(trigger) => {
+              openSettings({ trigger });
+            }}
+            onLoadMore={(enough) => runtime.loadMoreSessions(enough)}
           />
-          {terminalTabs.confirmation ? (
-            <ConfirmDialog
-              title="Close terminal?"
-              description={`${terminalTabs.confirmation.process} is still running in this terminal. Closing it ends the program too.`}
-              confirmLabel="Close"
-              danger
-              onConfirm={() => {
-                const pending = terminalTabs.confirmation;
-                if (pending)
-                  terminalTabs.closeTerminal(pending.tab, true, pending.remove);
+        )}
+        renderHeader={(sidebarOpen, openSidebar) => (
+          <MainHeader
+            sidebarOpen={sidebarOpen}
+            onOpenSidebar={openSidebar}
+            title={view.activeSession?.title}
+            header={view.header}
+            hasClient={client !== null}
+            sessionId={view.activeSession?.id ?? null}
+            sidePanelOpen={sidePanel.state.open}
+            onOpenSidePanel={() => {
+              setPanelOpenedByUser(true);
+              sidePanel.setOpen(true);
+            }}
+          />
+        )}
+        main={
+          client ? (
+            <SessionScreen
+              client={client}
+              runtime={runtime}
+              draftPicker={draftPicker}
+              onOpenModelSettings={openModelSettings}
+              onError={pushError}
+              subagentInstances={subagentInstances.state}
+              onOpenSubagent={openSubagent}
+              onAskInSideChat={sideChats.quote}
+              onFork={
+                activeId === undefined
+                  ? undefined
+                  : (runId): Promise<boolean> =>
+                      forkSession(activeId, { runId })
+              }
+            />
+          ) : (
+            <DraftFallback
+              picker={draftPicker}
+              reason={
+                workspaceActionCount > 0
+                  ? "Connecting…"
+                  : "The default directory is not available. Choose a workspace to start."
+              }
+            />
+          )
+        }
+        asideExpanded={sidePanel.state.expanded}
+        aside={
+          sidePanel.state.open ? (
+            <SidePanel
+              controls={sidePanel}
+              focusOnOpen={panelOpenedByUser}
+              onNewTerminal={terminalTabs.createTerminal}
+              onCloseTerminal={(tab, remove) => {
+                terminalTabs.closeTerminal(tab, false, remove);
               }}
-              onCancel={terminalTabs.dismissConfirmation}
-            />
-          ) : null}
-          {settingsDialog.state.mounted ? (
-            <SettingsDialog
-              settings={runtime.settings}
-              archive={runtime}
-              state={settingsDialog.state}
-              onClose={settingsDialog.close}
-              onSelectSection={settingsDialog.selectSection}
-              onShowNav={settingsDialog.showNav}
-            />
-          ) : null}
-          {directoryPickerOpen !== null ? (
-            <DirectoryPickerDialog
-              directoryPicker={runtime}
-              onClose={() => {
-                setDirectoryPickerOpen(null);
+              onNewSideChat={openSideChat}
+              sideChatUnavailable={sideChats.unavailable}
+              onCloseSideChat={sideChats.close}
+              onClosed={() => {
+                setPanelOpenedByUser(false);
+                requestAnimationFrame(() => {
+                  document
+                    .querySelector<HTMLElement>("[data-side-panel-toggle]")
+                    ?.focus();
+                });
               }}
-              onSelect={selectDirectory}
+              renderPage={(tab) => (
+                <SidePanelPage
+                  key={tab.id}
+                  tab={tab}
+                  context={sidePageContext}
+                />
+              )}
             />
-          ) : null}
-        </>
-      }
-    />
+          ) : undefined
+        }
+        blocking={
+          client && storeSnapshot.connectionNotice ? (
+            <ConnectionOverlay
+              notice={storeSnapshot.connectionNotice}
+              onReconnect={() => {
+                runtime.reconnectNow();
+              }}
+            />
+          ) : null
+        }
+        overlays={
+          <>
+            <NoticeStack
+              notices={notices}
+              onDismiss={(id) => {
+                setNotices((current) =>
+                  current.filter((notice) => notice.id !== id),
+                );
+              }}
+            />
+            {terminalTabs.confirmation ? (
+              <ConfirmDialog
+                title="Close terminal?"
+                description={`${terminalTabs.confirmation.process} is still running in this terminal. Closing it ends the program too.`}
+                confirmLabel="Close"
+                danger
+                onConfirm={() => {
+                  const pending = terminalTabs.confirmation;
+                  if (pending)
+                    terminalTabs.closeTerminal(
+                      pending.tab,
+                      true,
+                      pending.remove,
+                    );
+                }}
+                onCancel={terminalTabs.dismissConfirmation}
+              />
+            ) : null}
+            {settingsDialog.state.mounted ? (
+              <SettingsDialog
+                settings={runtime.settings}
+                archive={runtime}
+                state={settingsDialog.state}
+                onClose={settingsDialog.close}
+                onSelectSection={settingsDialog.selectSection}
+                onShowNav={settingsDialog.showNav}
+              />
+            ) : null}
+            {directoryPickerOpen !== null ? (
+              <DirectoryPickerDialog
+                directoryPicker={runtime}
+                onClose={() => {
+                  setDirectoryPickerOpen(null);
+                }}
+                onSelect={selectDirectory}
+              />
+            ) : null}
+          </>
+        }
+      />
+    </BackgroundTaskOpener.Provider>
   );
 }

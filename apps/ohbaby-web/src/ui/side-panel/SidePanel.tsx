@@ -83,6 +83,9 @@ export function SidePanel(props: {
     maxWidth: number;
   } | null>(null);
   const active = state.tabs.find((tab) => tab.id === state.activeTabId);
+  const kinds = SIDE_PAGE_KINDS.filter(
+    (kind) => !props.controls.hiddenKinds.includes(kind),
+  );
   const panel = useRef<HTMLElement>(null);
   const resizeBounds = (): { width: number; maxWidth: number } => {
     // CSS can show less than the stored width to preserve room for the chat.
@@ -362,7 +365,7 @@ export function SidePanel(props: {
       ) : (
         <div className="ohb-side-panel-entry">
           <h2>Open a page</h2>
-          {SIDE_PAGE_KINDS.map((kind) => {
+          {kinds.map((kind) => {
             const { title, description, icon: Icon } = SIDE_PAGES[kind];
             return (
               <button
@@ -397,7 +400,7 @@ export function SidePanel(props: {
             if (restoreFocus) addButton.current?.focus();
           }}
         >
-          {SIDE_PAGE_KINDS.map((kind) => {
+          {kinds.map((kind) => {
             const { title, icon: Icon } = SIDE_PAGES[kind];
             return (
               <button

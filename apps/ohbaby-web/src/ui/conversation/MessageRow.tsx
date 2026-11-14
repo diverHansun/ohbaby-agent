@@ -6,6 +6,7 @@ import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import { MarkdownBlock } from "../shared/MarkdownBlock.js";
 import { isCompactionMessage } from "./message-text.js";
 import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
+import { BackgroundTaskEntry, backgroundJobId } from "./BackgroundTaskEntry.js";
 
 export function MessageRow(props: {
   readonly steerState?: "unconsumed" | "unconfirmed";
@@ -90,6 +91,17 @@ export function MessageRow(props: {
               return (
                 <div key={`${props.message.id}-tool-${entry.call.id}`}>
                   {custom}
+                </div>
+              );
+            const jobId = backgroundJobId(entry.call, entry.result);
+            if (jobId)
+              return (
+                <div
+                  className="ohb-delegation"
+                  key={`${props.message.id}-tool-${entry.call.id}`}
+                >
+                  <ToolCard call={entry.call} result={entry.result} />
+                  <BackgroundTaskEntry jobId={jobId} />
                 </div>
               );
             return (

@@ -3,6 +3,7 @@ import {
   FolderOpen,
   MessageCircleQuestion,
   SquareTerminal,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 import type { TerminalInfo } from "ohbaby-sdk";
@@ -19,6 +20,10 @@ export interface SidePageStates {
     readonly subagentId?: string;
     /** Set only by an explicit "show this delegation" request. */
     readonly anchor?: SubagentAnchor;
+  };
+  readonly backgroundTasks: {
+    /** The task whose detail is open; absent shows the list. */
+    readonly jobId?: string;
   };
   readonly files: {
     /** The file whose preview is open, relative to scratch; absent shows the list. */
@@ -97,6 +102,13 @@ export const SIDE_PAGES: {
     title: "Subagents",
     description: "Read and stop this chat's subagents",
     icon: Bot,
+    initialState: {},
+    sessionScoped: true,
+  },
+  backgroundTasks: {
+    title: "Background tasks",
+    description: "See and cancel this chat's background tasks",
+    icon: Timer,
     initialState: {},
     sessionScoped: true,
   },

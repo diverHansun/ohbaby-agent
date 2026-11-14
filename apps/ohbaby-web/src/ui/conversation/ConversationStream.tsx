@@ -146,7 +146,9 @@ export function ConversationStream(props: {
     messages.filter(
       (message) =>
         message.runtimeInputKind !== "subagent-status" &&
-        message.runtimeInputKind !== "subagent-result",
+        message.runtimeInputKind !== "subagent-result" &&
+        // Task results are for the agent only (background tasks README D6).
+        message.runtimeInputKind !== "background-task-result",
     ),
   );
   const timelineItems = [

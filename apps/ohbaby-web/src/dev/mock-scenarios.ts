@@ -437,6 +437,160 @@ function wakeUp(): UiSnapshot {
   };
 }
 
+/**
+ * A chat whose agent started two background tasks and ran one foreground
+ * command, then was woken by a task result (background tasks 06 §6).
+ */
+function taskChat(): UiSnapshot {
+  const sessionId = "session_bg";
+  const bash = (
+    id: string,
+    command: string,
+    result: UiMessage["parts"][number],
+    description?: string,
+  ): UiMessage["parts"] => [
+    {
+      type: "tool-call",
+      call: {
+        id,
+        name: "bash",
+        input: {
+          command,
+          ...(description ? { description, run_in_background: true } : {}),
+        },
+        status: "completed",
+      },
+    },
+    result,
+  ];
+  const messages: UiMessage[] = [
+    {
+      id: "b-user",
+      role: "user",
+      createdAt: iso(14),
+      parts: [
+        {
+          type: "text",
+          text: "Start the dev server and keep the tests watching while I edit the sidebar.",
+        },
+      ],
+    },
+    {
+      id: "b-start",
+      role: "assistant",
+      runId: "run_b1",
+      createdAt: iso(14),
+      parts: [
+        ...bash(
+          "call_b1",
+          "pnpm --filter ohbaby-web exec vite --port 5173",
+          {
+            type: "tool-result",
+            result: {
+              callId: "call_b1",
+              output: "Started background task job_dev.",
+              details: {
+                kind: "bash",
+                mode: "background",
+                jobId: "job_dev",
+                status: "running",
+              },
+            },
+          },
+          "Dev server",
+        ),
+        ...bash(
+          "call_b2",
+          "pnpm exec vitest --watch apps/ohbaby-web",
+          {
+            type: "tool-result",
+            result: {
+              callId: "call_b2",
+              output: "Started background task job_watch.",
+              details: {
+                kind: "bash",
+                mode: "background",
+                jobId: "job_watch",
+                status: "running",
+              },
+            },
+          },
+          "Watch tests",
+        ),
+        ...bash("call_b3", "git status --short", {
+          type: "tool-result",
+          result: {
+            callId: "call_b3",
+            output: " M apps/ohbaby-web/src/ui/sidebar/sidebar.css",
+            details: { kind: "bash", mode: "foreground", exitCode: 0 },
+          },
+        }),
+        {
+          type: "text",
+          text: "The dev server is up on http://localhost:5173 and the tests are watching. I'll build once you're done editing.",
+        },
+      ],
+    },
+    {
+      id: "b-result",
+      role: "user",
+      runId: "run_b2",
+      runtimeInputKind: "background-task-result",
+      createdAt: iso(5),
+      parts: [
+        {
+          type: "text",
+          text: "Background task job_build (Build) failed: exit 1 after 3m 12s.",
+        },
+      ],
+    },
+    {
+      id: "b-answer",
+      role: "assistant",
+      runId: "run_b2",
+      createdAt: iso(5),
+      parts: [
+        {
+          type: "text",
+          text: "The build failed on a type error in `src/ui/App.tsx` line 12: a string is passed where a number is expected. I'll fix it next.",
+        },
+      ],
+    },
+  ];
+  const ended = {
+    sessionId,
+    status: { kind: "idle" },
+    outcome: "succeeded",
+  } as const;
+  return {
+    ...base,
+    activeSessionId: sessionId,
+    sessions: [
+      session(sessionId, "Edit the sidebar with live preview", 5, messages),
+      ...wakeUp().sessions.slice(0, 1),
+      ...history,
+    ],
+    runs: [
+      {
+        ...ended,
+        id: "run_b1",
+        trigger: "user",
+        startedAt: iso(14),
+        endedAt: iso(13.8),
+        updatedAt: iso(13.8),
+      },
+      {
+        ...ended,
+        id: "run_b2",
+        trigger: "background-task",
+        startedAt: iso(5),
+        endedAt: iso(4.9),
+        updatedAt: iso(4.9),
+      },
+    ],
+  };
+}
+
 const agentWorkspace = "/Users/demo/Projects/ohbaby-agent";
 const piWorkspace = "/Users/demo/Projects/pi-web";
 const notesWorkspace = "/Users/demo/notes";
@@ -736,6 +890,45 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     workspace,
     model,
     sessions: typicalSessions(),
+  }),
+  ...Object.fromEntries(
+    [
+      "bg-running",
+      "bg-chat",
+      "bg-two-chats",
+      "bg-subagents",
+      "bg-subagents-only",
+      "bg-many-done",
+      "bg-special",
+      "bg-cancel-errors",
+      "bg-output-fail",
+    ].map((name) => [
+      name,
+      (): MockScenario => ({
+        snapshot: taskChat(),
+        workspace,
+        model,
+        sessions: byRecency([
+          globalRow(
+            "session_bg",
+            "Edit the sidebar with live preview",
+            5,
+            agentWorkspace,
+          ),
+          globalRow("session_w", "Check the docs links", 7, agentWorkspace),
+          ...typicalSessions(),
+        ]),
+      }),
+    ]),
+  ),
+  "bg-none": () => ({
+    snapshot: running(false),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, agentWorkspace),
+      ...typicalSessions(),
+    ]),
   }),
   "no-model": () => ({
     snapshot: { ...base, activeSessionId: null, sessions: history },
