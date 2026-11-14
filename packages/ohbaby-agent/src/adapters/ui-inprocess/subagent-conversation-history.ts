@@ -96,7 +96,10 @@ export function parentMessage(
 export function createSubagentConversationHistory(options: {
   readonly executions: Pick<SubagentExecutionStore, "list" | "getForRoot">;
   readonly messages: MessageManager;
-  readonly project: (message: MessageWithParts) => UiMessage | undefined;
+  readonly project: (
+    message: MessageWithParts,
+    execution: SubagentExecutionRecord,
+  ) => UiMessage | undefined;
 }): {
   read(query: UiSubagentConversationQuery): Promise<{
     messages: UiMessage[];
@@ -134,7 +137,7 @@ export function createSubagentConversationHistory(options: {
         persisted.info.runId !== record.childRunId)
     )
       return synthetic;
-    return options.project(persisted) ?? synthetic;
+    return options.project(persisted, record) ?? synthetic;
   }
 
   function cursorFor(
@@ -406,7 +409,7 @@ export function createSubagentConversationHistory(options: {
               scanCursor = cursorFor(currentRecord, scanned.info, "message");
             rowsScanned += page.messages.length;
             const mapped = visible.flatMap((entry) => {
-              const message = options.project(entry);
+              const message = options.project(entry, currentRecord);
               return message
                 ? [
                     {

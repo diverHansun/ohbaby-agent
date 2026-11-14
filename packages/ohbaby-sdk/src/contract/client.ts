@@ -1,4 +1,8 @@
 import type {
+  UiShellJobReadClient,
+  UiShellJobCommandClient,
+} from "./shell-job.js";
+import type {
   UiSubagentConversationQuery,
   UiSubagentConversationUnwatchQuery,
   UiSubagentReadClient,
@@ -164,6 +168,7 @@ export type UiUnsubscribe = () => void;
 
 export interface UiQueryClient
   extends
+    Partial<UiShellJobReadClient>,
     Partial<UiSessionRecoveryClient>,
     Partial<UiSubagentReadClient>,
     Partial<Pick<UiSubagentInstanceClient, "listSubagentInstances">> {
@@ -246,6 +251,7 @@ export interface UiPromptQueueCommandClient {
 
 export interface UiCommandClient
   extends
+    Partial<UiShellJobCommandClient>,
     UiPromptCommandClient,
     UiPromptQueueCommandClient,
     Partial<Pick<UiSubagentInstanceClient, "stopSubagent">> {

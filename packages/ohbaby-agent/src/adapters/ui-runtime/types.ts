@@ -83,14 +83,25 @@ export interface UiRuntimeComposition {
   stopRewoundRunWork(rootRunId: string): Promise<void>;
   preflightShellRuns?(runIds: readonly string[]): Promise<readonly string[]>;
   markRewoundShellRuns?(runIds: readonly string[]): void;
+  shellJobCurrent?(
+    row: import("../../tools/shell-job-store.js").ShellJobRecord,
+  ): ReturnType<
+    import("../../tools/shell-job-registry.js").ShellJobRegistry["getCurrentRecord"]
+  >;
+  refreshShellRoot?(rootSessionId: string): Promise<void>;
+  shellJobManagement?(
+    row: import("../../tools/shell-job-store.js").ShellJobRecord,
+  ): Promise<{ managedByCurrentBackend: boolean; canStop: boolean }>;
   stopShellJob?(
     rootSessionId: string,
     jobId: string,
-  ): Promise<import("../../tools/shell-job-registry.js").ShellJobSnapshot>;
+    beforeAccept?: () => void,
+  ): Promise<{ outcome: "accepted" | "already-terminal" }>;
   abandonShellJob?(
     rootSessionId: string,
     jobId: string,
     confirm: boolean,
+    beforeAccept?: () => void,
   ): Promise<import("../../tools/shell-job-store.js").ShellJobRecord>;
   preflightShellSessions?(sessionIds: readonly string[]): Promise<void>;
   stopShellSessions?(sessionIds: readonly string[]): Promise<void>;

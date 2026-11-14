@@ -75,9 +75,10 @@ export interface StartSessionParams {
   readonly onInputReady?: () => void | Promise<void>;
   /** Internal wake-up context, recorded as a runtime input rather than user intent. */
   readonly runtimeInput?: {
-    readonly kind: "subagent-status";
+    readonly kind: "subagent-status" | "background-task-result";
     readonly sourceId: string;
     readonly body: string;
+    readonly goalReminder?: string;
     /** Roots whose results cannot authorize this automatic wake-up turn. */
   };
   readonly runModel: RunModel;

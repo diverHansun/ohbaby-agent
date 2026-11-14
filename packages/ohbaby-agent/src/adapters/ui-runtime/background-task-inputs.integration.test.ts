@@ -195,6 +195,62 @@ describe.each(["memory", "sqlite"] as const)(
           s.jobs.listNoticeBatches({ sessionId: "s", contextScopeId: null }),
         ).toEqual([]);
     });
+    it.runIf(backend === "sqlite")(
+      "keeps a wake claim when a foreign run accepted before batch binding",
+      async () => {
+        const s = await setup();
+        const batch = await s.jobs.allocateNoticeBatch({
+          sessionId: "s",
+          contextScopeId: null,
+        });
+        if (!batch) throw new Error("Missing batch");
+        expect(await s.jobs.claimNoticeWake(batch, "rejected-wake", null)).toBe(
+          true,
+        );
+        vi.spyOn(s.jobs, "bindNoticeBatch").mockRejectedValueOnce(
+          new Error("binding unavailable"),
+        );
+        await expect(s.port("one").beforeStep()).rejects.toThrow(
+          "binding unavailable",
+        );
+        expect(s.jobs.get("job")?.noticeInputId).toBeNull();
+        expect(
+          await s.inputs.listBySource("s", `background-task:${batch}`),
+        ).toHaveLength(1);
+        expect(
+          await s.jobs.releaseUnstartedNoticeWake(batch, "rejected-wake"),
+        ).toBe(false);
+        await s.inputs.close("one", "failed");
+        expect(
+          await s.jobs.releaseUnstartedNoticeWake(batch, "rejected-wake"),
+        ).toBe(false);
+        expect(s.jobs.get("job")?.noticeWakeRunId).toBe("rejected-wake");
+      },
+    );
+    it.runIf(backend === "sqlite")(
+      "rejects wake admission when actual input acceptance wins before its transaction",
+      async () => {
+        const s = await setup();
+        const batch = await s.jobs.allocateNoticeBatch({
+          sessionId: "s",
+          contextScopeId: null,
+        });
+        if (!batch) throw new Error("Missing batch");
+        vi.spyOn(s.jobs, "bindNoticeBatch").mockRejectedValueOnce(
+          new Error("before bind"),
+        );
+        await expect(s.port("one").beforeStep()).rejects.toThrow("before bind");
+        expect(s.jobs.get("job")?.noticeInputId).toBeNull();
+        expect(await s.jobs.claimNoticeWake(batch, "late-wake", null)).toBe(
+          false,
+        );
+        await s.inputs.close("one", "failed");
+        expect(await s.jobs.claimNoticeWake(batch, "late-wake", null)).toBe(
+          false,
+        );
+        expect(s.jobs.get("job")?.noticeWakeRunId).toBeNull();
+      },
+    );
     it("recovers acceptance-before-binding without a duplicate message", async () => {
       const s = await setup();
       const spy = vi

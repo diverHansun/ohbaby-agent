@@ -201,6 +201,170 @@ async function setup(
 const query = `runtimeEpoch=${epoch}&bindingGeneration=1`;
 
 describe("source session recovery HTTP/RPC/SSE", () => {
+  it.each(["stop", "abandon"] as const)(
+    "rechecks binding at the delayed %s acceptance point",
+    async (action) => {
+      const { backend, request } = await setup();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let effects = 0;
+      const operation = vi.fn(async (_input: unknown, guard?: () => void) => {
+        await gate;
+        guard?.();
+        effects++;
+        return {
+          rootSessionId: "root",
+          runtimeEpoch: epoch,
+          revision: 1,
+          job: {},
+          outcome: "accepted",
+          trackingReleasedAt: 1,
+        };
+      });
+      if (action === "stop")
+        backend.stopShellJob = operation as unknown as NonNullable<
+          typeof backend.stopShellJob
+        >;
+      else
+        backend.abandonShellJob = operation as unknown as NonNullable<
+          typeof backend.abandonShellJob
+        >;
+      const pending = request(`/v1/sessions/root/shell-jobs/job/${action}`, {
+        method: "POST",
+        body: JSON.stringify({
+          runtimeEpoch: epoch,
+          bindingGeneration: 1,
+          confirm: true,
+        }),
+      });
+      await vi.waitFor(() => {
+        expect(operation).toHaveBeenCalledOnce();
+      });
+      await request("/v1/sessions/other/select", { method: "PATCH" });
+      release();
+      expect((await pending).status).toBe(409);
+      expect(effects).toBe(0);
+    },
+  );
+  it.each(["stop", "abandon"] as const)(
+    "rejects malformed, non-object and oversized %s bodies",
+    async (action) => {
+      const { request } = await setup();
+      const endpoint = `/v1/sessions/root/shell-jobs/job/${action}`;
+      expect(
+        (await request(endpoint, { method: "POST", body: "{" })).status,
+      ).toBe(400);
+      expect(
+        (await request(endpoint, { method: "POST", body: "null" })).status,
+      ).toBe(400);
+      expect(
+        (
+          await request(endpoint, {
+            method: "POST",
+            body: "x".repeat(1_100_000),
+          })
+        ).status,
+      ).toBe(413);
+    },
+  );
+
+  it("authorizes shell routes and rejects invalid controls before backend effects", async () => {
+    const { backend, request, server } = await setup();
+    backend.listShellJobs = vi.fn().mockResolvedValue({
+      rootSessionId: "root",
+      runtimeEpoch: epoch,
+      revision: 1,
+      rows: [],
+      hasMore: false,
+      pendingStartCount: 0,
+      filteredCount: 0,
+      statusCounts: {},
+      unconfirmedCount: 0,
+    });
+    backend.abandonShellJob = vi.fn().mockResolvedValue({
+      rootSessionId: "root",
+      runtimeEpoch: epoch,
+      revision: 2,
+      trackingReleasedAt: 1,
+      job: {},
+    });
+    expect(
+      (await request(`/v1/sessions/root/shell-jobs?${query}`)).status,
+    ).toBe(200);
+    expect(
+      (await request(`/v1/sessions/other/shell-jobs?${query}`)).status,
+    ).toBe(409);
+    expect(
+      (await request(`/v1/sessions/root/shell-jobs?${query}&limit=101`)).status,
+    ).toBe(400);
+    const invalid = await request("/v1/sessions/root/shell-jobs/job/abandon", {
+      method: "POST",
+      body: JSON.stringify({
+        runtimeEpoch: epoch,
+        bindingGeneration: 1,
+        confirm: "true",
+      }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(backend.abandonShellJob).not.toHaveBeenCalled();
+    const remote = createRemoteUiBackendClient({
+      authToken: "recovery-token",
+      clientId: "remote-shell",
+      port: server.port,
+      startupIntent: { resumeSessionId: "root" },
+    });
+    cleanups.push(async () => remote.dispose());
+    expect(await remote.listShellJobs({ rootSessionId: "root" })).toMatchObject(
+      { rootSessionId: "root", revision: 1 },
+    );
+    await expect(
+      remote.abandonShellJob({
+        rootSessionId: "root",
+        jobId: "job",
+        confirm: "true" as unknown as true,
+      }),
+    ).rejects.toMatchObject({ code: "SHELL_JOB_INVALID_QUERY" });
+    expect(backend.abandonShellJob).not.toHaveBeenCalled();
+  });
+
+  it("rejects a shell result when the selected root changes during a read", async () => {
+    const { backend, request } = await setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    backend.listShellJobs = vi.fn(async () => {
+      await gate;
+      return {
+        rootSessionId: "root",
+        runtimeEpoch: epoch,
+        revision: 1,
+        rows: [],
+        hasMore: false,
+        pendingStartCount: 0,
+        filteredCount: 0,
+        statusCounts: {
+          running: 0,
+          completed: 0,
+          failed: 0,
+          timed_out: 0,
+          cancelled: 0,
+          lost: 0,
+        },
+        unconfirmedCount: 0,
+      };
+    });
+    const reading = request(`/v1/sessions/root/shell-jobs?${query}`);
+    await vi.waitFor(() => {
+      expect(backend.listShellJobs).toHaveBeenCalledOnce();
+    });
+    await request("/v1/sessions/other/select", { method: "PATCH" });
+    release();
+    expect((await reading).status).toBe(409);
+  });
+
   it("cancels a manual compact command when its RPC request is stopped", async () => {
     const { backend, server } = await setup();
     let started!: () => void;

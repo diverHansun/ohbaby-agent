@@ -1,3 +1,4 @@
+import { ShellJobRecoveryNotFoundError } from "../tools/shell-job-recovery.js";
 import { ShellJobRecovery } from "../tools/shell-job-recovery.js";
 import { readProcessIdentity } from "../shell/process-identity.js";
 import { DatabaseShellJobStore } from "../tools/shell-job-store.js";
@@ -108,6 +109,11 @@ export interface PersistentUiBackendClient
   listSubagentExecutions: NonNullable<
     UiBackendClient["listSubagentExecutions"]
   >;
+  listShellJobs: NonNullable<UiBackendClient["listShellJobs"]>;
+  getShellJobOutput: NonNullable<UiBackendClient["getShellJobOutput"]>;
+  readShellJobLog: NonNullable<UiBackendClient["readShellJobLog"]>;
+  stopShellJob: NonNullable<UiBackendClient["stopShellJob"]>;
+  abandonShellJob: NonNullable<UiBackendClient["abandonShellJob"]>;
   listSubagentInstances: NonNullable<UiBackendClient["listSubagentInstances"]>;
   stopSubagent: NonNullable<UiBackendClient["stopSubagent"]>;
   getSubagentExecutionView: NonNullable<
@@ -287,6 +293,26 @@ function withStartupRecovery(
     getSettingsMcpStatus: () => client.getSettingsMcpStatus(),
     getSettingsSkills: () => client.getSettingsSkills(),
     getSettingsAgents: () => client.getSettingsAgents(),
+    async listShellJobs(input) {
+      await ready();
+      return client.listShellJobs(input);
+    },
+    async getShellJobOutput(input) {
+      await ready();
+      return client.getShellJobOutput(input);
+    },
+    async readShellJobLog(input) {
+      await ready();
+      return client.readShellJobLog(input);
+    },
+    async stopShellJob(input, beforeAccept?: () => void) {
+      await ready();
+      return client.stopShellJob(input, beforeAccept);
+    },
+    async abandonShellJob(input, beforeAccept?: () => void) {
+      await ready();
+      return client.abandonShellJob(input, beforeAccept);
+    },
     async listSubagentInstances(input): Promise<UiSubagentInstanceSnapshot> {
       await ready();
       return client.listSubagentInstances(input);
@@ -821,7 +847,9 @@ export function createPersistentUiBackendClient(
   const subagentExecutionStore = new DatabaseSubagentExecutionStore({ db });
   const startupSessionMode = resolveStartupSessionMode(options);
   const projectRoot = resolvePersistentProjectRoot(options);
+  const shellJobStore = new DatabaseShellJobStore({ db });
   const stateStore = createPersistentUiStateStore({
+    shellJobStore,
     initialActiveSessionId: null,
     messageManager,
     projectRoot: () => projectRoot,
@@ -875,10 +903,10 @@ export function createPersistentUiBackendClient(
     log: (error: unknown): void =>
       options.logger?.emit(sessionFilesCleanupFailed, { error }),
   };
-  const shellJobStore = new DatabaseShellJobStore({ db });
   const startupReady = Promise.resolve().then(async () => {
     const identity = await readProcessIdentity(process.pid);
     const recovery = new ShellJobRecovery({
+      trackSourceCleanup: true,
       store: shellJobStore,
       backend: {
         ownerId: backendOwnerId,
@@ -886,8 +914,17 @@ export function createPersistentUiBackendClient(
         startToken: identity.state === "present" ? identity.startToken : null,
       },
     });
-    for (const row of shellJobStore.listUnsettled())
-      await recovery.recover(row.jobId);
+    for (const row of shellJobStore.listUnsettled()) {
+      try {
+        await recovery.recover(row.jobId);
+      } catch (error) {
+        if (
+          !(error instanceof ShellJobRecoveryNotFoundError) ||
+          shellJobStore.get(row.jobId)
+        )
+          throw error;
+      }
+    }
     await deleteOrphanSideChats(db, undefined, deletedSessionFiles);
     const sessions = await sessionManager.listByWorkingDirectory(
       await projectRoot,

@@ -885,7 +885,10 @@ export class DaemonClientViewCoordinator {
   routeEventForClient(event: UiEvent, clientId: string): UiEvent | undefined {
     const view = this.clientViews.get(clientId);
 
-    if (event.type === "subagent.instances.invalidated")
+    if (
+      event.type === "subagent.instances.invalidated" ||
+      event.type === "shell-jobs.invalidated"
+    )
       return view?.activeSessionId === event.rootSessionId ? event : undefined;
 
     if (

@@ -95,6 +95,8 @@ export interface GoalPersistencePort {
 export interface GoalTurnOutcome {
   readonly status: "succeeded" | "failed" | "cancelled" | "not_admitted";
   readonly ticket?: GoalTurnTicket;
+  /** Only after the caller proves this reserved turn never entered the run ledger. */
+  readonly refundUnstartedTurn?: true;
   readonly release?: () => void;
   readonly error?: string;
   readonly usage?: {

@@ -1,6 +1,6 @@
 # 后台任务：生命周期、自动转换与管理工具
 
-2026-11-13 开启。improve-1～3 的后端规划已收尾，均未实施。代码勘测基线 `f42608d4`；实施前须复核当前代码和数据库迁移编号。本文是交接索引，不是运行能力或测试通过报告。
+2026-11-13 开启。improve-1～3 的后端规划已收尾，improve-1 后端已完成修复、子代理和指定 Pi 复审及完整检查，等待用户验收；improve-2、improve-3 尚未开始。代码勘测基线 `f42608d4`；实际验收以各轮实施报告为准，规划文档中的代码位置是基线快照。
 
 用户先确认显式后台管理，再明确提前讨论自动转换及工具收拢，因此保留三个独立轮次。提前规划不代表前轮已验收。当前只负责后端，前端暂缓。
 
@@ -18,7 +18,11 @@
 
 ## 实施顺序与检查
 
-按“记录与状态 → 归属与回收 → 通知 → 用户后端接口 → task 工具表面 → 自动转后台”划分实现批次。每批完成当前能力的单元/集成验证，再跑一次 preflight；跨后续批次的集成项按 02/04 显式保留待验，不提前宣称通过；失败先修复再进入下一批，避免最后才发现生命周期接线问题。检查已通过后不无故重复全量运行。批次可形成独立提交，但当前会话没有实施或提交代码。
+按用户最后确认的分支顺序执行：improve-1（记录与状态 → 归属与回收 → 通知 → 用户后端接口）、improve-2（自动转后台）、improve-3（task 工具表面）。这替代规划期先收拢工具再接自动转换的建议。improve-2 可暂时使用现有管理工具，improve-3 再安全替换；不为过渡阶段新增 task_list 工厂。
+
+集成分支为 `codex/background-tasks-dev-20261113`，各轮在独立本地分支实施。每轮完成测试、子代理审查、指定 Pi 审核和修正后，分批提交并合并到集成分支。用户最新要求：本次完成 improve-1 后仅在当前分支分批提交，不合并到开发/集成分支，随后停止并交由用户验收；improve-2、improve-3 暂不开始。原定后续分支顺序保留，待用户重新安排。当前不推送、不实施前端。
+
+每批完成当前能力的单元/集成验证和 preflight；跨后续批次的集成项按 02/04 显式保留待验，不提前宣称通过；失败先修复再进入下一批。检查已通过后只对后续窄修做相关检查，下一整体验收再覆盖全部改动，不无故重复全量运行。
 
 本次收尾进一步简化：先提交启动占位再 spawn；纯前台不周期存输出尾部；task 列表聚焦后台和前台清理异常；删除新权限 pattern 语法、重复 subagent_id 及工作区移动的新限制。保留自动转换的狭窄同步提交接点，因为提前切换后再补偿失败会产生更多状态。
 
@@ -30,7 +34,7 @@
 | 代码现状与问题 | [01](improve-1/01-problem-analysis-and-current-state.md) | [01](improve-2/01-problem-analysis-and-current-state.md) | [01](improve-3/01-problem-analysis-and-current-state.md) |
 | 改造方案与迁移 | [02](improve-1/02-optimization-plan-and-change-scope.md) | [02](improve-2/02-optimization-plan-and-change-scope.md) | [02](improve-3/02-optimization-plan-and-change-scope.md) |
 | 本机参考与取舍 | [03](improve-1/03-reference-projects.md) | [03](improve-2/03-reference-projects.md) | [03](improve-3/03-reference-projects.md) |
-| 测试验收契约（未运行） | [04：T01–T41](improve-1/04-test-and-acceptance.md) | [04：A01–A16](improve-2/04-test-and-acceptance.md) | [04：T01–T18](improve-3/04-test-and-acceptance.md) |
+| 测试验收契约（实际结果见各轮 05） | [04：T01–T41](improve-1/04-test-and-acceptance.md) | [04：A01–A16](improve-2/04-test-and-acceptance.md) | [04：T01–T18](improve-3/04-test-and-acceptance.md) |
 | 模块目标 | [目标职责](improve-1/design/goals-duty.md) | [目标职责](improve-2/design/goals-duty.md) | [目标职责](improve-3/design/goals-duty.md) |
 | 模块架构 | [架构](improve-1/design/architecture.md) | [架构](improve-2/design/architecture.md) | [架构](improve-3/design/architecture.md) |
 | 数据与不变量 | [数据含义](improve-1/design/data-model.md) | [数据含义](improve-2/design/data-model.md) | [数据含义](improve-3/design/data-model.md) |
@@ -52,3 +56,5 @@
 - [tools模块设计](../goals-duty.md)、[shell模块设计](../../shell/goals-duty.md)：实施时同步权威契约。
 - [子代理可靠投递](../../agents/2026-11-12-subagent-delivery/README.md)：复用输入存储与准入能力，保留独立业务来源。
 - [执行可靠性第二轮](../../problem-lists/2026-09-19-execution-reliability/improve-2/00-discussion.md)：本议题修订旧Bash统一寿命上限；普通工具名额与后台任务名额仍分开。
+
+本轮结果见 [improve-1 实施与验收](improve-1/05-implementation-acceptance.md)：最终 preflight 8349 项通过，子代理和指定 Pi 复审无剩余阻断。仅当前分支分批提交，不合并、不推送，后续轮次等待用户安排。

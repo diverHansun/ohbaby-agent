@@ -1999,6 +1999,7 @@ describe("durable run handoff", () => {
       stage: "run-terminal",
     });
     expect(manager.hasActiveWork()).toBe(true);
+    expect(manager.hasPendingCleanup()).toBe(true);
     expect(bridge.endedScopes).toEqual([]);
     expect(sandboxManager.released).toHaveLength(1);
     await expect(
@@ -2019,6 +2020,7 @@ describe("durable run handoff", () => {
     ]);
     expect((await ledger.get(run.runId))?.endedAt).toBe(10_000);
     expect(manager.hasActiveWork()).toBe(false);
+    expect(manager.hasPendingCleanup()).toBe(false);
     expect(bridge.endedScopes).toEqual([`run/${run.runId}`]);
     expect(lifecycle.calls).toHaveLength(1);
     await expect(manager.retryFinalization(run.runId)).resolves.toEqual(

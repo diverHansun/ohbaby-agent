@@ -696,7 +696,7 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
     sql: `
       CREATE TABLE shell_job (
         job_id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-        context_scope_id TEXT, root_session_id TEXT NOT NULL, root_run_id TEXT, run_id TEXT, message_id TEXT, call_id TEXT,
+        context_scope_id TEXT, root_session_id TEXT NOT NULL, workspace_key TEXT, root_run_id TEXT, run_id TEXT, message_id TEXT, call_id TEXT,
         mode TEXT NOT NULL, command TEXT NOT NULL, description TEXT, cwd TEXT NOT NULL, shell TEXT NOT NULL, timeout_ms INTEGER,
         status TEXT, stop_reason TEXT, exit_code INTEGER, signal TEXT, error TEXT, pid INTEGER, pgid INTEGER,
         process_start_token TEXT, recovery_claim TEXT, owner_pid INTEGER, owner_id TEXT, owner_start_token TEXT, goal_id TEXT,

@@ -298,9 +298,13 @@ export class GoalStore {
       readonly cachedInputTokens?: number;
       readonly usageComplete: boolean;
     },
+    refundUnstartedTurn = false,
   ): Promise<void> {
     const state = this.state;
     if (state?.goalId !== goalId) return;
+    const turnsUsed = refundUnstartedTurn
+      ? Math.max(0, state.turnsUsed - 1)
+      : undefined;
     const tokensUsed =
       usage.totalTokens === undefined
         ? undefined
@@ -315,9 +319,11 @@ export class GoalStore {
       goalId,
       type: "update",
       usageIncomplete,
+      ...(turnsUsed === undefined ? {} : { turnsUsed }),
       ...(tokensUsed === undefined ? {} : { tokensUsed }),
       ...(cachedTokensUsed === undefined ? {} : { cachedTokensUsed }),
     });
+    if (turnsUsed !== undefined) state.turnsUsed = turnsUsed;
     if (tokensUsed !== undefined) state.tokensUsed = tokensUsed;
     if (cachedTokensUsed !== undefined)
       state.cachedTokensUsed = cachedTokensUsed;

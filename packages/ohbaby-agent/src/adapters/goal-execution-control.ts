@@ -2,7 +2,12 @@ import type { GoalExecutionInterruptInput } from "../goals/index.js";
 
 export interface GoalExecutionInterruptDeps {
   readonly activeRunId: () => string | undefined;
-  readonly promptOwner: () => "goal" | "user" | "subagent" | undefined;
+  readonly promptOwner: () =>
+    | "goal"
+    | "user"
+    | "subagent"
+    | "background-task"
+    | undefined;
   readonly promptSessionId: () => string | undefined;
   abortPromptRun(runId: string): Promise<boolean>;
   interruptSubagentsByRootRun(runId: string, reason: string): Promise<void>;

@@ -57,6 +57,10 @@ export interface PersistentUiStateStoreOptions {
   >;
   readonly messageManager: Pick<MessageManager, "listBySession">;
   readonly runLedger: RunLedger;
+  readonly shellJobStore?: Pick<
+    import("../../tools/shell-job-store.js").ShellJobStore,
+    "get"
+  >;
   readonly initialActiveSessionId?: string | null;
   readonly projectRoot: string | (() => Promise<string> | string);
   readonly sessionLimit?: number;
@@ -196,6 +200,55 @@ export function compareMessagePartOrder(
   );
 }
 
+/** Overlay only durable facts whose complete owner and tool-call identity matches. */
+export function overlayShellJobFacts(
+  message: UiMessage,
+  sessionId: string,
+  store: Pick<import("../../tools/shell-job-store.js").ShellJobStore, "get">,
+  owner: { rootSessionId: string; contextScopeId: string | null } = {
+    rootSessionId: sessionId,
+    contextScopeId: null,
+  },
+): UiMessage {
+  return {
+    ...message,
+    parts: message.parts.map((part) => {
+      if (
+        part.type !== "tool-result" ||
+        part.result.details?.kind !== "bash" ||
+        !part.result.details.jobId
+      )
+        return part;
+      const row = store.get(part.result.details.jobId);
+      if (
+        !row ||
+        row.sessionId !== sessionId ||
+        row.rootSessionId !== owner.rootSessionId ||
+        row.contextScopeId !== owner.contextScopeId ||
+        row.messageId !== message.id ||
+        row.callId !== part.result.callId ||
+        row.status === null
+      )
+        return part;
+      return {
+        ...part,
+        result: {
+          ...part.result,
+          details: {
+            ...part.result.details,
+            mode: row.mode,
+            status: row.status,
+            stopReason: row.stopReason ?? undefined,
+            cleanup: row.cleanup ?? undefined,
+            exitCode: row.exitCode ?? undefined,
+            outputTruncated: row.outputTruncated,
+          },
+        },
+      };
+    }),
+  };
+}
+
 export function messageToUiMessage(
   message: MessageWithParts,
 ): UiMessage | undefined {
@@ -300,6 +353,10 @@ function assistantCompletionFields(
 function sessionToUiSession(input: {
   readonly session: Session;
   readonly messages: readonly MessageWithParts[];
+  readonly shellJobStore?: Pick<
+    import("../../tools/shell-job-store.js").ShellJobStore,
+    "get"
+  >;
 }): UiSession {
   return {
     createdAt: toIsoString(input.session.createdAt),
@@ -307,7 +364,12 @@ function sessionToUiSession(input: {
     ...(input.session.sideChat ? { isSideChat: true } : {}),
     messages: input.messages
       .map(messageToUiMessage)
-      .filter((message): message is UiMessage => message !== undefined),
+      .filter((message): message is UiMessage => message !== undefined)
+      .map((message) =>
+        input.shellJobStore
+          ? overlayShellJobFacts(message, input.session.id, input.shellJobStore)
+          : message,
+      ),
     workingDirectory: input.session.workingDirectory,
     reasoning: input.session.reasoning,
     modelEntryId: input.session.modelEntryId,
@@ -469,6 +531,7 @@ export function createPersistentUiStateStore(
     return sessionToUiSession({
       messages: await options.messageManager.listBySession(session.id),
       session,
+      shellJobStore: options.shellJobStore,
     });
   }
 

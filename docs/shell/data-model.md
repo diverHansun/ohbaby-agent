@@ -29,4 +29,8 @@ AST 已解码的路径按字面值解析，保留引号字符、首尾空白、�
 
 `ShellPreflightResult` 提供 cdTargets 和 resolvedPaths。sandbox 的 `PreflightResult` 保留 internal/external/sensitive/denylist 路径事实，并用 completeness、incompleteReasons 表达分析边界。
 
-进程树仍使用原有 `KillTreeResult` 的 confirmed/unconfirmed 证据、一次终止尝试及有界观察。ShellJobRegistry 的 jobId、running/completed/failed/cancelled/timed_out 与前后台清理合同不变。
+进程树继续使用 `KillTreeResult` 的 confirmed/unconfirmed 证据和有界观察。ShellJobRegistry 管理活跃进程、输出与资源责任，ShellJobStore 保存权威任务记录；历史查询不依赖内存 Map。
+
+公共状态为 running、completed、failed、timed_out、cancelled、lost。timeout 到期对应 timed_out；用户、模型、所有者结束等主动停止对应 cancelled，具体来源见 stopReason。进程退出、输出关闭、清理确认和最终持久化分别记录，逻辑终态不能冒充资源已回收。启动前事务占位的内部空状态不对外增加第七种状态。
+
+显式后台默认不限时；显式 timeout 最长 24 小时。纯前台默认 120 秒、最长 600 秒。主代理当前轮 Stop 只停止前台；子代理本次执行结束回收该执行的全部任务。已登记任务在服务重启后根据原生进程身份保守恢复，无法核实身份时保留 unconfirmed，不按数字 PID 猜测并杀进程。详细边界见 [后台任务 improve-1](../tools/2026-11-13-background-tasks/improve-1/design/data-model.md)。

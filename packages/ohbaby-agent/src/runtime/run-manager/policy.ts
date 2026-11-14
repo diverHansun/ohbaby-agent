@@ -8,7 +8,12 @@ const interactive: RunDefaults = {
 };
 
 export const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
-  defaults: { user: interactive, goal: interactive, subagent: interactive },
+  defaults: {
+    user: interactive,
+    goal: interactive,
+    subagent: interactive,
+    "background-task": interactive,
+  },
 };
 
 export function mergeRunDefaults(

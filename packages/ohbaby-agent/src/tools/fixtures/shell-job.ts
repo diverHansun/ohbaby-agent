@@ -8,6 +8,7 @@ export function shellJobFixture(
     sessionId: "s",
     contextScopeId: null,
     rootSessionId: "s",
+    workspaceKey: null,
     rootRunId: "r",
     runId: "r",
     messageId: null,

@@ -304,10 +304,19 @@ export class RunManager {
   }
 
   hasActiveWork(): boolean {
+    return this.activeBySession.size > 0 || this.hasPendingCleanup();
+  }
+
+  hasPendingCleanup(): boolean {
     return (
-      this.activeBySession.size > 0 ||
       this.pendingSandboxReleases.size > 0 ||
-      this.failedSandboxReleases.length > 0
+      this.failedSandboxReleases.length > 0 ||
+      [...this.recordsById.values()].some(
+        (record) =>
+          isActive(record) &&
+          (record.finalization !== undefined ||
+            record.abortController.signal.aborted),
+      )
     );
   }
 

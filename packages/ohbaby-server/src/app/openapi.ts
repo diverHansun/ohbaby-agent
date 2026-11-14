@@ -799,6 +799,125 @@ export function createOpenApiDocument(
       },
     },
     paths: {
+      "/v1/sessions/{id}/shell-jobs": {
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
+        get: {
+          summary: "List background and unresolved shell tasks",
+          parameters: [
+            ...recoveryParameters,
+            {
+              name: "limit",
+              in: "query",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: 100,
+                default: 20,
+              },
+            },
+            {
+              name: "owner",
+              in: "query",
+              schema: { enum: ["main", "subagents", "subagent"] },
+            },
+            ...["subagentId", "statuses", "search", "cursor"].map((name) => ({
+              name,
+              in: "query",
+              schema: { type: "string" },
+            })),
+          ],
+          responses: recoveryResponses,
+        },
+      },
+      ...Object.fromEntries(
+        ["output", "log", "stop", "abandon"].map((action) => [
+          `/v1/sessions/{id}/shell-jobs/{jobId}/${action}`,
+          {
+            parameters: ["id", "jobId"].map((name) => ({
+              name,
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            })),
+            ...(action === "output" || action === "log"
+              ? {
+                  get: {
+                    summary:
+                      action === "output"
+                        ? "Read latest task output"
+                        : "Read bounded task log bytes",
+                    parameters: [
+                      ...recoveryParameters,
+                      ...(action === "log"
+                        ? [
+                            {
+                              name: "offset",
+                              in: "query",
+                              schema: { type: "integer", minimum: 0 },
+                            },
+                            {
+                              name: "maxBytes",
+                              in: "query",
+                              schema: {
+                                type: "integer",
+                                minimum: 1,
+                                maximum: 65536,
+                              },
+                            },
+                          ]
+                        : []),
+                    ],
+                    responses: recoveryResponses,
+                  },
+                }
+              : {
+                  post: {
+                    summary:
+                      action === "stop"
+                        ? "Stop one task"
+                        : "Release unconfirmed tracking",
+                    parameters: [recoveryParameters[0]],
+                    requestBody: {
+                      required: true,
+                      content: {
+                        "application/json": {
+                          schema: {
+                            type: "object",
+                            required:
+                              action === "abandon"
+                                ? [
+                                    "runtimeEpoch",
+                                    "bindingGeneration",
+                                    "confirm",
+                                  ]
+                                : ["runtimeEpoch", "bindingGeneration"],
+                            properties: {
+                              runtimeEpoch: { type: "string" },
+                              bindingGeneration: {
+                                type: "integer",
+                                minimum: 1,
+                              },
+                              ...(action === "abandon"
+                                ? { confirm: { const: true } }
+                                : {}),
+                            },
+                          },
+                        },
+                      },
+                    },
+                    responses: recoveryResponses,
+                  },
+                }),
+          },
+        ]),
+      ),
       ...settingsPaths,
       ...Object.fromEntries(
         ["view", "history", "control"].map((kind) => [

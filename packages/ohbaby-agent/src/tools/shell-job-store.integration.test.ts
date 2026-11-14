@@ -15,6 +15,7 @@ const record: ShellJobRecord = {
   sessionId: "session",
   contextScopeId: null,
   rootSessionId: "session",
+  workspaceKey: null,
   rootRunId: "root",
   runId: "run",
   messageId: "message",

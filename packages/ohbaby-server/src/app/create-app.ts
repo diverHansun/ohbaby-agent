@@ -1,3 +1,4 @@
+import { registerShellJobRoutes } from "../protocols/web/routes/shell-jobs.js";
 import type {
   InstanceSettingsReader,
   InstanceSettingsControl,
@@ -269,12 +270,17 @@ class DaemonServerAppRuntime implements DaemonRouteContext {
         },
         code === "SUBAGENT_CLOSED"
           ? 410
-          : code === "SUBAGENT_NOT_FOUND"
+          : code === "SUBAGENT_NOT_FOUND" || code === "SHELL_JOB_NOT_FOUND"
             ? 404
-            : code === "SIDE_CHAT_UNSUPPORTED" ||
+            : code === "SHELL_JOB_OTHER_BACKEND" ||
+                code === "SHELL_JOB_CLEANUP_BUSY" ||
+                code === "SHELL_JOB_ABANDON_NOT_ALLOWED" ||
+                code === "SHELL_JOB_NOT_READY" ||
+                code === "SIDE_CHAT_UNSUPPORTED" ||
                 code === "SUBAGENT_SNAPSHOT_CHANGED"
               ? 409
-              : code === "INVALID_SESSION_QUERY"
+              : code === "INVALID_SESSION_QUERY" ||
+                  code === "SHELL_JOB_INVALID_QUERY"
                 ? 400
                 : code === "SESSION_RECOVERY_UNSUPPORTED"
                   ? 426
@@ -301,6 +307,7 @@ class DaemonServerAppRuntime implements DaemonRouteContext {
     registerClientRoutes(this.app, this);
     registerSessionReadRoutes(this.app, this);
     registerSubagentRoutes(this.app, this);
+    registerShellJobRoutes(this.app, this);
     registerPromptReceiptRoutes(this.app, this);
     registerSnapshotRoutes(this.app, this);
     registerEventRoutes(this.app, this);

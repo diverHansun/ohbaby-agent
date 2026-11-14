@@ -1,3 +1,9 @@
+import {
+  queryMemoryShellJobs,
+  queryDatabaseShellJobs,
+  type ShellJobQuery,
+  type ShellJobPage,
+} from "./shell-job-query.js";
 import { randomUUID } from "node:crypto";
 import { freezeShellJobNoticeBatch } from "./shell-job-notice.js";
 import {
@@ -30,6 +36,8 @@ export interface ShellJobRecord {
   readonly sessionId: string;
   readonly contextScopeId: string | null;
   readonly rootSessionId: string;
+  /** Trusted launch workspace; null for records without a provable workspace. */
+  readonly workspaceKey: string | null;
   readonly rootRunId: string | null;
   readonly runId: string | null;
   readonly messageId: string | null;
@@ -90,7 +98,7 @@ export class ShellJobCapacityError extends Error {
     readonly active: number,
   ) {
     super(
-      `Background task capacity reached (${String(active)}/${String(limit)} tasks for this owner). Inspect or stop an existing task before starting another.`,
+      `Background task capacity reached (${String(active)}/${String(limit)} tasks for this owner). Wait for cleanup to be confirmed or stop an existing task before trying again; do not retry immediately.`,
     );
     this.name = "ShellJobCapacityError";
   }
@@ -205,6 +213,8 @@ class ShellJobChanges {
   }
 }
 export interface ShellJobStore {
+  readonly cleanupNamespace?: string | object;
+  query(input: ShellJobQuery): ShellJobPage;
   subscribe(listener: (record: ShellJobRecord) => void): () => void;
   allocateNoticeBatch(
     owner: ShellJobNoticeOwner,
@@ -242,6 +252,7 @@ export interface ShellJobStore {
     jobId: string,
     expected: ShellJobPatch,
     patch: ShellJobPatch,
+    beforeWrite?: () => void,
   ): Promise<boolean>;
   listUnsettled(rootSessionId?: string): readonly ShellJobRecord[];
   listByRootRun(rootRunId: string): readonly ShellJobRecord[];
@@ -260,6 +271,9 @@ function requireShellJob(
 }
 /* eslint-disable @typescript-eslint/require-await -- Atomic synchronous memory transitions implement the asynchronous persistence contract. */
 export class InMemoryShellJobStore implements ShellJobStore {
+  query(input: ShellJobQuery): ShellJobPage {
+    return queryMemoryShellJobs(this.records.values(), input);
+  }
   private readonly records = new Map<string, ShellJobRecord>();
   private readonly changes = new ShellJobChanges();
   subscribe(listener: (record: ShellJobRecord) => void): () => void {
@@ -440,7 +454,9 @@ export class InMemoryShellJobStore implements ShellJobStore {
     jobId: string,
     expected: ShellJobPatch,
     patch: ShellJobPatch,
+    beforeWrite?: () => void,
   ): Promise<boolean> {
+    beforeWrite?.();
     patch = definedPatch(patch);
     expected = definedPatch(expected);
     if (Object.keys(patch).length === 0)
@@ -507,6 +523,12 @@ function fromRow(row: Record<string, unknown>): ShellJobRecord {
   return record as unknown as ShellJobRecord;
 }
 export class DatabaseShellJobStore implements ShellJobStore {
+  get cleanupNamespace(): string | object {
+    return this.db.path === ":memory:" ? this.db : this.db.path;
+  }
+  query(input: ShellJobQuery): ShellJobPage {
+    return queryDatabaseShellJobs(this.db, input, fromRow);
+  }
   private readonly db: DatabaseConnection;
   private readonly changes = new ShellJobChanges();
   subscribe(listener: (record: ShellJobRecord) => void): () => void {
@@ -588,6 +610,15 @@ export class DatabaseShellJobStore implements ShellJobStore {
             row.noticeInputId === null &&
             row.noticeWakeRunId === wakeRunId,
         )
+      )
+        return [];
+      // A foreign run can persist acceptance before its batch-binding CAS.
+      if (
+        tx
+          .prepare(
+            "SELECT 1 FROM current_run_input WHERE session_id = ? AND source_id = ? AND source = 'background-task-result' LIMIT 1",
+          )
+          .get(rows[0].sessionId, `background-task:${batchId}`)
       )
         return [];
       tx.prepare(
@@ -674,7 +705,17 @@ export class DatabaseShellJobStore implements ShellJobStore {
     goalId: string | null,
   ): Promise<boolean> {
     const changed = await runWriteTransaction(this.db, (tx) => {
-      if (!canClaimNoticeWake(this.getNoticeBatch(batchId), goalId)) return [];
+      const rows = this.getNoticeBatch(batchId);
+      if (!canClaimNoticeWake(rows, goalId)) return [];
+      // Acceptance may win after the caller's preflight and before this writer lock.
+      if (
+        tx
+          .prepare(
+            "SELECT 1 FROM current_run_input WHERE session_id = ? AND source_id = ? AND source = 'background-task-result' LIMIT 1",
+          )
+          .get(rows[0].sessionId, `background-task:${batchId}`)
+      )
+        return [];
       tx.prepare(
         "UPDATE shell_job SET notice_wake_run_id = ? WHERE notice_batch_id = ?",
       ).run(wakeRunId, batchId);
@@ -742,6 +783,7 @@ export class DatabaseShellJobStore implements ShellJobStore {
     jobId: string,
     expected: ShellJobPatch,
     patch: ShellJobPatch,
+    beforeWrite?: () => void,
   ): Promise<boolean> {
     patch = definedPatch(patch);
     expected = definedPatch(expected);
@@ -750,6 +792,7 @@ export class DatabaseShellJobStore implements ShellJobStore {
     if (changed.length === 0)
       throw new Error("Shell job CAS requires an update.");
     const changedRow = await runWriteTransaction(this.db, (tx) => {
+      beforeWrite?.();
       const result = tx
         .prepare(
           `UPDATE shell_job SET ${changed.map((key) => `${columns[key]} = ?`).join(",")} WHERE job_id = ?${compared.map((key) => ` AND ${columns[key]} IS ?`).join("")}`,

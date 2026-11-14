@@ -1681,6 +1681,7 @@ export function createToolScheduler(
           plannedResources?.some((resource) => resource.kind === "file"));
       const sourceWait = (): "source-cleanup" | undefined => {
         if (!sourceSensitive) return undefined;
+        options.refreshSourceCleanup?.(prepared.owner);
         const state = getSourceCleanupState(prepared.owner);
         if (state === "unconfirmed") throw new SourceCleanupUnavailableError();
         return state === "in-progress" ? "source-cleanup" : undefined;

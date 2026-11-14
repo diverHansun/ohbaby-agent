@@ -22,6 +22,8 @@ export interface InProcessRuntimeControllerOptions {
   readonly coordinateAdmission?: <T>(work: () => Promise<T>) => Promise<T>;
   readonly getConfigVersion?: () => Promise<SettingsConfigVersions>;
   readonly onRuntimeReplaced?: () => void;
+  /** A real local admission finished; pending work may retry without polling. */
+  readonly onAdmissionReleased?: () => void;
   /** Reloads configuration that must match the recorded settings version. Runs under coordination. */
   readonly prepareRuntime?: (
     changedDomains?: readonly SettingsDomain[],
@@ -94,6 +96,18 @@ export class InProcessRuntimeController {
           const version = await this.options.getConfigVersion?.();
           if (this.changedDomains(version).length > 0) {
             const reasons = [...runtime.getActivityReasons()];
+            // A long-running background shell already pins this runtime. Ordinary
+            // concurrent work can continue; unresolved cleanup still blocks admission.
+            const backgroundPinned =
+              reasons.includes("background shell jobs") &&
+              reasons.every((reason) =>
+                [
+                  "background shell jobs",
+                  "active runs",
+                  "active tools",
+                  "background subagents",
+                ].includes(reason),
+              );
             if (this.admittedWork > 0)
               reasons.unshift("current tasks or context summaries");
             if (reasons.length > 0) {
@@ -106,6 +120,10 @@ export class InProcessRuntimeController {
                   message,
                 });
               this.waitingMessage = message;
+              if (backgroundPinned) {
+                this.admittedWork += 1;
+                return true;
+              }
               throw new RuntimeSwitchPendingError(message);
             }
             return false;
@@ -126,6 +144,7 @@ export class InProcessRuntimeController {
             if (!released) {
               released = true;
               this.admittedWork -= 1;
+              if (this.admittedWork === 0) this.options.onAdmissionReleased?.();
             }
           },
         };
@@ -151,7 +170,10 @@ export class InProcessRuntimeController {
       // the process-wide settings coordination shared by every workspace.
       if (
         this.admittedWork > 0 ||
-        (runtime?.getActivityReasons().length ?? 0) > 0
+        (runtime
+          ?.getActivityReasons()
+          .some((reason) => reason !== "background shell jobs") ??
+          false)
       )
         throw new InstanceBusyError();
       const mcp = await reload();

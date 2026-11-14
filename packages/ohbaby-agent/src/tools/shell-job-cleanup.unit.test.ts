@@ -1,3 +1,5 @@
+import { getSourceCleanupState } from "../core/tool-scheduler/source-cleanup.js";
+import { waitForCleanup } from "../core/tool-scheduler/run-cleanup.js";
 import {
   AdapterRegistry,
   SandboxManager,
@@ -6,6 +8,8 @@ import {
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { shellJobFixture } from "./fixtures/shell-job.js";
+import { ShellJobRecovery } from "./shell-job-recovery.js";
 import { InMemoryShellJobStore } from "./shell-job-store.js";
 import {
   ShellJobRegistry,
@@ -23,13 +27,240 @@ const start = (
   extra = {},
 ): Promise<ShellJobSnapshot> =>
   registry.start({
-    child: child as unknown as ChildProcess,
+    child: () => child as unknown as ChildProcess,
     sessionId: "cleanup-test",
     timeoutMs: 10000,
     ...extra,
   });
 afterEach(() => vi.useRealTimers());
 describe("shell job cleanup ownership", () => {
+  it.each(["foreground", "background", "natural"] as const)(
+    "keeps a naturally closed %s shell unblocked and releases its real cleanup guard",
+    async (mode) => {
+      const store = new InMemoryShellJobStore();
+      let alive = true;
+      const registry = new ShellJobRegistry({
+        store,
+        probeTree: () => (alive ? "running" : "stopped"),
+        killTree: () => {
+          alive = false;
+          return { status: "confirmed" };
+        },
+      });
+      const owner = {
+        sessionId: "cleanup-test",
+        rootSessionId: `close-${mode}`,
+        rootRunId: `run-${mode}`,
+        workspaceKey: `/close-${mode}`,
+        messageId: "m",
+        callId: "c",
+      };
+      const child = new Child();
+      try {
+        const job = await start(registry, child, {
+          owner,
+          background: mode !== "foreground",
+        });
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+        await vi.waitFor(() => {
+          expect(store.get(job.jobId)).toMatchObject({
+            status: "completed",
+            cleanup: null,
+          });
+        });
+        expect(getSourceCleanupState(owner)).toBeUndefined();
+        if (mode === "foreground")
+          registry.stopForeground(owner.rootRunId, "owner-ended");
+        else if (mode === "background")
+          await registry.stopForUser(job.jobId, owner.sessionId, undefined);
+        else {
+          alive = false;
+          await registry.refreshRoot(owner.rootSessionId);
+        }
+        await vi.waitFor(() => {
+          expect(store.get(job.jobId)?.cleanup).toBe("confirmed");
+        });
+        expect(getSourceCleanupState(owner)).toBeUndefined();
+      } finally {
+        await registry.dispose();
+      }
+    },
+  );
+
+  it("records the trusted launch workspace independently of command cwd", async () => {
+    const store = new InMemoryShellJobStore();
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: () => ({ status: "confirmed" }),
+      probeTree: () => "stopped",
+    });
+    const child = new Child();
+    const job = await start(registry, child, {
+      owner: {
+        sessionId: "cleanup-test",
+        rootSessionId: "root",
+        workspaceKey: "/trusted",
+        messageId: "m",
+        callId: "c",
+      },
+      metadata: { cwd: "/trusted/subdir" },
+    });
+    expect(store.get(job.jobId)).toMatchObject({
+      workspaceKey: "/trusted",
+      cwd: "/trusted/subdir",
+    });
+    child.emit("close", 0, null);
+    await registry.dispose();
+  });
+
+  it("waits for a short delayed close and persisted settlement during disposal", async () => {
+    const store = new InMemoryShellJobStore();
+    const child = new Child();
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: () => ({ status: "confirmed" }),
+      probeTree: () => "stopped",
+      outputDrainMs: 100,
+    });
+    const job = await start(registry, child, { background: true });
+    const closing = registry.dispose();
+    setTimeout(() => child.emit("close", null, "SIGTERM"), 10);
+    await expect(closing).resolves.toBeUndefined();
+    expect(store.get(job.jobId)?.settledAt).not.toBeNull();
+    expect(registry.hasActiveWork()).toBe(false);
+  });
+
+  it("does not report disposal confirmed while the output close and settlement are pending", async () => {
+    const store = new InMemoryShellJobStore();
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: () => ({ status: "confirmed" }),
+      probeTree: () => "stopped",
+      outputDrainMs: 10,
+    });
+    const child = new Child();
+    const job = await start(registry, child, { background: true });
+    await expect(registry.dispose()).rejects.toThrow("unconfirmed");
+    expect(store.get(job.jobId)?.settledAt).toBeNull();
+    child.emit("close", null, "SIGTERM");
+    await vi.waitFor(() => {
+      expect(registry.hasActiveWork()).toBe(false);
+    });
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+  it("detaches bounded output and cleanup waiters after timeout or abort", async () => {
+    const registry = new ShellJobRegistry({
+      killTree: () => ({ status: "unconfirmed" }),
+      probeTree: () => "running",
+    });
+    const child = new Child();
+    const job = await start(registry, child, {
+      owner: {
+        sessionId: "cleanup-test",
+        rootRunId: "run",
+        messageId: "m",
+        callId: "c",
+      },
+      background: true,
+    });
+    const internals = registry as unknown as {
+      jobs: Map<
+        string,
+        { terminalWaiters: Set<unknown>; confirmationWaiters?: Set<unknown> }
+      >;
+    };
+    for (let n = 0; n < 10; n++)
+      await registry.output(job.jobId, "cleanup-test", {
+        block: true,
+        waitMs: 1,
+      });
+    const controller = new AbortController();
+    const aborted = registry.output(job.jobId, "cleanup-test", {
+      block: true,
+      waitMs: 1000,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(aborted).rejects.toThrow("cancelled");
+    expect(internals.jobs.get(job.jobId)?.terminalWaiters.size).toBe(0);
+    for (let n = 0; n < 10; n++) {
+      const result = await registry.stopByRootRun("run", "rewound");
+      if (!result.settled) throw new Error("expected pending cleanup");
+      expect(await waitForCleanup(result.settled, 1, result.cancelWait)).toBe(
+        false,
+      );
+    }
+    expect(internals.jobs.get(job.jobId)?.confirmationWaiters?.size ?? 0).toBe(
+      0,
+    );
+    child.emit("close", null, "SIGKILL");
+    await expect(registry.dispose()).rejects.toThrow("unconfirmed");
+  });
+
+  it("reads raw live tails only within their owner scope", async () => {
+    const store = new InMemoryShellJobStore();
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: () => ({ status: "confirmed" }),
+      probeTree: () => "stopped",
+    });
+    const child = new Child();
+    const job = await start(registry, child, {
+      background: true,
+      contextScopeId: "child-a",
+    });
+    try {
+      child.stdout.emit("data", Buffer.from("raw-output"));
+      expect(
+        registry.getCurrentRecord(job.jobId, "cleanup-test", "child-a"),
+      ).toMatchObject({
+        source: "live",
+        record: { outputTail: "raw-output", outputBytes: 10 },
+      });
+      expect(() =>
+        registry.getCurrentRecord(job.jobId, "cleanup-test", "child-b"),
+      ).toThrow();
+      expect(() =>
+        registry.getCurrentRecord(job.jobId, "different", "child-a"),
+      ).toThrow();
+      child.emit("close", 0, null);
+    } finally {
+      await registry.dispose();
+    }
+  });
+  it("tolerates rows deleted during recovery observation but preserves real probe errors", async () => {
+    const store = new InMemoryShellJobStore();
+    await store.insert(shellJobFixture({ cleanup: "unconfirmed" }));
+    const recovery = new ShellJobRecovery({
+      store,
+      backend: { ownerId: "new", pid: 1, startToken: "new" },
+    });
+    const registry = new ShellJobRegistry({
+      store,
+      recovery,
+      killTree: () => ({ status: "confirmed" }),
+    });
+    const originalGet = store.get.bind(store);
+    let deleted = false;
+    vi.spyOn(store, "get").mockImplementation((id) =>
+      deleted ? null : originalGet(id),
+    );
+    const probe = vi.spyOn(recovery, "refresh").mockImplementation(() => {
+      deleted = true;
+      return Promise.reject(new Error("Unknown shell job"));
+    });
+    await expect(registry.refreshRoot("s")).resolves.toBeUndefined();
+    deleted = false;
+    probe.mockRejectedValue(new Error("database unavailable"));
+    await expect(registry.refreshRoot("s")).rejects.toThrow(
+      "database unavailable",
+    );
+    probe.mockRestore();
+    vi.restoreAllMocks();
+    await registry.dispose();
+  });
+
   it("refreshes an unconfirmed local group before admitting a new background job", async () => {
     let stopped = false;
     const store = new InMemoryShellJobStore();

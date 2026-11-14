@@ -1,3 +1,4 @@
+import { shellJobForClient } from "../../coordination/session-access.js";
 import { globalSessionErrorStatus } from "../global-sessions.js";
 import type { Hono } from "hono";
 import { randomUUID } from "node:crypto";
@@ -227,6 +228,28 @@ export async function callDaemonBackend(input: {
     input;
 
   switch (request.method) {
+    case "listShellJobs":
+    case "getShellJobOutput":
+    case "readShellJobLog":
+    case "stopShellJob":
+    case "abandonShellJob": {
+      const raw = request.params[0];
+      if (!isRecord(raw))
+        throw Object.assign(new Error("Invalid task query"), {
+          code: "INVALID_SESSION_QUERY",
+        });
+      return shellJobForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        method: request.method,
+        query: {
+          ...raw,
+          signal: input.signal,
+        } as unknown as import("ohbaby-sdk").UiShellJobQuery,
+      });
+    }
     case "listSubagentInstances":
     case "stopSubagent": {
       const raw = request.params[0];
@@ -1019,22 +1042,30 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
           : parsed.request.method === "exportSession"
             ? sessionExportErrorStatus(error)
             : isRecord(error) &&
-                (error.code === "SIDE_CHAT_UNSUPPORTED" ||
+                (error.code === "SHELL_JOB_OTHER_BACKEND" ||
+                  error.code === "SHELL_JOB_CLEANUP_BUSY" ||
+                  error.code === "SHELL_JOB_ABANDON_NOT_ALLOWED" ||
+                  error.code === "SHELL_JOB_NOT_READY" ||
+                  error.code === "SIDE_CHAT_UNSUPPORTED" ||
                   error.code === "CLIENT_NOT_REGISTERED" ||
                   error.code === "SESSION_SCOPE_CHANGED")
               ? 409
               : isRecord(error) && error.code === "SESSION_RECOVERY_UNSUPPORTED"
                 ? 426
-                : isRecord(error) && error.code === "INVALID_SESSION_QUERY"
+                : isRecord(error) &&
+                    (error.code === "INVALID_SESSION_QUERY" ||
+                      error.code === "SHELL_JOB_INVALID_QUERY")
                   ? 400
-                  : isDaemonForbiddenError(error)
-                    ? 403
-                    : isRecord(error) &&
-                        error.code === "INVALID_CLIENT_REQUEST_ID"
-                      ? 400
-                      : sessionOperation
-                        ? globalSessionErrorStatus(error)
-                        : 500;
+                  : isRecord(error) && error.code === "SHELL_JOB_NOT_FOUND"
+                    ? 404
+                    : isDaemonForbiddenError(error)
+                      ? 403
+                      : isRecord(error) &&
+                          error.code === "INVALID_CLIENT_REQUEST_ID"
+                        ? 400
+                        : sessionOperation
+                          ? globalSessionErrorStatus(error)
+                          : 500;
       return context.json(
         createDaemonRpcFailure(parsed.request.id, error),
         status,

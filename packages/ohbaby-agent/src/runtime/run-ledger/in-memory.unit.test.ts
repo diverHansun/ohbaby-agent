@@ -76,7 +76,9 @@ describe("InMemoryRunLedger", () => {
   });
 
   it("accepts user, goal and subagent triggers", () => {
-    expectTypeOf<TriggerSource>().toEqualTypeOf<"user" | "goal" | "subagent">();
+    expectTypeOf<TriggerSource>().toEqualTypeOf<
+      "user" | "goal" | "subagent" | "background-task"
+    >();
   });
 
   it("creates pending records with immutable snapshots", async () => {

@@ -2,12 +2,17 @@ export type ToolCleanupState = "in-progress" | "unconfirmed" | "confirmed";
 
 export interface RunCleanupSnapshot {
   readonly confirmed: boolean;
+  /** Actual cleanup or release work, excluding healthy running operations. */
+  readonly cleaning?: boolean;
   readonly settled?: Promise<void>;
+  /** Release a bounded observer without releasing underlying cleanup responsibility. */
+  readonly cancelWait?: () => void;
 }
 
 export async function waitForCleanup(
   cleaned: Promise<void>,
   timeoutMs = 2000,
+  cancelWait?: () => void,
 ): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -24,12 +29,16 @@ export async function waitForCleanup(
     ]);
   } finally {
     clearTimeout(timer);
+    cancelWait?.();
   }
 }
 
 /** Physical tool ownership can outlive the result returned to the model. */
 export class RunCleanupTracker {
-  private readonly pending = new Map<string, Set<Promise<void>>>();
+  private readonly pending = new Map<
+    string,
+    Map<Promise<void>, () => boolean>
+  >();
 
   begin(runId: string | undefined): {
     report(state: ToolCleanupState): void;
@@ -44,8 +53,12 @@ export class RunCleanupTracker {
     let released = false;
     let cleanup: ToolCleanupState | undefined;
     {
-      const entries = this.pending.get(key) ?? new Set();
-      entries.add(completion);
+      const entries =
+        this.pending.get(key) ?? new Map<Promise<void>, () => boolean>();
+      entries.set(
+        completion,
+        () => rawSettled || (cleanup !== undefined && cleanup !== "confirmed"),
+      );
       this.pending.set(key, entries);
     }
     const confirm = (): void => {
@@ -97,7 +110,10 @@ export class RunCleanupTracker {
     return entries.length
       ? {
           confirmed: false,
-          settled: Promise.all(entries).then(() => undefined),
+          cleaning: entries.some(([, cleaning]) => cleaning()),
+          settled: Promise.all(entries.map(([completion]) => completion)).then(
+            () => undefined,
+          ),
         }
       : { confirmed: true };
   }

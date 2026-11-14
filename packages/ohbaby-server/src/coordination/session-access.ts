@@ -682,3 +682,77 @@ export function unwatchSubagentConversationForClient(
     input.query.subagentId,
   );
 }
+
+export async function shellJobForClient(
+  input: Access & {
+    readonly method:
+      | "listShellJobs"
+      | "getShellJobOutput"
+      | "readShellJobLog"
+      | "stopShellJob"
+      | "abandonShellJob";
+    readonly query: import("ohbaby-sdk").UiShellJobQuery;
+  },
+): Promise<unknown> {
+  const { query, method } = input;
+  parseSessionQuery({ ...query, sessionId: query.rootSessionId });
+  const values = query as unknown as Record<string, unknown>;
+  const integer = (value: unknown, min: number, max: number): boolean =>
+    value === undefined ||
+    (typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      value >= min &&
+      value <= max);
+  if (
+    (method !== "listShellJobs" &&
+      (typeof values.jobId !== "string" ||
+        !values.jobId.trim() ||
+        values.jobId.length > 256)) ||
+    (method === "listShellJobs" && !integer(values.limit, 1, 100)) ||
+    (method === "readShellJobLog" &&
+      (!integer(values.offset, 0, Number.MAX_SAFE_INTEGER) ||
+        !integer(values.maxBytes, 1, 65536))) ||
+    (method === "abandonShellJob" && values.confirm !== true)
+  )
+    throw Object.assign(new Error("Invalid shell task query"), {
+      code: "SHELL_JOB_INVALID_QUERY",
+    });
+  const binding = capture(input, query);
+  if (binding.rootSessionId !== query.rootSessionId)
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Task access requires the selected root session",
+    );
+  await validateRoot(input.backend, query.rootSessionId);
+  recheck(input, binding);
+  query.signal?.throwIfAborted();
+  const operation = input.backend[method] as
+    | ((
+        value: typeof query,
+        beforeAccept?: () => void,
+      ) => Promise<import("ohbaby-sdk").UiShellJobVersion>)
+    | undefined;
+  if (!operation)
+    throw Object.assign(new Error("Shell tasks are unavailable"), {
+      code: "SESSION_RECOVERY_UNSUPPORTED",
+    });
+  const result = await operation.call(input.backend, query, () => {
+    recheck(input, binding);
+    query.signal?.throwIfAborted();
+  });
+  recheck(input, binding);
+  await validateRoot(input.backend, query.rootSessionId);
+  recheck(input, binding);
+  query.signal?.throwIfAborted();
+  if (
+    result.rootSessionId !== query.rootSessionId ||
+    result.runtimeEpoch !== input.epoch ||
+    !Number.isSafeInteger(result.revision) ||
+    result.revision < 1
+  )
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Task snapshot scope or version mismatch",
+    );
+  return { ...result, bindingGeneration: binding.bindingGeneration };
+}

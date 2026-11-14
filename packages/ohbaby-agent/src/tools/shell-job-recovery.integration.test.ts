@@ -1,3 +1,8 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { NodeSqliteConnection } from "../services/database/connection.js";
+import { getSourceCleanupState } from "../core/tool-scheduler/source-cleanup.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { describe, expect, it } from "vitest";
@@ -93,3 +98,61 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
     });
   },
 );
+
+it("rebinds an old recovered guard after the database closes and a peer resolves the row", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "shell-rebind-"));
+  const path = join(directory, "jobs.db");
+  const otherPath = join(directory, "other.db");
+  const owner = {
+    sessionId: "s",
+    rootSessionId: "s",
+    workspaceKey: "/source",
+    messageId: "m",
+    callId: "c",
+  };
+  const backend = { ownerId: "new", pid: process.pid, startToken: null };
+  try {
+    initDatabase({ dbPath: path });
+    getDatabase()
+      .prepare(
+        "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES('s','p','/tmp','test','active',1,1,'{}')",
+      )
+      .run();
+    const store = new DatabaseShellJobStore();
+    await store.insert(shellJobFixture({ workspaceKey: "/source" }));
+    await new ShellJobRecovery({
+      store,
+      backend,
+      trackSourceCleanup: true,
+      inspect: () => Promise.resolve({ state: "absent" }),
+      probeGroup: () => "unknown",
+    }).recover("job");
+    expect(getSourceCleanupState(owner)).toBe("unconfirmed");
+    closeDatabase();
+    initDatabase({ dbPath: otherPath });
+    new ShellJobRecovery({
+      store: new DatabaseShellJobStore(),
+      backend,
+      trackSourceCleanup: true,
+    });
+    expect(getSourceCleanupState(owner)).toBe("unconfirmed");
+    closeDatabase();
+    const peer = new NodeSqliteConnection(path);
+    peer
+      .prepare(
+        "UPDATE shell_job SET cleanup='confirmed', settled_at=20 WHERE job_id='job'",
+      )
+      .run();
+    peer.close();
+    initDatabase({ dbPath: path });
+    new ShellJobRecovery({
+      store: new DatabaseShellJobStore(),
+      backend,
+      trackSourceCleanup: true,
+    });
+    expect(getSourceCleanupState(owner)).toBeUndefined();
+  } finally {
+    closeDatabase();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

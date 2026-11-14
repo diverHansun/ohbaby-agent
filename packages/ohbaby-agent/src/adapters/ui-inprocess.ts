@@ -1,3 +1,8 @@
+import { overlayShellJobFacts } from "./ui-state/persistent-store.js";
+import { ShellJobProjection } from "./ui-inprocess/shell-jobs.js";
+import { ShellJobReader } from "../tools/shell-job-reader.js";
+import { InMemoryShellJobStore } from "../tools/shell-job-store.js";
+import { createBackgroundTaskWakeup } from "./ui-inprocess/background-task-wakeup.js";
 import { processOwnerId } from "../utils/process-owner.js";
 import { isUserFacingSession } from "../services/session/types.js";
 import { createSessionSubagentSupervisor } from "../agents/subagents/session-supervisor.js";
@@ -62,7 +67,10 @@ import { SideChatUnsupportedError } from "../services/session/errors.js";
 import { exportSession } from "../services/session-export/index.js";
 import { getAgentPackageVersion } from "../package-version.js";
 import { projectUnconsumedSteers } from "./ui-inprocess/steer-recovery.js";
-import { RunFinalizationError } from "../runtime/run-manager/errors.js";
+import {
+  RunFinalizationError,
+  ConcurrencyRejectedError,
+} from "../runtime/run-manager/errors.js";
 import { SubagentConversationProjection } from "./ui-inprocess/subagent-conversation.js";
 import { InMemorySubagentExecutionStore } from "../agents/subagents/execution-store.js";
 import { createSubagentViewReader } from "./ui-inprocess/subagent-views.js";
@@ -325,7 +333,7 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
 
 type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 
-type PromptOwner = "user" | "goal" | "subagent";
+type PromptOwner = "user" | "goal" | "subagent" | "background-task";
 
 type InternalSubmitPromptOptions = SubmitPromptOptions & {
   readonly expectedTemporaryTitle?: string;
@@ -333,9 +341,10 @@ type InternalSubmitPromptOptions = SubmitPromptOptions & {
   readonly signal?: AbortSignal;
   readonly owner?: PromptOwner;
   readonly runtimeInput?: {
-    readonly kind: "subagent-status";
+    readonly kind: "subagent-status" | "background-task-result";
     readonly sourceId: string;
     readonly body: string;
+    readonly goalReminder?: string;
   };
   readonly goalId?: string;
   readonly goalTicket?: GoalTurnTicket;
@@ -464,6 +473,19 @@ export interface InProcessUiBackendClient
     UiSessionRecoveryClient,
     InstanceSettingsReader,
     InstanceSettingsControl {
+  listShellJobs: NonNullable<UiBackendClient["listShellJobs"]>;
+  getShellJobOutput: NonNullable<UiBackendClient["getShellJobOutput"]>;
+  readShellJobLog: NonNullable<UiBackendClient["readShellJobLog"]>;
+  /** Local server guard; it is never part of the serialized SDK request. */
+  stopShellJob: (
+    input: Parameters<NonNullable<UiBackendClient["stopShellJob"]>>[0],
+    beforeAccept?: () => void,
+  ) => ReturnType<NonNullable<UiBackendClient["stopShellJob"]>>;
+  /** Local server guard; it is never part of the serialized SDK request. */
+  abandonShellJob: (
+    input: Parameters<NonNullable<UiBackendClient["abandonShellJob"]>>[0],
+    beforeAccept?: () => void,
+  ) => ReturnType<NonNullable<UiBackendClient["abandonShellJob"]>>;
   listSubagentInstances: NonNullable<UiBackendClient["listSubagentInstances"]>;
   stopSubagent: NonNullable<UiBackendClient["stopSubagent"]>;
   listSubagentExecutions: NonNullable<
@@ -648,8 +670,9 @@ export function createInProcessUiBackendClient(
       bus,
       store: createInMemoryMessageStore(),
     });
-  const goalPersistence =
+  const goalPersistence: GoalPersistencePort =
     options.goalPersistence ?? new InMemoryGoalPersistence();
+  const shellJobStore = options.shellJobStore ?? new InMemoryShellJobStore();
   const interactionBroker = createInteractionBroker({ bus });
   const contextWindowUsage: ContextWindowUsageTracker =
     createContextWindowUsageTracker({ now: timestamp });
@@ -941,6 +964,7 @@ export function createInProcessUiBackendClient(
     },
   );
   const subagentConversations = new SubagentConversationProjection({
+    shellJobStore,
     runtimeEpoch: permissionProjection.permissionEpoch,
     source: sourceProjection,
     messages: messageManager,
@@ -1203,6 +1227,15 @@ export function createInProcessUiBackendClient(
     onRuntimeReplaced: (): void => {
       contextWindowUsage.clear();
     },
+    onAdmissionReleased: (): void => {
+      // An in-flight claim may have temporarily removed the gate subscription.
+      // Preserve this real release even while its rollback suppresses self-events.
+      for (const id of backgroundDeferring) backgroundRerun.add(id);
+      for (const id of backgroundGateSubscriptions.keys()) {
+        if (backgroundDeferring.has(id)) backgroundRerun.add(id);
+        else scheduleBackgroundWake(id);
+      }
+    },
     prepareRuntime: async (changedDomains): Promise<void> => {
       if (
         changedDomains === undefined ||
@@ -1290,7 +1323,7 @@ export function createInProcessUiBackendClient(
         streamBridge: options.streamBridge,
         subagentInstanceStore,
         subagentExecutionStore,
-        shellJobStore: options.shellJobStore,
+        shellJobStore,
         shellAdmission: (owner) =>
           !shellAdmissionFences.has(owner.sessionId) &&
           !shellAdmissionFences.has(owner.rootSessionId ?? owner.sessionId) &&
@@ -1561,6 +1594,50 @@ export function createInProcessUiBackendClient(
         now: () => now().getTime(),
       })
     : undefined;
+  const prepareAutomaticSession = async (
+    sessionId: string,
+  ): Promise<
+    { modelEntryId?: string; reasoning?: ReasoningConfig } | undefined
+  > => {
+    if (
+      disposed ||
+      archivingSessions.has(sessionId) ||
+      closingSideChats.has(sessionId) ||
+      !currentRunInputStore ||
+      rewindingSessions.has(sessionId) ||
+      !isMainSessionIdle(sessionId) ||
+      promptScheduler.getRecoveryState(sessionId).status !== "ready" ||
+      (await movedSessionTarget(sessionId)) !== undefined
+    )
+      return undefined;
+    try {
+      await assertCanUseAsPrimarySession(sessionId);
+    } catch (error) {
+      if (
+        error instanceof SessionRunBusyError ||
+        error instanceof SessionArchiveError ||
+        error instanceof SessionMovedError
+      )
+        return undefined;
+      throw error;
+    }
+    const session = await stateStore.getSession(sessionId);
+    if (
+      !session ||
+      (await options.sessionManager?.get(sessionId))?.status === "archived"
+    )
+      return undefined;
+    if (
+      (await promptSubmissionStore.listQueued(promptScopeKey)).some(
+        (prompt) => prompt.sessionId === sessionId,
+      )
+    )
+      return undefined;
+    return {
+      modelEntryId: session.modelEntryId,
+      reasoning: session.reasoning,
+    };
+  };
   const wakeFromSubagent = subagentDelivery
     ? createSubagentWakeup({
         executions: subagentExecutionStore,
@@ -1588,49 +1665,134 @@ export function createInProcessUiBackendClient(
             message: getErrorMessage(error),
           });
         },
-        prepareSession: async (sessionId) => {
-          if (
-            disposed ||
-            archivingSessions.has(sessionId) ||
-            closingSideChats.has(sessionId) ||
-            !currentRunInputStore ||
-            rewindingSessions.has(sessionId) ||
-            !isMainSessionIdle(sessionId) ||
-            promptScheduler.getRecoveryState(sessionId).status !== "ready" ||
-            (await movedSessionTarget(sessionId)) !== undefined
-          )
-            return undefined;
-          try {
-            await assertCanUseAsPrimarySession(sessionId);
-          } catch (error) {
-            if (
-              error instanceof SessionRunBusyError ||
-              error instanceof SessionArchiveError ||
-              error instanceof SessionMovedError
-            )
-              return undefined;
-            throw error;
-          }
-          const session = await stateStore.getSession(sessionId);
-          if (
-            !session ||
-            (await options.sessionManager?.get(sessionId))?.status ===
-              "archived"
-          )
-            return undefined;
-          if (
-            (await promptSubmissionStore.listQueued(promptScopeKey)).some(
-              (prompt) => prompt.sessionId === sessionId,
-            )
-          )
-            return undefined;
-          return {
-            modelEntryId: session.modelEntryId,
-            reasoning: session.reasoning,
-          };
-        },
+        prepareSession: prepareAutomaticSession,
       })
     : (): Promise<boolean> => Promise.resolve(false);
+  const backgroundGateSubscriptions = new Map<string, () => void>();
+  const backgroundQueued = new Set<string>();
+  const backgroundRunning = new Set<string>();
+  const backgroundRerun = new Set<string>();
+  const backgroundDeferring = new Set<string>();
+  let unsubscribeBackgroundStore: (() => void) | undefined;
+  const wakeFromBackground = currentRunInputStore
+    ? createBackgroundTaskWakeup({
+        store: shellJobStore,
+        isClosed: () => disposed,
+        inputs: currentRunInputStore,
+        runs: sourceLedger,
+        gate: sessionExecution,
+        goals: sharedGoalService,
+        reserveRunId: nextRunId,
+        withSessionControl: (id, operation) =>
+          sourceProjection.owner.runControl(id, operation),
+        prepareSession: prepareAutomaticSession,
+        async hasUnknownActiveGoal(id): Promise<boolean> {
+          if (goalPersistence.activeOwner?.(id)) return true;
+          const records = await goalPersistence.list(id);
+          const lastCreate = records.findLastIndex(
+            (record) => record.type === "create",
+          );
+          return (
+            lastCreate >= 0 &&
+            !records.slice(lastCreate).some((record) => record.type === "clear")
+          );
+        },
+        isGoalOwnedHere(id, goalId): Promise<boolean> {
+          const owner = goalPersistence.activeOwner?.(id);
+          if (owner && (!owner.local || owner.goalId !== goalId))
+            return Promise.resolve(false);
+          return Promise.resolve(
+            !options.sideChatStorage ||
+              readActiveGoalId(options.sideChatStorage.db, id) === goalId,
+          );
+        },
+        submit: submitPromptInternal,
+        runGoalTurn: executeAdmittedGoalTurn,
+        finishGoalTurn,
+        goalHasRunningSubagents,
+        onDeferred: (id) => {
+          backgroundDeferring.add(id);
+          backgroundRerun.delete(id);
+        },
+        onReleased: (id, deferred) => {
+          promptScheduler.wake();
+          if (deferred) {
+            backgroundDeferring.delete(id);
+            if (backgroundRerun.delete(id)) scheduleBackgroundWake(id);
+          } else scheduleBackgroundWake(id);
+        },
+        onError: (id, error) => {
+          publishNotice({
+            key: `background:wakeup:${id}:${getErrorMessage(error)}`,
+            level: "error",
+            title: "Background result processing failed",
+            message: getErrorMessage(error),
+          });
+        },
+      })
+    : undefined;
+  function scheduleBackgroundWake(sessionId: string): void {
+    if (disposed || !wakeFromBackground) return;
+    if (!backgroundGateSubscriptions.has(sessionId))
+      backgroundGateSubscriptions.set(
+        sessionId,
+        sessionExecution.subscribe(sessionId, () => {
+          scheduleBackgroundWake(sessionId);
+        }),
+      );
+    if (backgroundDeferring.has(sessionId) || backgroundQueued.has(sessionId))
+      return;
+    backgroundQueued.add(sessionId);
+    queueMicrotask(() => {
+      backgroundQueued.delete(sessionId);
+      if (disposed || backgroundDeferring.has(sessionId)) return;
+      if (backgroundRunning.has(sessionId)) {
+        backgroundRerun.add(sessionId);
+        return;
+      }
+      backgroundRunning.add(sessionId);
+      void wakeFromBackground(sessionId)
+        .finally(() => {
+          backgroundRunning.delete(sessionId);
+          if (disposed) return;
+          if (
+            !backgroundDeferring.has(sessionId) &&
+            backgroundRerun.delete(sessionId)
+          )
+            scheduleBackgroundWake(sessionId);
+          try {
+            const pending = shellJobStore
+              .listByOwner(sessionId, null)
+              .some(
+                (row) =>
+                  row.noticeState === "pending" &&
+                  row.noticeWakeRunId === null &&
+                  row.status !== "lost" &&
+                  row.status !== "running" &&
+                  row.status !== null &&
+                  row.resultReadyAt !== null,
+              );
+            if (pending) return;
+          } catch (error) {
+            backgroundGateSubscriptions.get(sessionId)?.();
+            backgroundGateSubscriptions.delete(sessionId);
+            throw error;
+          }
+          backgroundGateSubscriptions.get(sessionId)?.();
+          backgroundGateSubscriptions.delete(sessionId);
+        })
+        .catch((error: unknown) => {
+          if (disposed) return;
+          publishNotice({
+            key: `background:wakeup:${sessionId}:${getErrorMessage(error)}`,
+            level: "error",
+            title: "Background result processing failed",
+            message: getErrorMessage(error),
+          });
+        });
+    });
+  }
+
   const subagentSupervisor = createSessionSubagentSupervisor({
     executions: subagentExecutionStore,
     isIdle: isMainSessionIdle,
@@ -1666,6 +1828,10 @@ export function createInProcessUiBackendClient(
     }
   }
   function removeSubagentSession(sessionId: string): void {
+    backgroundGateSubscriptions.get(sessionId)?.();
+    backgroundGateSubscriptions.delete(sessionId);
+    backgroundQueued.delete(sessionId);
+    backgroundRerun.delete(sessionId);
     subagentInstances.remove(sessionId);
     subagentSupervisor.remove(sessionId);
     subagentSessionGateSubscriptions.get(sessionId)?.();
@@ -1788,6 +1954,13 @@ export function createInProcessUiBackendClient(
         release,
       };
     } catch (error) {
+      if (
+        wakeOptions?.runtimeInput?.kind === "background-task-result" &&
+        (error instanceof ConcurrencyRejectedError ||
+          error instanceof SessionRunBusyError ||
+          error instanceof RuntimeSwitchPendingError)
+      )
+        throw error;
       if (error instanceof RunFinalizationError) {
         // One recovery slot owns runtime finalization, usage and complete clear.
         // Keep the final completion after the first stage succeeds.
@@ -2673,17 +2846,21 @@ export function createInProcessUiBackendClient(
         return {
           ...session,
           unconsumedSteers: recovery,
-          messages: [...messages.values()].sort((a, b) =>
-            a.createdAt < b.createdAt
-              ? -1
-              : a.createdAt > b.createdAt
-                ? 1
-                : a.id < b.id
-                  ? -1
-                  : a.id > b.id
-                    ? 1
-                    : 0,
-          ),
+          messages: [...messages.values()]
+            .map((message) =>
+              overlayShellJobFacts(message, session.id, shellJobStore),
+            )
+            .sort((a, b) =>
+              a.createdAt < b.createdAt
+                ? -1
+                : a.createdAt > b.createdAt
+                  ? 1
+                  : a.id < b.id
+                    ? -1
+                    : a.id > b.id
+                      ? 1
+                      : 0,
+            ),
         };
       }),
     );
@@ -4669,7 +4846,9 @@ export function createInProcessUiBackendClient(
           triggerSource:
             submitOptions?.runtimeInput?.kind === "subagent-status"
               ? "subagent"
-              : owner,
+              : submitOptions?.runtimeInput?.kind === "background-task-result"
+                ? "background-task"
+                : owner,
           preparationSignal: AbortSignal.any([
             activePrompt.preparation.signal,
             ...(submitOptions?.goalTicket
@@ -5303,6 +5482,52 @@ export function createInProcessUiBackendClient(
       budget: (id) => runtime?.getSubagentExecutionBudget(id),
     });
   }
+  let shellRuntime: UiRuntimeComposition | undefined;
+  const shellReader = new ShellJobReader({
+    store: shellJobStore,
+    ownerName: async (row) => {
+      if (row.contextScopeId === null) return "Main agent";
+      const instance = (
+        await subagentInstanceStore.listByParent(row.rootSessionId)
+      ).find((item) => item.contextScopeId === row.contextScopeId);
+      return instance?.name ?? `Subagent ${row.contextScopeId}`;
+    },
+    refreshRoot: async (root) => {
+      await shellRuntime?.refreshShellRoot?.(root);
+    },
+    readCurrent: (row) =>
+      shellRuntime?.shellJobCurrent?.(row) ?? {
+        record: row,
+        source: "saved",
+        sampledAt: Date.now(),
+      },
+    management: async (row) =>
+      shellRuntime?.shellJobManagement?.(row) ?? {
+        managedByCurrentBackend: false,
+        canStop: false,
+      },
+  });
+  const shellJobs = new ShellJobProjection({
+    runtimeEpoch: permissionProjection.permissionEpoch,
+    store: shellJobStore,
+    reader: shellReader,
+    validateRoot: async (input) => {
+      await validateSessionRead({ ...input, sessionId: input.rootSessionId });
+      shellRuntime = await runtimeController.getRuntime();
+    },
+    readCurrent: (row) => shellRuntime?.shellJobCurrent?.(row).record ?? row,
+    stop: async (root, id, beforeAccept) => {
+      if (!shellRuntime?.stopShellJob)
+        throw new Error("Shell task controls unavailable");
+      return shellRuntime.stopShellJob(root, id, beforeAccept);
+    },
+    abandon: async (root, id, confirm, beforeAccept) => {
+      if (!shellRuntime?.abandonShellJob)
+        throw new Error("Shell task controls unavailable");
+      return shellRuntime.abandonShellJob(root, id, confirm, beforeAccept);
+    },
+    publish,
+  });
   const subagentInstances = new SubagentInstanceProjection({
     runtimeEpoch: permissionProjection.permissionEpoch,
     instances: subagentInstanceStore,
@@ -5338,8 +5563,16 @@ export function createInProcessUiBackendClient(
   function closeAdmission(): void {
     if (disposed) return;
     disposed = true;
+    shellJobs.dispose();
     subagentInstances.dispose();
     subagentSupervisor.dispose();
+    unsubscribeBackgroundStore?.();
+    for (const unsubscribe of backgroundGateSubscriptions.values())
+      unsubscribe();
+    backgroundGateSubscriptions.clear();
+    backgroundQueued.clear();
+    backgroundRerun.clear();
+    backgroundDeferring.clear();
     unsubscribeSubagentSessionRemoved();
     for (const unsubscribe of subagentSessionGateSubscriptions.values())
       unsubscribe();
@@ -5369,6 +5602,37 @@ export function createInProcessUiBackendClient(
   });
   // The eager startup promise remains observable through initialize and writes.
   void ready.catch(() => undefined);
+  void ready
+    .then(() => {
+      if (disposed || !wakeFromBackground) return;
+      unsubscribeBackgroundStore = shellJobStore.subscribe((row) => {
+        if (
+          row.contextScopeId === null &&
+          row.noticeState === "pending" &&
+          row.noticeWakeRunId === null &&
+          row.resultReadyAt !== null &&
+          row.status !== null &&
+          row.status !== "running" &&
+          row.status !== "lost"
+        )
+          scheduleBackgroundWake(row.sessionId);
+      });
+      let cursor: string | undefined;
+      for (;;) {
+        const sessions = shellJobStore.listWakeableNoticeSessions(cursor, 100);
+        for (const id of sessions) scheduleBackgroundWake(id);
+        if (sessions.length < 100) break;
+        cursor = sessions.at(-1);
+      }
+    })
+    .catch((error: unknown) => {
+      publishNotice({
+        key: `background:startup:${getErrorMessage(error)}`,
+        level: "error",
+        title: "Background result startup failed",
+        message: getErrorMessage(error),
+      });
+    });
   return {
     async preflightSideChatShell(sessionId): Promise<void> {
       const session = readSessionRow(sideChatStorage().db, sessionId);
@@ -5463,6 +5727,13 @@ export function createInProcessUiBackendClient(
     },
     initialize: () => ready,
     initializeSession: (sessionId) => enterSession(sessionId, true),
+    listShellJobs: (input) => shellJobs.list(input),
+    getShellJobOutput: (input) => shellJobs.output(input),
+    readShellJobLog: (input) => shellJobs.log(input),
+    stopShellJob: (input, beforeAccept?: () => void) =>
+      shellJobs.stop(input, beforeAccept),
+    abandonShellJob: (input, beforeAccept?: () => void) =>
+      shellJobs.abandon(input, beforeAccept),
     listSubagentInstances: (input) => subagentInstances.list(input),
     stopSubagent: (input) => subagentInstances.stop(input),
     getSubagentConversationView: (input) => subagentConversations.read(input),
@@ -5477,18 +5748,26 @@ export function createInProcessUiBackendClient(
     },
     async getSessionView(input): Promise<UiSessionView> {
       await validateSessionRead(input);
+      const read = (): UiSessionView => {
+        const view = sourceProjection.owner.read(input.sessionId);
+        return {
+          ...view,
+          session: {
+            ...view.session,
+            messages: view.session.messages.map((message) =>
+              overlayShellJobFacts(message, input.sessionId, shellJobStore),
+            ),
+          },
+          serverNow: Date.now(),
+        };
+      };
       const entry = sessionEntries.get(input.sessionId);
       if (entry) {
         try {
           await entry;
         } catch (error) {
-          // Return the blocked view when its history was readable; otherwise
-          // preserve the original entry error instead of rebuilding in a loop.
           try {
-            return {
-              ...sourceProjection.owner.read(input.sessionId),
-              serverNow: Date.now(),
-            };
+            return read();
           } catch {
             throw error;
           }
@@ -5496,29 +5775,29 @@ export function createInProcessUiBackendClient(
       }
       try {
         await sourceProjection.owner.ready(input.sessionId);
-        return {
-          ...sourceProjection.owner.read(input.sessionId),
-          serverNow: Date.now(),
-        };
+        return read();
       } catch (error) {
         if (!sourceProjection.owner.hasViewOrPendingSeed(input.sessionId))
           throw error;
         await sourceProjection.owner.rebuild(input.sessionId);
-        return {
-          ...sourceProjection.owner.read(input.sessionId),
-          serverNow: Date.now(),
-        };
+        return read();
       }
     },
     async getSessionHistory(input): Promise<UiSessionHistory> {
       await validateSessionRead(input);
       await sessionEntries.get(input.sessionId)?.catch(() => undefined);
       await sourceProjection.owner.ready(input.sessionId);
-      return sourceProjection.history(
+      const history = await sourceProjection.history(
         input.sessionId,
         input.before,
         input.limit,
       );
+      return {
+        ...history,
+        messages: history.messages.map((message) =>
+          overlayShellJobFacts(message, input.sessionId, shellJobStore),
+        ),
+      };
     },
     async getSessionControl(input): Promise<UiSessionControl> {
       await validateSessionRead(input);

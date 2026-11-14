@@ -105,6 +105,10 @@ function boundaryText(
      AND status IN ('pending','running') ORDER BY COALESCE(started_at, created_at) DESC, run_id DESC LIMIT 1`,
     )
     .get(mainId);
+  if (run?.trigger === "background-task")
+    return (
+      boundary + "\nThe main session is processing a background task result."
+    );
   if (run?.trigger === "subagent")
     return (
       boundary + "\nThe main session is processing a result from a subagent."

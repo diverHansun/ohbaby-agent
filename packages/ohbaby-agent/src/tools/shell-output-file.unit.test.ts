@@ -39,7 +39,7 @@ describe("shell output files", () => {
   });
   function start(): Promise<ShellJobSnapshot> {
     return registry.start({
-      child: child as unknown as ChildProcess,
+      child: () => child as unknown as ChildProcess,
       sessionId: "session",
       timeoutMs: 1000,
       outputDirectory: directory,
@@ -106,7 +106,7 @@ describe("shell output files", () => {
     await start();
     child.stdout.emit("data", "a".repeat(40_000));
     child.stdout.emit("data", Buffer.from("😀").subarray(0, 2));
-    await registry.dispose();
+    await expect(registry.dispose()).rejects.toThrow("unconfirmed");
     const bytes = await fsp.readFile(path.join(directory, "job.log"));
     expect(() =>
       new TextDecoder("utf-8", { fatal: true }).decode(bytes),
@@ -208,7 +208,7 @@ describe("shell output files", () => {
     for (let index = 0; index < 100; index++) {
       const later = new Child();
       await registry.start({
-        child: later as unknown as ChildProcess,
+        child: () => later as unknown as ChildProcess,
         sessionId: "session",
         timeoutMs: 1000,
         outputDirectory: directory,

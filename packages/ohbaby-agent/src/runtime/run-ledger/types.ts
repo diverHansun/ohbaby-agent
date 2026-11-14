@@ -6,7 +6,7 @@ export type RunStatus =
   | "cancelled"
   | "interrupted";
 
-export type TriggerSource = "user" | "goal" | "subagent";
+export type TriggerSource = "user" | "goal" | "subagent" | "background-task";
 
 export interface RunLedgerRecord {
   readonly steerClosedAt?: number;

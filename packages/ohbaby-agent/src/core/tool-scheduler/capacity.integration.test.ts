@@ -213,19 +213,24 @@ describe("real scheduler session capacity", () => {
 
   it("admits the real task_output and task_kill tools while ordinary capacity is full", async () => {
     const f = fixture({ concurrency: { maxConcurrency: 1 } });
-    const child = spawn(
-      process.execPath,
-      ["-e", "process.stdout.write('capacity-job')"],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const closed = once(child, "close");
+    let closed: Promise<unknown> = Promise.resolve();
+    let child!: ReturnType<typeof spawn>;
+    const launch = () => {
+      child = spawn(
+        process.execPath,
+        ["-e", "process.stdout.write('capacity-job')"],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+      closed = once(child, "close");
+      return child;
+    };
     const registry = new ShellJobRegistry({
       killTree: (process): void => {
         process.kill();
       },
     });
     const job = await registry.start({
-      child,
+      child: launch,
       sessionId: "parent",
       timeoutMs: 5000,
       background: true,

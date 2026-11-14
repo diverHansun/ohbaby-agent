@@ -1,3 +1,4 @@
+import { InMemoryShellJobStore } from "../tools/shell-job-store.js";
 import { SkillLoader } from "../skill/loader.js";
 import {
   mkdir,
@@ -596,6 +597,249 @@ describe("settings propagation through the shared production backend", () => {
       });
     }
   });
+  it.each([false, true])(
+    "does not spin or lose a local release during wake rollback (deferred=%s)",
+    async (duringRollback) => {
+      const workdir = join(root, "busy-background-wake");
+      await mkdir(workdir);
+      const store = new InMemoryShellJobStore();
+      const originalRelease = store.releaseUnstartedNoticeWake.bind(store);
+      let resumeRollback!: () => void;
+      const rollbackGate = new Promise<void>((resolve) => {
+        resumeRollback = resolve;
+      });
+      const releaseClaim = vi
+        .spyOn(store, "releaseUnstartedNoticeWake")
+        .mockImplementation(async (...args) => {
+          if (duringRollback) await rollbackGate;
+          return originalRelease(...args);
+        });
+      let unblock!: () => void;
+      let entered!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        unblock = resolve;
+      });
+      const running = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let launched = false;
+      const requests: InterfaceProviderRequest[] = [];
+      const base = recordingClient(requests);
+      const original = base.provider.streamResponse.bind(base.provider);
+      const llm: LLMClientInstance = {
+        ...base,
+        provider: {
+          ...base.provider,
+          streamResponse(request) {
+            if (request.purpose === "agent-step" && !launched) {
+              launched = true;
+              return Promise.resolve(
+                // eslint-disable-next-line @typescript-eslint/require-await
+                (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+                  yield {
+                    finishReason: "tool_calls",
+                    toolCallDeltas: [
+                      {
+                        id: "wake-busy-call",
+                        index: 0,
+                        name: "bash",
+                        argumentsDelta: JSON.stringify({
+                          command: "sleep 0.7",
+                          run_in_background: true,
+                        }),
+                      },
+                    ],
+                  };
+                })(),
+              );
+            }
+            if (
+              request.purpose === "agent-step" &&
+              JSON.stringify(request).includes("HOLD_OTHER_SESSION")
+            ) {
+              return Promise.resolve(
+                (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+                  entered();
+                  await waiting;
+                  yield { textDelta: "done", finishReason: "stop" };
+                })(),
+              );
+            }
+            return original(request);
+          },
+        },
+      };
+      const client = createInProcessUiBackendClient({
+        workdir,
+        llmClient: llm,
+        shellJobStore: store,
+      });
+      clients.push(client);
+      let other: Promise<unknown> | undefined;
+      try {
+        await client.setPermission({ level: "full-access" });
+        const b = await client.submitPromptAndWait("Start task", {
+          sessionId: "session-b",
+        });
+        expect(b.prompt.status).toBe("succeeded");
+        other = client.submitPromptAndWait("HOLD_OTHER_SESSION", {
+          sessionId: "session-a",
+        });
+        await running;
+        await json(join(workdir, ".ohbaby", "agents", "settings.json"), {
+          agents: {},
+        });
+        await vi.waitFor(
+          () => {
+            expect(releaseClaim).toHaveBeenCalled();
+          },
+          { timeout: 5000 },
+        );
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        expect(releaseClaim).toHaveBeenCalledTimes(1);
+        const before = requests.length;
+        unblock();
+        await other;
+        resumeRollback();
+        await vi.waitFor(
+          () => {
+            expect(JSON.stringify(requests.slice(before))).toContain(
+              "Status: completed",
+            );
+            expect(
+              store.listByOwner("session-b", null)[0]?.noticeWakeRunId,
+            ).toBeTypeOf("string");
+          },
+          { timeout: 5000 },
+        );
+        const wakeRunId = store.listByOwner("session-b", null)[0]
+          ?.noticeWakeRunId;
+        const resumed = await client.submitPromptAndWait(
+          "Continue after settings change",
+          { sessionId: "session-b" },
+        );
+        expect(resumed.prompt.status).toBe("succeeded");
+        expect(JSON.stringify(requests.slice(before))).toContain(
+          "Status: completed",
+        );
+        expect(store.listByOwner("session-b", null)[0]?.noticeState).toBe(
+          "accepted",
+        );
+        expect(releaseClaim).toHaveBeenCalledTimes(1);
+        expect(store.listByOwner("session-b", null)[0]?.noticeWakeRunId).toBe(
+          wakeRunId,
+        );
+      } finally {
+        unblock();
+        resumeRollback();
+        await other?.catch(() => undefined);
+      }
+    },
+    15000,
+  );
+  it("continues using its live runtime after settings change while a real background shell runs", async () => {
+    const workdir = join(root, "background-config-project");
+    await mkdir(workdir);
+    const llm = recordingClient([]);
+    const original = llm.provider.streamResponse.bind(llm.provider);
+    let launched = false;
+    let enterOther!: () => void;
+    let releaseOther!: () => void;
+    const otherStarted = new Promise<void>((resolve) => {
+      enterOther = resolve;
+    });
+    const otherGate = new Promise<void>((resolve) => {
+      releaseOther = resolve;
+    });
+    const scripted: LLMClientInstance = {
+      ...llm,
+      provider: {
+        ...llm.provider,
+        streamResponse(request) {
+          if (request.purpose === "agent-step" && !launched) {
+            launched = true;
+            return Promise.resolve(
+              // eslint-disable-next-line @typescript-eslint/require-await
+              (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+                yield {
+                  finishReason: "tool_calls",
+                  toolCallDeltas: [
+                    {
+                      id: "background-config-call",
+                      index: 0,
+                      name: "bash",
+                      argumentsDelta: JSON.stringify({
+                        command: "sleep 30",
+                        run_in_background: true,
+                      }),
+                    },
+                  ],
+                };
+              })(),
+            );
+          }
+          if (
+            request.purpose === "agent-step" &&
+            JSON.stringify(request).includes("HOLD_PINNED_SESSION")
+          ) {
+            return Promise.resolve(
+              (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+                enterOther();
+                await otherGate;
+                yield { textDelta: "done", finishReason: "stop" };
+              })(),
+            );
+          }
+          return original(request);
+        },
+      },
+    };
+    const client = createInProcessUiBackendClient({
+      workdir,
+      llmClient: scripted,
+    });
+    clients.push(client);
+    await client.setPermission({ level: "full-access" });
+    const first = await client.submitPromptAndWait("Start a background job", {
+      sessionId: "normal",
+    });
+    expect(first.prompt.status).toBe("succeeded");
+    expect(
+      (await client.listShellJobs({ rootSessionId: "normal" })).rows,
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "running" })]),
+    );
+    const other = client.submitPromptAndWait("HOLD_PINNED_SESSION", {
+      sessionId: "other-active",
+    });
+    await otherStarted;
+    try {
+      await json(join(workdir, ".ohbaby", "agents", "settings.json"), {
+        agents: {},
+      });
+      const next = await Promise.race([
+        client.submitPromptAndWait("Continue", {
+          sessionId: "third-concurrent",
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => {
+            reject(new Error("prompt remained queued"));
+          }, 5000),
+        ),
+      ]);
+      expect(next.prompt.status).toBe("succeeded");
+      expect(
+        (await client.listShellJobs({ rootSessionId: "normal" })).rows,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ status: "running" }),
+        ]),
+      );
+    } finally {
+      releaseOther();
+      await other;
+    }
+  }, 15000);
   it("waits to apply settings while an injected client's current turn remains active", async () => {
     const workdir = join(root, "busy-project");
     await mkdir(workdir);

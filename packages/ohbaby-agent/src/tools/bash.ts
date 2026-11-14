@@ -178,7 +178,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
   return withToolAdmission(
     {
       name: "bash",
-      description: `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged; no interpreter fallback occurs after preparation. On Windows, select Git Bash only with a usable native full SHELL path; WSL launchers are unsupported. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; foreground defaults to 120000ms, background has no default timeout, the foreground maximum is 600000ms, and the background maximum is 86400000ms.`,
+      description: `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged; no interpreter fallback occurs after preparation. On Windows, select Git Bash only with a usable native full SHELL path; WSL launchers are unsupported. Set run_in_background=true to return a job_id immediately. Completion is reported automatically; do not poll or sleep for it. Background tasks end when their managing service stops. timeout is the maximum lifetime of the shell job for both foreground and background commands; foreground defaults to 120000ms, background has no default timeout, the foreground maximum is 600000ms, and the background maximum is 86400000ms.`,
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {

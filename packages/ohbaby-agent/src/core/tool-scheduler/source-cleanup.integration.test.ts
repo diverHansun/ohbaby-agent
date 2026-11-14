@@ -1,3 +1,9 @@
+import { InMemoryShellJobStore } from "../../tools/shell-job-store.js";
+import {
+  ShellJobRecovery,
+  syncUnconfirmedSourceCleanup,
+} from "../../tools/shell-job-recovery.js";
+import { shellJobFixture } from "../../tools/fixtures/shell-job.js";
 import { ToolSchedulerEvent } from "./events.js";
 import { createHostLocalEnvironment } from "../../adapters/ui-runtime/host-local-environment.js";
 import { describe, expect, it, vi } from "vitest";
@@ -26,7 +32,7 @@ const owner = (
   messageId: "m",
   callId,
 });
-function fixture(): {
+function fixture(store?: InMemoryShellJobStore): {
   scheduler: ToolScheduler;
   facts: ToolExecutionFact[];
   executed: string[];
@@ -40,6 +46,16 @@ function fixture(): {
   const executed: string[] = [];
   const bus = createBus();
   const scheduler = createToolScheduler({
+    ...(store
+      ? {
+          refreshSourceCleanup: (owner: ToolExecutionOwner): void => {
+            syncUnconfirmedSourceCleanup(
+              store,
+              owner.rootSessionId ?? owner.sessionId,
+            );
+          },
+        }
+      : {}),
     bus,
     permissionState: createPermissionState({
       bus,
@@ -104,6 +120,181 @@ function fixture(): {
 }
 
 describe("C3 source cleanup admission", () => {
+  it("rechecks persisted foreign cleanup when queued file work acquires its resource", async () => {
+    const store = new InMemoryShellJobStore();
+    await store.insert(
+      shellJobFixture({
+        rootSessionId: "root",
+        workspaceKey: "source-workspace",
+        cleanup: "in-progress",
+      }),
+    );
+    let release!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const calls: string[] = [];
+    const facts: ToolExecutionFact[] = [];
+    const bus = createBus();
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      config: { concurrency: { maxConcurrency: 1 } },
+      resolveOwner: (request) => owner(request.callId),
+      refreshSourceCleanup: (who) => {
+        syncUnconfirmedSourceCleanup(store, who.rootSessionId ?? who.sessionId);
+      },
+      onExecutionFact: (fact) => {
+        facts.push(fact);
+      },
+    });
+    scheduler.register(
+      withToolAdmission(
+        {
+          name: "queued-file",
+          source: "builtin",
+          category: "network",
+          description: "test",
+          parametersJsonSchema: {},
+          async execute(_params, context): Promise<ToolExecutionResult> {
+            calls.push(context.callId);
+            if (context.callId === "first") {
+              started();
+              await held;
+            }
+            return { output: "ok" };
+          },
+        },
+        {
+          plan: () => [
+            {
+              kind: "file",
+              path: "/tmp/shared-file",
+              scope: "file",
+              mode: "write",
+            },
+          ],
+          resolve: () => ({
+            resources: [
+              {
+                kind: "file",
+                path: "/tmp/shared-file",
+                scope: "file",
+                mode: "write",
+              },
+            ],
+          }),
+        },
+      ),
+    );
+    const execute = (callId: string): Promise<ToolCallResult> =>
+      scheduler.execute({
+        toolName: "queued-file",
+        callId,
+        sessionId: "root",
+        messageId: "m",
+        params: {},
+      });
+    const first = execute("first");
+    await running;
+    const second = execute("second");
+    await vi.waitFor(() => {
+      expect(
+        facts.some(
+          (fact) => fact.owner.callId === "second" && fact.phase === "waiting",
+        ),
+      ).toBe(true);
+    });
+    await store.update("job", { status: "cancelled", cleanup: "unconfirmed" });
+    release();
+    expect((await first).status).toBe("success");
+    expect((await second).status).toBe("error");
+    expect(calls).toEqual(["first"]);
+    await store.update("job", { cleanup: "confirmed", settledAt: 1 });
+    expect((await execute("third")).status).toBe("success");
+  });
+
+  it("refreshes foreign unconfirmed responsibility created after startup without signaling", async () => {
+    const store = new InMemoryShellJobStore();
+    await store.insert(
+      shellJobFixture({
+        rootSessionId: "root",
+        workspaceKey: "source-workspace",
+        cleanup: "in-progress",
+      }),
+    );
+    const f = fixture(store);
+    const signals = vi.fn();
+    const recovery = new ShellJobRecovery({
+      store,
+      backend: { ownerId: "new", pid: 20, startToken: "new" },
+      trackSourceCleanup: true,
+      inspect: () =>
+        Promise.resolve({
+          state: "present",
+          pid: 10,
+          pgid: 10,
+          startToken: "owner",
+        }),
+      signalGroup: signals,
+    });
+    expect((await f.execute("file", "before-foreign-cleanup")).status).toBe(
+      "success",
+    );
+    await store.update("job", { status: "cancelled", cleanup: "unconfirmed" });
+    await recovery.refresh("job");
+    expect((await f.execute("file", "foreign-unconfirmed")).status).toBe(
+      "error",
+    );
+    expect((await f.execute("control", "control-unblocked")).status).toBe(
+      "success",
+    );
+    expect((await f.execute("independent", "network-unblocked")).status).toBe(
+      "success",
+    );
+    await store.update("job", { cleanup: "confirmed", settledAt: 1 });
+    expect((await f.execute("file", "after-confirmation")).status).toBe(
+      "success",
+    );
+    expect(signals).not.toHaveBeenCalled();
+  });
+
+  it("blocks recovered unconfirmed source work until tracking is explicitly released", async () => {
+    const store = new InMemoryShellJobStore();
+    await store.insert(
+      shellJobFixture({
+        rootSessionId: "root",
+        workspaceKey: "source-workspace",
+      }),
+    );
+    const recovery = new ShellJobRecovery({
+      store,
+      backend: { ownerId: "new", pid: 20, startToken: "new" },
+      trackSourceCleanup: true,
+      inspect: () => Promise.resolve({ state: "absent" }),
+      probeGroup: () => "unknown",
+    });
+    await recovery.recover("job");
+    const f = fixture();
+    try {
+      const blocked = await f.execute("file");
+      expect(blocked.status).toBe("error");
+      expect(blocked.error?.message).toContain("unconfirmed cleanup");
+      expect((await f.execute("independent")).status).toBe("success");
+      await recovery.abandon("job", true);
+      expect((await f.execute("file", "after-release")).status).toBe("success");
+    } finally {
+      await store.update("job", { trackingReleasedAt: Date.now() });
+    }
+  });
+
   it("retains independent records across runs/scopes, releasing only the confirmed owner", () => {
     const first = beginSourceCleanup(owner("first"));
     const second = beginSourceCleanup(owner("second"));

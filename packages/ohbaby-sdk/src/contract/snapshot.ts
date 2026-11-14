@@ -116,7 +116,7 @@ export interface UiSession {
 export interface UiRun {
   readonly error?: UiPromptError;
   /** Event that started this run. A child result may arrive during any run. */
-  readonly trigger?: "user" | "goal" | "subagent";
+  readonly trigger?: "user" | "goal" | "subagent" | "background-task";
   /** Ledger result once the run has ended, independent of the session's idle status. */
   readonly outcome?: "succeeded" | "failed" | "cancelled" | "interrupted";
   readonly inputsCloseReason?: string;
@@ -196,6 +196,7 @@ export type UiToolResultDetails =
     }
   | {
       readonly kind: "bash";
+      readonly mode?: "foreground" | "background";
       readonly exitCode?: number;
       readonly jobId?: string;
       readonly status?:

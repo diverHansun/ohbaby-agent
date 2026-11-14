@@ -8,7 +8,7 @@ import type { UiMessage, UiRun } from "../contract/snapshot.js";
  */
 
 /** What started a turn; mirrors `UiRun.trigger`. */
-export type UiTurnTrigger = "user" | "goal" | "subagent";
+export type UiTurnTrigger = "user" | "goal" | "subagent" | "background-task";
 
 /** The facts a turn's end line needs, from its prompt or else its run. */
 export interface UiTurnTiming {
@@ -86,7 +86,9 @@ export function listEndedTurns(input: {
       const run = runById.get(runId);
       const prompt = promptByRun.get(runId);
       const automaticFailure =
-        (run?.trigger === "subagent" || run?.trigger === "goal") &&
+        (run?.trigger === "subagent" ||
+          run?.trigger === "goal" ||
+          run?.trigger === "background-task") &&
         (run.outcome === "failed" || run.outcome === "interrupted") &&
         run.error !== undefined;
       if (!prompt && !withMessages.has(runId) && !automaticFailure) return [];
@@ -164,5 +166,7 @@ function turnTrigger(
 
 /** The label a turn's end line carries for what started it, if any. */
 export function turnTriggerLabel(trigger: UiTurnTrigger): string | undefined {
-  return trigger === "subagent" ? "Subagent update" : undefined;
+  if (trigger === "subagent") return "Subagent update";
+  if (trigger === "background-task") return "Background task update";
+  return undefined;
 }

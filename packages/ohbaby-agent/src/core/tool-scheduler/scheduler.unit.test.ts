@@ -1966,7 +1966,7 @@ describe("ToolScheduler", () => {
       killTree: vi.fn(),
     });
     const job = await registry.start({
-      child: child as unknown as ChildProcess,
+      child: () => child as unknown as ChildProcess,
       sessionId: "session_1",
       timeoutMs: 1_000_000,
     });

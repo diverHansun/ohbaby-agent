@@ -1,3 +1,4 @@
+import { InMemoryShellJobStore } from "./shell-job-store.js";
 import {
   mkdir,
   mkdtemp,
@@ -47,6 +48,57 @@ function killShellTree(child: ChildProcess): ReturnType<typeof Shell.killTree> {
 }
 
 describe("shell job real-process integration", () => {
+  it("keeps a finished shell's same-group child charged until observation confirms it is gone", async () => {
+    const workdir = await mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-shell-descendant-"),
+    );
+    const store = new InMemoryShellJobStore();
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: killShellTree,
+      backgroundLimit: () => Promise.resolve(1),
+    });
+    const bash = createBashTool({ registry });
+    const context = createContext(workdir);
+    try {
+      const first = await bash.execute(
+        {
+          command: "sleep 1 >/dev/null 2>&1 & echo started",
+          run_in_background: true,
+        },
+        context,
+      );
+      const id = String(first.metadata?.jobId);
+      await vi.waitFor(
+        () => {
+          expect(store.get(id)).toMatchObject({
+            status: "completed",
+            cleanup: null,
+          });
+        },
+        { timeout: 2000 },
+      );
+      await expect(
+        bash.execute({ command: "true", run_in_background: true }, context),
+      ).rejects.toThrow("capacity");
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const second = await bash.execute(
+        { command: "true", run_in_background: true },
+        context,
+      );
+      expect(second.metadata?.jobId).toBeTruthy();
+      await vi.waitFor(() => {
+        expect(store.get(id)).toMatchObject({
+          cleanup: "confirmed",
+        });
+      });
+      expect(typeof store.get(id)?.settledAt).toBe("number");
+    } finally {
+      await registry.dispose();
+      await rm(workdir, { force: true, recursive: true });
+    }
+  });
+
   it.each([false, true])(
     "persists real stdout and stderr beyond capture (background=%s)",
     async (background) => {

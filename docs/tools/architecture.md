@@ -181,10 +181,10 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 #### bash（Shell 命令）
 
 ```
-输入: command, timeout?, run_in_background?
+输入: command, description?, timeout?, run_in_background?
 输出: `output` + 工具专属 metadata；后台返回 `jobId/status/truncated`
-限制: 有上限的内存尾部输出；job 生命周期默认 120 秒、上限 600 秒
-特殊: 跨平台 Shell 选择、`ShellJobRegistry`、进程树终止
+限制: 有界输出；纯前台默认120秒/最大600秒；显式后台默认不限时/最大24小时
+特殊: 跨平台 Shell 选择、ShellJobRegistry 资源责任、ShellJobStore 权威持久事实、进程树终止
 ```
 
 **bash 工具执行流程**：
@@ -207,7 +207,7 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 4. Shell.acceptable() 获取 shell 路径                 │
    |                                                  │
    v                                                  │
-5. 执行命令（spawn）                                   │
+5. 提交持久占位与配额检查，再执行命令（spawn）                                   │
    |                                                  │
    v                                                  │
 6. Registry 在 timeout/取消时调用 Shell.killTree() 清理进程 │
@@ -364,7 +364,7 @@ edit 工具使用多种替换策略，按优先级尝试：
 | read | 行数 | 2,000 |
 | read | 行长 | 2,000 字符 |
 | bash | 输出 | 30,000 字符 |
-| bash | 超时 | 120 秒 |
+| bash | 硬超时 | 纯前台默认120秒；显式后台默认不限时 |
 | glob | 结果数 | 100 |
 | grep | 匹配数 | 100 |
 | web_fetch | 响应大小 | 5 MB |

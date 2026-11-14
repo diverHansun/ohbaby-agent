@@ -1,4 +1,9 @@
 import {
+  retainRecoveredSourceCleanup,
+  releaseRecoveredSourceCleanup,
+  rebindRecoveredSourceCleanup,
+} from "../core/tool-scheduler/source-cleanup.js";
+import {
   readProcessIdentity,
   type ProcessIdentity,
 } from "../shell/process-identity.js";
@@ -17,12 +22,23 @@ export interface ShellBackendIdentity {
   readonly startToken: string | null;
 }
 
-export interface ShellJobRecoveryStore extends Pick<ShellJobStore, "get"> {
+export interface ShellJobRecoveryStore extends Pick<
+  ShellJobStore,
+  "get" | "cleanupNamespace"
+> {
   compareAndUpdate(
     jobId: string,
     expected: ShellJobPatch,
     patch: ShellJobPatch,
+    beforeWrite?: () => void,
   ): Promise<boolean>;
+}
+
+export class ShellJobRecoveryNotFoundError extends Error {
+  constructor(jobId: string) {
+    super(`Unknown shell job "${jobId}".`);
+    this.name = "ShellJobRecoveryNotFoundError";
+  }
 }
 
 export class ShellJobManagementError extends Error {
@@ -45,6 +61,7 @@ interface RecoveryOptions {
   readonly probeGroup?: (pgid: number) => ProcessTreeState;
   readonly signalGroup?: (pgid: number, signal: NodeJS.Signals) => void;
   readonly hasLocalHandle?: (jobId: string) => boolean;
+  readonly trackSourceCleanup?: boolean;
   readonly termGraceMs?: number;
   readonly observationMs?: number;
 }
@@ -79,12 +96,49 @@ function expectedOwnership(row: ShellJobRecord): ShellJobPatch {
   };
 }
 
+function unresolvedRecord(source: object, jobId: string): boolean {
+  const row = (source as ShellJobRecoveryStore).get(jobId);
+  return (
+    row !== null &&
+    row.trackingReleasedAt === null &&
+    row.cleanup !== "confirmed"
+  );
+}
+
+/** Read-only synchronization for source-sensitive admission; no process inspection or signals. */
+export function syncUnconfirmedSourceCleanup(
+  store: Pick<ShellJobStore, "get" | "listUnsettled" | "cleanupNamespace">,
+  rootSessionId: string,
+): void {
+  for (const row of store.listUnsettled(rootSessionId))
+    if (row.cleanup === "unconfirmed") registerSourceGuard(store, row);
+}
+function registerSourceGuard(
+  store: Pick<ShellJobStore, "get" | "cleanupNamespace">,
+  row: ShellJobRecord,
+): void {
+  retainRecoveredSourceCleanup({
+    jobId: row.jobId,
+    rootSessionId: row.rootSessionId,
+    workspaceKey: row.workspaceKey,
+    namespace: store.cleanupNamespace ?? store,
+    source: store,
+    unresolved: unresolvedRecord,
+  });
+}
+
 /** Recovery works on persisted facts; ordinary live handles remain Registry-owned. */
 export class ShellJobRecovery {
   private readonly inspect: (pid: number) => Promise<ProcessIdentity>;
   private readonly pending = new Map<string, Promise<ShellJobRecord>>();
   constructor(private readonly options: RecoveryOptions) {
     this.inspect = options.inspect ?? readProcessIdentity;
+    if (options.trackSourceCleanup)
+      rebindRecoveredSourceCleanup(
+        options.store.cleanupNamespace ?? options.store,
+        options.store,
+        unresolvedRecord,
+      );
   }
 
   /** Queries and quota admission may observe disappearance but never send a signal. */
@@ -93,6 +147,20 @@ export class ShellJobRecovery {
   }
   recover(jobId: string): Promise<ShellJobRecord> {
     return this.reconcile(jobId, true);
+  }
+
+  async recoverForUser(
+    jobId: string,
+    beforeAccept?: () => void,
+  ): Promise<{ record: ShellJobRecord; accepted: boolean }> {
+    let accepted = false;
+    const record = await this.perform(jobId, true, 2, {
+      beforeAccept,
+      accepted: () => {
+        accepted = true;
+      },
+    });
+    return { record, accepted };
   }
 
   async assertCanManage(jobId: string): Promise<void> {
@@ -113,10 +181,19 @@ export class ShellJobRecovery {
     );
   }
 
-  async abandon(jobId: string, confirm: boolean): Promise<ShellJobRecord> {
+  async abandon(
+    jobId: string,
+    confirm: boolean,
+    beforeWrite?: () => void,
+  ): Promise<ShellJobRecord> {
     if (!confirm)
       throw new Error("Abandoning task tracking requires confirm=true.");
     const row = await this.refresh(jobId);
+    if (row.cleanup === "confirmed")
+      throw new ShellJobManagementError(
+        "SHELL_JOB_ABANDON_NOT_ALLOWED",
+        "Task cleanup is already confirmed; abandoning tracking is unnecessary.",
+      );
     if (row.trackingReleasedAt !== null) return row;
     if (
       row.status === null ||
@@ -139,6 +216,14 @@ export class ShellJobRecovery {
       jobId,
       { ...expectedOwnership(row), status: row.status, cleanup: "unconfirmed" },
       { trackingReleasedAt: Date.now(), recoveryClaim: null },
+      () => {
+        beforeWrite?.();
+        if (this.options.hasLocalHandle?.(jobId))
+          throw new ShellJobManagementError(
+            "SHELL_JOB_ABANDON_NOT_ALLOWED",
+            "Task still has a local cleanup responsibility.",
+          );
+      },
     );
     if (!changed && this.require(jobId).trackingReleasedAt !== null)
       return this.require(jobId);
@@ -147,12 +232,19 @@ export class ShellJobRecovery {
         "SHELL_JOB_CLEANUP_BUSY",
         "Task cleanup changed; refresh and try again.",
       );
-    return this.require(jobId);
+    const result = this.require(jobId);
+    if (this.options.trackSourceCleanup && result.trackingReleasedAt !== null)
+      releaseRecoveredSourceCleanup(
+        this.options.store.cleanupNamespace ?? this.options.store,
+        result.rootSessionId,
+        result.jobId,
+      );
+    return result;
   }
 
   private require(jobId: string): ShellJobRecord {
     const row = this.options.store.get(jobId);
-    if (!row) throw new Error(`Unknown shell job "${jobId}".`);
+    if (!row) throw new ShellJobRecoveryNotFoundError(jobId);
     return row;
   }
 
@@ -186,9 +278,22 @@ export class ShellJobRecovery {
     const key = `${jobId}:${String(signal)}`;
     const existing = this.pending.get(key);
     if (existing) return existing;
-    const task = this.perform(jobId, signal).finally(() => {
-      this.pending.delete(key);
-    });
+    const task = this.perform(jobId, signal)
+      .then((row) => {
+        if (
+          this.options.trackSourceCleanup &&
+          (row.cleanup === "confirmed" || row.trackingReleasedAt !== null)
+        )
+          releaseRecoveredSourceCleanup(
+            this.options.store.cleanupNamespace ?? this.options.store,
+            row.rootSessionId,
+            row.jobId,
+          );
+        return row;
+      })
+      .finally(() => {
+        this.pending.delete(key);
+      });
     this.pending.set(key, task);
     return task;
   }
@@ -210,16 +315,28 @@ export class ShellJobRecovery {
     jobId: string,
     signal: boolean,
     retries = 2,
+    control?: { beforeAccept?: () => void; accepted: () => void },
   ): Promise<ShellJobRecord> {
     const row = this.require(jobId);
     if (
+      this.options.trackSourceCleanup &&
+      row.trackingReleasedAt === null &&
+      row.cleanup === "unconfirmed"
+    )
+      registerSourceGuard(this.options.store, row);
+    if (
       row.trackingReleasedAt !== null ||
-      row.settledAt !== null ||
+      (row.settledAt !== null &&
+        row.cleanup === "confirmed" &&
+        row.status !== null &&
+        row.status !== "running") ||
       row.ownerId === this.options.backend.ownerId ||
       this.options.hasLocalHandle?.(jobId) ||
       !(await this.ownerDead(row))
     )
       return row;
+    if (this.options.trackSourceCleanup && row.cleanup !== "confirmed")
+      registerSourceGuard(this.options.store, row);
     if (!(await this.claimAvailable(row.recoveryClaim)))
       return this.require(jobId);
     const expected: ShellJobPatch = {
@@ -239,11 +356,13 @@ export class ShellJobRecovery {
       // recovery. Its CAS cannot overwrite an active recovery or fresher facts.
       const group =
         row.cleanup === "confirmed" ? "stopped" : this.groupState(row);
-      await this.options.store.compareAndUpdate(
-        jobId,
-        expected,
-        this.resultPatch(row, group),
-      );
+      const patch = this.resultPatch(row, group);
+      if (
+        (Object.keys(patch) as (keyof ShellJobPatch)[]).some(
+          (key) => patch[key] !== row[key],
+        )
+      )
+        await this.options.store.compareAndUpdate(jobId, expected, patch);
       return this.require(jobId);
     }
     const claim = JSON.stringify({
@@ -251,18 +370,25 @@ export class ShellJobRecovery {
       attemptId: randomUUID(),
     });
     if (
-      !(await this.options.store.compareAndUpdate(jobId, expected, {
-        recoveryClaim: claim,
-      }))
+      !(await this.options.store.compareAndUpdate(
+        jobId,
+        expected,
+        {
+          recoveryClaim: claim,
+        },
+        control?.beforeAccept,
+      ))
     ) {
       return retries > 0
-        ? this.perform(jobId, true, retries - 1)
+        ? this.perform(jobId, true, retries - 1, control)
         : this.require(jobId);
     }
     try {
       // Confirmed disappearance permanently relinquishes the numeric group.
       const group =
-        row.cleanup === "confirmed" ? "stopped" : await this.terminate(row);
+        row.cleanup === "confirmed"
+          ? "stopped"
+          : await this.terminate(row, control);
       await this.options.store.compareAndUpdate(
         jobId,
         { recoveryClaim: claim, trackingReleasedAt: null },
@@ -315,16 +441,25 @@ export class ShellJobRecovery {
     );
   }
 
-  private async terminate(row: ShellJobRecord): Promise<ProcessTreeState> {
+  private async terminate(
+    row: ShellJobRecord,
+    control?: { beforeAccept?: () => void; accepted: () => void },
+  ): Promise<ProcessTreeState> {
+    let signalled = false;
     for (const signal of ["SIGTERM", "SIGKILL"] as const) {
       const state = this.groupState(row);
       if (state !== "running") return state;
       if (!(await this.matchesTarget(row)) || row.pgid === null)
         return "unknown";
+      if (!signalled) control?.beforeAccept?.();
       try {
         if (this.options.signalGroup)
           this.options.signalGroup(row.pgid, signal);
         else process.kill(-row.pgid, signal);
+        if (!signalled) {
+          signalled = true;
+          control?.accepted();
+        }
       } catch {
         return this.groupState(row) === "stopped" ? "stopped" : "unknown";
       }

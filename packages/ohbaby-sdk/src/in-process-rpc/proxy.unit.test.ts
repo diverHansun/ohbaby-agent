@@ -219,6 +219,11 @@ describe("createRPC", () => {
     "getSubagentExecutionView",
     "listSubagentInstances",
     "stopSubagent",
+    "listShellJobs",
+    "getShellJobOutput",
+    "readShellJobLog",
+    "stopShellJob",
+    "abandonShellJob",
   ] as const)(
     "preserves %s cancellation across the JSON proxy boundary",
     async (method) => {

@@ -487,6 +487,7 @@ describe("SessionSubagentHost", () => {
       expect(turn).toHaveBeenCalled();
     });
     expect(host.hasActiveWork()).toBe(true);
+    expect(host.hasPendingCleanup()).toBe(false);
     release({
       finalOutput: "done",
       mode: "waitForCompletion",
@@ -822,6 +823,7 @@ describe("SessionSubagentHost", () => {
       },
     );
     expect(closed.output).toContain("subagent closed");
+    expect(host.hasPendingCleanup()).toBe(true);
     resolveTurn();
     const result = await running;
 

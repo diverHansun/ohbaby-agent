@@ -1,3 +1,4 @@
+import { overlayShellJobFacts } from "../ui-state/persistent-store.js";
 import { isDeepStrictEqual } from "node:util";
 import type {
   UiMessage,
@@ -57,6 +58,10 @@ export class SubagentConversationProjection {
       readonly executions: SubagentExecutionStore;
       readonly instances?: Pick<SubagentInstanceStore, "get" | "subscribe">;
       readonly messages: MessageManager;
+      readonly shellJobStore?: Pick<
+        import("../../tools/shell-job-store.js").ShellJobStore,
+        "get"
+      >;
       readonly validateRoot: (id: string) => Promise<void>;
       readonly runs: (
         sessionId: string,
@@ -68,7 +73,23 @@ export class SubagentConversationProjection {
     this.history = createSubagentConversationHistory({
       executions: options.executions,
       messages: options.messages,
-      project: (record) => options.source.projectComplete(record),
+      project: (record, execution) => {
+        const message = options.source.projectComplete(record);
+        return message &&
+          options.shellJobStore &&
+          execution.childSessionId &&
+          execution.childScopeId
+          ? overlayShellJobFacts(
+              message,
+              execution.childSessionId,
+              options.shellJobStore,
+              {
+                rootSessionId: execution.rootSessionId,
+                contextScopeId: execution.childScopeId,
+              },
+            )
+          : message;
+      },
     });
     this.unsubscribeSource = options.source.subscribeScopeChanges((change) => {
       const sessionId =
@@ -347,12 +368,31 @@ export class SubagentConversationProjection {
       const executions = new Map(scope.executions);
       for (const record of page.executions)
         executions.set(record.executionId, record);
+      const shellJobStore = this.options.shellJobStore;
+      const contextScopeId = scope.scopeId;
+      const overlay = (messages: readonly UiMessage[]): readonly UiMessage[] =>
+        shellJobStore && contextScopeId
+          ? messages.map((message) =>
+              overlayShellJobFacts(message, scope.sessionId, shellJobStore, {
+                rootSessionId: input.rootSessionId,
+                contextScopeId,
+              }),
+            )
+          : messages;
+      const view = scope.owner.read(scope.sessionId);
       return {
         rootSessionId: input.rootSessionId,
         subagentId: input.subagentId,
         displayName,
-        view: scope.owner.read(scope.sessionId),
+        view: {
+          ...view,
+          session: {
+            ...view.session,
+            messages: overlay(view.session.messages),
+          },
+        },
         ...page,
+        messages: page.messages,
         executions: [...executions.values()].map(conversationExecution),
         readOnly: true,
         ...(storedResult ? { storedResult } : {}),

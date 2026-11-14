@@ -64,6 +64,10 @@ export function projectToolResultDetails(
         : undefined;
     return {
       kind: "bash",
+      mode:
+        metadata.mode === "foreground" || metadata.mode === "background"
+          ? metadata.mode
+          : undefined,
       exitCode: integer("exitCode", -2147483648),
       jobId: text("jobId", 256),
       status: knownStatus,

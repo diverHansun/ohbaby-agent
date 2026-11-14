@@ -259,7 +259,13 @@ export class GoalService {
       if (!ticket.settled) {
         await store.recordUsage(
           ticket.goalId,
-          outcome.usage ?? { usageComplete: false },
+          outcome.usage ??
+            (outcome.status === "not_admitted" &&
+            outcome.refundUnstartedTurn === true
+              ? { totalTokens: 0, usageComplete: true }
+              : { usageComplete: false }),
+          outcome.status === "not_admitted" &&
+            outcome.refundUnstartedTurn === true,
         );
         ticket.settled = true;
       }

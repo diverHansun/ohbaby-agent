@@ -1,3 +1,4 @@
+import { InMemoryShellJobStore } from "./shell-job-store.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
@@ -54,7 +55,7 @@ function startJob(
   contextScopeId?: string,
 ): Promise<ShellJobSnapshot> {
   return registry.start({
-    child: child as unknown as ChildProcess,
+    child: () => child as unknown as ChildProcess,
     ...(contextScopeId === undefined ? {} : { contextScopeId }),
     sessionId,
     timeoutMs,
@@ -62,6 +63,137 @@ function startJob(
 }
 
 describe("ShellJobRegistry", () => {
+  it("only checkpoints background output after new bytes arrive", async () => {
+    vi.useFakeTimers();
+    const store = new InMemoryShellJobStore();
+    const child = new FakeChild();
+    const registry = new ShellJobRegistry({
+      store,
+      killTree: () => undefined,
+      probeTree: () => "stopped",
+    });
+    try {
+      await registry.start({
+        child: () => child as unknown as ChildProcess,
+        sessionId: "session_1",
+        background: true,
+        timeoutMs: null,
+      });
+      const changed = vi.fn();
+      const unsubscribe = store.subscribe(changed);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(changed).not.toHaveBeenCalled();
+      child.stdout.emit("data", "new output");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(changed).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(changed).toHaveBeenCalledTimes(1);
+      unsubscribe();
+      child.emitExit(0, null);
+      await registry.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["exited", "different-group"] as const)(
+    "does not save a late or unrelated process identity (%s)",
+    async (scenario) => {
+      const store = new InMemoryShellJobStore();
+      const child = new FakeChild();
+      const registry = new ShellJobRegistry({
+        store,
+        killTree: () => undefined,
+        probeTree: () => "stopped",
+        readProcessIdentity: (pid) => {
+          if (pid === child.pid && scenario === "exited")
+            child.emitExit(0, null);
+          return Promise.resolve({
+            state: "present",
+            pid,
+            pgid:
+              scenario === "different-group" && pid === child.pid ? 99 : pid,
+            startToken: "native-birth",
+          });
+        },
+      });
+      try {
+        const started = await registry.start({
+          sessionId: "session_1",
+          background: true,
+          timeoutMs: null,
+          child: () => child as unknown as ChildProcess,
+        });
+        expect(store.get(started.jobId)?.processStartToken).toBeNull();
+        if (scenario !== "exited") child.emitExit(0, null);
+      } finally {
+        await registry.dispose();
+      }
+    },
+  );
+
+  it("reports accepted only for the stop that starts cleanup", async () => {
+    const child = new FakeChild();
+    let stopped = false;
+    const registry = new ShellJobRegistry({
+      killTree: () => undefined,
+      probeTree: () => (stopped ? "stopped" : "running"),
+    });
+    const started = await startJob(registry, child, 10000);
+    await expect(
+      registry.stopForUser(started.jobId, "session_1", undefined, () => {
+        throw new Error("binding changed");
+      }),
+    ).rejects.toThrow("binding changed");
+    expect(registry.get(started.jobId, "session_1").status).toBe("running");
+    const first = await registry.stopForUser(
+      started.jobId,
+      "session_1",
+      undefined,
+    );
+    const second = await registry.stopForUser(
+      started.jobId,
+      "session_1",
+      undefined,
+    );
+    expect(first.outcome).toBe("accepted");
+    expect(second.outcome).toBe("already-terminal");
+    stopped = true;
+    child.emitExit(0, null);
+    await registry.dispose();
+  });
+
+  it("wakes a task_output wait on user steer without stopping its job", async () => {
+    const child = new FakeChild();
+    const killTree = vi.fn();
+    const registry = new ShellJobRegistry({
+      killTree,
+      probeTree: () => "stopped",
+    });
+    const started = await startJob(registry, child, 10000);
+    let wake!: () => void;
+    const unsubscribe = vi.fn();
+    const pending = createTaskOutputTool(registry).execute(
+      { block: true, job_id: started.jobId, wait_ms: 5000 },
+      {
+        ...context(),
+        subscribeSteer: (callback) => {
+          wake = callback;
+          return Promise.resolve(unsubscribe);
+        },
+      },
+    );
+    await vi.waitFor(() => {
+      expect(wake).toBeDefined();
+    });
+    wake();
+    expect((await pending).metadata).toMatchObject({ status: "running" });
+    expect(killTree).not.toHaveBeenCalled();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    child.emitExit(0, null);
+    await registry.dispose();
+  });
+
   it("seals a cancelled root before invoking a later spawn while allowing another root", async () => {
     const child = new FakeChild();
     const spawn = vi.fn(() => child as unknown as ChildProcess);
@@ -102,58 +234,50 @@ describe("ShellJobRegistry", () => {
       await registry.dispose();
     }
   });
-  it.each(["during-spawn", "already-spawned"] as const)(
-    "retains and cancels a root-owned process arriving %s after the cancellation boundary",
-    async (race) => {
-      const child = new FakeChild();
-      let stopped = false;
-      const release = vi.fn();
-      const killTree = vi.fn();
-      let admitted = true;
-      const registry = new ShellJobRegistry({
-        killTree,
-        admitsOwner: () => admitted,
-        probeTree: (): "running" | "stopped" =>
-          stopped ? "stopped" : "running",
-      });
-      const owner = {
+  it("retains and cancels a root-owned process when admission closes during spawn", async () => {
+    const child = new FakeChild();
+    let stopped = false;
+    const release = vi.fn();
+    const killTree = vi.fn();
+    let admitted = true;
+    const registry = new ShellJobRegistry({
+      killTree,
+      admitsOwner: () => admitted,
+      probeTree: (): "running" | "stopped" => (stopped ? "stopped" : "running"),
+    });
+    const owner = {
+      sessionId: "session",
+      rootRunId: "A",
+      runId: "A",
+      messageId: "message",
+      callId: "call",
+    };
+    const launch = (): ChildProcess => {
+      admitted = false;
+      return child as unknown as ChildProcess;
+    };
+    try {
+      const job = await registry.start({
+        child: launch,
+        owner,
+        release,
         sessionId: "session",
-        rootRunId: "A",
-        runId: "A",
-        messageId: "message",
-        callId: "call",
-      };
-      if (race === "already-spawned") admitted = false;
-      const launch = (): ChildProcess => {
-        admitted = false;
-        return child as unknown as ChildProcess;
-      };
-      try {
-        const job = await registry.start({
-          child:
-            race === "during-spawn"
-              ? launch
-              : (child as unknown as ChildProcess),
-          owner,
-          release,
-          sessionId: "session",
-          timeoutMs: 10_000,
-        });
-        expect(job.status).toBe("cancelled");
-        expect(killTree).toHaveBeenCalledTimes(1);
-        expect(registry.hasActiveWork("A")).toBe(true);
-        expect(release).not.toHaveBeenCalled();
-        registry.markRootRunStopped("A", "owner-ended");
-        expect(killTree).toHaveBeenCalledTimes(1);
-      } finally {
-        stopped = true;
-        child.emitExit(0, null);
-        await registry.dispose();
-      }
-      expect(registry.hasActiveWork("A")).toBe(false);
-      expect(release).toHaveBeenCalledTimes(1);
-    },
-  );
+        timeoutMs: 10_000,
+      });
+      expect(job.status).toBe("cancelled");
+      expect(killTree).toHaveBeenCalledTimes(1);
+      expect(registry.hasActiveWork("A")).toBe(true);
+      expect(release).not.toHaveBeenCalled();
+      registry.markRootRunStopped("A", "owner-ended");
+      expect(killTree).toHaveBeenCalledTimes(1);
+    } finally {
+      stopped = true;
+      child.emitExit(0, null);
+      await registry.dispose();
+    }
+    expect(registry.hasActiveWork("A")).toBe(false);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
   it("cancels only root-owned foreground and background jobs while retaining unfinished cleanup", async () => {
     const killed: ChildProcess[] = [];
     const stopped = new Set<ChildProcess>();
@@ -193,7 +317,7 @@ describe("ShellJobRegistry", () => {
         const child = new FakeChild();
         const release = vi.fn();
         const snapshot = await registry.start({
-          child: child as unknown as ChildProcess,
+          child: () => child as unknown as ChildProcess,
           sessionId: "reused-child",
           contextScopeId: "reused-instance",
           captureMode: identity.captureMode,

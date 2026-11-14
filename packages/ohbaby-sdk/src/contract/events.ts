@@ -1,3 +1,4 @@
+import type { UiShellJobsInvalidatedEvent } from "./shell-job.js";
 import type { UiPermissionEvent } from "./permission.js";
 import type { UiSubagentConversationEvent } from "./subagent.js";
 import type { UiSubagentInstancesInvalidatedEvent } from "./subagent-instance.js";
@@ -240,6 +241,7 @@ export interface UiSettingsChangedEvent {
 }
 
 export type UiEvent =
+  | UiShellJobsInvalidatedEvent
   | UiSubagentInstancesInvalidatedEvent
   | UiSettingsChangedEvent
   | UiSubagentConversationEvent

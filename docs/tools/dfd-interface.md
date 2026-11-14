@@ -318,7 +318,8 @@ rg 包含隐藏普通文件，不读 ignore/config，始终排除 `.git / dist /
 ```typescript
 {
   command: string        // 必需，命令
-  timeout?: number       // 可选，job 生命周期（毫秒），默认 120000，上限 600000
+  timeout?: number       // 正整数毫秒；纯前台默认120000/最大600000，显式后台默认不限时/最大86400000
+  description?: string   // 可选，任务说明
   run_in_background?: boolean // 可选，默认 false
 }
 ```
@@ -329,7 +330,10 @@ rg 包含隐藏普通文件，不读 ignore/config，始终排除 `.git / dist /
   output: string         // 命令输出；后台为当前尾部快照
   metadata: {
     jobId: string
-    status: 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+    status: 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out' | 'lost'
+    stopReason?: string | null
+    cleanup?: 'in-progress' | 'confirmed' | 'unconfirmed'
+    outputComplete?: boolean | null
     truncated: boolean
     exitCode?: number | null
     signal?: string | null
@@ -338,7 +342,11 @@ rg 包含隐藏普通文件，不读 ignore/config，始终排除 `.git / dist /
 }
 ```
 
-`task_output({ job_id, block?, wait_ms? })` 返回同样的 `output + metadata`；`wait_ms` 只限制本次 block 等待，turn abort 会提前取消本次读取但不终止 job。`task_kill({ job_id })` 将运行中 job 置为 `cancelled`，对已终态调用保持原状态；killTree 后 child 仍不 close 时最多等待 1 秒再收口。v1 不落盘、不返回 `outputPath`，也不提供 cursor/offset；Registry 最多保留 100 个 job，超限时按完成顺序淘汰最早进入终态的 job。
+`task_output({ job_id, block?, wait_ms? })` 返回输出与状态；wait_ms 只限制本次等待，取消读取不会停止任务。`task_kill({ job_id })` 主动停止对应 cancelled；已经终态则保留原状态。两者将在 improve-3 统一为 task，当前不新增临时列表工具。
+
+任务记录落在 shell_job 表；后台输出尾部和检查点持久保存，日志保存在任务绑定的文件。查询区分本地实时尾部、持久检查点、真实零输出与读取不可用，不用日志前缀冒充尾部。终态历史由 Store 查询，不再保留 100 个任务的内存缓存。逻辑停止反馈与进程/输出/资源收尾事实分开，确认等待到期仍未收尾时保留 unconfirmed 责任，不能报告已清理。
+
+用户接口按主会话及子代理树授权，模型工具仍只操作自己的任务；五个用户接口、日志字节范围、分页和版本合同见 [后台任务接口](2026-11-13-background-tasks/improve-1/design/dfd-interface.md)。
 
 **错误场景**：
 - `timed_out`：job 生命周期到点并由 registry 自动终止

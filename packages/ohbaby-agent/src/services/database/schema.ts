@@ -11,6 +11,7 @@ export const schema = {
     sessionId: "session_id",
     contextScopeId: "context_scope_id",
     rootSessionId: "root_session_id",
+    workspaceKey: "workspace_key",
     rootRunId: "root_run_id",
     runId: "run_id",
     messageId: "message_id",

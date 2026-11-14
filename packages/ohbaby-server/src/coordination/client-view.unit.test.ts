@@ -576,6 +576,18 @@ describe("DaemonClientViewCoordinator", () => {
     };
     expect(coordinator.routeEventForClient(event, "first")).toEqual(event);
     expect(coordinator.routeEventForClient(event, "second")).toBeUndefined();
+    const shellEvent: UiEvent = {
+      type: "shell-jobs.invalidated",
+      rootSessionId: "session_1",
+      runtimeEpoch: "epoch",
+      revision: 4,
+    };
+    expect(coordinator.routeEventForClient(shellEvent, "first")).toEqual(
+      shellEvent,
+    );
+    expect(
+      coordinator.routeEventForClient(shellEvent, "second"),
+    ).toBeUndefined();
     coordinator.selectSession(
       "first",
       "session_2",

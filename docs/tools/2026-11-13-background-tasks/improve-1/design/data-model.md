@@ -23,6 +23,7 @@
 | `job_id` | 主键 |
 | `session_id`、`context_scope_id` | 模型工具的精确归属；context_scope_id 为空表示主代理，子代理可共享 child session 但 scope 独立 |
 | `root_session_id` | 用户会话树查询根，从可信 owner/实例关系取得；不能假设 child sessionId 等于 rootSessionId。子代理 context_scope_id 已等于实例 ID，不再存重复 subagent_id，展示时派生 |
+| `workspace_key` | 启动时从可信 ToolExecutionOwner 保存的规范化工作区键，用于重建同源回收保护；不能从命令 cwd 或后来迁移后的会话目录推断。缺失时只对同 root 保守保护，不赋予任何进程信号权 |
 | `pgid`、`process_start_token` | 启动时实际采集的进程组及 OS 出生身份（带平台/精度）；缺失不能用于恢复发信号 |
 | `root_run_id`、`run_id`、`message_id`、`call_id` | 启动它的轮次和工具调用，用于关联起始卡片、回滚判断 |
 | `mode` | 启动时确定为前台或后台；本轮不新增转换时间字段 |

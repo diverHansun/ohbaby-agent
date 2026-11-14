@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryGoalPersistence } from "./persistence.js";
 import { GoalService } from "./service.js";
 import type { GoalExecutionInterruptInput, GoalTurnRunner } from "./types.js";
@@ -36,6 +36,56 @@ const settle = (ms = 20): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("GoalService", () => {
+  it("refunds only proven unstarted tickets once, including after a failed write", async () => {
+    const persistence = new InMemoryGoalPersistence();
+    const service = new GoalService({
+      persistence,
+      executionControl: noOpExecutionControl,
+    });
+    const goal = await service.createGoal("s", {
+      actor: "user",
+      objective: "work",
+    });
+    const epoch = service.currentExecutionEpoch("s");
+    const ticket = await service.admitTurnInBoundary("s", goal.goalId, epoch);
+    if (!ticket) throw new Error("ticket missing");
+    const original = persistence.append.bind(persistence);
+    let fail = true;
+    vi.spyOn(persistence, "append").mockImplementation((id, data) => {
+      if (fail && data.turnsUsed === 0) {
+        fail = false;
+        return Promise.reject(new Error("write failed"));
+      }
+      return original(id, data);
+    });
+    const outcome = {
+      status: "not_admitted" as const,
+      refundUnstartedTurn: true as const,
+    };
+    await expect(service.settleTurn("s", ticket, outcome)).rejects.toThrow(
+      "write failed",
+    );
+    expect(service.peekSnapshot("s")?.turnsUsed).toBe(1);
+    await service.settleTurn("s", ticket, outcome);
+    await service.settleTurn("s", ticket, outcome);
+    expect(service.peekSnapshot("s")?.turnsUsed).toBe(0);
+    expect(service.peekSnapshot("s")?.usageIncomplete).not.toBe(true);
+    const started = await service.admitTurnInBoundary("s", goal.goalId, epoch);
+    if (!started) throw new Error("started ticket missing");
+    await service.settleTurn("s", started, {
+      status: "failed",
+      usage: { totalTokens: 0, usageComplete: true },
+    });
+    const unknown = await service.admitTurnInBoundary("s", goal.goalId, epoch);
+    if (!unknown) throw new Error("unknown ticket missing");
+    await service.settleTurn("s", unknown, {
+      status: "not_admitted",
+      usage: { totalTokens: 0, usageComplete: true },
+    });
+    expect(service.peekSnapshot("s")?.turnsUsed).toBe(2);
+    service.dispose();
+  });
+
   it("captures all owned roots after tickets settle and preserves background work on an ordinary Stop", async () => {
     const interruptions: GoalExecutionInterruptInput[] = [];
     const service = new GoalService({

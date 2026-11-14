@@ -171,16 +171,19 @@ const ListParams = z.object({
 ### 3.7 bash 工具
 
 ```typescript
-const BashParams = z.object({
-  command: z.string().describe('要执行的 Shell 命令'),
-  timeout: z.number().int().min(1).max(600000).optional()
-    .describe('job 最大生命周期（毫秒）；前后台一致，到点进入 timed_out'),
-  run_in_background: z.boolean().optional()
-    .describe('是否立即返回 job_id；默认 false'),
-})
+interface BashParams {
+  command: string;
+  description?: string;
+  timeout?: number; // 正整数毫秒；按前后台路径校验
+  run_in_background?: boolean; // 默认 false
+}
 ```
 
-`task_output` 使用 `job_id`、`block?`、`wait_ms?`；`wait_ms` 只限制本次读取等待，不修改 job 生命周期，当前 tool 被取消时本次 block 立即结束。`task_kill` 使用 `job_id`，运行中 job 进入 `cancelled`，与自动 `timed_out` 区分。Shell metadata 在 spawn 失败时可附 `error`；Registry 最多保留 100 个 job，按完成顺序优先淘汰最早进入终态的 job。
+显式后台默认不限时，显式 timeout 最大 86400000 ms；纯前台默认 120000 ms，最大 600000 ms。启动前先提交持久占位并原子检查后台名额，再 spawn；主代理默认 10 个、每个子代理默认 5 个，彼此独立。配置位于 `~/.ohbaby/tools/shell.json` 顶层 `maxRunningBackgroundJobs` 与 `maxRunningSubagentBackgroundJobs`。
+
+当前 `task_output` 使用 `job_id`、`block?`、`wait_ms?`；wait_ms 只限制读取等待，不改变进程寿命。`task_kill` 使用 job_id，主动停止对应 cancelled，硬超时对应 timed_out。两者在 improve-3 统一为 task 三动作；当前阶段不提供临时 task_list 工厂。
+
+ShellJobStore 保存历史与持久事实，Registry 只保留尚有进程、输出、清理或写入责任的对象；删除原先按 100 个终态淘汰的缓存。后台保存 32 KiB 尾部和检查点；纯前台不周期复制尾部到数据库。完整字段与空值语义见 [后台任务数据模型](2026-11-13-background-tasks/improve-1/design/data-model.md)。
 
 ### 3.8 task 工具
 
@@ -277,7 +280,10 @@ interface EditMetadata extends BaseMetadata {
 ```typescript
 interface BashMetadata extends BaseMetadata {
   jobId: string              // job 逻辑 id
-  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out' | 'lost'
+  stopReason?: string | null  // 逻辑终态的来源
+  cleanup?: 'in-progress' | 'confirmed' | 'unconfirmed'
+  outputComplete?: boolean | null
   truncated: boolean
   exitCode?: number | null    // 终态字段
   signal?: string | null      // 终态字段
@@ -309,7 +315,7 @@ interface ToolLimits {
   }
   bash: {
     maxOutputLength: number  // 默认约 32000 字符，内存尾部
-    defaultTimeout: number   // 默认 120000 (2分钟)，job 生命周期
+    defaultTimeout: number   // 纯前台默认 120000；显式后台没有默认硬超时
   }
   glob: {
     maxResults: number       // 默认 100
@@ -384,7 +390,7 @@ const BLOCKED_FILES = [
 
 - offset: >= 1
 - limit: >= 1
-- timeout: > 0, <= 600000 (10分钟)
+- timeout：正整数；纯前台 <= 600000，显式后台 <= 86400000（毫秒）
 - num_results: >= 1, <= 100
 
 ---

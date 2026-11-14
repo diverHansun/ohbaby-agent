@@ -1,3 +1,5 @@
+import { ShellJobRecovery } from "./shell-job-recovery.js";
+import { shellJobFixture } from "./fixtures/shell-job.js";
 import { spawn } from "node:child_process";
 import type { ProcessIdentity } from "../shell/process-identity.js";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -23,6 +25,77 @@ afterEach(() => {
 });
 
 describe("shell job persistence", () => {
+  it("checks the admission guard in the actual queued SQLite write callback", async () => {
+    initDatabase({ dbPath: ":memory:" });
+    getDatabase()
+      .prepare(
+        "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES('s','p','/tmp','test','active',1,1,'{}')",
+      )
+      .run();
+    const store = new DatabaseShellJobStore();
+    await store.insert(
+      shellJobFixture({ status: "lost", cleanup: "unconfirmed" }),
+    );
+    let valid = true;
+    const pending = store.compareAndUpdate(
+      "job",
+      { trackingReleasedAt: null },
+      { trackingReleasedAt: 9 },
+      () => {
+        if (!valid) throw new Error("binding changed");
+      },
+    );
+    valid = false;
+    await expect(pending).rejects.toThrow("binding changed");
+    expect(store.get("job")?.trackingReleasedAt).toBeNull();
+  });
+
+  it("reclaims quota by observing a dead foreign owner before a new reservation", async () => {
+    initDatabase({ dbPath: ":memory:" });
+    getDatabase()
+      .prepare(
+        "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES('s','p','/tmp','test','active',1,1,'{}')",
+      )
+      .run();
+    const store = new DatabaseShellJobStore();
+    await store.insert(shellJobFixture({ jobId: "foreign", cleanup: null }));
+    const signal = vi.fn();
+    const recovery = new ShellJobRecovery({
+      store,
+      backend: { ownerId: "local", pid: process.pid, startToken: "local" },
+      inspect: () => Promise.resolve({ state: "absent" }),
+      probeGroup: () => "stopped",
+      signalGroup: signal,
+    });
+    const registry = new ShellJobRegistry({
+      store,
+      recovery,
+      backgroundLimit: () => Promise.resolve(1),
+      refreshOwner: async (id, scope) => {
+        for (const row of store.listByOwner(id, scope))
+          await recovery.refresh(row.jobId);
+      },
+      killTree: () => ({ status: "confirmed" }),
+    });
+    try {
+      const next = await registry.start({
+        sessionId: "s",
+        background: true,
+        timeoutMs: 1000,
+        child: () => spawn("/bin/sh", ["-c", "true"], { detached: true }),
+      });
+      expect(next.jobId).toBeTruthy();
+      expect(store.get("foreign")).toMatchObject({
+        status: "lost",
+        cleanup: "confirmed",
+        noticeState: "pending",
+      });
+      expect(signal).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+    }
+  });
+
   it("commits the placeholder before spawn and saves the final output and lifecycle", async () => {
     const store = new InMemoryShellJobStore();
     const registry = new ShellJobRegistry({
@@ -422,7 +495,7 @@ describe("shell job persistence", () => {
       }
     }
     const store = new GatedStore();
-    const child = spawn("/bin/sh", ["-c", "sleep 10"], { detached: true });
+    let child!: ReturnType<typeof spawn>;
     const killTree = vi.fn(() => {
       if (child.pid === undefined) throw new Error("Child PID missing");
       process.kill(-child.pid, "SIGKILL");
@@ -433,7 +506,14 @@ describe("shell job persistence", () => {
       killTree,
       createJobId: (): string => "gated",
     });
-    await registry.start({ sessionId: "session", timeoutMs: 10000, child });
+    await registry.start({
+      sessionId: "session",
+      timeoutMs: 10000,
+      child: () => {
+        child = spawn("/bin/sh", ["-c", "sleep 10"], { detached: true });
+        return child;
+      },
+    });
     const result = await registry.kill("gated", "session");
     expect(result.status).toBe("cancelled");
     expect(killTree).not.toHaveBeenCalled();

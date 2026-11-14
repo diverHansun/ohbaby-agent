@@ -362,6 +362,8 @@ export interface ToolExecutionFact {
   readonly outcome?: ToolCallResult;
 }
 export interface ToolSchedulerOptions {
+  /** Refresh persisted unconfirmed source responsibility before file-sensitive admission. */
+  readonly refreshSourceCleanup?: (owner: ToolExecutionOwner) => void;
   readonly subscribeRunSteer?: (
     runId: string,
     wake: () => void,

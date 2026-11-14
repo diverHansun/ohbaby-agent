@@ -79,18 +79,60 @@ describe("runtime environment admission", () => {
     expect(f.disposed).toEqual(["A"]);
     next.release();
   });
-  it("waits for background work even without any main run, then admits immediately", async () => {
+  it("admits with the old runtime while only background work remains, then replaces it", async () => {
     const f = fixture();
-    (await f.controller.acquireRuntime()).release();
+    const original = await f.controller.acquireRuntime();
+    original.release();
     f.setBusy(true);
     f.save("B");
-    await expect(f.controller.acquireRuntime()).rejects.toThrow(
-      "background shell jobs",
-    );
+    const whileBusy = await f.controller.acquireRuntime();
+    expect(whileBusy.runtime).toBe(original.runtime);
+    expect(f.disposed).toEqual([]);
+    const concurrent = await f.controller.acquireRuntime();
+    expect(concurrent.runtime).toBe(original.runtime);
+    expect(f.disposed).toEqual([]);
+    concurrent.release();
+    whileBusy.release();
     f.setBusy(false);
     (await f.controller.acquireRuntime()).release();
     expect(f.created).toEqual(["A", "B"]);
   });
+  it("allows ordinary work on a background-pinned runtime but retains cleanup barriers", async () => {
+    let version = "A";
+    const reasons = ["background shell jobs"];
+    const dispose = vi.fn(() => Promise.resolve());
+    const runtime = {
+      getActivityReasons: () => reasons,
+      dispose,
+    } as unknown as UiRuntimeComposition;
+    const controller = new InProcessRuntimeController({
+      clearPendingPermissionsForRun: () => Promise.resolve(),
+      updateStatus: () => Promise.resolve(),
+      publishNotice: vi.fn(),
+      getConfigVersion: () => Promise.resolve(versions(version)),
+      createRuntime: () => Promise.resolve(runtime),
+    });
+    const held = await controller.acquireRuntime();
+    version = "B";
+    reasons.push("active runs", "active tools", "background subagents");
+    (await controller.acquireRuntime()).release();
+    for (const reason of [
+      "run cleanup",
+      "tool cleanup",
+      "shell cleanup",
+      "subagent cleanup",
+      "unknown responsibility",
+    ]) {
+      reasons.push(reason);
+      await expect(controller.acquireRuntime()).rejects.toBeInstanceOf(
+        RuntimeSwitchPendingError,
+      );
+      reasons.pop();
+    }
+    expect(dispose).not.toHaveBeenCalled();
+    held.release();
+  });
+
   it("serializes admission so a newly admitted run cannot lose its runtime", async () => {
     const f = fixture();
     const [one, two] = await Promise.all([
@@ -220,7 +262,7 @@ it("holds reconnect through tool refresh, rejects leases/background activity, an
   for (const reason of [
     "background subagents",
     "pending tools",
-    "background shell jobs",
+    "foreground shell cleanup",
   ]) {
     reasons.push(reason);
     await expect(
@@ -228,6 +270,9 @@ it("holds reconnect through tool refresh, rejects leases/background activity, an
     ).rejects.toMatchObject({ code: "INSTANCE_BUSY" });
     reasons.pop();
   }
+  reasons.push("background shell jobs");
+  await controller.reconnectMcp(() => Promise.resolve(current.mcp));
+  reasons.pop();
   current = { ...current, mcp: "new" };
   let entered!: () => void;
   const enteredGate = new Promise<void>((r) => {

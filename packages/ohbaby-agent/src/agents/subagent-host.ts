@@ -1332,6 +1332,17 @@ export class SessionSubagentHost {
     );
   }
 
+  hasPendingCleanup(): boolean {
+    return (
+      this.closingScopes.size > 0 ||
+      this.settlingTurns.size > 0 ||
+      [...this.leases.values()].some(
+        (lease) => !!lease.cleaning || !!lease.scopeCleanup,
+      ) ||
+      [...this.active.values()].some((active) => active.stopping)
+    );
+  }
+
   hasActiveWork(): boolean {
     return (
       this.leases.size > 0 ||

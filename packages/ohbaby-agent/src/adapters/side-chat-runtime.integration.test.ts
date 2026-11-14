@@ -1,3 +1,5 @@
+import { DatabaseShellJobStore } from "../tools/shell-job-store.js";
+import { shellJobFixture } from "../tools/fixtures/shell-job.js";
 import { ShellJobRegistry } from "../tools/shell-job-registry.js";
 import { DatabaseSubagentExecutionStore } from "../agents/subagents/execution-store.js";
 import { isOwnerProcessAlive, processOwnerId } from "../utils/process-owner.js";
@@ -50,6 +52,7 @@ describe("conversation copies through the persistent backend", () => {
   const summaries: InterfaceProviderRequest[] = [];
   let overflowNext = false;
   let titleRequests = 0;
+  let holdNextAnswer: Promise<void> | undefined;
 
   beforeEach(async () => {
     fixtureRoot = await mkdtemp(join(tmpdir(), "session-copy-runtime-"));
@@ -60,6 +63,7 @@ describe("conversation copies through the persistent backend", () => {
     summaries.length = 0;
     overflowNext = false;
     titleRequests = 0;
+    holdNextAnswer = undefined;
     requests.length = 0;
     vi.spyOn(McpManager.prototype, "getAllTools").mockResolvedValue([
       {
@@ -91,6 +95,11 @@ describe("conversation copies through the persistent backend", () => {
         streamResponse(request) {
           const call =
             request.purpose === "agent-step" ? calls.shift() : undefined;
+          const hold =
+            request.purpose === "agent-step" && !call
+              ? holdNextAnswer
+              : undefined;
+          if (hold) holdNextAnswer = undefined;
           if (request.purpose === "session-title") titleRequests++;
           if (request.purpose === "context-summary") summaries.push(request);
           if (request.purpose === "agent-step") {
@@ -106,6 +115,7 @@ describe("conversation copies through the persistent backend", () => {
           }
           return Promise.resolve(
             (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              if (hold) await hold;
               yield await Promise.resolve(
                 call
                   ? {
@@ -147,6 +157,239 @@ describe("conversation copies through the persistent backend", () => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     await rm(fixtureRoot, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "wakes an idle session once with the persisted background result",
+    async () => {
+      await client.setPermission({ level: "full-access" });
+      calls.push({
+        name: "bash",
+        args: {
+          command: "sleep 0.3; echo task-finished",
+          run_in_background: true,
+        },
+      });
+      const { prompt } = await client.submitPromptAndWait(
+        "start background task",
+      );
+      await vi.waitFor(
+        () => {
+          const rows = getDatabase()
+            .prepare<{
+              trigger: string;
+            }>(
+              "SELECT trigger FROM run_ledger WHERE session_id=? ORDER BY created_at",
+            )
+            .all(prompt.sessionId);
+          expect(rows.some((row) => row.trigger === "background-task")).toBe(
+            true,
+          );
+        },
+        { timeout: 5000 },
+      );
+      await vi.waitFor(
+        () => {
+          expect(
+            requests.some((request) =>
+              JSON.stringify(request.messages).includes("task-finished"),
+            ),
+          ).toBe(true);
+        },
+        { timeout: 5000 },
+      );
+      const count = getDatabase()
+        .prepare<{
+          count: number;
+        }>(
+          "SELECT count(*) AS count FROM run_ledger WHERE session_id=? AND trigger='background-task'",
+        )
+        .get(prompt.sessionId)?.count;
+      expect(count).toBe(1);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "wakes the owning session after another session becomes active",
+    async () => {
+      await client.setPermission({ level: "full-access" });
+      calls.push({
+        name: "bash",
+        args: {
+          command: "sleep 0.5; echo unselected-result",
+          run_in_background: true,
+        },
+      });
+      const { prompt } = await client.submitPromptAndWait(
+        "start background job",
+      );
+      const other = await client.createSession();
+      await client.submitPromptAndWait("switch session", {
+        sessionId: other.id,
+      });
+      await vi.waitFor(
+        () => {
+          expect(
+            getDatabase()
+              .prepare<{
+                count: number;
+              }>(
+                "SELECT count(*) AS count FROM run_ledger WHERE session_id=? AND trigger='background-task'",
+              )
+              .get(prompt.sessionId)?.count,
+          ).toBe(1);
+        },
+        { timeout: 5000 },
+      );
+      expect((await client.getSnapshot()).activeSessionId).toBe(other.id);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "delivers a result into an already running turn without an extra wake",
+    async () => {
+      await client.setPermission({ level: "full-access" });
+      let release!: () => void;
+      holdNextAnswer = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      calls.push({
+        name: "bash",
+        args: {
+          command: "sleep 0.2; echo busy-result",
+          run_in_background: true,
+        },
+      });
+      const prompt = await client.submitPromptAccepted(
+        "start and keep working",
+      );
+      try {
+        await vi.waitFor(
+          () => {
+            const row = getDatabase()
+              .prepare<{
+                result_ready_at: number | null;
+              }>("SELECT result_ready_at FROM shell_job WHERE session_id=?")
+              .get(prompt.sessionId);
+            expect(typeof row?.result_ready_at).toBe("number");
+          },
+          { timeout: 5000 },
+        );
+        expect(
+          getDatabase()
+            .prepare<{
+              count: number;
+            }>(
+              "SELECT count(*) AS count FROM run_ledger WHERE session_id=? AND trigger='background-task'",
+            )
+            .get(prompt.sessionId)?.count,
+        ).toBe(0);
+      } finally {
+        release();
+      }
+      await client.waitForPrompt(prompt.promptId);
+      await vi.waitFor(
+        () => {
+          expect(
+            requests.some((request) =>
+              JSON.stringify(request.messages).includes("busy-result"),
+            ),
+          ).toBe(true);
+        },
+        { timeout: 5000 },
+      );
+      expect(
+        getDatabase()
+          .prepare<{
+            count: number;
+          }>(
+            "SELECT count(*) AS count FROM run_ledger WHERE session_id=? AND trigger='background-task'",
+          )
+          .get(prompt.sessionId)?.count,
+      ).toBe(0);
+    },
+  );
+
+  it("recovers an unclaimed frozen batch at startup without waking for lost work", async () => {
+    const { prompt } = await client.submitPromptAndWait("create a session");
+    const store = new DatabaseShellJobStore({ db: getDatabase() });
+    await store.insert(
+      shellJobFixture({
+        jobId: "startup-ready",
+        sessionId: prompt.sessionId,
+        rootSessionId: prompt.sessionId,
+        status: "completed",
+        cleanup: "confirmed",
+        settledAt: 1,
+        resultReadyAt: 1,
+        noticeState: "pending",
+        outputTail: "saved startup result",
+      }),
+    );
+    const batch = await store.allocateNoticeBatch({
+      sessionId: prompt.sessionId,
+      contextScopeId: null,
+    });
+    await store.insert(
+      shellJobFixture({
+        jobId: "startup-lost",
+        sessionId: prompt.sessionId,
+        rootSessionId: prompt.sessionId,
+        status: "lost",
+        cleanup: "unconfirmed",
+        settledAt: null,
+        resultReadyAt: 2,
+        noticeState: "pending",
+        outputTail: "lost result",
+      }),
+    );
+    await client.dispose();
+    client = open();
+    await client.initialize();
+    await vi.waitFor(
+      () => {
+        const row = getDatabase()
+          .prepare<{
+            notice_wake_run_id: string | null;
+          }>(
+            "SELECT notice_wake_run_id FROM shell_job WHERE job_id='startup-ready'",
+          )
+          .get();
+        expect(row?.notice_wake_run_id).toBeTruthy();
+      },
+      { timeout: 5000 },
+    );
+    const received = store.getNoticeBatch(batch ?? "");
+    expect(received[0]?.noticeWakeRunId).toBeTruthy();
+    expect(store.get("startup-lost")?.noticeWakeRunId).toBeNull();
+    await vi.waitFor(() => {
+      expect(
+        requests.some((request) =>
+          JSON.stringify(request.messages).includes("saved startup result"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("unsubscribes its background result listener during shutdown", async () => {
+    // The original method is deliberately called with the mocked instance below.
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const original = DatabaseShellJobStore.prototype.subscribe;
+    const unsubscribe = vi.fn();
+    vi.spyOn(DatabaseShellJobStore.prototype, "subscribe").mockImplementation(
+      function (this: DatabaseShellJobStore, listener) {
+        const remove = original.call(this, listener);
+        return () => {
+          unsubscribe();
+          remove();
+        };
+      },
+    );
+    peer = open();
+    await peer.initialize();
+    await peer.dispose();
+    peer = undefined;
+    expect(unsubscribe).toHaveBeenCalled();
   });
 
   it("replays the same model prefix, MCP tools and cache key while keeping writes and selection scoped", async () => {

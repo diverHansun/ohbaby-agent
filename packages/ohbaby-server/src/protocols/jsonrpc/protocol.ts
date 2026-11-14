@@ -3,6 +3,11 @@ import type { DaemonStartupIntent, UiEvent } from "ohbaby-sdk";
 export const DAEMON_RPC_METHODS = [
   "getSnapshot",
   "listSubagentExecutions",
+  "listShellJobs",
+  "getShellJobOutput",
+  "readShellJobLog",
+  "stopShellJob",
+  "abandonShellJob",
   "listSubagentInstances",
   "stopSubagent",
   "getSubagentExecutionView",

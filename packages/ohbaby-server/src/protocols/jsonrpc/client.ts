@@ -1,10 +1,15 @@
 import { isUiCommandCompletion } from "ohbaby-sdk";
 import type {
+  UiShellJobReadClient,
+  UiShellJobCommandClient,
   UiSubagentReadClient,
   UiSubagentInstanceClient,
 } from "ohbaby-sdk";
 
-type SubagentClient = UiSubagentReadClient & UiSubagentInstanceClient;
+type SubagentClient = UiSubagentReadClient &
+  UiSubagentInstanceClient &
+  UiShellJobReadClient &
+  UiShellJobCommandClient;
 import { randomUUID } from "node:crypto";
 import {
   createShutdownOptions,
@@ -352,6 +357,31 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
         { code: "SESSION_SCOPE_CHANGED" },
       );
     return result;
+  }
+  listShellJobs(
+    input: Parameters<UiShellJobReadClient["listShellJobs"]>[0],
+  ): ReturnType<UiShellJobReadClient["listShellJobs"]> {
+    return this.subagentQuery("listShellJobs", input);
+  }
+  getShellJobOutput(
+    input: Parameters<UiShellJobReadClient["getShellJobOutput"]>[0],
+  ): ReturnType<UiShellJobReadClient["getShellJobOutput"]> {
+    return this.subagentQuery("getShellJobOutput", input);
+  }
+  readShellJobLog(
+    input: Parameters<UiShellJobReadClient["readShellJobLog"]>[0],
+  ): ReturnType<UiShellJobReadClient["readShellJobLog"]> {
+    return this.subagentQuery("readShellJobLog", input);
+  }
+  stopShellJob(
+    input: Parameters<UiShellJobCommandClient["stopShellJob"]>[0],
+  ): ReturnType<UiShellJobCommandClient["stopShellJob"]> {
+    return this.subagentQuery("stopShellJob", input);
+  }
+  abandonShellJob(
+    input: Parameters<UiShellJobCommandClient["abandonShellJob"]>[0],
+  ): ReturnType<UiShellJobCommandClient["abandonShellJob"]> {
+    return this.subagentQuery("abandonShellJob", input);
   }
   listSubagentInstances(
     input: Parameters<UiSubagentInstanceClient["listSubagentInstances"]>[0],
@@ -721,6 +751,11 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       if (
         (method === "executeCommand" ||
           method === "compactSession" ||
+          method === "listShellJobs" ||
+          method === "getShellJobOutput" ||
+          method === "readShellJobLog" ||
+          method === "stopShellJob" ||
+          method === "abandonShellJob" ||
           method === "listSubagentInstances" ||
           method === "stopSubagent") &&
         options.signal?.aborted &&
@@ -736,6 +771,11 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       if (
         (method === "executeCommand" ||
           method === "compactSession" ||
+          method === "listShellJobs" ||
+          method === "getShellJobOutput" ||
+          method === "readShellJobLog" ||
+          method === "stopShellJob" ||
+          method === "abandonShellJob" ||
           method === "listSubagentInstances" ||
           method === "stopSubagent") &&
         options.signal?.aborted &&
