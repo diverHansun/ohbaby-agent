@@ -1977,8 +1977,10 @@ it.each([false, true])(
     const directory = await mkdtemp(join(tmpdir(), "bash-delivery-"));
     const { createBashTool } =
       await import("../../../packages/ohbaby-agent/src/tools/bash.js");
-    const { ShellJobRegistry, createTaskOutputTool, createTaskKillTool } =
+    const { ShellJobRegistry } =
       await import("../../../packages/ohbaby-agent/src/tools/shell-job-registry.js");
+    const { createTaskTool } =
+      await import("../../../packages/ohbaby-agent/src/tools/task.js");
     const { Shell } =
       await import("../../../packages/ohbaby-agent/src/shell/index.js");
     const { createHostLocalEnvironment } =
@@ -2003,8 +2005,7 @@ it.each([false, true])(
       }),
     });
     scheduler.register(createBashTool({ registry }));
-    scheduler.register(createTaskOutputTool(registry));
-    scheduler.register(createTaskKillTool(registry));
+    scheduler.register(createTaskTool(registry));
     const manager = createMessageManager({
       bus,
       store: createDatabaseMessageStore(),

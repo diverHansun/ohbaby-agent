@@ -1,5 +1,28 @@
 type ToolMetadata = Record<string, unknown>;
 
+const SHELL_JOB_FACT_FIELDS = [
+  "jobId",
+  "mode",
+  "promotedAt",
+  "timeoutMs",
+  "deadline",
+  "status",
+  "stopReason",
+  "cleanup",
+  "truncated",
+  "exitCode",
+  "signal",
+  "outputBytes",
+  "startedAt",
+  "endedAt",
+  "settledAt",
+  "resultReadyAt",
+  "outputComplete",
+  "outputCheckpointAt",
+  "tailAvailable",
+  "trackingReleasedAt",
+] as const;
+
 function hasOwnMetadataValue(metadata: ToolMetadata, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(metadata, key);
 }
@@ -91,19 +114,46 @@ export function projectToolMetadataForModel(
     case "bash":
     case "task_output":
     case "task_kill":
+      return copyMetadataFields(metadata, SHELL_JOB_FACT_FIELDS);
+    case "task": {
+      if (metadata.taskAction === "list") {
+        return {
+          ...copyMetadataFields(metadata, [
+            "taskAction",
+            "hasMore",
+            "nextCursor",
+            "filteredCount",
+            "pendingStartCount",
+          ]),
+          jobs: Array.isArray(metadata.jobs)
+            ? metadata.jobs
+                .slice(0, 100)
+                .flatMap((job) =>
+                  typeof job === "object" && job !== null && !Array.isArray(job)
+                    ? [
+                        copyMetadataFields(job as ToolMetadata, [
+                          ...SHELL_JOB_FACT_FIELDS,
+                          "createdAt",
+                          "outputTruncated",
+                          "command",
+                          "description",
+                        ]),
+                      ]
+                    : [],
+                )
+            : [],
+        };
+      }
+      if (metadata.taskAction !== "output" && metadata.taskAction !== "stop") {
+        return {};
+      }
       return copyMetadataFields(metadata, [
-        "jobId",
-        "mode",
-        "promotedAt",
-        "timeoutMs",
-        "deadline",
-        "status",
-        "stopReason",
-        "cleanup",
-        "truncated",
-        "exitCode",
-        "signal",
+        ...SHELL_JOB_FACT_FIELDS,
+        "taskAction",
+        "stopResult",
+        "waitReason",
       ]);
+    }
     case "read":
       return copyMetadataFields(metadata, [
         "path",

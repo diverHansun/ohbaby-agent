@@ -58,9 +58,7 @@ describe.runIf(enabled)(
               (call) =>
                 (call.name === "bash" &&
                   allowedCommands.includes(String(call.input.command))) ||
-                ["task_output", "task_kill", "select_tools"].includes(
-                  call.name,
-                ),
+                ["task", "select_tools"].includes(call.name),
             );
           const choice = event.request.choices.find((item) =>
             allowed ? item.id === "allow_once" : item.intent === "deny",
@@ -109,7 +107,7 @@ describe.runIf(enabled)(
         await server.start();
         await request("/v1/clients", { clientId });
         await submit(
-          'Controlled Bash cleanup verification. Activate task_output via select_tools if it is not in your available tools. Use bash with command exactly "sleep 2", run_in_background=true, timeout=100. Then read its returned job_id with task_output(block=true, wait_ms=3000). Report the actual job status. Do not run any other shell commands, no subagents, no retries. You must actually call task_output rather than infer the status.',
+          'Controlled Bash cleanup verification. Activate task via select_tools if it is not in your available tools. Use bash with command exactly "sleep 2", run_in_background=true, timeout=100. Then read its returned job_id with task(action="output", block=true, wait_ms=3000). Report the actual job status. Do not run any other shell commands, no subagents, no retries. You must actually call task rather than infer the status.',
         );
         await submit(
           'Now verify new work after cleanup: use bash with command exactly "printf C3_RECOVERED", timeout=3000, run_in_background=false. Report its output. Do not use any other tool or command.',
@@ -150,7 +148,10 @@ describe.runIf(enabled)(
         ).toBe(true);
         expect(
           calls.some(
-            (call) => call.name === "task_output" && call.status === "failed",
+            (call) =>
+              call.name === "task" &&
+              call.input.action === "output" &&
+              call.status === "failed",
           ),
         ).toBe(true);
         expect(
@@ -168,7 +169,7 @@ describe.runIf(enabled)(
         // The UI projects the observed job timeout as failed; the control tool
         // itself completed and returned the actual job cleanup facts.
         expect(
-          persistedTools.find((part) => part.tool === "task_output")?.state,
+          persistedTools.find((part) => part.tool === "task")?.state,
         ).toMatchObject({
           status: "completed",
           metadata: { status: "timed_out", cleanup: "confirmed" },

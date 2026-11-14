@@ -40,6 +40,7 @@ export class ShellJobReadError extends Error {
 interface NormalizedList {
   readonly owner?: ShellJobOwnerFilter;
   readonly statuses?: readonly ShellJobStatus[];
+  readonly includeFinished?: boolean;
   readonly limit: number;
 }
 function requiredId(value: unknown, label: string): string {
@@ -113,6 +114,9 @@ function fingerprint(
         scope,
         owner: filter.owner ?? null,
         statuses: filter.statuses ?? [],
+        ...(filter.includeFinished === undefined
+          ? {}
+          : { includeFinished: filter.includeFinished }),
       }),
     )
     .digest("hex");

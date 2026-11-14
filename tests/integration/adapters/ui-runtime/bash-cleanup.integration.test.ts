@@ -1,3 +1,4 @@
+import { createTaskTool } from "../../../../packages/ohbaby-agent/src/tools/task.js";
 import { createTestUiRuntimeComposition as createUiRuntimeComposition } from "../../../fixtures/runtime-model-fixtures.js";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -58,11 +59,7 @@ function unusedLlmClient(): LLMClientInstance {
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { createBashTool } from "../../../../packages/ohbaby-agent/src/tools/bash.js";
-import {
-  createTaskKillTool,
-  createTaskOutputTool,
-  ShellJobRegistry,
-} from "../../../../packages/ohbaby-agent/src/tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../../../packages/ohbaby-agent/src/tools/shell-job-registry.js";
 
 class Child extends EventEmitter {
   readonly pid = 424242;
@@ -177,8 +174,7 @@ describe("composition Bash cleanup ownership", () => {
       return execute(params, context);
     };
     composition.toolScheduler.register(bash);
-    composition.toolScheduler.register(createTaskOutputTool(registry));
-    composition.toolScheduler.register(createTaskKillTool(registry));
+    composition.toolScheduler.register(createTaskTool(registry));
     const request = (callId: string, runId?: string): ToolCallRequest => ({
       callId,
       runId,
@@ -395,8 +391,7 @@ describe("composition Bash cleanup ownership", () => {
         return execute(params, context);
       });
       composition.toolScheduler.register(bash);
-      composition.toolScheduler.register(createTaskOutputTool(registry));
-      composition.toolScheduler.register(createTaskKillTool(registry));
+      composition.toolScheduler.register(createTaskTool(registry));
       const request = (
         callId: string,
         overrides: Partial<ToolCallRequest> = {},

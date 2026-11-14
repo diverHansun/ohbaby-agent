@@ -4,7 +4,7 @@ import type { DatabaseConnection } from "../database/index.js";
 
 /**
  * Detached shell handles belong to their runtime. A different backend can only
- * prove completion from a saved task_output/task_kill receipt for the same job.
+ * prove completion from a saved output/stop receipt for the same job and owner.
  */
 export function assertRewindShellOwners(
   db: DatabaseConnection,
@@ -34,9 +34,14 @@ export function assertRewindShellOwners(
       AND json_extract(p.data,'$.state.metadata.jobId') IS NOT NULL
       AND json_extract(p.data,'$.state.metadata.cleanup') IS NOT 'confirmed'
       AND NOT EXISTS (
-        SELECT 1 FROM part receipt WHERE receipt.session_id = p.session_id
+        SELECT 1 FROM part receipt
+          JOIN message receipt_message ON receipt_message.id = receipt.message_id
+        WHERE receipt.session_id = p.session_id
+          AND receipt_message.context_scope_id IS m.context_scope_id
           AND receipt.type = 'tool'
-          AND json_extract(receipt.data,'$.tool') IN ('task_output','task_kill')
+          AND (json_extract(receipt.data,'$.tool') IN ('task_output','task_kill')
+            OR (json_extract(receipt.data,'$.tool') = 'task'
+              AND json_extract(receipt.data,'$.state.metadata.taskAction') IN ('output','stop')))
           AND json_extract(receipt.data,'$.state.metadata.jobId') = json_extract(p.data,'$.state.metadata.jobId')
           AND json_extract(receipt.data,'$.state.metadata.cleanup') = 'confirmed'
       )

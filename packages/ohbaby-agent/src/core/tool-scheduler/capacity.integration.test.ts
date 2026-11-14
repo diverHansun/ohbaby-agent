@@ -1,13 +1,10 @@
+import { createTaskTool } from "../../tools/task.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { createPermissionState } from "../../permission/index.js";
-import {
-  createTaskKillTool,
-  createTaskOutputTool,
-  ShellJobRegistry,
-} from "../../tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
 import { createToolScheduler, ToolSchedulerEvent } from "./index.js";
 import { withToolAdmission } from "./tool-admission.js";
 import type { CapacityKind } from "./concurrency.js";
@@ -171,8 +168,7 @@ describe("real scheduler session capacity", () => {
   });
 
   it.each([
-    ["task_output", "subagent-control"],
-    ["task_kill", "memory"],
+    ["task", "subagent-control"],
     ["subagent_run", "subagent"],
   ] as const)(
     "does not exempt an untrusted implementation named %s with category %s",
@@ -211,7 +207,7 @@ describe("real scheduler session capacity", () => {
     },
   );
 
-  it("admits the real task_output and task_kill tools while ordinary capacity is full", async () => {
+  it("admits the real task output and stop actions while ordinary capacity is full", async () => {
     const f = fixture({ concurrency: { maxConcurrency: 1 } });
     let closed: Promise<unknown> = Promise.resolve();
     let child!: ReturnType<typeof spawn>;
@@ -239,16 +235,16 @@ describe("real scheduler session capacity", () => {
     try {
       await closed;
       f.register("ordinary", "readonly", "ordinary");
-      f.scheduler.register(createTaskOutputTool(registry));
-      f.scheduler.register(createTaskKillTool(registry));
+      f.scheduler.register(createTaskTool(registry));
       runs.push(f.scheduler.execute(request("ordinary-running", "ordinary")));
       await vi.waitFor(() => {
         expect(f.started).toContain("ordinary-running");
       });
-      for (const name of ["task_output", "task_kill"]) {
+      for (const action of ["output", "stop"]) {
+        const name = `task-${action}`;
         const result = f.scheduler.execute({
-          ...request(name, name),
-          params: { job_id: job.jobId },
+          ...request(name, "task"),
+          params: { action, job_id: job.jobId },
         });
         runs.push(result);
         await vi.waitFor(() => {

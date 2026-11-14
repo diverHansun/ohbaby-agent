@@ -1,3 +1,4 @@
+import { createTaskTool } from "./task.js";
 import {
   InMemoryShellJobStore,
   type ShellJobRecord,
@@ -20,11 +21,7 @@ import type {
 } from "../core/tool-scheduler/index.js";
 import { Shell } from "../shell/index.js";
 import { createBashTool } from "./bash.js";
-import {
-  createTaskKillTool,
-  createTaskOutputTool,
-  ShellJobRegistry,
-} from "./shell-job-registry.js";
+import { ShellJobRegistry } from "./shell-job-registry.js";
 
 function createContext(workdir: string): ToolExecutionContext {
   const commandContext = { cwd: workdir, env: {}, kind: "host-local" as const };
@@ -113,8 +110,8 @@ setTimeout(() => process.exit(0), 2300);
       controller.abort();
       expect(registry.get(jobId, context.sessionId).status).toBe("running");
       await writeFile(path.join(workdir, "continue"), "");
-      const result = await createTaskOutputTool(registry).execute(
-        { block: true, job_id: jobId, wait_ms: 3500 },
+      const result = await createTaskTool(registry).execute(
+        { action: "output", block: true, job_id: jobId, wait_ms: 3500 },
         createContext(workdir),
       );
       expect(result.metadata).toMatchObject({ jobId, status: "timed_out" });
@@ -301,8 +298,13 @@ setTimeout(() => process.exit(0), 2300);
           context,
         );
         const result = background
-          ? await createTaskOutputTool(registry).execute(
-              { job_id: started.metadata?.jobId, block: true, wait_ms: 5000 },
+          ? await createTaskTool(registry).execute(
+              {
+                action: "output",
+                job_id: started.metadata?.jobId,
+                block: true,
+                wait_ms: 5000,
+              },
               context,
             )
           : started;
@@ -338,7 +340,7 @@ setTimeout(() => process.exit(0), 2300);
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
     const bash = createBashTool({ registry });
-    const output = createTaskOutputTool(registry);
+    const output = createTaskTool(registry);
     try {
       const context = createContext(workdir);
       const started = await bash.execute(
@@ -351,6 +353,7 @@ setTimeout(() => process.exit(0), 2300);
       );
       const result = await output.execute(
         {
+          action: "output",
           block: true,
           job_id: started.metadata?.jobId,
           wait_ms: 1_000,
@@ -370,7 +373,7 @@ setTimeout(() => process.exit(0), 2300);
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
     const bash = createBashTool({ registry });
-    const output = createTaskOutputTool(registry);
+    const output = createTaskTool(registry);
     try {
       const context = createContext(workdir);
       const started = await bash.execute(
@@ -379,6 +382,7 @@ setTimeout(() => process.exit(0), 2300);
       );
       const result = await output.execute(
         {
+          action: "output",
           block: true,
           job_id: started.metadata?.jobId,
           wait_ms: 1_000,
@@ -395,11 +399,11 @@ setTimeout(() => process.exit(0), 2300);
     }
   });
 
-  it("cancels a real background process through task_kill", async () => {
+  it("cancels a real background process through task", async () => {
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
     const bash = createBashTool({ registry });
-    const kill = createTaskKillTool(registry);
+    const kill = createTaskTool(registry);
     try {
       const context = createContext(workdir);
       const started = await bash.execute(
@@ -407,11 +411,16 @@ setTimeout(() => process.exit(0), 2300);
         context,
       );
       const result = await kill.execute(
-        { job_id: started.metadata?.jobId },
+        { action: "stop", job_id: started.metadata?.jobId },
         context,
       );
 
-      expect(result.metadata).toMatchObject({ status: "cancelled" });
+      expect(result.metadata).toMatchObject({
+        taskAction: "stop",
+        stopResult: "requested",
+        status: "cancelled",
+        stopReason: "model",
+      });
     } finally {
       await registry.dispose();
       await rm(workdir, { force: true, recursive: true });
@@ -422,7 +431,7 @@ setTimeout(() => process.exit(0), 2300);
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-root-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
     const bash = createBashTool({ registry });
-    const output = createTaskOutputTool(registry);
+    const output = createTaskTool(registry);
     const quote = (value: string): string =>
       `'${value.replaceAll("'", "'\\''")}'`;
     const scopedContext = (id: string): ToolExecutionContext => ({
@@ -538,7 +547,7 @@ const timer = setInterval(() => {
         ),
       );
       const resultB = await output.execute(
-        { block: true, job_id: jobB.jobId, wait_ms: 5_000 },
+        { action: "output", block: true, job_id: jobB.jobId, wait_ms: 5_000 },
         b,
       );
       expect(resultB.metadata).toMatchObject({

@@ -5157,6 +5157,107 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it.each([
+    ["default", "task_output", "output"],
+    ["default", "task_kill", "stop"],
+    ["full-access", "task_output", "output"],
+    ["full-access", "task_kill", "stop"],
+  ] as const)(
+    "restores %s legacy %s deny only for task action %s",
+    async (level, legacyName, deniedAction) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const actions = ["list", "output", "stop"] as const;
+      const reason = `Restored ${legacyName} restriction`;
+      const client = createInProcessUiBackendClient({
+        initialSnapshot: {
+          ...createInitialSnapshotWithTwoSessions(),
+          permission: {
+            level,
+            mode: "auto",
+            sessionRules: [
+              {
+                sessionId: "session_1",
+                rules: [
+                  {
+                    tool: legacyName,
+                    scope: "session",
+                    decision: "deny",
+                    reason,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        llmClient: createSequentialFakeLLMClient(
+          [
+            ...actions.map((action): InterfaceProviderStreamEvent[] => [
+              {
+                toolCallDeltas: [
+                  {
+                    id: `restored-task-${action}`,
+                    index: 0,
+                    name: "task",
+                    argumentsDelta: JSON.stringify(
+                      action === "list"
+                        ? { action }
+                        : { action, job_id: "missing-restored-job" },
+                    ),
+                  },
+                ],
+                finishReason: "tool_calls",
+              },
+            ]),
+            [
+              {
+                textDelta: "Checked restored restrictions.",
+                finishReason: "stop",
+              },
+            ],
+          ],
+          requests,
+        ),
+      });
+      const approvals: UiEvent[] = [];
+      client.subscribePermissionEvents((event) => approvals.push(event));
+      try {
+        await client.submitPromptAndWait("Check shell task management", {
+          sessionId: "session_1",
+        });
+        expect(approvals).toEqual([]);
+        const snapshot = await client.getSnapshot();
+        const session = snapshot.sessions.find(
+          (session) => session.id === "session_1",
+        );
+        if (!session) throw new Error("Missing restored session");
+        const parts = session.messages.flatMap((message) => message.parts);
+        for (const action of actions) {
+          const part = parts.find(
+            (part) =>
+              part.type === "tool-result" &&
+              part.result.callId === `restored-task-${action}`,
+          );
+          if (part?.type !== "tool-result")
+            throw new Error(`Missing task ${action} result`);
+          if (action === deniedAction) {
+            expect(part.result.error).toContain(reason);
+          } else if (action === "list") {
+            expect(part.result.error).toBeUndefined();
+            expect(part.result.output).toContain("matching shell jobs");
+          } else {
+            // The other action reaches the real Registry rather than inheriting the deny.
+            expect(part.result.error).toContain(
+              "unavailable in this session/context scope",
+            );
+            expect(part.result.error).not.toContain(reason);
+          }
+        }
+      } finally {
+        await client.dispose();
+      }
+    },
+  );
+
   it("performs full-access external writes without interactive approval", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(

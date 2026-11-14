@@ -167,7 +167,7 @@ describe("shell job cleanup ownership", () => {
     const internals = registry as unknown as {
       jobs: Map<
         string,
-        { terminalWaiters: Set<unknown>; confirmationWaiters?: Set<unknown> }
+        { resultWaiters: Set<unknown>; confirmationWaiters?: Set<unknown> }
       >;
     };
     for (let n = 0; n < 10; n++)
@@ -183,7 +183,7 @@ describe("shell job cleanup ownership", () => {
     });
     controller.abort();
     await expect(aborted).rejects.toThrow("cancelled");
-    expect(internals.jobs.get(job.jobId)?.terminalWaiters.size).toBe(0);
+    expect(internals.jobs.get(job.jobId)?.resultWaiters.size).toBe(0);
     for (let n = 0; n < 10; n++) {
       const result = await registry.stopByRootRun("run", "rewound");
       if (!result.settled) throw new Error("expected pending cleanup");

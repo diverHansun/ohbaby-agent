@@ -1,10 +1,16 @@
 import { ShellJobManagementError } from "./shell-job-recovery.js";
 import type { ProcessIdentity } from "../shell/process-identity.js";
 import fs from "node:fs";
+import { initialShellJobNoticeState, boundedText } from "./shell-job-notice.js";
 import {
-  shellJobStatusLine,
-  initialShellJobNoticeState,
-} from "./shell-job-notice.js";
+  SHELL_JOB_STATUSES,
+  ShellJobQueryError,
+  isShellJobUnsettled,
+} from "./shell-job-query.js";
+import {
+  decodeShellJobCursor,
+  encodeShellJobCursor,
+} from "./shell-job-reader.js";
 import {
   InMemoryShellJobStore,
   ShellJobCapacityError,
@@ -27,7 +33,6 @@ import {
 } from "../shell/process.js";
 import { beginSourceCleanup } from "../core/tool-scheduler/source-cleanup.js";
 import type { ToolExecutionOwner } from "../core/tool-scheduler/types.js";
-import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -35,19 +40,9 @@ import {
   CappedOutputFile,
   outputFileNotice,
 } from "../utils/capped-output-file.js";
-import type {
-  Tool,
-  ToolExecutionResult,
-} from "../core/tool-scheduler/index.js";
 import { DEFAULT_OUTPUT_TOKEN_LIMIT, truncateOutput } from "./utils/output.js";
-import {
-  getNumberParam,
-  getRequiredNonEmptyStringParam,
-  ToolParameterError,
-} from "./utils/params.js";
+import { ToolParameterError } from "./utils/params.js";
 
-const MAX_TASK_OUTPUT_WAIT_MS = 600_000;
-export const DEFAULT_TASK_OUTPUT_WAIT_MS = 30_000;
 export const OUTPUT_CAPTURE_CHAR_LIMIT = DEFAULT_OUTPUT_TOKEN_LIMIT * 4 + 1;
 export const SHELL_JOB_TERMINATION_GRACE_MS = 1_000;
 
@@ -106,6 +101,46 @@ export interface ShellJobSnapshot {
   readonly metadata: Readonly<Record<string, unknown>>;
 }
 
+export interface ShellJobListOptions {
+  readonly includeFinished?: boolean;
+  readonly status?: ShellJobStatus;
+  readonly limit?: number;
+  readonly cursor?: string;
+  readonly signal?: AbortSignal;
+}
+
+export type ShellJobSummary = Pick<
+  ShellJobRecord,
+  | "jobId"
+  | "command"
+  | "description"
+  | "mode"
+  | "stopReason"
+  | "cleanup"
+  | "createdAt"
+  | "startedAt"
+  | "endedAt"
+  | "promotedAt"
+  | "resultReadyAt"
+  | "settledAt"
+  | "timeoutMs"
+  | "exitCode"
+  | "signal"
+  | "trackingReleasedAt"
+  | "outputBytes"
+  | "outputComplete"
+  | "outputTruncated"
+  | "outputCheckpointAt"
+> & { readonly status: ShellJobStatus };
+
+export interface ShellJobList {
+  readonly jobs: readonly ShellJobSummary[];
+  readonly hasMore: boolean;
+  readonly nextCursor?: string;
+  readonly filteredCount: number;
+  readonly pendingStartCount: number;
+}
+
 export type ShellCleanupResult = RunCleanupSnapshot;
 
 export interface ShellJobRegistryOptions {
@@ -159,7 +194,7 @@ interface ShellJob {
   pendingPatch: ShellJobPatch;
   identityPending: boolean;
   settling: boolean;
-  resultPublished: boolean;
+  resultReadyAt: number | null;
   foregroundObserved: boolean;
   outputComplete: boolean | null;
   stopReason: ShellJobStopReason | null;
@@ -177,7 +212,7 @@ interface ShellJob {
   cleanupTask?: Promise<void>;
   resolveCleanup?: () => void;
   confirmationWaiters?: Set<() => void>;
-  readonly terminalWaiters: Set<() => void>;
+  readonly resultWaiters: Set<() => void>;
   observation?: ReturnType<typeof setTimeout>;
   outputDrain?: ReturnType<typeof setTimeout>;
   closed: boolean;
@@ -533,7 +568,7 @@ export class ShellJobRegistry {
       pendingPatch: {},
       identityPending: Boolean(child.pid && this.options.readProcessIdentity),
       settling: false,
-      resultPublished: false,
+      resultReadyAt: null,
       foregroundObserved: false,
       outputComplete: null,
       stopReason: null,
@@ -556,7 +591,7 @@ export class ShellJobRegistry {
       stderr: "",
       stdout: "",
       resolveTerminal,
-      terminalWaiters: new Set(),
+      resultWaiters: new Set(),
       sessionId: input.sessionId,
       status: "running",
       terminal,
@@ -814,6 +849,86 @@ export class ShellJobRegistry {
     await Promise.all(jobs.map((job) => job.persist.catch(() => undefined)));
   }
 
+  /** Model reads are always scoped to the trusted calling session and context. */
+  async list(
+    sessionId: string,
+    options: ShellJobListOptions = {},
+    contextScopeId?: string,
+  ): Promise<ShellJobList> {
+    const limit = options.limit ?? 20;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+      throw new ShellJobQueryError(
+        "Shell task page limit must be an integer from 1 to 100.",
+      );
+    if (
+      options.includeFinished !== undefined &&
+      typeof options.includeFinished !== "boolean"
+    )
+      throw new ShellJobQueryError("includeFinished must be a boolean.");
+    if (
+      options.status !== undefined &&
+      !SHELL_JOB_STATUSES.includes(options.status)
+    )
+      throw new ShellJobQueryError("Invalid task status filter.");
+    if (options.status !== undefined && options.includeFinished !== undefined)
+      throw new ShellJobQueryError(
+        "status and includeFinished cannot be combined.",
+      );
+    const scope = { sessionId, contextScopeId: contextScopeId ?? null };
+    const filter = {
+      includeFinished: options.includeFinished ?? true,
+      ...(options.status ? { statuses: [options.status] } : {}),
+    };
+    const before = decodeShellJobCursor(options.cursor, scope, filter);
+    options.signal?.throwIfAborted();
+    await this.refreshLocalOwner(sessionId, scope.contextScopeId);
+    await this.options.refreshOwner?.(sessionId, scope.contextScopeId);
+    options.signal?.throwIfAborted();
+    const page = this.store.query({ scope, ...filter, limit, before });
+    // Project saved metadata only: listing does not open or stat individual logs.
+    const jobs = page.rows.map((record): ShellJobSummary => {
+      if (record.status === null)
+        throw new ShellJobQueryError(
+          "Task launch registration has not finished.",
+        );
+      return {
+        jobId: record.jobId,
+        command: boundedText(record.command, 1024),
+        description:
+          record.description === null
+            ? null
+            : boundedText(record.description, 512),
+        mode: record.mode,
+        status: record.status,
+        stopReason: record.stopReason,
+        cleanup: record.cleanup,
+        createdAt: record.createdAt,
+        startedAt: record.startedAt,
+        endedAt: record.endedAt,
+        promotedAt: record.promotedAt,
+        resultReadyAt: record.resultReadyAt,
+        settledAt: record.settledAt,
+        timeoutMs: record.timeoutMs,
+        exitCode: record.exitCode,
+        signal: record.signal,
+        trackingReleasedAt: record.trackingReleasedAt,
+        outputBytes: record.outputBytes,
+        outputComplete: record.outputComplete,
+        outputTruncated: record.outputTruncated,
+        outputCheckpointAt: record.outputCheckpointAt,
+      };
+    });
+    return {
+      jobs,
+      hasMore: page.hasMore,
+      ...(page.next
+        ? { nextCursor: encodeShellJobCursor(scope, filter, page.next) }
+        : {}),
+      filteredCount: page.filteredCount,
+      pendingStartCount: page.pendingStartCount,
+    };
+  }
+
   async cleanupScope(
     sessionId: string,
     contextScopeId: string,
@@ -1052,57 +1167,92 @@ export class ShellJobRegistry {
     },
     contextScopeId?: string,
   ): Promise<ShellJobSnapshot> {
+    const record = this.getOwnedRecord(jobId, sessionId, contextScopeId);
     const job = this.jobs.get(jobId);
-    if (!job)
-      return this.snapshotRecord(
-        this.getOwnedRecord(jobId, sessionId, contextScopeId),
-      );
-    this.getOwnedJob(jobId, sessionId, contextScopeId);
-    if (input.block && !isTerminal(job.status)) {
-      if (input.signal?.aborted) {
-        throw new Error("Task output wait was cancelled.");
-      }
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        let unsubscribeSteer: (() => void) | undefined;
-        const finish = (error?: Error): void => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          clearTimeout(timer);
-          input.signal?.removeEventListener("abort", abortHandler);
-          job.terminalWaiters.delete(onTerminal);
-          unsubscribeSteer?.();
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
-        };
-        const abortHandler = (): void => {
-          finish(new Error("Task output wait was cancelled."));
-        };
-        const timer = setTimeout(() => {
-          finish();
-        }, input.waitMs);
-        const onTerminal = (): void => {
-          finish();
-        };
-        job.terminalWaiters.add(onTerminal);
-        if (input.subscribeSteer)
-          void input
-            .subscribeSteer(onTerminal)
-            .then((unsubscribe) => {
-              if (settled) unsubscribe();
-              else unsubscribeSteer = unsubscribe;
-            })
-            .catch(() => undefined);
-        input.signal?.addEventListener("abort", abortHandler, { once: true });
-        if (input.signal?.aborted) abortHandler();
-      });
+    const ready = (): boolean =>
+      job
+        ? job.resultReadyAt !== null
+        : this.getOwnedRecord(jobId, sessionId, contextScopeId)
+            .resultReadyAt !== null;
+    let waitReason: "ready" | "timeout" | "steer" | undefined;
+    input.signal?.throwIfAborted();
+    if (input.block) {
+      waitReason = ready()
+        ? "ready"
+        : await new Promise<"ready" | "timeout" | "steer">(
+            (resolve, reject) => {
+              let settled = false;
+              let unsubscribeSteer: (() => void) | undefined;
+              let poll: ReturnType<typeof setTimeout> | undefined;
+              const finish = (
+                reason: "ready" | "timeout" | "steer",
+                error?: unknown,
+              ): void => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                clearTimeout(poll);
+                input.signal?.removeEventListener("abort", onAbort);
+                job?.resultWaiters.delete(onReady);
+                unsubscribeSteer?.();
+                if (error)
+                  reject(
+                    error instanceof Error
+                      ? error
+                      : new Error("Task output wait failed.", { cause: error }),
+                  );
+                else resolve(reason);
+              };
+              const onReady = (): void => {
+                finish("ready");
+              };
+              const onAbort = (): void => {
+                finish("timeout", new Error("Task output wait was cancelled."));
+              };
+              const timer = setTimeout(() => {
+                finish("timeout");
+              }, input.waitMs);
+              if (job) job.resultWaiters.add(onReady);
+              else {
+                // Only foreign/saved tasks need polling, and only while this read waits.
+                const check = (): void => {
+                  try {
+                    if (ready()) finish("ready");
+                    else poll = setTimeout(check, 100);
+                  } catch (error) {
+                    finish("timeout", error);
+                  }
+                };
+                check();
+              }
+              if (input.subscribeSteer)
+                void input
+                  .subscribeSteer(() => {
+                    finish("steer");
+                  })
+                  .then((unsubscribe) => {
+                    if (settled) unsubscribe();
+                    else unsubscribeSteer = unsubscribe;
+                  })
+                  .catch((error: unknown) => {
+                    finish("steer", error);
+                  });
+              input.signal?.addEventListener("abort", onAbort, { once: true });
+              if (input.signal?.aborted) onAbort();
+            },
+          );
     }
-    return this.snapshot(job);
+    const snapshot = job
+      ? this.snapshot(job)
+      : this.snapshotRecord(
+          input.block
+            ? this.getOwnedRecord(jobId, sessionId, contextScopeId)
+            : record,
+        );
+    return {
+      ...snapshot,
+      metadata: { ...snapshot.metadata, ...(waitReason ? { waitReason } : {}) },
+    };
   }
 
   hasLocalHandle(jobId: string): boolean {
@@ -1162,19 +1312,43 @@ export class ShellJobRegistry {
     stopReason: ShellJobStopReason = "model",
   ): Promise<ShellJobSnapshot> {
     const job = this.jobs.get(jobId);
-    if (!job) {
-      this.getOwnedRecord(jobId, sessionId, contextScopeId);
-      if (this.options.recovery) {
+    let snapshot: ShellJobSnapshot;
+    let stopResult:
+      | "requested"
+      | "already_finished"
+      | "tracking_released"
+      | "cleanup_pending";
+    if (job) {
+      this.getOwnedJob(jobId, sessionId, contextScopeId);
+      const accepted = await this.stopLive(job, stopReason);
+      snapshot = this.snapshot(job);
+      stopResult = accepted
+        ? "requested"
+        : job.cleanup === "confirmed" && job.releaseComplete
+          ? "already_finished"
+          : job.terminationStarted
+            ? "requested"
+            : "cleanup_pending";
+    } else {
+      let record = this.getOwnedRecord(jobId, sessionId, contextScopeId);
+      let accepted = false;
+      if (record.trackingReleasedAt === null && this.options.recovery) {
         await this.options.recovery.assertCanManage(jobId);
-        return this.snapshotRecord(await this.options.recovery.recover(jobId));
+        const recovered = await this.options.recovery.recoverForUser(jobId);
+        record = recovered.record;
+        accepted = recovered.accepted;
       }
-      return this.snapshotRecord(
-        this.getOwnedRecord(jobId, sessionId, contextScopeId),
-      );
+      snapshot = this.snapshotRecord(record);
+      stopResult =
+        record.trackingReleasedAt !== null
+          ? "tracking_released"
+          : accepted
+            ? "requested"
+            : isShellJobUnsettled(record)
+              ? "cleanup_pending"
+              : "already_finished";
     }
-    this.getOwnedJob(jobId, sessionId, contextScopeId);
-    await this.stopLive(job, stopReason);
-    return this.snapshot(job);
+    return { ...snapshot, metadata: { ...snapshot.metadata, stopResult } };
   }
 
   cleanupSession(sessionId: string): Promise<ShellCleanupResult> {
@@ -1332,10 +1506,12 @@ export class ShellJobRegistry {
   }
 
   private resultReadyPatch(job: ShellJob): ShellJobPatch {
-    if (job.resultPublished) return {};
-    job.resultPublished = true;
+    if (job.resultReadyAt !== null) return {};
+    job.resultReadyAt = Date.now();
+    for (const waiter of job.resultWaiters) waiter();
+    job.resultWaiters.clear();
     return {
-      resultReadyAt: Date.now(),
+      resultReadyAt: job.resultReadyAt,
       noticeState: initialShellJobNoticeState({
         mode: job.background ? "background" : "foreground",
         status: job.status,
@@ -1456,13 +1632,12 @@ export class ShellJobRegistry {
     contextScopeId?: string,
   ): ShellJobRecord {
     const record = this.store.get(jobId);
-    if (!record) throw new ToolParameterError(`Unknown shell job "${jobId}".`);
     if (
-      record.sessionId !== sessionId ||
+      record?.sessionId !== sessionId ||
       record.contextScopeId !== (contextScopeId ?? null)
     )
       throw new ToolParameterError(
-        `Shell job "${jobId}" is not owned by this session/context scope.`,
+        `Shell job "${jobId}" is unavailable in this session/context scope.`,
       );
     return record;
   }
@@ -1517,6 +1692,8 @@ export class ShellJobRegistry {
       signal: record.signal as NodeJS.Signals | null,
       metadata: {
         jobId: record.jobId,
+        command: record.command,
+        description: record.description,
         mode: record.mode,
         truncated,
         promotedAt: record.promotedAt,
@@ -1528,6 +1705,11 @@ export class ShellJobRegistry {
         status: record.status,
         cleanup: record.cleanup,
         stopReason: record.stopReason,
+        tailAvailable:
+          record.mode === "background" && record.outputTail !== null,
+        resultReadyAt: record.resultReadyAt,
+        settledAt: record.settledAt,
+        trackingReleasedAt: record.trackingReleasedAt,
         outputBytes: record.outputBytes,
         startedAt: record.startedAt,
         endedAt: record.endedAt,
@@ -1547,11 +1729,13 @@ export class ShellJobRegistry {
   ): ShellJob {
     const job = this.jobs.get(jobId);
     if (!job) {
-      throw new ToolParameterError(`Unknown shell job "${jobId}".`);
+      throw new ToolParameterError(
+        `Shell job "${jobId}" is unavailable in this session/context scope.`,
+      );
     }
     if (job.sessionId !== sessionId || job.contextScopeId !== contextScopeId) {
       throw new ToolParameterError(
-        `Shell job "${jobId}" is not owned by this session/context scope.`,
+        `Shell job "${jobId}" is unavailable in this session/context scope.`,
       );
     }
     return job;
@@ -1568,6 +1752,8 @@ export class ShellJobRegistry {
       promotedAt: job.promotedAt,
       timeoutMs: job.timeoutMs,
       deadline: job.timeoutMs === null ? null : job.startedAt + job.timeoutMs,
+      tailAvailable: job.background,
+      resultReadyAt: job.resultReadyAt,
       outputBytes: job.outputBytes,
       startedAt: job.startedAt,
       outputComplete: job.outputComplete,
@@ -1628,8 +1814,6 @@ export class ShellJobRegistry {
     job.exitCode = exitCode;
     job.signal = signal;
     job.resolveTerminal();
-    for (const waiter of job.terminalWaiters) waiter();
-    job.terminalWaiters.clear();
     this.persist(job, {
       status,
       exitCode,
@@ -1789,144 +1973,4 @@ export class ShellJobRegistry {
     void job.persist.then(signalProcess, signalProcess);
     this.finish(job, reason, job.exitCode ?? null, job.signal ?? null);
   }
-}
-
-function snapshotResult(
-  snapshot: ShellJobSnapshot,
-  includeStatus = false,
-): ToolExecutionResult {
-  if (!includeStatus)
-    return { metadata: snapshot.metadata, output: snapshot.output };
-  const file = snapshot.metadata.outputFile as
-    | { status?: string; path?: string }
-    | undefined;
-  let path: string | null = null;
-  if (file?.status !== "unavailable" && file?.path) {
-    try {
-      if (fs.statSync(file.path).isFile()) path = file.path;
-    } catch {
-      /* unavailable */
-    }
-  }
-  const line = shellJobStatusLine({
-    status: snapshot.status,
-    outputBytes:
-      typeof snapshot.metadata.outputBytes === "number"
-        ? snapshot.metadata.outputBytes
-        : null,
-    outputComplete:
-      typeof snapshot.metadata.outputComplete === "boolean"
-        ? snapshot.metadata.outputComplete
-        : null,
-    outputCheckpointAt:
-      typeof snapshot.metadata.outputCheckpointAt === "number"
-        ? snapshot.metadata.outputCheckpointAt
-        : null,
-    outputPath: path,
-    stopReason:
-      typeof snapshot.metadata.stopReason === "string"
-        ? snapshot.metadata.stopReason
-        : null,
-    elapsedMs:
-      typeof snapshot.metadata.startedAt === "number"
-        ? Math.max(
-            0,
-            (typeof snapshot.metadata.endedAt === "number"
-              ? snapshot.metadata.endedAt
-              : Date.now()) - snapshot.metadata.startedAt,
-          )
-        : null,
-    cleanup:
-      typeof snapshot.metadata.cleanup === "string"
-        ? snapshot.metadata.cleanup
-        : null,
-  });
-  return { metadata: snapshot.metadata, output: `${line}\n${snapshot.output}` };
-}
-
-export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
-  return withToolAdmission(
-    {
-      annotations: { readOnlyHint: true },
-      category: "subagent-control",
-      description:
-        "Read a shell job's current bounded tail-output snapshot. With block=true, wait up to wait_ms for the job to finish; wait_ms only limits this read and never changes the bash job timeout.",
-      name: "task_output",
-      parametersJsonSchema: {
-        additionalProperties: false,
-        properties: {
-          block: { default: false, type: "boolean" },
-          job_id: { type: "string" },
-          wait_ms: {
-            default: DEFAULT_TASK_OUTPUT_WAIT_MS,
-            maximum: MAX_TASK_OUTPUT_WAIT_MS,
-            minimum: 1,
-            type: "integer",
-          },
-        },
-        required: ["job_id"],
-        type: "object",
-      },
-      source: "builtin",
-      timeoutOwner: "tool",
-      async execute(params, context): Promise<ToolExecutionResult> {
-        const block = params.block ?? false;
-        if (typeof block !== "boolean") {
-          throw new ToolParameterError(
-            'Expected parameter "block" to be a boolean.',
-          );
-        }
-        const waitMs = getNumberParam(params, "wait_ms", {
-          defaultValue: DEFAULT_TASK_OUTPUT_WAIT_MS,
-          integer: true,
-          max: MAX_TASK_OUTPUT_WAIT_MS,
-          min: 1,
-        });
-        return snapshotResult(
-          await registry.output(
-            getRequiredNonEmptyStringParam(params, "job_id"),
-            context.sessionId,
-            {
-              block,
-              signal: context.signal,
-              waitMs,
-              subscribeSteer: context.subscribeSteer,
-            },
-            context.contextScopeId,
-          ),
-          true,
-        );
-      },
-    },
-    { shellJobController: registry, capacity: "control", plan: () => [] },
-  );
-}
-
-export function createTaskKillTool(registry: ShellJobRegistry): Tool {
-  return withToolAdmission(
-    {
-      category: "subagent-control",
-      description:
-        "Cancel a running shell job (stop/kill are equivalent). A cancelled job is distinct from an automatically timed_out job; killing an already terminal job is idempotent.",
-      name: "task_kill",
-      parametersJsonSchema: {
-        additionalProperties: false,
-        properties: { job_id: { type: "string" } },
-        required: ["job_id"],
-        type: "object",
-      },
-      source: "builtin",
-      timeoutOwner: "tool",
-      async execute(params, context): Promise<ToolExecutionResult> {
-        return snapshotResult(
-          await registry.kill(
-            getRequiredNonEmptyStringParam(params, "job_id"),
-            context.sessionId,
-            context.contextScopeId,
-          ),
-        );
-      },
-    },
-    { shellJobController: registry, capacity: "control", plan: () => [] },
-  );
 }

@@ -1083,6 +1083,7 @@ export function createToolScheduler(
       return makeCancelledResult(call);
     }
     let decision: PermissionDecision;
+    const tool = registry.get(call.toolName);
     try {
       decision = await waitForAbortable(
         () =>
@@ -1100,6 +1101,9 @@ export function createToolScheduler(
               messageId: call.messageId,
             },
             permissionState.getState(),
+            tool
+              ? trustedToolAdmission(tool)?.legacyDenyToolName?.(context.params)
+              : undefined,
           ),
         controller.signal,
       );
@@ -1716,6 +1720,7 @@ export function createToolScheduler(
           messageId: call.messageId,
         },
         permissionState.getState(),
+        admission?.legacyDenyToolName?.(prepared.permissionContext.params),
       );
       if (decision.type === "deny") {
         transition(call, "rejected");
@@ -1845,14 +1850,12 @@ export function createToolScheduler(
     tools: Record<string, boolean> | undefined,
     isSubagent: boolean | undefined,
   ): boolean {
-    return ["task_output", "task_kill"].every((name) => {
-      const tool = registry.get(name);
-      return (
-        tool !== undefined &&
-        trustedToolAdmission(tool)?.shellJobController === jobRegistry &&
-        isToolAvailableToAgent(tool, tools, isSubagent)
-      );
-    });
+    const tool = registry.get("task");
+    return (
+      tool !== undefined &&
+      trustedToolAdmission(tool)?.shellJobController === jobRegistry &&
+      isToolAvailableToAgent(tool, tools, isSubagent)
+    );
   }
 
   async function createPermissionContext(
@@ -2026,7 +2029,11 @@ export function createToolScheduler(
           result: makeResult(call, "error", {
             error: createError(
               "ToolNotFoundError",
-              `Tool not found: ${request.toolName}`,
+              ["task_output", "task_kill", "task_list"].includes(
+                request.toolName,
+              )
+                ? `Tool ${request.toolName} has been replaced by task. Use task with action=${request.toolName === "task_output" ? "output" : request.toolName === "task_kill" ? "stop" : "list"}; the retired call was not executed.`
+                : `Tool not found: ${request.toolName}`,
             ),
           }),
         };

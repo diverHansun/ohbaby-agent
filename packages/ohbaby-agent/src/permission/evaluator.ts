@@ -109,10 +109,18 @@ function evaluateLevelFallback(
 export function evaluatePermission(
   call: PermissionCall,
   state: PermissionState,
+  legacyDenyToolName?: string,
 ): PermissionDecision {
   const classification = classifyPermissionCall(call);
   const sessionRules = state.sessionRules.get(call.sessionId) ?? [];
-  const denyDecision = evaluateSessionDenyRules(call, sessionRules);
+  const denyDecision =
+    evaluateSessionDenyRules(call, sessionRules) ??
+    (legacyDenyToolName
+      ? evaluateSessionDenyRules(
+          { ...call, toolName: legacyDenyToolName },
+          sessionRules,
+        )
+      : undefined);
   if (denyDecision) {
     return denyDecision;
   }

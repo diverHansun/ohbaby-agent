@@ -1,3 +1,4 @@
+import { createTaskTool } from "./task.js";
 import { ShellJobRecovery } from "./shell-job-recovery.js";
 import { shellJobFixture } from "./fixtures/shell-job.js";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -18,10 +19,7 @@ import {
   DatabaseShellJobStore,
   InMemoryShellJobStore,
 } from "./shell-job-store.js";
-import {
-  createTaskOutputTool,
-  ShellJobRegistry,
-} from "./shell-job-registry.js";
+import { ShellJobRegistry } from "./shell-job-registry.js";
 
 afterEach(() => {
   closeDatabase();
@@ -54,6 +52,139 @@ const timer = setInterval(() => {
 }
 
 describe("shell job persistence", () => {
+  it("makes recovered lost output ready and preserves readiness after abandonment", async () => {
+    vi.useFakeTimers();
+    const store = new InMemoryShellJobStore();
+    const signalGroup = vi.fn();
+    const killTree = vi.fn();
+    const recovery = new ShellJobRecovery({
+      store,
+      backend: { ownerId: "new", pid: 20, startToken: "new-owner" },
+      inspect: (): Promise<ProcessIdentity> =>
+        Promise.resolve({ state: "absent" }),
+      probeGroup: (): "unknown" => "unknown",
+      signalGroup,
+    });
+    const registry = new ShellJobRegistry({ store, recovery, killTree });
+    const tool = createTaskTool(registry);
+    const context = {
+      sessionId: "s",
+      callId: "recovered-read",
+      messageId: "m",
+      signal: new AbortController().signal,
+    };
+    const input = {
+      action: "output",
+      job_id: "orphan",
+      block: true,
+      wait_ms: 5000,
+    };
+    try {
+      await store.insert(shellJobFixture({ jobId: "orphan", cleanup: null }));
+      const waiting = tool.execute(input, context);
+      const recovered = await recovery.recover("orphan");
+      expect(recovered).toMatchObject({
+        status: "lost",
+        cleanup: "unconfirmed",
+        trackingReleasedAt: null,
+        outputComplete: false,
+      });
+      expect(recovered.resultReadyAt).toEqual(expect.any(Number));
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await waiting).metadata).toMatchObject({
+        status: "lost",
+        waitReason: "ready",
+        resultReadyAt: recovered.resultReadyAt,
+      });
+
+      const abandoned = await recovery.abandon("orphan", true);
+      expect(abandoned.trackingReleasedAt).toEqual(expect.any(Number));
+      expect(abandoned.resultReadyAt).toBe(recovered.resultReadyAt);
+      // No clock advancement: an abandoned recovered result is already readable.
+      const result = await tool.execute(input, context);
+      expect(result.metadata).toMatchObject({
+        status: "lost",
+        cleanup: "unconfirmed",
+        waitReason: "ready",
+        resultReadyAt: recovered.resultReadyAt,
+        trackingReleasedAt: abandoned.trackingReleasedAt,
+      });
+      expect(signalGroup).not.toHaveBeenCalled();
+      expect(killTree).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds foreign output waits and observes persisted readiness without taking signal ownership", async () => {
+    vi.useFakeTimers();
+    const store = new InMemoryShellJobStore();
+    const killTree = vi.fn();
+    const registry = new ShellJobRegistry({ store, killTree });
+    const tool = createTaskTool(registry);
+    const context = {
+      sessionId: "s",
+      callId: "foreign-read",
+      messageId: "m",
+      signal: new AbortController().signal,
+    };
+    try {
+      await store.insert(shellJobFixture({ jobId: "foreign", cleanup: null }));
+      const first = tool.execute(
+        { action: "output", job_id: "foreign", block: true, wait_ms: 20 },
+        context,
+      );
+      await vi.advanceTimersByTimeAsync(20);
+      expect((await first).metadata).toMatchObject({
+        taskAction: "output",
+        status: "running",
+        waitReason: "timeout",
+        resultReadyAt: null,
+      });
+      expect(store.get("foreign")?.status).toBe("running");
+
+      let settled = false;
+      const second = Promise.resolve(
+        tool.execute(
+          { action: "output", job_id: "foreign", block: true, wait_ms: 5000 },
+          context,
+        ),
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
+      await store.update("foreign", {
+        status: "completed",
+        endedAt: Date.now(),
+        cleanup: "confirmed",
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      expect(settled).toBe(false);
+      await store.update("foreign", {
+        outputTail: "foreign final tail",
+        outputComplete: true,
+        resultReadyAt: Date.now(),
+        settledAt: Date.now(),
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      const result = await second;
+      expect(result.output).toContain("foreign final tail");
+      expect(result.metadata).toMatchObject({
+        taskAction: "output",
+        status: "completed",
+        waitReason: "ready",
+        outputComplete: true,
+      });
+      expect(result.metadata?.resultReadyAt).toEqual(expect.any(Number));
+      expect(killTree).not.toHaveBeenCalled();
+      expect(store.get("foreign")?.ownerId).toBe("old");
+    } finally {
+      await registry.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps failed SQLite promotion foreground and suppresses its background notice", async () => {
     const dir = await mkdtemp(join(tmpdir(), "shell-job-promotion-failure-"));
     let registry: ShellJobRegistry | undefined;
@@ -534,8 +665,8 @@ describe("shell job persistence", () => {
       store,
       killTree: (): { status: "confirmed" } => ({ status: "confirmed" }),
     });
-    const result = await createTaskOutputTool(reader).execute(
-      { job_id: "history" },
+    const result = await createTaskTool(reader).execute(
+      { action: "output", job_id: "history" },
       {
         sessionId: "session",
         messageId: "m",

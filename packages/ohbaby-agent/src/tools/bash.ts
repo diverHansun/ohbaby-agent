@@ -189,7 +189,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
     const foregroundTimeout = `For pure foreground execution, timeout defaults to ${String(DEFAULT_FOREGROUND_TIMEOUT_MS)}ms and has a maximum of ${String(MAX_FOREGROUND_TIMEOUT_MS)}ms.`;
     if (!canManageBackground)
       return `${commandDescription} This role can only run foreground commands. Background task management is unavailable. Omit run_in_background, auto_background and wait_ms. ${foregroundTimeout}`;
-    const backgroundDescription = `Set run_in_background=true to start a background job immediately. Completion is reported automatically. Do not poll or sleep for completion. Use task_output when you need the job's output and task_kill to stop it. Background jobs end when their managing service stops.`;
+    const backgroundDescription = `Set run_in_background=true to start a background job immediately. Completion is reported automatically. Do not poll or sleep for completion. Use task with action=list to find your jobs, action=output to read or wait for a result, and action=stop to stop one. Background jobs end when their managing service stops.`;
     const automaticDescription = autoBackgroundEnabled
       ? `By default, a foreground command still running after ${String(defaultWaitMs)}ms moves to the background and returns its job_id. Use wait_ms to set this wait for one call, or set auto_background=false for pure foreground execution. Omit both options when starting an explicit background job.`
       : "Automatic backgrounding is disabled. Omit wait_ms and leave auto_background unset or false.";

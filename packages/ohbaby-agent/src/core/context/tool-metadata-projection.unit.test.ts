@@ -266,6 +266,69 @@ describe("tool metadata projection", () => {
     });
   });
 
+  it.each(["output", "stop"])(
+    "keeps task %s facts separate from operation acceptance",
+    (taskAction) => {
+      const facts = {
+        taskAction,
+        jobId: "job_1",
+        status: "cancelled",
+        stopReason: "model",
+        cleanup: "unconfirmed",
+        exitCode: null,
+        outputBytes: 0,
+        outputComplete: false,
+        ...(taskAction === "stop" ? { stopResult: "requested" } : {}),
+      };
+      expect(
+        projectToolMetadataForModel("task", {
+          ...facts,
+          output: "raw output",
+          outcome: "success",
+        }),
+      ).toEqual(facts);
+    },
+  );
+
+  it("bounds task list summaries and preserves pagination without a single job result", () => {
+    const projected = projectToolMetadataForModel("task", {
+      taskAction: "list",
+      jobId: "not-a-single-job",
+      hasMore: true,
+      nextCursor: "opaque-next-page",
+      filteredCount: 101,
+      pendingStartCount: 2,
+      jobs: Array.from({ length: 101 }, (_, index) => ({
+        jobId: `job_${String(index)}`,
+        status: "timed_out",
+        cleanup: "unconfirmed",
+        output: "full log",
+        outputTail: "tail",
+        ownerId: "private-backend",
+      })),
+    });
+    expect(projected).toMatchObject({
+      taskAction: "list",
+      hasMore: true,
+      nextCursor: "opaque-next-page",
+      filteredCount: 101,
+      pendingStartCount: 2,
+    });
+    expect(projected).not.toHaveProperty("jobId");
+    expect(projected.jobs).toHaveLength(100);
+    expect((projected.jobs as unknown[])[0]).toEqual({
+      jobId: "job_0",
+      status: "timed_out",
+      cleanup: "unconfirmed",
+    });
+    expect(
+      projectToolMetadataForModel("task", {
+        taskAction: "unknown",
+        jobId: "j",
+      }),
+    ).toEqual({});
+  });
+
   it("includes subagent metadata in model-visible tool result content", () => {
     expect(
       formatToolResultContentForModel({

@@ -1,3 +1,4 @@
+import { createTaskTool } from "./task.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,11 +12,7 @@ import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import { createPermissionState } from "../permission/index.js";
 import { createHostLocalEnvironment } from "../adapters/ui-runtime/host-local-environment.js";
 import { createBashTool } from "./bash.js";
-import {
-  ShellJobRegistry,
-  createTaskKillTool,
-  createTaskOutputTool,
-} from "./shell-job-registry.js";
+import { ShellJobRegistry } from "./shell-job-registry.js";
 import { InMemoryShellJobStore } from "./shell-job-store.js";
 
 class Child extends EventEmitter {
@@ -73,7 +70,7 @@ function fixture(
     bus,
     agentTools: {
       getAgentConfig: (name) =>
-        name === "foreground-only" ? { tools: { task_kill: false } } : {},
+        name === "foreground-only" ? { tools: { task: false } } : {},
     },
     permissionState: createPermissionState({
       bus,
@@ -109,8 +106,7 @@ function fixture(
     },
   });
   scheduler.register(bash);
-  scheduler.register(createTaskKillTool(registry));
-  scheduler.register(createTaskOutputTool(registry));
+  scheduler.register(createTaskTool(registry));
   const independentExecute = vi.fn(() => ({ output: "independent" }));
   scheduler.register(
     withToolAdmission(
@@ -166,7 +162,7 @@ describe("Bash cleanup through scheduler", () => {
       expect(tools.find((tool) => tool.name === "bash")?.description).toContain(
         "only run foreground commands",
       );
-      expect(tools.some((tool) => tool.name === "task_kill")).toBe(false);
+      expect(tools.some((tool) => tool.name === "task")).toBe(false);
       for (const [index, params] of [
         { run_in_background: true },
         { auto_background: true },
@@ -197,7 +193,7 @@ describe("Bash cleanup through scheduler", () => {
     const f = fixture();
     try {
       f.scheduler.register({
-        name: "task_kill",
+        name: "task",
         description: "Unrelated tool with the same name",
         source: "builtin",
         parametersJsonSchema: {},
@@ -257,8 +253,8 @@ describe("Bash cleanup through scheduler", () => {
       const kill = await f.scheduler.execute(
         f.request("kill-converted", {
           runId: "later-run",
-          toolName: "task_kill",
-          params: { job_id: launch.metadata?.jobId },
+          toolName: "task",
+          params: { action: "stop", job_id: launch.metadata?.jobId },
         }),
       );
       expect(kill.metadata).toMatchObject({
@@ -306,8 +302,8 @@ describe("Bash cleanup through scheduler", () => {
       await f.scheduler.execute(
         f.request("stop-promoted", {
           runId: "later-run",
-          toolName: "task_kill",
-          params: { job_id: jobId },
+          toolName: "task",
+          params: { action: "stop", job_id: jobId },
         }),
       );
       expect(f.scheduler.getRunCleanup("run-1").confirmed).toBe(true);
@@ -429,8 +425,8 @@ describe("Bash cleanup through scheduler", () => {
       for (const jobId of jobs) {
         const killed = await f.scheduler.execute(
           f.request(`kill-${String(jobId)}`, {
-            toolName: "task_kill",
-            params: { job_id: jobId },
+            toolName: "task",
+            params: { action: "stop", job_id: jobId },
           }),
         );
         expect(killed.status).toBe("success");
@@ -439,8 +435,8 @@ describe("Bash cleanup through scheduler", () => {
       for (const jobId of jobs) {
         const output = await f.scheduler.execute(
           f.request(`output-${String(jobId)}`, {
-            toolName: "task_output",
-            params: { job_id: jobId },
+            toolName: "task",
+            params: { action: "output", job_id: jobId },
           }),
         );
         expect(output.metadata).toMatchObject({
@@ -451,8 +447,8 @@ describe("Bash cleanup through scheduler", () => {
           (
             await f.scheduler.execute(
               f.request(`again-${String(jobId)}`, {
-                toolName: "task_kill",
-                params: { job_id: jobId },
+                toolName: "task",
+                params: { action: "stop", job_id: jobId },
               }),
             )
           ).status,
@@ -505,8 +501,8 @@ describe("Bash cleanup through scheduler", () => {
       const [query] = await f.scheduler.executeBatch({
         calls: [
           f.request("query", {
-            toolName: "task_output",
-            params: { job_id: jobId },
+            toolName: "task",
+            params: { action: "output", job_id: jobId },
           }),
         ],
         observer: {
@@ -522,11 +518,13 @@ describe("Bash cleanup through scheduler", () => {
       const unauthorized = await f.scheduler.execute(
         f.request("unauthorized", {
           sessionId: "child-old",
-          toolName: "task_output",
-          params: { job_id: jobId },
+          toolName: "task",
+          params: { action: "output", job_id: jobId },
         }),
       );
-      expect(unauthorized.error?.message).toContain("not owned");
+      expect(unauthorized.error?.message).toContain(
+        "unavailable in this session/context scope",
+      );
       await vi.advanceTimersByTimeAsync(20);
       expect((await queued).error?.message).toContain("unconfirmed");
       expect(f.killTree).toHaveBeenCalledTimes(1);

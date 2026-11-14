@@ -80,8 +80,7 @@ describe("AgentManager", () => {
       skill: true,
       skill_resource: true,
       agent: false,
-      task_kill: true,
-      task_output: true,
+      task: true,
       todo_read: true,
       todo_write: true,
       web_fetch: true,
@@ -93,11 +92,41 @@ describe("AgentManager", () => {
         manager.getAgentToolsConfig(role, { isSubagent: true }),
       ).toMatchObject({
         bash: true,
-        task_kill: true,
-        task_output: true,
+        task: true,
       });
     }
   });
+
+  it.each(["task_output", "task_kill", "task_list"])(
+    "rejects legacy %s only when the configured role is selected",
+    async (legacyTool) => {
+      for (const field of ["include", "exclude"] as const) {
+        const tools = { [field]: ["bash", legacyTool] };
+        const registry = new AgentRegistry({
+          configLoader: (): AgentsConfig => ({
+            agents: {
+              legacy: {
+                name: "legacy",
+                mode: "primary",
+                tools,
+              },
+            },
+          }),
+        });
+        const manager = new AgentManager({ registry });
+        await expect(manager.initialize()).resolves.toBeUndefined();
+        await expect(manager.getRuntimeAgent("build")).resolves.toBeDefined();
+        expect(manager.get("legacy")?.tools).toEqual(tools);
+        expect(() => manager.getAgentToolsConfig("legacy")).toThrow(
+          `tools.${field}: ${legacyTool}`,
+        );
+        expect(() => manager.getAgentConfig("legacy")).toThrow(/use task/);
+        await expect(manager.getRuntimeAgent("legacy")).rejects.toThrow(
+          /review access/,
+        );
+      }
+    },
+  );
 
   it("rejects primary agents when requested as subagents", async () => {
     const registry = new AgentRegistry({

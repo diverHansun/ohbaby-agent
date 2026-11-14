@@ -1,3 +1,4 @@
+import { createTaskTool } from "../../tools/task.js";
 import { analyzeShellCommand } from "../../shell/analysis/index.js";
 import type {
   ChildProcess,
@@ -18,10 +19,7 @@ import { createBuiltinTools } from "../../tools/index.js";
 import type { ResourceAccess } from "./resources.js";
 import { withToolAdmission, type ToolAdmission } from "./tool-admission.js";
 import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
-import {
-  createTaskOutputTool,
-  ShellJobRegistry,
-} from "../../tools/shell-job-registry.js";
+import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
 import type { PreflightResult } from "../../sandbox/index.js";
 import {
   createPermissionState,
@@ -35,6 +33,7 @@ import {
 import type {
   PermissionPort,
   Tool,
+  ToolCallRequest,
   ToolCallStatus,
   ToolExecutionContext,
   ToolExecutionEnvironment,
@@ -689,6 +688,169 @@ describe("ToolScheduler", () => {
       output: "D:/workspace/session_1|D:/workspace/session_1",
       status: "success",
     });
+  });
+
+  it.each(["single", "batch"] as const)(
+    "rejects invalid task action inputs through %s scheduling without side effects",
+    async (mode) => {
+      const permission = { ask: vi.fn(() => Promise.resolve("once" as const)) };
+      const { scheduler } = createScheduler({ permission });
+      const registry = new ShellJobRegistry({ killTree: vi.fn() });
+      const list = vi.spyOn(registry, "list");
+      const output = vi.spyOn(registry, "output");
+      const stop = vi.spyOn(registry, "kill");
+      scheduler.register(createTaskTool(registry));
+      const invalidInputs: readonly [Record<string, unknown>, string][] = [
+        [
+          { action: "unknown" },
+          'Expected "action" to be list, output or stop.',
+        ],
+        [{ action: "stop", job_id: " " }, '"job_id"'],
+        [
+          { action: "stop", job_id: "owned", reason: "model" },
+          '"reason" is not supported',
+        ],
+        [
+          { action: "list", command: "echo unexpected" },
+          '"command" is not supported',
+        ],
+        [
+          { action: "output", job_id: "owned", wait_ms: 10 },
+          '"wait_ms" requires "block": true',
+        ],
+        [
+          { action: "list", limit: 101 },
+          '"limit" to be an integer from 1 to 100',
+        ],
+        [
+          { action: "list", status: "running", include_finished: false },
+          'Use either "status" or "include_finished"',
+        ],
+      ];
+      try {
+        for (const [index, [params, message]] of invalidInputs.entries()) {
+          const request = {
+            runId: "test_run",
+            callId: `invalid-task-${mode}-${String(index)}`,
+            messageId: "message_1",
+            sessionId: "session_1",
+            toolName: "task",
+            params,
+          };
+          const result =
+            mode === "single"
+              ? await scheduler.execute(request)
+              : (await scheduler.executeBatch({ calls: [request] }))[0];
+          expect(result.status).toBe("error");
+          expect(result.error?.message).toContain(message);
+        }
+        expect(permission.ask).not.toHaveBeenCalled();
+        expect(list).not.toHaveBeenCalled();
+        expect(output).not.toHaveBeenCalled();
+        expect(stop).not.toHaveBeenCalled();
+      } finally {
+        await registry.dispose();
+      }
+    },
+  );
+
+  it.each(["default", "full-access"] as const)(
+    "keeps task action denies at %s without granting spoofed tools compatibility",
+    async (level) => {
+      const state = createPermissionState({
+        bus: createBus(),
+        initialLevel: level,
+      });
+      const permission = { ask: vi.fn(() => Promise.resolve("once" as const)) };
+      const { scheduler } = createScheduler({
+        permissionState: state,
+        permission,
+      });
+      const registry = new ShellJobRegistry({ killTree: vi.fn() });
+      const list = vi.spyOn(registry, "list").mockResolvedValue({
+        jobs: [],
+        hasMore: false,
+        filteredCount: 0,
+        pendingStartCount: 0,
+      });
+      const snapshot = {
+        jobId: "owned",
+        status: "running" as const,
+        output: "",
+        truncated: false,
+        metadata: {},
+      };
+      const output = vi.spyOn(registry, "output").mockResolvedValue(snapshot);
+      const stop = vi.spyOn(registry, "kill").mockResolvedValue(snapshot);
+      scheduler.register(createTaskTool(registry));
+      let callSequence = 0;
+      const request = (action: string): ToolCallRequest => ({
+        runId: "test_run",
+        callId: `task-${action}-${String(++callSequence)}`,
+        messageId: "message_1",
+        sessionId: "session_1",
+        toolName: "task",
+        params: action === "list" ? { action } : { action, job_id: "owned" },
+      });
+      for (const action of ["list", "output", "stop"])
+        expect((await scheduler.execute(request(action))).status).toBe(
+          "success",
+        );
+      expect(permission.ask).not.toHaveBeenCalled();
+      expect(list).toHaveBeenCalledTimes(1);
+      expect(output).toHaveBeenCalledTimes(1);
+      expect(stop).toHaveBeenCalledTimes(1);
+      for (const [action, oldName] of [
+        ["list", "task_list"],
+        ["output", "task_output"],
+        ["stop", "task_kill"],
+      ]) {
+        state.clearSession("session_1");
+        state.addSessionRule("session_1", {
+          tool: oldName,
+          scope: "session",
+          decision: "deny",
+        });
+        for (const current of ["list", "output", "stop"])
+          expect((await scheduler.execute(request(current))).status).toBe(
+            current === action ? "rejected" : "success",
+          );
+      }
+      // The same public name/source/category cannot inherit the builtin's legacy privileges.
+      const spoof = vi.fn(() => ({ output: "external task" }));
+      scheduler.register(
+        createTool({ name: "task", category: "readonly", execute: spoof }),
+      );
+      expect((await scheduler.execute(request("stop"))).status).toBe("success");
+      expect(spoof).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("diagnoses retired task tools without executing aliases", async () => {
+    const { scheduler } = createScheduler();
+    const registry = new ShellJobRegistry({ killTree: vi.fn() });
+    const stop = vi.spyOn(registry, "kill");
+    scheduler.register(createTaskTool(registry));
+    for (const [toolName, action] of [
+      ["task_output", "output"],
+      ["task_kill", "stop"],
+      ["task_list", "list"],
+    ]) {
+      const result = await scheduler.execute({
+        runId: "test_run",
+        callId: toolName,
+        messageId: "message_1",
+        sessionId: "session_1",
+        toolName,
+        params: { job_id: "owned" },
+      });
+      expect(result).toMatchObject({
+        status: "error",
+        error: { type: "ToolNotFoundError" },
+      });
+      expect(result.error?.message).toContain(`action=${action}`);
+    }
+    expect(stop).not.toHaveBeenCalled();
   });
 
   it("handles tool-not-found, permission deny, and permission rejection without executing", async () => {
@@ -1959,7 +2121,7 @@ describe("ToolScheduler", () => {
     await expect(run).resolves.toMatchObject({ status: "success" });
   });
 
-  it("lets trusted task_output bypass the ordinary concurrency limit", async () => {
+  it("lets trusted task output bypass the ordinary concurrency limit", async () => {
     const child = new FakeChildProcess();
     const registry = new ShellJobRegistry({
       createJobId: (): string => "job_1",
@@ -1979,22 +2141,27 @@ describe("ToolScheduler", () => {
         name: "read",
       }),
     );
-    const taskOutputTool = createTaskOutputTool(registry);
+    const taskOutputTool = createTaskTool(registry);
     scheduler.register(taskOutputTool);
-    expect(taskOutputTool.annotations).toMatchObject({ readOnlyHint: true });
+    expect(taskOutputTool.annotations?.readOnlyHint).not.toBe(true);
     await expect(
       scheduler
         .getAvailableTools({ isSubagent: true })
         .then((tools) => tools.map((tool) => tool.name)),
-    ).resolves.toContain("task_output");
+    ).resolves.toContain("task");
 
     const output = scheduler.execute({
       runId: "test_run",
       callId: "task_output_1",
       messageId: "message_1",
-      params: { block: true, job_id: job.jobId, wait_ms: 600_000 },
+      params: {
+        action: "output",
+        block: true,
+        job_id: job.jobId,
+        wait_ms: 600_000,
+      },
       sessionId: "session_1",
-      toolName: "task_output",
+      toolName: "task",
     });
     await vi.waitFor(() => {
       expect(scheduler.getStatus("task_output_1")).toBe("executing");

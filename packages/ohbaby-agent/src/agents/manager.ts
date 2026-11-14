@@ -36,6 +36,22 @@ function isConfiguredSubagent(agent: AgentConfig): boolean {
   return agent.mode === "subagent";
 }
 
+function assertCurrentTaskTools(agent: AgentConfig): void {
+  const legacyNames = new Set(["task_output", "task_kill", "task_list"]);
+  const references = (["include", "exclude"] as const).flatMap((field) =>
+    (agent.tools?.[field] ?? [])
+      .filter((name) => legacyNames.has(name))
+      .map((name) => `tools.${field}: ${name}`),
+  );
+  if (references.length > 0) {
+    throw new Error(
+      `Agent ${agent.name} uses removed task tools (${references.join(", ")}). ` +
+        "Update its tools.include/tools.exclude configuration to use task. " +
+        "The task tool includes list, output, and stop; review access before replacing these entries.",
+    );
+  }
+}
+
 function modeErrorMessage(agent: AgentConfig, isSubagent: boolean): string {
   if (isSubagent) {
     return [
@@ -119,6 +135,7 @@ export class AgentManager implements AgentToolConfigProvider {
     if (!agent) {
       return undefined;
     }
+    assertCurrentTaskTools(agent);
     return withSubagentDisabledTools(
       toolsConfigToRecord(agent.tools),
       options.isSubagent ?? isConfiguredSubagent(agent),

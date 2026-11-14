@@ -13,9 +13,9 @@ export const SHELL_JOB_STATUSES = [
   "lost",
 ] as const;
 export type ShellJobStatus = (typeof SHELL_JOB_STATUSES)[number];
-export interface ShellJobQueryScope {
-  readonly rootSessionId: string;
-}
+export type ShellJobQueryScope =
+  | { readonly rootSessionId: string }
+  | { readonly sessionId: string; readonly contextScopeId: string | null };
 export type ShellJobOwnerFilter =
   | { readonly kind: "main" | "subagents" }
   | { readonly kind: "subagent"; readonly subagentId: string };
@@ -28,6 +28,7 @@ export interface ShellJobQuery {
   readonly scope: ShellJobQueryScope;
   readonly owner?: ShellJobOwnerFilter;
   readonly statuses?: readonly ShellJobStatus[];
+  readonly includeFinished?: boolean;
   readonly limit: number;
   readonly before?: ShellJobPagePosition;
 }
@@ -95,7 +96,13 @@ function defaultVisible(row: ShellJobRecord): boolean {
   );
 }
 function inScope(row: ShellJobRecord, query: ShellJobQuery): boolean {
-  if (row.rootSessionId !== query.scope.rootSessionId) return false;
+  if ("sessionId" in query.scope) {
+    if (
+      row.sessionId !== query.scope.sessionId ||
+      row.contextScopeId !== query.scope.contextScopeId
+    )
+      return false;
+  } else if (row.rootSessionId !== query.scope.rootSessionId) return false;
   if (query.owner?.kind === "main" && row.contextScopeId !== null) return false;
   if (query.owner?.kind === "subagents" && row.contextScopeId === null)
     return false;
@@ -109,6 +116,7 @@ function inScope(row: ShellJobRecord, query: ShellJobQuery): boolean {
 function filtered(row: ShellJobRecord, query: ShellJobQuery): boolean {
   return (
     row.status !== null &&
+    (query.includeFinished !== false || shellJobNeedsAttention(row)) &&
     (!query.statuses?.length || query.statuses.includes(row.status))
   );
 }
@@ -163,8 +171,16 @@ export function queryDatabaseShellJobs(
   decode: (row: Record<string, unknown>) => ShellJobRecord,
 ): ShellJobPage {
   validateQuery(query);
-  const where = ["root_session_id = ?"];
-  const params: SqliteValue[] = [query.scope.rootSessionId];
+  const ownerScope = "sessionId" in query.scope;
+  const where = [
+    ownerScope
+      ? "session_id = ? AND context_scope_id IS ?"
+      : "root_session_id = ?",
+  ];
+  const params: SqliteValue[] =
+    "sessionId" in query.scope
+      ? [query.scope.sessionId, query.scope.contextScopeId]
+      : [query.scope.rootSessionId];
   if (query.owner?.kind === "main") where.push("context_scope_id IS NULL");
   if (query.owner?.kind === "subagents")
     where.push("context_scope_id IS NOT NULL");
@@ -176,6 +192,7 @@ export function queryDatabaseShellJobs(
     "(mode = 'background' OR cleanup = 'unconfirmed' OR (status IS NOT NULL AND status != 'running' AND (cleanup IS NOT 'confirmed' OR settled_at IS NULL)))",
   );
   const visible = ["status IS NOT NULL"];
+  if (query.includeFinished === false) visible.push("_attention = 1");
   if (query.statuses?.length) {
     visible.push(`status IN (${query.statuses.map(() => "?").join(",")})`);
     params.push(...query.statuses);

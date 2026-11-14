@@ -19,11 +19,8 @@ import {
 import { createSubagentTools, type SubagentToolHost } from "./subagent.js";
 import { createWebTools, type WebToolsOptions } from "./web.js";
 import { createGoalTools, type GoalToolBackend } from "../goals/tools.js";
-import {
-  createTaskKillTool,
-  createTaskOutputTool,
-  ShellJobRegistry,
-} from "./shell-job-registry.js";
+import { ShellJobRegistry } from "./shell-job-registry.js";
+import { createTaskTool } from "./task.js";
 import { Shell } from "../shell/index.js";
 
 export interface BuiltinToolsOptions extends Pick<
@@ -63,8 +60,7 @@ export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
       shell: options.shell,
       spawn: options.spawn,
     }),
-    createTaskOutputTool(shellJobRegistry),
-    createTaskKillTool(shellJobRegistry),
+    createTaskTool(shellJobRegistry),
   ];
   if (options.subagentHost) {
     tools.push(...createSubagentTools(options.subagentHost));

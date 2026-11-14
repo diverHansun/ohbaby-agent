@@ -19,12 +19,14 @@ export interface ToolAdmission {
     context: ToolExecutionContext,
   ) => Promise<BashPreparation>;
   readonly cleanupOwner?: "tool";
-  /** Bash and both task controls must share the same job registry. */
+  /** Bash and task must share the same job registry. */
   readonly bashBackground?: {
     readonly registry: object;
     readonly describe: (canManageBackground: boolean) => string;
   };
   readonly shellJobController?: object;
+  /** Retired task names only preserve explicit denies; never grant old allows. */
+  readonly legacyDenyToolName?: (params: Record<string, unknown>) => string;
   /** After cancellation, local request settlement cannot prove remote work stopped. */
   readonly settlementConfirmsCleanup?: false;
   readonly capacity?:

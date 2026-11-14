@@ -728,7 +728,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(mcpListeners.size).toBe(0);
     expect(skillListeners.size).toBe(0);
   });
-  it("registers the renamed subagent tools without exposing legacy task tools", async () => {
+  it("registers separate agent and shell task tools without exposing retired tools", async () => {
     const bus = createBus();
     const composition = await createUiRuntimeComposition({
       agentManager: new AgentManager(),
@@ -749,7 +749,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     ).map((tool) => tool.name);
 
     expect(toolNames).toEqual(expect.arrayContaining(["agent"]));
-    expect(toolNames).not.toContain("task");
+    expect(toolNames).toContain("task");
+    for (const name of ["task_output", "task_kill", "task_list"])
+      expect(toolNames).not.toContain(name);
     expect(toolNames).not.toContain("agent_open");
     expect(toolNames).not.toContain("agent_eval");
     expect(toolNames).not.toContain("agent_status");

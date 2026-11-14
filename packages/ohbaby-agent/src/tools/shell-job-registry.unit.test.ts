@@ -1,3 +1,5 @@
+import { createTaskTool } from "./task.js";
+import { shellJobFixture } from "./fixtures/shell-job.js";
 import { InMemoryShellJobStore } from "./shell-job-store.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
@@ -11,11 +13,7 @@ import type {
   ToolExecutionOwner,
 } from "../core/tool-scheduler/index.js";
 import type { KillTreeResult } from "../shell/process.js";
-import {
-  createTaskKillTool,
-  createTaskOutputTool,
-  ShellJobRegistry,
-} from "./shell-job-registry.js";
+import { ShellJobRegistry } from "./shell-job-registry.js";
 
 class FakeChild extends EventEmitter {
   readonly pid = 42;
@@ -70,6 +68,239 @@ function startJob(
 }
 
 describe("ShellJobRegistry", () => {
+  it("returns bounded task list summaries and follows its opaque next cursor", async () => {
+    const store = new InMemoryShellJobStore();
+    const registry = new ShellJobRegistry({ store, killTree: vi.fn() });
+    const tool = createTaskTool(registry);
+    const owner = context("s");
+    try {
+      const empty = await tool.execute({ action: "list" }, owner);
+      expect(empty.metadata).toMatchObject({
+        taskAction: "list",
+        jobs: [],
+        filteredCount: 0,
+        hasMore: false,
+        pendingStartCount: 0,
+      });
+      for (const jobId of ["one", "two"]) {
+        await store.insert(
+          shellJobFixture({
+            jobId,
+            status: "completed",
+            cleanup: "confirmed",
+            endedAt: 10,
+            settledAt: 11,
+            resultReadyAt: 11,
+            outputTail: "private full output",
+          }),
+        );
+      }
+      const first = await tool.execute({ action: "list", limit: 1 }, owner);
+      expect(first.metadata).toMatchObject({
+        taskAction: "list",
+        jobs: [
+          expect.objectContaining({ status: "completed", mode: "background" }),
+        ],
+        filteredCount: 2,
+        hasMore: true,
+      });
+      expect(first.metadata?.nextCursor).toEqual(expect.any(String));
+      expect(first.metadata).not.toHaveProperty("jobId");
+      expect(JSON.stringify(first)).not.toContain("private full output");
+      const second = await tool.execute(
+        { action: "list", limit: 1, cursor: first.metadata?.nextCursor },
+        owner,
+      );
+      expect(second.metadata).toMatchObject({
+        taskAction: "list",
+        filteredCount: 2,
+        hasMore: false,
+      });
+      const ids = [first, second].flatMap((result) =>
+        (result.metadata?.jobs as { jobId: string }[]).map((job) => job.jobId),
+      );
+      expect(new Set(ids)).toEqual(new Set(["one", "two"]));
+      for (const status of [
+        "running",
+        "completed",
+        "failed",
+        "timed_out",
+        "cancelled",
+        "lost",
+      ] as const) {
+        await store.update("one", { status });
+        const filtered = await tool.execute({ action: "list", status }, owner);
+        expect(filtered.metadata?.jobs).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ jobId: "one", status }),
+          ]),
+        );
+        expect(
+          (filtered.metadata?.jobs as { status: string }[]).every(
+            (job) => job.status === status,
+          ),
+        ).toBe(true);
+      }
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  it.each([
+    [123, "tracking_released"],
+    [null, "cleanup_pending"],
+  ] as const)(
+    "reports unresolved saved cleanup without claiming stop success: %s",
+    async (trackingReleasedAt, stopResult) => {
+      const store = new InMemoryShellJobStore();
+      const killTree = vi.fn();
+      const registry = new ShellJobRegistry({ store, killTree });
+      await store.insert(
+        shellJobFixture({
+          jobId: "unresolved",
+          status: "lost",
+          cleanup: "unconfirmed",
+          trackingReleasedAt,
+        }),
+      );
+      const result = await createTaskTool(registry).execute(
+        { action: "stop", job_id: "unresolved" },
+        context("s"),
+      );
+      expect(result.metadata).toMatchObject({
+        stopResult,
+        status: "lost",
+        cleanup: "unconfirmed",
+        trackingReleasedAt,
+      });
+      expect(killTree).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {},
+    { action: "unknown" },
+    { action: "output", job_id: "" },
+    { action: "stop", job_id: "   " },
+    { action: "output", job_id: "job", wait_ms: 10 },
+    { action: "output", job_id: "job", block: "true" },
+    { action: "output", job_id: "job", block: true, wait_ms: 0 },
+    { action: "output", job_id: "job", block: true, wait_ms: 600001 },
+    { action: "output", job_id: "job", block: true, wait_ms: 1.5 },
+    { action: "stop", job_id: "job", reason: "user" },
+    { action: "stop", job_id: "job", signal: "SIGKILL" },
+    { action: "stop", job_id: "job", session_id: "other" },
+    { action: "list", command: "echo hidden" },
+    { action: "list", status: "running", include_finished: false },
+    { action: "list", limit: 101 },
+  ])(
+    "rejects invalid task input before any registry operation: %j",
+    async (params) => {
+      const registry = new ShellJobRegistry({ killTree: vi.fn() });
+      const output = vi.spyOn(registry, "output");
+      const kill = vi.spyOn(registry, "kill");
+      await expect(
+        createTaskTool(registry).execute(params, context()),
+      ).rejects.toThrow();
+      expect(output).not.toHaveBeenCalled();
+      expect(kill).not.toHaveBeenCalled();
+      await registry.dispose();
+    },
+  );
+
+  it("uses the same unavailable error for unknown and foreign job IDs", async () => {
+    const child = new FakeChild();
+    const registry = new ShellJobRegistry({
+      createJobId: (): string => "private-job",
+      killTree: vi.fn(),
+      probeTree: (): "stopped" => "stopped",
+    });
+    const tool = createTaskTool(registry);
+    try {
+      for (const action of ["output", "stop"]) {
+        await expect(
+          tool.execute({ action, job_id: "private-job" }, context("other")),
+        ).rejects.toThrow(
+          'Shell job "private-job" is unavailable in this session/context scope.',
+        );
+      }
+      await startJob(registry, child);
+      for (const action of ["output", "stop"]) {
+        await expect(
+          tool.execute({ action, job_id: "private-job" }, context("other")),
+        ).rejects.toThrow(
+          'Shell job "private-job" is unavailable in this session/context scope.',
+        );
+      }
+    } finally {
+      child.emitExit(0, null);
+      await registry.dispose();
+    }
+  });
+
+  it("waits for output drain after stop without treating logical cancellation as result readiness", async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild();
+    let stopped = false;
+    const killTree = vi.fn();
+    const registry = new ShellJobRegistry({
+      killTree,
+      probeTree: (): "stopped" | "running" => (stopped ? "stopped" : "running"),
+    });
+    try {
+      const started = await startJob(registry, child, 10000);
+      const tool = createTaskTool(registry);
+      const stop = await tool.execute(
+        { action: "stop", job_id: started.jobId },
+        context(),
+      );
+      expect(stop.metadata).toMatchObject({
+        taskAction: "stop",
+        stopResult: "requested",
+        status: "cancelled",
+        stopReason: "model",
+        cleanup: "in-progress",
+        resultReadyAt: null,
+      });
+      let settled = false;
+      const pending = Promise.resolve(
+        tool.execute(
+          {
+            action: "output",
+            job_id: started.jobId,
+            block: true,
+            wait_ms: 5000,
+          },
+          context(),
+        ),
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBe(false);
+      child.stdout.emit("data", "last output during cleanup");
+      stopped = true;
+      child.emitExit(null, "SIGTERM");
+      const result = await pending;
+      expect(result.output).toContain("last output during cleanup");
+      expect(result.metadata).toMatchObject({
+        taskAction: "output",
+        status: "cancelled",
+        waitReason: "ready",
+        cleanup: "confirmed",
+        outputComplete: true,
+      });
+      expect(result.metadata?.resultReadyAt).toEqual(expect.any(Number));
+      expect(killTree).toHaveBeenCalledOnce();
+    } finally {
+      stopped = true;
+      child.emitExit(null, "SIGTERM");
+      await registry.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("only checkpoints background output after new bytes arrive", async () => {
     vi.useFakeTimers();
     const store = new InMemoryShellJobStore();
@@ -170,7 +401,7 @@ describe("ShellJobRegistry", () => {
     await registry.dispose();
   });
 
-  it("wakes a task_output wait on user steer without stopping its job", async () => {
+  it("wakes a task wait on user steer without stopping its job", async () => {
     const child = new FakeChild();
     const killTree = vi.fn();
     const registry = new ShellJobRegistry({
@@ -180,8 +411,8 @@ describe("ShellJobRegistry", () => {
     const started = await startJob(registry, child, 10000);
     let wake!: () => void;
     const unsubscribe = vi.fn();
-    const pending = createTaskOutputTool(registry).execute(
-      { block: true, job_id: started.jobId, wait_ms: 5000 },
+    const pending = createTaskTool(registry).execute(
+      { action: "output", block: true, job_id: started.jobId, wait_ms: 5000 },
       {
         ...context(),
         subscribeSteer: (callback) => {
@@ -194,7 +425,11 @@ describe("ShellJobRegistry", () => {
       expect(wake).toBeDefined();
     });
     wake();
-    expect((await pending).metadata).toMatchObject({ status: "running" });
+    expect((await pending).metadata).toMatchObject({
+      taskAction: "output",
+      status: "running",
+      waitReason: "steer",
+    });
     expect(killTree).not.toHaveBeenCalled();
     expect(unsubscribe).toHaveBeenCalledOnce();
     child.emitExit(0, null);
@@ -677,11 +912,11 @@ describe("ShellJobRegistry", () => {
           .status,
       ).toBe("running");
       await expect(
-        createTaskOutputTool(registry).execute(
-          { job_id: siblingScopeJob.jobId },
+        createTaskTool(registry).execute(
+          { action: "output", job_id: siblingScopeJob.jobId },
           context("child_session", "subagent_1"),
         ),
-      ).rejects.toThrow("not owned");
+      ).rejects.toThrow("unavailable in this session/context scope");
       expect(killTree).toHaveBeenCalledTimes(1);
     } finally {
       siblingScopeChild.emitExit(0, null);
@@ -743,7 +978,7 @@ describe("ShellJobRegistry", () => {
     }
   });
 
-  it("blocks task_output only for the current read", async () => {
+  it("blocks task only for the current read", async () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({
       probeTree: (): "stopped" => "stopped",
@@ -751,24 +986,26 @@ describe("ShellJobRegistry", () => {
       killTree: vi.fn(),
     });
     const started = await startJob(registry, child);
-    const outputTool = createTaskOutputTool(registry);
+    const outputTool = createTaskTool(registry);
 
     const pending = outputTool.execute(
-      { block: true, job_id: started.jobId, wait_ms: 10 },
+      { action: "output", block: true, job_id: started.jobId, wait_ms: 10 },
       context(),
     );
     child.stdout.emit("data", "still running");
     const result = await pending;
 
     expect(result.metadata).toMatchObject({
+      taskAction: "output",
       jobId: started.jobId,
       status: "running",
+      waitReason: "timeout",
       truncated: false,
     });
     child.emitExit(0, null);
   });
 
-  it("aborts a blocking task_output read without cancelling its job", async () => {
+  it("aborts a blocking task read without cancelling its job", async () => {
     vi.useFakeTimers();
     const child = new FakeChild();
     const controller = new AbortController();
@@ -778,11 +1015,16 @@ describe("ShellJobRegistry", () => {
       killTree: vi.fn(),
     });
     const started = await startJob(registry, child, 1_000_000);
-    const outputTool = createTaskOutputTool(registry);
+    const outputTool = createTaskTool(registry);
     try {
       const assertion = expect(
         outputTool.execute(
-          { block: true, job_id: started.jobId, wait_ms: 600_000 },
+          {
+            action: "output",
+            block: true,
+            job_id: started.jobId,
+            wait_ms: 600_000,
+          },
           { ...context(), signal: controller.signal },
         ),
       ).rejects.toThrow("cancelled");
@@ -857,16 +1099,33 @@ describe("ShellJobRegistry", () => {
     });
     const started = await startJob(registry, child);
     child.emitExit(0, null);
-    const killTool = createTaskKillTool(registry);
+    const killTool = createTaskTool(registry);
 
     await expect(
-      killTool.execute({ job_id: started.jobId }, context("other")),
-    ).rejects.toThrow("not owned");
-    const first = await killTool.execute({ job_id: started.jobId }, context());
-    const second = await killTool.execute({ job_id: started.jobId }, context());
+      killTool.execute(
+        { action: "stop", job_id: started.jobId },
+        context("other"),
+      ),
+    ).rejects.toThrow("unavailable in this session/context scope");
+    const first = await killTool.execute(
+      { action: "stop", job_id: started.jobId },
+      context(),
+    );
+    const second = await killTool.execute(
+      { action: "stop", job_id: started.jobId },
+      context(),
+    );
 
-    expect(first.metadata).toMatchObject({ status: "completed" });
-    expect(second.metadata).toMatchObject({ status: "completed" });
+    expect(first.metadata).toMatchObject({
+      taskAction: "stop",
+      status: "completed",
+      stopResult: "already_finished",
+    });
+    expect(second.metadata).toMatchObject({
+      taskAction: "stop",
+      status: "completed",
+      stopResult: "already_finished",
+    });
     expect(killTree).not.toHaveBeenCalled();
   });
 });

@@ -54,6 +54,33 @@ function rule(input: {
 }
 
 describe("permission evaluator", () => {
+  it.each(["task_list", "task_output", "task_kill"])(
+    "does not use a legacy %s allow to authorize task",
+    (legacyName) => {
+      const permissionCall = { ...call("task"), category: "write" as const };
+      const permissionState = state({
+        level: "default",
+        mode: "auto",
+        rules: [rule({ tool: legacyName })],
+      });
+      // A category requiring approval makes an accidental migrated allow observable.
+      expect(
+        evaluatePermission(permissionCall, permissionState, legacyName).type,
+      ).toBe("ask");
+      expect(
+        evaluatePermission(
+          permissionCall,
+          state({
+            level: "default",
+            mode: "auto",
+            rules: [rule({ tool: "task" })],
+          }),
+          legacyName,
+        ).type,
+      ).toBe("allow");
+    },
+  );
+
   it.each([
     ["plan", "default", call("read", { file_path: "src/a.ts" }), "allow"],
     ["plan", "full-access", call("edit", { file_path: "src/a.ts" }), "allow"],
