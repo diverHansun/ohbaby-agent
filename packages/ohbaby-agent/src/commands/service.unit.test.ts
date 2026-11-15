@@ -602,6 +602,7 @@ describe("CommandService", () => {
       "btw",
       "fork",
       "rewind",
+      "bg",
       "goal",
       "permission",
       "mcps",

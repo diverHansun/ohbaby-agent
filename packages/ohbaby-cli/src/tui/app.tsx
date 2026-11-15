@@ -4,6 +4,8 @@ import {
   sessionActionErrorText,
 } from "ohbaby-sdk";
 import { SideChatPanel } from "./components/side-chat-panel.js";
+import { BackgroundTaskBrowser } from "./components/background-tasks/background-task-browser.js";
+import { useBackgroundTaskProbe } from "./components/background-tasks/use-background-tasks.js";
 import { RewindPanel } from "./components/rewind/RewindPanel.js";
 import {
   rewindablePrompts,
@@ -223,12 +225,21 @@ export function OhbabyTerminalApp({
     readonly firstQuestion?: string;
   } | null>(null);
   const [rewindOpen, setRewindOpen] = useState(false);
+  // /bg replaces the main view like the subagent browser (TUI background tasks T2).
+  const [backgroundTasksOpen, setBackgroundTasksOpen] = useState(false);
+  const backgroundTaskProbe = useBackgroundTaskProbe(
+    client,
+    subscribeEvents,
+    activeSessionId,
+  );
+  const backgroundTasksKnown = backgroundTaskProbe.known;
+  const backgroundTasksExist = backgroundTaskProbe.hasTasks;
   const promptDraftRef = useRef("");
   const [promptPrefill, setPromptPrefill] = useState<{
     readonly nonce: number;
     readonly text: string;
   }>();
-  /** Runs /btw, /fork and /rewind here; each reports through a notice. */
+  /** Runs /btw, /fork, /rewind and /bg here; each reports through a notice. */
   const runSessionAction = useCallback(
     async (
       invocation: Parameters<CoreAPI["executeCommand"]>[0],
@@ -249,6 +260,31 @@ export function OhbabyTerminalApp({
         };
       };
       const done = { ...base, status: "completed" as const };
+      if (invocation.commandId === "bg") {
+        if (!client.listShellJobs)
+          return fail("Background tasks", "Background tasks are unavailable");
+        if (sessionId === null) {
+          emitLocalNotice(
+            "bg",
+            "info",
+            "Background tasks",
+            "Open a chat to see its background tasks.",
+          );
+          return done;
+        }
+        // Before the probe answers the panel opens and loads (04 §2.1).
+        if (backgroundTasksKnown && !backgroundTasksExist) {
+          emitLocalNotice(
+            "bg",
+            "info",
+            "Background tasks",
+            "No background tasks in this chat.",
+          );
+          return done;
+        }
+        setBackgroundTasksOpen(true);
+        return done;
+      }
       if (invocation.commandId === "rewind") {
         if (sessionId === null) return fail("Rewind", "Nothing to rewind yet.");
         setRewindOpen(true);
@@ -300,7 +336,14 @@ export function OhbabyTerminalApp({
         return fail("Side chat", formatError(caught));
       }
     },
-    [client, emitLocalNotice, remote, store],
+    [
+      client,
+      emitLocalNotice,
+      remote,
+      store,
+      backgroundTasksKnown,
+      backgroundTasksExist,
+    ],
   );
   const closeSideChat = useCallback((): void => {
     const current = sideChat;
@@ -355,7 +398,7 @@ export function OhbabyTerminalApp({
       // /export runs locally so the file lands on this machine, even with a remote backend.
       if (invocation.commandId === "export")
         return runExportCommand(invocation);
-      if (["btw", "fork", "rewind"].includes(invocation.commandId))
+      if (["btw", "fork", "rewind", "bg"].includes(invocation.commandId))
         return runSessionAction(invocation);
       if (invocation.commandId !== "compact")
         return client.executeCommand(invocation);
@@ -778,6 +821,15 @@ export function OhbabyTerminalApp({
     if (!fullscreen) writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
     setSubagentBrowserOpen(false);
   }, [fullscreen, subagents, writeStdout]);
+  const closeBackgroundTasks = useCallback((): void => {
+    // As with the subagent browser, the main view reprints in place.
+    if (!fullscreen) writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
+    setBackgroundTasksOpen(false);
+  }, [fullscreen, writeStdout]);
+  // A different chat closes the panel and drops its confirmation (04 §2.2).
+  useEffect(() => {
+    setBackgroundTasksOpen(false);
+  }, [activeSessionId]);
   const closeCommandPanel = useCallback((): void => {
     setActiveCommandPanel(null);
   }, [setActiveCommandPanel]);
@@ -930,8 +982,9 @@ export function OhbabyTerminalApp({
         compactCommandRef.current.abort();
         return;
       }
-      // The side chat and the rewind list own the keyboard while open.
-      if (sideChat !== null || rewindOpen) return;
+      // The side chat, the rewind list and the Background tasks panel own the
+      // keyboard while open; Ink cannot stop a key reaching this handler.
+      if (sideChat !== null || rewindOpen || backgroundTasksOpen) return;
       if (
         (!hasDialog || subagentBrowserOpen) &&
         key.ctrl &&
@@ -1283,8 +1336,10 @@ export function OhbabyTerminalApp({
       <AppShell
         priorityDock={hasDialog}
         fullscreen={fullscreen}
-        identity={`${activeSessionId ?? "empty"}:${String(screenGeneration)}:${String(subagentBrowserOpen)}:${sideChat?.sideChatId ?? ""}`}
-        scrollEnabled={!subagentBrowserOpen && sideChat === null}
+        identity={`${activeSessionId ?? "empty"}:${String(screenGeneration)}:${String(subagentBrowserOpen)}:${String(backgroundTasksOpen)}:${sideChat?.sideChatId ?? ""}`}
+        scrollEnabled={
+          !subagentBrowserOpen && !backgroundTasksOpen && sideChat === null
+        }
         output={
           <>
             {permissions.length === 0 && sideChat === null ? (
@@ -1305,6 +1360,15 @@ export function OhbabyTerminalApp({
                 }}
                 onClose={closeSideChat}
               />
+            ) : backgroundTasksOpen && activeSessionId !== null ? (
+              <BackgroundTaskBrowser
+                client={client}
+                subscribeEvents={subscribeEvents}
+                rootSessionId={activeSessionId}
+                probe={backgroundTaskProbe}
+                approvalPending={permissions.length > 0}
+                onClose={closeBackgroundTasks}
+              />
             ) : subagentBrowserOpen ? (
               <>
                 {permissions.length > 0 ? (
@@ -1320,10 +1384,21 @@ export function OhbabyTerminalApp({
               </>
             ) : (
               <>
-                {permissions.length === 0 && client.listSubagentExecutions ? (
+                {permissions.length === 0 &&
+                (client.listSubagentExecutions ||
+                  backgroundTaskProbe.running > 0) ? (
                   <Text dimColor>
-                    Ctrl+G subagents ·{" "}
-                    {subagentState.list?.executions.length ?? 0} executions
+                    {[
+                      client.listSubagentExecutions
+                        ? `Ctrl+G subagents · ${String(subagentState.list?.executions.length ?? 0)} executions`
+                        : null,
+                      // Only while tasks run (T5); /bg is the only entry (T4).
+                      backgroundTaskProbe.running > 0
+                        ? `/bg background · ${String(backgroundTaskProbe.running)} running`
+                        : null,
+                    ]
+                      .filter((part) => part !== null)
+                      .join(" · ")}
                   </Text>
                 ) : null}
                 {permissions.length === 0 ? (
@@ -1353,7 +1428,7 @@ export function OhbabyTerminalApp({
           </>
         }
       >
-        {!subagentBrowserOpen && sideChat === null ? (
+        {!subagentBrowserOpen && !backgroundTasksOpen && sideChat === null ? (
           <>
             {rewindOpen && activeSessionId !== null ? (
               <RewindPanel
@@ -1476,7 +1551,11 @@ export function OhbabyTerminalApp({
           </>
         ) : null}
         <Box
-          display={subagentBrowserOpen || sideChat !== null ? "none" : "flex"}
+          display={
+            subagentBrowserOpen || backgroundTasksOpen || sideChat !== null
+              ? "none"
+              : "flex"
+          }
           flexDirection="column"
         >
           <Prompt
@@ -1490,7 +1569,12 @@ export function OhbabyTerminalApp({
             pendingModelEntryId={pendingModelEntryId}
             catalog={catalog}
             client={client}
-            disabled={hasDialog || subagentBrowserOpen || sideChat !== null}
+            disabled={
+              hasDialog ||
+              subagentBrowserOpen ||
+              backgroundTasksOpen ||
+              sideChat !== null
+            }
             executeCommand={executePromptCommand}
             canSubmit={
               executionRecovery?.status !== "recovering" &&

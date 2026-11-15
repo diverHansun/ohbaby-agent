@@ -37,13 +37,19 @@ export function renderToolDisplay(
         ? ` · ${String(details.count)} ${details.unit}${details.scanComplete === false ? " found" : ""}`
         : "";
   const title = `${label.name}${primary ? ` ${primary}` : ""}${summary}`;
-  const titleRows = wrapAnsi(title, width);
+  // A bash call that started a background task says so once, at the end of
+  // its title (TUI background tasks T9); older records lack `mode`.
+  const background =
+    details?.kind === "bash" &&
+    details.jobId !== undefined &&
+    (details.mode === "background" || details.status === "running");
+  const suffix = background ? " · background" : "";
   const titleBudget = call.name === "bash" ? 2 : 1;
   const rows: ToolDisplayLine[] = (
     expanded
-      ? titleRows
+      ? wrapAnsi(`${title}${suffix}`, width)
       : call.name === "bash"
-        ? limitTitle(titleRows, titleBudget, width)
+        ? limitTitle(title, suffix, titleBudget, width)
         : [compactTitle(label.name, primary, summary, width)]
   ).map((text) => ({ text, color: theme.tool.arg }));
   const bodyWidth = Math.max(1, width - Math.min(2, Math.max(0, width - 1)));
@@ -71,11 +77,8 @@ export function renderToolDisplay(
     return rows;
   if (details?.kind === "mutation" && details.dryRun)
     body("Dry run", theme.status.waiting);
-  if (details?.kind === "bash" && details.jobId && details.status === "running")
-    body(
-      `Started in background${expanded ? ` · ${details.jobId}` : ""}`,
-      theme.status.waiting,
-    );
+  if (background && expanded && details.jobId)
+    body(`Task ${details.jobId}`, undefined, true);
   if (
     details?.kind === "search" &&
     (details.scanComplete === false || details.displayLimited === true)
@@ -216,12 +219,21 @@ function compactTitle(
   return `${name} ${head}…${tail}${summary}`;
 }
 
-function limitTitle(rows: string[], budget: number, width: number): string[] {
+/** Wraps a title into `budget` rows; a suffix survives by cutting the title. */
+function limitTitle(
+  title: string,
+  suffix: string,
+  budget: number,
+  width: number,
+): string[] {
+  const rows = wrapAnsi(`${title}${suffix}`, width);
   if (rows.length <= budget) return rows;
-  return [
-    ...rows.slice(0, budget - 1),
-    truncateAnsi(`${rows[budget - 1]} …`, width),
-  ];
+  const head = wrapAnsi(title, width).slice(0, budget);
+  const last = head[budget - 1] ?? "";
+  const room = Math.max(1, width - visibleWidth(suffix) - 2);
+  head[budget - 1] =
+    `${truncateAnsi(last, room).replace(/\.{3}$/u, "")} …${suffix}`;
+  return head.map((row) => truncateAnsi(row, width));
 }
 
 function primaryInput(call: UiToolCall): string {

@@ -271,6 +271,7 @@ export * from "./contract/subagent-instance.js";
 export * from "./sync/subagent-instance-reader.js";
 export * from "./sync/shell-job-list-reader.js";
 export * from "./util/duration.js";
+export * from "./util/shell-job-view.js";
 export * from "./util/turn.js";
 export * from "./util/session-action-errors.js";
 

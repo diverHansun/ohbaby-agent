@@ -19,7 +19,7 @@ import {
   taskTitle,
   taskTrailing,
   type TaskGroup,
-} from "./task-view.js";
+} from "ohbaby-sdk";
 
 export type TaskOwnerFilter = "main" | "subagents" | "all";
 

@@ -1,8 +1,9 @@
-import {
-  formatDurationSeconds,
-  type UiShellJobOutput,
-  type UiShellJobRow,
-} from "ohbaby-sdk";
+/**
+ * Display rules for background tasks shared by the Web panel and the TUI, so
+ * both say the same thing (TUI background tasks T10; Web 03 §5).
+ */
+import type { UiShellJobOutput, UiShellJobRow } from "../contract/shell-job.js";
+import { formatDurationSeconds } from "./duration.js";
 
 /** The backend returns at most this much of a task's output tail. */
 export const OUTPUT_TAIL_BYTES = 32_768;

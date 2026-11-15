@@ -316,7 +316,9 @@ function reuseLiveMessage(
 export function isVisibleTranscriptMessage(message: UiMessage): boolean {
   return (
     message.runtimeInputKind !== "subagent-status" &&
-    message.runtimeInputKind !== "subagent-result"
+    message.runtimeInputKind !== "subagent-result" &&
+    // Task results are for the agent only (Web background tasks D6).
+    message.runtimeInputKind !== "background-task-result"
   );
 }
 

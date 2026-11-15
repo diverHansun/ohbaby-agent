@@ -4,7 +4,7 @@
 
 后台任务（background task，后端叫 ShellJob）的后端已经在 [后台任务议题](../../tools/2026-11-13-background-tasks/README.md) 的 improve-1～3 完成并合并到 `main`，起点提交是 `0ae131a4`。当时按 improve-1 D05 把前端暂缓。本组文档只补 Web 前端：右侧栏的 Background tasks 页面、bash 工具卡下的入口行，以及主会话里对任务结果消息的处理。产品规则（六种状态、停止原因、归属、额度）以后端议题为准，这里不重复定义。
 
-TUI 另开议题，放在 `docs/ohbaby-cli/background-tasks/`，做法照 pi-background-tasks 和 kimi-code 的 TUI，不在本组文档范围内。
+TUI 另开议题，见 [TUI 后台任务面板设计](../../ohbaby-cli/background-tasks/README.md)（2026-11-15 开始）。
 
 ## 已确认的决策
 

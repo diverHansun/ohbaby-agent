@@ -39,6 +39,10 @@ import {
   filterCommandCatalogBySurface,
 } from "../../../ohbaby-agent/src/commands/catalog.js";
 import * as exportSaving from "./session-export/save-export.js";
+import {
+  fakeTaskClient,
+  typicalRows,
+} from "./components/background-tasks/test-fixtures.js";
 import type {
   TerminalClient,
   TuiCommandCatalog,
@@ -5476,6 +5480,138 @@ describe("OhbabyTerminalApp", () => {
       },
       { permissionEpoch: "epoch", rootSessionId: "session_1" },
     );
+  });
+});
+
+describe("/bg Background tasks", () => {
+  const tuiCatalog = filterCommandCatalogBySurface(
+    buildCommandCatalog(),
+    "tui",
+  );
+  const rows = (): ReturnType<typeof typicalRows> =>
+    typicalRows().map((row) => ({
+      ...row,
+      rootSessionId: "session_1",
+      sessionId: "session_1",
+    }));
+
+  it("only notes, without opening a panel, when the chat ran only foreground commands", async () => {
+    const client = createFakeClient(snapshot(), tuiCatalog);
+    Object.assign(
+      client,
+      fakeTaskClient(rows().filter((row) => row.mode === "foreground")),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    expect(app.lastFrame()).not.toContain("/bg background");
+    app.stdin.write("/bg");
+    await flush();
+    app.stdin.write("\r");
+    await waitForFrame(app, (value) =>
+      value.includes("No background tasks in this chat."),
+    );
+    expect(app.lastFrame()).not.toContain("Running ");
+  });
+
+  it("shows the running count, opens the panel in place of the chat and closes with Esc", async () => {
+    const client = createFakeClient(snapshot(), tuiCatalog);
+    Object.assign(client, fakeTaskClient(rows()));
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (value) =>
+      value.includes("/bg background · 2 running"),
+    );
+    app.stdin.write("/bg");
+    await flush();
+    app.stdin.write("\r");
+    const open = await waitForFrame(app, (value) => value.includes("Done 3"));
+    expect(open).toContain("Background tasks");
+    expect(open).toContain("Running 2");
+    expect(open).not.toContain("git status");
+    // The panel owns the keyboard: Ctrl+G does not open the subagent browser.
+    app.stdin.write("\u0007");
+    await flush();
+    expect(app.lastFrame()).not.toContain("Subagents · Read only");
+    app.stdin.write("\u001B");
+    await flushEscapeInput();
+    await waitForFrame(app, (value) => !value.includes("Done 3"));
+  });
+
+  it("keeps task results out of the chat and marks the bash call that started one", async () => {
+    const base = snapshot();
+    const session = base.sessions[0];
+    const client = createFakeClient(
+      {
+        ...base,
+        sessions: [
+          {
+            ...session,
+            messages: [
+              {
+                createdAt: "2026-05-14T00:00:01.000Z",
+                id: "start",
+                role: "assistant",
+                runId: "run_1",
+                parts: [
+                  {
+                    type: "tool-call",
+                    call: {
+                      id: "call_bg",
+                      name: "bash",
+                      input: { command: "pnpm dev" },
+                      status: "completed",
+                    },
+                  },
+                  {
+                    type: "tool-result",
+                    result: {
+                      callId: "call_bg",
+                      output: "Started",
+                      details: {
+                        kind: "bash",
+                        mode: "background",
+                        jobId: "job_dev",
+                        status: "running",
+                      },
+                    },
+                  },
+                ],
+              },
+              {
+                createdAt: "2026-05-14T00:00:02.000Z",
+                id: "result",
+                role: "user",
+                runId: "run_2",
+                runtimeInputKind: "background-task-result",
+                parts: [{ type: "text", text: "TASK-RESULT-FOR-AGENT" }],
+              },
+            ],
+          },
+        ],
+      },
+      tuiCatalog,
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    const frame = await waitForFrame(app, (value) =>
+      value.includes("pnpm dev"),
+    );
+    expect(frame).toContain("pnpm dev · background");
+    expect(frame).not.toContain("TASK-RESULT-FOR-AGENT");
+    expect(frame).not.toContain("Started in background");
   });
 });
 

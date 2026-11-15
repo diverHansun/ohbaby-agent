@@ -1,4 +1,4 @@
-import type { UiShellJobOutput, UiShellJobRow } from "ohbaby-sdk";
+import type { UiShellJobOutput, UiShellJobRow } from "../contract/shell-job.js";
 import { describe, expect, it } from "vitest";
 import {
   canCancel,
@@ -9,7 +9,7 @@ import {
   taskStatusLine,
   taskTitle,
   taskTrailing,
-} from "./task-view.js";
+} from "./shell-job-view.js";
 
 const NOW = 10_000_000;
 

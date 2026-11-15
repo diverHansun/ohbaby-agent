@@ -198,6 +198,18 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     surfaces: ["tui"],
     title: "Rewind",
   },
+  // Opens the TUI's Background tasks panel; the Web has its right panel.
+  {
+    id: "bg",
+    path: ["bg"],
+    aliases: [],
+    argumentMode: "argv",
+    category: "session",
+    description: "See and cancel this chat's background tasks",
+    source: "builtin",
+    surfaces: ["tui"],
+    title: "Background Tasks",
+  },
   {
     id: "resume",
     path: ["resume"],

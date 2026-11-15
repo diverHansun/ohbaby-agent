@@ -152,7 +152,7 @@ describe("saved tool facts presentation", () => {
           { details: { kind: "bash", status: "running", jobId: "job" } },
         ),
       ),
-    ).toContain("Started in background");
+    ).toContain("· background");
   });
 });
 
@@ -332,6 +332,31 @@ it("preserves foreground subagent failures and result text until typed display f
   );
 });
 
+it("marks a background start once in the title, keeping it when a long command is cut", () => {
+  const long = display(
+    "bash",
+    { command: "x".repeat(400) },
+    {
+      details: { kind: "bash", mode: "background", jobId: "job" },
+      output: "",
+    },
+  );
+  expect(long).toHaveLength(2);
+  expect(long[1]?.text.endsWith(" · background")).toBe(true);
+  expect(
+    text(
+      display(
+        "bash",
+        { command: "git status" },
+        {
+          details: { kind: "bash", mode: "foreground", exitCode: 0 },
+          output: "",
+        },
+      ),
+    ),
+  ).not.toContain("background");
+});
+
 it("shows one background receipt without hiding actual command output", () => {
   const details = {
     kind: "bash" as const,
@@ -343,7 +368,7 @@ it("shows one background receipt without hiding actual command output", () => {
     output: "Command is still running with no output.",
   };
   expect(text(display("bash", { command: "sleep 10" }, result))).toBe(
-    "Bash sleep 10\n  Started in background",
+    "Bash sleep 10 · background",
   );
   expect(
     text(display("bash", { command: "sleep 10" }, result, true)),

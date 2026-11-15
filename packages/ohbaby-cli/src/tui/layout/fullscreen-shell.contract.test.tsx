@@ -271,7 +271,6 @@ describe("fullscreen transcript and dock terminal semantics", () => {
       await h.press(SHIFT_HOME);
       const pinned = screen(h.term);
       expect(pinned.join("\n")).toContain("HISTORY-START");
-      expect(pinned.join("\n")).toContain("History");
       for (let token = 0; token < 5; token += 1) {
         text += `继续生成第${String(token)}部分中文。`.repeat(8);
         await h.update({ text });
@@ -281,10 +280,12 @@ describe("fullscreen transcript and dock terminal semantics", () => {
       expect(screen(h.term).join("\n")).not.toContain("HISTORY-START");
       text += "FOLLOW-END";
       await h.update({ text });
-      expect(screen(h.term).join("\n")).toContain("FOLLOW-END");
+      const following = screen(h.term);
+      expect(following.join("\n")).toContain("FOLLOW-END");
       await h.press("\u001b[<64;3;2M");
       const mouseReading = screen(h.term);
-      expect(mouseReading.join("\n")).toContain("History");
+      // Leaving the bottom shows no hint any more (T11); the view itself moved.
+      expect(mouseReading).not.toEqual(following);
       text += "鼠标上滚时新内容继续增长".repeat(15);
       await h.update({ text });
       expect(screen(h.term)).toEqual(mouseReading);
@@ -691,7 +692,7 @@ describe("fullscreen review probes", () => {
     }
   });
 
-  it("scrolls and returns to latest with Ctrl+B/F/Y without changing the draft", async () => {
+  it("pages with Shift keys only and shows no paging hint, keeping the draft", async () => {
     const submit = vi.fn().mockResolvedValue({ sessionId: "root" });
     // SAFETY: only prompt submission is exercised by this dock fixture.
     const client = { submitPromptAccepted: submit } as unknown as CoreAPI;
@@ -725,15 +726,19 @@ describe("fullscreen review probes", () => {
       expect(screen(h.term).join("\n")).toContain("LATEST");
       expect(screen(h.term).join("\n")).toContain("Tasks");
       await h.press("abc");
-      await h.press("\u0002");
-      expect(screen(h.term).join("\n")).toContain("History");
-      expect(screen(h.term).join("\n")).toContain("Ctrl+Y latest");
+      // Ctrl+B/F/Y no longer page (TUI background tasks T11).
       await h.press("\u0002");
       await h.press("\u0006");
-      expect(screen(h.term).join("\n")).toContain("History");
-      await h.press("\u0019");
       expect(screen(h.term).join("\n")).toContain("LATEST");
+      await h.press(SHIFT_PAGE_UP);
+      expect(screen(h.term).join("\n")).not.toContain("LATEST");
+      // Reading history leaves the plain rule; no key guide appears.
       expect(screen(h.term).join("\n")).not.toContain("History");
+      expect(screen(h.term).join("\n")).not.toContain("Ctrl+Y");
+      await h.press("\u0019");
+      expect(screen(h.term).join("\n")).not.toContain("LATEST");
+      await h.press(SHIFT_END);
+      expect(screen(h.term).join("\n")).toContain("LATEST");
       await h.press("d");
       await h.press("\r");
       expect(submit).toHaveBeenCalledWith("abcd", expect.anything());

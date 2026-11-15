@@ -102,16 +102,8 @@ export function FullscreenShell({
     if (next !== positionRef.current) setPosition(next);
   });
   useInput(
-    (value, key) => {
-      if (key.ctrl && value === "y") {
-        anchor.current = null;
-        setPosition(null);
-        return;
-      }
-      if (key.ctrl && (value === "b" || value === "f")) {
-        scroll((value === "f" ? 1 : -1) * Math.max(1, viewport.height - 1));
-        return;
-      }
+    (_value, key) => {
+      // Ctrl+B/F/Y paging was removed with its hint (TUI background tasks T11).
       if (!key.shift) return;
       if (key.pageUp || key.pageDown)
         scroll((key.pageDown ? 1 : -1) * Math.max(1, viewport.height - 1));
@@ -186,13 +178,7 @@ export function FullscreenShell({
             <Box ref={dockRef} flexShrink={0} flexDirection="column">
               {!priorityDock ? (
                 <Text dimColor wrap="truncate-end">
-                  {position === null
-                    ? "─".repeat(layout.contentWidth)
-                    : layout.contentWidth >= 49
-                      ? "History · Ctrl+B up · Ctrl+F down · Ctrl+Y latest"
-                      : layout.contentWidth >= 35
-                        ? "History  Ctrl+B/F ↑↓  Ctrl+Y latest"
-                        : "History · Ctrl+Y latest"}
+                  {"─".repeat(layout.contentWidth)}
                 </Text>
               ) : null}
               <TodoPanelRefContext.Provider value={todoRef}>

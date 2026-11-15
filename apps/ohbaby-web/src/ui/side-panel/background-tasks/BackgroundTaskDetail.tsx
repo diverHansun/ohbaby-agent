@@ -18,7 +18,7 @@ import {
   taskOutputView,
   taskStatusLine,
   taskTitle,
-} from "./task-view.js";
+} from "ohbaby-sdk";
 import { useTaskOutput } from "./use-task-output.js";
 
 /** Leaving the bottom by less than this keeps following (04 §1.4). */

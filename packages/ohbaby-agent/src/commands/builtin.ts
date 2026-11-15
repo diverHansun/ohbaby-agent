@@ -49,6 +49,7 @@ const HELP_COMMAND_ORDER = [
   "btw",
   "fork",
   "rewind",
+  "bg",
   "goal",
   "permission",
   "mcps",
@@ -718,7 +719,7 @@ export function createBuiltinHandlers(
         return Promise.resolve();
       },
     },
-    ...(["btw", "fork", "rewind"] as const).map(
+    ...(["btw", "fork", "rewind", "bg"] as const).map(
       (id): CommandHandler => ({
         id,
         execute(_invocation, context): Promise<void> {

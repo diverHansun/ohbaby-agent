@@ -25,6 +25,7 @@ describe("command catalog", () => {
         "btw",
         "fork",
         "rewind",
+        "bg",
         "resume",
         "permission",
         "mcps",
@@ -269,7 +270,8 @@ describe("command catalog", () => {
       const ids = filterCommandCatalogBySurface(catalog, surface).commands.map(
         (command) => command.id,
       );
-      for (const id of ["btw", "fork", "rewind"]) expect(ids).not.toContain(id);
+      for (const id of ["btw", "fork", "rewind", "bg"])
+        expect(ids).not.toContain(id);
     }
     expect(
       filterCommandCatalogBySurface(catalog, "tui").commands.find(
