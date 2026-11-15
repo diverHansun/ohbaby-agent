@@ -32,6 +32,19 @@ export function canCancel(row: UiShellJobRow): boolean {
   return row.status === "running" && row.canStop;
 }
 
+/**
+ * Unconfirmed cleanup can be released once the backend that ran the task has
+ * exited; the server re-checks the same rule before abandoning.
+ */
+export function canAbandon(row: UiShellJobRow): boolean {
+  return (
+    row.status !== "running" &&
+    row.cleanup === "unconfirmed" &&
+    row.trackingReleasedAt === null &&
+    !row.managedByCurrentBackend
+  );
+}
+
 /** Started from another ohbaby backend; only meaningful while running (01 §1.3). */
 export function managedElsewhere(row: UiShellJobRow): boolean {
   return (
@@ -68,9 +81,16 @@ function longDuration(ms: number): string {
 }
 
 export function taskTrailing(row: UiShellJobRow, now: number): TaskTrailing {
+  if (row.status === "lost") return { kind: "unknown", text: "Unknown" };
+  // An ended task whose process may still run blocks file tools; say so first.
+  if (
+    row.status !== "running" &&
+    row.cleanup === "unconfirmed" &&
+    row.trackingReleasedAt === null
+  )
+    return { kind: "failed", text: "Unconfirmed" };
   if (row.status === "failed") return { kind: "failed", text: "Failed" };
   if (row.status === "timed_out") return { kind: "failed", text: "Timed out" };
-  if (row.status === "lost") return { kind: "unknown", text: "Unknown" };
   return { kind: "time", text: shortDuration(taskElapsed(row, now)) };
 }
 
@@ -117,7 +137,11 @@ export function taskNotes(row: UiShellJobRow): readonly string[] {
     notes.push("Started from another ohbaby window. Cancel it there.");
   if (row.cleanup === "unconfirmed" && row.trackingReleasedAt === null)
     notes.push(
-      "ohbaby couldn't confirm the process stopped. It may still be running.",
+      canAbandon(row)
+        ? "ohbaby couldn't confirm the process stopped. It may still be running. Stop tracking it to unblock file tools."
+        : row.status !== "running" && row.managedByCurrentBackend
+          ? "ohbaby couldn't confirm the process stopped. It may still be running. Restart ohbaby to release it."
+          : "ohbaby couldn't confirm the process stopped. It may still be running.",
     );
   if (row.status === "lost")
     notes.push("ohbaby stopped unexpectedly while this task was running.");

@@ -24,6 +24,7 @@ import {
   Shell,
 } from "../shell/index.js";
 import { analyzeShellCommand } from "../shell/analysis/index.js";
+import { manageWithWindowsJob } from "../shell/process.js";
 import type { BashPreparation } from "../shell/execution.js";
 import { preflightSandboxShellAnalysis } from "../sandbox/preflight.js";
 import { resolveCommandContext } from "./utils/context.js";
@@ -178,14 +179,19 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
     };
   }
   let interpreterDescription: string;
+  let dialectNote = "";
   try {
-    interpreterDescription = `${shell.acceptable()} (${process.platform})`;
+    const interpreter = shell.acceptable();
+    interpreterDescription = `${interpreter} (${process.platform})`;
+    // The tool keeps its bash name; say plainly when commands run in PowerShell.
+    if (detectShellKind(interpreter) === "powershell")
+      dialectNote = ` The interpreter is PowerShell, not bash: write PowerShell commands (no /dev/null, grep, or head). Start long-running processes with run_in_background, not Start-Process; processes started with Start-Process are outside ohbaby's process cleanup.`;
   } catch (error) {
     interpreterDescription = `unavailable (${error instanceof Error ? error.message : String(error)})`;
   }
 
   function describe(canManageBackground: boolean): string {
-    const commandDescription = `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged with no interpreter fallback after preparation. On Windows, select Git Bash only with a usable native full SHELL path. WSL launchers are unsupported.`;
+    const commandDescription = `Run a shell command using ${interpreterDescription} in the execution workspace.${dialectNote} Commands execute unchanged with no interpreter fallback after preparation. On Windows, select Git Bash only with a usable native full SHELL path. WSL launchers are unsupported.`;
     const foregroundTimeout = `For pure foreground execution, timeout defaults to ${String(DEFAULT_FOREGROUND_TIMEOUT_MS)}ms and has a maximum of ${String(MAX_FOREGROUND_TIMEOUT_MS)}ms.`;
     if (!canManageBackground)
       return `${commandDescription} This role can only run foreground commands. Background task management is unavailable. Omit run_in_background, auto_background and wait_ms. ${foregroundTimeout}`;
@@ -359,12 +365,15 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             reportCleanupError: context.reportCleanupError,
             child: (): ChildProcess => {
               throwIfCancelled(context.signal);
-              return spawn(spawnFile, spawnArgs, {
+              const child = spawn(spawnFile, spawnArgs, {
                 cwd: binding.cwd,
                 detached: shouldDetach(),
                 env,
                 windowsHide: true,
               });
+              // Attach before the shell runs the command; an empty Job is the cleanup proof.
+              manageWithWindowsJob(child);
+              return child;
             },
             contextScopeId: context.contextScopeId,
             metadata: {

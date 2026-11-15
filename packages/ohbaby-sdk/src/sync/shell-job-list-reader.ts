@@ -1,6 +1,7 @@
 import type { UiBackendClient } from "../contract/client.js";
 import type {
   UiShellJobList,
+  UiShellJobListQuery,
   UiShellJobOwnerFilter,
   UiShellJobRow,
 } from "../contract/shell-job.js";
@@ -13,7 +14,7 @@ export interface UiShellJobListReaderQuery {
   /** Absent lists every owner in the session tree. */
   readonly owner?: UiShellJobOwnerFilter;
   /** `background` leaves out foreground jobs (task panels, README D12). */
-  readonly mode?: "background";
+  readonly mode?: UiShellJobListQuery["mode"];
   /** Rows per "load more"; a refresh re-reads at least this many. */
   readonly pageSize: number;
 }

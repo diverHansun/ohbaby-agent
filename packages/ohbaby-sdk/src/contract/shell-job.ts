@@ -37,10 +37,11 @@ export interface UiShellJobListQuery extends UiShellJobQuery {
   readonly owner?: UiShellJobOwnerFilter;
   /**
    * `background` lists only jobs that run in the background, auto-promoted
-   * ones included. Omitted, foreground jobs whose cleanup is unfinished are
-   * listed too.
+   * ones included. `background-or-unconfirmed` adds foreground jobs whose
+   * process cleanup is unconfirmed, so users can see what blocks file tools.
+   * Omitted, foreground jobs whose cleanup is unfinished are listed too.
    */
-  readonly mode?: "background";
+  readonly mode?: "background" | "background-or-unconfirmed";
   readonly statuses?: readonly UiShellJobStatus[];
   readonly limit?: number;
   readonly cursor?: string;

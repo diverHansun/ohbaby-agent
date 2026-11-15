@@ -8,8 +8,8 @@ TUI 用进程内客户端（`UiBackendClient`），调用和 Web 相同的三个
 
 | 接口 | 谁在用 | 怎么用 |
 |---|---|---|
-| `listShellJobs({ mode: "background", owner: main/subagents, limit: 1 })`，两个并行 | 会话级探测：`/bg` 能否打开、提示行运行数、筛选是否可用、默认筛选 | 只读 `statusCounts` |
-| `listShellJobs({ mode: "background", owner?, limit: 30, cursor? })` | 面板列表 | 用 SDK 的 `createShellJobListReader` |
+| `listShellJobs({ mode: "background-or-unconfirmed", owner: main/subagents, limit: 1 })`，两个并行 | 会话级探测：`/bg` 能否打开、提示行运行数、筛选是否可用、默认筛选 | 只读 `statusCounts` |
+| `listShellJobs({ mode: "background-or-unconfirmed", owner?, limit: 30, cursor? })` | 面板列表 | 用 SDK 的 `createShellJobListReader` |
 | `getShellJobOutput` | 详情 | 运行中或结果尚未就绪时每 2 秒轮询 |
 | `stopShellJob` | 确认后的取消 | 返回后不直接改行，等列表或输出刷新 |
 | 事件 `shell-jobs.invalidated` | 探测、列表 | 节流，最多 2 秒一次（Web 06 §3.2） |

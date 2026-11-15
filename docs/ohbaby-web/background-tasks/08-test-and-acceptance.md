@@ -6,8 +6,9 @@
 
 ### UC-BGT-01 查看任务列表
 
-- [ ] `bg-none`：会话只跑过前台命令（Mock 里有两条前台记录），`[+]` 菜单和入口页都没有 Background tasks。
-- [ ] `bg-running`：列表里没有 `git status --short`、`sleep 600` 两条前台命令，组标题数量不算它们（D12）。
+- [ ] `bg-none`：会话只跑过一条普通前台命令，`[+]` 菜单和入口页都没有 Background tasks。
+- [ ] `bg-running`：列表里没有刚结束的 `git status --short`；清理未确认的 `sleep 600` 出现在 Done 组并计入数量（D12、Windows D14）。
+- [ ] `bg-unconfirmed`：两条清理未确认的前台命令都列出；原后端已退出的那条详情里有 `Stop tracking`，两次点击后离开列表；另一条只显示重启说明（Windows D14）。
 - [ ] `bg-running`：菜单里有 Background tasks；打开后 Running 组 2 行、Done 组 3 行，组标题数量分别是 2 和 3。
 - [ ] 运行中行的时长每秒更新，宽度不抖；Done 组里失败的行显示红字 `Failed`，成功和被取消的行只显示灰色时长。
 - [ ] 列表里没有卡片、胶囊、状态圆点；命令是等宽灰字，单行省略。

@@ -106,7 +106,7 @@
 | 输出拉取失败 | 输出区上方一行错误 + `Retry`；已有输出保留；轮询暂停，点 Retry 后恢复 | 重试、返回 |
 | 取消失败 | 标题区下方一行错误说明（不带 Retry），恢复 Cancel | 再点 Cancel |
 | 由别的后端管理（仅运行中） | 没有 Cancel；说明行见 03 §5.3；输出来自已保存的检查点 | 查看 |
-| 清理未确认 | 说明行见 03 §5.3；不提供重试清理或“放弃追踪” | 查看 |
+| 清理未确认 | 说明行见 03 §5.3；不提供重试清理。原后端已退出时，详情标题栏给出 `Stop tracking`：第一次点击变成 `Confirm: stop tracking`，5 秒内再点一次才发 `abandonShellJob`，成功后任务离开列表；当前后端仍在管理时只显示重启说明（[Windows 兼容 improve-1 · D14](../../shell/2026-11-15-windows-compatibility/improve-1/00-discussion.md)） | 查看、Stop tracking |
 | lost | 状态行 `Result unknown`；说明行见 03 §5.3 | 查看 |
 | 输出超过 32KiB | 输出区第一行 `Showing the last 32 KB.`；有日志路径时带复制图标 | 复制路径 |
 | 日志被截断 | 再加一行 03 §5.4 的说明 | 查看 |

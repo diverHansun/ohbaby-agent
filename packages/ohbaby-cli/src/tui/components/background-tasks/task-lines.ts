@@ -179,6 +179,7 @@ export function panelTitle(filter: OwnerFilter, filterable: boolean): Line {
 export function keyLine(input: {
   readonly view: "list" | "detail";
   readonly canCancel: boolean;
+  readonly canAbandon?: boolean;
   readonly filterable: boolean;
   readonly following: boolean;
   readonly retry: boolean;
@@ -189,6 +190,7 @@ export function keyLine(input: {
           "↑/↓ select",
           "Enter open",
           ...(input.canCancel ? ["c cancel"] : []),
+          ...(input.canAbandon ? ["u stop tracking"] : []),
           ...(input.filterable ? ["f filter"] : []),
           ...(input.retry ? ["r retry"] : []),
           "Esc close",
@@ -197,17 +199,22 @@ export function keyLine(input: {
           "↑/↓ scroll",
           ...(input.following ? [] : ["End follow"]),
           ...(input.canCancel ? ["c cancel"] : []),
+          ...(input.canAbandon ? ["u stop tracking"] : []),
           ...(input.retry ? ["r retry"] : []),
           "Esc back",
         ];
   return [{ text: keys.join(" · "), tone: "dim" }];
 }
 
-export function confirmLine(title: string, width: number): Line {
+export function confirmLine(
+  title: string,
+  width: number,
+  verb = "Cancel",
+): Line {
   const suffix = "? y confirm · any key back";
   return [
     {
-      text: `Cancel ${cut(title, Math.max(4, width - 7 - suffix.length))}${suffix}`,
+      text: `${verb} ${cut(title, Math.max(4, width - verb.length - 1 - suffix.length))}${suffix}`,
       tone: "warning",
     },
   ];

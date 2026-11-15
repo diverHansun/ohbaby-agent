@@ -202,7 +202,10 @@ interface ShellJob {
   closed: boolean;
   closing: boolean;
   exited: boolean;
+  endedAt?: number;
   terminationSucceeded: boolean;
+  /** Why cleanup is unconfirmed; kept in memory for errors and snapshots. */
+  cleanupReason?: string;
   readonly child: ChildProcess;
   readonly contextScopeId?: string;
   readonly jobId: string;
@@ -618,7 +621,8 @@ export class ShellJobRegistry {
     });
     child.once("exit", (exitCode, signal) => {
       job.exited = true;
-      this.persist(job, { endedAt: Date.now(), exitCode, signal });
+      job.endedAt = Date.now();
+      this.persist(job, { endedAt: job.endedAt, exitCode, signal });
       job.exitCode = exitCode;
       job.signal = signal;
       this.observeStopped(job);
@@ -1705,6 +1709,7 @@ export class ShellJobRegistry {
       resultReadyAt: job.resultReadyAt,
       outputBytes: job.outputBytes,
       startedAt: job.startedAt,
+      endedAt: job.endedAt ?? null,
       outputComplete: job.outputComplete,
       stopReason: job.stopReason,
       jobId: job.jobId,
@@ -1712,6 +1717,7 @@ export class ShellJobRegistry {
       truncated: rendered.truncated,
       outputFile,
       ...(job.cleanup ? { cleanup: job.cleanup } : {}),
+      ...(job.cleanupReason ? { cleanupReason: job.cleanupReason } : {}),
       ...(job.error ? { error: job.error } : {}),
       ...(isTerminal(job.status)
         ? { exitCode: job.exitCode ?? null, signal: job.signal ?? null }
@@ -1851,9 +1857,10 @@ export class ShellJobRegistry {
     this.settle(job);
   }
 
-  private markUnconfirmed(job: ShellJob): void {
+  private markUnconfirmed(job: ShellJob, reason: string): void {
     if (job.cleanup === "confirmed" || job.cleanup === "unconfirmed") return;
     job.cleanup = "unconfirmed";
+    job.cleanupReason = reason;
     this.persist(job, {
       cleanup: "unconfirmed",
       outputComplete: false,
@@ -1887,7 +1894,7 @@ export class ShellJobRegistry {
         : {}),
       cleanup: "in-progress",
     });
-    if (job.owner) job.sourceCleanup = beginSourceCleanup(job.owner);
+    if (job.owner) job.sourceCleanup = beginSourceCleanup(job.owner, job.jobId);
     job.reportCleanup?.("in-progress");
     job.cleanupTask = new Promise<void>((resolve) => {
       job.resolveCleanup = resolve;
@@ -1897,7 +1904,7 @@ export class ShellJobRegistry {
     const signalProcess = (): void => {
       if (!this.options.terminationManagesObservation) {
         job.observation = setTimeout(() => {
-          this.markUnconfirmed(job);
+          this.markUnconfirmed(job, "observation-expired");
         }, this.options.cleanupObservationMs ?? 1200);
         job.observation.unref();
       }
@@ -1908,15 +1915,15 @@ export class ShellJobRegistry {
             if (result?.terminationSucceeded) job.terminationSucceeded = true;
             if (result?.status === "confirmed") this.confirmStopped(job);
             else if (result?.status === "unconfirmed")
-              this.markUnconfirmed(job);
+              this.markUnconfirmed(job, result.reason ?? "termination-failed");
             else this.observeStopped(job);
           },
           () => {
-            this.markUnconfirmed(job);
+            this.markUnconfirmed(job, "termination-failed");
           },
         );
       } catch {
-        this.markUnconfirmed(job);
+        this.markUnconfirmed(job, "termination-failed");
       }
     };
     void job.persist.then(signalProcess, signalProcess);

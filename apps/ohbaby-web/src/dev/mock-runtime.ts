@@ -294,7 +294,8 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
           shellJobs &&
           (key === "listShellJobs" ||
             key === "getShellJobOutput" ||
-            key === "stopShellJob")
+            key === "stopShellJob" ||
+            key === "abandonShellJob")
         )
           return shellJobs[key];
         if (key === "listCommands")

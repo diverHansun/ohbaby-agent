@@ -648,6 +648,83 @@ describe("ShellJobRegistry", () => {
       await registry.dispose();
     }
   });
+  it("does not stop a naturally exited job whose cleanup is already confirmed", async () => {
+    const child = new FakeChild();
+    const killTree = vi.fn();
+    const registry = new ShellJobRegistry({
+      killTree,
+      probeTree: () => child.treeState,
+    });
+    const started = await registry.start({
+      child: () => child as unknown as ChildProcess,
+      sessionId: "session_1",
+      timeoutMs: 10_000,
+      owner: {
+        rootRunId: "A",
+        executionId: "execution-A",
+        rootSessionId: "session_1",
+        sessionId: "session_1",
+        runId: "run",
+        messageId: "message",
+        callId: "call",
+      },
+    });
+    try {
+      child.emitExit(0, null);
+      registry.stopForeground("A", "owner-ended");
+      const snapshot = registry.get(started.jobId, "session_1");
+      expect(snapshot.metadata).toMatchObject({
+        cleanup: "confirmed",
+        status: "completed",
+      });
+      expect(killTree).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+    }
+  });
+
+  it("freezes endedAt and records why cleanup stays unconfirmed", async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild();
+    const registry = new ShellJobRegistry({
+      probeTree: () => "unknown",
+      killTree: () =>
+        Promise.resolve({
+          status: "unconfirmed",
+          reason: "native-unavailable",
+        } as const),
+    });
+    const started = await registry.start({
+      child: () => child as unknown as ChildProcess,
+      sessionId: "session_1",
+      timeoutMs: 10_000,
+      owner: {
+        rootRunId: "A",
+        executionId: "execution-A",
+        rootSessionId: "session_1",
+        sessionId: "session_1",
+        runId: "run",
+        messageId: "message",
+        callId: "call",
+      },
+    });
+    try {
+      child.emitExit(0, null);
+      const endedAt = registry.get(started.jobId, "session_1").metadata.endedAt;
+      expect(typeof endedAt).toBe("number");
+      registry.stopForeground("A", "owner-ended");
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(registry.get(started.jobId, "session_1").metadata).toMatchObject({
+        endedAt,
+        cleanup: "unconfirmed",
+        cleanupReason: "native-unavailable",
+      });
+    } finally {
+      vi.useRealTimers();
+      await registry.dispose().catch(() => undefined);
+    }
+  });
+
   it("counts background work until close drains its pipes, but ignores completed records", async () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({

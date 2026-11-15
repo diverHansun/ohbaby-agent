@@ -27,7 +27,7 @@
 | Background tasks 列表 | 右侧栏 Tab | T-01、T-03 | 当前会话有过至少一个任务 | 是 |
 | Background tasks 详情 | 同一 Tab | T-02、T-03 | 从列表行或入口行进入 | 是 |
 
-“当前会话有过任务”指后端 `listShellJobs` 的 `statusCounts` 之和大于 0（主代理和子代理分别查，见 06 §3.1），包括已结束的任务。还在登记中的任务（`pendingStartCount`）不算，登记完成后自然会出现。前台命令不算（D12）：每条前台 bash 都会留下记录，后端默认列表还会带上刚结束、尚未收尾的前台命令和清理异常的前台命令，所以探测和列表都带 `mode=background`，只看后台任务（自动转后台的也算）。只跑过前台命令的会话不出现入口。
+“当前会话有过任务”指后端 `listShellJobs` 的 `statusCounts` 之和大于 0（主代理和子代理分别查，见 06 §3.1），包括已结束的任务。还在登记中的任务（`pendingStartCount`）不算，登记完成后自然会出现。普通前台命令不算（D12）：每条前台 bash 都会留下记录，后端默认列表还会带上刚结束、尚未收尾的前台命令，所以探测和列表都带 `mode=background-or-unconfirmed`，只看后台任务（自动转后台的也算），外加清理未确认、尚未放弃追踪的前台命令。后者会阻塞文件工具，需要让用户看到（[Windows 兼容 improve-1 · D14](../../shell/2026-11-15-windows-compatibility/improve-1/00-discussion.md)）。只跑过普通前台命令的会话不出现入口。
 
 ### 1.3 权限
 

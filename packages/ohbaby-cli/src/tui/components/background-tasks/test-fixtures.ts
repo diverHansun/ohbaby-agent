@@ -1,4 +1,6 @@
 import type {
+  UiShellJobAbandonInput,
+  UiShellJobAbandonResult,
   UiShellJobList,
   UiShellJobListQuery,
   UiShellJobOutput,
@@ -89,7 +91,11 @@ export function fakeTaskClient(rows: UiShellJobRow[]) {
     (input: UiShellJobListQuery): Promise<UiShellJobList> => {
       const scoped = rows.filter(
         (row) =>
-          (input.mode !== "background" || row.mode === "background") &&
+          (input.mode === undefined ||
+            row.mode === "background" ||
+            (input.mode === "background-or-unconfirmed" &&
+              row.cleanup === "unconfirmed" &&
+              row.trackingReleasedAt === null)) &&
           (input.owner?.kind === "main"
             ? row.ownerKind === "main"
             : input.owner?.kind === "subagents"
@@ -173,5 +179,19 @@ export function fakeTaskClient(rows: UiShellJobRow[]) {
       });
     },
   );
-  return { listShellJobs, getShellJobOutput, stopShellJob };
+  const abandonShellJob = vi.fn(
+    (input: UiShellJobAbandonInput): Promise<UiShellJobAbandonResult> => {
+      const index = rows.findIndex((row) => row.jobId === input.jobId);
+      if (index < 0) return Promise.reject(new Error("missing"));
+      rows[index] = { ...rows[index], trackingReleasedAt: NOW };
+      return Promise.resolve({
+        rootSessionId: input.rootSessionId,
+        runtimeEpoch: "epoch",
+        revision: 2,
+        trackingReleasedAt: NOW,
+        job: rows[index],
+      });
+    },
+  );
+  return { listShellJobs, getShellJobOutput, stopShellJob, abandonShellJob };
 }

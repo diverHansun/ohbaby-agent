@@ -13,6 +13,8 @@ import type {
   UiShellJobList,
   UiShellJobListQuery,
   UiShellJobOutput,
+  UiShellJobAbandonInput,
+  UiShellJobAbandonResult,
   UiShellJobStopResult,
   UiShellJobTarget,
 } from "ohbaby-sdk";
@@ -276,6 +278,19 @@ export class DaemonHttpClient {
       body: {
         runtimeEpoch: input.runtimeEpoch,
         bindingGeneration: input.bindingGeneration,
+      },
+      method: "POST",
+      signal: input.signal,
+    });
+  }
+  abandonShellJob(
+    input: UiShellJobAbandonInput,
+  ): Promise<{ ok: true; result: UiShellJobAbandonResult }> {
+    return this.request(`${this.shellJobPath(input)}/abandon`, {
+      body: {
+        runtimeEpoch: input.runtimeEpoch,
+        bindingGeneration: input.bindingGeneration,
+        confirm: input.confirm,
       },
       method: "POST",
       signal: input.signal,

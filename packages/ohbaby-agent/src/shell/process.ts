@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { SIGKILL_TIMEOUT_MS } from "./constants.js";
+import { createWindowsJob, type WindowsJobAttachment } from "./windows-job.js";
 
 export type ProcessTreeState = "running" | "stopped" | "unknown";
 
@@ -10,7 +11,8 @@ export interface KillTreeResult {
     | "missing-pid"
     | "probe-failed"
     | "termination-failed"
-    | "observation-expired";
+    | "observation-expired"
+    | "native-unavailable";
   /** Windows taskkill succeeded; a later owned exit can complete confirmation. */
   readonly terminationSucceeded?: boolean;
 }
@@ -23,6 +25,48 @@ export interface ProcessTreeProbeOptions extends KillTreeOptions {
   readonly platform?: NodeJS.Platform;
   readonly probeGroup?: (pid: number) => ProcessTreeState;
   readonly terminationSucceeded?: boolean;
+  /** Overrides the Job registered for this process (tests). */
+  readonly windowsJob?: WindowsJobAttachment;
+}
+
+// Windows commands spawned by bash own a Job; other children keep the legacy path.
+const windowsJobs = new WeakMap<object, WindowsJobAttachment>();
+
+/**
+ * Put a just-spawned Windows command into its own Job. A spawn without a PID
+ * stays a spawn failure; attach failures are recorded as native-unavailable.
+ */
+export function manageWithWindowsJob(
+  proc: Pick<ChildProcess, "pid">,
+  options: {
+    readonly platform?: NodeJS.Platform;
+    readonly attach?: (pid: number) => WindowsJobAttachment;
+  } = {},
+): void {
+  if ((options.platform ?? process.platform) !== "win32") return;
+  const pid = proc.pid;
+  if (!pid || !Number.isSafeInteger(pid) || pid <= 0) return;
+  windowsJobs.set(proc, (options.attach ?? createWindowsJob)(pid));
+}
+
+function windowsJobFor(
+  proc: Pick<ChildProcess, "pid">,
+  options: ProcessTreeProbeOptions,
+): WindowsJobAttachment | undefined {
+  return options.windowsJob ?? windowsJobs.get(proc);
+}
+
+/** An empty Job is final: without breakaway nothing can join it again. */
+function windowsJobState(
+  attachment: Extract<WindowsJobAttachment, { kind: "job" }>,
+): ProcessTreeState {
+  const job = attachment.job;
+  if (job.closed) return "stopped";
+  const active = job.activeProcesses();
+  if (active === undefined) return "unknown";
+  if (active > 0) return "running";
+  job.close();
+  return "stopped";
 }
 
 export interface KillTreePlatformOptions extends ProcessTreeProbeOptions {
@@ -75,6 +119,8 @@ export function probeProcessTree(
   }
   try {
     if ((options.platform ?? process.platform) === "win32") {
+      const attachment = windowsJobFor(proc, options);
+      if (attachment?.kind === "job") return windowsJobState(attachment);
       return options.terminationSucceeded && options.exited?.()
         ? "stopped"
         : "unknown";
@@ -127,13 +173,28 @@ export async function killTreeWithPlatform(
   }
   const observationMs = Math.max(0, options.observationMs ?? 1000);
   if ((options.platform ?? process.platform) === "win32") {
+    const attachment = windowsJobFor(proc, options);
+    if (attachment?.kind === "job") {
+      const probe = (): ProcessTreeState => windowsJobState(attachment);
+      if (probe() === "stopped") return { status: "confirmed" };
+      // The Job handle names our tree, so terminating is safe after leader exit.
+      if (!attachment.job.terminate() && probe() !== "stopped")
+        return { status: "unconfirmed", reason: "termination-failed" };
+      return observedResult(await observe(probe, observationMs, options));
+    }
     try {
       // Once our owned leader has exited, its numeric PID may name an unrelated
       // process. Without a native tree handle, never issue a new taskkill.
       if (options.exited?.()) {
         return options.terminationSucceeded
           ? { status: "confirmed", terminationSucceeded: true }
-          : { status: "unconfirmed", reason: "termination-failed" };
+          : {
+              status: "unconfirmed",
+              reason:
+                attachment?.kind === "unavailable"
+                  ? "native-unavailable"
+                  : "termination-failed",
+            };
       }
     } catch {
       return { status: "unconfirmed", reason: "probe-failed" };

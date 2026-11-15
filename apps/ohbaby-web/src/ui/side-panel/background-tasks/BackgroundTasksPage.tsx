@@ -80,7 +80,7 @@ export function BackgroundTasksPage(props: {
       createShellJobListReader(client, {
         rootSessionId,
         owner: ownerQuery(filter),
-        mode: "background",
+        mode: "background-or-unconfirmed",
         pageSize: PAGE_SIZE,
       }),
     // A new chat remounts the page; the filter switches through `select`,
@@ -104,7 +104,7 @@ export function BackgroundTasksPage(props: {
       void reader.select({
         rootSessionId,
         owner: ownerQuery(next),
-        mode: "background",
+        mode: "background-or-unconfirmed",
         pageSize: PAGE_SIZE,
       });
     },
@@ -222,6 +222,44 @@ export function BackgroundTasksPage(props: {
       });
   };
 
+  const [abandoning, setAbandoning] = useState<string>();
+  const abandon = (row: UiShellJobRow): void => {
+    if (abandoning) return;
+    setCancelError(undefined);
+    if (!client.abandonShellJob) {
+      setCancelError("Background tasks are unavailable");
+      return;
+    }
+    setAbandoning(row.jobId);
+    client
+      .abandonShellJob({
+        rootSessionId,
+        jobId: row.jobId,
+        confirm: true,
+        signal: AbortSignal.timeout(STOP_REQUEST_TIMEOUT_MS),
+      })
+      .then((result) => {
+        settle([result.job]);
+      })
+      .catch((error: unknown) => {
+        const code = errorCode(error);
+        if (code === "SHELL_JOB_ABANDON_NOT_ALLOWED")
+          setCancelError(
+            "This task can't be released yet. Restart ohbaby, then try again.",
+          );
+        else if (isTimeout(error))
+          setCancelError("System didn't respond. Try again.");
+        else if (code !== "SESSION_SCOPE_CHANGED")
+          setCancelError(
+            error instanceof Error ? error.message : String(error),
+          );
+      })
+      .finally(() => {
+        setAbandoning(undefined);
+        void reader.refresh();
+      });
+  };
+
   // Focus moves into a detail only when the list opened it (04 §3).
   const [openedFromList, setOpenedFromList] = useState<string>();
   const [returnFocus, setReturnFocus] = useState<string>();
@@ -281,6 +319,8 @@ export function BackgroundTasksPage(props: {
           cancelError={cancelError}
           stopRefusal={stopRefusals.get(selected)}
           onCancel={cancel}
+          abandoning={abandoning === selected}
+          onAbandon={abandon}
           onNotFound={markNotFound}
           onRow={settleOne}
           takeFocus={openedFromList === selected}

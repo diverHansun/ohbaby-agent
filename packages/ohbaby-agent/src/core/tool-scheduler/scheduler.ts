@@ -3,6 +3,7 @@ import { RunCleanupTracker, type ToolCleanupState } from "./run-cleanup.js";
 import {
   getSourceCleanupState,
   SourceCleanupUnavailableError,
+  unconfirmedSourceCleanupJobs,
 } from "./source-cleanup.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -1678,7 +1679,10 @@ export function createToolScheduler(
         if (!sourceSensitive) return undefined;
         options.refreshSourceCleanup?.(prepared.owner);
         const state = getSourceCleanupState(prepared.owner);
-        if (state === "unconfirmed") throw new SourceCleanupUnavailableError();
+        if (state === "unconfirmed")
+          throw new SourceCleanupUnavailableError(
+            unconfirmedSourceCleanupJobs(prepared.owner),
+          );
         return state === "in-progress" ? "source-cleanup" : undefined;
       };
       params = access.params ?? params;

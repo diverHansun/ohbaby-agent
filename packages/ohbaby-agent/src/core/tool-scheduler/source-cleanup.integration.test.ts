@@ -10,7 +10,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { createPermissionState } from "../../permission/index.js";
 import { createToolScheduler } from "./scheduler.js";
-import { beginSourceCleanup, getSourceCleanupState } from "./source-cleanup.js";
+import {
+  beginSourceCleanup,
+  getSourceCleanupState,
+  SourceCleanupUnavailableError,
+  unconfirmedSourceCleanupJobs,
+} from "./source-cleanup.js";
 import { withToolAdmission, type ToolAdmission } from "./tool-admission.js";
 import type {
   ToolExecutionFact,
@@ -292,6 +297,28 @@ describe("C3 source cleanup admission", () => {
       expect((await f.execute("file", "after-release")).status).toBe("success");
     } finally {
       await store.update("job", { trackingReleasedAt: Date.now() });
+    }
+  });
+
+  it("names the unconfirmed jobs and where the user can release them", () => {
+    const pending = beginSourceCleanup(owner("pending"), "job-pending");
+    const blocked = beginSourceCleanup(owner("blocked"), "job-blocked");
+    try {
+      blocked.markUnconfirmed();
+      expect(getSourceCleanupState(owner("new"))).toBe("unconfirmed");
+      expect(unconfirmedSourceCleanupJobs(owner("new"))).toEqual([
+        "job-blocked",
+      ]);
+      const message = new SourceCleanupUnavailableError(["job-blocked"])
+        .message;
+      expect(message).toContain("Blocking shell job(s): job-blocked.");
+      expect(message).toContain("/bg");
+      expect(new SourceCleanupUnavailableError().message).not.toContain(
+        "Blocking shell job",
+      );
+    } finally {
+      pending.confirm();
+      blocked.confirm();
     }
   });
 

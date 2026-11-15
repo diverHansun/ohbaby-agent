@@ -144,6 +144,44 @@ describe("Background tasks panel", () => {
     expect(frame(app)).toContain("Done 4");
   });
 
+  it("lists an unconfirmed foreground command and stops tracking it after y", async () => {
+    const client = fakeTaskClient([
+      taskRow("left", {
+        command: "npm run dev",
+        mode: "foreground",
+        status: "completed",
+        cleanup: "unconfirmed",
+        managedByCurrentBackend: false,
+        canStop: false,
+      }),
+      taskRow("here", {
+        command: "Get-ChildItem",
+        mode: "foreground",
+        status: "completed",
+        cleanup: "unconfirmed",
+        canStop: false,
+      }),
+    ]);
+    const app = mount(client);
+    await settle();
+    expect(frame(app)).toContain("npm run dev");
+    expect(frame(app)).toContain("Get-ChildItem");
+    // Only the one an exited ohbaby left can be released.
+    expect(frame(app)).toContain("u stop tracking");
+    await press(app, "u");
+    expect(frame(app)).toContain("Stop tracking npm run dev? y confirm");
+    await press(app, "y");
+    await settle();
+    expect(client.abandonShellJob).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "left", confirm: true }),
+    );
+    expect(frame(app)).not.toContain("npm run dev");
+    // The one this ohbaby still manages offers no release.
+    expect(frame(app)).not.toContain("u stop tracking");
+    await press(app, "u");
+    expect(frame(app)).not.toContain("y confirm");
+  });
+
   it("drops an unanswered confirmation after five seconds", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const client = fakeTaskClient(typicalRows());

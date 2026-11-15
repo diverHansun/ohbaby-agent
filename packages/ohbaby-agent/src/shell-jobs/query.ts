@@ -35,6 +35,8 @@ export interface ShellJobQuery {
    * cleanup is unfinished.
    */
   readonly backgroundOnly?: boolean;
+  /** With backgroundOnly: also unreleased foreground jobs whose cleanup is unconfirmed. */
+  readonly includeUnconfirmed?: boolean;
   readonly limit: number;
   readonly before?: ShellJobPagePosition;
 }
@@ -117,7 +119,16 @@ function inScope(row: ShellJobRecord, query: ShellJobQuery): boolean {
     row.contextScopeId !== query.owner.subagentId
   )
     return false;
-  if (query.backgroundOnly && row.mode !== "background") return false;
+  if (
+    query.backgroundOnly &&
+    row.mode !== "background" &&
+    !(
+      query.includeUnconfirmed &&
+      row.cleanup === "unconfirmed" &&
+      row.trackingReleasedAt === null
+    )
+  )
+    return false;
   return defaultVisible(row);
 }
 function filtered(row: ShellJobRecord, query: ShellJobQuery): boolean {
@@ -195,7 +206,12 @@ export function queryDatabaseShellJobs(
     where.push("context_scope_id = ?");
     params.push(query.owner.subagentId);
   }
-  if (query.backgroundOnly) where.push("mode = 'background'");
+  if (query.backgroundOnly)
+    where.push(
+      query.includeUnconfirmed
+        ? "(mode = 'background' OR (cleanup = 'unconfirmed' AND tracking_released_at IS NULL))"
+        : "mode = 'background'",
+    );
   where.push(
     "(mode = 'background' OR cleanup = 'unconfirmed' OR (status IS NOT NULL AND status != 'running' AND (cleanup IS NOT 'confirmed' OR settled_at IS NULL)))",
   );

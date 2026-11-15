@@ -153,14 +153,16 @@
 | `cancelled` + 其他原因 | `Cancelled · 2m`，原因见下方说明行 |
 | `lost` | `Result unknown` |
 
-列表里只用其中一部分：运行中显示时长；`failed` 显示红字 `Failed`；`timed_out` 显示红字 `Timed out`；`lost` 显示灰字 `Unknown`；其余显示灰色时长。
+列表里只用其中一部分：运行中显示时长；`lost` 显示灰字 `Unknown`；已结束、清理未确认且未放弃追踪的显示红字 `Unconfirmed`（Windows D14，优先于下面两条）；`failed` 显示红字 `Failed`；`timed_out` 显示红字 `Timed out`；其余显示灰色时长。
 
 ### 5.3 说明行文案（详情页，有才显示）
 
 | 情况 | 文案 |
 |---|---|
 | 由别的后端管理 | `Started from another ohbaby window. Cancel it there.` |
-| `cleanup` 为 `unconfirmed` | `ohbaby couldn't confirm the process stopped. It may still be running.` |
+| `cleanup` 为 `unconfirmed`，原后端已退出（可放弃追踪） | `ohbaby couldn't confirm the process stopped. It may still be running. Stop tracking it to unblock file tools.` |
+| `cleanup` 为 `unconfirmed`，已结束且当前后端仍在管理 | `ohbaby couldn't confirm the process stopped. It may still be running. Restart ohbaby to release it.` |
+| `cleanup` 为 `unconfirmed`，其他情况 | `ohbaby couldn't confirm the process stopped. It may still be running.` |
 | `lost` | `ohbaby stopped unexpectedly while this task was running.` |
 | 停止原因 `owner-ended` | `Stopped when its subagent finished.` |
 | 停止原因 `rewound` | `Stopped when the chat was rewound.` |

@@ -1,0 +1,30 @@
+[
+  {
+    "shell": "pwsh.exe",
+    "expectedExitCode": 0,
+    "actualExitCode": 0,
+    "active": 0,
+    "passed": true
+  },
+  {
+    "shell": "pwsh.exe",
+    "expectedExitCode": 7,
+    "actualExitCode": 7,
+    "active": 0,
+    "passed": true
+  },
+  {
+    "shell": "powershell.exe",
+    "expectedExitCode": 0,
+    "actualExitCode": 0,
+    "active": 0,
+    "passed": true
+  },
+  {
+    "shell": "powershell.exe",
+    "expectedExitCode": 7,
+    "actualExitCode": 7,
+    "active": 0,
+    "passed": true
+  }
+]

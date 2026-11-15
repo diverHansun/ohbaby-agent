@@ -125,13 +125,13 @@ export function useBackgroundTaskProbe(
             main: createShellJobListReader(client, {
               rootSessionId,
               owner: { kind: "main" },
-              mode: "background",
+              mode: "background-or-unconfirmed",
               pageSize: 1,
             }),
             subagents: createShellJobListReader(client, {
               rootSessionId,
               owner: { kind: "subagents" },
-              mode: "background",
+              mode: "background-or-unconfirmed",
               pageSize: 1,
             }),
           }

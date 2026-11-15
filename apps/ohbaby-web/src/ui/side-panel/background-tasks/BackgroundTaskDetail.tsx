@@ -11,8 +11,10 @@ import { CopyButton } from "../../shared/CopyButton.js";
 import { readableError } from "../../shared/error-text.js";
 import { IconButton } from "../../shared/IconButton.js";
 import { useDelayed } from "../../shared/use-delayed.js";
+import { TaskAbandonButton } from "./TaskAbandonButton.js";
 import { TaskCancelButton } from "./TaskCancelButton.js";
 import {
+  canAbandon,
   canCancel,
   taskNotes,
   taskOutputView,
@@ -38,6 +40,8 @@ export function BackgroundTaskDetail(props: {
   readonly cancelling: boolean;
   readonly cancelError?: string;
   readonly stopRefusal?: "not-found" | "other-backend";
+  readonly abandoning?: boolean;
+  readonly onAbandon?: (row: UiShellJobRow) => void;
   readonly onCancel: (row: UiShellJobRow) => void;
   readonly onBack: () => void;
   readonly onNotFound: (jobId: string) => void;
@@ -148,6 +152,14 @@ export function BackgroundTaskDetail(props: {
             cancelling={props.cancelling}
             onCancel={() => {
               props.onCancel(job);
+            }}
+          />
+        ) : props.onAbandon && canAbandon(job) ? (
+          <TaskAbandonButton
+            title={title}
+            busy={props.abandoning === true}
+            onAbandon={() => {
+              props.onAbandon?.(job);
             }}
           />
         ) : null}

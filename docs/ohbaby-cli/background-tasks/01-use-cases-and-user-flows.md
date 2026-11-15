@@ -26,7 +26,7 @@ TUI 主屏
 | 面板列表 | T-01、T-03 | 面板已打开 | 是 |
 | 面板详情 | T-02、T-03 | 在列表里按 Enter | 是 |
 
-“会话有过后台任务”的判断和 Web 相同：带 `mode: "background"` 分别查主代理和子代理，`statusCounts` 之和大于 0。前台命令不算（Web D12）。
+“会话有过后台任务”的判断和 Web 相同：带 `mode: "background-or-unconfirmed"` 分别查主代理和子代理，`statusCounts` 之和大于 0。普通前台命令不算（Web D12），清理未确认、尚未放弃追踪的前台命令算（[Windows 兼容 improve-1 · D14](../../shell/2026-11-15-windows-compatibility/improve-1/00-discussion.md)）。
 
 ### 1.3 权限
 
@@ -122,7 +122,7 @@ TUI 主屏
 
 - 运行中的任务都在 Running 组，时长每秒走动；Done 组里失败和超时显示 `Failed` / `Timed out`（error 色），lost 显示灰色 `Unknown`，其余只显示灰色时长。
 - 组标题数量来自后端统计。
-- 列表里没有前台命令。
+- 列表里没有普通前台命令；清理未确认的前台命令会列出（Windows D14）。
 
 ### UC-TBG-02 筛选启动者
 

@@ -1,4 +1,5 @@
 import {
+  canAbandon,
   taskTitle,
   type CoreAPI,
   type UiEventHandler,
@@ -150,7 +151,7 @@ export function BackgroundTaskBrowser({
       void reader.select({
         rootSessionId,
         owner: ownerQuery(next),
-        mode: "background",
+        mode: "background-or-unconfirmed",
         pageSize: TASK_PAGE_SIZE,
       });
     },
@@ -170,7 +171,9 @@ export function BackgroundTaskBrowser({
   const [confirm, setConfirm] = useState<{
     readonly jobId: string;
     readonly title: string;
+    readonly action: "cancel" | "abandon";
   } | null>(null);
+  const [abandoning, setAbandoning] = useState<string>();
   const [cancelling, setCancelling] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -291,6 +294,39 @@ export function BackgroundTaskBrowser({
       });
   };
 
+  const abandon = (row: UiShellJobRow): void => {
+    if (!client.abandonShellJob) {
+      setNotice("Background tasks are unavailable");
+      return;
+    }
+    setAbandoning(row.jobId);
+    const signal = AbortSignal.timeout(STOP_REQUEST_TIMEOUT_MS);
+    client
+      .abandonShellJob({
+        rootSessionId,
+        jobId: row.jobId,
+        confirm: true,
+        signal,
+      })
+      .then((result) => {
+        settle([result.job]);
+      })
+      .catch((error: unknown) => {
+        const code = errorCode(error);
+        if (signal.aborted) setNotice("System didn't respond. Try again.");
+        else if (code === "SHELL_JOB_ABANDON_NOT_ALLOWED")
+          setNotice(
+            "This task can't be released yet. Restart ohbaby, then try again.",
+          );
+        else if (code !== "SESSION_SCOPE_CHANGED")
+          setNotice(formatError(error));
+      })
+      .finally(() => {
+        setAbandoning(undefined);
+        void reader.refresh();
+      });
+  };
+
   // Fixed rows: title, optional approval line, optional error, key line, and
   // the root's reserve, as the subagent browser budgets them.
   const loadError = detailJobId
@@ -342,7 +378,11 @@ export function BackgroundTaskBrowser({
       if (!key.ctrl && !key.meta && (value === "y" || value === "Y")) {
         const row =
           rows.find((item) => item.jobId === target.jobId) ?? detailRow;
-        if (row && row.jobId === target.jobId && canCancelRow(row)) cancel(row);
+        if (row && row.jobId === target.jobId) {
+          if (target.action === "abandon") {
+            if (canAbandon(row) && abandoning === undefined) abandon(row);
+          } else if (canCancelRow(row)) cancel(row);
+        }
       }
       return;
     }
@@ -364,6 +404,16 @@ export function BackgroundTaskBrowser({
         setConfirm({
           jobId: selectedRow.jobId,
           title: taskTitle(selectedRow),
+          action: "cancel",
+        });
+      return;
+    }
+    if (value === "u") {
+      if (selectedRow && canAbandon(selectedRow) && abandoning === undefined)
+        setConfirm({
+          jobId: selectedRow.jobId,
+          title: taskTitle(selectedRow),
+          action: "abandon",
         });
       return;
     }
@@ -415,13 +465,21 @@ export function BackgroundTaskBrowser({
     );
 
   const footer: Line = confirm
-    ? confirmLine(confirm.title, width)
+    ? confirmLine(
+        confirm.title,
+        width,
+        confirm.action === "abandon" ? "Stop tracking" : "Cancel",
+      )
     : keyLine({
         view: detailJobId ? "detail" : "list",
         canCancel:
           selectedRow !== undefined &&
           canCancelRow(selectedRow) &&
           !cancelling.has(selectedRow.jobId),
+        canAbandon:
+          selectedRow !== undefined &&
+          canAbandon(selectedRow) &&
+          abandoning === undefined,
         filterable,
         following,
         retry: loadError !== undefined,

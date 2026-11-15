@@ -902,6 +902,7 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
       "bg-special",
       "bg-cancel-errors",
       "bg-output-fail",
+      "bg-unconfirmed",
     ].map((name) => [
       name,
       (): MockScenario => ({

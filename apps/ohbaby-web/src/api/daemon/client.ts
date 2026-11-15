@@ -26,6 +26,8 @@ import {
   type UiShellJobList,
   type UiShellJobListQuery,
   type UiShellJobOutput,
+  type UiShellJobAbandonInput,
+  type UiShellJobAbandonResult,
   type UiShellJobStopResult,
   type UiShellJobTarget,
   type UiUnsubscribe,
@@ -228,6 +230,19 @@ export class BrowserDaemonClient implements UiBackendClient {
     const binding = this.sync.permissionSync.getState().binding;
     return (
       await this.http.stopShellJob({
+        ...input,
+        runtimeEpoch: binding?.permissionEpoch,
+        bindingGeneration: binding?.bindingGeneration,
+      })
+    ).result;
+  }
+  /** Releases tracking only; the server re-checks that the owning backend exited. */
+  async abandonShellJob(
+    input: UiShellJobAbandonInput,
+  ): Promise<UiShellJobAbandonResult> {
+    const binding = this.sync.permissionSync.getState().binding;
+    return (
+      await this.http.abandonShellJob({
         ...input,
         runtimeEpoch: binding?.permissionEpoch,
         bindingGeneration: binding?.bindingGeneration,

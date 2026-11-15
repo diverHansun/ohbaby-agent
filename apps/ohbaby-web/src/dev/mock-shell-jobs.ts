@@ -1,6 +1,9 @@
+import { canAbandon } from "ohbaby-sdk";
 import type {
   UiEvent,
   UiEventHandler,
+  UiShellJobAbandonInput,
+  UiShellJobAbandonResult,
   UiShellJobList,
   UiShellJobListQuery,
   UiShellJobOutput,
@@ -312,8 +315,8 @@ function specialJobs(): MockJob[] {
 
 /**
  * Foreground commands also leave records (backend D15): one that just ended
- * and is not settled yet, and one whose cleanup was never confirmed. The
- * backend still returns them without `mode=background`; the panel must not.
+ * and is not settled yet, and one whose cleanup was never confirmed. The panel
+ * asks for `background-or-unconfirmed`, so only the second one shows there.
  */
 function foregroundJobs(rootSessionId = MOCK_TASK_SESSION): MockJob[] {
   return [
@@ -369,7 +372,34 @@ function cancelErrorJobs(): MockJob[] {
 
 const SCENARIOS: Readonly<Record<string, () => MockJob[]>> = {
   // Only foreground commands ran in this chat (`session_1` of `running`).
-  "bg-none": () => foregroundJobs("session_1"),
+  "bg-none": () => foregroundJobs("session_1").slice(0, 1),
+  // Foreground commands whose cleanup was never confirmed (Windows D14):
+  // one left by an exited ohbaby, one still managed by this one.
+  "bg-unconfirmed": () => [
+    {
+      row: job("job_fg_left", {
+        command: "npm run dev",
+        mode: "foreground",
+        status: "completed",
+        exitCode: 0,
+        cleanup: "unconfirmed",
+        managedByCurrentBackend: false,
+      }),
+      output: "",
+      tailAvailable: false,
+    },
+    {
+      row: job("job_fg_here", {
+        command: "Get-ChildItem",
+        mode: "foreground",
+        status: "completed",
+        exitCode: 0,
+        cleanup: "unconfirmed",
+      }),
+      output: "",
+      tailAvailable: false,
+    },
+  ],
   "bg-running": () => [...mainJobs(), ...foregroundJobs()],
   "bg-chat": () => [...mainJobs(), ...foregroundJobs()],
   "bg-two-chats": mainJobs,
@@ -408,6 +438,9 @@ export interface MockShellJobs {
   listShellJobs(input: UiShellJobListQuery): Promise<UiShellJobList>;
   getShellJobOutput(input: UiShellJobTarget): Promise<UiShellJobOutput>;
   stopShellJob(input: UiShellJobTarget): Promise<UiShellJobStopResult>;
+  abandonShellJob(
+    input: UiShellJobAbandonInput,
+  ): Promise<UiShellJobAbandonResult>;
 }
 
 export function createMockShellJobs(
@@ -485,7 +518,11 @@ export function createMockShellJobs(
         .filter(
           (row) =>
             row.rootSessionId === input.rootSessionId &&
-            (input.mode !== "background" || row.mode === "background") &&
+            (input.mode === undefined ||
+              row.mode === "background" ||
+              (input.mode === "background-or-unconfirmed" &&
+                row.cleanup === "unconfirmed" &&
+                row.trackingReleasedAt === null)) &&
             (input.owner?.kind === "main"
               ? row.ownerKind === "main"
               : input.owner?.kind === "subagents"
@@ -588,6 +625,26 @@ export function createMockShellJobs(
       return {
         ...version(input.rootSessionId),
         outcome: "accepted",
+        job: item.row,
+      };
+    },
+    async abandonShellJob(
+      input: UiShellJobAbandonInput,
+    ): Promise<UiShellJobAbandonResult> {
+      await wait(input.signal);
+      const item = find(input);
+      // The backend allows it only once the owning backend has exited.
+      if (!canAbandon(item.row))
+        throw coded(
+          "SHELL_JOB_ABANDON_NOT_ALLOWED",
+          "Only an unresolved task whose managing backend has exited can be abandoned.",
+        );
+      const trackingReleasedAt = Date.now();
+      item.row = { ...item.row, trackingReleasedAt };
+      emit();
+      return {
+        ...version(input.rootSessionId),
+        trackingReleasedAt,
         job: item.row,
       };
     },

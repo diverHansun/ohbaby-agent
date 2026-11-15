@@ -56,6 +56,7 @@
     "dotenv": "^16.4.7",
     "exa-js": "^2.0.12",
     "https-proxy-agent": "^7",
+    "koffi": "3.1.1",
     "ohbaby-sdk": "workspace:*",
     "undici": "^7",
     "web-tree-sitter": "0.25.10",

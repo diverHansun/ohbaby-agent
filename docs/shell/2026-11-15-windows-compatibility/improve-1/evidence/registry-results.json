@@ -1,0 +1,44 @@
+[
+  {
+    "name": "natural",
+    "jobId": "0fbfb50a-90bc-4a93-9794-047b4d00cbb3",
+    "promotion": null,
+    "mode": "foreground",
+    "status": "completed",
+    "cleanup": "confirmed",
+    "sourceGuard": null,
+    "spawnCount": 1,
+    "sameHelperPid": true,
+    "deadlineUnchanged": true,
+    "runtimeMs": 145,
+    "passed": true
+  },
+  {
+    "name": "explicit-background",
+    "jobId": "86ceb987-7a83-4081-9203-cd51a45a36b0",
+    "promotion": null,
+    "mode": "background",
+    "status": "completed",
+    "cleanup": "confirmed",
+    "sourceGuard": null,
+    "spawnCount": 1,
+    "sameHelperPid": true,
+    "deadlineUnchanged": true,
+    "runtimeMs": 145,
+    "passed": true
+  },
+  {
+    "name": "auto-background-timeout",
+    "jobId": "026609b8-d99a-4498-81dc-21bcce3ed27b",
+    "promotion": "converted",
+    "mode": "background",
+    "status": "timed_out",
+    "cleanup": "confirmed",
+    "sourceGuard": null,
+    "spawnCount": 1,
+    "sameHelperPid": true,
+    "deadlineUnchanged": true,
+    "runtimeMs": 1269,
+    "passed": true
+  }
+]

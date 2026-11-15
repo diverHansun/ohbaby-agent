@@ -8,6 +8,7 @@ export interface SourceCleanupHandle {
 }
 interface CleanupRecord {
   readonly key: string;
+  readonly jobId?: string;
   state: SourceCleanupState;
 }
 // Process lifetime, independent of schedulers/runs. Each job owns its own record.
@@ -139,10 +140,38 @@ export function getSourceCleanupState(
   }
   return state;
 }
+/**
+ * Job ids behind an unconfirmed guard, for the blocked-tool message. Call after
+ * getSourceCleanupState, which drops recovered guards that have resolved.
+ */
+export function unconfirmedSourceCleanupJobs(
+  owner: ToolExecutionOwner,
+): string[] {
+  const key = sourceKey(owner);
+  const root = owner.rootSessionId ?? owner.sessionId;
+  const workspace = owner.workspaceKey ?? owner.scopeKey ?? "";
+  const jobs = new Set<string>();
+  for (const group of recovered.values())
+    for (const record of group.values())
+      if (
+        record.rootSessionId === root &&
+        (record.workspaceKey === null || record.workspaceKey === workspace)
+      )
+        jobs.add(record.jobId);
+  for (const record of records)
+    if (record.key === key && record.state === "unconfirmed" && record.jobId)
+      jobs.add(record.jobId);
+  return [...jobs];
+}
 export function beginSourceCleanup(
   owner: ToolExecutionOwner,
+  jobId?: string,
 ): SourceCleanupHandle {
-  const record: CleanupRecord = { key: sourceKey(owner), state: "in-progress" };
+  const record: CleanupRecord = {
+    key: sourceKey(owner),
+    ...(jobId ? { jobId } : {}),
+    state: "in-progress",
+  };
   records.add(record);
   wakeResourceWaiters();
   return Object.freeze({
@@ -157,9 +186,11 @@ export function beginSourceCleanup(
   });
 }
 export class SourceCleanupUnavailableError extends Error {
-  constructor() {
+  constructor(jobIds: readonly string[] = []) {
+    const jobs =
+      jobIds.length > 0 ? ` Blocking shell job(s): ${jobIds.join(", ")}.` : "";
     super(
-      "Tool not executed: resource temporarily unavailable; a previous operation has unconfirmed cleanup and related resources remain protected. Continue independent work; do not automatically retry.",
+      `Tool not executed: resource temporarily unavailable; a previous operation has unconfirmed cleanup and related resources remain protected.${jobs} Continue independent work; do not automatically retry or work around it with other tools. Tell the user they can review these tasks with /bg in the terminal or in the Background tasks panel on the web: a task can be released there once the ohbaby process that ran it has exited; tasks still managed by the running ohbaby are released after restarting ohbaby.`,
     );
     this.name = "SourceCleanupUnavailableError";
   }

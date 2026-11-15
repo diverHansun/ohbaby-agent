@@ -1,0 +1,289 @@
+[
+  {
+    "name": "normal-success",
+    "passed": true,
+    "failure": null,
+    "helperExitCode": 0,
+    "helperExitSignal": null,
+    "processes": [
+      {
+        "mode": "natural",
+        "pid": 13320,
+        "stillAlive": false
+      }
+    ],
+    "events": [
+      {
+        "eventName": "started",
+        "pid": 13320,
+        "mode": "natural"
+      },
+      {
+        "eventName": "observe",
+        "active": 2,
+        "total": 2,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "observe",
+        "active": 0,
+        "total": 2,
+        "rootExitCode": 0
+      },
+      {
+        "eventName": "clean",
+        "active": 0,
+        "total": 2,
+        "rootExitCode": 0
+      }
+    ],
+    "stderr": ""
+  },
+  {
+    "name": "normal-failure",
+    "passed": true,
+    "failure": null,
+    "helperExitCode": 0,
+    "helperExitSignal": null,
+    "processes": [
+      {
+        "mode": "failed",
+        "pid": 14380,
+        "stillAlive": false
+      }
+    ],
+    "events": [
+      {
+        "eventName": "started",
+        "pid": 14380,
+        "mode": "failed"
+      },
+      {
+        "eventName": "observe",
+        "active": 2,
+        "total": 2,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "observe",
+        "active": 0,
+        "total": 2,
+        "rootExitCode": 7
+      },
+      {
+        "eventName": "clean",
+        "active": 0,
+        "total": 2,
+        "rootExitCode": 7
+      }
+    ],
+    "stderr": ""
+  },
+  {
+    "name": "cancel-tree",
+    "passed": true,
+    "failure": null,
+    "helperExitCode": 0,
+    "helperExitSignal": null,
+    "processes": [
+      {
+        "mode": "tree",
+        "pid": 44524,
+        "stillAlive": false
+      },
+      {
+        "mode": "leaf",
+        "pid": 36212,
+        "stillAlive": false
+      }
+    ],
+    "events": [
+      {
+        "eventName": "started",
+        "pid": 44524,
+        "mode": "tree"
+      },
+      {
+        "eventName": "observe",
+        "active": 2,
+        "total": 2,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "observe",
+        "active": 3,
+        "total": 3,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "stop-requested"
+      },
+      {
+        "eventName": "observe",
+        "active": 0,
+        "total": 3,
+        "rootExitCode": 99
+      },
+      {
+        "eventName": "clean",
+        "active": 0,
+        "total": 3,
+        "rootExitCode": 99
+      }
+    ],
+    "stderr": ""
+  },
+  {
+    "name": "leader-exits-first",
+    "passed": true,
+    "failure": null,
+    "helperExitCode": 0,
+    "helperExitSignal": null,
+    "processes": [
+      {
+        "mode": "orphan",
+        "pid": 34876,
+        "stillAlive": false
+      },
+      {
+        "mode": "leaf",
+        "pid": 18452,
+        "stillAlive": false
+      }
+    ],
+    "events": [
+      {
+        "eventName": "started",
+        "pid": 34876,
+        "mode": "orphan"
+      },
+      {
+        "eventName": "observe",
+        "active": 2,
+        "total": 2,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "observe",
+        "active": 3,
+        "total": 3,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "observe",
+        "active": 1,
+        "total": 3,
+        "rootExitCode": 0
+      },
+      {
+        "eventName": "stop-requested"
+      },
+      {
+        "eventName": "observe",
+        "active": 0,
+        "total": 3,
+        "rootExitCode": 0
+      },
+      {
+        "eventName": "clean",
+        "active": 0,
+        "total": 3,
+        "rootExitCode": 0
+      }
+    ],
+    "stderr": ""
+  },
+  {
+    "name": "hard-timeout",
+    "passed": true,
+    "failure": null,
+    "helperExitCode": 0,
+    "helperExitSignal": null,
+    "processes": [
+      {
+        "mode": "tree",
+        "pid": 37428,
+        "stillAlive": false
+      },
+      {
+        "mode": "leaf",
+        "pid": 44400,
+        "stillAlive": false
+      }
+    ],
+    "events": [
+      {
+        "eventName": "started",
+        "pid": 37428,
+        "mode": "tree"
+      },
+      {
+        "eventName": "observe",
+        "active": 2,
+        "total": 2,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "observe",
+        "active": 3,
+        "total": 3,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "stop-requested"
+      },
+      {
+        "eventName": "observe",
+        "active": 0,
+        "total": 3,
+        "rootExitCode": 99
+      },
+      {
+        "eventName": "clean",
+        "active": 0,
+        "total": 3,
+        "rootExitCode": 99
+      }
+    ],
+    "stderr": ""
+  },
+  {
+    "name": "helper-force-killed",
+    "passed": true,
+    "failure": null,
+    "helperExitCode": null,
+    "helperExitSignal": "SIGTERM",
+    "processes": [
+      {
+        "mode": "tree",
+        "pid": 23904,
+        "stillAlive": false
+      },
+      {
+        "mode": "leaf",
+        "pid": 44280,
+        "stillAlive": false
+      }
+    ],
+    "events": [
+      {
+        "eventName": "started",
+        "pid": 23904,
+        "mode": "tree"
+      },
+      {
+        "eventName": "observe",
+        "active": 2,
+        "total": 2,
+        "rootExitCode": 259
+      },
+      {
+        "eventName": "observe",
+        "active": 3,
+        "total": 3,
+        "rootExitCode": 259
+      }
+    ],
+    "stderr": ""
+  }
+]

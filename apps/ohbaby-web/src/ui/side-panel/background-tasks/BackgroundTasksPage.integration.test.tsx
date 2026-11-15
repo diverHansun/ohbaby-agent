@@ -187,16 +187,18 @@ describe("Background tasks page", () => {
     const titles = [...element.querySelectorAll(".ohb-bgtask-group h3")].map(
       (heading) => heading.textContent,
     );
-    // Foreground commands (one unsettled, one with unconfirmed cleanup) stay out.
-    expect(titles).toEqual(["Running2", "Done3"]);
+    // A just-ended foreground command stays out; one whose cleanup is
+    // unconfirmed is listed, because it blocks file tools (Windows D14).
+    expect(titles).toEqual(["Running2", "Done4"]);
     const list = element.querySelector(".ohb-bgtask-list")?.textContent ?? "";
     expect(list).not.toContain("git status --short");
-    expect(list).not.toContain("sleep 600");
-    // Only the failed row carries a word; others show a quiet time.
+    expect(list).toContain("sleep 600");
+    // Only the failed and the unconfirmed rows carry a word; others show a quiet time.
     expect(rowFor(element, "Build").textContent).toContain("Failed");
+    expect(rowFor(element, "sleep 600").textContent).toContain("Unconfirmed");
     expect(
       element.querySelectorAll(".ohb-bgtask-row-trailing.is-failed"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     // No filter without subagent tasks.
     expect(element.querySelector(".ohb-bgtask-toolbar")).toBeNull();
 
@@ -215,7 +217,7 @@ describe("Background tasks page", () => {
     expect(element.querySelector(".ohb-bgtask-detail")).toBeNull();
     await until(() =>
       [...element.querySelectorAll(".ohb-bgtask-group h3")].some(
-        (heading) => heading.textContent === "Done4",
+        (heading) => heading.textContent === "Done5",
       ),
     );
     expect(
@@ -246,7 +248,7 @@ describe("Background tasks page", () => {
     expect(element.querySelector('[role="alert"]')).toBeNull();
     await until(() =>
       [...element.querySelectorAll(".ohb-bgtask-group h3")].some(
-        (heading) => heading.textContent === "Done4",
+        (heading) => heading.textContent === "Done5",
       ),
     );
   });
@@ -265,7 +267,7 @@ describe("Background tasks page", () => {
     await click(button(element, "Cancel Watch tests"));
     await until(() =>
       [...element.querySelectorAll(".ohb-bgtask-group h3")].some(
-        (heading) => heading.textContent === "Done4",
+        (heading) => heading.textContent === "Done5",
       ),
     );
 
@@ -288,6 +290,45 @@ describe("Background tasks page", () => {
     expect(
       element.querySelectorAll('[aria-label="Open background task"]'),
     ).toHaveLength(0);
+  });
+
+  it("lists unconfirmed foreground commands and releases only those an exited ohbaby left", async () => {
+    const { element } = await mount("bg-unconfirmed");
+    await openTasksPage(element);
+    await click(
+      rowFor(element, "npm run dev").querySelector<HTMLElement>(
+        ".ohb-bgtask-row-open",
+      ) ?? undefined,
+    );
+    await until(() => element.querySelector(".ohb-bgtask-detail h2") !== null);
+    expect(
+      element.querySelector(".ohb-bgtask-detail-meta")?.textContent,
+    ).toContain("Stop tracking it to unblock file tools.");
+    const release = button(element, "Stop tracking npm run dev");
+    if (!release) throw new Error("missing Stop tracking");
+    // The first click only asks; the second releases.
+    await click(release);
+    expect(button(element, "Confirm: stop tracking npm run dev")).toBeDefined();
+    await click(button(element, "Confirm: stop tracking npm run dev"));
+    await until(
+      () =>
+        !(
+          element.querySelector(".ohb-bgtask-list")?.textContent ?? ""
+        ).includes("npm run dev"),
+    );
+
+    // One still managed by this ohbaby offers no action, only the restart note.
+    await click(button(element, "Back to tasks"));
+    await click(
+      rowFor(element, "Get-ChildItem").querySelector<HTMLElement>(
+        ".ohb-bgtask-row-open",
+      ) ?? undefined,
+    );
+    await until(() => element.querySelector(".ohb-bgtask-detail h2") !== null);
+    expect(
+      element.querySelector(".ohb-bgtask-detail-meta")?.textContent,
+    ).toContain("Restart ohbaby to release it.");
+    expect(button(element, "Stop tracking Get-ChildItem")).toBeUndefined();
   });
 
   it("preserves the list and restores focus to its row after reading details", async () => {

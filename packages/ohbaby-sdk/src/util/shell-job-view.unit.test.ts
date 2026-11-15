@@ -1,6 +1,7 @@
 import type { UiShellJobOutput, UiShellJobRow } from "../contract/shell-job.js";
 import { describe, expect, it } from "vitest";
 import {
+  canAbandon,
   canCancel,
   groupCounts,
   shortDuration,
@@ -136,12 +137,43 @@ describe("background task view", () => {
         }),
       ),
     ).toEqual([
-      "ohbaby couldn't confirm the process stopped. It may still be running.",
+      "ohbaby couldn't confirm the process stopped. It may still be running. Restart ohbaby to release it.",
       "ohbaby stopped unexpectedly while this task was running.",
     ]);
     expect(
       taskNotes(row({ status: "cancelled", stopReason: "owner-ended" })),
     ).toEqual(["Stopped when its subagent finished."]);
+  });
+
+  it("marks an ended task with unconfirmed cleanup until it is released", () => {
+    const stuck = row({ status: "failed", cleanup: "unconfirmed" });
+    expect(taskTrailing(stuck, NOW)).toEqual({
+      kind: "failed",
+      text: "Unconfirmed",
+    });
+    expect(taskTrailing({ ...stuck, trackingReleasedAt: 1 }, NOW).text).toBe(
+      "Failed",
+    );
+    expect(taskTrailing({ ...stuck, status: "lost" }, NOW).text).toBe(
+      "Unknown",
+    );
+  });
+
+  it("offers release only for unconfirmed tasks an exited backend left", () => {
+    const left = row({
+      status: "completed",
+      cleanup: "unconfirmed",
+      managedByCurrentBackend: false,
+    });
+    expect(canAbandon(left)).toBe(true);
+    expect(taskNotes(left)[0]).toBe(
+      "ohbaby couldn't confirm the process stopped. It may still be running. Stop tracking it to unblock file tools.",
+    );
+    expect(canAbandon({ ...left, managedByCurrentBackend: true })).toBe(false);
+    expect(canAbandon({ ...left, trackingReleasedAt: 1 })).toBe(false);
+    expect(canAbandon({ ...left, status: "running" })).toBe(false);
+    expect(canAbandon({ ...left, cleanup: "confirmed" })).toBe(false);
+    expect(taskNotes({ ...left, trackingReleasedAt: 1 })).toEqual([]);
   });
 
   it("tells a tail-only read from a cut log and from no saved output", () => {

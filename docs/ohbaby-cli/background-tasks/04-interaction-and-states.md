@@ -42,7 +42,7 @@
 
 为了和主屏“对话区顶部提示行”区分，面板底部这一行叫“键位行”。
 
-只列当前能用的键：选中的任务不在运行、不能取消或正在 `Cancelling…` 时不列 `c cancel`；子代理没有任务不列 `f filter`；跟随中不列 `End follow`；有加载错误时才列 `r retry`。确认取消时整行换成确认文案（warning 色），5 秒后自动恢复。
+只列当前能用的键：选中的任务不在运行、不能取消或正在 `Cancelling…` 时不列 `c cancel`；选中的任务清理未确认且原后端已退出时才列 `u stop tracking`（Windows D14）；子代理没有任务不列 `f filter`；跟随中不列 `End follow`；有加载错误时才列 `r retry`。确认取消时整行换成确认文案（warning 色），5 秒后自动恢复。
 
 ### 1.4 输出区
 
@@ -103,7 +103,7 @@
 | 任务不存在 | `This task is no longer available.` | Esc |
 | 输出拉取失败 | 头部下一行原因 · `r retry`；轮询暂停 | `r`、Esc |
 | 由别的后端管理（仅运行中） | 没有 `c`；说明行 | 滚动、Esc |
-| 清理未确认 / lost / 停止原因 | 对应说明行（Web 03 §5.3） | 滚动、Esc |
+| 清理未确认 / lost / 停止原因 | 对应说明行（Web 03 §5.3）；原后端已退出的清理未确认任务可按 `u`，确认行为 `Stop tracking <标题>? y confirm · any key back` | 滚动、Esc、`u` |
 | 输出超过 32KiB / 日志被截断 | 03 §4.3 | 滚动、Esc |
 
 ### 2.4 主屏

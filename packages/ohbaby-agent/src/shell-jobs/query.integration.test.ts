@@ -188,6 +188,44 @@ describe.each(["memory", "sqlite"] as const)(
         },
       });
     });
+    it("adds unreleased foreground jobs with unconfirmed cleanup for the release view", async () => {
+      const store = await setup();
+      await store.insert(
+        shellJobFixture({
+          jobId: "unsettled-foreground",
+          mode: "foreground",
+          createdAt: 70,
+          endedAt: 71,
+          status: "completed",
+          cleanup: "confirmed",
+          settledAt: null,
+        }),
+      );
+      await store.insert(
+        shellJobFixture({
+          jobId: "released-foreground",
+          mode: "foreground",
+          createdAt: 72,
+          endedAt: 73,
+          status: "completed",
+          cleanup: "unconfirmed",
+          settledAt: null,
+          trackingReleasedAt: 80,
+        }),
+      );
+      const view = store.query({
+        scope: { rootSessionId: "s" },
+        backgroundOnly: true,
+        includeUnconfirmed: true,
+        limit: 20,
+      });
+      expect(view.rows.map((row) => row.jobId).sort()).toEqual([
+        "abnormal-foreground",
+        "active-old",
+        "child",
+        "done-new",
+      ]);
+    });
     it("keeps status and owner filters honest and lowers abandoned cleanup priority", async () => {
       const store = await setup();
       expect(

@@ -10,8 +10,8 @@
 
 | 接口 | 谁在用 | 怎么用 |
 |---|---|---|
-| `GET /v1/sessions/:id/shell-jobs?mode=background&owner=main&limit=1` 和 `?mode=background&owner=subagents&limit=1`，两个请求并行发 | 会话级探测（§3.1） | 每个请求只读 `statusCounts`，求和得到这一方的任务数 |
-| `GET /v1/sessions/:id/shell-jobs?mode=background&owner=main\|subagents&limit=30&cursor=` | 列表视图（UC-BGT-01、02） | 转成 ViewModel 后渲染；滚到底部附近时用 `nextCursor` 往后追加 |
+| `GET /v1/sessions/:id/shell-jobs?mode=background-or-unconfirmed&owner=main&limit=1` 和 `?mode=background-or-unconfirmed&owner=subagents&limit=1`，两个请求并行发 | 会话级探测（§3.1） | 每个请求只读 `statusCounts`，求和得到这一方的任务数 |
+| `GET /v1/sessions/:id/shell-jobs?mode=background-or-unconfirmed&owner=main\|subagents&limit=30&cursor=` | 列表视图（UC-BGT-01、02） | 转成 ViewModel 后渲染；滚到底部附近时用 `nextCursor` 往后追加 |
 | `GET /v1/sessions/:id/shell-jobs/:jobId/output` | 详情视图（UC-BGT-03、05） | 渲染返回的 `job` 和 `output`；任务运行中时轮询 |
 | `POST /v1/sessions/:id/shell-jobs/:jobId/stop` | Cancel（UC-BGT-04） | 请求返回后不直接改这一行，等列表或输出刷新出新状态 |
 | 事件 `shell-jobs.invalidated` | 探测、列表 | 触发重新请求，但要节流（§3.2） |
@@ -174,7 +174,7 @@ interface BackgroundTaskOutputView {
 | `bg-many-done` | 1 个运行中，250 个已结束 | 滚动自动加载、超过 100 行后的失效刷新 |
 | `bg-special` | 每种各一个：`lost`、清理未确认、由别的后端管理（运行中）、`timed_out`、停止原因为 `owner-ended`、输出超过 32KiB、日志被截断、没有保存输出尾部 | 04 §2.3 特殊状态 |
 
-`bg-none`、`bg-running`、`bg-chat` 里另有两条前台记录（一条刚结束未收尾、一条清理未确认），用来验证 D12：它们不能出现在列表里，也不能让入口出现。
+`bg-running`、`bg-chat` 里另有两条前台记录（一条刚结束未收尾、一条清理未确认），用来验证 D12 与 D14：前者不出现，后者出现在 Done 组。`bg-none` 只有刚结束的那条，不出现入口。`bg-unconfirmed` 有两条清理未确认的前台命令，一条原后端已退出（可 Stop tracking），一条当前后端仍在管理（[Windows 兼容 improve-1 · D14](../../shell/2026-11-15-windows-compatibility/improve-1/00-discussion.md)）。
 | `bg-cancel-errors` | 取消时分别返回 `OTHER_BACKEND`、`CLEANUP_BUSY`、`NOT_FOUND`、网络错误 | 04 §2.2、§2.3 取消失败 |
 | `bg-output-fail` | 输出接口返回失败 | 04 §2.3 输出拉取失败 |
 | `bg-chat` | 对话里有：一张启动了后台任务的 bash 卡片、一张前台 bash 卡片、一条 `background-task-result` 消息和它唤醒的回复 | UC-BGT-05、06 |
@@ -197,3 +197,5 @@ mock 还要能控制网络延迟（用来看 `Loading…`）。断线沿用现�
 | 后端默认列表包含刚结束未收尾和清理异常的前台命令 | 实施审查时发现（D12）。后端新增可选参数 `mode=background`：内存和 SQLite 查询都只取 `mode = 'background'`，计数随之一致；cursor 指纹包含这个参数，不能和未筛选的列表混用；模型的 `task list` 不传，行为不变 |
 
 除了 `mode=background` 这一个可选参数，本轮不需要后端补其他接口或字段。
+
+后续（[Windows 兼容 improve-1 · D14](../../shell/2026-11-15-windows-compatibility/improve-1/00-discussion.md)）：新增 `mode=background-or-unconfirmed`，在后台任务之外再带上清理未确认、尚未放弃追踪的前台命令；内存和 SQLite 查询一致，cursor 指纹包含它。Web 客户端补上 `abandonShellJob`，走已有的 `POST .../abandon` 路由。
