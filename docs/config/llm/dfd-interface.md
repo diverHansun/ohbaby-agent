@@ -71,7 +71,7 @@ interface ModelSettingsNumericView {
 }
 ```
 
-有效 context 为覆盖→同路由检测→300000；有效输出为覆盖→32768。reasoning 能力视图另行返回；identified 可附失败 reason，不含 stale。Responses 的 max 受能力校验；Anthropic adaptive 不发布不可发送的 minimal。清理通知只在明确 reasoning 选择成功保存后清除，probe 不清除。
+有效 context 为覆盖→同路由检测→1000000；有效输出为覆盖→32768。reasoning 能力视图另行返回；identified 可附失败 reason，不含 stale。Responses 的 max 受能力校验；Anthropic adaptive 不发布不可发送的 minimal。清理通知只在明确 reasoning 选择成功保存后清除，probe 不清除。
 
 ### 接口2：写入和探测
 
@@ -84,7 +84,7 @@ interface ModelSettingsNumericView {
 
 `createModelEntry`、`updateModelEntry`、`selectModelEntry`、删除接口和 `applyActiveModelConfig` 共用发布协调。旧 `setActiveLLMConfig.maxTokens` 仍可用，但正式字段 `maxOutputTokens`（包括 null）优先。`probeModelEntry` 对 unknown 仍返回成功结果；独立只读 context probe 保留其既有数值接口，不接受 null 清空语义。
 
-输入框只显示覆盖值。检测容量在字段旁以“自动”只读提示展示，未知时不显示 300000 数字。表单只提交脏字段，主动输入与检测值相同也属于覆盖；后台通知只刷新只读状态，不替换草稿或打开基线。清空已有覆盖提交 null。配置标签统一为 Reasoning Effort。
+输入框只显示覆盖值。留空时占位文字显示生效值及来源，例如 `1,050,000 (detected)`、`1,000,000 (default)`，探测中显示 `Detecting…`；不再另起一行提示。表单只提交脏字段，主动输入与检测值相同也属于覆盖；后台通知只刷新只读状态，不替换草稿或打开基线。清空已有覆盖提交 null。配置标签统一为 Reasoning Effort。
 
 ## 数据归属与责任
 

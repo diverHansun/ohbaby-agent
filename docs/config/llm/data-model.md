@@ -42,10 +42,10 @@
 
 | 有效值 | 解析顺序 |
 | --- | --- |
-| context | 用户覆盖 → 同路由检测值 → 300000 |
+| context | 用户覆盖 → 同路由检测值 → 1000000 |
 | 普通输出上限 | 用户覆盖 → 32768 |
 
-默认常量统一定义在 `services/llm-model/modelProfiles.ts`。运行层 `maxTokens` 仍为必填数字，主、子代理共用解析后的 RunModel；effort 不改变普通输出上限。标题、摘要和 probe 的专用上限独立。300000 是本地预算兜底，不代表已知模型容量。
+默认常量定义在 `ohbaby-sdk` 的 `contract/connect-model.ts`，由 `services/llm-model/modelProfiles.ts` 重新导出，Web 和 TUI 用同一份值显示占位文字。运行层 `maxTokens` 仍为必填数字，主、子代理共用解析后的 RunModel；effort 不改变普通输出上限。标题、摘要和 probe 的专用上限独立。1000000 是本地预算兜底，不代表已知模型容量；真实窗口更小时依靠超长报错后的强制压缩恢复。
 
 Settings 和 current-model 读取视图保留可选覆盖值、可选检测值，并必返 `effectiveContextWindowTokens`、`effectiveMaxOutputTokens`、`contextDiscovery`。context 状态为 `detecting | identified | unknown`，可带内存中的失败 `reason`。reasoning 复用能力视图，重新探测失败且有旧证据时保持 identified 并附 reason，不再使用 stale。
 
@@ -57,7 +57,7 @@ context 放不下输出与安全余量时，保存和读取仍成功，视图带
 
 Create 的数值省略表示无覆盖，正整数设置覆盖，null 无效。Patch 省略表示保持原值，正整数设置覆盖，null 删除覆盖；0、负数、小数、空字符串无效。connect 同样支持省略和 null，`maxOutputTokens`（包括 null）优先于旧 `maxTokens` 别名。任何路径都不把检测值或 fallback 写进覆盖字段。
 
-只有缺少版本属性的文档在读取时执行一次性数字迁移：先展开旧顶层格式，再把旧 context 转入检测字段、为旧自动证据补充当前 routeKey，删除恰好为 8192 的旧输出值。混合格式残留的顶层 `llmParams.maxTokens` 不再补到条目。版本 2 中用户明确设置的 8192 保留；其他版本拒绝。读取不写盘，首次成功落盘前备份原文件到 `backups/model-json-<UTC 时间戳>/model.json`，并保存版本 2；后续不重复备份。降级须恢复备份。
+只有缺少版本属性的文档在读取时执行一次性数字迁移：先展开旧顶层格式，再删除旧 context 值（无法区分旧默认、旧探测和手填，改用自动值，见 2026-11-16 C2）、为旧自动 reasoning 证据补充当前 routeKey，删除恰好为 8192 的旧输出值。混合格式残留的顶层 `llmParams.maxTokens` 不再补到条目。版本 2 中用户明确设置的 8192 保留；其他版本拒绝。读取不写盘，首次成功落盘前备份原文件到 `backups/model-json-<UTC 时间戳>/model.json`，并保存版本 2；后续不重复备份。降级须恢复备份。
 
 Anthropic adaptive 的有效能力只发布正式请求可发送的 low/medium/high/xhigh/max。原始证据保留，只有 minimal 的证据投影为 unknown。无版本及版本 2 文档中实际会发送 minimal 的模型默认偏好在读取时清理，下一次正常保存或探测写回后持久化；新 Create/Patch 明确选择该无效偏好直接拒绝。明确的 minimal→low 映射、budget/binary 配置及不发送该 effort 的偏好不误清理。
 

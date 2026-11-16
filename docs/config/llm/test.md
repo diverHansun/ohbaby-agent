@@ -8,7 +8,7 @@
 
 ### 正常路径
 
-1. 仅填连接创建模型，两个覆盖字段保持省略，运行有效 context/output 为 300000/32768；effort 不影响普通输出上限。
+1. 仅填连接创建模型，两个覆盖字段保持省略，运行有效 context/output 为 1000000/32768；effort 不影响普通输出上限。
 2. 同路由检测值只写 `detectedContextWindowTokens`；手动覆盖优先。清空覆盖后回到自动，重新读取不把检测或 fallback 写回覆盖。
 3. Save 先完成发布，自动发现锁外运行；context/reasoning 独立进入终态并通知。普通 Save 复用可信能力，Detect again 强制刷新自动能力。
 4. 主、子代理使用同一有效配置；标题、摘要、probe 的专用额度不受普通默认影响。
