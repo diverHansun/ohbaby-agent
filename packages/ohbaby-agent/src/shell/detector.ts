@@ -44,8 +44,8 @@ function defaultWhich(command: string): string | undefined {
 }
 function windowsShellEntryExists(candidate: string): boolean {
   try {
-    // Store 执行别名的目标可能拒绝 stat，但 Windows 仍能启动它。
-    // lstat 只检查入口本身；实际启动错误仍由 spawn 报告。
+    // A Store execution alias may refuse stat on its target, yet Windows can
+    // still launch it. lstat checks only the entry; spawn reports launch errors.
     const entry = fs.lstatSync(candidate);
     return entry.isFile() || entry.isSymbolicLink();
   } catch {
