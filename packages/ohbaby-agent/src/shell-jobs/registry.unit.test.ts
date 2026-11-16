@@ -337,6 +337,45 @@ describe("ShellJobRegistry", () => {
     }
   });
 
+  it.each(["cancel", "timeout"] as const)(
+    "keeps drained output complete after %s and the old drain deadline",
+    async (reason) => {
+      vi.useFakeTimers();
+      const child = new FakeChild();
+      const store = new InMemoryShellJobStore();
+      const registry = new ShellJobRegistry({
+        store,
+        killTree: (): KillTreeResult => ({ status: "confirmed" }),
+        terminationManagesObservation: true,
+      });
+      try {
+        const started = await startJob(registry, child, 10);
+        if (reason === "cancel")
+          await registry.kill(started.jobId, "session_1");
+        await vi.advanceTimersByTimeAsync(10);
+        expect(store.get(started.jobId)?.cleanup).toBe("confirmed");
+
+        child.stdout.emit("data", "last output");
+        child.emitExit(1, null);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(store.get(started.jobId)?.outputComplete).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(store.get(started.jobId)).toMatchObject({
+          status: reason === "cancel" ? "cancelled" : "timed_out",
+          cleanup: "confirmed",
+          outputComplete: true,
+        });
+        expect(child.stdout.destroy).not.toHaveBeenCalled();
+        expect(child.stderr.destroy).not.toHaveBeenCalled();
+      } finally {
+        child.emitExit(1, null);
+        await registry.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("only checkpoints background output after new bytes arrive", async () => {
     vi.useFakeTimers();
     const store = new InMemoryShellJobStore();
@@ -1184,6 +1223,7 @@ describe("ShellJobRegistry", () => {
         exitCode: null,
         signal: null,
         status: "timed_out",
+        outputComplete: false,
       });
     } finally {
       vi.useRealTimers();

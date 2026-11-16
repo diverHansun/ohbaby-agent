@@ -7,6 +7,6 @@
 - [02 · 改动范围](02-optimization-plan-and-change-scope.md)
 - [03 · 项目借鉴](03-reference-projects.md)
 - [04 · 验收标准](04-test-and-acceptance.md)
-- 05 · 实施验收：完成后创建，记录实际证据与未覆盖项。
+- [05 · 实施验收](05-implementation-acceptance.md)：局部修复通过；Store 后代终止与完整双平台验收仍有缺口。
 
 00–04 保留实施前契约；实际进度以提交和 05 为准。[返回议题索引](../README.md)。

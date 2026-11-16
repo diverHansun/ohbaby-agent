@@ -630,6 +630,7 @@ export class ShellJobRegistry {
     child.once("close", (exitCode, signal) => {
       job.closing = true;
       job.closed = true;
+      if (job.outputDrain) clearTimeout(job.outputDrain);
       job.outputComplete ??= true;
       job.outputFile.finish(job.terminationReason === undefined);
       job.exitCode ??= exitCode;
@@ -1766,7 +1767,6 @@ export class ShellJobRegistry {
     }
     if (job.terminationStarted || job.cleanup === "confirmed")
       clearTimeout(job.timeoutId);
-    if (job.closed && job.outputDrain) clearTimeout(job.outputDrain);
     job.status = status;
     job.exitCode = exitCode;
     job.signal = signal;

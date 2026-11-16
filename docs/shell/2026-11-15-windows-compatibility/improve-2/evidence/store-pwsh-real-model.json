@@ -1,0 +1,165 @@
+{
+  "date": "2026-11-16",
+  "model": "glm-5.2",
+  "interfaceProvider": "openai-compatible",
+  "effort": "high",
+  "requests": 22,
+  "turns": [
+    {
+      "label": "files-foreground",
+      "sessionId": "session_1794813636381_uww44g1",
+      "status": "succeeded"
+    },
+    {
+      "label": "backgrounds",
+      "sessionId": "session_1794813636381_uww44g1",
+      "status": "succeeded"
+    },
+    {
+      "label": "after-background",
+      "sessionId": "session_1794813636381_uww44g1",
+      "status": "succeeded"
+    },
+    {
+      "label": "subagent",
+      "sessionId": "session_1794813636381_uww44g1",
+      "status": "succeeded"
+    },
+    {
+      "label": "timeout",
+      "sessionId": "session_1794813636381_uww44g1",
+      "status": "succeeded"
+    },
+    {
+      "label": "cancel",
+      "sessionId": "session_1794813636381_uww44g1",
+      "status": "succeeded"
+    }
+  ],
+  "tools": [
+    {
+      "name": "glob",
+      "status": "completed"
+    },
+    {
+      "name": "grep",
+      "status": "completed"
+    },
+    {
+      "name": "read",
+      "status": "completed"
+    },
+    {
+      "name": "edit",
+      "status": "completed"
+    },
+    {
+      "name": "read",
+      "status": "completed"
+    },
+    {
+      "name": "bash",
+      "status": "completed"
+    },
+    {
+      "name": "bash",
+      "status": "completed"
+    },
+    {
+      "name": "bash",
+      "status": "completed"
+    },
+    {
+      "name": "read",
+      "status": "completed"
+    },
+    {
+      "name": "read",
+      "status": "completed"
+    },
+    {
+      "name": "glob",
+      "status": "completed"
+    },
+    {
+      "name": "grep",
+      "status": "completed"
+    },
+    {
+      "name": "agent",
+      "status": "completed"
+    },
+    {
+      "name": "bash",
+      "status": "completed"
+    },
+    {
+      "name": "read",
+      "status": "completed"
+    },
+    {
+      "name": "bash",
+      "status": "completed"
+    },
+    {
+      "name": "bash",
+      "status": "completed"
+    }
+  ],
+  "jobs": [
+    {
+      "jobId": "6457f65f-5afd-458d-97ce-1d4e1952f261",
+      "status": "completed",
+      "cleanup": "confirmed",
+      "outputComplete": 1,
+      "promoted": false
+    },
+    {
+      "jobId": "a38efe1d-0f45-4a19-a7eb-dec2f179ce03",
+      "status": "completed",
+      "cleanup": "confirmed",
+      "outputComplete": 1,
+      "promoted": false
+    },
+    {
+      "jobId": "7a9dc4d2-2ec4-423d-8216-8fcc74b390fb",
+      "status": "completed",
+      "cleanup": "confirmed",
+      "outputComplete": 1,
+      "promoted": true
+    },
+    {
+      "jobId": "558676df-c1d0-46b7-814d-a25a583a2bde",
+      "status": "completed",
+      "cleanup": "confirmed",
+      "outputComplete": 1,
+      "promoted": false
+    },
+    {
+      "jobId": "c2a1d878-841f-4ac2-8e84-ac683cd3092e",
+      "status": "timed_out",
+      "cleanup": "confirmed",
+      "outputComplete": 0,
+      "promoted": false
+    },
+    {
+      "jobId": "edd96bf8-f5da-4c34-bb81-fbb2d853be3f",
+      "status": "cancelled",
+      "cleanup": "confirmed",
+      "outputComplete": 0,
+      "promoted": false
+    }
+  ],
+  "subagents": [
+    {
+      "status": "completed"
+    }
+  ],
+  "result": "PARTIAL: tool requests succeeded; Store PowerShell descendant termination failed. An empty Job was not evidence that escaped Node descendants stopped.",
+  "harnessErrors": [
+    {
+      "name": "Error",
+      "message": "JOB_NOT_SETTLED"
+    }
+  ]
+}

@@ -1,0 +1,230 @@
+{
+  "recordedAt": "2026-11-16T07:36:50.221Z",
+  "platform": "win32",
+  "nodeVersion": "v25.6.0",
+  "scope": "Real source Windows Job API; preloaded before spawn. Command is node long.cjs; child writes its own PID/PPID then remains silent. No production changes in this diagnosis.",
+  "interpreters": [
+    {
+      "name": "powershell",
+      "version": "5.1.26100.9818",
+      "installation": "Windows inbox PowerShell",
+      "path": "%SystemRoot%/System32/WindowsPowerShell/v1.0/powershell.exe",
+      "rootPid": 38816,
+      "childPid": 41616,
+      "childReportedParentPid": 38816,
+      "jobActivity": [
+        {
+          "atMs": 39,
+          "active": 1
+        },
+        {
+          "atMs": 45,
+          "active": 2
+        },
+        {
+          "atMs": 270,
+          "active": 3
+        },
+        {
+          "atMs": 2551,
+          "active": 0
+        }
+      ],
+      "kill": {
+        "atMs": 2550,
+        "status": "confirmed"
+      },
+      "childObservation": {
+        "millisecondsAfterKill": 1614,
+        "alive": false
+      },
+      "cleanup": {
+        "action": "No extra signal; child already absent",
+        "pid": 41616,
+        "noMatchingLongCjsProcessInFinalWmiQuery": true
+      }
+    },
+    {
+      "name": "store-pwsh",
+      "version": "7.7.0",
+      "installation": "Microsoft Store PowerShell via execution alias",
+      "path": "%LOCALAPPDATA%/Microsoft/WindowsApps/Microsoft.PowerShell_8wekyb3d8bbwe/pwsh.exe",
+      "rootPid": 15976,
+      "childPid": 39896,
+      "childReportedParentPid": 15976,
+      "jobActivity": [
+        {
+          "atMs": 56,
+          "active": 1
+        },
+        {
+          "atMs": 2571,
+          "active": 0
+        }
+      ],
+      "kill": {
+        "atMs": 2567,
+        "status": "confirmed"
+      },
+      "childObservation": {
+        "millisecondsAfterKill": 1617,
+        "alive": true
+      },
+      "cleanup": {
+        "action": "SIGKILL to exact fixture PID after validating fixture ppid equals spawned root pid",
+        "pid": 39896,
+        "noMatchingLongCjsProcessInFinalWmiQuery": true
+      }
+    },
+    {
+      "name": "store-installed",
+      "version": "7.7.0",
+      "installation": "Microsoft Store PowerShell via installed executable",
+      "path": "C:/Program Files/WindowsApps/Microsoft.PowerShell_7.7.0.0_x64__8wekyb3d8bbwe/pwsh.exe",
+      "rootPid": 43744,
+      "childPid": 39744,
+      "childReportedParentPid": 43744,
+      "jobActivity": [
+        {
+          "atMs": 102,
+          "active": 1
+        },
+        {
+          "atMs": 2619,
+          "active": 0
+        }
+      ],
+      "kill": {
+        "atMs": 2605,
+        "status": "confirmed"
+      },
+      "childObservation": {
+        "millisecondsAfterKill": 1608,
+        "alive": true
+      },
+      "cleanup": {
+        "action": "SIGKILL to exact fixture PID after validating fixture ppid equals spawned root pid",
+        "pid": 39744,
+        "noMatchingLongCjsProcessInFinalWmiQuery": true
+      }
+    },
+    {
+      "name": "portable-pwsh",
+      "version": "7.6.9",
+      "installation": "Codex bundled PowerShell executable",
+      "path": "CodexPrimaryRuntime/dependencies/native/powershell/pwsh.exe",
+      "rootPid": 14508,
+      "childPid": 2800,
+      "childReportedParentPid": 14508,
+      "jobActivity": [
+        {
+          "atMs": 24,
+          "active": 2
+        },
+        {
+          "atMs": 458,
+          "active": 3
+        },
+        {
+          "atMs": 2536,
+          "active": 0
+        }
+      ],
+      "kill": {
+        "atMs": 2536,
+        "status": "confirmed"
+      },
+      "childObservation": {
+        "millisecondsAfterKill": 1606,
+        "alive": false
+      },
+      "cleanup": {
+        "action": "No extra signal; child already absent",
+        "pid": 2800,
+        "noMatchingLongCjsProcessInFinalWmiQuery": true
+      }
+    }
+  ],
+  "additionalControl": {
+    "name": "winps-startprocess",
+    "version": "5.1.26100.9818",
+    "installation": "Windows inbox PowerShell",
+    "command": "Start-Process -FilePath node -ArgumentList long.cjs -NoNewWindow -Wait",
+    "rootPid": 29752,
+    "childPid": 39724,
+    "childReportedParentPid": 29752,
+    "jobActivity": [
+      {
+        "atMs": 42,
+        "active": 1
+      },
+      {
+        "atMs": 49,
+        "active": 2
+      },
+      {
+        "atMs": 304,
+        "active": 3
+      },
+      {
+        "atMs": 2558,
+        "active": 0
+      }
+    ],
+    "kill": {
+      "atMs": 2557,
+      "status": "confirmed"
+    },
+    "childObservation": {
+      "millisecondsAfterKill": 1605,
+      "alive": false
+    },
+    "cleanup": {
+      "action": "No extra signal; child already absent",
+      "pid": 39724,
+      "noMatchingLongCjsProcessInFinalWmiQuery": true
+    }
+  },
+  "findings": [
+    "In these runs Store PowerShell 7.7.0 ordinary Node children did not appear in the assigned Job; killing the Job stopped its PowerShell member but left the Node child alive.",
+    "Using the installed Store executable instead of its alias did not change the outcome.",
+    "Inbox Windows PowerShell 5.1 and bundled PowerShell 7.6.9 included the Node descendant and stopped it. Distribution versus version was not isolated; no universal claim about every PowerShell build.",
+    "The earlier ticking-child Registry probe showed stdout continuing after Job-empty, then the real one-second drain deadline destroyed the pipes. No ECONNRESET was observed. outputComplete=false was correct for that capture."
+  ],
+  "mainE2eCleanupCheck": {
+    "databaseReadOnly": true,
+    "jobs": [
+      {
+        "jobId": "c2a1d878-841f-4ac2-8e84-ac683cd3092e",
+        "rootPid": 26640,
+        "startedAt": 1794813691713,
+        "endedAt": 1794813694298,
+        "status": "timed_out"
+      },
+      {
+        "jobId": "edd96bf8-f5da-4c34-bb81-fbb2d853be3f",
+        "rootPid": 41616,
+        "startedAt": 1794813703086,
+        "endedAt": 1794813705350,
+        "status": "cancelled"
+      }
+    ],
+    "query": "Win32_Process where Name=node.exe; filter CommandLine containing long.cjs; compare ParentProcessId and CreationDate against recorded job identity before any termination",
+    "matchingProcesses": 0,
+    "terminationActions": 0,
+    "note": "No survivors remained at inspection time. This does not prove Job cleanup; no broad termination or stale-PID kill was attempted."
+  },
+  "probeCleanup": {
+    "earlierTickingRawProbe": {
+      "rootPid": 39620,
+      "childPid": 43460,
+      "action": "Verified WMI parent PID and exact node long.cjs command line, then Stop-Process this PID only"
+    },
+    "finalWmiLongCjsCount": 0
+  },
+  "limitations": [
+    "Only these local builds and commands were tested.",
+    "Root Job empty is evidence about Job members, not about descendants outside that Job.",
+    "A silent escaped child demonstrates that pipe shutdown cannot be relied on to terminate descendants."
+  ]
+}

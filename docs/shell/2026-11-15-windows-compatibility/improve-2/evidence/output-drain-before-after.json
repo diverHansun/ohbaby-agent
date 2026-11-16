@@ -1,0 +1,1905 @@
+{
+  "before": [
+    {
+      "interpreter": "node",
+      "mode": "raw",
+      "events": [
+        {
+          "ms": 8,
+          "event": "spawn"
+        },
+        {
+          "ms": 8,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 13,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 54,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 54,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1208,
+          "event": "kill.request"
+        },
+        {
+          "ms": 1208,
+          "event": "kill.result",
+          "status": "confirmed"
+        },
+        {
+          "ms": 1210,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1210,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1211,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1211,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1213,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1215,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1215,
+          "event": "child.close"
+        }
+      ]
+    },
+    {
+      "interpreter": "node",
+      "mode": "cancel",
+      "events": [
+        {
+          "ms": 9,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 34,
+          "event": "spawn"
+        },
+        {
+          "ms": 38,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 40,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 53,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 113,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 113,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1123,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 1243,
+          "event": "cancel.request"
+        },
+        {
+          "ms": 1244,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1245,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1246,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1246,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1249,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1249,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1250,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1250,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1266,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1267,
+          "event": "child.close"
+        },
+        {
+          "ms": 1269,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1269,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1269,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2249,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        },
+        {
+          "ms": 2851,
+          "event": "final",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        }
+      ]
+    },
+    {
+      "interpreter": "node",
+      "mode": "timeout",
+      "events": [
+        {
+          "ms": 0,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 4,
+          "event": "spawn"
+        },
+        {
+          "ms": 4,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 8,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 55,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 56,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1063,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 1213,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1213,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1213,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1216,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1216,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1216,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1216,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1219,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1222,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1222,
+          "event": "child.close"
+        },
+        {
+          "ms": 1222,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1222,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1222,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2214,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        },
+        {
+          "ms": 2709,
+          "event": "final",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        }
+      ]
+    },
+    {
+      "interpreter": "powershell",
+      "mode": "raw",
+      "events": [
+        {
+          "ms": 52,
+          "event": "spawn"
+        },
+        {
+          "ms": 54,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 66,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 378,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 382,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1256,
+          "event": "kill.request"
+        },
+        {
+          "ms": 1257,
+          "event": "kill.result",
+          "status": "confirmed"
+        },
+        {
+          "ms": 1257,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1273,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1274,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1275,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1275,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1294,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1294,
+          "event": "child.close"
+        }
+      ]
+    },
+    {
+      "interpreter": "powershell",
+      "mode": "cancel",
+      "events": [
+        {
+          "ms": 0,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 3,
+          "event": "spawn"
+        },
+        {
+          "ms": 3,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 12,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 205,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 207,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1207,
+          "event": "cancel.request"
+        },
+        {
+          "ms": 1207,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1208,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1208,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1208,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1210,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1210,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1210,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1210,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1212,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1217,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1217,
+          "event": "child.close"
+        },
+        {
+          "ms": 1217,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1217,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1217,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2216,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        },
+        {
+          "ms": 2813,
+          "event": "final",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        }
+      ]
+    },
+    {
+      "interpreter": "powershell",
+      "mode": "timeout",
+      "events": [
+        {
+          "ms": 0,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 22,
+          "event": "spawn"
+        },
+        {
+          "ms": 23,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 24,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 43,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 274,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 275,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1238,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1239,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1240,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1240,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1251,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1252,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1252,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1253,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1277,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1280,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1280,
+          "event": "child.close"
+        },
+        {
+          "ms": 1280,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1280,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1280,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2245,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        },
+        {
+          "ms": 2732,
+          "event": "final",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        }
+      ]
+    },
+    {
+      "interpreter": "store-pwsh",
+      "mode": "raw",
+      "events": [
+        {
+          "ms": 59,
+          "event": "spawn"
+        },
+        {
+          "ms": 59,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 474,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 481,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1261,
+          "event": "kill.request"
+        },
+        {
+          "ms": 1261,
+          "event": "kill.result",
+          "status": "confirmed"
+        },
+        {
+          "ms": 1264,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1264,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1264,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1265,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1277,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1296,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1296,
+          "event": "child.close"
+        }
+      ]
+    },
+    {
+      "interpreter": "store-pwsh",
+      "mode": "cancel",
+      "events": [
+        {
+          "ms": 0,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 77,
+          "event": "spawn"
+        },
+        {
+          "ms": 77,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 77,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 510,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 518,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1280,
+          "event": "cancel.request"
+        },
+        {
+          "ms": 1280,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1282,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1282,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1293,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1293,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1293,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1293,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1293,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1336,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1336,
+          "event": "child.close"
+        },
+        {
+          "ms": 1337,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1337,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1337,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2288,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        },
+        {
+          "ms": 2883,
+          "event": "final",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        }
+      ]
+    },
+    {
+      "interpreter": "store-pwsh",
+      "mode": "timeout",
+      "events": [
+        {
+          "ms": 0,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 41,
+          "event": "spawn"
+        },
+        {
+          "ms": 41,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 44,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 497,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 515,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1243,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1245,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1245,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1253,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1258,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1258,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1259,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1259,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1299,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1299,
+          "event": "child.close"
+        },
+        {
+          "ms": 1299,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1299,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1299,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2247,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        },
+        {
+          "ms": 2745,
+          "event": "final",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": false
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "interpreter": "node",
+      "mode": "raw",
+      "events": [
+        {
+          "ms": 6,
+          "event": "spawn"
+        },
+        {
+          "ms": 7,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 11,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 55,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 56,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1213,
+          "event": "kill.request"
+        },
+        {
+          "ms": 1217,
+          "event": "kill.result",
+          "status": "confirmed"
+        },
+        {
+          "ms": 1218,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1226,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1229,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1233,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1233,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1242,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1243,
+          "event": "child.close"
+        }
+      ]
+    },
+    {
+      "interpreter": "node",
+      "mode": "cancel",
+      "events": [
+        {
+          "ms": 1,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 4,
+          "event": "spawn"
+        },
+        {
+          "ms": 5,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 11,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 45,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 45,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1050,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 1206,
+          "event": "cancel.request"
+        },
+        {
+          "ms": 1207,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1209,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1212,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1212,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1218,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1219,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1219,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1220,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1238,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1239,
+          "event": "child.close"
+        },
+        {
+          "ms": 1242,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1242,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1242,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2813,
+          "event": "final",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        }
+      ]
+    },
+    {
+      "interpreter": "node",
+      "mode": "timeout",
+      "events": [
+        {
+          "ms": 0,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 13,
+          "event": "spawn"
+        },
+        {
+          "ms": 14,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 16,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 20,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 180,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 181,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1182,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 1214,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1214,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1214,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1216,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1216,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1216,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1216,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1219,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1220,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1220,
+          "event": "child.close"
+        },
+        {
+          "ms": 1220,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1220,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1220,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2715,
+          "event": "final",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        }
+      ]
+    },
+    {
+      "interpreter": "powershell",
+      "mode": "raw",
+      "events": [
+        {
+          "ms": 22,
+          "event": "spawn"
+        },
+        {
+          "ms": 22,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 37,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 252,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 254,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1227,
+          "event": "kill.request"
+        },
+        {
+          "ms": 1229,
+          "event": "kill.result",
+          "status": "confirmed"
+        },
+        {
+          "ms": 1233,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1241,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1241,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1241,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1241,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1253,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1253,
+          "event": "child.close"
+        }
+      ]
+    },
+    {
+      "interpreter": "powershell",
+      "mode": "cancel",
+      "events": [
+        {
+          "ms": 1,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 21,
+          "event": "spawn"
+        },
+        {
+          "ms": 22,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 24,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 50,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 307,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 308,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1233,
+          "event": "cancel.request"
+        },
+        {
+          "ms": 1233,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1234,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1234,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1239,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1240,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1240,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1242,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1242,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1252,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1252,
+          "event": "child.close"
+        },
+        {
+          "ms": 1252,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1253,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1253,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2833,
+          "event": "final",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        }
+      ]
+    },
+    {
+      "interpreter": "powershell",
+      "mode": "timeout",
+      "events": [
+        {
+          "ms": 1,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 14,
+          "event": "spawn"
+        },
+        {
+          "ms": 15,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 16,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 32,
+          "event": "job.active",
+          "activeProcesses": 2
+        },
+        {
+          "ms": 276,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 278,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1225,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1228,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1228,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1228,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1241,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1241,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1242,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1242,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1273,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1274,
+          "event": "child.close"
+        },
+        {
+          "ms": 1274,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1274,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1274,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2720,
+          "event": "final",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        }
+      ]
+    },
+    {
+      "interpreter": "store-pwsh",
+      "mode": "raw",
+      "events": [
+        {
+          "ms": 41,
+          "event": "spawn"
+        },
+        {
+          "ms": 50,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 452,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 459,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1250,
+          "event": "kill.request"
+        },
+        {
+          "ms": 1250,
+          "event": "kill.result",
+          "status": "confirmed"
+        },
+        {
+          "ms": 1250,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1253,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1253,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1253,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1253,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1266,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1266,
+          "event": "child.close"
+        }
+      ]
+    },
+    {
+      "interpreter": "store-pwsh",
+      "mode": "cancel",
+      "events": [
+        {
+          "ms": 1,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 108,
+          "event": "spawn"
+        },
+        {
+          "ms": 108,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 110,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 715,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 722,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1309,
+          "event": "cancel.request"
+        },
+        {
+          "ms": 1309,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1309,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1309,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1313,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1313,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1313,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1313,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1314,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1362,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1362,
+          "event": "child.close"
+        },
+        {
+          "ms": 1362,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1362,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1363,
+          "event": "store",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2909,
+          "event": "final",
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        }
+      ]
+    },
+    {
+      "interpreter": "store-pwsh",
+      "mode": "timeout",
+      "events": [
+        {
+          "ms": 0,
+          "event": "store",
+          "status": null,
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 69,
+          "event": "spawn"
+        },
+        {
+          "ms": 69,
+          "event": "store",
+          "status": "running",
+          "cleanup": null,
+          "outputComplete": null
+        },
+        {
+          "ms": 70,
+          "event": "job.active",
+          "activeProcesses": 1
+        },
+        {
+          "ms": 499,
+          "event": "stdout.data"
+        },
+        {
+          "ms": 508,
+          "event": "stderr.data"
+        },
+        {
+          "ms": 1272,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1274,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "in-progress",
+          "outputComplete": null
+        },
+        {
+          "ms": 1274,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1274,
+          "event": "job.active",
+          "activeProcesses": 0
+        },
+        {
+          "ms": 1279,
+          "event": "stdout.end"
+        },
+        {
+          "ms": 1279,
+          "event": "stdout.close"
+        },
+        {
+          "ms": 1280,
+          "event": "stderr.end"
+        },
+        {
+          "ms": 1280,
+          "event": "stderr.close"
+        },
+        {
+          "ms": 1312,
+          "event": "child.exit"
+        },
+        {
+          "ms": 1312,
+          "event": "child.close"
+        },
+        {
+          "ms": 1312,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": null
+        },
+        {
+          "ms": 1312,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 1312,
+          "event": "store",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        },
+        {
+          "ms": 2773,
+          "event": "final",
+          "status": "timed_out",
+          "cleanup": "confirmed",
+          "outputComplete": true
+        }
+      ]
+    }
+  ]
+}
