@@ -42,6 +42,16 @@ function defaultWhich(command: string): string | undefined {
     return undefined;
   }
 }
+function windowsShellEntryExists(candidate: string): boolean {
+  try {
+    // Store 执行别名的目标可能拒绝 stat，但 Windows 仍能启动它。
+    // lstat 只检查入口本身；实际启动错误仍由 spawn 报告。
+    const entry = fs.lstatSync(candidate);
+    return entry.isFile() || entry.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
 export function isBlacklistedShell(
   shellPath: string,
   platform: NodeJS.Platform = process.platform,
@@ -57,7 +67,9 @@ export function resolveAcceptableShell(
 ): string {
   const platform = input.platform ?? process.platform;
   const env = input.env ?? process.env;
-  const exists = input.existsSync ?? fs.existsSync;
+  const exists =
+    input.existsSync ??
+    (platform === "win32" ? windowsShellEntryExists : fs.existsSync);
   const which = input.which ?? defaultWhich;
   const shell = env.SHELL;
   // MSYS login paths are inherited preferences, not native Windows executables.

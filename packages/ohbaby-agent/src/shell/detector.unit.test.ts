@@ -1,7 +1,76 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveAcceptableShell } from "./detector.js";
 
+afterEach(() => vi.restoreAllMocks());
+
 describe("native shell selection", () => {
+  it.each([true, false])(
+    "honors an explicit Windows existence check returning %s",
+    (available) => {
+      const shell = "C:\\custom\\pwsh.exe";
+      const existsSync = vi.fn(() => available);
+      const lstat = vi.spyOn(fs, "lstatSync").mockImplementation(() => {
+        throw new Error("injected check must own the lookup");
+      });
+      const resolve = (): string =>
+        resolveAcceptableShell({
+          platform: "win32",
+          env: { SHELL: shell },
+          existsSync,
+        });
+      if (available) expect(resolve()).toBe(shell);
+      else expect(resolve).toThrow("unavailable");
+      expect(existsSync).toHaveBeenCalledWith(shell);
+      expect(lstat).not.toHaveBeenCalled();
+    },
+  );
+  it("accepts a Windows explicit shell file", () => {
+    const shell = "C:\\PowerShell\\pwsh.exe";
+    const entry = fs.lstatSync(process.execPath);
+    vi.spyOn(fs, "lstatSync").mockReturnValue(entry);
+    expect(
+      resolveAcceptableShell({ platform: "win32", env: { SHELL: shell } }),
+    ).toBe(shell);
+  });
+  it("accepts a Windows shell alias even when following its target is denied", () => {
+    const alias = "C:\\Users\\test\\WindowsApps\\pwsh.exe";
+    const entry = fs.lstatSync(process.execPath);
+    vi.spyOn(entry, "isFile").mockReturnValue(false);
+    vi.spyOn(entry, "isSymbolicLink").mockReturnValue(true);
+    vi.spyOn(fs, "lstatSync").mockReturnValue(entry);
+    expect(
+      resolveAcceptableShell({
+        platform: "win32",
+        env: { SHELL: alias },
+      }),
+    ).toBe(alias);
+  });
+
+  it("rejects a Windows directory named like a shell", () => {
+    const directory = "C:\\not-a-shell\\pwsh.exe";
+    const entry = fs.lstatSync(process.cwd());
+    vi.spyOn(fs, "lstatSync").mockReturnValue(entry);
+    expect(() =>
+      resolveAcceptableShell({
+        platform: "win32",
+        env: { SHELL: directory },
+      }),
+    ).toThrow("unavailable");
+  });
+
+  it("rejects a missing Windows explicit shell without falling back", () => {
+    vi.spyOn(fs, "lstatSync").mockImplementation(() => {
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    });
+    expect(() =>
+      resolveAcceptableShell({
+        platform: "win32",
+        env: { SHELL: "C:\\missing\\pwsh.exe" },
+        which: () => "powershell.exe",
+      }),
+    ).toThrow("unavailable");
+  });
   it("prefers Windows PowerShell defaults instead of automatically detecting Git Bash", () => {
     const pwsh = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
     expect(
