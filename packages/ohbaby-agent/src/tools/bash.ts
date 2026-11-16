@@ -366,7 +366,8 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             reportCleanupError: context.reportCleanupError,
             child: (): ChildProcess => {
               throwIfCancelled(context.signal);
-              // 首次加载原生库可能慢于短命令退出，先加载以缩小 spawn→assign 窗口。
+              // Load the native library first: its first load can outlast a short
+              // command, which would widen the spawn-to-assign window.
               if (process.platform === "win32") loadWindowsJobApi();
               const child = spawn(spawnFile, spawnArgs, {
                 cwd: binding.cwd,
