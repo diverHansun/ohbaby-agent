@@ -1,8 +1,9 @@
 import { ArrowLeft } from "lucide-react";
-import type {
-  UiReasoningConfig,
-  UiSettingsModel,
-  UiSettingsModels,
+import {
+  automaticTokenLimitText,
+  type UiReasoningConfig,
+  type UiSettingsModel,
+  type UiSettingsModels,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useId, useMemo, useRef, useState } from "react";
@@ -46,40 +47,6 @@ function isUnclearable(field: ModelField): field is UnclearableField {
 
 function tokens(value: number): string {
   return `${value.toLocaleString("en-US")} tokens`;
-}
-
-/**
- * What an empty Context window uses: the detected value, read-only. The
- * runtime fallback is not a detection result, so it is never shown here.
- */
-function AutoContextNote(props: {
-  readonly entry: UiSettingsModel;
-}): ReactElement {
-  const { contextDiscovery: discovery, detectedContextWindowTokens: detected } =
-    props.entry;
-  const detecting = discovery.status === "detecting";
-  const failure = detectionFailure(discovery.reason);
-  const text =
-    detected !== undefined
-      ? `Detected: ${tokens(detected)}`
-      : detecting
-        ? "Detecting…"
-        : "Not detected";
-  return (
-    <p className="ohb-field-note">
-      {detecting ? (
-        <Spinner size={12} label="Detecting context window" />
-      ) : null}
-      {text}
-      {!detecting && discovery.reason
-        ? detected !== undefined
-          ? " · Couldn’t refresh. Using previous value."
-          : failure
-            ? ` · ${failure}`
-            : null
-        : null}
-    </p>
-  );
 }
 
 function detectionFailure(reason: string | undefined): string | undefined {
@@ -172,8 +139,7 @@ function reasoningFrom(value: string): UiReasoningConfig | null {
  * entry the default when there is none (session-model 02 P16). Editing a
  * complete entry also shows its Reasoning Effort levels, with Detect again
  * and the level its chats start from (D13). The two token fields hold the
- * user's overrides only; detection results are shown beside them read-only
- * and never enter the form.
+ * user's overrides only. Detection is shown as a placeholder.
  */
 export function ModelEditor(props: {
   readonly settings: SettingsLayer;
@@ -193,6 +159,13 @@ export function ModelEditor(props: {
   const [form, setForm] = useState<ModelForm>(
     () => baseline ?? EMPTY_MODEL_FORM,
   );
+  const contextEvidence =
+    form.provider.trim() === entry?.provider &&
+    form.model.trim() === entry.model &&
+    form.baseUrl.trim() === (entry.baseUrl ?? "") &&
+    form.interfaceProvider === (entry.interfaceProvider ?? "")
+      ? entry
+      : undefined;
   const [touched, setTouched] = useState<ReadonlySet<ModelField>>(new Set());
   const [serverErrors, setServerErrors] = useState<FieldErrors>({});
   const [moreOpen, setMoreOpen] = useState(
@@ -519,10 +492,12 @@ export function ModelEditor(props: {
             >
               {input("contextWindowTokens", {
                 type: "number",
-                // Empty still means automatic; the note says what it uses.
-                placeholder: "Optional",
+                // Empty means automatic; the placeholder is the value it uses.
+                placeholder: automaticTokenLimitText(
+                  "contextWindowTokens",
+                  contextEvidence,
+                ),
               })}
-              {entry ? <AutoContextNote entry={entry} /> : null}
             </FieldRow>
             <FieldRow
               id={id("maxOutputTokens")}
@@ -532,7 +507,7 @@ export function ModelEditor(props: {
             >
               {input("maxOutputTokens", {
                 type: "number",
-                placeholder: "Optional",
+                placeholder: automaticTokenLimitText("maxOutputTokens"),
               })}
             </FieldRow>
             <FieldRow
@@ -649,6 +624,14 @@ function ReasoningEffortRow(props: {
       : options && view.reason && !detecting
         ? "Couldn’t refresh. Using previous levels."
         : null;
+  const contextFailure = detecting
+    ? undefined
+    : detectionFailure(props.entry.contextDiscovery.reason);
+  const contextNote =
+    contextFailure && contextFailure !== status
+      ? `Context window: ${contextFailure}`
+      : undefined;
+  const notes = [note, contextNote].filter(Boolean).join(" ");
   return (
     <FieldRow
       id={props.id}
@@ -698,7 +681,7 @@ function ReasoningEffortRow(props: {
           Detect again
         </button>
       </div>
-      {note ? <p className="ohb-field-note">{note}</p> : null}
+      {notes ? <p className="ohb-field-note">{notes}</p> : null}
     </FieldRow>
   );
 }

@@ -1,14 +1,16 @@
-import type {
-  UiReasoningCapabilityView,
-  UiSettingsChangedEvent,
-  UiSettingsGlobalMcpServer,
-  UiSettingsMcpServer,
-  UiSettingsModel,
-  UiSettingsModelCreate,
-  UiSettingsModelPatch,
-  UiSettingsModels,
-  UiSettingsSearch,
-  UiSettingsSkill,
+import {
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  type UiReasoningCapabilityView,
+  type UiSettingsChangedEvent,
+  type UiSettingsGlobalMcpServer,
+  type UiSettingsMcpServer,
+  type UiSettingsModel,
+  type UiSettingsModelCreate,
+  type UiSettingsModelPatch,
+  type UiSettingsModels,
+  type UiSettingsSearch,
+  type UiSettingsSkill,
 } from "ohbaby-sdk";
 import type {
   SettingsAbout,
@@ -35,8 +37,8 @@ const effortReasoning: UiReasoningCapabilityView = {
  * Mock-only stand-ins for the server's runtime defaults and a detected
  * context. The page never computes these; it reads `effective*` fields.
  */
-const MOCK_DEFAULT_CONTEXT = 300_000;
-const MOCK_DEFAULT_MAX_OUTPUT = 32_768;
+const MOCK_DEFAULT_CONTEXT = DEFAULT_CONTEXT_WINDOW_TOKENS;
+const MOCK_DEFAULT_MAX_OUTPUT = DEFAULT_MAX_OUTPUT_TOKENS;
 const MOCK_SAFETY_MARGIN = 1_024;
 const MOCK_DETECTED_CONTEXT = 128_000;
 

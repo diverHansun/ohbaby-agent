@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from "ink";
-import { connectUrlPathWarning } from "ohbaby-sdk";
+import { automaticTokenLimitText, connectUrlPathWarning } from "ohbaby-sdk";
 import type {
   CoreAPI,
   UiCurrentModelConfig,
@@ -370,6 +370,18 @@ export function ConnectPanel({
             (currentModel?.reasoningNotice ? 1 : 0),
         );
   const fieldStart = Math.max(0, selectedIndex - fieldRows + 1);
+  const normalizedDraftUrl = /[?#]/u.test(draft.baseUrl)
+    ? draft.baseUrl
+    : draft.baseUrl.replace(/\/+$/u, "");
+  const contextModel =
+    currentModel?.model === draft.model &&
+    currentModel.provider === draft.provider &&
+    (currentModel.baseUrl === draft.baseUrl ||
+      currentModel.baseUrl === normalizedDraftUrl) &&
+    currentModel.interfaceProvider ===
+      (draft.interfaceProvider || inferInterfaceProvider(draft.baseUrl))
+      ? currentModel
+      : undefined;
   return (
     <Box flexDirection="column">
       <Box flexDirection="column" marginTop={bodyRows === undefined ? 1 : 0}>
@@ -377,7 +389,7 @@ export function ConnectPanel({
           (field, index) => (
             <ConnectFieldRow
               draft={draft}
-              currentModel={currentModel}
+              contextModel={contextModel}
               editValue={editValue}
               editingField={editingField}
               field={field}
@@ -438,14 +450,14 @@ export function ConnectPanel({
 
 function ConnectFieldRow({
   draft,
-  currentModel,
+  contextModel,
   editValue,
   editingField,
   field,
   isSelected,
 }: {
   readonly draft: ConnectDraft;
-  readonly currentModel: UiCurrentModelConfig | null;
+  readonly contextModel?: UiCurrentModelConfig;
   readonly editValue: string;
   readonly editingField: ConnectFieldKey | null;
   readonly field: ConnectField;
@@ -460,6 +472,13 @@ function ConnectFieldRow({
       ? draft.interfaceProvider || inferInterfaceProvider(draft.baseUrl)
       : draft[field.key];
   const displayValue = field.secret ? maskSecret(rawValue) : rawValue;
+  // An empty token field shows what it falls back to, like a placeholder.
+  const automatic =
+    !isEditing &&
+    rawValue === "" &&
+    (field.key === "contextWindowTokens" || field.key === "maxOutputTokens")
+      ? automaticTokenLimitText(field.key, contextModel)
+      : undefined;
   const prefix = isSelected ? "> " : "  ";
   const label = field.label.padEnd(18, " ");
 
@@ -472,18 +491,14 @@ function ConnectFieldRow({
     >
       {prefix}
       <Text bold>{label}</Text>
-      {field.optional ? <Text dimColor>optional </Text> : null}
-      {displayValue}
-      {field.key === "contextWindowTokens" && currentModel ? (
-        <Text dimColor>
-          {currentModel.detectedContextWindowTokens === undefined
-            ? ` · Automatic: ${currentModel.contextDiscovery.status === "detecting" ? "detecting" : "unknown"}`
-            : ` · Automatic: ${String(currentModel.detectedContextWindowTokens)} tokens`}
-          {currentModel.contextDiscovery.reason
-            ? ` (${currentModel.contextDiscovery.reason})`
-            : ""}
-        </Text>
-      ) : null}
+      {automatic !== undefined ? (
+        <Text dimColor>{automatic}</Text>
+      ) : (
+        <>
+          {field.optional ? <Text dimColor>optional </Text> : null}
+          {displayValue}
+        </>
+      )}
       {isEditing ? <Text>▏ [editing]</Text> : null}
       {isEditing && field.key === "interfaceProvider" ? (
         <Text dimColor> ↑/↓ choose · Enter commit · Esc cancel</Text>

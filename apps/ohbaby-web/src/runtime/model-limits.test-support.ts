@@ -5,7 +5,7 @@ import type { UiModelSettingsNumericView } from "ohbaby-sdk";
  * page never computes these; they stand in for what the server reports.
  */
 export const AUTO_LIMITS: UiModelSettingsNumericView = {
-  effectiveContextWindowTokens: 300_000,
+  effectiveContextWindowTokens: 1_000_000,
   effectiveMaxOutputTokens: 32_768,
   contextDiscovery: { status: "unknown" },
 };

@@ -18,20 +18,21 @@ describe("ConnectPanel protocols", () => {
     const connectModel = vi.fn((_input: unknown) =>
       Promise.resolve({ saved: true }),
     );
+    const getCurrentModel = vi.fn(() =>
+      Promise.resolve({
+        provider: "fixture",
+        model: "model",
+        baseUrl: "https://fixture.test/v1",
+        interfaceProvider: "openai-compatible",
+        detectedContextWindowTokens: detected,
+        contextDiscovery: { status: "identified" },
+        effectiveContextWindowTokens: detected,
+        effectiveMaxOutputTokens: 32768,
+      }),
+    );
     const client = {
       connectModel,
-      getCurrentModel: vi.fn(() =>
-        Promise.resolve({
-          provider: "fixture",
-          model: "model",
-          baseUrl: "https://fixture.test/v1",
-          interfaceProvider: "openai-compatible",
-          detectedContextWindowTokens: detected,
-          contextDiscovery: { status: "identified" },
-          effectiveContextWindowTokens: detected,
-          effectiveMaxOutputTokens: 32768,
-        }),
-      ),
+      getCurrentModel,
     } as unknown as CoreAPI;
     const app = render(
       <ConnectPanel
@@ -44,13 +45,18 @@ describe("ConnectPanel protocols", () => {
         runtime={{ kind: "idle" }}
       />,
     );
-    await until(() => (app.lastFrame() ?? "").includes("100000 tokens"));
+    await until(() => (app.lastFrame() ?? "").includes("100,000 (detected)"));
+    detected = 200000;
+    handler({ type: "model.invalidated" });
+    // An empty field shows the refreshed automatic value.
+    await until(() => (app.lastFrame() ?? "").includes("200,000 (detected)"));
     for (let index = 0; index < 5; index += 1) await key(app, "\u001b[B");
     await key(app, "\r");
     await key(app, "100000");
-    detected = 200000;
+    detected = 300000;
     handler({ type: "model.invalidated" });
-    await until(() => (app.lastFrame() ?? "").includes("200000 tokens"));
+    await until(() => getCurrentModel.mock.calls.length >= 3);
+    // A refresh during editing keeps the typed override.
     expect(app.lastFrame()).toContain("100000");
     await key(app, "\r");
     expect(connectModel).toHaveBeenLastCalledWith(
@@ -90,8 +96,8 @@ describe("ConnectPanel protocols", () => {
       />,
     );
     await until(() => (app.lastFrame() ?? "").includes("fixture"));
-    expect(app.lastFrame()).toContain("Automatic: 1000000 tokens");
-    expect(app.lastFrame()).toContain("Latest lookup failed");
+    expect(app.lastFrame()).toContain("1,000,000 (detected)");
+    expect(app.lastFrame()).toContain("32,768 (default)");
     expect(app.lastFrame()).toMatch(/Reasoning Effort.*cleared/);
     expect(app.lastFrame()).not.toContain("32768");
     await key(app, "\r");
@@ -106,6 +112,8 @@ describe("ConnectPanel protocols", () => {
     expect(connectModel.mock.calls[0]?.[0]).not.toHaveProperty(
       "maxOutputTokens",
     );
+    expect(app.lastFrame()).toContain("1,000,000 (default)");
+    expect(app.lastFrame()).not.toContain("1,000,000 (detected)");
     app.unmount();
   });
 

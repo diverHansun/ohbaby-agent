@@ -4348,10 +4348,8 @@ describe("OhbabyTerminalApp", () => {
     expect(frame).toContain("API key value");
     expect(frame).toMatch(/Model name\s+glm-5\.1/u);
     expect(frame).toContain("Context window");
-    expect(frame).toContain("Automatic: 128000 tokens");
-    expect(frame).toMatch(/Context window\s+optional\s+· Automatic:/u);
-    expect(frame).toContain("Max output tokens");
-    expect(frame).toMatch(/Max output tokens\s+optional\s+│/u);
+    expect(frame).toMatch(/Context window\s+128,000 \(detected\)/u);
+    expect(frame).toMatch(/Max output tokens\s+32,768 \(default\)/u);
     expect(client.connectModel).not.toHaveBeenCalled();
     app.unmount();
   });

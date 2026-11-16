@@ -410,9 +410,16 @@ describe("settings dialog", () => {
     await click(button(dialog(), "More options"));
     const max = field("Max output") as HTMLInputElement;
     expect(max.value).toBe("32000");
-    // No context override: empty, with the detected value beside it.
+    // No context override: empty, and the placeholder is the detected value.
     expect((field("Context window") as HTMLInputElement).value).toBe("");
-    expect(dialog().textContent).toContain("Detected: 128,000 tokens");
+    expect((field("Context window") as HTMLInputElement).placeholder).toBe(
+      "128,000 (detected)",
+    );
+    await type(field("Model") as HTMLInputElement, "different-model");
+    expect((field("Context window") as HTMLInputElement).placeholder).toBe(
+      "1,000,000 (default)",
+    );
+    await type(field("Model") as HTMLInputElement, "gpt-5.2");
     await type(max, "");
     expect(dialog().textContent).not.toContain("This can't be cleared");
     await click(button(dialog(), "Save"));
@@ -426,6 +433,44 @@ describe("settings dialog", () => {
     expect((field("Max output") as HTMLInputElement).value).toBe("");
     expect((field("Context window") as HTMLInputElement).value).toBe("");
     expect(button(dialog(), "Save").disabled).toBe(true);
+  });
+
+  it("shows context detection failures even when reasoning levels are known", async () => {
+    const runtime = createMockRuntime("settings");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("deepseek-v4.1-pro"),
+      "the model list",
+    );
+    await click(button(dialog(), "Edit deepseek-v4.1-pro"));
+    const { data } = selectSettings(
+      runtime.settings.cache.getSnapshot(),
+      "models",
+    );
+    if (!data) throw new Error("Missing model settings");
+    act(() => {
+      runtime.settings.cache.update("models", {
+        data: {
+          ...data,
+          models: data.models.map((model) =>
+            model.id === "m2"
+              ? {
+                  ...model,
+                  contextDiscovery: {
+                    status: "identified",
+                    reason: "rate-limit",
+                  },
+                }
+              : model,
+          ),
+        },
+      });
+    });
+    expect(field("Reasoning Effort")).toBeInstanceOf(HTMLSelectElement);
+    expect(dialog().textContent).toContain(
+      "Context window: Rate limited. Try again.",
+    );
   });
 
   it("detects after saving a new model, without filling its token fields", async () => {
@@ -462,8 +507,12 @@ describe("settings dialog", () => {
     await click(button(dialog(), "More options"));
     expect((field("Context window") as HTMLInputElement).value).toBe("");
     expect((field("Max output") as HTMLInputElement).value).toBe("");
-    expect(dialog().textContent).toContain("Detected: 128,000 tokens");
-    expect(dialog().textContent).not.toContain("300,000");
+    expect((field("Context window") as HTMLInputElement).placeholder).toBe(
+      "128,000 (detected)",
+    );
+    expect((field("Max output") as HTMLInputElement).placeholder).toBe(
+      "32,768 (default)",
+    );
   });
 
   it("keeps the draft and its baseline while detection updates the entry", async () => {
