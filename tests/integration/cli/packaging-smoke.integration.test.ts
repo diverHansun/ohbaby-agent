@@ -169,7 +169,9 @@ function commandProcessInput(
   command: string,
   args: readonly string[],
 ): { readonly args: readonly string[]; readonly command: string } {
-  if (process.platform !== "win32") {
+  // Native executables accept argv directly; routing a spaced node.exe path
+  // through cmd adds an extra quoting layer and breaks the installed smoke.
+  if (process.platform !== "win32" || !/\.(?:cmd|bat)$/iu.test(command)) {
     return { args, command };
   }
 
@@ -826,6 +828,38 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   expect(cliImportResult.stdout).toBe("");
   expect(cliImportResult.stderr).toBe("");
 
+  if (process.platform === "win32") {
+    const jobSmokePath = join(
+      installedCliPackage,
+      "installed-windows-job-smoke.mjs",
+    );
+    await writeFile(
+      jobSmokePath,
+      await readFile(
+        join(
+          repoRoot,
+          "tests/integration/cli/fixtures/installed-windows-job-smoke.mjs",
+        ),
+      ),
+    );
+    const jobResult = await runCommand({
+      command: process.execPath,
+      args: [jobSmokePath],
+      cwd: cliCwd,
+      env: isolatedEnv,
+      timeoutMs: 45_000,
+    });
+    expectSuccess(
+      jobResult,
+      "installed Windows shell cleanup and next-turn read",
+    );
+    expect(JSON.parse(jobResult.stdout)).toEqual({
+      bash: true,
+      nextTurnRead: true,
+      disposed: true,
+    });
+  }
+
   // The package must supply rg even when lifecycle scripts and system rg are
   // unavailable. Probe the actual installed tool, not the development PATH.
   const grepSmokePath = join(installedCliPackage, "installed-grep-smoke.mjs");
@@ -886,7 +920,9 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
       await rename(hiddenAsset, asset);
     }
   }
-  const platformPackage = dirname(dirname(installedSearch.binary));
+  const platformPackage = await realpath(
+    dirname(dirname(installedSearch.binary)),
+  );
   expect(platformPackage.startsWith(await realpath(installedCliPackage))).toBe(
     true,
   );
