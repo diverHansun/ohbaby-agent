@@ -1,0 +1,156 @@
+{
+  "date": "2026-11-16",
+  "platform": "Windows x64",
+  "codeCommit": "e2aa571d",
+  "runtime": {
+    "passed": true,
+    "model": "glm-5.2",
+    "effort": "high",
+    "interfaceProvider": "openai-compatible",
+    "requests": 18,
+    "turns": 4,
+    "completedTools": 15,
+    "confirmedShellJobs": 4,
+    "completedSubagents": 1,
+    "automaticPromotionDelayMs": 125,
+    "actualShell": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "checked": [
+      "glob",
+      "grep",
+      "read",
+      "edit",
+      "foreground Bash",
+      "explicit background Bash",
+      "automatic background Bash",
+      "next-turn file tools",
+      "subagent Bash/read"
+    ],
+    "limitations": [
+      "compiled persistent backend request path; no browser UI in this probe",
+      "not a macOS validation",
+      "real-model prompts were explicit acceptance instructions"
+    ]
+  },
+  "web": {
+    "passed": true,
+    "model": "glm-5.2",
+    "effort": "high",
+    "interfaceProvider": "openai-compatible",
+    "sessionId": "session_1794802598142_0id4e71",
+    "tools": [
+      {
+        "tool": "read",
+        "status": "completed",
+        "output": "1: GLM_REAL_WEB_SENTINEL"
+      },
+      {
+        "tool": "bash",
+        "status": "completed",
+        "output": "GLM_REAL_WEB_BASH_OK"
+      },
+      {
+        "tool": "edit",
+        "status": "completed",
+        "output": "Replacements: 1\n--- before\n+++ after\n@@ -1,1 +1,1 @@\n-GLM_REAL_WEB_SENTINEL\r\n+GLM_REAL_WEB_EDITED\r"
+      },
+      {
+        "tool": "read",
+        "status": "completed",
+        "output": "1: GLM_REAL_WEB_EDITED"
+      },
+      {
+        "tool": "bash",
+        "status": "completed",
+        "output": "Command is still running with no output."
+      },
+      {
+        "tool": "read",
+        "status": "completed",
+        "output": "1: GLM_WEB_BACKGROUND_OK"
+      },
+      {
+        "tool": "glob",
+        "status": "completed",
+        "output": "fixture.txt\nweb-bg-result.txt"
+      },
+      {
+        "tool": "grep",
+        "status": "completed",
+        "output": "C:\\Users\\Hansun2026\\AppData\\Local\\Temp\\ohbaby-glm-web-a60c670ae2fb4df396b1ba16d1461bd0\\workspace\\web-bg-result.txt:1: GLM_WEB_BACKGROUND_OK"
+      },
+      {
+        "tool": "read",
+        "status": "completed",
+        "output": "1: GLM_REAL_WEB_EDITED"
+      },
+      {
+        "tool": "read",
+        "status": "completed",
+        "output": "1: GLM_WEB_BACKGROUND_OK"
+      }
+    ],
+    "jobs": [
+      {
+        "job_id": "4eb7d26e-e134-47d7-97a4-36f494846e39",
+        "mode": "foreground",
+        "status": "completed",
+        "cleanup": "confirmed",
+        "exit_code": 0,
+        "started_at": 1794802613111,
+        "ended_at": 1794802613361
+      },
+      {
+        "job_id": "4484dfc9-5cfc-4fbe-82e1-b58b7d19c6b3",
+        "mode": "background",
+        "status": "completed",
+        "cleanup": "confirmed",
+        "exit_code": 0,
+        "started_at": 1794802658299,
+        "ended_at": 1794802685938
+      }
+    ],
+    "runs": [
+      {
+        "trigger": "user",
+        "status": "succeeded"
+      },
+      {
+        "trigger": "user",
+        "status": "succeeded"
+      },
+      {
+        "trigger": "background-task",
+        "status": "succeeded"
+      },
+      {
+        "trigger": "user",
+        "status": "succeeded"
+      }
+    ],
+    "connectionWarnings": [
+      {
+        "kind": "timeout",
+        "networkCode": "UND_ERR_CONNECT_TIMEOUT",
+        "retryScheduled": true
+      },
+      {
+        "kind": "timeout",
+        "networkCode": "UND_ERR_CONNECT_TIMEOUT",
+        "retryScheduled": true
+      }
+    ],
+    "browserObservation": {
+      "backgroundJobId": "4484dfc9-5cfc-4fbe-82e1-b58b7d19c6b3",
+      "navigatedAwayWhileRunning": true,
+      "databaseStillRunningAfterNavigation": true,
+      "releasedFixtureWhileBrowserDisconnected": true,
+      "completedBeforeReconnection": true,
+      "followupFileToolsAfterReconnect": true
+    },
+    "limitations": [
+      "No macOS run",
+      "No remote TUI disconnect test",
+      "Explicit acceptance prompts, not random model behavior"
+    ]
+  }
+}
