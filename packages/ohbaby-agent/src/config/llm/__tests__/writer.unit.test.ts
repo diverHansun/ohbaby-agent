@@ -235,7 +235,7 @@ describe("setActiveLLMConfig", () => {
 
     expect(modelJson.llmParams).toEqual({
       maxTokens: 32768,
-      contextWindowTokens: 300000,
+      contextWindowTokens: 1000000,
     });
     expect(modelJson.models?.[1]).toMatchObject({
       temperature: 0.1,
@@ -244,6 +244,8 @@ describe("setActiveLLMConfig", () => {
     expect(modelJson.models).toHaveLength(3);
     expect(modelJson.models?.[0]).toMatchObject({
       ...existingModelJson.models[0],
+      // Legacy context values are dropped; the default applies.
+      contextWindowTokens: 1_000_000,
       needsConfiguration: true,
     });
     expect(modelJson.models?.[1]).toMatchObject({ model: "gpt-4" });
@@ -278,7 +280,7 @@ describe("setActiveLLMConfig", () => {
     );
     expect(written.llmParams).toEqual({
       maxTokens: 32768,
-      contextWindowTokens: 300000,
+      contextWindowTokens: 1000000,
     });
   });
 
@@ -371,9 +373,14 @@ describe("setActiveLLMConfig", () => {
     expect(modelJson.models).toHaveLength(4);
     expect(modelJson.models?.[0]).toMatchObject({
       ...existingModelJson.models[0],
+      // Legacy context values are dropped; the default applies.
+      contextWindowTokens: 1_000_000,
       needsConfiguration: true,
     });
-    expect(modelJson.models?.[1]).toMatchObject(existingModelJson.models[1]);
+    expect(modelJson.models?.[1]).toMatchObject({
+      ...existingModelJson.models[1],
+      contextWindowTokens: 1_000_000,
+    });
     expect(modelJson.models?.[2]).toMatchObject({ model: "old-model" });
     expect(modelJson.models?.[3]).toMatchObject({
       provider: "zenmux",
@@ -433,18 +440,25 @@ describe("setActiveLLMConfig", () => {
 
     expect(modelJson.llmParams).toEqual({
       maxTokens: 32768,
-      contextWindowTokens: 300000,
+      contextWindowTokens: 1000000,
     });
     expect(modelJson.models).toHaveLength(4);
-    expect(modelJson.models?.[0]).toMatchObject(existingModelJson.models[0]);
-    expect(modelJson.models?.[1]).toMatchObject(existingModelJson.models[1]);
+    // Legacy context values are dropped; the default applies.
+    expect(modelJson.models?.[0]).toMatchObject({
+      ...existingModelJson.models[0],
+      contextWindowTokens: 1_000_000,
+    });
+    expect(modelJson.models?.[1]).toMatchObject({
+      ...existingModelJson.models[1],
+      contextWindowTokens: 1_000_000,
+    });
     expect(modelJson.models?.[2]).toMatchObject({
       model: "gpt-4.1",
       contextWindowTokens: 1000000,
     });
     expect(modelJson.models?.[3]).toMatchObject({
       model: "unknown-model",
-      contextWindowTokens: 300000,
+      contextWindowTokens: 1000000,
     });
   });
 });

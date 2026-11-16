@@ -226,8 +226,9 @@ describe("connectModel keyless local endpoint integration", () => {
 
       expect(result).toMatchObject({
         baseUrl: server.baseUrl,
-        contextWindowSource: "detected",
-        contextWindowTokens: 65_536,
+        // The legacy 65536 is dropped; detection runs after the save returns.
+        contextWindowSource: "default",
+        contextWindowTokens: 1_000_000,
         interfaceProvider: "openai-compatible",
         model: MODEL,
         provider: "lmstudio",

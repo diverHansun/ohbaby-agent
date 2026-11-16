@@ -55,7 +55,7 @@ async function writeModels(
 ): Promise<void> {
   await writeFile(
     join(home, "model.json"),
-    JSON.stringify({ activeProfileId, models }),
+    JSON.stringify({ schemaVersion: 2, activeProfileId, models }),
   );
 }
 function createClient(

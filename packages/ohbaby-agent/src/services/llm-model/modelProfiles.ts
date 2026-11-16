@@ -1,5 +1,9 @@
-export const DEFAULT_CONTEXT_WINDOW_TOKENS = 300_000;
-export const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
+import {
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+} from "ohbaby-sdk";
+
+export { DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS };
 const DEFAULT_SAFETY_MARGIN_TOKENS = 1_024;
 
 export type ModelProfileSource = "user" | "fallback";

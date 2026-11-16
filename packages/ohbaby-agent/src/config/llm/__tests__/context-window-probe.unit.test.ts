@@ -6,6 +6,25 @@ import {
 } from "../context-window-probe.js";
 
 describe("context window metadata probe helpers", () => {
+  it("does not start a metadata request after cancellation", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(
+        probeContextWindow({
+          apiKey: "secret",
+          baseUrl: "https://api.example.com/v1",
+          interfaceProvider: "openai-compatible",
+          model: "model",
+          signal: AbortSignal.abort(),
+        }),
+      ).resolves.toMatchObject({ reasoningReason: "cancelled" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("builds Anthropic-compatible model metadata URLs from common base URL shapes", () => {
     expect(
       buildModelMetadataUrl({

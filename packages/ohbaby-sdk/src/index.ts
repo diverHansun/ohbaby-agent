@@ -97,6 +97,9 @@ export type {
   UiProbeModelContextWindowResult,
 } from "./contract/connect-model.js";
 export {
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  automaticTokenLimitText,
   connectUrlPathWarning,
   inferConnectModelInterfaceProvider,
   isConnectModelInterfaceProvider,

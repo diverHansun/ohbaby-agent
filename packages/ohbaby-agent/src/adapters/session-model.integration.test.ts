@@ -82,6 +82,7 @@ describe("session model integration", () => {
     await writeFile(
       join(home, "model.json"),
       JSON.stringify({
+        schemaVersion: 2,
         activeProfileId: "a",
         models: [entry("a"), entry("b", 32_000)],
       }),
@@ -162,7 +163,11 @@ describe("session model integration", () => {
     });
     await writeFile(
       join(home, "model.json"),
-      JSON.stringify({ activeProfileId: "a", models: [entry("a")] }),
+      JSON.stringify({
+        schemaVersion: 2,
+        activeProfileId: "a",
+        models: [entry("a")],
+      }),
     );
     const next = await client.submitPromptAndWait("two", {
       sessionId: first.prompt.sessionId,
@@ -275,6 +280,7 @@ describe("session model integration", () => {
       await writeFile(
         join(home, "model.json"),
         JSON.stringify({
+          schemaVersion: 2,
           activeProfileId: "a",
           models: [
             { ...entry("a"), baseUrl: "https://changed.invalid/v1" },

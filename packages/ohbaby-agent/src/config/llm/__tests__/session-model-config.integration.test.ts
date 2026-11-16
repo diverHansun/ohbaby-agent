@@ -61,12 +61,12 @@ it("migrates parameters per entry without inheriting a mixed-format global outpu
   });
   expect(document.models[1]).not.toHaveProperty("maxOutputTokens");
   expect(document.models[1]).not.toHaveProperty("contextWindowTokens");
-  expect(document.models[1].detectedContextWindowTokens).toBe(128000);
+  expect(document.models[1]).not.toHaveProperty("detectedContextWindowTokens");
   expect(document.models[1]).not.toHaveProperty("temperature");
   expect(document.models[1]).not.toHaveProperty("reasoning");
   expect(projectModelDocument(document, "b")?.llmParams).toEqual({
     maxTokens: 32768,
-    contextWindowTokens: 128000,
+    contextWindowTokens: 1_000_000,
   });
 });
 it("drops legacy reasoning incompatible with the original default", async () => {

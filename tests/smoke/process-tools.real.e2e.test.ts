@@ -119,17 +119,18 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
       await writeFile(
         join(profile, "model.json"),
         JSON.stringify({
-          provider: "zenmux",
-          defaultModel: "openai/gpt-5.6-luna",
-          apiConfig: {
-            apiKeyEnv: "ZENMUX_API_KEY",
-            baseUrl: "https://zenmux.ai/api/v1",
-            interfaceProvider: "openai-compatible",
-          },
+          schemaVersion: 2,
+          activeProfileId: "process-tools",
           models: [
             {
+              id: "process-tools",
+              provider: "zenmux",
               model: "openai/gpt-5.6-luna",
-              contextWindowTokens: 128000,
+              apiKeyEnv: "ZENMUX_API_KEY",
+              baseUrl: "https://zenmux.ai/api/v1",
+              interfaceProvider: "openai-compatible",
+              contextWindowTokens: 128_000,
+              maxOutputTokens: 4096,
               reasoningCapabilities: {
                 mode: "effort",
                 wire: "reasoning",
@@ -137,12 +138,9 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
                 efforts: ["low", "medium", "high"],
                 temperature: "unsupported",
               },
+              reasoning: { enabled: true, effort: "medium" },
             },
           ],
-          llmParams: {
-            maxTokens: 4096,
-            reasoning: { enabled: true, effort: "medium" },
-          },
         }),
         { mode: 0o600 },
       );

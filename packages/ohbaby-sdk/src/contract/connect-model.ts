@@ -4,6 +4,27 @@ export type UiConnectModelInterfaceProvider =
   | "anthropic";
 export type UiCurrentModelInterfaceProvider = UiConnectModelInterfaceProvider;
 
+/** Runtime fallbacks when a model has no override and no detected value. */
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
+
+/** What an empty token field uses, as Settings and /connect show it. */
+export function automaticTokenLimitText(
+  field: "contextWindowTokens" | "maxOutputTokens",
+  view?: Pick<
+    UiModelSettingsNumericView,
+    "detectedContextWindowTokens" | "contextDiscovery"
+  >,
+): string {
+  const amount = (value: number): string => value.toLocaleString("en-US");
+  if (field === "maxOutputTokens")
+    return `${amount(DEFAULT_MAX_OUTPUT_TOKENS)} (default)`;
+  const detected = view?.detectedContextWindowTokens;
+  if (detected !== undefined) return `${amount(detected)} (detected)`;
+  if (view?.contextDiscovery.status === "detecting") return "Detecting…";
+  return `${amount(DEFAULT_CONTEXT_WINDOW_TOKENS)} (default)`;
+}
+
 export function isConnectModelInterfaceProvider(
   value: unknown,
 ): value is UiConnectModelInterfaceProvider {

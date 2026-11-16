@@ -72,7 +72,7 @@ export async function probeContextWindow(
     while (!visited.has(url)) {
       visited.add(url);
       const response = await abortable(
-        fetch(url, { headers, method: "GET", signal: controller.signal }),
+        () => fetch(url, { headers, method: "GET", signal: controller.signal }),
         controller.signal,
       );
       if (!response.ok)
@@ -85,7 +85,7 @@ export async function probeContextWindow(
         );
       let payload: unknown;
       try {
-        payload = await abortable(response.json(), controller.signal);
+        payload = await abortable(() => response.json(), controller.signal);
       } catch (error) {
         if (controller.signal.aborted) throw error;
         return failed("invalid-json");
@@ -154,8 +154,11 @@ export async function probeContextWindow(
   }
 }
 
-async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) throw signal.reason;
+async function abortable<T>(
+  work: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  signal.throwIfAborted();
   let abort!: () => void;
   const cancelled = new Promise<never>((_, reject) => {
     abort = (): void => {
@@ -168,7 +171,7 @@ async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
     signal.addEventListener("abort", abort, { once: true });
   });
   try {
-    return await Promise.race([work, cancelled]);
+    return await Promise.race([work(), cancelled]);
   } finally {
     signal.removeEventListener("abort", abort);
   }

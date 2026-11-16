@@ -1067,7 +1067,7 @@ it.each(["contextWindowTokens", "maxOutputTokens"])(
     expect(model).toMatchObject(
       field === "contextWindowTokens"
         ? {
-            effectiveContextWindowTokens: 300000,
+            effectiveContextWindowTokens: 1000000,
             maxOutputTokens: 4096,
             effectiveMaxOutputTokens: 4096,
           }

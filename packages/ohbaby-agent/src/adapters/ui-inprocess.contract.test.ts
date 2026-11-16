@@ -2369,7 +2369,7 @@ describe("createInProcessUiBackendClient", () => {
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.example/v1",
         contextWindowSource: "default",
-        contextWindowTokens: 300_000,
+        contextWindowTokens: 1_000_000,
         envPath: globalEnvPath,
         interfaceProvider: "openai-compatible",
         maxOutputTokens: 8192,
@@ -2766,15 +2766,16 @@ describe("createInProcessUiBackendClient", () => {
       expect(current).toMatchObject({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.ai/api/anthropic",
-        detectedContextWindowTokens: 200_000,
-        effectiveContextWindowTokens: 200_000,
+        // Legacy context values are dropped; the default applies.
+        effectiveContextWindowTokens: 1_000_000,
         effectiveMaxOutputTokens: 32768,
-        contextDiscovery: { status: "identified" },
+        contextDiscovery: { status: "unknown" },
         interfaceProvider: "anthropic",
         model: "anthropic/claude-sonnet-4.6",
         provider: "zenmux",
       });
       expect(current).not.toHaveProperty("contextWindowTokens");
+      expect(current).not.toHaveProperty("detectedContextWindowTokens");
       expect(current).not.toHaveProperty("maxOutputTokens");
     } finally {
       if (previousHome === undefined) {
@@ -2837,15 +2838,16 @@ describe("createInProcessUiBackendClient", () => {
       expect(current).toMatchObject({
         apiKeyEnv: "OPENAI_API_KEY",
         baseUrl: "https://api.openai.com/v1",
-        detectedContextWindowTokens: 128_000,
-        effectiveContextWindowTokens: 128_000,
+        // Legacy context values are dropped; the default applies.
+        effectiveContextWindowTokens: 1_000_000,
         effectiveMaxOutputTokens: 32768,
-        contextDiscovery: { status: "identified" },
+        contextDiscovery: { status: "unknown" },
         interfaceProvider: "openai-responses",
         model: "gpt-5.6",
         provider: "openai",
       });
       expect(current).not.toHaveProperty("contextWindowTokens");
+      expect(current).not.toHaveProperty("detectedContextWindowTokens");
       expect(current).not.toHaveProperty("maxOutputTokens");
     } finally {
       if (previousHome === undefined) {

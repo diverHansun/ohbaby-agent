@@ -381,8 +381,6 @@ function migrateModelDocument(raw: unknown): ModelDocument {
       baseUrl: api.baseUrl,
       interfaceProvider,
     });
-    const context = profile?.contextWindowTokens ?? params?.contextWindowTokens;
-    if (context !== undefined) active.contextWindowTokens = context;
     if (api.apiKeyEnv !== undefined) active.apiKeyEnv = api.apiKeyEnv;
     else delete active.apiKeyEnv;
     if (api.promptCache !== undefined) active.promptCache = api.promptCache;
@@ -409,14 +407,12 @@ function migrateModelDocument(raw: unknown): ModelDocument {
       entry.temperature ??= params?.temperature;
       entry.reasoning ??= params?.reasoning;
     }
-    if (entry.contextWindowTokens !== undefined) {
-      entry.detectedContextWindowTokens = entry.contextWindowTokens;
-      delete entry.contextWindowTokens;
-    }
+    // Legacy context mixed old defaults, detections and user input; drop it
+    // so the entry falls back to fresh detection or the default.
+    delete entry.contextWindowTokens;
     if (entry.maxOutputTokens === LEGACY_DEFAULT_MAX_OUTPUT_TOKENS)
       delete entry.maxOutputTokens;
     if (
-      entry.detectedContextWindowTokens !== undefined ||
       entry.reasoningCapabilitySource === "model-metadata" ||
       entry.reasoningCapabilitySource === "active-probe"
     )

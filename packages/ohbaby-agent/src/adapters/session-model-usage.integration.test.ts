@@ -30,6 +30,7 @@ it.each([false, true])(
     await writeFile(
       join(home, "model.json"),
       JSON.stringify({
+        schemaVersion: 2,
         activeProfileId: "a",
         models: [
           {
@@ -211,6 +212,7 @@ it("does not cache a stale static window query after switching models", async ()
   await writeFile(
     join(directory, "model.json"),
     JSON.stringify({
+      schemaVersion: 2,
       activeProfileId: "a",
       models: ["a", "b"].map((id) => ({
         id,

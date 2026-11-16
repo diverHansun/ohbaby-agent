@@ -55,7 +55,9 @@ describe("agent model document boundary", () => {
     });
     expect(config.apiKeyEnv).toBe("A_KEY");
     expect(config.modelProfiles).toHaveLength(1);
-    expect(config.contextWindowTokens).toBe(123000);
+    expect(config.modelProfiles?.[0].id).toBe("a");
+    // Legacy context values are dropped; the default applies.
+    expect(config.contextWindowTokens).toBe(1_000_000);
     expect(capabilitiesFor(config).capability).toBeUndefined();
   });
   it("migrates the most-specific budget and effective wildcard explicit capability together", async () => {
@@ -74,7 +76,8 @@ describe("agent model document boundary", () => {
       ],
     });
     expect(config.modelProfiles).toHaveLength(1);
-    expect(config.contextWindowTokens).toBe(33000);
+    expect(config.modelProfiles?.[0].id).toBe("budget");
+    expect(config.contextWindowTokens).toBe(1_000_000);
     expect(capabilitiesFor(config).capability).toEqual(none);
     expect(config.maxTokens).toBe(7000);
   });
@@ -110,6 +113,6 @@ it("preserves original matcher specificity before filling missing provider field
     ],
   });
   expect(config.modelProfiles?.[0].id).toBe("last");
-  expect(config.contextWindowTokens).toBe(20000);
+  expect(config.contextWindowTokens).toBe(1_000_000);
   expect(capabilitiesFor(config).capability?.mode).toBe("binary");
 });

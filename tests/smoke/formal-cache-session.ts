@@ -281,30 +281,26 @@ export async function createFormalCacheSession(
         );
       contextWindow = { tokens: probe.contextWindowTokens, source: "detected" };
     }
+    // A versioned document keeps the detected window as an explicit value;
+    // legacy context values are dropped on migration.
     const config = {
-      provider,
-      defaultModel: profile.model,
-      apiConfig: {
-        baseUrl: profile.baseUrl,
-        apiKeyEnv,
-        interfaceProvider: profile.protocol,
-      },
-      llmParams: {
-        maxTokens: 4096,
-        contextWindowTokens: contextWindow.tokens,
-        reasoning: {
-          enabled: options.reasoningEnabled ?? true,
-          effort: profile.enabledEffort,
-        },
-      },
+      schemaVersion: 2,
+      activeProfileId: "formal-cache",
       models: [
         {
+          id: "formal-cache",
+          provider,
           model: profile.model,
-          interfaceProvider: profile.protocol,
           baseUrl: profile.baseUrl,
+          interfaceProvider: profile.protocol,
+          apiKeyEnv,
           contextWindowTokens: contextWindow.tokens,
           maxOutputTokens: 4096,
           reasoningCapabilities: profile.capabilities,
+          reasoning: {
+            enabled: options.reasoningEnabled ?? true,
+            effort: profile.enabledEffort,
+          },
         },
       ],
     };

@@ -119,8 +119,8 @@ it.each(["active-probe", "builtin", "migrated-auto"] as const)(
       expect(await readFile(options.modelJsonPath, "utf8")).toBe(original);
       expect(migrated.models[0]).toMatchObject({
         reasoning: { effort: "max" },
-        detectedContextWindowTokens: 100000,
       });
+      expect(migrated.models[0].detectedContextWindowTokens).toBeUndefined();
       expect(migrated.models[0].maxOutputTokens).toBeUndefined();
       id = migrated.models[0].id;
       await updateModelEntry(id, { label: "Migrated" }, options);

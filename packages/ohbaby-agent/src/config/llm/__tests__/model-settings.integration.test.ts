@@ -49,7 +49,7 @@ describe("independent model settings", () => {
     expect((await disk()).models.map((e) => e.id)).toEqual([a.id, b.id]);
     expect(a.contextWindowTokens).toBeUndefined();
     expect(a.maxOutputTokens).toBeUndefined();
-    expect(a.effectiveContextWindowTokens).toBe(300000);
+    expect(a.effectiveContextWindowTokens).toBe(1000000);
     expect(a.effectiveMaxOutputTokens).toBe(32768);
     expect(
       (await disk()).models.every(

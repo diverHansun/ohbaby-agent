@@ -452,31 +452,23 @@ export async function createRealCacheHarness(
   await writeFile(
     modelJsonPath,
     JSON.stringify({
-      apiConfig: {
-        apiKeyEnv: profile.apiKeyEnv,
-        baseUrl: profile.baseUrl,
-        interfaceProvider: profile.interfaceProvider,
-        promptCache: "auto",
-      },
-      defaultModel: profile.model,
-      ...(profile.reasoningCapabilities
-        ? {
-            models: [
-              {
-                model: profile.model,
-                provider: profile.provider,
-                contextWindowTokens: 200000,
-                reasoningCapabilities: profile.reasoningCapabilities,
-              },
-            ],
-          }
-        : {}),
-      llmParams: {
-        contextWindowTokens: 200_000,
-        maxTokens: 256,
-        temperature: 0,
-      },
-      provider: profile.provider,
+      schemaVersion: 2,
+      activeProfileId: "real-cache",
+      models: [
+        {
+          id: "real-cache",
+          provider: profile.provider,
+          model: profile.model,
+          apiKeyEnv: profile.apiKeyEnv,
+          baseUrl: profile.baseUrl,
+          interfaceProvider: profile.interfaceProvider,
+          promptCache: "auto",
+          contextWindowTokens: 200_000,
+          maxOutputTokens: 256,
+          temperature: 0,
+          reasoningCapabilities: profile.reasoningCapabilities,
+        },
+      ],
     }),
     "utf8",
   );

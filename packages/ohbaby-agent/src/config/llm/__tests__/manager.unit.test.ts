@@ -86,14 +86,15 @@ describe("LLMConfigManager", () => {
         interfaceProvider: "openai-compatible",
         promptCache: "auto",
         maxTokens: 4096,
-        contextWindowTokens: 128_000,
+        // Legacy context values are dropped on migration.
+        contextWindowTokens: 1_000_000,
         modelProfiles: [
           expect.objectContaining({
             model: "gpt-4",
             provider: "openai",
             baseUrl: "https://api.openai.com/v1",
             interfaceProvider: "openai-compatible",
-            contextWindowTokens: 128000,
+            contextWindowTokens: 1_000_000,
           }),
         ],
       });

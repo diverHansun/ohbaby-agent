@@ -76,14 +76,14 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
     });
     expect(written.models?.slice(1)).toMatchObject(
       [responses, other, generic, caseDistinct].map(
-        ({ contextWindowTokens, ...profile }) => ({
-          ...profile,
-          detectedContextWindowTokens: contextWindowTokens,
-        }),
+        ({ contextWindowTokens: _legacy, ...profile }) => profile,
       ),
     );
-    for (const entry of written.models?.slice(1) ?? [])
+    // Legacy context values are dropped, not kept as detected values.
+    for (const entry of written.models?.slice(1) ?? []) {
       expect(entry).not.toHaveProperty("contextWindowTokens");
+      expect(entry).not.toHaveProperty("detectedContextWindowTokens");
+    }
     const projected = await loadProjectedModelJson({ modelJsonPath: path });
     expect(
       capabilitiesFor({
@@ -108,7 +108,7 @@ it("preserves independent routes and legacy profiles, and resolves the exact rou
     expect(
       (await loadProjectedModelJson({ modelJsonPath: path })).llmParams
         .contextWindowTokens,
-    ).toBe(300000);
+    ).toBe(1_000_000);
     expect((await read()).models?.slice(1)).toEqual(written.models?.slice(1));
     await setActiveLLMConfig({
       provider: "gateway",
@@ -164,8 +164,9 @@ it("loads exact active route windows for summary and token budgets", async () =>
       await import("../../../services/llm-model/activeModel.js");
     const manager = LLMConfigManager.getInstance();
     const config = await manager.reload({ modelJsonPath: path });
+    // Legacy context values are dropped, so every route uses the default.
     expect(summarizeActiveModel(config).profile?.contextWindowTokens).toBe(
-      200000,
+      1_000_000,
     );
     const { activeModelBudgetProfiles } = await import("ohbaby-llm");
     const { createHeuristicTokenCounter } =
@@ -175,7 +176,7 @@ it("loads exact active route windows for summary and token budgets", async () =>
         provider: config.provider,
         profiles: activeModelBudgetProfiles(config),
       }).getBudget(config.model).contextWindowTokens,
-    ).toBe(200000);
+    ).toBe(1_000_000);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -270,16 +271,16 @@ it("legacy connect refreshes the first duplicate entry and retains its sibling",
         efforts: ["medium"],
       },
     });
-    const { contextWindowTokens, ...sibling } = profile;
-    expect(written.models?.[1]).toMatchObject({
-      ...sibling,
-      detectedContextWindowTokens: contextWindowTokens,
-    });
+    const { contextWindowTokens: _legacy, ...sibling } = profile;
+    expect(written.models?.[1]).toMatchObject(sibling);
     expect(written.models?.[1]).not.toHaveProperty("contextWindowTokens");
+    expect(written.models?.[1]).not.toHaveProperty(
+      "detectedContextWindowTokens",
+    );
     expect(
       (await readModelDocument({ modelJsonPath: path })).models[1]
         .detectedRouteKey,
-    ).toBeDefined();
+    ).toBeUndefined();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

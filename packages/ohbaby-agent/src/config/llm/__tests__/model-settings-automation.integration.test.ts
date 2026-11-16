@@ -52,7 +52,7 @@ it("keeps new numeric intent empty while projecting usable runtime limits", asyn
     options,
   );
   expect(settings.models[0]).toMatchObject({
-    effectiveContextWindowTokens: 300000,
+    effectiveContextWindowTokens: 1000000,
     effectiveMaxOutputTokens: 32768,
   });
   expect(settings.models[0].contextWindowTokens).toBeUndefined();
@@ -65,7 +65,7 @@ it("keeps new numeric intent empty while projecting usable runtime limits", asyn
   expect(raw.models[0].maxOutputTokens).toBeUndefined();
   expect(
     projectModelDocument(await readModelDocument(options))?.llmParams,
-  ).toMatchObject({ maxTokens: 32768, contextWindowTokens: 300000 });
+  ).toMatchObject({ maxTokens: 32768, contextWindowTokens: 1000000 });
 });
 it("migrates old defaults once and preserves a later intentional 8192 override", async () => {
   await writeFile(
@@ -78,12 +78,13 @@ it("migrates old defaults once and preserves a later intentional 8192 override",
     }),
   );
   const migrated = await readModelSettings(options);
+  // Legacy context is dropped: neither an override nor a detected value.
   expect(migrated.models[0]).toMatchObject({
-    detectedContextWindowTokens: 128000,
-    effectiveContextWindowTokens: 128000,
+    effectiveContextWindowTokens: 1000000,
     effectiveMaxOutputTokens: 32768,
   });
   expect(migrated.models[0].contextWindowTokens).toBeUndefined();
+  expect(migrated.models[0].detectedContextWindowTokens).toBeUndefined();
   await updateModelEntry("one", { maxOutputTokens: 8192 }, options);
   expect((await readModelSettings(options)).models[0].maxOutputTokens).toBe(
     8192,
@@ -92,14 +93,8 @@ it("migrates old defaults once and preserves a later intentional 8192 override",
     await readFile(options.modelJsonPath, "utf8"),
   ) as ModelDocument;
   expect(raw.schemaVersion).toBe(2);
-  expect(raw.models[0].detectedRouteKey).toBe(
-    JSON.stringify([
-      route.provider,
-      route.model,
-      route.interfaceProvider,
-      route.baseUrl,
-    ]),
-  );
+  expect(raw.models[0].detectedContextWindowTokens).toBeUndefined();
+  expect(raw.models[0].detectedRouteKey).toBeUndefined();
 });
 it("clears overrides durably without promoting detected values into user intent", async () => {
   await writeFile(
@@ -179,10 +174,11 @@ it("expands legacy top-level data before migrating 8192 and context", async () =
   );
   const entry = (await readModelSettings(options)).models[0];
   expect(entry).toMatchObject({
-    detectedContextWindowTokens: 128000,
+    effectiveContextWindowTokens: 1000000,
     effectiveMaxOutputTokens: 32768,
   });
   expect(entry.contextWindowTokens).toBeUndefined();
+  expect(entry.detectedContextWindowTokens).toBeUndefined();
   expect(entry.maxOutputTokens).toBeUndefined();
 });
 it("automatically discovers effort after Save and publishes terminal state without replacing an override", async () => {
@@ -318,7 +314,7 @@ it.each(["context", "reasoning"] as const)(
       }),
     );
     const before = (await readModelSettings(options)).models[0];
-    expect(before.effectiveContextWindowTokens).toBe(300000);
+    expect(before.effectiveContextWindowTokens).toBe(1000000);
     expect(before.reasoning.status).toBe("unknown");
     const currentRouteKey = JSON.stringify([
       route.provider,
@@ -354,7 +350,7 @@ it.each(["context", "reasoning"] as const)(
       });
       expect(after.reasoning.status).toBe("unknown");
     } else {
-      expect(after.effectiveContextWindowTokens).toBe(300000);
+      expect(after.effectiveContextWindowTokens).toBe(1000000);
       expect(after.detectedContextWindowTokens).toBeUndefined();
       expect(after.reasoning.efforts).toEqual(["low"]);
     }

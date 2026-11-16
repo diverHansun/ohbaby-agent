@@ -463,7 +463,7 @@ describe("applyActiveModelConfig", () => {
       apiKeyEnv: "ZENMUX_API_KEY",
       baseUrl: "https://zenmux.ai/api/anthropic",
       contextWindowSource: "default",
-      contextWindowTokens: 300_000,
+      contextWindowTokens: 1_000_000,
       interfaceProvider: "anthropic",
       model: "anthropic/claude-sonnet-4.6",
       modelJsonPath,
@@ -595,7 +595,7 @@ describe("applyActiveModelConfig", () => {
   });
 
   it.each([
-    { contextWindowTokens: undefined, source: "default", expected: 300_000 },
+    { contextWindowTokens: undefined, source: "default", expected: 1_000_000 },
     { contextWindowTokens: 96_000, source: "user", expected: 96_000 },
   ])(
     "skips standalone probing with a missing credential reference and keeps the $source context",
@@ -669,7 +669,7 @@ describe("applyActiveModelConfig", () => {
     expect(result).toMatchObject({
       apiKeyEnv: "ZENMUX_API_KEY",
       contextWindowSource: "default",
-      contextWindowTokens: 300_000,
+      contextWindowTokens: 1_000_000,
       saved: true,
     });
     await discoveryFinished();
@@ -722,7 +722,7 @@ describe("applyActiveModelConfig", () => {
     expect(result).toMatchObject({
       baseUrl: "http://127.0.0.1:1234/v1",
       contextWindowSource: "default",
-      contextWindowTokens: 300_000,
+      contextWindowTokens: 1_000_000,
       model: "local-model",
       provider: "lmstudio",
       saved: true,
@@ -1074,7 +1074,7 @@ describe("applyActiveModelConfig", () => {
     ).toEqual({ status: "unknown", reason: "network-error" });
   });
 
-  it("keeps the 300k fallback without a stored override when background detection fails", async () => {
+  it("keeps the 1M fallback without a stored override when background detection fails", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
     const result = await applyActiveModelConfig({
@@ -1088,7 +1088,7 @@ describe("applyActiveModelConfig", () => {
       provider: "zenmux",
     });
 
-    expect(result.contextWindowTokens).toBe(300_000);
+    expect(result.contextWindowTokens).toBe(1_000_000);
     expect(result.contextWindowSource).toBe("default");
     expect(result.warning).toBeUndefined();
     await discoveryFinished();
@@ -1104,7 +1104,7 @@ describe("applyActiveModelConfig", () => {
         readonly contextWindowTokens?: number;
       };
     };
-    expect(modelJson.llmParams.contextWindowTokens).toBe(300_000);
+    expect(modelJson.llmParams.contextWindowTokens).toBe(1_000_000);
   });
 
   it("probes context window without writing active config", async () => {
@@ -1153,7 +1153,7 @@ describe("applyActiveModelConfig", () => {
     });
     expect(defaultFallback).toMatchObject({
       contextWindowSource: "default",
-      contextWindowTokens: 300_000,
+      contextWindowTokens: 1_000_000,
     });
     expect(defaultFallback.warning).toMatch(/context window/i);
   });
