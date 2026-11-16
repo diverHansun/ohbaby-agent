@@ -10,15 +10,27 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ToolExecutionContext,
   ToolExecutionEnvironment,
 } from "../core/tool-scheduler/index.js";
-import { Shell } from "../shell/index.js";
+import { Shell, resolveAcceptableShell } from "../shell/index.js";
+import { manageWithWindowsJob } from "../shell/process.js";
+import { loadWindowsJobApi } from "../shell/windows-job.js";
 import { createBashTool } from "../tools/bash.js";
 import { ShellJobRegistry } from "./registry.js";
+
+// Match nodeCommand's dialect independently of the developer's SHELL setting.
+const fixtureShell = {
+  acceptable: (): string =>
+    process.platform === "win32"
+      ? resolveAcceptableShell({ env: { SHELL: "powershell.exe" } })
+      : "/bin/sh",
+  killTree: Shell.killTree,
+};
 
 function createContext(workdir: string): ToolExecutionContext {
   const commandContext = { cwd: workdir, env: {}, kind: "host-local" as const };
@@ -44,6 +56,34 @@ function killShellTree(child: ChildProcess): ReturnType<typeof Shell.killTree> {
   return Shell.killTree(child);
 }
 
+function spawnNode(args: string[], cwd: string): ChildProcess {
+  if (process.platform === "win32") loadWindowsJobApi();
+  const child = spawn(process.execPath, args, {
+    cwd,
+    detached: process.platform !== "win32",
+    windowsHide: true,
+  });
+  manageWithWindowsJob(child);
+  return child;
+}
+
+function nodeCommand(script: string, ...args: string[]): string {
+  const quote = (value: string): string =>
+    process.platform === "win32"
+      ? `'${value.replaceAll("'", "''")}'`
+      : `'${value.replaceAll("'", "'\\''")}'`;
+  return `${process.platform === "win32" ? "&" : "exec"} ${[process.execPath, script, ...args].map(quote).join(" ")}`;
+}
+
+async function writeNodeCommand(
+  workdir: string,
+  source: string,
+): Promise<string> {
+  const script = path.join(workdir, `${randomUUID()}.mjs`);
+  await writeFile(script, source);
+  return nodeCommand(script);
+}
+
 describe("shell job real-process integration", () => {
   it("returns the original Bash job on promotion and keeps its hard deadline after Stop", async () => {
     const workdir = await realpath(
@@ -53,7 +93,7 @@ describe("shell job real-process integration", () => {
     const registry = new ShellJobRegistry({ store, killTree: killShellTree });
     const controller = new AbortController();
     const context = { ...createContext(workdir), signal: controller.signal };
-    const bash = createBashTool({ registry });
+    const bash = createBashTool({ registry, shell: fixtureShell });
     const script = path.join(workdir, "controlled.mjs");
     const states: ShellJobRecord[] = [];
     const unsubscribe = store.subscribe((row) => {
@@ -74,11 +114,9 @@ const timer = setInterval(() => {
 setTimeout(() => process.exit(0), 2300);
 `,
       );
-      const quote = (value: string): string =>
-        `'${value.replaceAll("'", "'\\''")}'`;
       const receipt = await bash.execute(
         {
-          command: `exec ${quote(process.execPath)} ${quote(script)}`,
+          command: nodeCommand(script),
           wait_ms: 800,
           timeout: 1600,
         },
@@ -100,9 +138,13 @@ setTimeout(() => process.exit(0), 2300);
         deadline: foreground.startedAt + 1600,
       });
       expect(store.get(jobId)?.outputTail).toContain("before-promotion");
-      expect(await readFile(path.join(workdir, "launches"), "utf8")).toBe(
-        `${String(foreground.pid)}\n`,
-      );
+      const launches = (await readFile(path.join(workdir, "launches"), "utf8"))
+        .trim()
+        .split("\n");
+      expect(launches).toHaveLength(1);
+      expect(() => process.kill(Number(launches[0]), 0)).not.toThrow();
+      if (process.platform !== "win32")
+        expect(Number(launches[0])).toBe(foreground.pid);
 
       controller.abort();
       expect(registry.get(jobId, context.sessionId).status).toBe("running");
@@ -141,23 +183,62 @@ setTimeout(() => process.exit(0), 2300);
       killTree: killShellTree,
       backgroundLimit: (): Promise<number> => Promise.resolve(2),
     });
-    const bash = createBashTool({ registry });
+    const bash = createBashTool({ registry, shell: fixtureShell });
     const context = createContext(workdir);
     try {
       const old = await bash.execute(
-        { command: "exec sleep 15", run_in_background: true },
+        {
+          command: await writeNodeCommand(
+            workdir,
+            "setTimeout(() => {}, 15000);",
+          ),
+          run_in_background: true,
+        },
         context,
       );
-      const results = await Promise.all([
-        bash.execute(
-          { command: "echo left; exec sleep 15", wait_ms: 200 },
-          { ...context, callId: "left" },
+      const foreground = await Promise.all(
+        ["left", "right"].map((id) =>
+          registry.start({
+            sessionId: context.sessionId,
+            timeoutMs: 15000,
+            owner: {
+              sessionId: context.sessionId,
+              runId: "run",
+              rootRunId: "root",
+              executionId: id,
+              callId: id,
+              messageId: id,
+            },
+            child: () =>
+              spawnNode(
+                [
+                  "-e",
+                  "console.log(process.argv[1]); setTimeout(() => {}, 15000);",
+                  id,
+                ],
+                workdir,
+              ),
+          }),
         ),
-        bash.execute(
-          { command: "echo right; exec sleep 15", wait_ms: 200 },
-          { ...context, callId: "right" },
+      );
+      await vi.waitFor(() => {
+        for (const job of foreground)
+          expect(registry.get(job.jobId, context.sessionId).output).toContain(
+            String(store.get(job.jobId)?.callId),
+          );
+      });
+      const results = await Promise.all(
+        foreground.map(
+          async (job) =>
+            (
+              await registry.waitForForeground(job.jobId, context.sessionId, {
+                waitMs: 1,
+                signal: context.signal,
+                onBackground: () => undefined,
+              })
+            ).snapshot,
         ),
-      ]);
+      );
       expect(results.map((result) => result.metadata)).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ mode: "background", status: "running" }),
@@ -173,7 +254,7 @@ setTimeout(() => process.exit(0), 2300);
       const refused = rows.find((row) => row.mode === "foreground");
       if (!refused) throw new Error("Missing refused job");
       const refusedResult = results.find(
-        (result) => result.metadata?.jobId === refused.jobId,
+        (result) => result.metadata.jobId === refused.jobId,
       );
       expect(refusedResult?.output).toContain(String(refused.callId));
       await vi.waitFor(() => {
@@ -205,7 +286,7 @@ setTimeout(() => process.exit(0), 2300);
     }
   });
 
-  it("keeps a finished shell's same-group child charged until observation confirms it is gone", async () => {
+  it("keeps a finished command's owned child charged until observation confirms it is gone", async () => {
     const workdir = await mkdtemp(
       path.join(os.tmpdir(), "ohbaby-shell-descendant-"),
     );
@@ -215,19 +296,41 @@ setTimeout(() => process.exit(0), 2300);
       killTree: killShellTree,
       backgroundLimit: () => Promise.resolve(1),
     });
-    const bash = createBashTool({ registry });
+    const bash = createBashTool({ registry, shell: fixtureShell });
     const context = createContext(workdir);
     try {
-      const first = await bash.execute(
-        {
-          command: "sleep 1 >/dev/null 2>&1 & echo started",
-          run_in_background: true,
-        },
-        context,
+      const script = path.join(workdir, "parent.mjs");
+      await writeFile(
+        script,
+        `
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+// Windows needs detached for the child to outlive Node; POSIX must keep the group.
+const child = spawn(process.execPath, ['-e',
+  "const fs = require('node:fs'); fs.writeFileSync('child.pid', String(process.pid)); const deadline = setTimeout(() => process.exit(2), 10000); const timer = setInterval(() => { if (fs.existsSync('release')) { clearTimeout(deadline); clearInterval(timer); } }, 10);"
+], { stdio: 'ignore', windowsHide: true, detached: process.platform === 'win32' });
+child.unref();
+const ready = setInterval(() => {
+  if (!fs.existsSync('child.pid')) return;
+  clearInterval(ready);
+  console.log('started');
+}, 10);
+`,
       );
-      const id = String(first.metadata?.jobId);
+      const first = await registry.start({
+        sessionId: context.sessionId,
+        background: true,
+        timeoutMs: 10000,
+        child: () => spawnNode([script], workdir),
+      });
+      const exitCommand = await writeNodeCommand(workdir, "process.exit(0);");
+      const id = first.jobId;
       await vi.waitFor(
-        () => {
+        async () => {
+          const pid = Number(
+            await readFile(path.join(workdir, "child.pid"), "utf8"),
+          );
+          expect(() => process.kill(pid, 0)).not.toThrow();
           expect(store.get(id)).toMatchObject({
             status: "completed",
             cleanup: null,
@@ -236,11 +339,18 @@ setTimeout(() => process.exit(0), 2300);
         { timeout: 2000 },
       );
       await expect(
-        bash.execute({ command: "true", run_in_background: true }, context),
+        bash.execute(
+          { command: exitCommand, run_in_background: true },
+          context,
+        ),
       ).rejects.toThrow("capacity");
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await writeFile(path.join(workdir, "release"), "");
+      await vi.waitFor(async () => {
+        await registry.refreshLocalOwner(context.sessionId, null);
+        expect(store.get(id)?.cleanup).toBe("confirmed");
+      });
       const second = await bash.execute(
-        { command: "true", run_in_background: true },
+        { command: exitCommand, run_in_background: true },
         context,
       );
       expect(second.metadata?.jobId).toBeTruthy();
@@ -265,9 +375,7 @@ setTimeout(() => process.exit(0), 2300);
       const storage = path.join(workdir, "owner");
       await mkdir(storage);
       const registry = new ShellJobRegistry({ killTree: killShellTree });
-      const bash = createBashTool({ registry });
-      const quote = (value: string): string =>
-        `'${value.replaceAll("'", "'\\''")}'`;
+      const bash = createBashTool({ registry, shell: fixtureShell });
       const script = path.join(workdir, "large-output.mjs");
       await writeFile(
         script,
@@ -288,7 +396,7 @@ setTimeout(() => process.exit(0), 2300);
       try {
         const started = await bash.execute(
           {
-            command: `exec ${quote(process.execPath)} ${quote(script)}`,
+            command: nodeCommand(script),
             run_in_background: background,
             timeout: 5000,
           },
@@ -336,13 +444,16 @@ setTimeout(() => process.exit(0), 2300);
   it("runs a background command and reads its terminal output", async () => {
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
-    const bash = createBashTool({ registry });
+    const bash = createBashTool({ registry, shell: fixtureShell });
     const output = createTaskTool(registry);
     try {
       const context = createContext(workdir);
       const started = await bash.execute(
         {
-          command: "printf 'background-ready\\n'",
+          command: await writeNodeCommand(
+            workdir,
+            "console.log('background-ready');",
+          ),
           run_in_background: true,
           timeout: 1_000,
         },
@@ -369,12 +480,19 @@ setTimeout(() => process.exit(0), 2300);
   it("automatically times out a real background process", async () => {
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
-    const bash = createBashTool({ registry });
+    const bash = createBashTool({ registry, shell: fixtureShell });
     const output = createTaskTool(registry);
     try {
       const context = createContext(workdir);
       const started = await bash.execute(
-        { command: "sleep 2", run_in_background: true, timeout: 50 },
+        {
+          command: await writeNodeCommand(
+            workdir,
+            "setTimeout(() => {}, 2000);",
+          ),
+          run_in_background: true,
+          timeout: 50,
+        },
         context,
       );
       const result = await output.execute(
@@ -399,12 +517,19 @@ setTimeout(() => process.exit(0), 2300);
   it("cancels a real background process through task", async () => {
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
-    const bash = createBashTool({ registry });
+    const bash = createBashTool({ registry, shell: fixtureShell });
     const kill = createTaskTool(registry);
     try {
       const context = createContext(workdir);
       const started = await bash.execute(
-        { command: "sleep 2", run_in_background: true, timeout: 1_000 },
+        {
+          command: await writeNodeCommand(
+            workdir,
+            "setTimeout(() => {}, 2000);",
+          ),
+          run_in_background: true,
+          timeout: 1_000,
+        },
         context,
       );
       const result = await kill.execute(
@@ -427,10 +552,8 @@ setTimeout(() => process.exit(0), 2300);
   it("cleans up a promoted command when its subagent scope closes", async () => {
     const workdir = await mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-root-"));
     const registry = new ShellJobRegistry({ killTree: killShellTree });
-    const bash = createBashTool({ registry });
+    const bash = createBashTool({ registry, shell: fixtureShell });
     const output = createTaskTool(registry);
-    const quote = (value: string): string =>
-      `'${value.replaceAll("'", "'\\''")}'`;
     const scopedContext = (id: string): ToolExecutionContext => ({
       ...createContext(workdir),
       callId: `call-${id}`,
@@ -472,7 +595,7 @@ const timer = setInterval(() => {
       ): Promise<{ jobId: string; pid: number }> => {
         const result = await bash.execute(
           {
-            command: `exec ${quote(process.execPath)} ${quote(script)} ${id}`,
+            command: nodeCommand(script, id),
             ...(promote ? { wait_ms: 50 } : { run_in_background: true }),
             timeout: 15_000,
           },

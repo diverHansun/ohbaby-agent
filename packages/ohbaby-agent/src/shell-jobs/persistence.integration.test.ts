@@ -14,6 +14,8 @@ import {
   initDatabase,
 } from "../services/database/index.js";
 import { Shell } from "../shell/index.js";
+import { manageWithWindowsJob } from "../shell/process.js";
+import { loadWindowsJobApi } from "../shell/windows-job.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseShellJobStore, InMemoryShellJobStore } from "./store.js";
 import { ShellJobRegistry } from "./registry.js";
@@ -26,12 +28,19 @@ function killShellTree(child: ChildProcess): ReturnType<typeof Shell.killTree> {
   return Shell.killTree(child);
 }
 
+function spawnNode(source: string, ...args: string[]): ChildProcess {
+  if (process.platform === "win32") loadWindowsJobApi();
+  const child = spawn(process.execPath, ["-e", source, ...args], {
+    detached: process.platform !== "win32",
+    windowsHide: true,
+  });
+  manageWithWindowsJob(child);
+  return child;
+}
+
 function spawnUntilReleased(releasePath: string): ChildProcess {
-  return spawn(
-    process.execPath,
-    [
-      "-e",
-      `
+  return spawnNode(
+    `
 const fs = require('node:fs');
 process.stdout.write('durable-tail');
 const deadline = setTimeout(() => process.exit(2), 7000);
@@ -42,9 +51,7 @@ const timer = setInterval(() => {
   process.stdout.write('-done');
 }, 10);
 `,
-      releasePath,
-    ],
-    { detached: true },
+    releasePath,
   );
 }
 
@@ -343,7 +350,9 @@ describe("shell job persistence", () => {
                 : "cancelled_before_commit",
           });
           expect(detached).not.toHaveBeenCalled();
-          await vi.waitFor(() => {
+          await vi.waitFor(async () => {
+            // Windows Job accounting may become empty after the child's close event.
+            await jobs.refreshLocalOwner("s", null);
             expect(store.get(started.jobId)).toMatchObject({
               mode: "foreground",
               promotedAt: null,
@@ -425,7 +434,7 @@ describe("shell job persistence", () => {
         sessionId: "s",
         background: true,
         timeoutMs: 1000,
-        child: () => spawn("/bin/sh", ["-c", "true"], { detached: true }),
+        child: () => spawnNode("process.exit(0);"),
       });
       expect(next.jobId).toBeTruthy();
       expect(store.get("foreign")).toMatchObject({
@@ -450,14 +459,19 @@ describe("shell job persistence", () => {
       sessionId: "session",
       timeoutMs: 10000,
       background: true,
-      metadata: { command: "printf hello", cwd: "/tmp", shell: "/bin/sh" },
+      metadata: {
+        command: "node",
+        cwd: process.cwd(),
+        shell: process.execPath,
+      },
       child: () => {
         expect(store.get("job")).toMatchObject({ status: null, pid: null });
-        return spawn("/bin/sh", ["-c", "printf hello"], { detached: true });
+        return spawnNode("process.stdout.write('hello');");
       },
     });
     await registry.waitForTerminal(job.jobId, "session");
-    await viWait(() => {
+    await vi.waitFor(async () => {
+      await registry.refreshLocalOwner("session", null);
       expect(store.get("job")).toMatchObject({
         status: "completed",
         outputBytes: 5,
@@ -480,8 +494,7 @@ describe("shell job persistence", () => {
     const job = await registry.start({
       sessionId: "session",
       timeoutMs: 10000,
-      child: () =>
-        spawn("/bin/sh", ["-c", "printf fast-result"], { detached: true }),
+      child: () => spawnNode("process.stdout.write('fast-result');"),
     });
     expect((await registry.waitForTerminal(job.jobId, "session")).output).toBe(
       "fast-result",
@@ -553,7 +566,8 @@ describe("shell job persistence", () => {
         connection.close();
       }
       await writeFile(releasePath, "");
-      await vi.waitFor(() => {
+      await vi.waitFor(async () => {
+        await jobs.refreshLocalOwner("session", null);
         expect(store.get("persisted")?.settledAt).toBeTypeOf("number");
       });
       expect(store.get(started.jobId)?.noticeState).toBe("pending");
@@ -583,15 +597,16 @@ describe("shell job persistence", () => {
     }
   });
   it("retries a failed final write without losing cleanup responsibility", async () => {
-    class FailOnceStore extends DatabaseShellJobStore {
+    class FailingUntilReleasedStore extends DatabaseShellJobStore {
       attempts = 0;
+      failWrites = true;
       override async update(
         jobId: string,
         patch: Parameters<DatabaseShellJobStore["update"]>[1],
       ): Promise<void> {
         if (patch.settledAt !== undefined) {
           this.attempts++;
-          if (this.attempts === 1) throw new Error("transient failure");
+          if (this.failWrites) throw new Error("transient failure");
         }
         await super.update(jobId, patch);
       }
@@ -602,7 +617,7 @@ describe("shell job persistence", () => {
         "INSERT INTO session(id,project_id,working_directory,title,status,created_at,updated_at,data) VALUES('session','p','/tmp','test','active',1,1,'{}')",
       )
       .run();
-    const store = new FailOnceStore();
+    const store = new FailingUntilReleasedStore();
     const registry = new ShellJobRegistry({
       store,
       createJobId: (): string => "retry",
@@ -612,28 +627,31 @@ describe("shell job persistence", () => {
       sessionId: "session",
       timeoutMs: 10000,
       background: true,
-      child: () => spawn("/bin/sh", ["-c", "printf ok"], { detached: true }),
+      child: () => spawnNode("process.stdout.write('ok');"),
     });
-    await vi.waitFor(() => {
-      expect(store.attempts).toBe(1);
+    await vi.waitFor(async () => {
+      await registry.refreshLocalOwner("session", null);
+      expect(store.attempts).toBeGreaterThanOrEqual(1);
     });
     expect(store.get("retry")?.settledAt).toBeNull();
     expect(registry.hasActiveWork()).toBe(true);
     await expect(registry.dispose()).rejects.toThrow();
     expect(registry.hasActiveWork()).toBe(true);
+    const failedAttempts = store.attempts;
+    store.failWrites = false;
     await vi.waitFor(
       () => {
         expect(store.get("retry")?.settledAt).toBeTypeOf("number");
       },
       { timeout: 3000 },
     );
-    expect(store.attempts).toBe(2);
+    expect(store.attempts).toBe(failedAttempts + 1);
     await vi.waitFor(() => {
       expect(registry.hasActiveWork()).toBe(false);
     });
     await registry.dispose();
     await new Promise<void>((resolve) => setTimeout(resolve, 1100));
-    expect(store.attempts).toBe(2);
+    expect(store.attempts).toBe(failedAttempts + 1);
   });
   it("labels recovered output as incomplete and gives its checkpoint", async () => {
     const store = new InMemoryShellJobStore();
@@ -646,10 +664,10 @@ describe("shell job persistence", () => {
       sessionId: "session",
       timeoutMs: 10000,
       background: true,
-      child: () =>
-        spawn("/bin/sh", ["-c", "printf recovered"], { detached: true }),
+      child: () => spawnNode("process.stdout.write('recovered');"),
     });
-    await vi.waitFor(() => {
+    await vi.waitFor(async () => {
+      await registry.refreshLocalOwner("session", null);
       expect(registry.hasActiveWork()).toBe(false);
     });
     await store.update("history", {
@@ -686,7 +704,7 @@ describe("shell job persistence", () => {
         return Promise.reject(new Error("disk unavailable"));
       }
     }
-    const child = vi.fn(() => spawn("/bin/sh", ["-c", "exit 0"]));
+    const child = vi.fn(() => spawnNode("process.exit(0);"));
     const registry = new ShellJobRegistry({
       store: new RejectingStore(),
       killTree: (): { status: "confirmed" } => ({ status: "confirmed" }),
@@ -716,7 +734,7 @@ describe("shell job persistence", () => {
     }
     const store = new DelayedAdmissionStore();
     const abort = new AbortController();
-    const child = vi.fn(() => spawn("/bin/sh", ["-c", "exit 0"]));
+    const child = vi.fn(() => spawnNode("process.exit(0);"));
     const registry = new ShellJobRegistry({
       store,
       createJobId: (): string => "admission",
@@ -755,7 +773,7 @@ describe("shell job persistence", () => {
     }
     const store = new GatedReservationStore();
     const abort = new AbortController();
-    const child = vi.fn(() => spawn("/bin/sh", ["-c", "exit 0"]));
+    const child = vi.fn(() => spawnNode("process.exit(0);"));
     const release = vi.fn();
     const registry = new ShellJobRegistry({
       store,
@@ -853,17 +871,16 @@ describe("shell job persistence", () => {
       store,
       maxOutputBytes: 5,
       createJobId: (): string => "limited",
-      killTree: (child): { status: "unconfirmed" } => {
-        if (child.pid) process.kill(-child.pid, "SIGKILL");
-        return { status: "unconfirmed" };
-      },
+      killTree: killShellTree,
     });
     await registry.start({
       sessionId: "session",
       timeoutMs: 10000,
       background: true,
       child: () =>
-        spawn("/bin/sh", ["-c", "printf abcde; sleep 10"], { detached: true }),
+        spawnNode(
+          "process.stdout.write('abcde'); setTimeout(() => {}, 10000);",
+        ),
     });
     await vi.waitFor(() => {
       expect(store.get("limited")).toMatchObject({
@@ -872,6 +889,7 @@ describe("shell job persistence", () => {
         outputBytes: 5,
       });
     });
+    await registry.dispose();
   });
   it("saves the stop intent before sending a signal", async () => {
     class GatedStore extends InMemoryShellJobStore {
@@ -888,12 +906,7 @@ describe("shell job persistence", () => {
       }
     }
     const store = new GatedStore();
-    let child!: ReturnType<typeof spawn>;
-    const killTree = vi.fn(() => {
-      if (child.pid === undefined) throw new Error("Child PID missing");
-      process.kill(-child.pid, "SIGKILL");
-      return { status: "unconfirmed" as const };
-    });
+    const killTree = vi.fn(killShellTree);
     const registry = new ShellJobRegistry({
       store,
       killTree,
@@ -902,10 +915,7 @@ describe("shell job persistence", () => {
     await registry.start({
       sessionId: "session",
       timeoutMs: 10000,
-      child: () => {
-        child = spawn("/bin/sh", ["-c", "sleep 10"], { detached: true });
-        return child;
-      },
+      child: () => spawnNode("setTimeout(() => {}, 10000);"),
     });
     const result = await registry.kill("gated", "session");
     expect(result.status).toBe("cancelled");
@@ -918,6 +928,7 @@ describe("shell job persistence", () => {
       status: "cancelled",
       stopReason: "model",
     });
+    await registry.dispose();
   });
   it("retains cleanup responsibility when saving the spawned identity fails", async () => {
     class FailingStore extends InMemoryShellJobStore {
@@ -937,17 +948,15 @@ describe("shell job persistence", () => {
       killTree,
       cleanupObservationMs: 5,
     });
-    let pid: number | undefined;
+    let spawned: ChildProcess | undefined;
     await expect(
       registry.start({
         sessionId: "session",
         timeoutMs: 10000,
         release,
         child: () => {
-          const child = spawn("/bin/sh", ["-c", "sleep 10"], {
-            detached: true,
-          });
-          pid = child.pid;
+          const child = spawnNode("setTimeout(() => {}, 10000);");
+          spawned = child;
           return child;
         },
       }),
@@ -957,10 +966,8 @@ describe("shell job persistence", () => {
     });
     expect(release).not.toHaveBeenCalled();
     expect(registry.hasActiveWork()).toBe(true);
-    process.kill(-Number(pid), "SIGKILL");
+    if (!spawned) throw new Error("Missing spawned process");
+    await killShellTree(spawned);
+    await registry.dispose();
   });
 });
-async function viWait(assertion: () => void): Promise<void> {
-  const { vi } = await import("vitest");
-  await vi.waitFor(assertion);
-}

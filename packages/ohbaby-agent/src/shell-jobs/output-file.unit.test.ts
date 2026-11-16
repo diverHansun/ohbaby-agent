@@ -281,10 +281,21 @@ describe("shell output files", () => {
     );
     expect(() => fs.fstatSync(fd())).toThrow(/bad file descriptor|EBADF/i);
   });
-  it("does not follow a planted log symlink or overwrite its target", async () => {
+  it("does not follow a planted log symlink or overwrite its target", async (context) => {
     const target = path.join(directory, "untouched");
     await fsp.writeFile(target, "original");
-    await fsp.symlink(target, path.join(directory, "job.log"));
+    try {
+      await fsp.symlink(target, path.join(directory, "job.log"));
+    } catch (error) {
+      if (
+        process.platform === "win32" &&
+        (error as NodeJS.ErrnoException).code === "EPERM"
+      ) {
+        context.skip();
+        return;
+      }
+      throw error;
+    }
     await start();
     child.stdout.emit("data", "a".repeat(40_000));
     close();
