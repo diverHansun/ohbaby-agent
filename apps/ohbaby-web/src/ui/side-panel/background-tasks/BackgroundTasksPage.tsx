@@ -223,6 +223,8 @@ export function BackgroundTasksPage(props: {
   };
 
   const [abandoning, setAbandoning] = useState<string>();
+  const selectedRef = useRef(props.selectedJobId);
+  selectedRef.current = props.selectedJobId;
   const abandon = (row: UiShellJobRow): void => {
     if (abandoning) return;
     setCancelError(undefined);
@@ -240,6 +242,8 @@ export function BackgroundTasksPage(props: {
       })
       .then((result) => {
         settle([result.job]);
+        // Released foreground rows leave the list; don't keep their cached detail open.
+        if (selectedRef.current === row.jobId) onSelect(undefined);
       })
       .catch((error: unknown) => {
         const code = errorCode(error);

@@ -168,6 +168,8 @@ describe("Background tasks panel", () => {
     expect(frame(app)).toContain("Get-ChildItem");
     // Only the one an exited ohbaby left can be released.
     expect(frame(app)).toContain("u stop tracking");
+    await press(app, ENTER);
+    expect(frame(app)).toContain("Stop tracking it to unblock file tools.");
     await press(app, "u");
     expect(frame(app)).toContain("Stop tracking npm run dev? y confirm");
     await press(app, "y");
@@ -176,6 +178,7 @@ describe("Background tasks panel", () => {
       expect.objectContaining({ jobId: "left", confirm: true }),
     );
     expect(frame(app)).not.toContain("npm run dev");
+    expect(frame(app)).not.toContain("Stop tracking it to unblock file tools.");
     // The one this ohbaby still manages offers no release.
     expect(frame(app)).not.toContain("u stop tracking");
     await press(app, "u");

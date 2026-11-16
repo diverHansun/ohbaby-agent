@@ -310,6 +310,10 @@ export function BackgroundTaskBrowser({
       })
       .then((result) => {
         settle([result.job]);
+        // Released foreground rows leave the list; their ended output cache is stale.
+        setDetailJobId((current) =>
+          current === row.jobId ? undefined : current,
+        );
       })
       .catch((error: unknown) => {
         const code = errorCode(error);

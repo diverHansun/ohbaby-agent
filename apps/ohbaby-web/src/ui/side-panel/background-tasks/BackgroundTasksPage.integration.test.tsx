@@ -64,6 +64,7 @@ async function until(check: () => boolean, timeout = 3000): Promise<void> {
 async function mount(
   scenario: string,
   refusal?: { readonly operation: "output" | "stop"; readonly code: string },
+  overrides: Partial<UiBackendClient> = {},
 ): Promise<{
   readonly element: HTMLElement;
   readonly stop: ReturnType<typeof vi.fn>;
@@ -81,6 +82,7 @@ async function mount(
   );
   const client = new Proxy(base, {
     get: (target, property, receiver): unknown => {
+      if (property in overrides) return Reflect.get(overrides, property);
       if (property === "stopShellJob") return stop;
       if (property === "getShellJobOutput" && refusal?.operation === "output")
         return (): Promise<never> =>
@@ -155,6 +157,64 @@ function rowFor(element: HTMLElement, title: string): HTMLElement {
 }
 
 describe("Background tasks page", () => {
+  it("leaves a released background detail that was opened outside the loaded list", async () => {
+    const base = createMockRuntime("bg-chat").client;
+    if (!base?.getShellJobOutput || !base.listShellJobs)
+      throw new Error("Missing mock task readers");
+    const readOutput = base.getShellJobOutput.bind(base);
+    const readList = base.listShellJobs.bind(base);
+    let released = false;
+    const output = vi.fn(
+      async (
+        input: Parameters<NonNullable<UiBackendClient["getShellJobOutput"]>>[0],
+      ) => {
+        const result = await readOutput(input);
+        return {
+          ...result,
+          job: {
+            ...result.job,
+            status: "completed" as const,
+            resultReadyAt: 1,
+            cleanup: "unconfirmed" as const,
+            managedByCurrentBackend: false,
+            canStop: false,
+            trackingReleasedAt: released ? 2 : null,
+          },
+        };
+      },
+    );
+    const { element } = await mount("bg-chat", undefined, {
+      getShellJobOutput: output,
+      listShellJobs: async (input) => {
+        const page = await readList(input);
+        return { ...page, rows: [], hasMore: false };
+      },
+      abandonShellJob: async (input) => {
+        released = true;
+        const result = await output(input);
+        return { ...result, trackingReleasedAt: 2 };
+      },
+    });
+    await until(
+      () =>
+        element.querySelector('[aria-label="Open background task"]') !== null,
+    );
+    await click(
+      element.querySelector<HTMLButtonElement>(
+        '[aria-label="Open background task"]',
+      ) ?? undefined,
+    );
+    await until(
+      () => button(element, "Stop tracking Dev server") !== undefined,
+    );
+    expect(element.querySelectorAll(".ohb-bgtask-row")).toHaveLength(0);
+    await click(button(element, "Stop tracking Dev server"));
+    await click(button(element, "Confirm: stop tracking Dev server"));
+    await until(() => element.querySelector(".ohb-bgtask-detail") === null);
+    expect(released).toBe(true);
+    expect(button(element, "Stop tracking Dev server")).toBeUndefined();
+  });
+
   it("keeps task results out of the chat and opens a task from its bash card", async () => {
     const { element } = await mount("bg-chat");
     await until(() => element.textContent.includes("The build failed"));
@@ -318,7 +378,8 @@ describe("Background tasks page", () => {
     );
 
     // One still managed by this ohbaby offers no action, only the restart note.
-    await click(button(element, "Back to tasks"));
+    expect(element.querySelector(".ohb-bgtask-detail")).toBeNull();
+    expect(button(element, "Stop tracking npm run dev")).toBeUndefined();
     await click(
       rowFor(element, "Get-ChildItem").querySelector<HTMLElement>(
         ".ohb-bgtask-row-open",
