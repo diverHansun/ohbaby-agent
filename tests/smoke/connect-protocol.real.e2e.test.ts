@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_MAX_OUTPUT_TOKENS } from "ohbaby-sdk";
 import type {
   UiConnectModelResult,
   UiCurrentModelConfig,
@@ -46,8 +47,13 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    const agentOutputLimits: number[] = [];
     const session = await createFormalCacheSession(profile.id, {
       maxRequests: 20,
+      onProviderRequest(request): void {
+        if (request.purpose === "agent-step")
+          agentOutputLimits.push(request.maxTokens);
+      },
     });
     const authToken = randomUUID();
     const clientId = randomUUID();
@@ -166,7 +172,7 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
         (item) => item.sessionId === sessionId,
       );
       expect(contextWindow?.contextWindowTokens).toBe(
-        resolved?.contextWindowTokens,
+        resolved?.effectiveContextWindowTokens,
       );
       expect(contextWindow?.currentTokens).toBeGreaterThan(0);
       if (contextWindow)
@@ -193,17 +199,20 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
 
     try {
       await start();
+      const route = {
+        provider: "zenmux",
+        model: profile.model,
+        interfaceProvider: profile.protocol,
+        baseUrl: profile.baseUrl,
+        apiKeyEnv: "ZENMUX_API_KEY",
+      };
       const { model } = await request<{ model: UiConnectModelResult }>(
         "/v1/model",
         "POST",
         {
-          provider: "zenmux",
-          model: profile.model,
-          interfaceProvider: profile.protocol,
-          baseUrl: profile.baseUrl,
-          apiKeyEnv: "ZENMUX_API_KEY",
-          contextWindowTokens: session.contextWindow.tokens,
-          maxOutputTokens: 4096,
+          ...route,
+          contextWindowTokens: null,
+          maxOutputTokens: null,
         },
       );
       const persisted = JSON.parse(
@@ -212,12 +221,14 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
         activeProfileId: string;
         models: { id: string; interfaceProvider: string }[];
       };
+      const active = persisted.models.find(
+        (entry) => entry.id === persisted.activeProfileId,
+      );
+      if (!active) throw new Error("ACTIVE_MODEL_NOT_PERSISTED");
       saved = {
         saved: model.saved,
         protocol: model.interfaceProvider,
-        persistedProtocol: persisted.models.find(
-          (entry) => entry.id === persisted.activeProfileId,
-        )?.interfaceProvider,
+        persistedProtocol: active.interfaceProvider,
         contextWindowTokens: model.contextWindowTokens,
         contextWindowSource: model.contextWindowSource,
       };
@@ -231,29 +242,51 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
       phase = "metadata-discovery";
       const { probe } = await request<{
         probe: UiProbeModelContextWindowResult;
-      }>("/v1/model/context-window-probe", "POST", {
-        provider: "zenmux",
-        model: profile.model,
-        interfaceProvider: profile.protocol,
-        baseUrl: profile.baseUrl,
-        apiKeyEnv: "ZENMUX_API_KEY",
-        contextWindowTokens: session.contextWindow.tokens,
-        maxOutputTokens: 4096,
-      });
+      }>("/v1/model/context-window-probe", "POST", route);
       contextProbe = probe;
       expect(contextProbe.contextWindowSource).toBe("detected");
       const current = await request<{ model: UiCurrentModelConfig }>(
         "/v1/model",
       );
       resolved = current.model;
-      expect(resolved.contextWindowTokens).toBe(
-        contextProbe.contextWindowTokens,
-      );
-      expect(resolved?.contextWindowTokens).toBeGreaterThan(0);
       expect(resolved).toMatchObject({
         provider: "zenmux",
         model: profile.model,
         interfaceProvider: profile.protocol,
+        detectedContextWindowTokens: contextProbe.contextWindowTokens,
+        effectiveContextWindowTokens: contextProbe.contextWindowTokens,
+        effectiveMaxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      });
+      expect(resolved.contextWindowTokens).toBeUndefined();
+      expect(resolved.maxOutputTokens).toBeUndefined();
+      phase = "manual-override";
+      const manualContext = 300_000;
+      const manual = await request<{ model: UiConnectModelResult }>(
+        "/v1/model",
+        "POST",
+        { ...route, contextWindowTokens: manualContext },
+      );
+      expect(manual.model).toMatchObject({
+        contextWindowTokens: manualContext,
+        contextWindowSource: "user",
+      });
+      const overridden = await request<{ model: UiCurrentModelConfig }>(
+        "/v1/model",
+      );
+      expect(overridden.model).toMatchObject({
+        contextWindowTokens: manualContext,
+        effectiveContextWindowTokens: manualContext,
+        detectedContextWindowTokens: contextProbe.contextWindowTokens,
+      });
+      phase = "clear-override";
+      const cleared = await request<{ model: UiConnectModelResult }>(
+        "/v1/model",
+        "POST",
+        { ...route, contextWindowTokens: null },
+      );
+      expect(cleared.model).toMatchObject({
+        contextWindowTokens: contextProbe.contextWindowTokens,
+        contextWindowSource: "detected",
       });
       phase = "first-read";
       const first = await submit(
@@ -293,7 +326,9 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
       expect(reopenedModel.model).toMatchObject({
         model: resolved?.model,
         interfaceProvider: resolved?.interfaceProvider,
-        contextWindowTokens: resolved?.contextWindowTokens,
+        detectedContextWindowTokens: resolved?.detectedContextWindowTokens,
+        effectiveContextWindowTokens: resolved?.effectiveContextWindowTokens,
+        effectiveMaxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
       });
       phase = "post-reopen";
       const continued = await submit(
@@ -334,6 +369,10 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
       );
       expect(agentRequests.length).toBeGreaterThanOrEqual(3);
       expect(agentRequests.every((item) => item.status === 200)).toBe(true);
+      expect(agentOutputLimits.length).toBeGreaterThanOrEqual(3);
+      expect([...new Set(agentOutputLimits)]).toEqual([
+        DEFAULT_MAX_OUTPUT_TOKENS,
+      ]);
       expect(session.wire.length).toBeLessThanOrEqual(20);
       expect(session.providerRequests.every((item) => item.settled)).toBe(true);
       expect(permissionErrors).toEqual([]);
@@ -362,7 +401,9 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
               maxHttpRequests: 20,
               seededVerifiedCapabilities: true,
               seededContextWindow: session.contextWindow,
-              contextWindowTokens: resolved?.contextWindowTokens,
+              contextWindowTokens: resolved?.effectiveContextWindowTokens,
+              maxOutputTokens: resolved?.effectiveMaxOutputTokens,
+              agentOutputLimits,
               saved,
               resolved: resolved && {
                 entry: "POST /v1/model/context-window-probe -> GET /v1/model",
@@ -370,7 +411,8 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
                 provider: resolved.provider,
                 model: resolved.model,
                 interfaceProvider: resolved.interfaceProvider,
-                contextWindowTokens: resolved.contextWindowTokens,
+                contextWindowTokens: resolved.effectiveContextWindowTokens,
+                maxOutputTokens: resolved.effectiveMaxOutputTokens,
                 reasoningStatus: resolved.reasoning?.status,
               },
               visibleContextWindows,
