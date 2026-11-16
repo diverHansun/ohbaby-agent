@@ -15,6 +15,8 @@ export interface KillTreeResult {
     | "native-unavailable";
   /** Windows taskkill succeeded; a later owned exit can complete confirmation. */
   readonly terminationSucceeded?: boolean;
+  /** Diagnostic detail from native setup; does not change cleanup evidence. */
+  readonly detail?: string;
 }
 
 export interface KillTreeOptions {
@@ -121,6 +123,7 @@ export function probeProcessTree(
     if ((options.platform ?? process.platform) === "win32") {
       const attachment = windowsJobFor(proc, options);
       if (attachment?.kind === "job") return windowsJobState(attachment);
+      if (attachment?.kind === "unavailable") return "unknown";
       return options.terminationSucceeded && options.exited?.()
         ? "stopped"
         : "unknown";
@@ -186,7 +189,8 @@ export async function killTreeWithPlatform(
       // Once our owned leader has exited, its numeric PID may name an unrelated
       // process. Without a native tree handle, never issue a new taskkill.
       if (options.exited?.()) {
-        return options.terminationSucceeded
+        return options.terminationSucceeded &&
+          attachment?.kind !== "unavailable"
           ? { status: "confirmed", terminationSucceeded: true }
           : {
               status: "unconfirmed",
@@ -194,6 +198,9 @@ export async function killTreeWithPlatform(
                 attachment?.kind === "unavailable"
                   ? "native-unavailable"
                   : "termination-failed",
+              ...(attachment?.kind === "unavailable"
+                ? { detail: attachment.reason }
+                : {}),
             };
       }
     } catch {
@@ -227,6 +234,14 @@ export async function killTreeWithPlatform(
       observationMs,
       options,
     );
+    // Best-effort taskkill cannot replace the native evidence promised for a
+    // command whose Job setup failed. Unregistered children keep legacy rules.
+    if (attachment?.kind === "unavailable")
+      return {
+        status: "unconfirmed",
+        reason: "native-unavailable",
+        detail: attachment.reason,
+      };
     return {
       ...observedResult(state),
       ...(termination.failed ? { reason: "termination-failed" as const } : {}),

@@ -11,6 +11,7 @@ import type {
 } from "../core/tool-scheduler/index.js";
 import type { KillTreeResult } from "../shell/process.js";
 import { ShellJobRegistry } from "./registry.js";
+import { unconfirmedSourceCleanupReasons } from "../core/tool-scheduler/source-cleanup.js";
 
 class FakeChild extends EventEmitter {
   treeState: "running" | "stopped" = "running";
@@ -692,6 +693,7 @@ describe("ShellJobRegistry", () => {
         Promise.resolve({
           status: "unconfirmed",
           reason: "native-unavailable",
+          detail: "koffi missing",
         } as const),
     });
     const started = await registry.start({
@@ -719,6 +721,20 @@ describe("ShellJobRegistry", () => {
         cleanup: "unconfirmed",
         cleanupReason: "native-unavailable",
       });
+      expect(
+        registry.getCurrentRecord(started.jobId, "session_1").cleanupReason,
+      ).toBe("native-unavailable");
+      expect(
+        unconfirmedSourceCleanupReasons({
+          rootRunId: "A",
+          executionId: "execution-A",
+          rootSessionId: "session_1",
+          sessionId: "session_1",
+          runId: "run",
+          messageId: "message",
+          callId: "call",
+        }),
+      ).toContain(`${started.jobId}: native-unavailable: koffi missing`);
     } finally {
       vi.useRealTimers();
       await registry.dispose().catch(() => undefined);

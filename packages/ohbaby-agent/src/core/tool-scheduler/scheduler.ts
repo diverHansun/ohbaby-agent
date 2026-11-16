@@ -4,6 +4,7 @@ import {
   getSourceCleanupState,
   SourceCleanupUnavailableError,
   unconfirmedSourceCleanupJobs,
+  unconfirmedSourceCleanupReasons,
 } from "./source-cleanup.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -1682,6 +1683,7 @@ export function createToolScheduler(
         if (state === "unconfirmed")
           throw new SourceCleanupUnavailableError(
             unconfirmedSourceCleanupJobs(prepared.owner),
+            unconfirmedSourceCleanupReasons(prepared.owner),
           );
         return state === "in-progress" ? "source-cleanup" : undefined;
       };

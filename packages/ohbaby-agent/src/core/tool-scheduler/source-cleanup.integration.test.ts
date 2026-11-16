@@ -15,6 +15,7 @@ import {
   getSourceCleanupState,
   SourceCleanupUnavailableError,
   unconfirmedSourceCleanupJobs,
+  unconfirmedSourceCleanupReasons,
 } from "./source-cleanup.js";
 import { withToolAdmission, type ToolAdmission } from "./tool-admission.js";
 import type {
@@ -297,6 +298,25 @@ describe("C3 source cleanup admission", () => {
       expect((await f.execute("file", "after-release")).status).toBe("success");
     } finally {
       await store.update("job", { trackingReleasedAt: Date.now() });
+    }
+  });
+
+  it("reports the native setup cause only to tools in the blocked source", async () => {
+    const blocked = beginSourceCleanup(owner("native"), "job-native");
+    const f = fixture();
+    try {
+      blocked.markUnconfirmed("native-unavailable: koffi missing");
+      const result = await f.execute("file");
+      expect(result.status).toBe("error");
+      expect(result.error?.message).toContain(
+        "job-native: native-unavailable: koffi missing",
+      );
+      expect(
+        unconfirmedSourceCleanupReasons(owner("other", "other-workspace")),
+      ).toEqual([]);
+    } finally {
+      blocked.confirm();
+      f.scheduler.cancelAll();
     }
   });
 

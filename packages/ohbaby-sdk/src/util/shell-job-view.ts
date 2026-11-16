@@ -133,6 +133,16 @@ const STOP_NOTES: Partial<
 /** Up to two quiet explanation lines for the detail, in 03 §5.3 order. */
 export function taskNotes(row: UiShellJobRow): readonly string[] {
   const notes: string[] = [];
+  if (
+    row.cleanup === "unconfirmed" &&
+    row.trackingReleasedAt === null &&
+    row.cleanupReason
+  )
+    notes.push(
+      row.cleanupReason === "native-unavailable"
+        ? "Windows native process cleanup is unavailable (native-unavailable)."
+        : `Cleanup reason: ${row.cleanupReason}`,
+    );
   if (managedElsewhere(row))
     notes.push("Started from another ohbaby window. Cancel it there.");
   if (row.cleanup === "unconfirmed" && row.trackingReleasedAt === null)

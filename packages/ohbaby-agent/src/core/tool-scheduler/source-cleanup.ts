@@ -3,13 +3,14 @@ import type { ToolExecutionOwner } from "./types.js";
 
 export type SourceCleanupState = "in-progress" | "unconfirmed";
 export interface SourceCleanupHandle {
-  markUnconfirmed(): void;
+  markUnconfirmed(reason?: string): void;
   confirm(): void;
 }
 interface CleanupRecord {
   readonly key: string;
   readonly jobId?: string;
   state: SourceCleanupState;
+  reason?: string;
 }
 // Process lifetime, independent of schedulers/runs. Each job owns its own record.
 const records = new Set<CleanupRecord>();
@@ -175,9 +176,10 @@ export function beginSourceCleanup(
   records.add(record);
   wakeResourceWaiters();
   return Object.freeze({
-    markUnconfirmed() {
+    markUnconfirmed(reason?: string) {
       if (!records.has(record) || record.state === "unconfirmed") return;
       record.state = "unconfirmed";
+      if (reason) record.reason = reason;
       wakeResourceWaiters();
     },
     confirm() {
@@ -186,12 +188,30 @@ export function beginSourceCleanup(
   });
 }
 export class SourceCleanupUnavailableError extends Error {
-  constructor(jobIds: readonly string[] = []) {
+  constructor(jobIds: readonly string[] = [], reasons: readonly string[] = []) {
     const jobs =
       jobIds.length > 0 ? ` Blocking shell job(s): ${jobIds.join(", ")}.` : "";
+    const cause =
+      reasons.length > 0 ? ` Cleanup reason(s): ${reasons.join("; ")}.` : "";
     super(
-      `Tool not executed: resource temporarily unavailable; a previous operation has unconfirmed cleanup and related resources remain protected.${jobs} Continue independent work; do not automatically retry or work around it with other tools. Tell the user they can review these tasks with /bg in the terminal or in the Background tasks panel on the web: a task can be released there once the ohbaby process that ran it has exited; tasks still managed by the running ohbaby are released after restarting ohbaby.`,
+      `Tool not executed: resource temporarily unavailable; a previous operation has unconfirmed cleanup and related resources remain protected.${jobs}${cause} Continue independent work; do not automatically retry or work around it with other tools. Tell the user they can review these tasks with /bg in the terminal or in the Background tasks panel on the web: a task can be released there once the ohbaby process that ran it has exited; tasks still managed by the running ohbaby are released after restarting ohbaby.`,
     );
     this.name = "SourceCleanupUnavailableError";
   }
+}
+
+/** Available live diagnostics only; historical guards may have no recorded cause. */
+export function unconfirmedSourceCleanupReasons(
+  owner: ToolExecutionOwner,
+): string[] {
+  const key = sourceKey(owner);
+  return [...records]
+    .filter(
+      (record) =>
+        record.key === key && record.state === "unconfirmed" && record.reason,
+    )
+    .map(
+      (record) =>
+        `${record.jobId ?? "operation"}: ${record.reason ?? "unknown"}`,
+    );
 }

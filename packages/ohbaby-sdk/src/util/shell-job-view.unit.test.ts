@@ -44,6 +44,19 @@ function row(patch: Partial<UiShellJobRow> = {}): UiShellJobRow {
 }
 
 describe("background task view", () => {
+  it("explains unavailable native cleanup with the existing recovery advice", () => {
+    const task = row({
+      status: "completed",
+      cleanup: "unconfirmed",
+      cleanupReason: "native-unavailable",
+    });
+    expect(taskNotes(task).join(" ")).toContain(
+      "Windows native process cleanup is unavailable",
+    );
+    expect(taskNotes(task).join(" ")).toContain("Restart ohbaby");
+    expect(taskNotes({ ...task, trackingReleasedAt: NOW })).toEqual([]);
+  });
+
   it("titles a task by its description, else the command's first line", () => {
     expect(taskTitle(row({ description: " Dev server " }))).toBe("Dev server");
     expect(taskTitle(row())).toBe("pnpm dev");

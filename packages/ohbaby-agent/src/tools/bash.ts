@@ -25,6 +25,7 @@ import {
 } from "../shell/index.js";
 import { analyzeShellCommand } from "../shell/analysis/index.js";
 import { manageWithWindowsJob } from "../shell/process.js";
+import { loadWindowsJobApi } from "../shell/windows-job.js";
 import type { BashPreparation } from "../shell/execution.js";
 import { preflightSandboxShellAnalysis } from "../sandbox/preflight.js";
 import { resolveCommandContext } from "./utils/context.js";
@@ -365,13 +366,15 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             reportCleanupError: context.reportCleanupError,
             child: (): ChildProcess => {
               throwIfCancelled(context.signal);
+              // 首次加载原生库可能慢于短命令退出，先加载以缩小 spawn→assign 窗口。
+              if (process.platform === "win32") loadWindowsJobApi();
               const child = spawn(spawnFile, spawnArgs, {
                 cwd: binding.cwd,
                 detached: shouldDetach(),
                 env,
                 windowsHide: true,
               });
-              // Attach before the shell runs the command; an empty Job is the cleanup proof.
+              // Attach immediately after spawn; this does not suspend the child.
               manageWithWindowsJob(child);
               return child;
             },

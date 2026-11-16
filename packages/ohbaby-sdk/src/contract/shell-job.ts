@@ -47,6 +47,8 @@ export interface UiShellJobListQuery extends UiShellJobQuery {
   readonly cursor?: string;
 }
 export interface UiShellJobRow {
+  /** Current runtime diagnostic, unavailable for historical records. */
+  readonly cleanupReason?: string;
   readonly jobId: string;
   readonly rootSessionId: string;
   readonly sessionId: string;

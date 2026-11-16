@@ -281,6 +281,7 @@ export class ShellJobReader {
         readonly record: ShellJobRecord;
         readonly source: "live" | "saved";
         readonly sampledAt: number;
+        readonly cleanupReason?: string;
       };
       readonly ownerName?: (row: ShellJobRecord) => Promise<string>;
       readonly management: (row: ShellJobRecord) => Promise<{
@@ -309,6 +310,7 @@ export class ShellJobReader {
     managementResult?: ReturnType<ShellJobReader["management"]>,
   ): Promise<UiShellJobRow> {
     const summary = shellJobSummary(record);
+    const cleanupReason = this.options.readCurrent?.(record).cleanupReason;
     const management = await (managementResult ?? this.management(record));
     return {
       rootSessionId: record.rootSessionId,
@@ -329,6 +331,9 @@ export class ShellJobReader {
             ...(record.runId ? { childRunId: record.runId } : {}),
           }),
       ...summary,
+      ...(cleanupReason
+        ? { cleanupReason: boundedText(cleanupReason, 512) }
+        : {}),
     };
   }
   async list(

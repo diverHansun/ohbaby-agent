@@ -695,6 +695,7 @@ export class ShellJobRegistry {
     readonly record: ShellJobRecord;
     readonly source: "live" | "saved";
     readonly sampledAt: number;
+    readonly cleanupReason?: string;
   } {
     const record = this.getOwnedRecord(jobId, sessionId, contextScopeId);
     const job = this.jobs.get(jobId);
@@ -704,6 +705,7 @@ export class ShellJobRegistry {
     return {
       source: "live",
       sampledAt,
+      ...(job.cleanupReason ? { cleanupReason: job.cleanupReason } : {}),
       record: {
         ...record,
         ...this.outputFilePatch(job),
@@ -1857,7 +1859,11 @@ export class ShellJobRegistry {
     this.settle(job);
   }
 
-  private markUnconfirmed(job: ShellJob, reason: string): void {
+  private markUnconfirmed(
+    job: ShellJob,
+    reason: string,
+    detail?: string,
+  ): void {
     if (job.cleanup === "confirmed" || job.cleanup === "unconfirmed") return;
     job.cleanup = "unconfirmed";
     job.cleanupReason = reason;
@@ -1870,7 +1876,9 @@ export class ShellJobRegistry {
       outputTail: job.background ? this.tailText(job) : null,
     });
     if (job.observation) clearTimeout(job.observation);
-    job.sourceCleanup?.markUnconfirmed();
+    job.sourceCleanup?.markUnconfirmed(
+      detail ? `${reason}: ${detail}` : reason,
+    );
     job.reportCleanup?.("unconfirmed");
     job.resolveCleanup?.();
   }
@@ -1915,7 +1923,11 @@ export class ShellJobRegistry {
             if (result?.terminationSucceeded) job.terminationSucceeded = true;
             if (result?.status === "confirmed") this.confirmStopped(job);
             else if (result?.status === "unconfirmed")
-              this.markUnconfirmed(job, result.reason ?? "termination-failed");
+              this.markUnconfirmed(
+                job,
+                result.reason ?? "termination-failed",
+                result.detail,
+              );
             else this.observeStopped(job);
           },
           () => {

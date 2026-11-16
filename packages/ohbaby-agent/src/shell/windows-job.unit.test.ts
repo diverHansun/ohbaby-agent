@@ -200,8 +200,61 @@ describe("Windows Job cleanup evidence", () => {
           spawnTaskkill,
         },
       ),
-    ).toEqual({ status: "unconfirmed", reason: "native-unavailable" });
+    ).toEqual({
+      status: "unconfirmed",
+      reason: "native-unavailable",
+      detail: "koffi missing",
+    });
     expect(spawnTaskkill).not.toHaveBeenCalled();
+  });
+
+  it("does not replace failed native attachment evidence with successful taskkill", async () => {
+    const windowsJob = {
+      kind: "unavailable",
+      reason: "assignment failed",
+    } as const;
+    let exited = false;
+    const spawnTaskkill = vi.fn(() => {
+      exited = true;
+      return Promise.resolve();
+    });
+    const result = await killTreeWithPlatform(
+      { pid: 7 },
+      {
+        platform: "win32",
+        windowsJob,
+        exited: () => exited,
+        spawnTaskkill,
+      },
+    );
+    expect(spawnTaskkill).toHaveBeenCalledOnce();
+    expect(result).toEqual({
+      status: "unconfirmed",
+      reason: "native-unavailable",
+      detail: "assignment failed",
+    });
+    expect(
+      probeProcessTree(
+        { pid: 7 },
+        {
+          platform: "win32",
+          windowsJob,
+          exited: () => true,
+          terminationSucceeded: true,
+        },
+      ),
+    ).toBe("unknown");
+    expect(
+      await killTreeWithPlatform(
+        { pid: 7 },
+        {
+          platform: "win32",
+          windowsJob,
+          exited: () => true,
+          terminationSucceeded: true,
+        },
+      ),
+    ).toEqual(result);
   });
 });
 

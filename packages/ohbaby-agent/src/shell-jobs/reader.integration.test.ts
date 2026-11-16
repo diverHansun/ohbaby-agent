@@ -9,7 +9,7 @@ import {
   mkdir,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { execFileSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { ShellJobRegistry } from "./registry.js";
@@ -49,6 +49,31 @@ async function setup(): Promise<{
 }
 const target = { rootSessionId: "s", jobId: "job" };
 describe("authorized shell job reads", () => {
+  it("projects live cleanup diagnostics without requiring a stored field", async () => {
+    const { store } = await setup();
+    const reader = new ShellJobReader({
+      store,
+      readCurrent: (record) => ({
+        record,
+        source: "live",
+        sampledAt: Date.now(),
+        cleanupReason: "native-unavailable",
+      }),
+      management: () =>
+        Promise.resolve({
+          managedByCurrentBackend: true,
+          canStop: false,
+        }),
+    });
+    expect(
+      (await reader.list({ rootSessionId: "s" })).rows[0].cleanupReason,
+    ).toBe("native-unavailable");
+    expect((await reader.output(target)).job.cleanupReason).toBe(
+      "native-unavailable",
+    );
+    expect(store.get("job")).not.toHaveProperty("cleanupReason");
+  });
+
   it("shares identical owner checks only within one list page", async () => {
     const { store } = await setup();
     await store.insert(shellJobFixture({ jobId: "second" }));
@@ -211,7 +236,7 @@ describe("authorized shell job reads", () => {
       sessionId: "s",
       background: true,
       timeoutMs: null,
-      outputDirectory: path.slice(0, path.lastIndexOf("/")),
+      outputDirectory: dirname(path),
     });
     const reader = new ShellJobReader({
       store,
@@ -289,39 +314,69 @@ describe("authorized shell job reads", () => {
         "range",
       );
   });
-  it("rejects directories, symlinks and FIFOs without blocking or following client paths", async () => {
+  it("rejects directories and directory links without following client paths", async () => {
     const { reader, path } = await setup();
-    await symlink(tmpdir(), path);
+    await mkdir(path);
     expect(await reader.log(target)).toMatchObject({
       available: false,
       bytesRead: 0,
     });
-    await rm(path);
+    await rm(path, { recursive: true });
+    await symlink(
+      tmpdir(),
+      path,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    expect(await reader.log(target)).toMatchObject({
+      available: false,
+      bytesRead: 0,
+    });
+  });
+  it("rejects file symlinks without following their target", async (context) => {
+    const { reader, path } = await setup();
     await writeFile(path + ".real", "secret");
-    await symlink(path + ".real", path);
+    try {
+      await symlink(path + ".real", path, "file");
+    } catch (error) {
+      if (
+        process.platform === "win32" &&
+        (error as NodeJS.ErrnoException).code === "EPERM"
+      ) {
+        context.skip(); // Windows file links require developer mode or elevated privileges.
+        return;
+      }
+      throw error;
+    }
     expect(await reader.log(target)).toMatchObject({
       available: false,
       bytesRead: 0,
     });
-    await rm(path);
-    if (process.platform !== "win32") {
+  });
+  it.skipIf(process.platform === "win32")(
+    "rejects FIFOs without blocking",
+    async () => {
+      const { reader, path } = await setup();
       execFileSync("mkfifo", [path]);
       expect(await reader.log(target)).toMatchObject({
         available: false,
         bytesRead: 0,
       });
-    }
-  });
+    },
+  );
   it("rejects a replaced parent directory even when its new target contains a regular file", async () => {
     const { reader, path } = await setup();
     await writeFile(path, "original");
-    const parent = path.slice(0, path.lastIndexOf("/"));
+    const parent = dirname(path);
     const replacement = parent + "-replacement";
     directories.push(replacement);
     await mkdir(replacement);
     await writeFile(join(replacement, "job.log"), "other-session-secret");
     await rm(parent, { recursive: true });
-    await symlink(replacement, parent);
+    await symlink(
+      replacement,
+      parent,
+      process.platform === "win32" ? "junction" : "dir",
+    );
     expect(await reader.log(target)).toMatchObject({
       available: false,
       text: "",
