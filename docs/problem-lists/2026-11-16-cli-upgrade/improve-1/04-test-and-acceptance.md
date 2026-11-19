@@ -39,7 +39,7 @@
 | I3 | 空闲实例正常停止 | 确认目标实例退出且匹配报告为 confirmed，`stoppedDaemon` 为 true，前置检查通过 | 2 |
 | I4 | npm 安装从旧版升到新版 | 用 `npm install -g --prefix <临时前缀>` 装版本 1，运行 `<前缀>/bin/ohbaby update -y`：`--version` 变成版本 2，输出里有"已升级到" | 4 |
 | I5 | 升级时 daemon 在跑 | 两个版本的测试都启动空闲 daemon。支持仅空闲接口的版本自动停机后升级。缺少接口的版本先提示手动停机，手动停妥并留下匹配旧格式报告后重试升级。之后手动运行目标版本的 `ohbaby serve`，服务可用 | 4 |
-| I6 | 自动升级 | `--auto on` 后，在缓存里写好版本 2，启动 TUI 入口（用非交互方式驱动）：完成升级、打印"请重新运行"、退出码 0。让升级前检查不通过：打印原因并照常进入 TUI。开关打开、缓存里有版本 2 时：启动 `ohbaby serve` 只提示不升级；设置 `OHBABY_NO_UPDATE_CHECK=1` 后启动 TUI 不升级。脚本已经切换但后续步骤非零退出时，提示已切换和恢复方式，旧进程退出，不加载 TUI。 | 3 |
+| I6 | 自动升级 | `--auto on` 后，在缓存里写好版本 2，启动 TUI 入口（用非交互方式驱动）：完成升级、打印"请重新运行"、退出码 0。让升级前检查不通过：打印原因并照常进入 TUI。开关打开、缓存里有版本 2 时：启动 `ohbaby serve` 只提示不升级；设置 `OHBABY_NO_UPDATE_CHECK=1` 后启动 TUI 不升级。脚本已经切换但后续步骤非零退出时，提示已切换和恢复方式，旧进程退出，不加载 TUI。npm 安装命令非零退出时：旧进程以非零码退出、不加载 TUI，提示里有 `ohbaby update --auto off`。安装脚本下载失败时：打印原因并照常进入 TUI。脚本非零退出但 `current` 仍是当前版本时：打印原因并照常进入 TUI。 | 3 |
 | I7 | 脚本安装分支的调用 | 用本地文件代替下载，替换成一个只记录参数和环境变量的假安装脚本：确认传入了 `OHBABY_INSTALL_VERSION`、`OHBABY_INSTALL_DIR`、`OHBABY_NON_INTERACTIVE=1`，Windows 上用的是 `powershell -NoProfile -ExecutionPolicy Bypass -File`。假脚本写入临时 `current`，同时验证退出 0 和切换后非零两条结果。 | 4 |
 | I8 | 降级被拦住 | 用临时数据库，手工往 `migration` 表插入 `999_future`，启动 `ohbaby run`：退出码 1，只打印提示消息、没有堆栈；`ohbaby update` 在这个数据库下仍然能运行到"确认"这一步 | 5 |
 | I9 | Web 重连后自动刷新 | 在现有 Web 连接测试的基础上，模拟 daemon 重启后返回 401：页面调用了 `reload` | 6 |
