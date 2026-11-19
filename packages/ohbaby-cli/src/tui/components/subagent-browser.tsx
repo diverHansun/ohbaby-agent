@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { useExecutionDuration } from "./execution-duration.js";
 import type { UiRun } from "ohbaby-sdk";
 import { Box, Text, useInput } from "ink";
@@ -6,7 +7,10 @@ import type { ReactElement } from "react";
 import type { UiSubagentReaderState, createSubagentReader } from "ohbaby-sdk";
 import { useTuiLayout } from "../layout/context.js";
 import { useTheme } from "../theme/index.js";
-import { isVisibleTranscriptMessage } from "../store/transcript.js";
+import {
+  isVisibleTranscriptMessage,
+  withoutRetriedAttempts,
+} from "../store/transcript.js";
 import { renderMessageParts } from "./message/message-row.js";
 import { wrapAnsi } from "../render/wrap.js";
 
@@ -47,40 +51,44 @@ export function SubagentBrowser({
         ...(view.execution.artifactPath
           ? plainLines(`Full result artifact: ${view.execution.artifactPath}`)
           : []),
-        ...view.messages
-          .filter(isVisibleTranscriptMessage)
-          .flatMap((message) => {
-            const parts = message.parts.flatMap((part) => {
-              if (part.type !== "tool-result") {
-                // Share root rules, retaining complete browser result bodies below.
-                return renderMessageParts(
-                  { ...message, parts: [part], finishReason: undefined },
+        ...withoutRetriedAttempts(
+          view.messages.filter(isVisibleTranscriptMessage),
+        ).flatMap((message) => {
+          const parts = message.parts.flatMap((part) => {
+            if (part.type !== "tool-result") {
+              // Share root rules, retaining complete browser result bodies below.
+              return renderMessageParts(
+                { ...message, parts: [part], finishReason: undefined },
+                width,
+                theme,
+              ).flatMap((rendered) => {
+                const text =
+                  rendered.kind !== "text"
+                    ? rendered.label
+                    : rendered.dimColor
+                      ? chalk.dim(rendered.text)
+                      : rendered.text;
+                // Shared message rendering has already sanitized raw input.
+                // Preserve its web links across the browser's final reflow.
+                return wrapAnsi(
+                  part.type === "tool-call"
+                    ? `${text} (${part.call.status})`
+                    : text,
                   width,
-                  theme,
-                ).flatMap((rendered) => {
-                  const text =
-                    rendered.kind === "text" ? rendered.text : rendered.label;
-                  // Shared message rendering has already sanitized raw input.
-                  // Preserve its web links across the browser's final reflow.
-                  return wrapAnsi(
-                    part.type === "tool-call"
-                      ? `${text} (${part.call.status})`
-                      : text,
-                    width,
-                    { hyperlinks: true },
-                  );
-                });
-              }
-              return [
-                `Tool result ${part.result.callId}`,
-                part.result.output,
-                part.result.error ?? "",
-              ].flatMap(plainLines);
-            });
-            return parts.some((part) => part.trim() !== "")
-              ? [...plainLines(`${message.role} · ${message.id}`), ...parts, ""]
-              : [];
-          }),
+                  { hyperlinks: true },
+                );
+              });
+            }
+            return [
+              `Tool result ${part.result.callId}`,
+              part.result.output,
+              part.result.error ?? "",
+            ].flatMap(plainLines);
+          });
+          return parts.some((part) => part.trim() !== "")
+            ? [...plainLines(`${message.role} · ${message.id}`), ...parts, ""]
+            : [];
+        }),
         ...(view.output === undefined
           ? []
           : ["Stored result", view.output].flatMap(plainLines)),

@@ -60,6 +60,11 @@ describe("run process eligibility", () => {
       ).toBe(false);
     },
   );
+  it("keeps a turn with a failed message expanded", () => {
+    expect(
+      project([msg("failed", { status: "error" }), msg("answer")]).foldable,
+    ).toBe(false);
+  });
   it("waits for the final message and reasoning to finish", () => {
     expect(
       project([msg("progress"), msg("answer", { status: "streaming" })])

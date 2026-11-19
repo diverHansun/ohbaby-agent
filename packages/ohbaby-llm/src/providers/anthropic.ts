@@ -1,3 +1,4 @@
+import { ProviderStreamEofError } from "./stream-errors.js";
 import { isDeepStrictEqual } from "node:util";
 import { ModelRequestValidationError } from "./request-validation-error.js";
 import Anthropic from "@anthropic-ai/sdk";
@@ -606,9 +607,11 @@ class AnthropicNativeAccumulator {
   }
 
   finalize(): InterfaceProviderStreamEvent | undefined {
-    if (this.blocks.size === 0) return;
-    if (!this.stopped || !this.finishReason)
+    if (!this.stopped)
+      throw new ProviderStreamEofError("Incomplete Anthropic message stream.");
+    if (!this.finishReason)
       throw new Error("Incomplete Anthropic message stream.");
+    if (this.blocks.size === 0) return;
     // Truncated output can retain trusted usage, but cannot become replayable state.
     if (
       this.finishReason === "length" ||
@@ -744,20 +747,24 @@ export function createAnthropicProvider(
       } catch (error) {
         throw new ModelRequestValidationError(error);
       }
-      const stream = client.messages.stream(params, {
-        signal: request.signal,
-      });
-
-      return Promise.resolve(
-        (async function* (): AsyncGenerator<
+      // Read the raw SDK events so the adapter can distinguish EOF from a
+      // completed message and validate the protocol's own terminal event.
+      return client.messages
+        .create({ ...params, stream: true }, { signal: request.signal })
+        .then(async function* (events): AsyncGenerator<
           InterfaceProviderStreamEvent,
           void,
           unknown
         > {
           const usage = createAnthropicUsageAccumulator(reportTokenUsage);
           const native = new AnthropicNativeAccumulator();
-          for await (const rawEvent of stream) {
+          let started = false;
+          for await (const rawEvent of events) {
             request.onActivity?.();
+            const startsMessage = rawEvent.type === "message_start";
+            if (startsMessage ? started : !started)
+              throw new Error("Unexpected Anthropic message event order.");
+            started = true;
             const initial = native.update(rawEvent);
             if (initial) yield initial;
             const rawUsage =
@@ -785,10 +792,11 @@ export function createAnthropicProvider(
               };
             }
           }
+          if (request.signal?.aborted || events.controller.signal.aborted)
+            throw new APIUserAbortError();
           const final = native.finalize();
           if (final) yield final;
-        })(),
-      );
+        });
     },
     isAbortError(error: unknown): boolean {
       return error instanceof APIUserAbortError;

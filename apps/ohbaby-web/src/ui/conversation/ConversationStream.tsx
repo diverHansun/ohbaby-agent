@@ -16,7 +16,7 @@ import type {
   UiRun,
   UiUnconsumedSteer,
 } from "ohbaby-sdk";
-import { turnTriggerLabel } from "ohbaby-sdk";
+import { listRetriedAttemptIds, turnTriggerLabel } from "ohbaby-sdk";
 import type { ReactNode } from "react";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import {
@@ -142,9 +142,12 @@ export function ConversationStream(props: {
   const readingPosition =
     props.readingPosition ?? localReading.current.position;
   const messages = props.messages;
+  // A step retry replaced these answers and the model no longer sees them.
+  const retriedIds = listRetriedAttemptIds(messages);
   const visibleMessages = filterTodoToolMessages(
     messages.filter(
       (message) =>
+        !retriedIds.has(message.id) &&
         message.runtimeInputKind !== "subagent-status" &&
         message.runtimeInputKind !== "subagent-result" &&
         // Task results are for the agent only (background tasks README D6).

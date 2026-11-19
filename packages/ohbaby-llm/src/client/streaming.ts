@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { ModelRequestValidationError } from "../providers/request-validation-error.js";
-import { providerErrorDetail } from "./provider-error.js";
+import { agentStepRetry, providerErrorDetail } from "./provider-error.js";
+import {
+  ProviderStreamEofError,
+  ProviderStreamFailureError,
+} from "../providers/stream-errors.js";
 import {
   createIdleWatchdog,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
@@ -15,8 +19,6 @@ import type {
   ModelRequestObservation,
   PreparedRequestSettings,
 } from "./types.js";
-import { APIConnectionError as OpenAIConnectionError } from "openai";
-import { APIConnectionError as AnthropicConnectionError } from "@anthropic-ai/sdk/error";
 /**
  * Streaming chat completion with automatic message accumulation.
  *
@@ -46,6 +48,7 @@ import type {
 import {
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
+  isProviderTransportError,
   isRetryableProviderError,
   nextRetryDelayMs,
   resolveProviderRetryPolicy,
@@ -321,6 +324,8 @@ export async function* streamResponse(
       observation: ModelRequestObservation,
     ) => Promise<void>;
     retry?: Partial<ProviderRetryPolicy>;
+    /** Opts agent steps into whole-step retry and carries their used budget. */
+    priorFailedAttempts?: number;
     idleTimeoutMs?: number;
     signal?: AbortSignal;
     tools?: readonly ModelToolDefinition[];
@@ -334,6 +339,7 @@ export async function* streamResponse(
   const { provider, config } = llmClient;
   const {
     retry,
+    priorFailedAttempts,
     signal: callerSignal,
     tools,
     maxTokens,
@@ -342,6 +348,8 @@ export async function* streamResponse(
     contextScopeId,
   } = options ?? {};
   const retryPolicy = resolveProviderRetryPolicy(retry);
+  const agentStep = purpose === "agent-step";
+  const allowStepRetry = agentStep && priorFailedAttempts !== undefined;
   const idleTimeoutMs = validateStreamIdleTimeoutMs(
     options?.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   );
@@ -371,7 +379,7 @@ export async function* streamResponse(
     ...(contextScopeId === undefined ? {} : { contextScopeId }),
   });
 
-  let failedAttempts = 0;
+  let failedAttempts = agentStep ? (priorFailedAttempts ?? 0) : 0;
 
   for (;;) {
     if (callerSignal?.aborted) {
@@ -661,7 +669,7 @@ export async function* streamResponse(
       }
       if (finishReason === null) {
         throw new ProviderStreamInterruptedError(
-          new Error("Provider stream ended without a terminal event"),
+          new ProviderStreamEofError(),
           "eof",
         );
       }
@@ -736,6 +744,7 @@ export async function* streamResponse(
     } catch (caughtError) {
       let error: unknown = caughtError;
       let delayMs: number | undefined;
+      let reason: string | undefined;
       // Decide once before sealing the end fact. Defer terminal errors until
       // persistence completes so observation failures and cancellation keep
       // their existing precedence.
@@ -759,60 +768,88 @@ export async function* streamResponse(
             promptCache.strategy,
           );
         }
-        if (error instanceof ProviderStreamInterruptedError) throw error;
+        if (error instanceof ProviderStreamEofError) {
+          error = new ProviderStreamInterruptedError(error, "eof");
+        }
+        if (
+          error instanceof ProviderStreamInterruptedError &&
+          (!agentStep || error.source !== "eof")
+        )
+          throw error;
         if (validatingProtocol) {
           throw new ProviderStreamInterruptedError(error, "protocol");
         }
 
+        // Legacy callers treated explicit Responses failure events as opaque.
+        // Keep their retry and context-trimming decisions while retaining diagnostics.
+        if (!agentStep && error instanceof ProviderStreamFailureError)
+          error = new ProviderRequestError(error);
         // Lifecycle owns the single forced-compaction retry, including an
         // overflowing attempt that emitted a provisional completion already.
         // Do not turn that explicit provider error into a transport failure.
         if (isContextOverflowError(error)) throw error;
         // Summaries have not executed tools or committed their partial output.
         // Preserve SDK transport identity for Context's single remaining retry.
-        if (
-          purpose === "context-summary" &&
-          streamFailureSource(error) === "transport"
-        ) {
+        if (purpose === "context-summary" && isProviderTransportError(error)) {
           throw new ProviderStreamInterruptedError(error, "transport");
         }
 
-        if (
+        const hasOutput =
           accumulatedContent !== "" ||
           accumulatedReasoning !== "" ||
           accumulatedToolCalls.size > 0 ||
-          finishReason !== null ||
-          rawFinishReason !== undefined
-        ) {
+          (!agentStep &&
+            (finishReason !== null || rawFinishReason !== undefined));
+        const stepFailure = agentStep
+          ? agentStepRetry(error, hasOutput)
+          : undefined;
+        const retryable = agentStep
+          ? stepFailure !== undefined
+          : isRetryableProviderError(error);
+        let interrupted: ProviderStreamInterruptedError | undefined;
+        if (hasOutput) {
+          const source = agentStep
+            ? stepFailure?.source
+            : isProviderTransportError(error)
+              ? "transport"
+              : undefined;
+          interrupted =
+            error instanceof ProviderStreamInterruptedError
+              ? error
+              : new ProviderStreamInterruptedError(error, source);
+          if (!allowStepRetry)
+            throw annotatePromptCacheError(interrupted, promptCache.strategy);
+        }
+        const failure = interrupted ?? error;
+        if (!retryable)
+          throw annotatePromptCacheError(failure, promptCache.strategy);
+        if (failedAttempts >= retryPolicy.maxRetriesPerStep) {
           throw annotatePromptCacheError(
-            new ProviderStreamInterruptedError(
-              error,
-              streamFailureSource(error),
+            new ProviderRetryExhaustedError(
+              annotatePromptCacheError(failure, promptCache.strategy),
+              failedAttempts,
             ),
             promptCache.strategy,
           );
         }
 
         failedAttempts += 1;
-        const retryable = isRetryableProviderError(error);
-        if (failedAttempts > retryPolicy.maxRetriesPerStep || !retryable) {
-          if (retryable) {
-            throw annotatePromptCacheError(
-              new ProviderRetryExhaustedError(
-                annotatePromptCacheError(error, promptCache.strategy),
-                failedAttempts - 1,
-              ),
-              promptCache.strategy,
-            );
-          }
-          throw annotatePromptCacheError(error, promptCache.strategy);
-        }
-
+        reason = stepFailure?.reason;
         delayMs = nextRetryDelayMs({
           attempt: failedAttempts,
           error,
           policy: retryPolicy,
         });
+        if (interrupted) {
+          error = annotatePromptCacheError(
+            new ProviderStreamInterruptedError(
+              interrupted.cause,
+              interrupted.source,
+              { delayMs },
+            ),
+            promptCache.strategy,
+          );
+        }
       } catch (terminalError) {
         error = terminalError;
       }
@@ -888,9 +925,11 @@ export async function* streamResponse(
           attempt: failedAttempts,
           delayMs,
           maxRetries: retryPolicy.maxRetriesPerStep,
-          reason: retryReason(error),
+          reason: reason ?? retryReason(error),
         },
       };
+      if (error instanceof ProviderStreamInterruptedError && error.stepRetry)
+        throw error;
       try {
         await sleepForRetry(delayMs, signal);
       } catch (sleepError) {
@@ -967,27 +1006,4 @@ async function sleepForRetry(
     }, delayMs);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
-}
-
-/** History may retain known transport failures; this does not expand retries. */
-function streamFailureSource(error: unknown): "transport" | undefined {
-  if (
-    error instanceof OpenAIConnectionError ||
-    error instanceof AnthropicConnectionError
-  ) {
-    return "transport";
-  }
-  if (typeof error !== "object" || error === null || !("code" in error))
-    return undefined;
-  return typeof error.code === "string" &&
-    [
-      "ECONNRESET",
-      "EPIPE",
-      "ETIMEDOUT",
-      "ECONNREFUSED",
-      "ENOTFOUND",
-      "EAI_AGAIN",
-    ].includes(error.code.toUpperCase())
-    ? "transport"
-    : undefined;
 }

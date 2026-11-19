@@ -80,22 +80,40 @@ export function projectModelActivity(
     latest.outcome === "error" && latest.retryScheduled === true;
   if (!active && !backingOff) return undefined;
 
-  // A reset to attempt 1 (including overflow recovery) starts a new wait.
+  // A reset to attempt 1 (including overflow recovery) starts a new wait. A
+  // step retry moves the chain to a new message; it stays one wait.
   let first = requests.length - 1;
   while (first > 0 && requests[first].attempt !== 1) {
     const previous = requests[first - 1];
     if (
-      previous.messageId !== latest.messageId ||
-      previous.step !== latest.step
+      previous.step !== latest.step ||
+      (previous.messageId !== requests[first].messageId &&
+        previous.retryScheduled !== true)
     )
       break;
     first--;
   }
-  const chain = requests.slice(first);
-  const message = messages.find(
-    (candidate) => candidate.id === latest.messageId,
-  );
-  const hasProgress =
+  // Say "retrying" only while the user has seen nothing: a retry after output
+  // reads as the model thinking again.
+  const failure = requests
+    .slice(first)
+    .findLast((request) => request.retryScheduled === true);
+  const progressOf = (messageId: string): boolean =>
+    hasVisibleOutput(messages.find((message) => message.id === messageId));
+  return {
+    ...latest,
+    phase:
+      failure !== undefined &&
+      !progressOf(failure.messageId) &&
+      !progressOf(latest.messageId)
+        ? "retrying"
+        : "requesting",
+    waitingStartedAt: requests[first].startedAt,
+  };
+}
+
+function hasVisibleOutput(message: UiMessage | undefined): boolean {
+  return (
     message?.hiddenToolCalls === true ||
     message?.parts.some((part) => {
       if (
@@ -108,16 +126,54 @@ export function projectModelActivity(
         : part.type === "tool-call" &&
             part.call.id.length > 0 &&
             part.call.name.length > 0;
-    });
-  return {
-    ...latest,
-    phase:
-      backingOff ||
-      (chain.some((request) => request.retryScheduled) && !hasProgress)
-        ? "retrying"
-        : "requesting",
-    waitingStartedAt: requests[first].startedAt,
-  };
+    }) === true
+  );
+}
+/** Assistant attempts that were followed by a started request in the same step. */
+export function listRetriedAttemptIds(
+  messages: readonly UiMessage[],
+): ReadonlySet<string> {
+  const retried = new Set<string>();
+  for (const message of messages) {
+    const failed = getScheduledStepRetry(message);
+    if (
+      failed &&
+      messages.some(
+        (later) =>
+          later.id !== message.id &&
+          later.role === "assistant" &&
+          later.runId === failed.runId &&
+          later.modelRequests?.some(
+            (request) =>
+              request.purpose === "agent-step" &&
+              request.messageId === later.id &&
+              request.runId === failed.runId &&
+              request.step === failed.step &&
+              request.attempt > failed.attempt &&
+              request.startedAt > 0,
+          ),
+      )
+    )
+      retried.add(message.id);
+  }
+  return retried;
+}
+
+/** The failed request scheduling a retry, even before the message error is projected. */
+export function getScheduledStepRetry(
+  message: UiMessage,
+): UiAgentStepRequest | undefined {
+  if (message.role !== "assistant" || message.status === "completed")
+    return undefined;
+  const last = message.modelRequests?.findLast(
+    (request): request is UiAgentStepRequest =>
+      request.purpose === "agent-step" &&
+      request.messageId === message.id &&
+      request.runId === message.runId,
+  );
+  return last?.outcome === "error" && last.retryScheduled === true
+    ? last
+    : undefined;
 }
 /** Copy only public facts; internal admission owners never cross this boundary. */
 export function projectToolExecution(

@@ -12,6 +12,10 @@ import {
 } from "./native-state.js";
 import type { InterfaceProviderStreamEvent } from "./types.js";
 import {
+  ProviderStreamEofError,
+  ProviderStreamFailureError,
+} from "./stream-errors.js";
+import {
   normalizeOpenAIResponsesUsage,
   type TokenUsageDiagnosticReporter,
 } from "./token-usage.js";
@@ -928,7 +932,12 @@ export async function* mapResponsesStream(
         break;
       case "error":
       case "response.failed":
-        throw new Error(`Responses ${event.type}: provider failure`);
+        throw new ProviderStreamFailureError(
+          event.type,
+          event.type === "error"
+            ? event
+            : (event.response as Response | undefined)?.error,
+        );
       case "response.reasoning_summary_part.added":
       case "response.reasoning_summary_part.done":
       case "response.reasoning_summary_text.delta":
@@ -981,6 +990,9 @@ export async function* mapResponsesStream(
     if (mapped !== undefined) yield mapped;
   }
   if (signal?.aborted) throw new APIUserAbortError();
-  check(terminal !== undefined, "stream", "missing terminal event");
+  if (terminal === undefined)
+    throw new ProviderStreamEofError(
+      "Responses stream: missing terminal event",
+    );
   yield terminal;
 }

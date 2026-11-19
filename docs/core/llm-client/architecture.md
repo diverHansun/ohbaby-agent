@@ -31,11 +31,11 @@ provider 接口的核心是 `streamResponse(request)` 与 `isAbortError(error)`�
 
 ## 流累积与完成边界
 
-client 层累积正文、推理、工具调用原始 JSON 和 usage。provider 终态是完成候选；只有迭代器正常耗尽、工具参数解析和 native 校验通过后，才产出唯一正常最终快照。晚到错误可以使候选失效；无终态 EOF 和无本地信号的 provider abort 不伪造成功。
+client 层累积正文、推理、工具调用原始 JSON 和 usage。provider 终态是完成候选。只有迭代器正常耗尽、工具参数解析和 native 校验通过后，才产出唯一正常最终快照。Anthropic 必须收到 `message_stop`，单独的 `stop_reason` 仍属于未完成。各协议缺终止事件的 EOF 统一归为流中断，晚到错误或没有本地取消信号的 provider abort 也会使候选失效。
 
 本地取消返回真实已有片段，`streamStopReason` 为 `user_aborted`，不合成占位正文、不发布可执行参数。调用方仍需耗尽生成器，再决定是否接受结果和执行工具。
 
-三个内置 adapter 的 SDK 重试均关闭（`maxRetries: 0`）。项目层默认额外 5 次，仅在没有有效输出、错误可重试时重放；详见 [目标与职责](./goals-duty.md#重试边界)。context overflow、摘要 transport 恢复和工具执行属于 agent；请求观测经回调交给上层保存。
+三个内置 adapter 的 SDK 重试均关闭（`maxRetries: 0`）。模型步骤在有效输出前由 LLM 层直接重试。开始输出后遇到已知临时断流、EOF、空闲超时或可重试的上游流内错误时，LLM 层先保存重试决定，再交给已启用整步重来的 Lifecycle 执行。两条路径共享步骤预算。请求观测通过回调交给上层保存，上下文超长、摘要恢复和工具执行也由 agent 处理。详见 [重试边界](./goals-duty.md#重试边界)。
 
 ## 与 llm-model 的关系
 
@@ -47,9 +47,7 @@ agent `services/llm-model` 提供模型元数据、文本 token 估算和 UI rea
 
 provider 接收融合的 `providerSignal` 和可选 `onActivity`。三种协议在 SDK 原始事件到达时调用活动回调；没有产出归一化事件的 role/空 delta/状态事件也可续时。SDK 未暴露的心跳不在保证内。
 
-超时只 abort 专属子 controller，并由 race 主动结束等待；不修改 caller signal。用户取消优先；无 partial 时走既有有界 retry，原因是 `stream_idle_timeout`，耗尽后抛 `ProviderRetryExhaustedError`；已有正文、reasoning、工具片段或 finish 时抛 `ProviderStreamInterruptedError`，不重放，也不把超时伪装成摘要可恢复的 transport 错误。
-
-这个分类有一个上层后果：partial idle 在 lifecycle 中记录为 `APIError`，已输出正文仍保存在消息记录和 UI 中，但没有 interruption fact，也不会进入后续请求或摘要的失败历史投影。它与 ECONNRESET 的保留策略不同，属于本批按既有分类落地的边界。
+超时只中止专属子 controller，并由 race 主动结束等待。调用方 signal 保持原状，用户取消优先。模型步骤尚无有效输出时，LLM 层以 `stream_idle_timeout` 为原因退避重试。已交付有效输出且启用整步重来时，LLM 层封存重试决定并交给 Lifecycle。预算耗尽时抛出 `ProviderRetryExhaustedError`。摘要空闲超时沿用既有分类，摘要的 transport 恢复不适用于该超时。
 
 安装的 OpenAI、Anthropic SDK 另有默认 600,000 ms 的建流 timeout，收到 HTTP 响应后清除；因此建流阶段存在同阈值竞争，错误可能先由 SDK 或看门狗报告。流读取仍由本模块守卫。未来上调 idle 常量时，需同时复查 SDK 的建流 timeout，不能将常量误当成唯一请求时限。
 

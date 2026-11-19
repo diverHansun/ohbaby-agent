@@ -12,8 +12,9 @@ import { useExecutionDuration } from "./use-execution-duration.js";
 
 /**
  * The model step's wait, one row for its whole request chain: Thinking while
- * a request is out, `Retrying #n` once the service has scheduled a retry. It
- * steps aside when the current step shows something the reader can see.
+ * a request is out, `Retrying #n` while the service retries a request that
+ * failed before any output. It steps aside when the current step shows
+ * something the reader can see.
  */
 export function ModelWaiting({
   run,
@@ -31,10 +32,12 @@ export function ModelWaiting({
     run !== undefined &&
     activity !== undefined &&
     isWaiting(run, activity) &&
-    !hasVisibleProgress(
-      messages.find((message) => message.id === activity.messageId),
-      reasoningByMessageId[activity.messageId],
-    );
+    // A failed attempt's partial text is not progress: its retry is pending.
+    (activity.outcome !== "running" ||
+      !hasVisibleProgress(
+        messages.find((message) => message.id === activity.messageId),
+        reasoningByMessageId[activity.messageId],
+      ));
   const retry = waiting ? retryNumber(activity) : undefined;
   // One clock per request chain; a retry does not start it over. Only
   // Thinking shows it, so retries do not tick every second.

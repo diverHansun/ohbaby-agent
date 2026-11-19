@@ -1,5 +1,7 @@
 import {
+  getScheduledStepRetry,
   listEndedTurns,
+  listRetriedAttemptIds,
   type UiMessage,
   type UiPromptSubmission,
   type UiRun,
@@ -47,9 +49,12 @@ export function advanceTranscriptCommit(
   messages: readonly UiMessage[],
   runtime: TuiRuntimeStatus,
 ): TranscriptCommitState {
-  const split = splitTranscript(messages, runtime);
   const previousItems = previous?.committedItems ?? [];
   const previousCounts = previous?.committedPartCounts ?? {};
+  const split = splitTranscript(
+    withoutRetriedAttempts(messages, previousCounts),
+    runtime,
+  );
   const items = [...previousItems];
   const counts: Partial<Record<string, number>> = { ...previousCounts };
   const itemIndexById = new Map(
@@ -119,7 +124,9 @@ export function advanceTranscriptCommit(
     const alreadyCommitted = counts[live.id] ?? 0;
     const start = Math.min(
       live.parts.length,
-      Math.max(alreadyCommitted, computeLiveStartIndex(live)),
+      getScheduledStepRetry(live)
+        ? alreadyCommitted
+        : Math.max(alreadyCommitted, computeLiveStartIndex(live)),
     );
 
     if (start > alreadyCommitted) {
@@ -138,6 +145,42 @@ export function advanceTranscriptCommit(
   }
 
   return unchangedOrNext(previous, changed, items, counts, liveMessage);
+}
+
+/**
+ * Drops the attempts a step retry replaced. Parts already frozen in the
+ * scrollback stay; the rest goes, and an attempt with nothing frozen goes
+ * entirely.
+ */
+export function withoutRetriedAttempts(
+  messages: readonly UiMessage[],
+  committedPartCounts: Readonly<Partial<Record<string, number>>> = {},
+): readonly UiMessage[] {
+  const retried = listRetriedAttemptIds(messages);
+  if (retried.size === 0) return messages;
+  return messages.flatMap((message) => {
+    if (!retried.has(message.id)) return [message];
+    const frozen = committedPartCounts[message.id] ?? 0;
+    return frozen === 0 ? [] : [frozenPrefix(message, frozen)];
+  });
+}
+
+// Same input, same object: commits compare messages by reference.
+const frozenPrefixes = new WeakMap<
+  UiMessage,
+  { readonly frozen: number; readonly prefix: UiMessage }
+>();
+
+function frozenPrefix(message: UiMessage, frozen: number): UiMessage {
+  const cached = frozenPrefixes.get(message);
+  if (cached?.frozen === frozen) return cached.prefix;
+  const prefix: UiMessage = {
+    ...message,
+    status: "completed",
+    parts: message.parts.slice(0, frozen),
+  };
+  frozenPrefixes.set(message, { frozen, prefix });
+  return prefix;
 }
 
 /**
@@ -322,6 +365,22 @@ export function isVisibleTranscriptMessage(message: UiMessage): boolean {
   );
 }
 
+/** Keep accepted Steers visible after a model attempt that is still live. */
+export function steersAfterLiveMessage(
+  messages: readonly UiMessage[],
+  live: UiMessage | null,
+): readonly UiMessage[] | undefined {
+  if (!live) return undefined;
+  const index = messages.findIndex((message) => message.id === live.id);
+  if (index < 0) return undefined;
+  return messages
+    .slice(index + 1)
+    .filter(
+      (message) =>
+        message.role === "user" && isVisibleTranscriptMessage(message),
+    );
+}
+
 export function splitTranscript(
   messages: readonly UiMessage[],
   runtime: TuiRuntimeStatus,
@@ -331,6 +390,20 @@ export function splitTranscript(
   const last = messages.at(-1);
   if (!last || runtime.kind === "idle" || runtime.kind === "error") {
     return { committedMessages: messages, liveMessage: null };
+  }
+
+  if (runtime.kind === "running") {
+    const activeAttempt = messages.findLastIndex(
+      (message) => message.runId === runtime.runId && keepsAttemptLive(message),
+    );
+    // A Steer or an assistant placeholder can follow a model attempt.
+    // Keep them in the live tail while the attempt can still be retried.
+    if (activeAttempt >= 0) {
+      return {
+        committedMessages: messages.slice(0, activeAttempt),
+        liveMessage: messages[activeAttempt],
+      };
+    }
   }
 
   if (
@@ -368,6 +441,22 @@ function liveTail(
     committedMessages: messages.slice(0, -1),
     liveMessage,
   };
+}
+
+function keepsAttemptLive(message: UiMessage): boolean {
+  return (
+    getScheduledStepRetry(message) !== undefined ||
+    (message.role === "assistant" &&
+      (message.status === undefined || message.status === "streaming") &&
+      message.modelRequests?.some(
+        (request) =>
+          request.purpose === "agent-step" &&
+          request.messageId === message.id &&
+          request.runId === message.runId &&
+          request.outcome === "running" &&
+          request.startedAt > 0,
+      ) === true)
+  );
 }
 
 function hasPendingOrRunningTool(message: UiMessage): boolean {

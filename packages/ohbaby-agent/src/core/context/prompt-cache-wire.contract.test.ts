@@ -1,3 +1,4 @@
+import { Stream } from "@anthropic-ai/sdk/core/streaming";
 import type {
   MessageCreateParams,
   RawMessageStreamEvent,
@@ -27,6 +28,10 @@ function emptyStream<T>(): AsyncGenerator<T, void, unknown> {
     await Promise.resolve();
     yield* [] as T[];
   })();
+}
+
+function emptyAnthropicStream(): Stream<RawMessageStreamEvent> {
+  return new Stream(emptyStream<RawMessageStreamEvent>, new AbortController());
 }
 
 function observeOnly(): InterfaceProviderPromptCache {
@@ -101,9 +106,9 @@ describe("prompt-cache wire contract", () => {
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
-    const anthropicStream = vi
-      .spyOn(anthropic.client.messages, "stream")
-      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+    const anthropicCreate = vi
+      .spyOn(anthropic.client.messages, "create")
+      .mockResolvedValue(emptyAnthropicStream());
     const firstGoal: GoalSnapshot = {
       goalId: "cache-goal",
       objective: "Fix checkout validation without changing the payment API.",
@@ -211,8 +216,8 @@ describe("prompt-cache wire contract", () => {
       expect(request.store).toBe(false);
     }
 
-    const firstAnthropic = anthropicStream.mock.calls[0][0];
-    const nextAnthropic = anthropicStream.mock.calls[1][0];
+    const firstAnthropic = anthropicCreate.mock.calls[0][0];
+    const nextAnthropic = anthropicCreate.mock.calls[1][0];
     expect(firstAnthropic.system).toEqual([
       {
         type: "text",
@@ -294,8 +299,8 @@ describe("prompt-cache wire contract", () => {
         baseUrl,
       });
       const stream = vi
-        .spyOn(provider.client.messages, "stream")
-        .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+        .spyOn(provider.client.messages, "create")
+        .mockResolvedValue(emptyAnthropicStream());
       const nativeBlocks = [
         {
           type: "thinking" as const,
@@ -416,8 +421,8 @@ describe("prompt-cache wire contract", () => {
         baseUrl,
       });
       const stream = vi
-        .spyOn(provider.client.messages, "stream")
-        .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+        .spyOn(provider.client.messages, "create")
+        .mockResolvedValue(emptyAnthropicStream());
       const thinking = {
         type: "thinking" as const,
         thinking: "Still thinking",
@@ -825,8 +830,8 @@ describe("prompt-cache wire contract", () => {
       baseUrl: "https://api.anthropic.com",
     });
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(emptyAnthropicStream());
 
     await provider.streamResponse({
       maxTokens: 128,
@@ -869,8 +874,8 @@ describe("prompt-cache wire contract", () => {
       baseUrl: "https://api.anthropic.com",
     });
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(emptyAnthropicStream());
     const tools = [
       {
         name: "read_fixture",
@@ -932,8 +937,8 @@ describe("prompt-cache wire contract", () => {
       baseUrl: "https://api.anthropic.com",
     });
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(emptyAnthropicStream());
     const toolCalls = Array.from({ length: 21 }, (_, index) => ({
       argumentsJson: JSON.stringify({ index }),
       name: "read_fixture",
@@ -1009,43 +1014,46 @@ describe("prompt-cache wire contract", () => {
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
-    const stream = vi.spyOn(provider.client.messages, "stream").mockReturnValue(
-      (async function* (): AsyncGenerator<
-        RawMessageStreamEvent,
-        void,
-        unknown
-      > {
-        await Promise.resolve();
-        yield {
-          type: "message_start",
-          message: {
-            usage: {
-              cache_creation_input_tokens: 30,
-              cache_read_input_tokens: 60,
-              input_tokens: 10,
-              output_tokens: 0,
+    const stream = vi
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(
+        new Stream(async function* (): AsyncGenerator<
+          RawMessageStreamEvent,
+          void,
+          unknown
+        > {
+          await Promise.resolve();
+          yield {
+            type: "message_start",
+            message: {
+              usage: {
+                cache_creation_input_tokens: 30,
+                cache_read_input_tokens: 60,
+                input_tokens: 10,
+                output_tokens: 0,
+              },
             },
-          },
-        } as unknown as RawMessageStreamEvent;
-        yield {
-          type: "message_delta",
-          delta: {
-            container: null,
-            stop_reason: "end_turn",
-            stop_details: null,
-            stop_sequence: null,
-          },
-          usage: {
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-            input_tokens: 0,
-            output_tokens: 5,
-            output_tokens_details: null,
-            server_tool_use: null,
-          },
-        };
-      })(),
-    );
+          } as unknown as RawMessageStreamEvent;
+          yield {
+            type: "message_delta",
+            delta: {
+              container: null,
+              stop_reason: "end_turn",
+              stop_details: null,
+              stop_sequence: null,
+            },
+            usage: {
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 0,
+              input_tokens: 0,
+              output_tokens: 5,
+              output_tokens_details: null,
+              server_tool_use: null,
+            },
+          };
+          yield { type: "message_stop" };
+        }, new AbortController()),
+      );
     const messages = [{ role: "user" as const, content: "Hello" }];
     const result = await provider.streamResponse({
       maxTokens: 128,
@@ -1088,8 +1096,8 @@ describe("prompt-cache wire contract", () => {
       baseUrl: "https://zenmux.ai/api/anthropic/v1",
     });
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(emptyAnthropicStream());
     const messages = [
       { role: "system" as const, content: "Stable system" },
       { role: "user" as const, content: "Earlier" },
@@ -1136,7 +1144,7 @@ describe("prompt-cache wire contract", () => {
       apiKey: "test-key",
       baseUrl: "https://gateway.example.test/anthropic",
     });
-    const stream = vi.spyOn(provider.client.messages, "stream");
+    const stream = vi.spyOn(provider.client.messages, "create");
 
     expect(() =>
       provider.streamResponse({
@@ -1160,8 +1168,8 @@ describe("prompt-cache wire contract", () => {
       baseUrl: "https://api.deepseek.com/anthropic",
     });
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(emptyAnthropicStream());
 
     for (const promptCache of [
       observeOnly(),
@@ -1229,8 +1237,8 @@ it("preserves tool batches and separate reminder blocks on all wires without cro
     baseUrl: "https://api.anthropic.com",
   });
   const stream = vi
-    .spyOn(anthropic.client.messages, "stream")
-    .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+    .spyOn(anthropic.client.messages, "create")
+    .mockResolvedValue(emptyAnthropicStream());
   const normal = {
     model: "claude",
     messages,

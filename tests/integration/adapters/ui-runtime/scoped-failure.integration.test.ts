@@ -7,7 +7,10 @@ import { APIUserAbortError } from "openai";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../../../packages/ohbaby-agent/src/bus/index.js";
 
-import type { LLMClientInstance } from "ohbaby-llm";
+import {
+  DEFAULT_PROVIDER_RETRY_POLICY,
+  type LLMClientInstance,
+} from "ohbaby-llm";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -136,7 +139,7 @@ describe("failed child scope and primary run handoff", () => {
                     throw new APIUserAbortError();
                   throw Object.assign(
                     new Error("controlled transport failure"),
-                    { code: "ECONNRESET" },
+                    { code: "ECONNRESET", headers: { "retry-after-ms": "0" } },
                   );
                 }
                 primaryCalls += 1;
@@ -268,7 +271,11 @@ describe("failed child scope and primary run handoff", () => {
           failure === "cancel" ? "interrupted" : "failed",
         );
         expect(child.terminalReason).toBe(
-          failure === "cancel" ? "cancelled" : "provider_stream_interrupted",
+          failure === "cancel"
+            ? "cancelled"
+            : failure === "transport"
+              ? "provider_retry_exhausted"
+              : "provider_stream_interrupted",
         );
         expect(await ledger.get("primary-run")).toMatchObject({
           status: "running",
@@ -318,7 +325,11 @@ describe("failed child scope and primary run handoff", () => {
         );
         expect(
           requests.filter((request) => request.contextScopeId === "child"),
-        ).toHaveLength(1);
+        ).toHaveLength(
+          failure === "transport"
+            ? DEFAULT_PROVIDER_RETRY_POLICY.maxRetriesPerStep + 1
+            : 1,
+        );
         const childPrepared = await contextManager.prepareTurn({
           sessionId: "shared",
           contextScopeId: "child",
@@ -335,11 +346,12 @@ describe("failed child scope and primary run handoff", () => {
         expect(childPrepared.usage.currentTokens).toBe(
           childPrepared.sentHeuristic,
         );
-        if (failure === "transport")
+        if (failure === "transport") {
+          expect(childText.match(/private child fragment/g)).toHaveLength(1);
           expect(childText).toContain(
             "[Response interrupted: the saved text below may be incomplete.]\\nprivate child fragment",
           );
-        else expect(childText).not.toContain("private child fragment");
+        } else expect(childText).not.toContain("private child fragment");
         if (failure === "cancel")
           expect(
             childText.match(/Response cancelled by the user/g),

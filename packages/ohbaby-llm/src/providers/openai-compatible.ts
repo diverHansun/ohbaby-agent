@@ -1,3 +1,4 @@
+import { ProviderStreamEofError } from "./stream-errors.js";
 import { ModelRequestValidationError } from "./request-validation-error.js";
 import OpenAI, { APIUserAbortError } from "openai";
 import type {
@@ -408,7 +409,9 @@ class ChatNativeAccumulator {
   finalize(): NativeOutput | undefined {
     if (this.field === undefined && this.details.size === 0) return;
     if (this.finish === undefined)
-      throw new Error("Incomplete Chat native reasoning stream.");
+      throw new ProviderStreamEofError(
+        "Incomplete Chat native reasoning stream.",
+      );
     if (this.finish === "length" || this.finish === "content_filter") return;
     for (const detail of this.details.values()) {
       const payloadFields =

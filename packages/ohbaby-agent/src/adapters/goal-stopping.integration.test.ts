@@ -1,6 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { AgentManager } from "../agents/index.js";
-import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "ohbaby-llm";
+import {
+  DEFAULT_PROVIDER_RETRY_POLICY,
+  DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+} from "ohbaby-llm";
 import { InMemoryGoalPersistence } from "../goals/persistence.js";
 import type {
   InterfaceProviderRequest,
@@ -279,9 +282,21 @@ it.each(["deadline", "watchdog"] as const)(
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let clock = 0;
     const started = deferred();
+    let transientFailures =
+      first === "watchdog"
+        ? DEFAULT_PROVIDER_RETRY_POLICY.maxRetriesPerStep
+        : 0;
     const { client, persistence } = await fixture(
       async function* () {
-        // A partial response disables retries; next() deliberately ignores abort.
+        // Use the retry budget before stalling so the watchdog can settle the
+        // run before the deadline. The outstanding next() ignores abort.
+        if (transientFailures > 0) {
+          transientFailures -= 1;
+          throw Object.assign(new Error("controlled transient failure"), {
+            status: 503,
+            headers: { "retry-after-ms": "0" },
+          });
+        }
         yield { textDelta: "working" };
         // Signal the outstanding next(), after the consumer handled the event.
         started.resolve();

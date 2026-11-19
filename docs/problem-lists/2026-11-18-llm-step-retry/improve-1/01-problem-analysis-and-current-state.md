@@ -114,7 +114,7 @@ lifecycle 收到失败后再决定重来，已经无法回填该请求的 `retry
 
 ### 1.4.5 请求记录与重试状态
 
-`ohbaby-sdk/src/contract/execution.ts` 的 `projectModelActivity` 按运行和消息读取已有请求事实。目前跨消息 ID 会断开等待链。整步重来会换消息，因此后端先保证同一步的临时故障重试计数连续，并在封存时记录 `retryScheduled`。跨消息的等待投影及界面呈现留到前端实施时决定。
+`ohbaby-sdk/src/contract/execution.ts` 的 `projectModelActivity` 按运行和消息读取已有请求事实。目前跨消息 ID 会断开等待链。整步重来会换消息，因此后端先保证同一步的临时故障重试计数连续，并在封存时记录 `retryScheduled`。跨消息的等待投影及界面呈现留到前端实施时决定（已在 [00 D11](./00-discussion.md) 和 [02 §2.5](./02-optimization-plan-and-change-scope.md) 定稿）。
 
 ## 1.5 子代理与 Side Chat
 
@@ -149,7 +149,7 @@ lifecycle 收到失败后再决定重来，已经无法回填该请求的 `retry
 - **ohbaby-llm**：`client/retry.ts`、`client/streaming.ts`、`client/provider-error.ts`、`providers/openai-responses-stream.ts`、`providers/openai-compatible.ts`、`providers/anthropic.ts`。
 - **ohbaby-agent**：`core/lifecycle/lifecycle.ts`、`core/context/failed-history.ts`、`core/message` 的错误类型和事件 schema、`agents/subagents/result-artifacts.ts`。
 - **后端观测**：沿用已有请求记录和安全日志字段，补充缺终止事件等诊断原因。
-- 工具调度、审批、子代理时限及摘要重试维持既有契约。前端呈现与 SDK 等待投影待前端实施时决定。
+- 工具调度、审批、子代理时限及摘要重试维持既有契约。前端呈现与 SDK 等待投影待前端实施时决定（已在 00 D11 定稿）。
 
 ## 1.8 SWE 原则审视摘要
 

@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { Socket } from "node:net";
 import { createTestContextManager as createContextManager } from "../../../fixtures/model-fixtures.js";
 import OpenAI from "openai";
 import { createBus } from "../../../../packages/ohbaby-agent/src/bus/index.js";
@@ -13,11 +15,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOpenAICompatibleProvider } from "ohbaby-llm";
 import {
   isRetryableProviderError,
+  isContextOverflowError,
+  providerErrorDetail,
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
 } from "ohbaby-llm";
 import { resolvePreparedRequestSettings, streamResponse } from "ohbaby-llm";
-import type { LLMClientInstance, StreamingResponse } from "ohbaby-llm";
+import type {
+  InterfaceProviderStreamEvent,
+  LLMClientInstance,
+  StreamingResponse,
+} from "ohbaby-llm";
 
 // Exercise the installed SDK, production adapter and project retry loop together.
 // Only HTTP is replaced; production SDK settings and project retry policy apply.
@@ -209,6 +217,11 @@ function consume(
     signal?: AbortSignal;
     onFrame?: (frame: StreamingResponse) => void;
     maxRetriesPerStep?: number;
+    purpose?: NonNullable<Parameters<typeof streamResponse>[2]>["purpose"];
+    priorFailedAttempts?: number;
+    onRequestObservation?: NonNullable<
+      Parameters<typeof streamResponse>[2]
+    >["onRequestObservation"];
   } = {},
 ): {
   frames: StreamingResponse[];
@@ -222,6 +235,9 @@ function consume(
         [{ role: "user", content: "fixture" }],
         {
           signal: options.signal,
+          purpose: options.purpose,
+          priorFailedAttempts: options.priorFailedAttempts,
+          onRequestObservation: options.onRequestObservation,
           ...(options.maxRetriesPerStep === undefined
             ? {}
             : { retry: { maxRetriesPerStep: options.maxRetriesPerStep } }),
@@ -246,6 +262,500 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+function earlyEof(protocol: (typeof protocols)[number]): Response {
+  return new Response(protocol === "anthropic" ? "" : "data: [DONE]\n\n", {
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function anthropicSse(events: readonly { type: string }[]): Response {
+  return new Response(
+    events
+      .map(
+        (event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+      )
+      .join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+function streamFailure(protocol: (typeof protocols)[number]): Response {
+  if (protocol === "anthropic") {
+    const event = {
+      type: "error",
+      error: { type: "overloaded_error", message: "controlled overload" },
+    };
+    return anthropicSse([event]);
+  }
+  return sse([
+    { error: { code: "server_error", message: "controlled failure" } },
+  ]);
+}
+
+describe.each(protocols)("%s agent-step stream errors", (protocol) => {
+  it.each([
+    {
+      fault: "in-stream error",
+      response: streamFailure,
+      reason: protocol === "anthropic" ? "overloaded_error" : "server_error",
+    },
+    {
+      fault: "missing terminal event",
+      response: earlyEof,
+      reason: "stream_eof",
+    },
+  ])("retries $fault before any output", async ({ response, reason }) => {
+    const f = fixture(
+      (attempt) => (attempt === 1 ? response(protocol) : success(protocol)),
+      protocol,
+    );
+    const run = consume(f.client, { purpose: "agent-step" });
+    await vi.runAllTimersAsync();
+    expect(await run.done).toEqual({});
+    expect(f.attempts).toHaveLength(2);
+    expect(run.frames.flatMap((frame) => frame.retry?.reason ?? [])).toEqual([
+      reason,
+    ]);
+    expect(run.frames.at(-1)?.messageSnapshot.content).toBe("done");
+  });
+});
+
+it.each(["agent-step", "context-summary"] as const)(
+  "requires Anthropic message_stop even after receiving stop_reason for %s",
+  async (purpose) => {
+    const start = {
+      type: "message_start",
+      message: {
+        id: "msg_empty",
+        type: "message",
+        role: "assistant",
+        model: "fixture",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 12, output_tokens: 0 },
+      },
+    };
+    const delta = {
+      type: "message_delta",
+      delta: { stop_reason: "end_turn", stop_sequence: null },
+      usage: { output_tokens: 0 },
+    };
+    const f = fixture(
+      (attempt) =>
+        attempt === 1 ? anthropicSse([start, delta]) : success("anthropic"),
+      "anthropic",
+    );
+    const run = consume(f.client, { purpose });
+    await vi.runAllTimersAsync();
+    if (purpose === "context-summary") {
+      expect((await run.done).error).toMatchObject({ source: "eof" });
+      expect(f.attempts).toHaveLength(1);
+      expect(run.frames.some((frame) => frame.retry)).toBe(false);
+      return;
+    }
+    expect(await run.done).toEqual({});
+    expect(f.attempts).toHaveLength(2);
+    expect(run.frames.find((frame) => frame.retry)?.retry?.reason).toBe(
+      "stream_eof",
+    );
+    expect(run.frames.at(-1)?.messageSnapshot.content).toBe("done");
+  },
+);
+
+it.each([
+  { networkCode: "UND_ERR_SOCKET", attempts: 2 },
+  { networkCode: "CERT_HAS_EXPIRED", attempts: 1 },
+])(
+  "uses explicit network evidence in nested SDK causes ($networkCode)",
+  async ({ networkCode, attempts }) => {
+    const f = fixture((attempt) => {
+      if (attempt > 1) return success("openai-compatible");
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("underlying network fault"), {
+          code: networkCode,
+        }),
+      });
+    });
+    const run = consume(f.client, { purpose: "agent-step" });
+    await vi.runAllTimersAsync();
+    const { error } = await run.done;
+    expect(f.attempts).toHaveLength(attempts);
+    if (attempts === 2) {
+      expect(error).toBeUndefined();
+      expect(run.frames.find((frame) => frame.retry)?.retry?.reason).toBe(
+        "und_err_socket",
+      );
+    } else {
+      expect(providerErrorDetail(error)).toMatchObject({
+        kind: "tls",
+        networkCode,
+      });
+      expect(run.frames.some((frame) => frame.retry)).toBe(false);
+    }
+  },
+);
+
+it.each([
+  {
+    protocol: "openai-compatible",
+    response: () =>
+      sse([{ error: { type: "invalid_request_error", message: "fixture" } }]),
+    kind: "invalid_request",
+  },
+  {
+    protocol: "anthropic",
+    response: () => {
+      const event = {
+        type: "error",
+        error: { type: "invalid_request_error", message: "fixture" },
+      };
+      return anthropicSse([event]);
+    },
+    kind: "invalid_request",
+  },
+  {
+    protocol: "openai-compatible",
+    response: () =>
+      sse([{ error: { code: "unknown_error_fixture", message: "fixture" } }]),
+    kind: "unknown",
+  },
+  {
+    protocol: "openai-compatible",
+    response: () =>
+      Response.json(
+        {
+          error: {
+            code: "insufficient_quota",
+            type: "rate_limit_error",
+            message: "fixture",
+          },
+        },
+        { status: 429 },
+      ),
+    kind: "billing",
+  },
+] as const)(
+  "keeps $protocol $kind failures terminal",
+  async ({ protocol, response, kind }) => {
+    const f = fixture(response, protocol);
+    const run = consume(f.client, { purpose: "agent-step" });
+    await vi.runAllTimersAsync();
+    expect(f.attempts).toHaveLength(1);
+    expect(run.frames.some((frame) => frame.retry)).toBe(false);
+    expect(providerErrorDetail((await run.done).error)?.kind).toBe(kind);
+  },
+);
+
+describe("Responses explicit failure events", () => {
+  it.each([
+    { code: "server_error", attempts: 2, kind: undefined },
+    { code: "invalid_prompt", attempts: 1, kind: "invalid_request" },
+    { code: "context_length_exceeded", attempts: 1, kind: "context_overflow" },
+    { code: "unrecognized_fixture_error", attempts: 1, kind: "unknown" },
+    { code: null, attempts: 1, kind: "unknown" },
+  ])("handles response.failed with $code", async ({ code, attempts, kind }) => {
+    const f = fixture(
+      (attempt) =>
+        attempt === 1
+          ? sse([
+              {
+                type: "response.failed",
+                response: {
+                  id: "resp_failed",
+                  status: "failed",
+                  error: code
+                    ? { code, message: "upstream detail must not be exposed" }
+                    : null,
+                },
+              },
+            ])
+          : success("openai-responses"),
+      "openai-responses",
+    );
+    const run = consume(f.client, { purpose: "agent-step" });
+    await vi.runAllTimersAsync();
+    const { error } = await run.done;
+    expect(f.attempts).toHaveLength(attempts);
+    if (kind === undefined) {
+      expect(error).toBeUndefined();
+      expect(run.frames.find((frame) => frame.retry)?.retry?.reason).toBe(code);
+    } else {
+      const detail = providerErrorDetail(error);
+      expect(detail?.kind).toBe(kind);
+      expect(detail?.upstreamCode).toBe(kind === "unknown" ? undefined : code);
+      expect(detail?.message).not.toContain("upstream detail");
+      expect(isContextOverflowError(error)).toBe(kind === "context_overflow");
+    }
+  });
+});
+
+describe("agent-step retry after partial output", () => {
+  it("seals the failed request and signals retry before throwing a real socket interruption", async () => {
+    vi.useRealTimers();
+    const realFetch = globalThis.fetch;
+    let socket: Socket | undefined;
+    const server = createServer((request, response) => {
+      socket = request.socket;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(
+        `data: ${JSON.stringify(chunk({ content: "partial" }))}\n\n`,
+      );
+    });
+    try {
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const address = server.address();
+      if (!address || typeof address === "string")
+        throw new Error("Expected TCP listener");
+      const f = fixture(() =>
+        realFetch(`http://127.0.0.1:${String(address.port)}`),
+      );
+      const order: string[] = [];
+      let observedRetryDelayMs: number | undefined;
+      const run = consume(f.client, {
+        purpose: "agent-step",
+        priorFailedAttempts: 0,
+        onRequestObservation: (fact) => {
+          if (fact.type === "request-ended") {
+            order.push("request-ended");
+            expect(fact.request).toMatchObject({
+              attempt: 1,
+              outcome: "error",
+              retryScheduled: true,
+            });
+            expect(fact.failure).toMatchObject({
+              networkCode: "UND_ERR_SOCKET",
+            });
+            observedRetryDelayMs = fact.failure?.retryDelayMs;
+          }
+          return Promise.resolve();
+        },
+        onFrame: (frame) => {
+          if (frame.messageSnapshot.content === "partial") socket?.destroy();
+          if (frame.retry) order.push("retry");
+        },
+      });
+      const { error } = await run.done;
+      const retry = run.frames.find((frame) => frame.retry)?.retry;
+      expect(retry).toMatchObject({ attempt: 1, reason: "und_err_socket" });
+      expect(observedRetryDelayMs).toBeTypeOf("number");
+      expect(observedRetryDelayMs).toBe(retry?.delayMs);
+      expect(error).toMatchObject({
+        name: "ProviderStreamInterruptedError",
+        source: "transport",
+        stepRetry: { delayMs: retry?.delayMs },
+      });
+      expect(order).toEqual(["request-ended", "retry"]);
+      expect(f.attempts).toHaveLength(1);
+    } finally {
+      socket?.destroy();
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    }
+  });
+
+  it.each([2, 5])(
+    "counts prior failures (%s) against the same budget",
+    async (priorFailedAttempts) => {
+      const f = fixture(() =>
+        sse([chunk({ reasoning_content: "partial thought" })]),
+      );
+      const attempts: number[] = [];
+      const run = consume(f.client, {
+        purpose: "agent-step",
+        priorFailedAttempts,
+        onRequestObservation: (fact) => {
+          if (fact.type === "request-ended")
+            attempts.push(fact.request.attempt);
+          return Promise.resolve();
+        },
+      });
+      await vi.runAllTimersAsync();
+      const { error } = await run.done;
+      expect(attempts).toEqual([priorFailedAttempts + 1]);
+      expect(f.attempts).toHaveLength(1);
+      const retry = run.frames.find((frame) => frame.retry)?.retry;
+      if (priorFailedAttempts === 2) {
+        expect(retry).toMatchObject({ attempt: 3, reason: "stream_eof" });
+        expect(error).toMatchObject({
+          source: "eof",
+          stepRetry: { delayMs: retry?.delayMs },
+        });
+        expect(providerErrorDetail(error)?.upstreamReason).toBe("stream_eof");
+      } else {
+        expect(retry).toBeUndefined();
+        expect(error).toBeInstanceOf(ProviderRetryExhaustedError);
+        expect(error).toMatchObject({ attempts: 5, cause: { source: "eof" } });
+      }
+    },
+  );
+
+  it.each([
+    { fault: new OpenAI.APIUserAbortError(), source: "provider_abort" },
+    {
+      fault: Object.assign(new Error("unknown provider exception"), {
+        code: "fixture_unknown",
+      }),
+      source: undefined,
+    },
+    {
+      fault: Object.assign(new Error("untyped exception"), {
+        code: "server_error",
+        type: "overloaded_error",
+      }),
+      source: undefined,
+    },
+  ])(
+    "does not retry partial output for $fault.message",
+    async ({ fault, source }) => {
+      const f = fixture(() => success("openai-compatible"));
+      async function* partial(): AsyncGenerator<InterfaceProviderStreamEvent> {
+        yield await Promise.resolve({ textDelta: "partial" });
+        throw fault;
+      }
+      vi.spyOn(f.client.provider, "streamResponse").mockImplementation(() =>
+        Promise.resolve(partial()),
+      );
+      const run = consume(f.client, {
+        purpose: "agent-step",
+        priorFailedAttempts: 0,
+      });
+      await vi.runAllTimersAsync();
+      const { error } = await run.done;
+      expect(error).toMatchObject({
+        name: "ProviderStreamInterruptedError",
+        source,
+      });
+      expect(error).not.toHaveProperty("stepRetry", expect.anything());
+      expect(run.frames.some((frame) => frame.retry)).toBe(false);
+    },
+  );
+
+  it("does not retry malformed tool arguments after a successful stream", async () => {
+    const f = fixture(() =>
+      sse([
+        chunk({
+          tool_calls: [
+            {
+              index: 0,
+              id: "call_1",
+              type: "function",
+              function: { name: "test", arguments: "{" },
+            },
+          ],
+        }),
+        chunk({}, "tool_calls"),
+      ]),
+    );
+    const run = consume(f.client, {
+      purpose: "agent-step",
+      priorFailedAttempts: 0,
+    });
+    await vi.runAllTimersAsync();
+    expect((await run.done).error).toMatchObject({
+      name: "ToolCallParseError",
+    });
+    expect(run.frames.some((frame) => frame.retry)).toBe(false);
+    expect(f.attempts).toHaveLength(1);
+  });
+
+  it("does not schedule a retry after local cancellation of a partial stream", async () => {
+    const f = fixture(() => sse([chunk({ content: "partial" })]));
+    const controller = new AbortController();
+    const run = consume(f.client, {
+      purpose: "agent-step",
+      priorFailedAttempts: 0,
+      signal: controller.signal,
+      onFrame: (frame) => {
+        if (frame.messageSnapshot.content === "partial") controller.abort();
+      },
+    });
+    await vi.runAllTimersAsync();
+    expect(await run.done).toEqual({});
+    expect(run.frames.at(-1)?.streamStopReason).toBe("user_aborted");
+    expect(run.frames.some((frame) => frame.retry)).toBe(false);
+    expect(f.attempts).toHaveLength(1);
+  });
+
+  it("does not schedule a retry when a later event violates the Responses protocol", async () => {
+    const f = fixture(
+      () =>
+        sse([
+          {
+            type: "response.output_item.added",
+            output_index: 0,
+            item: {
+              id: "msg_partial",
+              type: "message",
+              role: "assistant",
+              status: "in_progress",
+              content: [],
+            },
+          },
+          {
+            type: "response.content_part.added",
+            item_id: "msg_partial",
+            output_index: 0,
+            content_index: 0,
+            part: {
+              type: "output_text",
+              text: "",
+              annotations: [],
+              logprobs: [],
+            },
+          },
+          {
+            type: "response.output_text.delta",
+            item_id: "msg_partial",
+            output_index: 0,
+            content_index: 0,
+            delta: "partial",
+          },
+          { type: "response.unknown" },
+        ]),
+      "openai-responses",
+    );
+    const run = consume(f.client, {
+      purpose: "agent-step",
+      priorFailedAttempts: 0,
+    });
+    await vi.runAllTimersAsync();
+    expect(
+      run.frames.some((frame) => frame.messageSnapshot.content === "partial"),
+    ).toBe(true);
+    expect((await run.done).error).toBeInstanceOf(
+      ProviderStreamInterruptedError,
+    );
+    expect((await run.done).error).not.toHaveProperty(
+      "stepRetry",
+      expect.anything(),
+    );
+    expect(run.frames.some((frame) => frame.retry)).toBe(false);
+    expect(f.attempts).toHaveLength(1);
+  });
+
+  it.each(["agent-step", "context-summary", "session-title"] as const)(
+    "preserves the %s caller's opt-in boundary for post-output retry",
+    async (purpose) => {
+      const f = fixture(() => sse([chunk({ content: "partial" })]));
+      const run = consume(f.client, { purpose });
+      await vi.runAllTimersAsync();
+      expect((await run.done).error).toMatchObject({ source: "eof" });
+      expect((await run.done).error).not.toHaveProperty(
+        "stepRetry",
+        expect.anything(),
+      );
+      expect(run.frames.some((frame) => frame.retry)).toBe(false);
+      expect(f.attempts).toHaveLength(1);
+    },
+  );
 });
 
 describe("installed SDK and project retry boundaries", () => {
@@ -486,6 +996,8 @@ describe.each(protocols)("%s Context summary HTTP budget", (protocol) => {
     { failures: 1, fault: "503", attempts: 2, status: "compacted" },
     { failures: 2, fault: "503", attempts: 2, status: "failed" },
     { failures: 1, fault: "ECONNRESET", attempts: 2, status: "compacted" },
+    { failures: 1, fault: "in-stream error", attempts: 1, status: "failed" },
+    { failures: 1, fault: "EOF", attempts: 1, status: "failed" },
   ] as const)(
     "limits $failures initial $fault failures to $attempts actual HTTP requests",
     async ({ failures, fault, attempts, status }) => {
@@ -496,6 +1008,8 @@ describe.each(protocols)("%s Context summary HTTP budget", (protocol) => {
             code: "ECONNRESET",
           });
         }
+        if (fault === "in-stream error") return streamFailure(protocol);
+        if (fault === "EOF") return earlyEof(protocol);
         return unavailable();
       }, protocol);
       const bus = createBus();

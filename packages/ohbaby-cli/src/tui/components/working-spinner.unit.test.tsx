@@ -266,7 +266,7 @@ it("turns into Retrying #n in the same slot while retries run, without a timer",
     app.rerender(view({ ...failed, requestId: "r2", attempt: 2 }));
   });
   expect(app.lastFrame()).toBe("Retrying #2");
-  // Recovered: back to the phrase with the turn's time.
+  // Recovered: back to the phrase with the step's time.
   act(() => {
     app.rerender(
       view({
@@ -389,7 +389,7 @@ it("runs one animation timer and stops animation and duration timers when hidden
   });
 });
 
-it("keeps the run phrase while displaying current state titles and the turn's time", () => {
+it("keeps the run phrase while displaying current state titles and the step's time", () => {
   const sample = { serverNow: 5000, receivedAt: performance.now() };
   const view = (retry: boolean, title?: string): ReactElement => (
     <DurationSampleContext.Provider value={sample}>
@@ -397,7 +397,13 @@ it("keeps the run phrase while displaying current state titles and the turn's ti
         runtime={{ kind: "running", runId: "run_1", title }}
         run={runOf(
           retry
-            ? { ...request, requestId: "retry", startedAt: 4000, attempt: 1 }
+            ? {
+                ...request,
+                requestId: "retry",
+                startedAt: 4000,
+                waitingStartedAt: 1000,
+                attempt: 2,
+              }
             : request,
         )}
       />
@@ -413,7 +419,7 @@ it("keeps the run phrase while displaying current state titles and the turn's ti
     app.rerender(view(true, "Retrying request"));
   });
   expect(app.lastFrame()).toContain("Retrying request");
-  // A new request does not restart the turn's clock.
+  // The retry keeps the same model step's clock.
   expect(app.lastFrame()).toContain("4s");
   act(() => {
     app.rerender(view(true));
@@ -423,6 +429,55 @@ it("keeps the run phrase while displaying current state titles and the turn's ti
   act(() => {
     app.unmount();
   });
+});
+
+it("starts the timer for the current model step and keeps it during a step retry", () => {
+  const sample = { serverNow: 15_000, receivedAt: performance.now() };
+  const view = (activity?: UiModelActivity): ReactElement => (
+    <DurationSampleContext.Provider value={sample}>
+      <WorkingSpinner
+        runtime={{ kind: "running", runId: "run_1" }}
+        run={runOf(activity)}
+      />
+    </DurationSampleContext.Provider>
+  );
+  const stepTwo = {
+    ...request,
+    requestId: "step-two",
+    messageId: "step-two-message",
+    step: 2,
+    attempt: 1,
+    startedAt: 11_000,
+    phase: "requesting" as const,
+  };
+  let app!: ReturnType<typeof render>;
+  act(() => {
+    app = render(view());
+  });
+  try {
+    expect(app.lastFrame()).toMatch(/ 14s$/u);
+    act(() => {
+      app.rerender(view(stepTwo));
+    });
+    expect(app.lastFrame()).toMatch(/ 4s$/u);
+    act(() => {
+      app.rerender(
+        view({
+          ...stepTwo,
+          requestId: "step-two-retry",
+          messageId: "step-two-retry-message",
+          attempt: 2,
+          startedAt: 14_000,
+          waitingStartedAt: 11_000,
+        }),
+      );
+    });
+    expect(app.lastFrame()).toMatch(/ 4s$/u);
+  } finally {
+    act(() => {
+      app.unmount();
+    });
+  }
 });
 
 it("keeps the same run phrase after the transcript is remounted", () => {

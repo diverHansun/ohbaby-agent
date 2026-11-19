@@ -22,11 +22,15 @@ import type { InterfaceProviderStreamEvent } from "ohbaby-llm";
 import { serializeHistoryMessages } from "../../../../packages/ohbaby-agent/src/core/context/serializer.js";
 import { serializeHistory } from "../../../../packages/ohbaby-agent/src/core/context/serialization.js";
 import { ensureInterruptionFact } from "../../../../packages/ohbaby-agent/src/core/message/interruption.js";
-import { ProviderStreamIdleTimeoutError } from "ohbaby-llm";
+import {
+  ProviderStreamIdleTimeoutError,
+  ProviderStreamInterruptedError,
+} from "ohbaby-llm";
 
 function fixture(
   events: InterfaceProviderStreamEvent[],
   after?: () => void,
+  retryEvents?: InterfaceProviderStreamEvent[],
 ): {
   run: (
     signal?: AbortSignal,
@@ -38,6 +42,7 @@ function fixture(
     bus: createBus(),
     store: createInMemoryMessageStore(),
   });
+  let attempt = 0;
   const client: LLMClientInstance = {
     config: {
       provider: "test",
@@ -65,8 +70,10 @@ function fixture(
       streamResponse: () =>
         Promise.resolve(
           (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
-            for (const event of events) yield await Promise.resolve(event);
-            after?.();
+            const retry = attempt++ > 0 && retryEvents !== undefined;
+            for (const event of retry ? retryEvents : events)
+              yield await Promise.resolve(event);
+            if (!retry) after?.();
           })(),
         ),
     },
@@ -185,46 +192,56 @@ describe("failed model history persistence", () => {
       );
     },
   );
-  it("preserves known transport failure text", async () => {
-    const f = fixture([{ textDelta: "saved fragment" }], () => {
-      throw Object.assign(new Error("wire closed"), { code: "ECONNRESET" });
+  it.each([
+    new ProviderStreamIdleTimeoutError(100, 100),
+    Object.assign(new Error("wire closed"), { code: "ECONNRESET" }),
+  ])(
+    "stores partial output but hides a retried %s from model history",
+    async (failure) => {
+      const f = fixture(
+        [{ textDelta: "saved fragment" }],
+        () => {
+          throw failure;
+        },
+        [{ textDelta: "finished", finishReason: "stop" }],
+      );
+      const { result } = await f.run();
+      expect(result.success).toBe(true);
+      const history = await f.manager.listBySession("session");
+      expect(history[0].info).toMatchObject({
+        finish: "error",
+        error: { name: "MessageStreamInterruptedError", retried: true },
+      });
+      expect(history[0].parts).toEqual([
+        expect.objectContaining({ type: "text", text: "saved fragment" }),
+      ]);
+      expect(serializeHistoryMessages(history)).toEqual([
+        { role: "assistant", content: "finished" },
+      ]);
+      expect(
+        serializeHistory(history, { includeToolContext: true }),
+      ).not.toContain("saved fragment");
+      expect(f.execute).not.toHaveBeenCalled();
+    },
+  );
+  it("honors a retireable legacy interruption fact without visible text", async () => {
+    const f = fixture([]);
+    const interrupted = await f.manager.createMessage({
+      sessionId: "session",
+      contextScopeId: "child",
+      role: "assistant",
+      agent: "primary",
     });
-    await f.run();
-    const history = await f.manager.listBySession("session");
-    expect(history[0].info).toMatchObject({
+    if (interrupted.role !== "assistant") throw new Error("Expected assistant");
+    await f.manager.updateMessage(interrupted.id, {
+      finish: "error",
       error: { name: "MessageStreamInterruptedError" },
     });
-    expect(serializeHistoryMessages(history)).toEqual([
-      {
-        role: "assistant",
-        content:
-          "[Response interrupted: the saved text below may be incomplete.]\nsaved fragment",
-      },
-    ]);
-  });
-  it("stores partial idle output but excludes it from subsequent model history", async () => {
-    const f = fixture([{ textDelta: "idle fragment" }], () => {
-      throw new ProviderStreamIdleTimeoutError(100, 100);
-    });
-    const { result } = await f.run();
-    expect(result.success).toBe(false);
-    const history = await f.manager.listBySession("session");
-    expect(history[0].info).toMatchObject({
-      finish: "error",
-      error: { name: "APIError" },
-    });
-    expect(history[0].parts).toEqual([
-      expect.objectContaining({ type: "text", text: "idle fragment" }),
-    ]);
-    expect(serializeHistoryMessages(history)).toEqual([]);
-    expect(
-      serializeHistory(history, { includeToolContext: true }),
-    ).not.toContain("idle fragment");
-    expect(f.execute).not.toHaveBeenCalled();
-  });
-  it("persists one retireable fact for EOF without visible text", async () => {
-    const f = fixture([]);
-    await f.run();
+    await ensureInterruptionFact(
+      f.manager,
+      interrupted,
+      "MessageStreamInterruptedError",
+    );
     const history = await f.manager.listBySession("session");
     expect(history[0].info).toMatchObject({
       error: { name: "MessageStreamInterruptedError" },
@@ -264,8 +281,9 @@ describe("failed model history persistence", () => {
       const f = fixture(body ? [{ textDelta: body }] : [], () => {
         controller.abort();
       });
-      const { result } = await f.run(controller.signal);
+      const { result, events } = await f.run(controller.signal);
       expect(result.terminalReason).toBe("cancelled");
+      expect(events.some((event) => event.type === "llm:retrying")).toBe(false);
       const history = await f.manager.listBySession("session");
       expect(history[0].info).toMatchObject({
         error: { name: "MessageAbortedError" },
@@ -285,11 +303,19 @@ describe("failed model history persistence", () => {
       );
     },
   );
-  it("does not replay text after an unknown or protocol failure", async () => {
+  it.each([
+    new Error("unknown provider failure"),
+    new ProviderStreamInterruptedError(
+      new Error("native projection invalid"),
+      "protocol",
+    ),
+  ])("does not schedule retries or replay text after %s", async (error) => {
     const f = fixture([{ textDelta: "unsafe partial" }], () => {
-      throw new Error("native projection invalid");
+      throw error;
     });
-    await f.run();
+    const { result, events } = await f.run();
+    expect(result.terminalReason).toBe("provider_stream_interrupted");
+    expect(events.some((event) => event.type === "llm:retrying")).toBe(false);
     const history = await f.manager.listBySession("session");
     expect(history[0].info).toMatchObject({ finish: "error" });
     expect(serializeHistoryMessages(history)).toEqual([]);
@@ -297,6 +323,23 @@ describe("failed model history persistence", () => {
       serializeHistory(history, { includeToolContext: true }),
     ).not.toContain("unsafe partial");
   });
+
+  it("does not retry or execute malformed tool arguments", async () => {
+    const f = fixture([
+      { textDelta: "attempting tool call" },
+      {
+        toolCallDeltas: [
+          { index: 0, id: "tool", name: "write", argumentsDelta: "{" },
+        ],
+        finishReason: "tool_calls",
+      },
+    ]);
+    const { result, events } = await f.run();
+    expect(result.terminalReason).toBe("tool_parse_failure");
+    expect(events.some((event) => event.type === "llm:retrying")).toBe(false);
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
   it("persists an ordinary failed tool's partial output through the lifecycle state conversion", async () => {
     const controller = new AbortController();
     const f = fixture([

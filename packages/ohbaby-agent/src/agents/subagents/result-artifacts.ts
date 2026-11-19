@@ -40,6 +40,7 @@ export function createSubagentResultArtifacts(options: {
   ) => Promise<{
     readonly name?: string;
     readonly unprocessedMessageCount?: number;
+    readonly isInstanceOpen?: boolean;
   }>;
 }): SubagentResultArtifacts {
   const resolver = new PathResolver(options.rootDir);
@@ -49,7 +50,11 @@ export function createSubagentResultArtifacts(options: {
     record: SubagentExecutionRecord,
   ): Promise<string> {
     const context = await options.readDeliveryContext?.(record);
-    return `${identity(record)}\nname: ${JSON.stringify((context?.name ?? record.subagentId).slice(0, 200))}${context?.unprocessedMessageCount === undefined ? "" : `\nunprocessed_messages: ${String(context.unprocessedMessageCount)}${context.unprocessedMessageCount > 0 ? " (not consumed; original messages and close reasons remain saved)" : ""}`}`;
+    const continuationHint =
+      record.status === "failed" && context?.isInstanceOpen
+        ? "\nThis subagent instance is still open. Its history and completed tool results are saved, so you can send it a follow-up task to continue."
+        : "";
+    return `${identity(record)}\nname: ${JSON.stringify((context?.name ?? record.subagentId).slice(0, 200))}${context?.unprocessedMessageCount === undefined ? "" : `\nunprocessed_messages: ${String(context.unprocessedMessageCount)}${context.unprocessedMessageCount > 0 ? " (not consumed; original messages and close reasons remain saved)" : ""}`}${continuationHint}`;
   }
   const keyFor = (record: SubagentExecutionRecord): StorageKey => [
     record.rootSessionId,

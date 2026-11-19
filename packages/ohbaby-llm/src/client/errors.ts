@@ -1,3 +1,4 @@
+import { ProviderStreamFailureError } from "../providers/stream-errors.js";
 import { APIUserAbortError as AnthropicUserAbortError } from "@anthropic-ai/sdk/error";
 import { APIUserAbortError as OpenAIUserAbortError } from "openai";
 
@@ -55,6 +56,7 @@ const INPUT_TOKEN_LIMIT_PATTERN =
   /(?:\b(?:context|input|prompt)\b[^\n]{0,80}\btoken limit\b|\btoken limit\b[^\n]{0,80}\b(?:context|input|prompt)\b)/u;
 
 export function isContextOverflowError(error: unknown): boolean {
+  if (error instanceof ProviderStreamFailureError) error = error.error;
   const candidates = [
     errorStringField(error, "code"),
     errorStringField(error, "type"),

@@ -11,7 +11,11 @@ import {
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
 import { createInMemoryRunLedger } from "../../../packages/ohbaby-agent/src/runtime/run-ledger/index.js";
 import { createInProcessUiBackendClient } from "../../../packages/ohbaby-agent/src/adapters/ui-inprocess.js";
-import type { LLMClientInstance, TokenUsage } from "ohbaby-llm";
+import {
+  DEFAULT_PROVIDER_RETRY_POLICY,
+  type LLMClientInstance,
+  type TokenUsage,
+} from "ohbaby-llm";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -246,8 +250,17 @@ describe("final step cache accounting through the in-process runtime", () => {
   it.each(["eof", "throw", "complete-then-throw"] as const)(
     "retains earlier settled steps after a later %s",
     async (failure) => {
+      const retries =
+        failure === "eof" ? DEFAULT_PROVIDER_RETRY_POLICY.maxRetriesPerStep : 0;
+      const transientFailure = (): never => {
+        throw Object.assign(new Error("provider unavailable"), {
+          status: 503,
+          headers: { "retry-after-ms": "0" },
+        });
+      };
       const f = await fixture([
         [toolStep(usage(1_000, 800))],
+        ...Array.from({ length: retries }, () => transientFailure),
         async function* () {
           if (failure === "eof") {
             yield { textDelta: "unfinished", tokenUsage: usage(2_000, 2_000) };
@@ -260,7 +273,11 @@ describe("final step cache accounting through the in-process runtime", () => {
       ]);
       const completion = await f.run();
       expect(completion.prompt.status).toBe("failed");
-      expect(f.requests).toHaveLength(2);
+      expect(f.requests).toHaveLength(retries + 2);
+      if (failure === "eof")
+        expect(await f.runLedger.get("run_1")).toMatchObject({
+          errorData: { code: "PROVIDER_RETRY_EXHAUSTED", attempts: retries },
+        });
       expect(await f.cache()).toEqual({
         sessionId: "session_1",
         accountedInputTokens: 1_000,

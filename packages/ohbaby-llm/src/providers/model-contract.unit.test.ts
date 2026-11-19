@@ -26,9 +26,9 @@ describe("model request contract", () => {
       const responsesCreate = vi
         .spyOn(responses.client.responses, "create")
         .mockResolvedValue({} as never);
-      const anthropicStream = vi
-        .spyOn(anthropic.client.messages, "stream")
-        .mockReturnValue({});
+      const anthropicCreate = vi
+        .spyOn(anthropic.client.messages, "create")
+        .mockResolvedValue({} as never);
       const provider =
         kind === "chat" ? chat : kind === "responses" ? responses : anthropic;
       for (const message of [
@@ -57,7 +57,7 @@ describe("model request contract", () => {
         ).rejects.toThrow();
       expect(chatCreate).not.toHaveBeenCalled();
       expect(responsesCreate).not.toHaveBeenCalled();
-      expect(anthropicStream).not.toHaveBeenCalled();
+      expect(anthropicCreate).not.toHaveBeenCalled();
     },
   );
   it("projects flat calls and tools to Chat while preserving raw arguments and rare fields", async () => {
@@ -168,8 +168,8 @@ describe("model request contract", () => {
   it("preserves flat parallel calls and their result IDs through Anthropic conversion", async () => {
     const provider = createAnthropicProvider(options);
     const create = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockReturnValue({});
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue({} as never);
     await provider.streamResponse({
       ...base,
       messages: [
@@ -251,8 +251,8 @@ describe("model request contract", () => {
     async (content, expected) => {
       const provider = createAnthropicProvider(options);
       const create = vi
-        .spyOn(provider.client.messages, "stream")
-        .mockReturnValue({});
+        .spyOn(provider.client.messages, "create")
+        .mockResolvedValue({} as never);
       await provider.streamResponse({
         ...base,
         messages: [{ role: "tool", callId: "c", content }],

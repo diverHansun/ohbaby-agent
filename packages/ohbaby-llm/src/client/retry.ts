@@ -28,6 +28,7 @@ export class ProviderStreamInterruptedError extends Error {
   constructor(
     override readonly cause: unknown,
     readonly source?: "transport" | "eof" | "protocol" | "provider_abort",
+    readonly stepRetry?: { readonly delayMs: number },
   ) {
     super(errorMessage(cause));
     this.name = "ProviderStreamInterruptedError";
@@ -111,23 +112,23 @@ export function isRetryableProviderError(error: unknown): boolean {
   if (error instanceof ProviderStreamIdleTimeoutError) return true;
   // Context recovery belongs to the forced-compaction path, never backoff.
   if (isContextOverflowError(error)) return false;
-  // SDK retries are off; their wrapped network failures (including request
-  // timeouts) carry no status or code, so classify them by type here.
+  const status = providerErrorStatus(error);
+  return (
+    isProviderTransportError(error) ||
+    status === 408 ||
+    status === 429 ||
+    status === 529 ||
+    (status !== undefined && status >= 500 && status < 600)
+  );
+}
+
+/** SDK connection failures and legacy direct network codes. */
+export function isProviderTransportError(error: unknown): boolean {
   if (
     error instanceof OpenAIConnectionError ||
     error instanceof AnthropicConnectionError
   )
     return true;
-
-  const status = providerErrorStatus(error);
-  if (
-    status === 408 ||
-    status === 429 ||
-    status === 529 ||
-    (status !== undefined && status >= 500 && status < 600)
-  ) {
-    return true;
-  }
 
   const code = stringField(error, "code")?.toUpperCase();
   return (

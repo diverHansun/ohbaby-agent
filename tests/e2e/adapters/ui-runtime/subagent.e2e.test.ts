@@ -671,8 +671,8 @@ describe("subagent runtime e2e", () => {
       });
       expect(JSON.stringify(child)).toContain("partial child report");
       expect(execution.status).toBe("failed");
-      expect(execution.error).toContain(
-        "LLM provider stream was interrupted after partial output.",
+      expect(execution.error).toBe(
+        "The response was interrupted. You can try again.",
       );
       expect(execution.output ?? "").not.toContain("partial child report");
       expect(parentText).not.toContain("partial child report");

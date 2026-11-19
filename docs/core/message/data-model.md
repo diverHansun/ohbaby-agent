@@ -132,13 +132,13 @@ type MessageError =
   | { name: 'ProviderAuthError'; providerId: string; message: string }
   | { name: 'MessageOutputLengthError' }
   | { name: 'MessageContentFilterError' }
-  | { name: 'MessageStreamInterruptedError' }
+  | { name: 'MessageStreamInterruptedError'; retried?: true }
   | { name: 'MessageAbortedError'; message: string }
   | { name: 'APIError'; message: string; statusCode?: number; isRetryable: boolean }
   | { name: 'Unknown'; message: string }
 ```
 
-2026-11-11 请求反馈补充：`modelRequests` 的 `retryScheduled?: true` 随失败结束事实一次保存；终态仍不可补写。详细诊断仅在观测回调中传递，不存入此字段。旧 JSON 缺少新字段时不推测历史重试。
+`modelRequests` 的 `retryScheduled?: true` 随失败结束事实一次保存，终态不可补写。被整步重来取代的助手消息保留这条请求记录，UI 先收到请求结束，再收到消息失败状态。详细诊断只在观测回调中传递。旧 JSON 缺少 `retryScheduled` 时不推测历史重试。
 
 SDK 的 `UiRun.modelActivity` 从当前 run 最新请求和对应 assistant 内容推导，增加可选 `phase`、`waitingStartedAt`。退避时仍关联真实已结束的失败请求；同一链计时连续，新的 attempt=1 重新计时。非空正文、reasoning 或工具进展更新阶段；运行结束时清空，旧重试不会复活。
 
@@ -648,13 +648,13 @@ AssistantMessage.agent: string  // 响应时使用的 Agent
 
 ## improve-7：失败回复与历史事实
 
-`finish: "error"` 的 assistant 保留在会话中。`MessageOutputLengthError`、`MessageContentFilterError`、明确 transport/无终态 EOF 的 `MessageStreamInterruptedError` 可投影 active、用户可见的 TextPart，附固定未完成说明。推理、native 状态、未完成工具参数、ignored/synthetic/runtime/已 compacted 正文不作为材料。旧 `Unknown`/`APIError` 保守过滤，不按错误文案升级。
+`finish: "error"` 的助手消息保留在会话中。被整步重来取代的 `MessageStreamInterruptedError` 带 `retried: true`，模型请求和摘要都排除整条消息及其中断说明。普通 `MessageStreamInterruptedError`、`MessageOutputLengthError` 和 `MessageContentFilterError` 仍可投影 active、用户可见的 TextPart，并附固定的未完成说明。推理、native 状态、未完成的工具参数和 ignored/synthetic/runtime/已 compacted 正文不作为材料。旧 `Unknown` 和 `APIError` 保守过滤。
 
 主动取消使用 `MessageAbortedError`，取消正文留库但不发送。无正文的可投影失败或取消，在原 assistant 上保存至多一个 `synthetic: true`、`metadata.kind: "lifecycle-interruption"` 的 TextPart。其 scope 跟随原消息，压缩退休后不得因读取 `Message.error` 重新生成。正常收完的无正文 length/filter 由该 Part 保存已接受 usage。
 
 工具阶段取消保留已经接受的 assistant 和工具调用/结果，不能把它改成失败协议回复。只追加同一种事实 Part，投影时放在配对结果之后。进入请求前取消且尚无 assistant 时，只记录 Run cancelled。
 
-新错误 variant 同步进入事件 Zod；持久化使用现有 JSON 字段，无 SQL 列变更。旧版本程序可能拒绝新 variant，回滚运行程序前应保留数据库备份；不能宣称旧程序可无损识别新分类。
+消息事件 Zod schema 保留 `retried`，沿用现有 JSON 字段保存。缺少该字段的旧消息按普通中断处理。回滚后，旧版本同样会按普通中断投影原先带 `retried` 的消息。
 
 ## 会话 Fork 的消息副本
 
