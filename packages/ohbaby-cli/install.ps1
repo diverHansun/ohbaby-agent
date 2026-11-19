@@ -171,6 +171,17 @@
         }
     }
 
+    function Get-Sha256([string]$Path) {
+        $stream = [IO.File]::OpenRead($Path)
+        try {
+            $hash = [Security.Cryptography.SHA256]::Create()
+            try { [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '') }
+            finally { $hash.Dispose() }
+        } finally {
+            $stream.Dispose()
+        }
+    }
+
     function Test-ExecutableVersion([string]$Executable, [string]$Expected, [string]$Program) {
         if (-not [IO.File]::Exists($Executable)) { return $false }
         $ErrorActionPreference = 'Continue'
@@ -214,7 +225,7 @@
         $expectedHash = @([IO.File]::ReadLines($checksums) | ForEach-Object {
             if ($_ -match $pattern) { $Matches[1] }
         })
-        if ($expectedHash.Count -ne 1 -or (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash -ine $expectedHash[0]) {
+        if ($expectedHash.Count -ne 1 -or (Get-Sha256 $zipPath) -ine $expectedHash[0]) {
             throw "SHA-256 verification failed for '$archive'."
         }
 
