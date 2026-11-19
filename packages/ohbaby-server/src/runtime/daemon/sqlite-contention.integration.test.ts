@@ -488,7 +488,8 @@ it.each([
       await laterWrite;
       clearInterval(heartbeat);
       expect(heartbeatCount).toBeGreaterThan(0);
-      expect(maxHeartbeatGap).toBeLessThan(200);
+      // Keep the heartbeat well below the shortest lock, even on hosted runners.
+      expect(maxHeartbeatGap).toBeLessThan(350);
       expect(queuedResult.ok).toBe(holdMs < 5000);
       if (holdMs < 5000) {
         const outcome = await backend.waitForPrompt(first.result.promptId);

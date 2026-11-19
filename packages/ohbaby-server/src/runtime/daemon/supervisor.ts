@@ -5,6 +5,8 @@ import {
   createShutdownOptions,
   withinShutdown,
   type CleanupResult,
+  serverPreviousRunUnclean,
+  serverStateFilesCleanupFailed,
   serverStopFailed,
   serverStopped,
   type Logger,
@@ -17,6 +19,7 @@ import type {
   DaemonPidLock,
   DaemonRuntimeHandle,
   DaemonSignalTarget,
+  DaemonState,
   DaemonStateFile,
 } from "./types.js";
 
@@ -106,22 +109,31 @@ export class Supervisor {
     if (this.runtime) {
       return;
     }
+    if (this.pidLock) {
+      throw new Error("Cannot restart a supervisor that retained its PID lock");
+    }
 
     this.stopPromise = undefined;
+    this.pidLock = await this.pidFile.acquire();
     try {
-      this.pidLock = await this.pidFile.acquire();
+      await this.recordPreviousRun();
+      try {
+        await this.stateFile.removeStaleFiles?.();
+      } catch (error) {
+        emitDiagnosticSafely(this.logger, serverStateFilesCleanupFailed, {
+          error,
+        });
+      }
       this.startedAt = this.now();
       this.runtime = await this.options.bootstrap();
       await this.runtime.start();
       await this.writeState("running");
       this.registerSignals();
     } catch (error) {
-      if (this.pidLock) {
-        try {
-          await this.writeState("crashed", errorToMessage(error));
-        } catch {
-          // The original startup failure remains authoritative.
-        }
+      try {
+        await this.writeState("crashed", errorToMessage(error));
+      } catch {
+        // The original startup failure remains authoritative.
       }
       try {
         await this.runtime?.stop();
@@ -179,7 +191,7 @@ export class Supervisor {
 
   private async stopInternal(): Promise<void> {
     const options = createShutdownOptions(this.shutdownTimeoutMs);
-    // Reserve part of the same budget for final state and the token-scoped report.
+    // Reserve part of the same budget for the final state and report.
     const cleanupOptions = {
       ...options,
       deadlineAt:
@@ -196,8 +208,21 @@ export class Supervisor {
     this.activeClients.clear();
     if (!this.runtime && !this.pidLock) return;
 
+    let pendingStateWrite: Promise<void> | undefined;
+    const writeStopState = (
+      status: DaemonState["status"],
+      error?: string,
+    ): Promise<void> => {
+      const write = this.writeState(status, error);
+      pendingStateWrite = write;
+      const settled = (): void => {
+        if (pendingStateWrite === write) pendingStateWrite = undefined;
+      };
+      void write.then(settled, settled);
+      return write;
+    };
     const stopping = withinShutdown(cleanupOptions, "state.stopping", () =>
-      this.writeState("stopping"),
+      writeStopState("stopping"),
     );
     const runtime = collectCleanup(cleanupOptions, {
       runtime: () => this.runtime?.stop(cleanupOptions),
@@ -210,8 +235,15 @@ export class Supervisor {
     const runtimeResult = await runtime;
     errors.push(...runtimeResult.errors);
     try {
+      // The stage deadline stops waiting, but it does not cancel the write.
+      const earlierWrite = pendingStateWrite;
+      if (earlierWrite) {
+        await withinShutdown(options, "state.stopping", () =>
+          earlierWrite.catch(() => undefined),
+        );
+      }
       await withinShutdown(options, "state.final", () =>
-        this.writeState(
+        writeStopState(
           runtimeResult.status === "confirmed" ? "stopped" : "crashed",
           runtimeResult.errors.at(0),
         ),
@@ -219,6 +251,7 @@ export class Supervisor {
     } catch (error) {
       errors.push(errorToMessage(error));
     }
+    const retainLock = pendingStateWrite !== undefined;
     // Emit while the sink still accepts events; its disposal flushes this record.
     if (this.logger !== NOOP_LOGGER) {
       if (!errors.length)
@@ -241,35 +274,57 @@ export class Supervisor {
       },
     });
     errors.push(...diagnostics.errors);
-    const finalCleanup = await collectCleanup(options, {
-      "pid.release": () => this.releasePidLock(),
-    });
-    errors.push(...finalCleanup.errors);
-    const cleanup: CleanupResult = {
-      status: errors.length ? "unconfirmed" : "confirmed",
-      errors,
-    };
-    try {
-      if (identity && this.stateFile.writeShutdownReport) {
-        await withinShutdown(
-          options,
-          "shutdown-report",
-          () =>
-            this.stateFile.writeShutdownReport?.({
-              pid: identity.pid,
-              pidToken: identity.token,
-              recordedAt: this.now(),
-              cleanup,
-            }) ?? Promise.resolve(),
-        );
+    // A successor must not acquire the lock while an earlier write can still publish.
+    if (!retainLock) {
+      const finalCleanup = await collectCleanup(options, {
+        "pid.release": () => this.releasePidLock(),
+      });
+      errors.push(...finalCleanup.errors);
+      const cleanup: CleanupResult = {
+        status: errors.length ? "unconfirmed" : "confirmed",
+        errors,
+      };
+      try {
+        if (identity && this.stateFile.writeShutdownReport) {
+          await withinShutdown(
+            options,
+            "shutdown-report",
+            () =>
+              this.stateFile.writeShutdownReport?.({
+                pid: identity.pid,
+                pidToken: identity.token,
+                recordedAt: this.now(),
+                cleanup,
+              }) ?? Promise.resolve(),
+          );
+        }
+      } catch (error) {
+        errors.push(errorToMessage(error));
       }
-    } catch (error) {
-      errors.push(errorToMessage(error));
     }
     this.unregisterSignals();
     this.runtime = undefined;
     this.startedAt = undefined;
     if (errors.length) throw new Error(errors.join("; "));
+  }
+
+  private async recordPreviousRun(): Promise<void> {
+    try {
+      const state = await this.stateFile.read?.();
+      if (
+        (state?.status === "running" || state?.status === "stopping") &&
+        state.pid !== undefined
+      ) {
+        emitDiagnosticSafely(this.logger, serverPreviousRunUnclean, {
+          previousPid: state.pid,
+          previousStatus: state.status,
+          previousStartedAt: state.startedAt,
+          previousUpdatedAt: state.updatedAt,
+        });
+      }
+    } catch {
+      // Previous-run diagnostics must not block startup.
+    }
   }
 
   private scheduleIdleStop(): void {
@@ -296,7 +351,7 @@ export class Supervisor {
   }
 
   private async writeState(
-    status: "running" | "stopping" | "stopped" | "crashed",
+    status: DaemonState["status"],
     error?: string,
   ): Promise<void> {
     await this.stateFile.write({

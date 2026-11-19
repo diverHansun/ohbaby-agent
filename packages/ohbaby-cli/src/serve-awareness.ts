@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import type { resolveOhbabyHome } from "ohbaby-agent";
 
 interface DaemonPidRecord {
   readonly pid: number;
@@ -18,6 +18,7 @@ interface DaemonState {
 }
 
 export interface ReadServeCoexistenceNoticeOptions {
+  readonly environment?: Readonly<NodeJS.ProcessEnv>;
   readonly fetch?: typeof fetch;
   readonly homeDirectory?: string;
   readonly packageVersion: string;
@@ -70,13 +71,10 @@ function isProcessAlive(pid: number): boolean {
 
 export async function readServeCoexistenceNotice(
   options: ReadServeCoexistenceNoticeOptions,
+  resolveHome: typeof resolveOhbabyHome,
 ): Promise<string | undefined> {
   try {
-    const serverDirectory = join(
-      options.homeDirectory ?? homedir(),
-      ".ohbaby",
-      "server",
-    );
+    const serverDirectory = join(resolveHome(options), "server");
     const [pidValue, stateValue] = await Promise.all([
       readJson(join(serverDirectory, "daemon.pid")),
       readJson(join(serverDirectory, "daemon-state.json")),

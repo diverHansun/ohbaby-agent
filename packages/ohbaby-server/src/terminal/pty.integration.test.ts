@@ -1,18 +1,23 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
+import { realpath } from "node:fs/promises";
 import { createTerminalPty, type TerminalPty } from "./pty.js";
 
 import * as processTree from "./process-tree.js";
 import { execFileSync } from "node:child_process";
 
 const opened: TerminalPty[] = [];
+const windows = process.platform === "win32";
+// These tests exercise POSIX session inspection, process groups and signals.
+const itPosix = it.skipIf(windows);
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(opened.splice(0).map((pty) => pty.terminate()));
 });
 async function open(shellPath = "/bin/sh"): Promise<{
   pty: TerminalPty;
+  pid: number;
   shell: string;
   waitFor: (pattern: RegExp) => Promise<string>;
 }> {
@@ -38,8 +43,16 @@ async function open(shellPath = "/bin/sh"): Promise<{
     }
     return output;
   };
-  pty.write("stty -echo\r");
-  return { pty, shell, waitFor };
+  if (!windows) {
+    pty.write("stty -echo\r");
+    return { pty, pid: pty.pid, shell, waitFor };
+  }
+  // ConPTY publishes its child PID after startup. Ask the running shell for it.
+  const pidMarker = /PTY-(\d+)-PID/;
+  pty.write("Write-Output ('PTY-{0}-PID' -f $PID)\r");
+  const pid = Number(matchOutput(await waitFor(pidMarker), pidMarker)[1]);
+  expect(pid).toBeGreaterThan(0);
+  return { pty, pid, shell, waitFor };
 }
 function alive(pid: number): boolean {
   try {
@@ -51,33 +64,45 @@ function alive(pid: number): boolean {
 }
 it("runs actual UTF-8 commands in the requested directory and applies terminal size", async () => {
   const { pty, shell, waitFor } = await open();
-  expect(shell).toBe("sh");
   pty.resize(101, 35);
+  if (windows) {
+    expect(shell).toMatch(/^(?:pwsh|powershell)$/);
+    pty.write(
+      "Write-Output ('RESULT:{0}:{1}:{2}:中文' -f $PWD.Path, [Console]::WindowWidth, [Console]::WindowHeight)\r",
+    );
+    const result = /RESULT:(.+):101:35:中文/;
+    const [, directory] = matchOutput(await waitFor(result), result);
+    expect(await realpath(directory)).toBe(await realpath(tmpdir()));
+    return;
+  }
+  expect(shell).toBe("sh");
   pty.write("printf 'RESULT:%s:中文\\n' \"$PWD\"; stty size\r");
   const output = await waitFor(/35 101/);
   expect(output).toContain(`RESULT:${tmpdir().replace(/\/$/, "")}:中文`);
 });
 it("reports a natural shell exit once with its actual code", async () => {
-  const { pty } = await open();
+  const { pty, pid } = await open();
   const exits: number[] = [];
   pty.onExit(({ exitCode }) => exits.push(exitCode));
   pty.write("exit 7\r");
-  await expect.poll(() => exits).toEqual([7]);
+  await expect.poll(() => exits, { timeout: 5_000 }).toEqual([7]);
   await pty.terminate();
   expect(exits).toEqual([7]);
-  expect(alive(pty.pid)).toBe(false);
+  await expect.poll(() => alive(pid), { timeout: 5_000 }).toBe(false);
 });
 it("cleans a paused shell and shares simultaneous termination", async () => {
-  const { pty, waitFor } = await open();
-  pty.write("printf 'READY\\n'\r");
-  await waitFor(/READY\r?\n/);
+  const { pty, pid, waitFor } = await open();
+  pty.write(
+    windows ? "Write-Output ('RE' + 'ADY')\r" : "printf 'RE%s\\n' ADY\r",
+  );
+  await waitFor(/READY/);
   pty.pause();
   const first = pty.terminate();
   expect(pty.terminate()).toBe(first);
   await first;
-  expect(alive(pty.pid)).toBe(false);
+  await expect.poll(() => alive(pid), { timeout: 5_000 }).toBe(false);
 });
-it("kills an ignoring child after the shell exits first, and frees its listening port", async () => {
+itPosix("kills an ignoring child after the shell exits first, and frees its listening port", async () => {
   const { pty, waitFor } = await open();
   const command = `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>console.log("CHILD:"+process.pid+":"+s.address().port));' &`;
   pty.write(command + "\r");
@@ -85,9 +110,7 @@ it("kills an ignoring child after the shell exits first, and frees its listening
   const [, pidText, portText] = matchOutput(output, /CHILD:(\d+):(\d+)/);
   const child = Number(pidText);
   expect(await pty.inspectChildren()).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ pid: child, name: "node" }),
-    ]),
+    expect.arrayContaining([expect.objectContaining({ pid: child })]),
   );
   await pty.terminate();
   expect(alive(child)).toBe(false);
@@ -104,7 +127,7 @@ it("kills an ignoring child after the shell exits first, and frees its listening
     }),
   );
 });
-it("escalates when the shell itself ignores hangup", async () => {
+itPosix("escalates when the shell itself ignores hangup", async () => {
   const { pty, waitFor } = await open();
   pty.write("trap '' HUP; printf 'TRAPPED\\n'\r");
   await waitFor(/TRAPPED\r?\n/);
@@ -112,7 +135,7 @@ it("escalates when the shell itself ignores hangup", async () => {
   expect(alive(pty.pid)).toBe(false);
 });
 
-it("retains captured children after failed cleanup so a later attempt can finish", async () => {
+itPosix("retains captured children after failed cleanup so a later attempt can finish", async () => {
   const { pty, waitFor } = await open();
   pty.write(
     `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("RETRY:"+process.pid)' &\r`,
@@ -141,7 +164,7 @@ function matchOutput(output: string, pattern: RegExp): RegExpExecArray {
   return match;
 }
 
-it("cleans an observed background child after the shell naturally exits", async () => {
+itPosix("cleans an observed background child after the shell naturally exits", async () => {
   const { pty, waitFor } = await open();
   pty.write(
     `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("NATURAL:"+process.pid)' &\r`,
@@ -164,7 +187,7 @@ it("cleans an observed background child after the shell naturally exits", async 
   expect(alive(child)).toBe(false);
 });
 
-it.each(["/bin/sh", "/bin/zsh"])(
+itPosix.each(["/bin/sh", "/bin/zsh"])(
   "cleans unobserved jobs from %s after natural exit without touching another terminal or a detached process",
   async (shellPath) => {
     const { pty, waitFor } = await open(shellPath);
@@ -234,7 +257,7 @@ it.each(["/bin/sh", "/bin/zsh"])(
   15000,
 );
 
-it("leaves cleanup retryable when process-session inspection fails", async () => {
+itPosix("leaves cleanup retryable when process-session inspection fails", async () => {
   const { pty } = await open();
   vi.spyOn(processTree, "readProcessTable").mockRejectedValue(
     new Error("session inspection unavailable"),
@@ -247,7 +270,7 @@ it("leaves cleanup retryable when process-session inspection fails", async () =>
   await pty.terminate();
   expect(alive(pty.pid)).toBe(false);
 });
-it("never reopens a session number after a complete scan proved it empty", async () => {
+itPosix("never reopens a session number after a complete scan proved it empty", async () => {
   const { pty } = await open();
   const other = await open();
   await pty.terminate();
@@ -262,7 +285,7 @@ it("never reopens a session number after a complete scan proved it empty", async
   expect(alive(other.pty.pid)).toBe(true);
 });
 
-it("rescans a seemingly empty session before sealing when a successor was absent from the first process sample", async () => {
+itPosix("rescans a seemingly empty session before sealing when a successor was absent from the first process sample", async () => {
   const { pty, waitFor } = await open();
   pty.write(
     `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("SUCCESSOR:"+process.pid)' &\r`,

@@ -1,6 +1,8 @@
 import { once } from "node:events";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { request } from "node:http";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { createDaemonHttpServer, type WorkspaceBackend } from "./server.js";
@@ -11,6 +13,13 @@ const protocols = [
   `ohbaby.bearer.${Buffer.from(token).toString("base64url")}`,
   "ohbaby.terminal.v1",
 ];
+
+function markerCommand(prefix: string, suffix: string): string {
+  // The expected text is formed by the shell, so command echo cannot satisfy it.
+  return process.platform === "win32"
+    ? `Write-Output ('{0}-{1}' -f '${prefix}', '${suffix}')\r`
+    : `printf '${prefix}-%s\\n' ${suffix}\r`;
+}
 
 async function createTerminal(
   url: string,
@@ -236,23 +245,31 @@ describe("daemon terminal HTTP and WebSocket boundary", () => {
           await fetch(`${url}/v1/terminals`, { headers: { authorization } })
         ).json(),
       ).toEqual({ ok: true, terminals: [] });
-      const terminal = await createTerminal(url, {
-        "x-ohbaby-directory": encodeURIComponent(`${process.cwd()}/packages`),
-        "x-ohbaby-directory-encoding": "percent-utf8",
-      });
-      expect(terminal.directory).toBe(process.cwd());
-      const deleted = await fetch(
-        `${url}/v1/terminals/${terminal.id}?force=1`,
-        {
-          method: "DELETE",
-          headers: {
-            authorization,
-            "x-ohbaby-directory": "%GG",
-            "x-ohbaby-directory-encoding": "percent-utf8",
+      const workspace = await mkdtemp(join(tmpdir(), "terminal-workspace-"));
+      try {
+        const nested = join(workspace, "nested");
+        await mkdir(join(workspace, ".git"));
+        await mkdir(nested);
+        const terminal = await createTerminal(url, {
+          "x-ohbaby-directory": encodeURIComponent(nested),
+          "x-ohbaby-directory-encoding": "percent-utf8",
+        });
+        expect(terminal.directory).toBe(await realpath(workspace));
+        const deleted = await fetch(
+          `${url}/v1/terminals/${terminal.id}?force=1`,
+          {
+            method: "DELETE",
+            headers: {
+              authorization,
+              "x-ohbaby-directory": "%GG",
+              "x-ohbaby-directory-encoding": "percent-utf8",
+            },
           },
-        },
-      );
-      expect(deleted.status).toBe(200);
+        );
+        expect(deleted.status).toBe(200);
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
     }, true);
   });
 
@@ -346,10 +363,12 @@ describe("daemon terminal HTTP and WebSocket boundary", () => {
       ws.send(
         JSON.stringify({
           type: "input",
-          data: "printf 'checked-%s\\n' valid\r",
+          data: markerCommand("checked", "valid"),
         }),
       );
-      await expect.poll(() => output.join("")).toContain("checked-valid");
+      await expect
+        .poll(() => output.join(""), { timeout: 5_000 })
+        .toContain("checked-valid");
       expect(output.join("")).not.toContain("INJECTED_");
       const viewer = new WebSocket(address, protocols);
       const snapshot = once(viewer, "message");
@@ -361,10 +380,12 @@ describe("daemon terminal HTTP and WebSocket boundary", () => {
       ws.send(
         JSON.stringify({
           type: "input",
-          data: "printf 'resized-%s\\n' valid\r",
+          data: markerCommand("resized", "valid"),
         }),
       );
-      await expect.poll(() => output.join("")).toContain("resized-valid");
+      await expect
+        .poll(() => output.join(""), { timeout: 5_000 })
+        .toContain("resized-valid");
       const resized = new WebSocket(address, protocols);
       const resizedSnapshot = once(resized, "message");
       expect(
@@ -432,15 +453,17 @@ describe("daemon terminal HTTP and WebSocket boundary", () => {
       ws.send(
         JSON.stringify({
           type: "input",
-          data: "printf 'terminal-%s\\n' boundary-ok\r",
+          data: markerCommand("terminal", "boundary-ok"),
         }),
       );
       await expect
-        .poll(() =>
-          messages
-            .filter((message) => message.type === "output")
-            .map((message) => message.data)
-            .join(""),
+        .poll(
+          () =>
+            messages
+              .filter((message) => message.type === "output")
+              .map((message) => message.data)
+              .join(""),
+          { timeout: 5_000 },
         )
         .toContain("terminal-boundary-ok");
       const disconnected = once(ws, "close");
@@ -471,15 +494,14 @@ describe("daemon terminal HTTP and WebSocket boundary", () => {
   });
 });
 
-it("cleans unobserved background work on shell exit without affecting another terminal", async () => {
-  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
-  const { tmpdir } = await import("node:os");
-  const path = await import("node:path");
+// The POSIX adapter owns background shell jobs by session. Windows uses native PTY termination.
+it.skipIf(process.platform === "win32")("cleans unobserved background work on shell exit without affecting another terminal", async () => {
+  const { readFile } = await import("node:fs/promises");
   const net = await import("node:net");
   const directory = await mkdtemp(
-    path.join(tmpdir(), "terminal-natural-exit-"),
+    join(tmpdir(), "terminal-natural-exit-"),
   );
-  const resultPath = path.join(directory, "child.json");
+  const resultPath = join(directory, "child.json");
   let childPid: number | undefined;
   const alive = (pid: number): boolean => {
     try {

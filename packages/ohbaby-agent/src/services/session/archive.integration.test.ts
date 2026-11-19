@@ -305,19 +305,18 @@ it("keeps session storage through restore and removes only the permanently delet
   expect(await fs.readFile(join(root, "project.txt"), "utf8")).toBe("project");
 });
 
-it("keeps database deletion committed when storage cleanup cannot access its parent", async () => {
-  const fs = await import("node:fs/promises");
+it("keeps database deletion committed when storage cleanup fails", async () => {
   const { cleanupDeletedSessionFiles } = await import("./archive-files.js");
   addSession("owner");
-  const blocked = join(root, "blocked");
-  await fs.writeFile(blocked, "not a directory");
   const result = await deleteArchivedSession("owner");
   const failures: unknown[] = [];
   await cleanupDeletedSessionFiles(result, {
-    sessionStorageRoot: blocked,
+    sessionStorageRoot: join(root, "invalid\0directory"),
     snapshotRoot: root,
     log: (error) => failures.push(error),
   });
   expect(readSessionRow(getDatabase(), "owner")).toBeNull();
-  expect(failures).toHaveLength(1);
+  expect(failures).toEqual([
+    expect.objectContaining({ code: "ERR_INVALID_ARG_VALUE" }),
+  ]);
 });

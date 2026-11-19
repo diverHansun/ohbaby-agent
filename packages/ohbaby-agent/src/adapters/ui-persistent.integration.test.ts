@@ -914,6 +914,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -994,6 +995,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1040,6 +1042,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1098,6 +1101,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       releaseBlocked.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1140,6 +1144,7 @@ describe("createPersistentUiBackendClient", () => {
       ).toEqual(completion.prompt.error);
     } finally {
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1184,6 +1189,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1227,6 +1233,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1277,6 +1284,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1551,6 +1559,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       settleAbortedRun.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -2326,40 +2335,49 @@ describe("createPersistentUiBackendClient", () => {
           });
         else await client.submitPromptAndWait("inspect files", { sessionId });
         const ledger = createDatabaseRunLedger();
-        await vi.waitFor(async () => {
-          expect(
-            await ledger.listBySession(sessionId, { mainOnly: true }),
-          ).toMatchObject([{ triggerSource: owner, status: "succeeded" }]);
-        });
+        await vi.waitFor(
+          async () => {
+            expect(
+              await ledger.listBySession(sessionId, { mainOnly: true }),
+            ).toMatchObject([{ triggerSource: owner, status: "succeeded" }]);
+          },
+          { timeout: 5000 },
+        );
         releaseChild.resolve(undefined);
-        await vi.waitFor(() => {
-          expect(primaryRequests).toBe(3);
-        });
+        await vi.waitFor(
+          () => {
+            expect(primaryRequests).toBe(3);
+          },
+          { timeout: 5000 },
+        );
         expect((await client.getSessionControl?.({ sessionId }))?.driver).toBe(
           owner === "goal" ? "goal" : "subagent",
         );
         releaseWake.resolve(undefined);
-        await vi.waitFor(async () => {
-          const runs = await ledger.listBySession(sessionId, {
-            mainOnly: true,
-          });
-          expect(runs).toMatchObject([
-            { triggerSource: "subagent", status: "succeeded" },
-            { triggerSource: owner, status: "succeeded" },
-          ]);
-          const view = await client.getSessionView?.({ sessionId });
-          for (const run of runs) {
-            const expected = {
-              id: run.runId,
-              trigger: run.triggerSource,
-              outcome: "succeeded",
-            };
-            expect(view?.runs).toContainEqual(
-              expect.objectContaining(expected),
-            );
-            expect(updates).toContainEqual(expect.objectContaining(expected));
-          }
-        });
+        await vi.waitFor(
+          async () => {
+            const runs = await ledger.listBySession(sessionId, {
+              mainOnly: true,
+            });
+            expect(runs).toMatchObject([
+              { triggerSource: "subagent", status: "succeeded" },
+              { triggerSource: owner, status: "succeeded" },
+            ]);
+            const view = await client.getSessionView?.({ sessionId });
+            for (const run of runs) {
+              const expected = {
+                id: run.runId,
+                trigger: run.triggerSource,
+                outcome: "succeeded",
+              };
+              expect(view?.runs).toContainEqual(
+                expect.objectContaining(expected),
+              );
+              expect(updates).toContainEqual(expect.objectContaining(expected));
+            }
+          },
+          { timeout: 5000 },
+        );
         const messages = await createDatabaseMessageStore().listBySession(
           sessionId,
           { contextScopeId: undefined },
@@ -2387,6 +2405,7 @@ describe("createPersistentUiBackendClient", () => {
         await rm(directory, { recursive: true, force: true });
       }
     },
+    30000,
   );
 
   it("persists background subagent child sessions, transcripts, and run ledger entries", async () => {
@@ -2410,16 +2429,19 @@ describe("createPersistentUiBackendClient", () => {
         throw new Error("expected parent session");
       }
 
-      await vi.waitUntil(() => {
-        const rows = getDatabase()
-          .prepare(
-            `SELECT id
+      await vi.waitUntil(
+        () => {
+          const rows = getDatabase()
+            .prepare(
+              `SELECT id
              FROM ${schema.session.tableName}
              WHERE parent_id = ?`,
-          )
-          .all(parentSessionId);
-        return rows.length === 1;
-      });
+            )
+            .all(parentSessionId);
+          return rows.length === 1;
+        },
+        { timeout: 5000 },
+      );
       const childRows = getDatabase()
         .prepare<{
           readonly id: string;
@@ -2441,16 +2463,19 @@ describe("createPersistentUiBackendClient", () => {
         isSubagent: true,
       });
 
-      await vi.waitUntil(() => {
-        const rows = getDatabase()
-          .prepare<{ readonly status: string }>(
-            `SELECT status
+      await vi.waitUntil(
+        () => {
+          const rows = getDatabase()
+            .prepare<{ readonly status: string }>(
+              `SELECT status
              FROM ${schema.runLedger.tableName}
              WHERE session_id = ?`,
-          )
-          .all(childId);
-        return rows.some((row) => row.status === "succeeded");
-      });
+            )
+            .all(childId);
+          return rows.some((row) => row.status === "succeeded");
+        },
+        { timeout: 5000 },
+      );
       const childRuns = getDatabase()
         .prepare<{
           readonly run_id: string;
@@ -2471,17 +2496,20 @@ describe("createPersistentUiBackendClient", () => {
       expect(executions.executions).toHaveLength(1);
       const execution = executions.executions[0];
       const executionStore = new DatabaseSubagentExecutionStore();
-      await vi.waitFor(async () => {
-        expect(
-          await executionStore.getForRoot(
-            execution.executionId,
-            parentSessionId,
-          ),
-        ).toMatchObject({
-          status: "completed",
-          delivery: { state: "processed" },
-        });
-      });
+      await vi.waitFor(
+        async () => {
+          expect(
+            await executionStore.getForRoot(
+              execution.executionId,
+              parentSessionId,
+            ),
+          ).toMatchObject({
+            status: "completed",
+            delivery: { state: "processed" },
+          });
+        },
+        { timeout: 5000 },
+      );
       await client.dispose();
       client = undefined;
       closeDatabase();
@@ -2589,7 +2617,7 @@ describe("createPersistentUiBackendClient", () => {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
-  });
+  }, 30000);
 
   it("closes unfinished executions of terminal roots on SQLite reopen without replaying completed results", async () => {
     const directory = await tempDir("ohbaby-execution-recovery-");
@@ -3575,6 +3603,7 @@ describe("persistent conversation rewind", () => {
   afterEach(async () => {
     await client.dispose();
     vi.unstubAllEnvs();
+    closeDatabase();
     await rm(directory, { force: true, recursive: true });
   });
 

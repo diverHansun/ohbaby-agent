@@ -643,3 +643,183 @@ it("records the final stop diagnostic before disposing its logger", async () => 
   await supervisor.stop();
   expect(recorded).toContain(serverStopped);
 });
+
+it.each(["stopping", "stopped"] as const)(
+  "keeps the lock and skips the report when writing %s hangs",
+  async (hungStatus) => {
+    const release = vi.fn(() => Promise.resolve());
+    const report = vi.fn(() => Promise.resolve());
+    const states: string[] = [];
+    let ownerAlive = true;
+    let published: DaemonState | undefined;
+    let finishWrite: (() => void) | undefined;
+    const writeFinished = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
+    const supervisor = new Supervisor({
+      pidFile: {
+        acquire: (): Promise<DaemonPidLock> =>
+          Promise.resolve({
+            record: { pid: process.pid, token: "current", startedAt: 1 },
+            release,
+          }),
+      },
+      stateFile: {
+        write: async (state): Promise<void> => {
+          states.push(state.status);
+          if (state.status === hungStatus) await writeFinished;
+          published = state;
+        },
+        writeShutdownReport: report,
+      },
+      bootstrap: (): DaemonRuntimeHandle => new RecordingRuntime([]),
+      signalTarget: null,
+      shutdownTimeoutMs: 40,
+    });
+    const successor = new Supervisor({
+      pidFile: {
+        acquire(): Promise<DaemonPidLock> {
+          if (ownerAlive && release.mock.calls.length === 0) {
+            return Promise.reject(new Error("PID lock still held"));
+          }
+          return Promise.resolve({
+            record: { pid: process.pid, token: "successor", startedAt: 2 },
+            release: () => Promise.resolve(),
+          });
+        },
+      },
+      stateFile: {
+        write(state): Promise<void> {
+          published = state;
+          return Promise.resolve();
+        },
+      },
+      bootstrap: (): DaemonRuntimeHandle => new RecordingRuntime([]),
+      signalTarget: null,
+    });
+    await supervisor.start();
+    try {
+      await expect(supervisor.stop()).rejects.toThrow(/deadline/);
+      expect(release).not.toHaveBeenCalled();
+      expect(report).not.toHaveBeenCalled();
+      expect(states).toEqual(
+        hungStatus === "stopping"
+          ? ["running", "stopping"]
+          : ["running", "stopping", "stopped"],
+      );
+      await expect(supervisor.start()).rejects.toThrow(/lock/);
+      await expect(successor.start()).rejects.toThrow("PID lock still held");
+      finishWrite?.();
+      await writeFinished;
+      ownerAlive = false;
+      await successor.start();
+      expect(published).toMatchObject({
+        status: "running",
+        pidToken: "successor",
+      });
+      await successor.stop();
+    } finally {
+      finishWrite?.();
+    }
+  },
+);
+
+it("observes the prior state and sweeps artifacts only after acquiring the lock", async () => {
+  const calls: string[] = [];
+  const emit = vi.fn();
+  const sweepError = new Error("cleanup unavailable");
+  const supervisor = new Supervisor({
+    pidFile: new RecordingPidFile(calls),
+    stateFile: {
+      read: (): Promise<DaemonState> => {
+        calls.push("state.read");
+        return Promise.resolve({
+          status: "stopping",
+          pid: 12,
+          startedAt: 3,
+          updatedAt: 4,
+        });
+      },
+      removeStaleFiles: (): Promise<void> => {
+        calls.push("state.sweep");
+        return Promise.reject(sweepError);
+      },
+      write: ({ status }): Promise<void> => {
+        calls.push(`state.${status}`);
+        return Promise.resolve();
+      },
+    },
+    bootstrap: (): DaemonRuntimeHandle => {
+      calls.push("bootstrap");
+      return new RecordingRuntime(calls);
+    },
+    logger: { emit },
+    signalTarget: null,
+  });
+  await supervisor.start();
+  expect(calls.slice(0, 4)).toEqual([
+    "pid.acquire",
+    "state.read",
+    "state.sweep",
+    "bootstrap",
+  ]);
+  expect(emit).toHaveBeenCalledWith(
+    expect.objectContaining({ event: "server.previous_run.unclean" }),
+    {
+      previousPid: 12,
+      previousStatus: "stopping",
+      previousStartedAt: 3,
+      previousUpdatedAt: 4,
+    },
+  );
+  expect(emit).toHaveBeenCalledWith(
+    expect.objectContaining({ event: "server.state_files.cleanup.failed" }),
+    {
+      error: sweepError,
+    },
+  );
+  await supervisor.stop();
+});
+
+it.each(["stopped", "crashed", "absent", "invalid"] as const)(
+  "starts without an unclean-run event when the previous state is %s",
+  async (previous) => {
+    const emit = vi.fn();
+    const supervisor = new Supervisor({
+      pidFile: new RecordingPidFile([]),
+      stateFile: {
+        read: (): Promise<DaemonState | undefined> => {
+          if (previous === "invalid")
+            return Promise.reject(new Error("invalid state"));
+          if (previous === "absent") return Promise.resolve(undefined);
+          return Promise.resolve({ status: previous, pid: 12, updatedAt: 4 });
+        },
+        write: (): Promise<void> => Promise.resolve(),
+      },
+      bootstrap: (): DaemonRuntimeHandle => new RecordingRuntime([]),
+      logger: { emit },
+      signalTarget: null,
+    });
+    await supervisor.start();
+    expect(emit).not.toHaveBeenCalled();
+    await supervisor.stop();
+  },
+);
+
+it("does not inspect the former state or sweep files when PID lock acquisition fails", async () => {
+  const failure = new Error("a daemon already owns the lock");
+  const read = vi.fn();
+  const removeStaleFiles = vi.fn();
+  const write = vi.fn();
+  const bootstrap = vi.fn();
+  const supervisor = new Supervisor({
+    pidFile: { acquire: (): Promise<DaemonPidLock> => Promise.reject(failure) },
+    stateFile: { read, removeStaleFiles, write },
+    bootstrap,
+    signalTarget: null,
+  });
+  await expect(supervisor.start()).rejects.toBe(failure);
+  for (const fn of [read, removeStaleFiles, write, bootstrap]) {
+    expect(fn).not.toHaveBeenCalled();
+  }
+});

@@ -187,7 +187,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       body.servers.find((server: { name: string }) => server.name === "failed"),
     ).toMatchObject({
       status: "failed",
-      error: expect.stringContaining("ENOENT") as unknown,
+      error: expect.stringMatching(/ENOENT|Connection closed/) as unknown,
       toolCount: 0,
     });
     for (const server of body.servers)

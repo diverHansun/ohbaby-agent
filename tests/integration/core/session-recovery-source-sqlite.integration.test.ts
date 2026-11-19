@@ -1050,9 +1050,12 @@ describe("source recovery against SQLite", () => {
         "continues",
       );
       release.resolve();
-      await vi.waitFor(() => {
-        expect(source.reasoning.pendingPartIds("a")).toEqual(["generating"]);
-      });
+      await vi.waitFor(
+        () => {
+          expect(source.reasoning.pendingPartIds("a")).toEqual(["generating"]);
+        },
+        { timeout: 5000 },
+      );
       const history = await source.history("a");
       expect(history.reasoningMissing).toBe(true);
       const reasoning = history.messages

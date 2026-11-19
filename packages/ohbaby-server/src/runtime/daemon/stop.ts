@@ -1,7 +1,11 @@
 import { createShutdownOptions, withinShutdown } from "ohbaby-agent";
 import { readFile, stat } from "node:fs/promises";
 import { FilePidFile } from "./pid-file.js";
-import { JsonDaemonStateFile, shutdownReportPath } from "./state-file.js";
+import {
+  JsonDaemonStateFile,
+  legacyShutdownReportPath,
+  shutdownReportPath,
+} from "./state-file.js";
 import { resolveDaemonScope } from "./scope.js";
 import type { DaemonShutdownReport, DaemonState } from "./types.js";
 
@@ -81,6 +85,30 @@ async function requestShutdown(
     );
 }
 
+async function readShutdownCleanup(
+  path: string,
+  target: NonNullable<StopDaemonResult["target"]>,
+): Promise<DaemonShutdownReport["cleanup"] | undefined> {
+  try {
+    const report = JSON.parse(
+      await readFile(path, "utf8"),
+    ) as Partial<DaemonShutdownReport>;
+    if (
+      report.pid === target.pid &&
+      report.pidToken === target.token &&
+      (report.cleanup?.status === "confirmed" ||
+        report.cleanup?.status === "unconfirmed") &&
+      Array.isArray(report.cleanup.errors) &&
+      report.cleanup.errors.every((error) => typeof error === "string")
+    ) {
+      return report.cleanup;
+    }
+  } catch {
+    // An absent or unreadable report does not prove cleanup.
+  }
+  return undefined;
+}
+
 async function observeDaemonStop(
   options: StopDaemonFromStateOptions,
   deadlineAt: number,
@@ -127,29 +155,16 @@ async function observeDaemonStop(
     }
     const target = { pid: state.pid, token: state.pidToken };
     const confirmed = async (): Promise<StopDaemonResult> => {
-      let cleanup: StopDaemonResult["cleanup"] = "unknown";
-      let reason: string | undefined;
-      try {
-        const report = JSON.parse(
-          await readFile(shutdownReportPath(statePath, target.token), "utf8"),
-        ) as Partial<DaemonShutdownReport>;
-        if (
-          report.pid === target.pid &&
-          report.pidToken === target.token &&
-          (report.cleanup?.status === "confirmed" ||
-            report.cleanup?.status === "unconfirmed") &&
-          Array.isArray(report.cleanup.errors) &&
-          report.cleanup.errors.every((error) => typeof error === "string")
-        ) {
-          cleanup = report.cleanup.status;
-          reason = report.cleanup.errors.join("; ") || undefined;
-        }
-      } catch {
-        /* An absent/malformed report cannot prove cleanup. */
-      }
+      const cleanup =
+        (await readShutdownCleanup(shutdownReportPath(statePath), target)) ??
+        (await readShutdownCleanup(
+          legacyShutdownReportPath(statePath, target.token),
+          target,
+        ));
+      const reason = cleanup?.errors.join("; ");
       return {
         processExit: "confirmed",
-        cleanup,
+        cleanup: cleanup?.status ?? "unknown",
         target,
         ...(reason ? { reason } : {}),
       };

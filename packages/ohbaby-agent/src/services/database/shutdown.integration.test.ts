@@ -9,7 +9,7 @@ import { NodeSqliteConnection } from "./connection.js";
 import { beginDatabaseShutdown, runWriteTransaction } from "./index.js";
 
 it.each([
-  { holdMs: 400, budgetMs: 80, commits: false },
+  { holdMs: 800, budgetMs: 80, commits: false },
   { holdMs: 50, budgetMs: 500, commits: true },
 ])(
   "shares one shutdown budget with a real independent SQLite lock ($holdMs ms lock/$budgetMs ms budget)",
@@ -33,7 +33,17 @@ it.each([
       });
       if (commits) await save;
       else await expect(save).rejects.toThrow(/shutdown/i);
-      expect(Date.now() - startedAt).toBeLessThan(budgetMs + 100);
+      const elapsed = Date.now() - startedAt;
+      if (commits) {
+        expect(elapsed).toBeLessThan(budgetMs + 100);
+      } else {
+        // A hosted runner can wake late, but expiry must still precede lock release.
+        expect(elapsed).toBeGreaterThanOrEqual(budgetMs);
+        expect(elapsed).toBeLessThan(holdMs / 2);
+        expect(() => {
+          db.exec("BEGIN IMMEDIATE");
+        }).toThrow(/locked/i);
+      }
       expect(db.prepare("SELECT * FROM facts").all()).toHaveLength(
         commits ? 1 : 0,
       );

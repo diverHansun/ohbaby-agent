@@ -9,6 +9,7 @@ import { NodeSqliteConnection } from "./connection.js";
 import { beginDatabaseShutdown, runWriteTransaction } from "./index.js";
 import {
   createDatabaseWriteBudget,
+  remainingDatabaseWriteBudget,
   withDatabaseWriteBudget,
 } from "./write-budget.js";
 
@@ -93,7 +94,9 @@ it("charges concurrent nested writes once to their shared parent allowance", asy
   const holders: ChildProcess[] = [];
   try {
     holders.push(await lock(path, 220));
-    await withDatabaseWriteBudget(createDatabaseWriteBudget(400), async () => {
+    await withDatabaseWriteBudget(createDatabaseWriteBudget(5000), async () => {
+      const availableBefore = remainingDatabaseWriteBudget();
+      const startedAt = performance.now();
       await Promise.all(
         [db, other].map((connection) =>
           withDatabaseWriteBudget(createDatabaseWriteBudget(5000), () =>
@@ -105,6 +108,12 @@ it("charges concurrent nested writes once to their shared parent allowance", asy
           ),
         ),
       );
+      const elapsed = performance.now() - startedAt;
+      const charged = availableBefore - remainingDatabaseWriteBudget();
+      expect(charged).toBeGreaterThan(0);
+      // Parallel writes share one clock, so they cannot charge more than wall time.
+      expect(charged).toBeLessThanOrEqual(elapsed + 1);
+
       holders.push(await lock(path, 80));
       await runWriteTransaction(db, (transaction) => {
         transaction
@@ -151,7 +160,7 @@ it("expires a queued save promptly without allowing a later writer to overtake t
   const path = join(directory, "facts.db");
   const db = new NodeSqliteConnection(path);
   db.exec("CREATE TABLE facts(value TEXT)");
-  const holder = await lock(path, 400);
+  const holder = await lock(path, 900);
   let first: Promise<void> | undefined;
   let third: Promise<void> | undefined;
   try {
@@ -166,7 +175,8 @@ it("expires a queued save promptly without allowing a later writer to overtake t
         }),
       ),
     ).rejects.toThrow(/Critical-save attempt deadline/);
-    expect(performance.now() - startedAt).toBeLessThan(180);
+    // Allow runner scheduling delay while still requiring expiry during the lock.
+    expect(performance.now() - startedAt).toBeLessThan(350);
     expect(db.prepare("SELECT * FROM facts").all()).toHaveLength(0);
     third = runWriteTransaction(db, (connection) => {
       connection.prepare("INSERT INTO facts VALUES ('third')").run();

@@ -1,4 +1,4 @@
-import { getDatabase } from "../services/database/index.js";
+import { closeDatabase, getDatabase } from "../services/database/index.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -142,6 +142,7 @@ describe("real persisted shell projections", () => {
       }
     } finally {
       await client.dispose();
+      closeDatabase();
       vi.unstubAllEnvs();
       await rm(dir, { recursive: true, force: true });
     }
@@ -252,6 +253,7 @@ describe("real persisted shell projections", () => {
       });
     } finally {
       await client.dispose();
+      closeDatabase();
       vi.unstubAllEnvs();
       await rm(dir, { recursive: true, force: true });
     }

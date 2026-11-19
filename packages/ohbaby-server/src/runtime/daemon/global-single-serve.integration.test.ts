@@ -27,6 +27,9 @@ interface ChildReady {
 
 const children: ChildProcessWithoutNullStreams[] = [];
 const cleanupDirectories: string[] = [];
+// A cold tsx child can take longer to load on Windows.
+const CHILD_READY_TIMEOUT_MS = process.platform === "win32" ? 30_000 : 10_000;
+const PROCESS_TEST_TIMEOUT_MS = process.platform === "win32" ? 60_000 : 20_000;
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
@@ -179,7 +182,7 @@ function waitForReady(
     let stderr = "";
     const timeout = setTimeout(() => {
       reject(new Error(`Timed out waiting for child serve: ${stderr}`));
-    }, 10_000);
+    }, CHILD_READY_TIMEOUT_MS);
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
       const line = stdout
@@ -426,7 +429,7 @@ describe("global single serve across real processes", () => {
     child.kill("SIGTERM");
     await waitForExit(child);
     await rm(repo, { recursive: true });
-    const defaultDirectory = join(common.ohbabyHome, "workspace/default");
+    const defaultDirectory = join(common.ohbabyHome, "workspace", "default");
     await mkdir(defaultDirectory, { recursive: true });
     const restarted = spawnServe({ ...common, workdir: defaultDirectory });
     origin = new URL((await waitForReady(restarted)).url).origin;
@@ -435,13 +438,11 @@ describe("global single serve across real processes", () => {
       headers: globalHeaders,
     });
     expect(missingFolderRestore.status).toBe(200);
-    const expectedDefaultDirectory: unknown =
-      expect.stringContaining("workspace/default");
     expect(await missingFolderRestore.json()).toMatchObject({
       session: {
         id,
         workspaceDirectory: null,
-        pendingWorkingDirectory: expectedDefaultDirectory,
+        pendingWorkingDirectory: await realpath(defaultDirectory),
       },
     });
     const defaultHeaders = {
@@ -487,7 +488,7 @@ describe("global single serve across real processes", () => {
     ).toBe(404);
     restarted.kill("SIGTERM");
     await waitForExit(restarted);
-  }, 30_000);
+  }, Math.max(30_000, PROCESS_TEST_TIMEOUT_MS));
 
   it("reuses the default workspace without registering it as a project", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-default-reuse-"));
@@ -517,7 +518,7 @@ describe("global single serve across real processes", () => {
     });
     expect(scopes.status).toBe(200);
     expect(await scopes.json()).toMatchObject({ scopes: [] });
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("migrates legacy platform data before a direct server start opens SQLite", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-data-migrate-"));
@@ -559,7 +560,7 @@ describe("global single serve across real processes", () => {
     await expect(readFile(legacyDatabasePath)).resolves.toBeInstanceOf(Buffer);
     child.kill("SIGTERM");
     await waitForExit(child);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("reuses the first listener when started from another repository", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-global-serve-"));
@@ -589,7 +590,7 @@ describe("global single serve across real processes", () => {
 
     firstChild.kill("SIGTERM");
     await waitForExit(firstChild);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("admits ten concurrent sessions and keeps the eleventh durable through a real daemon process", async () => {
     const root = await mkdtemp(
@@ -688,7 +689,7 @@ describe("global single serve across real processes", () => {
     await waitForStarted(startedPath, 11);
     child.kill("SIGTERM");
     await waitForExit(child);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("retains queued work after a crash and explicitly resubmits one original prompt idempotently", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-prompt-recovery-"));
@@ -962,7 +963,7 @@ describe("global single serve across real processes", () => {
     expect(await startedCount(startedPath)).toBe(11);
     thirdChild.kill("SIGTERM");
     await waitForExit(thirdChild);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("preserves queued edit and cancel decisions across a real daemon restart", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-prompt-edit-"));
@@ -1143,7 +1144,7 @@ describe("global single serve across real processes", () => {
     }
     secondChild.kill("SIGTERM");
     await waitForExit(secondChild);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("atomically rejects the 101st queued prompt with scheduler fields in a real process", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-prompt-limit-"));
@@ -1229,7 +1230,7 @@ describe("global single serve across real processes", () => {
     }
     child.kill("SIGKILL");
     await waitForExit(child);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("retains queued work on graceful stop and sends only an explicitly resubmitted item after newer work", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-graceful-stop-"));
@@ -1285,8 +1286,13 @@ describe("global single serve across real processes", () => {
     }
     await waitForStarted(startedPath, 1);
 
-    firstChild.kill("SIGTERM");
+    const stop = await fetch(`${origin}/api/shutdown`, {
+      method: "POST",
+      headers,
+    });
+    expect(stop.status).toBe(200);
     await waitForExit(firstChild);
+    expect(firstChild.exitCode).toBe(0);
 
     const stoppedDatabase = new NodeSqliteConnection(dbPath);
     try {
@@ -1438,7 +1444,7 @@ describe("global single serve across real processes", () => {
     }
     secondChild.kill("SIGTERM");
     await waitForExit(secondChild);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("keeps provider 429 distinct from local queue-full in a real process", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-provider-error-"));
@@ -1517,7 +1523,7 @@ describe("global single serve across real processes", () => {
     }
     child.kill("SIGTERM");
     await waitForExit(child);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 
   it("keeps retained input while its workspace is unavailable and sends only after restoration", async () => {
     const root = await mkdtemp(
@@ -1644,5 +1650,5 @@ describe("global single serve across real processes", () => {
     expect(await startedCount(startedPath)).toBe(2);
     restoredChild.kill("SIGTERM");
     await waitForExit(restoredChild);
-  }, 20_000);
+  }, PROCESS_TEST_TIMEOUT_MS);
 });

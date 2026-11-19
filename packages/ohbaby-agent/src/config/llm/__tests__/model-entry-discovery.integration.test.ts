@@ -231,25 +231,35 @@ it("superseded scheduled jobs stop before invoking fetch with an already aborted
   });
   answer(0, 12345);
   await detected((await readModelDocument(opts)).models[0].id, 12345);
-  const { coordinateModelConfig } = await import("../config-coordination.js");
-  // Keep scheduled network work paused until both snapshots exist, proving pre-start cancellation.
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  let releaseFirst!: () => void;
+  const beforeFirstFetch = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const onFirstDiscovery = vi.fn(() => beforeFirstFetch);
+  const fetchSpy = vi.spyOn(globalThis, "fetch");
   try {
-    const first = startModelEntryDiscovery(a.id, opts);
+    const first = startModelEntryDiscovery(a.id, {
+      ...opts,
+      onDiscovery: onFirstDiscovery,
+    });
+    await vi.waitFor(() => {
+      expect(onFirstDiscovery).toHaveBeenCalledOnce();
+    });
     const second = startModelEntryDiscovery(a.id, opts);
-    await coordinateModelConfig(opts.modelJsonPath, () => Promise.resolve());
-    await vi.advanceTimersByTimeAsync(0);
-    expect((await first).reasoningReason).toBe("cancelled");
     await vi.waitFor(() => {
       expect(requests).toHaveLength(2);
     });
+    releaseFirst();
+    expect((await first).reasoningReason).toBe("cancelled");
+    expect(fetchSpy).toHaveBeenCalledOnce();
     answer(1, 45678);
     await second;
     expect(
       (await readModelDocument(opts)).models[0].detectedContextWindowTokens,
     ).toBe(45678);
   } finally {
-    vi.useRealTimers();
+    releaseFirst();
+    fetchSpy.mockRestore();
   }
 });
 

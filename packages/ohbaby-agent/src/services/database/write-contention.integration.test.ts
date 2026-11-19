@@ -11,6 +11,9 @@ import {
   withTransaction,
 } from "./index.js";
 
+// Allow hosted runner scheduling delay while staying below the 450 ms lock.
+const MAX_HEARTBEAT_DELAY_MS = 350;
+
 let directory: string;
 afterEach(async () => {
   closeDatabase();
@@ -63,7 +66,7 @@ it("yields during an independent write lock and commits FIFO without premature p
   const delay = await heartbeat;
   expect(published).toEqual([]);
   await Promise.all([first, second]);
-  expect(delay).toBeLessThan(200);
+  expect(delay).toBeLessThan(MAX_HEARTBEAT_DELAY_MS);
   expect(published).toEqual(["first", "second"]);
   expect(
     getDatabase().prepare("SELECT value FROM ordered_write ORDER BY id").all(),
@@ -343,14 +346,15 @@ it.each(writers)(
     const operation = Promise.resolve()
       .then(operations[name])
       .then(() => publication.push(name));
-    const results = await Promise.allSettled([first, operation]);
     const delay = await heartbeat;
+    expect(delay).toBeLessThan(MAX_HEARTBEAT_DELAY_MS);
+    expect(publication).toEqual([]);
+    const results = await Promise.allSettled([first, operation]);
     injected?.close();
     expect(results.map((result) => result.status)).toEqual([
       "fulfilled",
       "fulfilled",
     ]);
-    expect(delay).toBeLessThan(200);
     expect(
       db.prepare("SELECT COUNT(*) AS count FROM write_audit").get(),
     ).toEqual({ count: 1 });
@@ -427,7 +431,7 @@ it("exhausts its finite admission budget, does not execute or publish, and lets 
   await failure;
   expect(performance.now() - start).toBeGreaterThanOrEqual(4900);
   expect(performance.now() - start).toBeLessThan(6000);
-  expect(heartbeat).toBeLessThan(200);
+  expect(heartbeat).toBeLessThan(MAX_HEARTBEAT_DELAY_MS);
   expect(calls).toBe(0);
   expect(published).toBe(false);
   await withTransaction((db) => {

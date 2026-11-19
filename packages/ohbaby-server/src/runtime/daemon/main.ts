@@ -419,13 +419,13 @@ async function tryReuseRunningDaemon(input: {
   readonly scopeRoot: string;
   readonly stateFile: JsonDaemonStateFile;
 }): Promise<RunningDaemonServer | undefined> {
+  if (!input.pidRecord || !isProcessAlive(input.pidRecord.pid))
+    return undefined;
   const state = await input.stateFile.read();
   if (
     state?.status !== "running" ||
-    input.pidRecord === undefined ||
     state.pid !== input.pidRecord.pid ||
-    state.pidToken !== input.pidRecord.token ||
-    !isProcessAlive(input.pidRecord.pid)
+    state.pidToken !== input.pidRecord.token
   ) {
     return undefined;
   }
@@ -670,7 +670,7 @@ export async function startDaemonServer(
   const scope = await resolveStartScope(options);
   const healthCheck = options.healthCheck ?? fetchDaemonHealth;
   const stateFile = new JsonDaemonStateFile(scope.stateFilePath);
-  const pidRecord = await new FilePidFile(scope.pidFilePath).read();
+  const pidRecord = await new FilePidFile(scope.pidFilePath).readForStartup();
   const explicitHost = options.host !== undefined;
   const explicitPort = options.port !== undefined;
   const requestedHost = options.host ?? DEFAULT_HOST;

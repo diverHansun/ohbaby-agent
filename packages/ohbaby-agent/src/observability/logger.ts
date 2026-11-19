@@ -168,11 +168,13 @@ const DIAGNOSTIC_ENUM_VALUES = new Set([
   "raw-total-mismatch",
   "read",
   "requested",
+  "running",
   "serve",
   "shutdown",
   "signal",
   "startup-failed",
   "stale",
+  "stopping",
   "summary-body-limit",
   "tui",
 ] as const);

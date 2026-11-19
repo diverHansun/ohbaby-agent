@@ -8,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   stat,
   writeFile,
@@ -55,7 +56,9 @@ describe("conversation copies through the persistent backend", () => {
   let holdNextAnswer: Promise<void> | undefined;
 
   beforeEach(async () => {
-    fixtureRoot = await mkdtemp(join(tmpdir(), "session-copy-runtime-"));
+    fixtureRoot = await realpath(
+      await mkdtemp(join(tmpdir(), "session-copy-runtime-")),
+    );
     directory = join(fixtureRoot, "work");
     await mkdir(directory);
     vi.stubEnv("OHBABY_HOME", join(fixtureRoot, "home"));
@@ -695,7 +698,10 @@ describe("conversation copies through the persistent backend", () => {
             .get(),
         ).toBeUndefined();
       }
-      expect(isOwnerProcessAlive(pid)).toBe(false);
+      // The injected refusal returns before the already requested termination settles.
+      await expect
+        .poll(() => isOwnerProcessAlive(pid), { timeout: 3_000 })
+        .toBe(false);
       await client.rewindSession({ sessionId, promptId });
       expect(isOwnerProcessAlive(pid)).toBe(false);
       expect((await executions.get(record))?.rewoundAt).toBeDefined();
@@ -838,14 +844,17 @@ describe("conversation copies through the persistent backend", () => {
     expect(initial.promptCache.key).not.toBe(atCut.promptCache.key);
     const sent = JSON.stringify(initial.messages);
     expect(sent).not.toContain("third question");
+    const sourceScratch = join(resolveSessionStorageDir(source), "scratch");
+    const forkScratch = join(
+      resolveSessionStorageDir(fork.sessionId),
+      "scratch",
+    );
     const inheritedScratch = sent.indexOf(
-      join(resolveSessionStorageDir(source), "scratch"),
+      JSON.stringify(sourceScratch).slice(1, -1),
     );
     expect(inheritedScratch).toBeGreaterThanOrEqual(0);
     expect(
-      sent.lastIndexOf(
-        join(resolveSessionStorageDir(fork.sessionId), "scratch"),
-      ),
+      sent.lastIndexOf(JSON.stringify(forkScratch).slice(1, -1)),
     ).toBeGreaterThan(inheritedScratch);
     expect(executeLookup).toHaveBeenCalledWith(
       forkQuery,
@@ -948,7 +957,8 @@ describe("conversation copies through the persistent backend", () => {
       "external_directory_read",
     ]);
     const sent = JSON.stringify(requests.at(-1)?.messages);
-    for (const file of files) expect(sent).toContain(file);
+    for (const file of files)
+      expect(sent).toContain(JSON.stringify(file).slice(1, -1));
     expect(sent).not.toContain("private source output");
     expect(await readFile(write.args.file_path, "utf8")).toBe("from source");
     choiceId = "allow_once";

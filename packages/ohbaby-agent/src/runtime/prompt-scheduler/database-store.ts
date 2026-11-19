@@ -771,14 +771,12 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     ];
     const values: string[] = [scopeKey, sessionId];
     if (messageIds.length > 0) {
-      associations.push(
-        `user_message_id IN (${messageIds.map(() => "?").join(", ")})`,
-      );
-      values.push(...messageIds);
+      associations.push("user_message_id IN (SELECT value FROM json_each(?))");
+      values.push(JSON.stringify(messageIds));
     }
     if (runIds.length > 0) {
-      associations.push(`run_id IN (${runIds.map(() => "?").join(", ")})`);
-      values.push(...runIds);
+      associations.push("run_id IN (SELECT value FROM json_each(?))");
+      values.push(JSON.stringify(runIds));
     }
     return this.db
       .prepare<PromptSubmissionRow>(

@@ -239,6 +239,14 @@ async function setField(
 
 async function submit(container: ParentNode, text: string): Promise<void> {
   await setField(container, ".ohb-composer textarea", text);
+  // The session may still be enabling composition after the draft renders.
+  await waitFor(() => {
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        '.ohb-composer button[aria-label="Send message"]',
+      )?.disabled,
+    ).toBe(false);
+  });
   const textarea = container.querySelector(".ohb-composer textarea");
   if (!(textarea instanceof HTMLTextAreaElement))
     throw new Error("Missing composer");

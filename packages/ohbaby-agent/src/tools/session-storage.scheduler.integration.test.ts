@@ -407,7 +407,7 @@ it("reuses explicit write approval only for that scope and honors a later deny e
     ).toBe("rejected");
     policy.state.addSessionRule("session", {
       tool: "external_directory_write",
-      pattern: `${records}/**`,
+      pattern: `${records.replaceAll("\\", "/")}/**`,
       decision: "deny",
       scope: "session",
     });

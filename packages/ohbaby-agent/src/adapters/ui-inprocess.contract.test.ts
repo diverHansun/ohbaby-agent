@@ -12859,25 +12859,34 @@ describe("manual compact admission", () => {
         return Promise.resolve(createAbortableProviderStream(request.signal));
       },
     });
-    const before = await messageManager.listBySession("manual_one");
     const controller = new AbortController();
-    const compact = client.compactSession({
-      sessionId: "manual_one",
-      signal: controller.signal,
-    });
-    const failure = expect(
-      withTimeout(compact, 500, "manual Stop did not reach summary"),
-    ).rejects.toMatchObject({ name: "AbortError" });
-    const signal = await started.promise;
-    controller.abort();
-    await failure;
-    expect(signal?.aborted).toBe(true);
-    expect(await messageManager.listBySession("manual_one")).toEqual(before);
-    await expect(
-      client.compactSession({ sessionId: "manual_one" }),
-    ).resolves.toMatchObject({ status: "compacted" });
-    expect((await client.getSnapshot()).runs).toEqual([]);
-    await client.dispose();
+    try {
+      const before = await messageManager.listBySession("manual_one");
+      const compact = client.compactSession({
+        sessionId: "manual_one",
+        signal: controller.signal,
+      });
+      void compact.catch(() => undefined);
+      const signal = await withTimeout(
+        started.promise,
+        5000,
+        "summary provider did not start",
+      );
+      const failure = expect(
+        withTimeout(compact, 1000, "manual Stop did not reach summary"),
+      ).rejects.toMatchObject({ name: "AbortError" });
+      controller.abort();
+      await failure;
+      expect(signal?.aborted).toBe(true);
+      expect(await messageManager.listBySession("manual_one")).toEqual(before);
+      await expect(
+        client.compactSession({ sessionId: "manual_one" }),
+      ).resolves.toMatchObject({ status: "compacted" });
+      expect((await client.getSnapshot()).runs).toEqual([]);
+    } finally {
+      controller.abort();
+      await client.dispose();
+    }
   });
 });
 

@@ -15,7 +15,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-19 | 首轮 | 见上 | 规划文档已完成，待用户审查 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-19 | 首轮 | 见上 | 实施与发布验收通过 |
 
 ## 本轮文档地图
 
@@ -26,7 +26,7 @@
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 3 个 Stage、设计决策、新旧版本兼容、关键改动清单 |
 | [03 参考项目](improve-1/03-reference-projects.md) | codex 的 daemon 停止标记与诊断事件 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 单元和集成测试、真机验收、发布门 |
-| 05 实施与验收 | 本轮实施完成后，由验收模式写入 |
+| [05 实施与验收](improve-1/05-implementation-acceptance.md) | 实施结果、自动化测试、终端走查和审查记录 |
 
 ## 相关议题
 
