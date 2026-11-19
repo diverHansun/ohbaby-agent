@@ -1,3 +1,4 @@
+import { isInterruptionFactPart } from "../../../../packages/ohbaby-agent/src/core/message/interruption.js";
 import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -336,6 +337,103 @@ describe("lifecycle logical step retries", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("adds no interruption note to a replaced reasoning-only attempt", async () => {
+    const f = await fixture([
+      (): Response =>
+        sse(chunk({ reasoning_content: "half a thought" }), {
+          error: { code: "server_error", message: "controlled stream failure" },
+        }),
+      (): Response => sse(chunk({ content: "finished" }, "stop")),
+    ]);
+    expect(await f.run()).toMatchObject({
+      success: true,
+      finalResponse: "finished",
+    });
+    const history = await f.messageManager.listBySession(sessionId);
+    const dropped = history.find(
+      ({ info }) => info.role === "assistant" && info.finish === "error",
+    );
+    expect(dropped?.info).toMatchObject({
+      error: { name: "MessageStreamInterruptedError", retried: true },
+    });
+    expect(dropped?.parts.map((part) => part.type)).toEqual(["reasoning"]);
+  });
+
+  it.each(["backoff", "preparation", "input reconciliation"] as const)(
+    "adds an interruption note if a reasoning-only retry is cancelled during %s",
+    async (cancelDuring) => {
+      const abort = new AbortController();
+      const f = await fixture([
+        (): Response =>
+          sse(chunk({ reasoning_content: "half a thought" }), {
+            error: {
+              code: "server_error",
+              message: "controlled stream failure",
+            },
+          }),
+      ]);
+      if (cancelDuring === "input reconciliation") {
+        await f.runLedger.createPending({
+          runId,
+          sessionId,
+          triggerSource: "user",
+        });
+        await f.runLedger.markRunning(runId);
+      }
+      let reconciliations = 0;
+      const currentRunInputs =
+        cancelDuring === "input reconciliation"
+          ? createRunInputCoordinator({
+              runId,
+              inputs: f.inputs,
+              sources: [
+                {
+                  reconcile: (signal): Promise<void> => {
+                    if (++reconciliations === 2) {
+                      abort.abort();
+                      signal?.throwIfAborted();
+                    }
+                    return Promise.resolve();
+                  },
+                },
+              ],
+            })
+          : undefined;
+      let preparations = 0;
+      const result = f.run(
+        { signal: abort.signal, currentRunInputs },
+        (event) => {
+          if (
+            (cancelDuring === "backoff" && event.type === "llm:retrying") ||
+            (cancelDuring === "preparation" &&
+              event.type === "context:prepared" &&
+              ++preparations === 2)
+          )
+            abort.abort();
+        },
+      );
+      if (cancelDuring === "input reconciliation") {
+        await expect(result).rejects.toMatchObject({ name: "AbortError" });
+      } else {
+        await expect(result).resolves.toMatchObject({
+          terminalReason: "cancelled",
+        });
+      }
+      expect(f.bodies).toHaveLength(1);
+      const saved = (await f.messageManager.listBySession(sessionId)).find(
+        (record) => record.info.role === "assistant",
+      );
+      expect(saved?.info).toMatchObject({
+        error: { name: "MessageStreamInterruptedError", retried: true },
+      });
+      expect(saved?.parts.filter(isInterruptionFactPart)).toMatchObject([
+        {
+          text: "[Response interrupted: the saved text below may be incomplete.]",
+        },
+      ]);
+    },
+  );
 
   it("cancels during backoff after a partial response without opening another request", async () => {
     const controller = new AbortController();

@@ -395,6 +395,8 @@ async function markAssistantMessageError(
       completed: Date.now(),
     },
   });
+  // A step retry replaces this attempt, so no note: the frontends hide it.
+  if (retried) return;
   if (
     messageError.name === "MessageOutputLengthError" ||
     messageError.name === "MessageContentFilterError" ||
@@ -576,19 +578,34 @@ export class Lifecycle {
     const onRetry = (attempt: number): void => {
       failedStepAttempts = attempt;
     };
-    let preparedBeforeRetry: PreparedTurn | undefined;
+    let pendingStepRetry:
+      | { readonly prepared: PreparedTurn; readonly assistantMessageId: string }
+      | undefined;
+    const recordRetryInterruption = (
+      assistantMessageId: string,
+    ): Promise<void> =>
+      ensureInterruptionFact(
+        this.deps.messageManager,
+        {
+          id: assistantMessageId,
+          sessionId: params.sessionId,
+          contextScopeId: params.contextScopeId,
+        },
+        "MessageStreamInterruptedError",
+      );
     let forceRecoveryStep: number | undefined;
     let promptSnapshot: AgentRunPromptSnapshot | undefined;
     const activeReasoningByMessageId = new Map<string, string>();
 
     for (let step = 1; step <= maxSteps; step += 1) {
       if (params.signal?.aborted) {
-        if (preparedBeforeRetry) {
+        if (pendingStepRetry) {
+          await recordRetryInterruption(pendingStepRetry.assistantMessageId);
           yield this.createTurnEndEvent({
             contextScopeId: params.contextScopeId,
             finalResponse,
             finishReason: "error",
-            prepared: preparedBeforeRetry,
+            prepared: pendingStepRetry.prepared,
             sessionId: params.sessionId,
             step,
           });
@@ -603,77 +620,88 @@ export class Lifecycle {
         };
       }
 
-      preparedBeforeRetry = undefined;
       const isFinalStep = step === maxSteps;
-      const protectedInputs = await params.currentRunInputs?.beforeStep(
-        params.signal,
-        isFinalStep,
-      );
-      const resolvedStepTools =
-        (await this.deps.resolveTools?.({
-          agentName: params.agent,
-          contextScopeId: params.contextScopeId,
-          isSubagent: params.isSubagent,
-          sessionId: params.sessionId,
-          step,
-        })) ??
-        (params.tools === undefined
-          ? undefined
-          : { definitions: undefined, requestTools: params.tools });
-      const resolvedTools = resolvedStepTools?.requestTools;
-      const toolNames = toolNamesFromSchemas(resolvedTools);
-      promptSnapshot ??= await contextManager.createRunPromptSnapshot({
-        runModel: params.runModel,
-        ...(params.contextScopeId === undefined
-          ? {}
-          : { contextScopeId: params.contextScopeId }),
-        ...(params.initiatingUserMessageId === undefined
-          ? {}
-          : { initiatingUserMessageId: params.initiatingUserMessageId }),
-        agentName: params.agent,
-        directory: params.directory,
-        ...(params.projectRoot === undefined
-          ? {}
-          : { projectRoot: params.projectRoot }),
-        isSubagent: params.isSubagent ?? false,
-        sessionId: params.sessionId,
-        toolNames,
-      });
-      const tools = isFinalStep ? [] : resolvedTools;
-      const toolDefinitions = isFinalStep ? [] : resolvedStepTools?.definitions;
-      const tailDirectives = isFinalStep
-        ? [buildMaxStepsFinalizationMessage()]
-        : undefined;
       let assistantMessageId = randomUUID();
-      let prepared = yield* this.prepareTurnWithProgress({
-        promptCacheSessionId: params.promptCacheSessionId,
-        runModel: params.runModel,
-        reminderAnchorId: assistantMessageId,
-        runId: params.runId,
-        protectedInputs,
-        reasoning: mergeReasoningIntent(params.reasoning),
-        ...(tailDirectives === undefined ? {} : { tailDirectives }),
-        ...(activeReasoningByMessageId.size === 0
-          ? {}
-          : { activeReasoningByMessageId }),
-        ...(params.contextScopeId === undefined
-          ? {}
-          : { contextScopeId: params.contextScopeId }),
-        agentName: params.agent,
-        directory: params.directory,
-        isSubagent: params.isSubagent,
-        modelId: params.modelId,
-        promptSnapshot,
-        sessionScratchDirectory: params.environment
-          ?.trustedRoots?.()
-          .find((root) => root.kind === "session-scratch")?.path,
-        sessionId: params.sessionId,
-        ...(params.signal === undefined ? {} : { signal: params.signal }),
-        step,
-        ...(toolDefinitions === undefined ? {} : { toolDefinitions }),
-        toolNames,
-        tools,
-      });
+      let stepInput: Parameters<typeof this.prepareTurnWithProgress>[0];
+      let prepared: PreparedTurn;
+      try {
+        const protectedInputs = await params.currentRunInputs?.beforeStep(
+          params.signal,
+          isFinalStep,
+        );
+        const resolvedStepTools =
+          (await this.deps.resolveTools?.({
+            agentName: params.agent,
+            contextScopeId: params.contextScopeId,
+            isSubagent: params.isSubagent,
+            sessionId: params.sessionId,
+            step,
+          })) ??
+          (params.tools === undefined
+            ? undefined
+            : { definitions: undefined, requestTools: params.tools });
+        const resolvedTools = resolvedStepTools?.requestTools;
+        const toolNames = toolNamesFromSchemas(resolvedTools);
+        promptSnapshot ??= await contextManager.createRunPromptSnapshot({
+          runModel: params.runModel,
+          ...(params.contextScopeId === undefined
+            ? {}
+            : { contextScopeId: params.contextScopeId }),
+          ...(params.initiatingUserMessageId === undefined
+            ? {}
+            : { initiatingUserMessageId: params.initiatingUserMessageId }),
+          agentName: params.agent,
+          directory: params.directory,
+          ...(params.projectRoot === undefined
+            ? {}
+            : { projectRoot: params.projectRoot }),
+          isSubagent: params.isSubagent ?? false,
+          sessionId: params.sessionId,
+          toolNames,
+        });
+        const tools = isFinalStep ? [] : resolvedTools;
+        const toolDefinitions = isFinalStep
+          ? []
+          : resolvedStepTools?.definitions;
+        const tailDirectives = isFinalStep
+          ? [buildMaxStepsFinalizationMessage()]
+          : undefined;
+        stepInput = {
+          promptCacheSessionId: params.promptCacheSessionId,
+          runModel: params.runModel,
+          reminderAnchorId: assistantMessageId,
+          runId: params.runId,
+          protectedInputs,
+          reasoning: mergeReasoningIntent(params.reasoning),
+          ...(tailDirectives === undefined ? {} : { tailDirectives }),
+          ...(activeReasoningByMessageId.size === 0
+            ? {}
+            : { activeReasoningByMessageId }),
+          ...(params.contextScopeId === undefined
+            ? {}
+            : { contextScopeId: params.contextScopeId }),
+          agentName: params.agent,
+          directory: params.directory,
+          isSubagent: params.isSubagent,
+          modelId: params.modelId,
+          promptSnapshot,
+          sessionScratchDirectory: params.environment
+            ?.trustedRoots?.()
+            .find((root) => root.kind === "session-scratch")?.path,
+          sessionId: params.sessionId,
+          ...(params.signal === undefined ? {} : { signal: params.signal }),
+          step,
+          ...(toolDefinitions === undefined ? {} : { toolDefinitions }),
+          toolNames,
+          tools,
+        };
+        prepared = yield* this.prepareTurnWithProgress(stepInput);
+      } catch (error) {
+        if (params.signal?.aborted && pendingStepRetry) {
+          await recordRetryInterruption(pendingStepRetry.assistantMessageId);
+        }
+        throw error;
+      }
       if (!turnStarted) {
         turnStarted = true;
         yield {
@@ -698,6 +726,9 @@ export class Lifecycle {
         ? { message: finalResponse, terminalReason: "cancelled" as const }
         : contextPreparationFailure(prepared);
       if (preparationFailure) {
+        if (params.signal?.aborted && pendingStepRetry) {
+          await recordRetryInterruption(pendingStepRetry.assistantMessageId);
+        }
         finalResponse = preparationFailure.message;
         yield this.createTurnEndEvent({
           contextScopeId: params.contextScopeId,
@@ -716,6 +747,7 @@ export class Lifecycle {
           usage,
         };
       }
+      pendingStepRetry = undefined;
 
       const runParams: ModelStepParams = {
         promptCacheSessionId: params.promptCacheSessionId,
@@ -746,7 +778,7 @@ export class Lifecycle {
         });
       } catch (error) {
         if (await waitForStepRetry(error, params.signal)) {
-          preparedBeforeRetry = prepared;
+          pendingStepRetry = { prepared, assistantMessageId };
           step -= 1;
           continue;
         }
@@ -802,34 +834,9 @@ export class Lifecycle {
 
         assistantMessageId = randomUUID();
         prepared = yield* this.prepareTurnWithProgress({
-          promptCacheSessionId: params.promptCacheSessionId,
-          runModel: params.runModel,
+          ...stepInput,
           reminderAnchorId: assistantMessageId,
-          runId: params.runId,
-          protectedInputs,
-          reasoning: mergeReasoningIntent(params.reasoning),
-          ...(tailDirectives === undefined ? {} : { tailDirectives }),
-          ...(activeReasoningByMessageId.size === 0
-            ? {}
-            : { activeReasoningByMessageId }),
-          ...(params.contextScopeId === undefined
-            ? {}
-            : { contextScopeId: params.contextScopeId }),
-          agentName: params.agent,
-          directory: params.directory,
           force: true,
-          isSubagent: params.isSubagent,
-          modelId: params.modelId,
-          promptSnapshot,
-          sessionScratchDirectory: params.environment
-            ?.trustedRoots?.()
-            .find((root) => root.kind === "session-scratch")?.path,
-          sessionId: params.sessionId,
-          ...(params.signal === undefined ? {} : { signal: params.signal }),
-          step,
-          ...(toolDefinitions === undefined ? {} : { toolDefinitions }),
-          toolNames,
-          tools,
         });
         yield this.createContextPreparedEvent({
           contextScopeId: params.contextScopeId,
@@ -871,7 +878,7 @@ export class Lifecycle {
           });
         } catch (retryError) {
           if (await waitForStepRetry(retryError, params.signal)) {
-            preparedBeforeRetry = prepared;
+            pendingStepRetry = { prepared, assistantMessageId };
             step -= 1;
             continue;
           }

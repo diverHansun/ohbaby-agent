@@ -38,7 +38,7 @@ export function isVisibleAssistantTextPart(part: Part): part is TextPart {
 /** Attach a fact only when the existing saved body cannot carry it. */
 export async function ensureInterruptionFact(
   manager: MessageManager,
-  message: AssistantMessage,
+  message: Pick<AssistantMessage, "id" | "sessionId" | "contextScopeId">,
   name: keyof typeof INTERRUPTION_TEXT,
   tokenUsage?: TokenUsage,
 ): Promise<void> {
