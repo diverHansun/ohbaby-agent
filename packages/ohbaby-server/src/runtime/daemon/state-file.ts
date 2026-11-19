@@ -1,5 +1,13 @@
-import { dirname } from "node:path";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join } from "node:path";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import type {
   DaemonState,
   DaemonStateFile,
@@ -63,7 +71,14 @@ function parseDaemonState(raw: string): DaemonState | undefined {
   };
 }
 
-export function shutdownReportPath(statePath: string, token: string): string {
+export function shutdownReportPath(statePath: string): string {
+  return join(dirname(statePath), "daemon-shutdown.json");
+}
+
+export function legacyShutdownReportPath(
+  statePath: string,
+  token: string,
+): string {
   return `${statePath}.shutdown-${encodeURIComponent(token)}.json`;
 }
 
@@ -71,7 +86,7 @@ export class JsonDaemonStateFile implements DaemonStateFile {
   constructor(private readonly path: string) {}
 
   async writeShutdownReport(report: DaemonShutdownReport): Promise<void> {
-    const path = shutdownReportPath(this.path, report.pidToken);
+    const path = shutdownReportPath(this.path);
     await writeFile(path, `${JSON.stringify(report)}\n`, {
       encoding: "utf8",
       mode: 0o600,
@@ -91,11 +106,46 @@ export class JsonDaemonStateFile implements DaemonStateFile {
 
   async write(state: DaemonState): Promise<void> {
     await mkdir(dirname(this.path), { mode: 0o700, recursive: true });
-    const tempPath = `${this.path}.${String(process.pid)}.tmp`;
-    await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await rename(tempPath, this.path);
+    const tempPath = `${this.path}.${String(process.pid)}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await rename(tempPath, this.path);
+    } catch (error) {
+      await unlink(tempPath).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async removeStaleFiles(): Promise<void> {
+    const directory = dirname(this.path);
+    const base = basename(this.path);
+    let names: string[];
+    try {
+      names = await readdir(directory);
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") return;
+      throw error;
+    }
+
+    const errors: unknown[] = [];
+    for (const name of names) {
+      const legacyReport =
+        name.startsWith(`${base}.shutdown-`) && name.endsWith(".json");
+      const stateTemp = name.startsWith(`${base}.`) && name.endsWith(".tmp");
+      if (!legacyReport && !stateTemp) continue;
+      try {
+        await unlink(join(directory, name));
+      } catch (error) {
+        if (!isNodeError(error) || error.code !== "ENOENT") errors.push(error);
+      }
+    }
+    if (errors.length)
+      throw new AggregateError(
+        errors,
+        "Unable to remove stale daemon state files",
+      );
   }
 }

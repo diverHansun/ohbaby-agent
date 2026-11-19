@@ -20,6 +20,8 @@ export {
   serverStartFailed,
   serverStarted,
   serverStopFailed,
+  serverPreviousRunUnclean,
+  serverStateFilesCleanupFailed,
   serverStopped,
   sessionTitleGenerationFailed,
   sessionFilesCleanupFailed,

@@ -695,7 +695,10 @@ describe("conversation copies through the persistent backend", () => {
             .get(),
         ).toBeUndefined();
       }
-      expect(isOwnerProcessAlive(pid)).toBe(false);
+      // The injected refusal returns before the already requested termination settles.
+      await expect
+        .poll(() => isOwnerProcessAlive(pid), { timeout: 3_000 })
+        .toBe(false);
       await client.rewindSession({ sessionId, promptId });
       expect(isOwnerProcessAlive(pid)).toBe(false);
       expect((await executions.get(record))?.rewoundAt).toBeDefined();

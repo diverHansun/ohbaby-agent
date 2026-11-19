@@ -34,6 +34,7 @@ import type {
   ShutdownOptions,
   collectCleanup,
   createShutdownOptions,
+  resolveOhbabyHome,
 } from "ohbaby-agent";
 import { StartupNoticeBuffer } from "./cli/startup-notice-buffer.js";
 
@@ -122,6 +123,7 @@ interface AgentRuntimeModule {
   readonly durationClockAnomaly?: unknown;
   readonly loadRuntimeEnvIntoProcessEnv?: unknown;
   readonly migrateOhbabyData?: unknown;
+  readonly resolveOhbabyHome?: typeof resolveOhbabyHome;
 }
 
 type AgentCoreFactoryOptions = CliGlobalOptions & {
@@ -368,6 +370,12 @@ async function loadDefaultDependencies(
   };
 
   return {
+    readServeCoexistenceNotice(): Promise<string | undefined> {
+      const resolveHome = runtimeModule.resolveOhbabyHome;
+      return resolveHome
+        ? readServeCoexistenceNotice({ packageVersion: VERSION }, resolveHome)
+        : Promise.resolve(undefined);
+    },
     installSystemProxy: requireFunction(
       runtimeModule.installSystemProxy,
       "installSystemProxy",
@@ -603,10 +611,7 @@ export async function runOhbabyCli(
   const openUrl = dependencies.openUrl ?? openUrlWithSystemBrowser;
   const coexistenceNotice =
     dependencies.readServeCoexistenceNotice ??
-    (defaultDependencies === undefined
-      ? undefined
-      : (): Promise<string | undefined> =>
-          readServeCoexistenceNotice({ packageVersion: VERSION }));
+    defaultDependencies?.readServeCoexistenceNotice;
 
   if (!createCoreHost || !loadRuntimeEnvIntoProcessEnv) {
     throw new Error("CLI runtime dependencies were not initialized");

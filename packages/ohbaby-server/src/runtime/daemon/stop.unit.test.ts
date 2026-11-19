@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { stopDaemonFromState } from "./stop.js";
 import { resolveDaemonScope } from "./scope.js";
-import { shutdownReportPath } from "./state-file.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -62,30 +61,56 @@ it("does not signal an unverifiable live process or adopt a replacement token", 
   expect(kill).not.toHaveBeenCalled();
 });
 
-it("reports unknown cleanup when only a different token has a clean shutdown report", async () => {
-  const f = await fixture();
-  await writeFile(
-    shutdownReportPath(f.stateFilePath, "replacement"),
-    JSON.stringify({
-      pid: 123,
-      pidToken: "replacement",
-      recordedAt: 2,
-      cleanup: { status: "confirmed", errors: [] },
-    }),
-  );
-  let checks = 0;
-  await expect(
-    stopDaemonFromState({
-      ...f,
-      observeProcess: () => (++checks === 1 ? "alive" : "dead"),
-      requestShutdown: () => Promise.resolve(),
-    }),
-  ).resolves.toMatchObject({
-    processExit: "confirmed",
-    cleanup: "unknown",
-    target: { token: "original" },
-  });
-});
+it.each([
+  { fixed: "matching", legacy: "wrong-pid", cleanup: "confirmed" },
+  { fixed: "replacement", legacy: "missing", cleanup: "unknown" },
+  { fixed: "replacement", legacy: "matching", cleanup: "confirmed" },
+  { fixed: "invalid", legacy: "matching", cleanup: "confirmed" },
+  { fixed: "missing", legacy: "wrong-pid", cleanup: "unknown" },
+  { fixed: "unconfirmed", legacy: "matching", cleanup: "unconfirmed" },
+])(
+  "reads shutdown evidence: $fixed / $legacy",
+  async ({ fixed, legacy, cleanup }) => {
+    const f = await fixture();
+    const writeReport = async (
+      path: string,
+      variant: string,
+    ): Promise<void> => {
+      if (variant === "missing") return;
+      await writeFile(
+        path,
+        variant === "invalid"
+          ? "{"
+          : JSON.stringify({
+              pid: variant === "wrong-pid" ? 456 : 123,
+              pidToken: variant === "replacement" ? "replacement" : "original",
+              recordedAt: 2,
+              cleanup: {
+                status: variant === "unconfirmed" ? "unconfirmed" : "confirmed",
+                errors: [],
+              },
+            }),
+      );
+    };
+    await writeReport(
+      join(dirname(f.stateFilePath), "daemon-shutdown.json"),
+      fixed,
+    );
+    await writeReport(`${f.stateFilePath}.shutdown-original.json`, legacy);
+    let checks = 0;
+    await expect(
+      stopDaemonFromState({
+        ...f,
+        observeProcess: () => (++checks === 1 ? "alive" : "dead"),
+        requestShutdown: () => Promise.resolve(),
+      }),
+    ).resolves.toMatchObject({
+      processExit: "confirmed",
+      cleanup,
+      target: { token: "original" },
+    });
+  },
+);
 
 it("does not report exit for an early stopped file while the original process is alive", async () => {
   const f = await fixture();

@@ -163,6 +163,25 @@ export const serverStopFailed = defineDiagnosticEvent({
   level: "error",
 });
 
+export const serverPreviousRunUnclean = defineDiagnosticEvent({
+  component: "server",
+  event: "server.previous_run.unclean",
+  fields: {
+    previousPid: diagnosticField.integer(),
+    previousStatus: diagnosticField.stringEnum(["running", "stopping"]),
+    previousStartedAt: diagnosticField.optional(diagnosticField.integer()),
+    previousUpdatedAt: diagnosticField.integer(),
+  },
+  level: "warn",
+});
+
+export const serverStateFilesCleanupFailed = defineDiagnosticEvent({
+  component: "server",
+  event: "server.state_files.cleanup.failed",
+  fields: { error: diagnosticField.externalError() },
+  level: "warn",
+});
+
 export const interactionCleanupFailure = defineDiagnosticEvent({
   component: "server",
   event: "ui.interaction.cleanup.failure",

@@ -28,6 +28,7 @@ export interface DaemonShutdownReport {
 }
 
 export interface DaemonStateFile {
+  removeStaleFiles?(): Promise<void>;
   writeShutdownReport?(report: DaemonShutdownReport): Promise<void>;
   read?(): Promise<DaemonState | undefined>;
   write(state: DaemonState): Promise<void>;
