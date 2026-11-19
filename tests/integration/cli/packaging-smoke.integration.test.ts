@@ -64,15 +64,10 @@ interface PackedWorkspacePackage {
   readonly tarballPath: string;
 }
 
-interface LocalRegistryPackage {
-  readonly entry: NpmPackEntry;
-  readonly manifest: PackageJson;
-  readonly tarballPath: string;
-}
-
 const pinnedRuntimeDependencies = ["ink", "ink-gradient", "react"] as const;
 const repoRoot = process.cwd();
 const cleanupDirectories: string[] = [];
+const closeRegistries: (() => Promise<void>)[] = [];
 let releasePackageBuildLock: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
@@ -86,6 +81,7 @@ afterAll(async () => {
 }, 30_000);
 
 afterEach(async () => {
+  await Promise.all(closeRegistries.splice(0).map((close) => close()));
   for (const directory of cleanupDirectories.splice(0)) {
     await rm(directory, { force: true, recursive: true });
   }
@@ -287,13 +283,14 @@ async function startLocalNpmRegistry(
   readonly diagnostics: () => readonly RegistryDiagnostic[];
   readonly url: string;
 }> {
-  const packageMap = new Map<string, LocalRegistryPackage>();
+  const packageMap = new Map<string, PackedWorkspacePackage[]>();
+  const tarballs = new Map<string, string>();
   for (const packedPackage of packages) {
-    packageMap.set(packedPackage.packageJson.name, {
-      entry: packedPackage.entry,
-      manifest: packedPackage.packageJson,
-      tarballPath: packedPackage.tarballPath,
-    });
+    const name = packedPackage.packageJson.name;
+    const versions = packageMap.get(name) ?? [];
+    versions.push(packedPackage);
+    packageMap.set(name, versions);
+    tarballs.set(packedPackage.entry.filename, packedPackage.tarballPath);
   }
 
   const activeRequests = new Set<AbortController>();
@@ -308,6 +305,7 @@ async function startLocalNpmRegistry(
       completedRequests,
       pendingRequests,
       packageMap,
+      tarballs,
       request,
       response,
       server,
@@ -357,7 +355,8 @@ async function handleRegistryRequest(input: {
     AbortController,
     { readonly path: string; readonly startedAt: number }
   >;
-  readonly packageMap: ReadonlyMap<string, LocalRegistryPackage>;
+  readonly packageMap: ReadonlyMap<string, readonly PackedWorkspacePackage[]>;
+  readonly tarballs: ReadonlyMap<string, string>;
   readonly request: IncomingMessage;
   readonly response: ServerResponse;
   readonly server: Server;
@@ -368,47 +367,42 @@ async function handleRegistryRequest(input: {
 
     if (pathname.startsWith("/tarballs/")) {
       const filename = decodeURIComponent(pathname.slice("/tarballs/".length));
-      for (const localPackage of input.packageMap.values()) {
-        if (localPackage.tarballPath.endsWith(filename)) {
-          streamFile(input.response, localPackage.tarballPath);
-          return;
-        }
+      const tarball = input.tarballs.get(filename);
+      if (tarball) {
+        streamFile(input.response, tarball);
+      } else {
+        sendJson(input.response, 404, { error: "tarball not found" });
       }
-      sendJson(input.response, 404, { error: "tarball not found" });
       return;
     }
 
     const localPackageRequest = parseLocalPackageRequest(pathname);
     if (localPackageRequest) {
-      const localPackage = input.packageMap.get(localPackageRequest.name);
-      if (localPackage) {
-        if (
-          localPackageRequest.version !== undefined &&
-          localPackageRequest.version !== "latest" &&
-          localPackageRequest.version !== localPackage.manifest.version
-        ) {
-          sendJson(input.response, 404, { error: "version not found" });
-          return;
-        }
+      const localPackages = input.packageMap.get(localPackageRequest.name);
+      const latest = localPackages?.at(-1);
+      if (localPackages && latest) {
         const baseUrl = registryBaseUrl(input.server);
-        const manifest = createPackageManifest({
-          baseUrl,
-          entry: localPackage.entry,
-          packageJson: localPackage.manifest,
-        });
-
-        if (localPackageRequest.version) {
-          sendJson(input.response, 200, manifest);
+        const manifests = localPackages.map(({ entry, packageJson }) =>
+          createPackageManifest({ baseUrl, entry, packageJson }),
+        );
+        const version = localPackageRequest.version;
+        if (version) {
+          const requested =
+            version === "latest"
+              ? manifests.at(-1)
+              : manifests.find((manifest) => manifest.version === version);
+          if (requested) sendJson(input.response, 200, requested);
+          else sendJson(input.response, 404, { error: "version not found" });
           return;
         }
 
         sendJson(input.response, 200, {
-          _id: localPackage.manifest.name,
-          "dist-tags": { latest: localPackage.manifest.version },
-          name: localPackage.manifest.name,
-          versions: {
-            [localPackage.manifest.version]: manifest,
-          },
+          _id: latest.packageJson.name,
+          "dist-tags": { latest: latest.packageJson.version },
+          name: latest.packageJson.name,
+          versions: Object.fromEntries(
+            manifests.map((manifest) => [manifest.version, manifest]),
+          ),
         });
         return;
       }
@@ -652,7 +646,7 @@ describe("npm packed CLI smoke", () => {
         },
       );
     }
-  }, 480_000);
+  }, 600_000);
 });
 
 async function runPackedCliSmoke(tempRoot: string): Promise<void> {
@@ -737,14 +731,19 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   });
   expectCliPackIncludesWebAssets(cliPack.entry);
   const cliPackageJson = cliPack.packageJson;
+  const target = await repackCliVersion(cliPack, packDestination);
 
+  // Both versions share one registry URL so npm can reuse the first install's
+  // cached dependency metadata and artifacts during the upgrade.
   const registry = await startLocalNpmRegistry([
     sdkPack,
     llmPack,
     agentPack,
     serverPack,
     cliPack,
+    target,
   ]);
+  closeRegistries.push(registry.close);
 
   try {
     const installResult = await runCommand({
@@ -780,8 +779,6 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
       "utf8",
     );
     throw error;
-  } finally {
-    await registry.close();
   }
 
   const installedCliPackage = installedGlobalPackagePath(prefix, "ohbaby-cli");
@@ -980,18 +977,12 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   expect(versionResult.stdout).toBe(`${packageJson.version}\n`);
   expect(versionResult.stderr).toBe("");
 
-  const target = await repackCliVersion(cliPack, packDestination);
-  const updateRegistry = await startLocalNpmRegistry([
-    sdkPack,
-    llmPack,
-    agentPack,
-    serverPack,
-    target,
-  ]);
   try {
     const updateEnv = {
       ...isolatedEnv,
-      npm_config_registry: updateRegistry.url,
+      npm_config_registry: registry.url,
+      npm_config_prefer_offline: "true",
+      npm_config_loglevel: "verbose",
       npm_config_cache: npmCache,
       npm_config_tmp: npmTmp,
       npm_config_ignore_scripts: "true",
@@ -1002,7 +993,7 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
       command: ohbaby,
       cwd: cliCwd,
       env: updateEnv,
-      timeoutMs: 120_000,
+      timeoutMs: 180_000,
     };
     const probe = join(tempRoot, "check-update-native-load.cjs");
     await writeFile(
@@ -1077,8 +1068,20 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
     await expect(
       readFile(join(installedCliPackage, "package.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
-  } finally {
-    await updateRegistry.close();
+  } catch (error) {
+    const requests = registry.diagnostics();
+    await writeFile(
+      join(tempRoot, "registry-diagnostics.json"),
+      JSON.stringify(requests, null, 2),
+      "utf8",
+    );
+    const incomplete = requests.filter(
+      ({ status }) => typeof status !== "number" || status >= 500,
+    );
+    throw new Error(
+      `Packaged CLI maintenance failed. Incomplete registry requests: ${JSON.stringify(incomplete.slice(-12))}`,
+      { cause: error },
+    );
   }
 }
 

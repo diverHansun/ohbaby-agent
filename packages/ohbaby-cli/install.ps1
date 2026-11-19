@@ -162,6 +162,8 @@
     }
 
     function Get-NodeDownload([string]$Url, [string]$Destination) {
+        # Windows PowerShell's per-chunk progress reporting can slow large downloads.
+        $ProgressPreference = 'SilentlyContinue'
         try {
             Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Destination
         } catch {
@@ -205,6 +207,7 @@
         $zipPath = Join-Path $partial $archive
         $checksums = Join-Path $partial 'SHASUMS256.txt'
         $from = "$($Mirror.TrimEnd('/'))/v$nodeVersion"
+        Write-Host "Downloading Node.js $nodeVersion for Windows $Architecture..."
         Get-NodeDownload "$from/$archive" $zipPath
         Get-NodeDownload "$from/SHASUMS256.txt" $checksums
         $pattern = '^([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape($archive) + '\z'

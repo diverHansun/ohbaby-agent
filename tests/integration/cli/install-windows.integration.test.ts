@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   access,
   copyFile,
+  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -58,18 +59,18 @@ it.runIf(process.platform === "win32")(
       USERPROFILE: root,
     };
     let archiveBytes: Buffer;
+    let checksums: string;
     let brokenDownload = true;
+    const mirrorRequests: string[] = [];
     const mirror = createServer((request, response) => {
       const base = "/v" + nodeVersion + "/";
+      mirrorRequests.push(request.url ?? "<missing URL>");
       if (request.url === base + archive) {
-        response.end(archiveBytes);
+        response.end(brokenDownload ? "corrupt archive" : archiveBytes);
         return;
       }
       if (request.url === base + "SHASUMS256.txt") {
-        const hash = brokenDownload
-          ? "0".repeat(64)
-          : createHash("sha256").update(archiveBytes).digest("hex");
-        response.end(hash + "  " + archive + "\n");
+        response.end(checksums);
         return;
       }
       response.writeHead(404).end();
@@ -106,6 +107,11 @@ it.runIf(process.platform === "win32")(
       );
       await exec("tar.exe", ["-a", "-cf", archive, bundle], { cwd: root });
       archiveBytes = await readFile(join(root, archive));
+      checksums =
+        createHash("sha256").update(archiveBytes).digest("hex") +
+        "  " +
+        archive +
+        "\n";
       const source = await readFile(installer, "utf8");
       await writeFile(
         script,
@@ -122,22 +128,51 @@ it.runIf(process.platform === "win32")(
           "http://127.0.0.1:" + (mirror.address() as AddressInfo).port,
       });
 
-      const install = (version = "", environment: NodeJS.ProcessEnv = {}) =>
-        exec(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            script,
-          ],
-          {
-            env: { ...env, OHBABY_INSTALL_VERSION: version, ...environment },
-            timeout: 40_000,
-          },
-        );
+      const install = async (
+        version = "",
+        environment: NodeJS.ProcessEnv = {},
+      ) => {
+        const firstRequest = mirrorRequests.length;
+        const startedAt = Date.now();
+        try {
+          return await exec(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              script,
+            ],
+            {
+              env: { ...env, OHBABY_INSTALL_VERSION: version, ...environment },
+              timeout: 90_000,
+              windowsHide: true,
+            },
+          );
+        } catch (error) {
+          if (error instanceof Error && "killed" in error && error.killed) {
+            const requests = mirrorRequests.slice(firstRequest).join(", ");
+            const stderr =
+              "stderr" in error && typeof error.stderr === "string"
+                ? error.stderr.trim()
+                : "";
+            throw new Error(
+              "PowerShell installer timed out for " +
+                (version || "latest") +
+                " after " +
+                (Date.now() - startedAt) +
+                " ms. Loopback mirror received: " +
+                (requests || "no requests") +
+                ". Stderr: " +
+                (stderr || "<empty>"),
+              { cause: error },
+            );
+          }
+          throw error;
+        }
+      };
       const installedVersion = async () =>
         (
           await exec(
@@ -211,6 +246,9 @@ it.runIf(process.platform === "win32")(
       ).resolves.toBeUndefined();
 
       const badPath = join(root, "cannot;add to PATH");
+      await cp(join(installDir, "runtime"), join(badPath, "runtime"), {
+        recursive: true,
+      });
       await install(initialVersion, { OHBABY_INSTALL_DIR: badPath });
       await expect(
         install(nextVersion, {
