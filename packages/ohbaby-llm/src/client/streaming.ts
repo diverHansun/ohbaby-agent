@@ -324,6 +324,8 @@ export async function* streamResponse(
       observation: ModelRequestObservation,
     ) => Promise<void>;
     retry?: Partial<ProviderRetryPolicy>;
+    /** Opts agent steps into whole-step retry and carries their used budget. */
+    priorFailedAttempts?: number;
     idleTimeoutMs?: number;
     signal?: AbortSignal;
     tools?: readonly ModelToolDefinition[];
@@ -337,6 +339,7 @@ export async function* streamResponse(
   const { provider, config } = llmClient;
   const {
     retry,
+    priorFailedAttempts,
     signal: callerSignal,
     tools,
     maxTokens,
@@ -346,6 +349,7 @@ export async function* streamResponse(
   } = options ?? {};
   const retryPolicy = resolveProviderRetryPolicy(retry);
   const agentStep = purpose === "agent-step";
+  const allowStepRetry = agentStep && priorFailedAttempts !== undefined;
   const idleTimeoutMs = validateStreamIdleTimeoutMs(
     options?.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   );
@@ -375,7 +379,7 @@ export async function* streamResponse(
     ...(contextScopeId === undefined ? {} : { contextScopeId }),
   });
 
-  let failedAttempts = 0;
+  let failedAttempts = agentStep ? (priorFailedAttempts ?? 0) : 0;
 
   for (;;) {
     if (callerSignal?.aborted) {
@@ -796,45 +800,56 @@ export async function* streamResponse(
           accumulatedToolCalls.size > 0 ||
           (!agentStep &&
             (finishReason !== null || rawFinishReason !== undefined));
-        const retry = agentStep ? agentStepRetry(error) : undefined;
+        const stepFailure = agentStep
+          ? agentStepRetry(error, hasOutput)
+          : undefined;
+        const retryable = agentStep
+          ? stepFailure !== undefined
+          : isRetryableProviderError(error);
+        let interrupted: ProviderStreamInterruptedError | undefined;
         if (hasOutput) {
-          if (error instanceof ProviderStreamInterruptedError) throw error;
+          const source = agentStep
+            ? stepFailure?.source
+            : isProviderTransportError(error)
+              ? "transport"
+              : undefined;
+          interrupted =
+            error instanceof ProviderStreamInterruptedError
+              ? error
+              : new ProviderStreamInterruptedError(error, source);
+          if (!allowStepRetry)
+            throw annotatePromptCacheError(interrupted, promptCache.strategy);
+        }
+        const failure = interrupted ?? error;
+        if (!retryable)
+          throw annotatePromptCacheError(failure, promptCache.strategy);
+        if (failedAttempts >= retryPolicy.maxRetriesPerStep) {
           throw annotatePromptCacheError(
-            new ProviderStreamInterruptedError(
-              error,
-              agentStep
-                ? retry?.source
-                : isProviderTransportError(error)
-                  ? "transport"
-                  : undefined,
+            new ProviderRetryExhaustedError(
+              annotatePromptCacheError(failure, promptCache.strategy),
+              failedAttempts,
             ),
             promptCache.strategy,
           );
         }
 
         failedAttempts += 1;
-        const retryable = agentStep
-          ? retry !== undefined
-          : isRetryableProviderError(error);
-        if (failedAttempts > retryPolicy.maxRetriesPerStep || !retryable) {
-          if (retryable) {
-            throw annotatePromptCacheError(
-              new ProviderRetryExhaustedError(
-                annotatePromptCacheError(error, promptCache.strategy),
-                failedAttempts - 1,
-              ),
-              promptCache.strategy,
-            );
-          }
-          throw annotatePromptCacheError(error, promptCache.strategy);
-        }
-
-        reason = retry?.reason;
+        reason = stepFailure?.reason;
         delayMs = nextRetryDelayMs({
           attempt: failedAttempts,
           error,
           policy: retryPolicy,
         });
+        if (interrupted) {
+          error = annotatePromptCacheError(
+            new ProviderStreamInterruptedError(
+              interrupted.cause,
+              interrupted.source,
+              { delayMs },
+            ),
+            promptCache.strategy,
+          );
+        }
       } catch (terminalError) {
         error = terminalError;
       }
@@ -913,6 +928,8 @@ export async function* streamResponse(
           reason: reason ?? retryReason(error),
         },
       };
+      if (error instanceof ProviderStreamInterruptedError && error.stepRetry)
+        throw error;
       try {
         await sleepForRetry(delayMs, signal);
       } catch (sleepError) {

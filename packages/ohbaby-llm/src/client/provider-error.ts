@@ -312,6 +312,7 @@ function isPermanentNetworkCode(code: unknown): boolean {
 /** Decide eligibility for agent steps independently of user-facing error normalization. */
 export function agentStepRetry(
   error: unknown,
+  hasOutput: boolean,
 ): { reason: string; source?: "eof" | "transport" } | undefined {
   if (error instanceof ProviderStreamInterruptedError && error.source === "eof")
     return { reason: "stream_eof", source: "eof" };
@@ -374,7 +375,11 @@ export function agentStepRetry(
     if (reason !== undefined) return { reason };
   }
 
-  if (isRetryableProviderError(error))
+  // Before output, keep accepting HTTP failures from custom adapters.
+  if (
+    (!hasOutput || upstream.some((node) => node === error)) &&
+    isRetryableProviderError(error)
+  )
     return { reason: retryReason(error) };
   return undefined;
 }

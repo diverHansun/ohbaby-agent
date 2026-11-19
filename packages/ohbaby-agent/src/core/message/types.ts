@@ -96,7 +96,7 @@ export type MessageError =
     }
   | { readonly name: "MessageOutputLengthError" }
   | { readonly name: "MessageContentFilterError" }
-  | { readonly name: "MessageStreamInterruptedError" }
+  | { readonly name: "MessageStreamInterruptedError"; readonly retried?: true }
   | { readonly name: "MessageAbortedError"; readonly message: string }
   | {
       readonly name: "APIError";

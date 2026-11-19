@@ -16,7 +16,10 @@ const MessageErrorSchema = z.discriminatedUnion("name", [
   }),
   z.object({ name: z.literal("MessageOutputLengthError") }),
   z.object({ name: z.literal("MessageContentFilterError") }),
-  z.object({ name: z.literal("MessageStreamInterruptedError") }),
+  z.object({
+    name: z.literal("MessageStreamInterruptedError"),
+    retried: z.literal(true).optional(),
+  }),
   z.object({
     name: z.literal("MessageAbortedError"),
     message: z.string(),

@@ -2968,7 +2968,9 @@ describe("createInProcessUiBackendClient", () => {
       updatedAt: 1,
     };
     let currentCoreSession = primarySession;
-    const modelClient = createFakeLLMClient([]);
+    const modelClient = createFakeLLMClient([
+      { textDelta: "Done", finishReason: "stop" },
+    ]);
     const client = createInProcessUiBackendClient({
       llmClient: modelClient,
       initialSnapshot: {
@@ -6614,7 +6616,9 @@ describe("createInProcessUiBackendClient", () => {
     });
     const prompts = new InMemoryPromptSubmissionStore();
     const client = createInProcessUiBackendClient({
-      llmClient: createFakeLLMClient([]),
+      llmClient: createFakeLLMClient([
+        { textDelta: "Done", finishReason: "stop" },
+      ]),
       messageManager,
       promptSubmissionStore: prompts,
     });

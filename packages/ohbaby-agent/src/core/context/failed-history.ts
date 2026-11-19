@@ -27,7 +27,11 @@ export function selectFailedHistoryText(
   if (message.info.role !== "assistant" || message.info.finish !== "error")
     return undefined;
 
-  const reason = message.info.error?.name;
+  const error = message.info.error;
+  if (error?.name === "MessageStreamInterruptedError" && error.retried)
+    return undefined;
+
+  const reason = error?.name;
   switch (reason) {
     case "MessageAbortedError":
       return selectActiveInterruptionText(message.parts);

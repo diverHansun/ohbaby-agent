@@ -8,6 +8,7 @@ import type { ModelRequestAttempt, ModelRequestObservation } from "ohbaby-llm";
 import { ToolBatchEventQueue } from "./tool-event-queue.js";
 import { ToolDeliveryError } from "../tool-scheduler/index.js";
 import { randomUUID } from "node:crypto";
+import { setTimeout } from "node:timers/promises";
 import {
   DisplayReasoningOwner,
   type ReasoningEndReason,
@@ -155,6 +156,21 @@ function providerFailure(error: unknown):
   return detail
     ? { finalResponse: detail.message, terminalReason: undefined }
     : undefined;
+}
+
+async function waitForStepRetry(
+  error: unknown,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  if (!(error instanceof ProviderStreamInterruptedError) || !error.stepRetry)
+    return false;
+  try {
+    await setTimeout(error.stepRetry.delayMs, undefined, { signal });
+  } catch (waitError) {
+    if (!signal?.aborted) throw waitError;
+  }
+  // The next iteration checks cancellation before preparing another request.
+  return true;
 }
 
 function contextPreparationFailure(
@@ -339,13 +355,19 @@ async function markAssistantMessageError(
   const detail = providerErrorDetail(error);
   const statusCode = detail?.statusCode;
   const providerMessage = detail?.message ?? failure?.finalResponse;
+  const retried =
+    error instanceof ProviderStreamInterruptedError &&
+    error.stepRetry !== undefined;
   const interrupted =
     error instanceof ProviderStreamInterruptedError &&
-    (error.source === "transport" || error.source === "eof");
+    (retried || error.source === "transport" || error.source === "eof");
   const messageError: MessageError =
     terminalError ??
     (interrupted
-      ? { name: "MessageStreamInterruptedError" }
+      ? {
+          name: "MessageStreamInterruptedError",
+          ...(retried ? { retried: true } : {}),
+        }
       : statusCode === 401 || statusCode === 403
         ? {
             name: "ProviderAuthError" as const,
@@ -550,6 +572,10 @@ export class Lifecycle {
     const allToolCalls: ParsedToolCall[] = [];
     let turnStarted = false;
     let staleInputRetries = 0;
+    let failedStepAttempts = 0;
+    const onRetry = (attempt: number): void => {
+      failedStepAttempts = attempt;
+    };
     let forceRecoveryStep: number | undefined;
     let promptSnapshot: AgentRunPromptSnapshot | undefined;
     const activeReasoningByMessageId = new Map<string, string>();
@@ -703,8 +729,14 @@ export class Lifecycle {
           params: runParams,
           parentMessageId,
           step,
+          priorFailedAttempts: failedStepAttempts,
+          onRetry,
         });
       } catch (error) {
+        if (await waitForStepRetry(error, params.signal)) {
+          step -= 1;
+          continue;
+        }
         if (isRuntimeInputSnapshotChanged(error) && ++staleInputRetries <= 3) {
           step -= 1;
           continue;
@@ -821,8 +853,14 @@ export class Lifecycle {
             params: runParams,
             parentMessageId,
             step,
+            priorFailedAttempts: failedStepAttempts,
+            onRetry,
           });
         } catch (retryError) {
+          if (await waitForStepRetry(retryError, params.signal)) {
+            step -= 1;
+            continue;
+          }
           if (
             isRuntimeInputSnapshotChanged(retryError) &&
             ++staleInputRetries <= 3
@@ -876,6 +914,7 @@ export class Lifecycle {
       }
       const { assistantMessage, finalEvent } = stepResult;
       staleInputRetries = 0;
+      failedStepAttempts = 0;
       finalResponse = stepResult.finalResponse;
       if (
         assistantMessage?.role === "assistant" &&
@@ -1398,6 +1437,8 @@ export class Lifecycle {
     readonly params: ModelStepParams;
     readonly parentMessageId?: string;
     readonly step: number;
+    readonly priorFailedAttempts: number;
+    readonly onRetry: (attempt: number) => void;
   }): AsyncGenerator<LifecycleEvent, StepResult, void> {
     const { params, step } = input;
     const currentRunInputs = params.currentRunInputs;
@@ -1492,6 +1533,7 @@ export class Lifecycle {
         {
           preparedSettings: input.request.settings,
           purpose: "agent-step",
+          priorFailedAttempts: input.priorFailedAttempts,
           ...(currentRunInputs
             ? {
                 beforeRequestAttempt: (attempt: ModelRequestAttempt) =>
@@ -1601,6 +1643,7 @@ export class Lifecycle {
           streamStopReason = response.streamStopReason;
         if (response.tokenUsage) observedUsage = response.tokenUsage;
         if (response.retry) {
+          input.onRetry(response.retry.attempt);
           yield {
             type: "llm:retrying",
             attempt: response.retry.attempt,
@@ -1731,18 +1774,24 @@ export class Lifecycle {
       }
     } catch (error) {
       if (error instanceof ModelObservationError) throw error;
+      const cause =
+        error instanceof ProviderRetryExhaustedError ? error.cause : error;
+      const interrupted =
+        cause instanceof ProviderStreamInterruptedError &&
+        cause.source !== "protocol";
       const reasoningEnd = await finishReasoning(
-        params.signal?.aborted ||
-          (error instanceof ProviderStreamInterruptedError &&
-            error.source !== "protocol")
-          ? "interrupted"
-          : "failed",
+        params.signal?.aborted || interrupted ? "interrupted" : "failed",
       );
       if (reasoningEnd) yield reasoningEnd;
       await markAssistantMessageError(
         this.deps.messageManager,
         assistantMessage,
         error,
+        error instanceof ProviderRetryExhaustedError &&
+          interrupted &&
+          previousContent !== ""
+          ? { name: "MessageStreamInterruptedError" }
+          : undefined,
       );
       throw error;
     }

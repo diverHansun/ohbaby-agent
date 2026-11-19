@@ -28,6 +28,7 @@ export class ProviderStreamInterruptedError extends Error {
   constructor(
     override readonly cause: unknown,
     readonly source?: "transport" | "eof" | "protocol" | "provider_abort",
+    readonly stepRetry?: { readonly delayMs: number },
   ) {
     super(errorMessage(cause));
     this.name = "ProviderStreamInterruptedError";

@@ -1148,7 +1148,7 @@ describe("Lifecycle.run", () => {
     ]);
   });
 
-  it("treats a partial provider event followed by EOF as an interrupted stream", async () => {
+  it("retries a partial EOF without completing or calibrating the discarded attempt", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -1169,7 +1169,7 @@ describe("Lifecycle.run", () => {
                 30,
               ),
             )
-            .mockResolvedValueOnce(
+            .mockResolvedValue(
               preparedTurn(
                 [{ role: "user", content: "Second" }],
                 SESSION_USAGE,
@@ -1196,6 +1196,7 @@ describe("Lifecycle.run", () => {
             },
           ],
           [{ textDelta: "partial" }],
+          [{ textDelta: "retried", finishReason: "stop" }],
         ],
         [],
       ),
@@ -1237,11 +1238,13 @@ describe("Lifecycle.run", () => {
       emitted.filter(
         (event) => event.type === "llm:complete" && event.step === 2,
       ),
-    ).toEqual([]);
+    ).toEqual([
+      expect.objectContaining({ messageSnapshot: { content: "retried" } }),
+    ]);
     expect(next.value).toMatchObject({
-      finishReason: "error",
-      success: false,
-      terminalReason: "provider_stream_interrupted",
+      finishReason: "stop",
+      success: true,
+      terminalReason: "completed",
       usage: {
         inputTokens: 40,
         outputTokens: 4,
@@ -1252,7 +1255,7 @@ describe("Lifecycle.run", () => {
     expect(updateCalibrationFactor.mock.calls).toEqual([
       ["session_partial_eof", 40, 30],
     ]);
-    expect(assistantMessages).toHaveLength(2);
+    expect(assistantMessages).toHaveLength(3);
     expect(
       assistantMessages[1]?.parts.some(
         (part) => readTokenUsageMetadata(part.metadata) !== undefined,
@@ -3394,13 +3397,14 @@ describe("Lifecycle final step usage observer", () => {
     );
   });
 
-  it("observes absent usage for a final result but nothing for EOF", async () => {
+  it("observes absent usage for successful responses and skips the interrupted attempt", async () => {
     const observations: unknown[] = [];
     const { lifecycle } = fixture(
       createSequentialFakeLLMClient(
         [
           [{ textDelta: "done", finishReason: "stop" }],
           [{ textDelta: "unfinished" }],
+          [{ textDelta: "finished after EOF", finishReason: "stop" }],
         ],
         [],
       ),
@@ -3416,9 +3420,12 @@ describe("Lifecycle final step usage observer", () => {
     const second = await consumeLifecycleEvents(
       lifecycle.run({ ...params, onStepUsage }),
     );
-    expect(observations).toEqual([{ step: 1, tokenUsage: undefined }]);
+    expect(observations).toEqual([
+      { step: 1, tokenUsage: undefined },
+      { step: 1, tokenUsage: undefined },
+    ]);
     expect(first.result.usage?.usageComplete).toBe(false);
-    expect(second.result.terminalReason).toBe("provider_stream_interrupted");
+    expect(second.result.terminalReason).toBe("completed");
   });
 
   it("discards completed usage from an overflowing attempt and observes only retry usage", async () => {
