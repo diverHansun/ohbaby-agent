@@ -21,7 +21,7 @@ npm 版 CLI 负责 TUI 和 Web，升级入口只有 CLI 命令 `ohbaby update`�
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 6 个 Stage、设计决策（★ 项已确认）、接口与兼容、关键改动清单 |
 | [03 参考项目](improve-1/03-reference-projects.md) | claude-code、codex、opencode、kimi-code、pi、Step-Code 的升级做法与取舍 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 单元和集成测试、Windows 实施前探针、真机验收、发布门 |
-| 05 实施与验收 | 本轮实施完成后，由验收模式写入 |
+| [05 实施与验收](improve-1/05-implementation-acceptance.md) | 本地实施结果、验收证据和发布后的待验证项 |
 
 原计划把升级模块的设计文档单独放在 `docs/cli/upgrade/`，目前没有建。升级功能代码量不大，2026-11-19 确认不单独建，改为实施后更新 [docs/cli/](../../cli/) 的现有设计文档（02 的 D2）。
 

@@ -24,6 +24,7 @@ import { createDraftStore, type DraftStore } from "../store/draft.js";
 import type { GlobalCatalogStore } from "../store/global-catalog.js";
 import { createOhbabyWebStore, type OhbabyWebStore } from "../store/store.js";
 import { sessionMovedTarget, waitForSessionReady } from "./session-moved.js";
+import type { RestartAutoReloadOptions } from "../api/daemon/client-sync.js";
 import { isDaemonRequestError } from "../api/daemon/http.js";
 import { SettingsClient } from "../api/daemon/settings-client.js";
 import { TerminalClient, type TerminalApi } from "../api/daemon/terminals.js";
@@ -171,16 +172,38 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     selectedDirectory: null,
   };
   private readonly cleanups: (() => void)[] = [];
+  private readonly sideChatConnections = new Set<SideChatConnection>();
   /** A bound session missing from the list is refreshed for once, not on every index change. */
   private refreshedForSession: string | null = null;
 
   constructor(
     private readonly config: OhbabyBootstrapConfig,
     private readonly fetchImpl: typeof fetch | undefined,
+    autoReloadOnRestart?: RestartAutoReloadOptions,
   ) {
     this.global = new GlobalLayer(config, fetchImpl);
     this.terminals = new TerminalClient(config, fetchImpl);
-    this.instance = new InstanceLayer(config, fetchImpl, this.store);
+    const hasUnsentSideChatDraft = (): boolean => {
+      for (const connection of this.sideChatConnections) {
+        if (connection.draft.getSnapshot().text.trim().length > 0) return true;
+      }
+      return false;
+    };
+    const restartReload: RestartAutoReloadOptions | undefined =
+      autoReloadOnRestart === undefined
+        ? undefined
+        : {
+            ...autoReloadOnRestart,
+            canReload: (): boolean =>
+              !hasUnsentSideChatDraft() &&
+              (autoReloadOnRestart.canReload?.() ?? true),
+          };
+    this.instance = new InstanceLayer(
+      config,
+      fetchImpl,
+      this.store,
+      restartReload,
+    );
     this.settings = new SettingsLayer(
       new SettingsClient(config, fetchImpl),
       () => this.settingsDirectory(),
@@ -309,6 +332,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   async dispose(): Promise<void> {
     for (const cleanup of this.cleanups) cleanup();
+    this.sideChatConnections.clear();
     await this.instance.dispose();
   }
 
@@ -432,11 +456,20 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   connectSideChat(entry: SideChatEntry): SideChatConnection {
-    return connectSideChat({
+    const connection = connectSideChat({
       config: this.config,
       ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
       entry,
     });
+    const tracked: SideChatConnection = {
+      ...connection,
+      close: async (): Promise<void> => {
+        this.sideChatConnections.delete(tracked);
+        await connection.close();
+      },
+    };
+    this.sideChatConnections.add(tracked);
+    return tracked;
   }
 
   async abortSession(sessionId: string, runId?: string): Promise<void> {
@@ -930,7 +963,16 @@ function workspaceName(directory: string): string {
 
 export function createOhbabyWebRuntime(
   config: OhbabyBootstrapConfig,
-  options: { readonly fetch?: typeof fetch } = {},
+  options: {
+    readonly fetch?: typeof fetch;
+    readonly autoReloadOnRestart?: boolean | RestartAutoReloadOptions;
+  } = {},
 ): OhbabyWebRuntime {
-  return new BrowserOhbabyWebRuntime(config, options.fetch);
+  const autoReload =
+    options.autoReloadOnRestart === true
+      ? {}
+      : options.autoReloadOnRestart === false
+        ? undefined
+        : options.autoReloadOnRestart;
+  return new BrowserOhbabyWebRuntime(config, options.fetch, autoReload);
 }

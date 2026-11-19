@@ -22,7 +22,7 @@
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 4 个 Stage、启动脚本内容、安装流程、跨语言契约、关键改动清单 |
 | [03 参考项目](improve-1/03-reference-projects.md) | pi、codex、Step-Code、opencode、claude-code 的做法与取舍 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 单元和集成测试、实施前真机探针、真机验收、发布门 |
-| 05 实施与验收 | 本轮实施完成后，由验收模式写入 |
+| [05 实施与验收](improve-1/05-implementation-acceptance.md) | 本地实施结果、验收证据和发布后的待验证项 |
 
 ## 相关议题
 

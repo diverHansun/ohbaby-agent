@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { CoreAPI, DaemonStartupIntent } from "ohbaby-sdk";
@@ -10,13 +11,28 @@ import { hideBin } from "yargs/helpers";
 import { createRunCommand } from "./cli/commands/run.js";
 import { createServeCommand } from "./cli/commands/serve.js";
 import { createTerminalCommand } from "./cli/commands/terminal.js";
+import { createUninstallCommand } from "./cli/commands/uninstall.js";
+import {
+  createUpdateCommand,
+  runAutomaticUpdate,
+} from "./cli/commands/update.js";
 import type {
   CliCommandRuntime,
   CliCoreHost,
   CliCoreHostResult,
   CliGlobalOptions,
+  CliStartupUpdate,
   CliWritable,
 } from "./cli/commands/types.js";
+import { readAutoUpdate } from "./update/settings.js";
+import {
+  runUpgradePreflight,
+  type UpgradePreflightRuntime,
+} from "./update/preflight.js";
+import {
+  readUpdateNotice,
+  refreshVersionCacheInBackground,
+} from "./update/version-check.js";
 import { EXIT_CODES } from "./cli/exit-codes.js";
 import { readStdin } from "./cli/stdin.js";
 import { createStdoutRenderer } from "./cli/stdout-renderer.js";
@@ -69,6 +85,84 @@ class CliUsageError extends Error {
   }
 }
 
+const DATABASE_NEWER_THAN_PROGRAM = "DATABASE_NEWER_THAN_PROGRAM";
+
+/** Matches by structural code because the error class may come from another package copy. */
+function findDatabaseNewerThanProgram(error: unknown): Error | undefined {
+  for (let current = error, depth = 0; depth < 5; depth += 1) {
+    if (!(current instanceof Error)) return undefined;
+    if ((current as { code?: unknown }).code === DATABASE_NEWER_THAN_PROGRAM) {
+      return current;
+    }
+    current = current.cause;
+  }
+  return undefined;
+}
+
+const AUTO_UPDATE_HINT =
+  "Run ohbaby update --auto on to enable automatic updates.";
+
+/**
+ * Startup update hooks for the local TUI and `serve start`. The cache reads stay
+ * offline; only automatic update initializes the proxy, right before it runs.
+ */
+function createStartupUpdate(input: {
+  readonly resolveOhbabyHome: () => string;
+  readonly initializeProxy: () => Promise<void>;
+  readonly runtime: () => CliCommandRuntime;
+  readonly pushStartupNotice: (message: string) => void;
+}): CliStartupUpdate {
+  const readNotice = (
+    ohbabyHome: string,
+  ): ReturnType<typeof readUpdateNotice> =>
+    readUpdateNotice({ ohbabyHome, currentVersion: VERSION });
+  return {
+    readNotice(): string | undefined {
+      const ohbabyHome = input.resolveOhbabyHome();
+      const notice = readNotice(ohbabyHome);
+      if (notice === undefined) return undefined;
+      return readAutoUpdate(ohbabyHome)
+        ? notice.message
+        : `${notice.message} ${AUTO_UPDATE_HINT}`;
+    },
+    async runAutomaticUpdate(): Promise<"continue" | "exit"> {
+      const ohbabyHome = input.resolveOhbabyHome();
+      if (!readAutoUpdate(ohbabyHome)) return "continue";
+      const notice = readNotice(ohbabyHome);
+      if (notice === undefined) return "continue";
+      await input.initializeProxy();
+      const runtime = input.runtime();
+      const messages: string[] = [];
+      const decision = await runAutomaticUpdate({
+        ohbabyHome,
+        currentVersion: VERSION,
+        targetVersion: notice.latestVersion,
+        runtime: {
+          ...runtime,
+          stderr: {
+            write(chunk: string): void {
+              messages.push(chunk);
+              runtime.stderr.write(chunk);
+            },
+          },
+        },
+      });
+      if (decision === "continue") {
+        // The TUI clears the screen on start, so repeat the reason inside it.
+        for (const line of messages.join("").split("\n")) {
+          if (line.trim().length > 0) input.pushStartupNotice(line);
+        }
+      }
+      return decision;
+    },
+    refreshInBackground(): void {
+      refreshVersionCacheInBackground({
+        ohbabyHome: input.resolveOhbabyHome(),
+      });
+    },
+  };
+}
+
 export interface RunOhbabyCliIo {
   readonly stderr?: CliWritable;
   readonly stdin?: Readable & { readonly isTTY?: boolean };
@@ -94,6 +188,10 @@ export interface RunOhbabyCliDependencies {
   ) => Promise<void> | void;
   readonly openUrl?: CliCommandRuntime["openUrl"];
   readonly readServeCoexistenceNotice?: () => Promise<string | undefined>;
+  /** Enables startup update checks; injected tests opt in explicitly. */
+  readonly resolveOhbabyHome?: () => string;
+  readonly resolveOhbabyDataPaths?: CliCommandRuntime["resolveOhbabyDataPaths"];
+  readonly runUpgradePreflight?: CliCommandRuntime["runUpgradePreflight"];
   readonly readDaemonStatus?: CliCommandRuntime["readDaemonStatus"];
   readonly startDaemonServer?: (
     options: Parameters<CliCommandRuntime["startDaemonServer"]>[0] & {
@@ -113,6 +211,8 @@ interface RemoteDaemonClientOptions {
 }
 
 interface AgentRuntimeModule {
+  readonly OHBABY_DATABASE_FILE_NAME?: unknown;
+  readonly resolveOhbabyDataRoot?: unknown;
   readonly installSystemProxy?: unknown;
   readonly collectCleanup?: typeof collectCleanup;
   readonly createShutdownOptions?: typeof createShutdownOptions;
@@ -178,6 +278,7 @@ function emitWithoutAffectingProduct<Input>(
 
 interface ServerRuntimeModule {
   readonly createRemoteCoreApiHost?: unknown;
+  readonly inspectDaemonForMaintenance?: unknown;
   readonly listDaemonConnections?: unknown;
   readonly readDaemonStatus?: unknown;
   readonly startDaemonServer?: unknown;
@@ -369,7 +470,51 @@ async function loadDefaultDependencies(
     );
   };
 
+  const resolveHomeExport = optionalRuntimeExport(
+    runtimeModule as Record<string, unknown>,
+    "resolveOhbabyHome",
+  ) as typeof resolveOhbabyHome | undefined;
+
   return {
+    ...(resolveHomeExport === undefined
+      ? {}
+      : { resolveOhbabyHome: (): string => resolveHomeExport() }),
+    resolveOhbabyDataPaths() {
+      const resolveDataRoot = requireFunction(
+        runtimeModule.resolveOhbabyDataRoot,
+        "resolveOhbabyDataRoot",
+        AGENT_RUNTIME_MODULE,
+      ) as () => string;
+      const databaseName = runtimeModule.OHBABY_DATABASE_FILE_NAME;
+      if (typeof databaseName !== "string") {
+        throw new Error("Missing database file name from ohbaby-agent");
+      }
+      const dataRoot = resolveDataRoot();
+      const configuredDatabase = process.env.OHBABY_DB_PATH;
+      return {
+        dataRoot,
+        databasePath:
+          configuredDatabase === undefined
+            ? join(dataRoot, databaseName)
+            : resolve(configuredDatabase),
+      };
+    },
+    async runUpgradePreflight(options) {
+      if (!resolveHomeExport) {
+        throw new Error("Missing resolveOhbabyHome export from ohbaby-agent");
+      }
+      const inspectDaemonForMaintenance = (await requireServerFunction(
+        "inspectDaemonForMaintenance",
+      )) as UpgradePreflightRuntime["inspectDaemonForMaintenance"];
+      const stopDaemonFromState = (await requireServerFunction(
+        "stopDaemonFromState",
+      )) as UpgradePreflightRuntime["stopDaemonFromState"];
+      return runUpgradePreflight(options, {
+        resolveOhbabyHome: resolveHomeExport,
+        inspectDaemonForMaintenance,
+        stopDaemonFromState,
+      });
+    },
     readServeCoexistenceNotice(): Promise<string | undefined> {
       const resolveHome = runtimeModule.resolveOhbabyHome;
       return resolveHome
@@ -612,6 +757,8 @@ export async function runOhbabyCli(
   const coexistenceNotice =
     dependencies.readServeCoexistenceNotice ??
     defaultDependencies?.readServeCoexistenceNotice;
+  const resolveHome =
+    dependencies.resolveOhbabyHome ?? defaultDependencies?.resolveOhbabyHome;
 
   if (!createCoreHost || !loadRuntimeEnvIntoProcessEnv) {
     throw new Error("CLI runtime dependencies were not initialized");
@@ -639,6 +786,26 @@ export async function runOhbabyCli(
   let exitCode: number = EXIT_CODES.ok;
   const runtime: CliCommandRuntime = {
     onHostShutdownComplete: dependencies.onHostShutdownComplete,
+    initializeProxy,
+    resolveOhbabyDataPaths:
+      dependencies.resolveOhbabyDataPaths ??
+      defaultDependencies?.resolveOhbabyDataPaths,
+    runUpgradePreflight:
+      dependencies.runUpgradePreflight ??
+      defaultDependencies?.runUpgradePreflight,
+    ...(resolveHome === undefined ? {} : { resolveOhbabyHome: resolveHome }),
+    ...(resolveHome === undefined
+      ? {}
+      : {
+          startupUpdate: createStartupUpdate({
+            resolveOhbabyHome: resolveHome,
+            initializeProxy,
+            runtime: () => runtime,
+            pushStartupNotice: (message) => {
+              startupNotices.push(message);
+            },
+          }),
+        }),
     async createCoreHost(options) {
       if (options.remotePort === undefined) await initializeProxy();
       return createRpcCoreHost(await createCoreHost(options));
@@ -729,6 +896,8 @@ export async function runOhbabyCli(
       .command(createTerminalCommand(runtime))
       .command(createRunCommand(runtime))
       .command(createServeCommand(runtime))
+      .command(createUpdateCommand(runtime, stdin))
+      .command(createUninstallCommand(runtime, stdin))
       .demandCommand(0, 1)
       .strict()
       .help()
@@ -739,7 +908,9 @@ export async function runOhbabyCli(
         }
       }, true)
       .exitProcess(false)
-      .fail((message) => {
+      .fail((message, error) => {
+        // Handler failures reach here too; keep structured errors intact.
+        if (findDatabaseNewerThanProgram(error)) throw error;
         throw new CliUsageError(message);
       })
       .parseAsync();
@@ -748,6 +919,11 @@ export async function runOhbabyCli(
     if (error instanceof CliUsageError) {
       stderr.write(`${error.message}\n`);
       return EXIT_CODES.usage;
+    }
+    const newerDatabase = findDatabaseNewerThanProgram(error);
+    if (newerDatabase) {
+      stderr.write(`${newerDatabase.message}\n`);
+      return EXIT_CODES.failure;
     }
     throw error;
   } finally {

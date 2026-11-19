@@ -1,4 +1,12 @@
 import type { DaemonRpcMethod } from "../../protocols/jsonrpc/protocol.js";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  REQUEST_DIRECTORY_ENCODING_HEADER,
+  REQUEST_DIRECTORY_ENCODING_PERCENT_UTF8,
+  REQUEST_DIRECTORY_HEADER,
+} from "ohbaby-sdk";
 import {
   request as httpRequest,
   createServer as createHttpServer,
@@ -36,6 +44,14 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 function emptySnapshot(): UiSnapshot {
@@ -1070,6 +1086,162 @@ describe("createDaemonHttpServer", () => {
       },
       { authToken: "token_1", onShutdown },
     );
+  });
+
+  it("binds idle shutdown to the daemon identity and restores admission when busy", async () => {
+    const finishSubmit = deferred();
+    const startedSubmit = deferred();
+    const backend = new FakeBackend();
+    const accept = backend.submitPromptAccepted.bind(backend);
+    let active = false;
+    vi.spyOn(backend, "submitPromptAccepted").mockImplementation(
+      async (...args) => {
+        startedSubmit.resolve();
+        await finishSubmit.promise;
+        active = true;
+        return accept(...args);
+      },
+    );
+    const onShutdown = vi.fn();
+    await withServer(
+      Object.assign(backend, {
+        getActivityReasons: () => (active ? ["Active run session_1"] : []),
+      }),
+      async (url) => {
+        const postIdle = (
+          pidToken: string,
+          authorized = true,
+        ): Promise<Response> =>
+          fetch(`${url}/api/shutdown/idle`, {
+            method: "POST",
+            headers: authorized ? authHeaders() : {},
+            body: JSON.stringify({ pidToken }),
+          });
+        expect((await postIdle("current", false)).status).toBe(401);
+        expect((await postIdle("old")).status).toBe(409);
+        expect(onShutdown).not.toHaveBeenCalled();
+
+        const submit = postRpc(url, {
+          clientId: "client_1",
+          id: "submit",
+          method: "submitPromptAccepted",
+          params: ["hello", null],
+        });
+        try {
+          await startedSubmit.promise;
+          const shutdown = postIdle("current");
+          try {
+            await vi.waitFor(async () => {
+              expect(
+                (
+                  await fetch(`${url}/v1/terminals`, {
+                    method: "POST",
+                    headers: authHeaders(),
+                  })
+                ).status,
+              ).toBe(503);
+            });
+            const newRpc = await postRpc(url, {
+              clientId: "client_1",
+              id: "paused",
+              method: "submitPromptAccepted",
+              params: ["new", null],
+            });
+            expect(newRpc.status).toBe(503);
+            expect((await postIdle("current")).status).toBe(409);
+          } finally {
+            finishSubmit.resolve();
+          }
+          expect((await submit).status).toBe(200);
+          const refusal = await shutdown;
+          expect(refusal.status).toBe(409);
+          expect(await refusal.json()).toMatchObject({
+            reasons: ["Active run session_1"],
+          });
+          expect(onShutdown).not.toHaveBeenCalled();
+
+          active = false;
+          expect((await postIdle("current")).status).toBe(200);
+          await vi.waitFor(() => {
+            expect(onShutdown).toHaveBeenCalledOnce();
+          });
+        } finally {
+          finishSubmit.resolve();
+          await submit.catch(() => undefined);
+        }
+      },
+      { pidToken: "current", onShutdown },
+    );
+  });
+
+  it("checks a workspace whose backend is still being created", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-idle-workspace-"));
+    const workspace = await realpath(root);
+    const creating = deferred();
+    const finishCreating = deferred();
+    const onShutdown = vi.fn();
+    try {
+      await withServer(
+        new FakeBackend(),
+        async (url) => {
+          const snapshot = fetch(`${url}/v1/snapshot`, {
+            headers: {
+              ...authHeaders(),
+              [REQUEST_DIRECTORY_HEADER]: encodeURIComponent(workspace),
+              [REQUEST_DIRECTORY_ENCODING_HEADER]:
+                REQUEST_DIRECTORY_ENCODING_PERCENT_UTF8,
+            },
+          });
+          try {
+            await creating.promise;
+            const shutdown = fetch(`${url}/api/shutdown/idle`, {
+              method: "POST",
+              headers: authHeaders(),
+              body: JSON.stringify({ pidToken: "current" }),
+            });
+            try {
+              await vi.waitFor(async () => {
+                expect(
+                  (
+                    await fetch(`${url}/v1/terminals`, {
+                      method: "POST",
+                      headers: authHeaders(),
+                    })
+                  ).status,
+                ).toBe(503);
+              });
+              expect(onShutdown).not.toHaveBeenCalled();
+            } finally {
+              finishCreating.resolve();
+            }
+            const response = await shutdown;
+            expect(response.status).toBe(409);
+            expect(await response.json()).toMatchObject({
+              reasons: [`${workspace}: background shell jobs`],
+            });
+            expect((await snapshot).status).toBe(400);
+            expect(onShutdown).not.toHaveBeenCalled();
+          } finally {
+            finishCreating.resolve();
+            await snapshot.catch(() => undefined);
+          }
+        },
+        {
+          scopeRoot: process.cwd(),
+          createWorkspaceBackend: async () => {
+            creating.resolve();
+            await finishCreating.promise;
+            return Object.assign(new FakeBackend(), {
+              getActivityReasons: () => ["background shell jobs"],
+            });
+          },
+          pidToken: "current",
+          onShutdown,
+        },
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("responds before stopping itself from shutdown hooks", async () => {

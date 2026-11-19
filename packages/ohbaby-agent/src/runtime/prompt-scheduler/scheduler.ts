@@ -916,6 +916,18 @@ export class WorkspacePromptScheduler {
     );
   }
 
+  getActivityReasons(): readonly string[] {
+    return [
+      ...[...this.activeBySession].map(
+        ([sessionId, promptId]) =>
+          `Active prompt ${promptId} (session ${sessionId})`,
+      ),
+      ...[...this.pendingFinalizations.keys()].map(
+        (sessionId) => `Prompt cleanup (session ${sessionId})`,
+      ),
+    ];
+  }
+
   /** Re-reads the durable queue, e.g. after another workspace handed prompts over. */
   wake(): void {
     this.requestDrain();

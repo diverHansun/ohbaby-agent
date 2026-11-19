@@ -1,4 +1,8 @@
 import type {
+  UpgradePreflight,
+  UpgradePreflightOptions,
+} from "../../update/preflight.js";
+import type {
   CoreAPI,
   SDKAPI,
   UiEventHandler,
@@ -81,8 +85,32 @@ export interface TerminalUiLifecycle {
   readonly unmount?: () => void;
 }
 
+export type CliStartupUpdateDecision = "continue" | "exit";
+
+/** Startup update hooks used only by the local TUI and `serve start`. */
+export interface CliStartupUpdate {
+  /** Reads the cached update notice. It never touches the network. */
+  readonly readNotice: () => string | undefined;
+  /** Runs the automatic update when it is enabled and the cache has a newer version. */
+  readonly runAutomaticUpdate: () => Promise<CliStartupUpdateDecision>;
+  /** Refreshes the cache without delaying startup. Callers must own an initialized proxy. */
+  readonly refreshInBackground: () => void;
+}
+
 export interface CliCommandRuntime {
   readonly onHostShutdownComplete?: () => void;
+  /** Installs the shared network proxy once; later calls are no-ops. */
+  readonly initializeProxy?: () => Promise<void>;
+  /** Resolves <OHBABY_HOME> without opening the database. */
+  readonly resolveOhbabyHome?: () => string;
+  readonly resolveOhbabyDataPaths?: () => {
+    readonly dataRoot: string;
+    readonly databasePath: string;
+  };
+  readonly runUpgradePreflight?: (
+    options: UpgradePreflightOptions,
+  ) => Promise<UpgradePreflight>;
+  readonly startupUpdate?: CliStartupUpdate;
   readonly createCoreHost: (options: CliGlobalOptions) => CliCoreHostResult;
   readonly createStdoutRenderer: typeof createStdoutRenderer;
   readonly failUsage: (message: string) => never;

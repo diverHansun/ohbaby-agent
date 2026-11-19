@@ -22,3 +22,5 @@ Most users should install `ohbaby-cli`, which includes both the terminal and web
 npm install -g ohbaby-cli
 ohbaby
 ```
+
+See the [project installation guide](https://github.com/diverHansun/ohbaby-agent#install) for the script installers and maintenance commands.

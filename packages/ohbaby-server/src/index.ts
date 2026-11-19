@@ -42,3 +42,5 @@ export type {
 } from "./runtime/daemon/main.js";
 export type { DaemonState } from "./runtime/daemon/types.js";
 export type { CoreApiHost } from "ohbaby-agent";
+
+export { inspectDaemonForMaintenance } from "./runtime/daemon/stop.js";

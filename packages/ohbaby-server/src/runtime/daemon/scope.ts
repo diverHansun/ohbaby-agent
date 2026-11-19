@@ -12,6 +12,7 @@ export interface DaemonScope {
 
 export interface ResolveDaemonScopeOptions {
   readonly homeDirectory?: string;
+  readonly environment?: Readonly<NodeJS.ProcessEnv>;
   readonly workdir?: string;
 }
 
@@ -49,7 +50,10 @@ export async function resolveDaemonScope(
     ? await canonicalDirectory(projectRoot)
     : workdir;
   const configHome = await canonicalPath(
-    resolveOhbabyHome({ homeDirectory: options.homeDirectory }),
+    resolveOhbabyHome({
+      homeDirectory: options.homeDirectory,
+      environment: options.environment,
+    }),
   );
   const serverDir = join(configHome, "server");
   const legacyServerDir = join(scopeRoot, ".ohbaby", "server");

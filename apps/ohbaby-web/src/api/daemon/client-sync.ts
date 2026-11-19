@@ -40,6 +40,76 @@ function reportEventSubscriberFailure(): void {
 
 /** How long the connection may stay down before the page says it is lost. */
 export const CONNECTION_LOST_AFTER_MS = 10_000;
+/** Minimum interval between automatic reloads after a daemon restart. */
+export const AUTO_RELOAD_COOLDOWN_MS = 30_000;
+export const AUTO_RELOAD_STORAGE_KEY = "ohbaby:web-auto-reload-at";
+
+export interface RestartAutoReloadOptions {
+  /** Skip auto-reload (leaving the manual Refresh notice) when false. */
+  readonly canReload?: () => boolean;
+  readonly now?: () => number;
+  readonly reload?: () => void;
+  readonly storage?: Pick<Storage, "getItem" | "setItem">;
+}
+
+function isWithinReloadCooldown(
+  lastReloadRaw: string | null,
+  now: number,
+): boolean {
+  if (lastReloadRaw === null || lastReloadRaw.trim() === "") return false;
+  const lastReloadAt = Number(lastReloadRaw);
+  return (
+    Number.isFinite(lastReloadAt) &&
+    now >= lastReloadAt &&
+    now - lastReloadAt < AUTO_RELOAD_COOLDOWN_MS
+  );
+}
+
+function resolveReloadAction(
+  reload: RestartAutoReloadOptions["reload"],
+): (() => void) | undefined {
+  if (reload) return reload;
+  const loc = globalThis.location as { reload?: () => void } | undefined;
+  return loc?.reload ? (): void => loc.reload?.() : undefined;
+}
+
+function resolveStorage(
+  storage: RestartAutoReloadOptions["storage"],
+): Pick<Storage, "getItem" | "setItem"> | undefined {
+  if (storage) return storage;
+  return (
+    globalThis as {
+      readonly sessionStorage?: Pick<Storage, "getItem" | "setItem">;
+    }
+  ).sessionStorage;
+}
+
+/**
+ * Reloads the page at most once per cooldown window after a daemon restart.
+ * Writes the timestamp before reloading so a stale page cannot loop; storage
+ * errors or an active guard fall back to the manual Refresh overlay.
+ */
+export function tryAutoReloadOnRestart(
+  options: RestartAutoReloadOptions = {},
+): boolean {
+  if (options.canReload && !options.canReload()) return false;
+  const reload = resolveReloadAction(options.reload);
+  if (!reload) return false;
+  const current = (options.now ?? Date.now)();
+  try {
+    const storage = resolveStorage(options.storage);
+    if (!storage) return false;
+    if (
+      isWithinReloadCooldown(storage.getItem(AUTO_RELOAD_STORAGE_KEY), current)
+    )
+      return false;
+    storage.setItem(AUTO_RELOAD_STORAGE_KEY, String(current));
+  } catch {
+    return false;
+  }
+  reload();
+  return true;
+}
 
 /**
  * Connection, SSE delivery, the selected-session binding and its derived
@@ -54,6 +124,7 @@ export class ClientSync {
   readonly sessionSync: SessionSync;
   private readonly events: FetchDaemonEventStream;
   private readonly hooks: ClientSyncHooks;
+  private readonly restartReload: RestartAutoReloadOptions | undefined;
   /** Pending "lost" notice for the current outage; see `trackOutage`. */
   private outageTimer: ReturnType<typeof setTimeout> | undefined;
   private outageOpen = false;
@@ -92,12 +163,19 @@ export class ClientSync {
     readonly http: DaemonHttpClient;
     readonly store: OhbabyWebStore;
     readonly hooks: ClientSyncHooks;
+    readonly autoReloadOnRestart?: boolean | RestartAutoReloadOptions;
   }) {
     this.config = input.config;
     this.events = input.events;
     this.http = input.http;
     this.store = input.store;
     this.hooks = input.hooks;
+    this.restartReload =
+      input.autoReloadOnRestart === true
+        ? {}
+        : input.autoReloadOnRestart === false
+          ? undefined
+          : input.autoReloadOnRestart;
     this.sessionSync = createSessionSync({
       query: async (scope, signal) =>
         (await this.http.getSessionView({ ...scope, signal })).view,
@@ -222,6 +300,9 @@ export class ClientSync {
             // Set first: clearing "lost" before it would reopen an outage.
             this.store.setConnectionNotice("restarted");
             this.endOutage();
+            if (this.restartReload) {
+              tryAutoReloadOnRestart(this.restartReload);
+            }
           }
           this.transportLive = false;
           this.permissionSync.disconnect();

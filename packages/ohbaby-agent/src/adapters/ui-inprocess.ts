@@ -514,6 +514,7 @@ export interface InProcessUiBackendClient
   getActiveGoalRunForSteer(
     sessionId: string,
   ): { runId: string; goalId: string } | undefined;
+  getActivityReasons(): readonly string[];
   closeAdmission(): void;
   dispose(options?: ShutdownOptions): Promise<CleanupResult>;
 }
@@ -5878,6 +5879,16 @@ export function createInProcessUiBackendClient(
       promptScheduler.wake();
     },
     assertSessionRoutable,
+    getActivityReasons(): readonly string[] {
+      return [
+        ...runtimeController.getActivityReasons(),
+        ...promptScheduler.getActivityReasons(),
+        ...sharedGoalService.getActivityReasons(),
+        ...(backgroundQueued.size || backgroundDeferring.size
+          ? ["Background work being scheduled"]
+          : []),
+      ];
+    },
     closeAdmission,
     dispose(
       shutdown: ShutdownOptions = createShutdownOptions(),

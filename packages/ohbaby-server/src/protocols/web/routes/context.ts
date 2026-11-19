@@ -21,6 +21,7 @@ export interface DaemonRouteContext {
       Partial<InstanceSettingsReader & InstanceSettingsControl>;
     readonly packageVersion?: string;
     readonly onShutdown?: () => Promise<void> | void;
+    readonly tryEnterMaintenanceAdmission?: () => (() => void) | undefined;
   };
   readonly clientViews: DaemonClientViewCoordinator;
   readonly eventBus: EventBus;

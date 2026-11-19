@@ -303,6 +303,60 @@ describe("createServeCommand", () => {
 
     expect(stdout.join("")).toContain("not-running");
   });
+
+  it.each([false, true])(
+    "prints the cached update notice on start and refreshes only a new server (reused %s)",
+    async (reused) => {
+      const { runtime, startDaemonServer, stderr } = createRuntime();
+      const order: string[] = [];
+      startDaemonServer.mockImplementationOnce(() => {
+        order.push("start");
+        return Promise.resolve({
+          host: "127.0.0.1",
+          port: 4096,
+          reused,
+          scopeRoot: "/repo",
+          stop: (): Promise<void> => Promise.resolve(),
+          url: "http://127.0.0.1:4096",
+        });
+      });
+      const startupUpdate = {
+        readNotice: vi.fn(() => {
+          order.push("notice");
+          return "ohbaby 9.9.9 is available";
+        }),
+        runAutomaticUpdate: vi.fn(() => Promise.resolve("exit" as const)),
+        refreshInBackground: vi.fn(() => {
+          order.push("refresh");
+        }),
+      };
+
+      await runServe(["serve", "--no-open"], { ...runtime, startupUpdate });
+
+      expect(order).toEqual(
+        reused ? ["notice", "start"] : ["notice", "start", "refresh"],
+      );
+      expect(stderr.join("")).toContain("ohbaby 9.9.9 is available\n");
+      expect(startupUpdate.runAutomaticUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["status", "stop", "ps"])(
+    "does not check for updates during serve %s",
+    async (action) => {
+      const { runtime } = createRuntime();
+      const startupUpdate = {
+        readNotice: vi.fn(() => "notice"),
+        runAutomaticUpdate: vi.fn(() => Promise.resolve("exit" as const)),
+        refreshInBackground: vi.fn(),
+      };
+
+      await runServe(["serve", action], { ...runtime, startupUpdate });
+
+      expect(startupUpdate.readNotice).not.toHaveBeenCalled();
+      expect(startupUpdate.refreshInBackground).not.toHaveBeenCalled();
+    },
+  );
 });
 
 it.each([

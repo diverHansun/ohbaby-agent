@@ -39,6 +39,11 @@ import {
   listenToNodeServer,
   type NodeListenHandle,
 } from "../../transport/node-listen.js";
+import { registerIdleShutdownRoute } from "../../protocols/web/routes/system.js";
+import {
+  MAINTENANCE_ADMISSION_MESSAGE,
+  MaintenanceAdmission,
+} from "../../coordination/maintenance-admission.js";
 import { InstanceStore } from "../instance-store.js";
 import {
   createDirectoryBrowser,
@@ -94,6 +99,7 @@ export interface DaemonHttpServerOptions {
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
   readonly onShutdown?: () => Promise<void> | void;
+  readonly pidToken?: string;
   readonly packageVersion?: string;
   readonly diagnosticsFile?: string;
   readonly port?: number;
@@ -109,6 +115,8 @@ export type WorkspaceBackend = UiBackendClient &
     adoptSessionWorkspaceMove?(plan: SessionWorkspaceMovePlan): Promise<void>;
     preflightSideChatShell?(sessionId: string): Promise<void>;
     releaseSideChatShell?(sessionId: string): void;
+    getActivityReasons?(): Promise<readonly string[]> | readonly string[];
+    getSharedActivityReasons?(): Promise<readonly string[]>;
     closeAdmission?(): void;
     dispose?(
       options?: ShutdownOptions,
@@ -156,6 +164,7 @@ type NormalizedDaemonHttpServerOptions = Omit<
 
 interface WorkspaceAppInstance {
   readonly appHandle: DaemonServerAppHandle;
+  readonly scopeKey: string;
   readonly backend: WorkspaceBackend;
   closeAdmission(): void;
   dispose(options?: ShutdownOptions): Promise<void>;
@@ -167,6 +176,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   }
   private readonly app = new Hono();
   private readonly terminalManager = new TerminalManager();
+  private readonly maintenanceAdmission = new MaintenanceAdmission();
   private readonly appHandle: DaemonServerAppHandle;
   private readonly instanceStore:
     | InstanceStore<WorkspaceAppInstance>
@@ -210,6 +220,12 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         this.clientDisconnected(scopeKey, clientId);
       },
       onShutdown: this.options.onShutdown,
+      ...(this.options.pidToken && this.options.onShutdown
+        ? {
+            tryEnterMaintenanceAdmission: () =>
+              this.maintenanceAdmission.tryEnter(),
+          }
+        : {}),
       packageVersion: this.options.packageVersion,
       ...(scopeKey === this.options.scopeRoot
         ? {
@@ -268,6 +284,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     }
     return {
       appHandle,
+      scopeKey,
       backend,
       closeAdmission(): void {
         backend.closeAdmission?.();
@@ -309,6 +326,37 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       await next();
       return;
     });
+    if (this.options.pidToken && this.options.onShutdown) {
+      registerIdleShutdownRoute(this.app, {
+        pidToken: this.options.pidToken,
+        isAuthorized: (header) =>
+          isAuthorizedDaemonRequest(header, this.options.authToken),
+        checkIdle: (signal) => this.checkIdleShutdown(signal),
+        onShutdown: this.options.onShutdown,
+      });
+      this.app.use("/v1/*", async (context, next) => {
+        if (
+          ["GET", "HEAD", "OPTIONS"].includes(context.req.method) ||
+          !isAuthorizedDaemonRequest(
+            context.req.header("authorization"),
+            this.options.authToken,
+          )
+        ) {
+          return next();
+        }
+        const release = this.maintenanceAdmission.tryEnter();
+        if (!release)
+          return context.json(
+            { ok: false, error: { message: MAINTENANCE_ADMISSION_MESSAGE } },
+            503,
+          );
+        try {
+          await next();
+        } finally {
+          release();
+        }
+      });
+    }
     registerTerminalRoutes(this.app, {
       manager: this.terminalManager,
       host: this.options.host,
@@ -366,6 +414,49 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     this.app.all("/v1", dispatch);
     this.app.all("/v1/*", dispatch);
     this.app.all("*", (context) => this.appHandle.app.fetch(context.req.raw));
+  }
+
+  private checkIdleShutdown(signal: AbortSignal): Promise<readonly string[]> {
+    return this.maintenanceAdmission.check(
+      signal,
+      async () => {
+        const store = this.instanceStore;
+        const instances = store
+          ? await Promise.all(
+              store.loadedScopeKeys().map(async (key) => store.get(key)),
+            )
+          : [];
+        const backends = new Map([
+          [this.options.backend, this.options.scopeRoot],
+        ]);
+        for (const instance of instances) {
+          if (!instance || backends.has(instance.backend)) continue;
+          backends.set(instance.backend, instance.scopeKey);
+        }
+        const shared =
+          (await this.options.backend.getSharedActivityReasons?.()) ?? [];
+        const workspaces = await Promise.all(
+          [...backends].map(async ([backend, scopeKey]) => {
+            const reasons = (await backend.getActivityReasons?.()) ?? [];
+            return reasons.map((reason) =>
+              scopeKey ? `${scopeKey}: ${reason}` : reason,
+            );
+          }),
+        );
+        const terminals = this.terminalManager
+          .list()
+          .map(
+            ({ id, title }) =>
+              `Close Web terminal "${title}" (${id}) before stopping the daemon.`,
+          );
+        return [...shared, ...workspaces.flat(), ...terminals];
+      },
+      () => {
+        if (this.closing) return false;
+        this.closeAdmission();
+        return true;
+      },
+    );
   }
 
   private clientConnected(
@@ -845,7 +936,15 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       return directory;
     }
     try {
-      const instance = await this.instanceStore?.load(directory);
+      const scopeKey = await resolveWorkspaceScope(directory);
+      const existing = this.instanceStore?.get(scopeKey);
+      if (!existing && this.maintenanceAdmission.isPaused)
+        return context.json(
+          { ok: false, error: { message: MAINTENANCE_ADMISSION_MESSAGE } },
+          503,
+        );
+      const instance = await (existing ??
+        this.instanceStore?.loadScope(scopeKey));
       if (!instance) {
         throw new Error("Workspace routing is not configured");
       }
@@ -934,7 +1033,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     }
     for (const scopeKey of scopeKeys) {
       const canonical = await resolveWorkspaceScope(scopeKey);
-      await this.instanceStore.loadScope(canonical);
+      const existing = this.instanceStore.get(canonical);
+      if (!existing && this.maintenanceAdmission.isPaused)
+        throw new Error(MAINTENANCE_ADMISSION_MESSAGE);
+      await (existing ?? this.instanceStore.loadScope(canonical));
     }
   }
 
@@ -1014,6 +1116,7 @@ export function createDaemonHttpServer(
     onClientConnected: options.onClientConnected,
     onClientDisconnected: options.onClientDisconnected,
     onShutdown: options.onShutdown,
+    pidToken: options.pidToken,
     packageVersion: options.packageVersion,
     diagnosticsFile: options.diagnosticsFile,
     permissionRouter: options.permissionRouter ?? new PermissionRouter(),

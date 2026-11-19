@@ -1,3 +1,7 @@
+import {
+  isOwnerProcessAlive,
+  isValidOwnerPid,
+} from "../utils/process-owner.js";
 import { ShellJobRecoveryNotFoundError } from "../shell-jobs/recovery.js";
 import { ShellJobRecovery } from "../shell-jobs/recovery.js";
 import { readProcessIdentity } from "../shell/process-identity.js";
@@ -137,6 +141,8 @@ export interface PersistentUiBackendClient
    * the binding and the queue move in one write, then the queue is re-read.
    */
   adoptSessionWorkspaceMove(plan: SessionWorkspaceMovePlan): Promise<void>;
+  getActivityReasons(): Promise<readonly string[]>;
+  getSharedActivityReasons(): Promise<readonly string[]>;
   closeAdmission(): void;
   dispose(options?: ShutdownOptions): Promise<CleanupResult>;
 }
@@ -262,7 +268,12 @@ function withStartupRecovery(
   client: InProcessUiBackendClient,
   recovery: Promise<unknown>,
   releaseGoalOwner: () => Promise<void>,
-): Omit<PersistentUiBackendClient, "adoptSessionWorkspaceMove"> {
+): Omit<
+  PersistentUiBackendClient,
+  | "adoptSessionWorkspaceMove"
+  | "getActivityReasons"
+  | "getSharedActivityReasons"
+> {
   let recovered = false;
   let startupFailureReported = false;
   const startup = recovery.then(() => {
@@ -994,6 +1005,30 @@ export function createPersistentUiBackendClient(
     goalPersistence.releaseOwner(),
   );
   return Object.assign(client, {
+    async getActivityReasons(): Promise<readonly string[]> {
+      await startupReady;
+      return [
+        ...inProcessClient.getActivityReasons(),
+        ...promptSubmissionStore
+          .listOwnedUnfinished(promptScopeKey)
+          .map(
+            ({ promptId, sessionId, status }) =>
+              `${status} prompt ${promptId} (session ${sessionId})`,
+          ),
+      ];
+    },
+    async getSharedActivityReasons(): Promise<readonly string[]> {
+      const runs = await runLedger.getActiveRuns();
+      return runs
+        .filter(
+          ({ ownerPid }) =>
+            isValidOwnerPid(ownerPid) && isOwnerProcessAlive(ownerPid),
+        )
+        .map(
+          ({ runId, sessionId }) =>
+            `Active run ${runId} (session ${sessionId})`,
+        );
+    },
     async adoptSessionWorkspaceMove(
       plan: SessionWorkspaceMovePlan,
     ): Promise<void> {

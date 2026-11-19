@@ -59,6 +59,7 @@ const rows = db.select().from(schema.session).where(eq(schema.session.status, 'a
 - Append-Only：一旦文件被提交并执行，不可修改，只能新增文件
 - 每条迁移在事务中执行：全成功或全回滚
 - 执行后记录在 `migration` 表，防止重复执行
+- 已发布的迁移必须保留原版本号，后续变更通过追加迁移完成。启动时遇到当前程序无法识别的迁移版本，会拒绝继续并提示运行 `ohbaby update`。
 - 迁移失败阻止应用启动（抛出 `MigrationError`）
 
 ---

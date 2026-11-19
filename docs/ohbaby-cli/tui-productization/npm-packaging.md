@@ -49,3 +49,9 @@ The packaging smoke test will:
 6. Run the installed `ohbaby --version` and assert it matches the `ohbaby-cli` package version.
 
 The smoke intentionally imports `ohbaby-cli` without rendering the TUI, then uses `--help` and `--version` for the binary. Those paths do not load provider keys, start an interactive TUI, or contact network services.
+
+## Script installer release check
+
+1. Check that `install.sh` and `install.ps1` pin the same current Node.js 24 patch release.
+2. Pack `ohbaby-cli` and check that both installers are at the package root alongside the existing compiled CLI and Web assets.
+3. After publication, install from the version-pinned jsDelivr URL on macOS, Linux and Windows, and verify `ohbaby --version`. For this step use an isolated install and configuration directory.

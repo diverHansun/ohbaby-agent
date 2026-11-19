@@ -198,6 +198,21 @@ export class InProcessRuntimeController {
       : work();
   }
 
+  getActivityReasons(): readonly string[] {
+    return [
+      ...[...this.activeRunSessionById].map(
+        ([runId, sessionId]) => `Active run ${runId} (session ${sessionId})`,
+      ),
+      ...(this.admittedWork > 0
+        ? ["Tasks or context summaries in progress"]
+        : []),
+      ...(this.runtimePromise && !this.resolvedRuntime
+        ? ["Runtime initialization"]
+        : []),
+      ...(this.resolvedRuntime?.getActivityReasons() ?? []),
+    ];
+  }
+
   getActiveRunId(sessionId?: string): string | undefined {
     if (sessionId !== undefined) {
       return this.activeRunBySession.get(sessionId);

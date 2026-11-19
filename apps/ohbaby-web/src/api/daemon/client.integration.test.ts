@@ -5,6 +5,7 @@ import {
   sessionViewFromSnapshot,
 } from "./session-recovery.test-utils.js";
 import { createBrowserDaemonClient } from "./client.js";
+import { AUTO_RELOAD_STORAGE_KEY } from "./client-sync.js";
 import { createOhbabyWebStore } from "../../store/store.js";
 import { createOhbabyWebRuntime } from "../../runtime/index.js";
 import type { OhbabyBootstrapConfig, WebSseEvent } from "./wire.js";
@@ -1232,3 +1233,338 @@ it.each(["response loss", "timeout"])(
     }
   },
 );
+
+describe("daemon restart auto-reload (I9)", () => {
+  function memoryStorage(): Pick<Storage, "getItem" | "setItem"> & {
+    readonly entries: Map<string, string>;
+  } {
+    const entries = new Map<string, string>();
+    return {
+      entries,
+      getItem: (key): string | null => entries.get(key) ?? null,
+      setItem: (key, value): void => {
+        entries.set(key, value);
+      },
+    };
+  }
+
+  function createRestartFetch(
+    eventsBehavior: () => {
+      readonly onEvents: (
+        url: string,
+        clientId: string | null,
+      ) => Response | Promise<Response>;
+    },
+  ): typeof fetch {
+    const { onEvents } = eventsBehavior();
+    return (input, init = {}): Promise<Response> => {
+      const url = urlFromRequestInput(input);
+      const headers = new Headers(init.headers);
+      if (url.endsWith("/v1/scopes")) {
+        return Promise.resolve(
+          Response.json({
+            defaultDirectory: {
+              available: true,
+              directory: "/repo",
+              lastOpenedAt: 1,
+              loaded: true,
+              position: 0,
+            },
+            ok: true,
+            scopes: [
+              {
+                available: true,
+                directory: "/repo",
+                lastOpenedAt: 1,
+                loaded: true,
+                position: 0,
+              },
+            ],
+          }),
+        );
+      }
+      if (url.endsWith("/v1/sessions/index"))
+        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
+      if (url.includes("/v1/global/sessions"))
+        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
+      if (url.endsWith("/v1/clients")) {
+        return Promise.resolve(
+          Response.json({
+            clientId: headers.get("x-ohbaby-client-id") ?? "client_web",
+            ok: true,
+            ...recoveryBinding(),
+          }),
+        );
+      }
+      if (url.endsWith("/v1/events")) {
+        return Promise.resolve(
+          onEvents(url, headers.get("x-ohbaby-client-id")),
+        );
+      }
+      if (new URL(url).pathname.endsWith("/view")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            seqNum: 0,
+            view: sessionViewFromSnapshot({
+              activeSessionId: null,
+              permission: { level: "default", mode: "auto", sessionRules: [] },
+              permissions: [],
+              runs: [],
+              sessions: [],
+              status: { kind: "idle" },
+            }),
+          }),
+        );
+      }
+      if (url.endsWith("/v1/model"))
+        return Promise.resolve(Response.json({ model: null, ok: true }));
+      return Promise.resolve(
+        Response.json({ error: { message: "not found" } }, { status: 404 }),
+      );
+    };
+  }
+
+  it("auto-reloads primary managed runtime on SSE 401 after restart and skips transient reconnects", async () => {
+    let attempts = 0;
+    const storage = memoryStorage();
+    storage.setItem(
+      "ohbaby:composer:session_1",
+      JSON.stringify({ text: "unsent draft" }),
+    );
+    const reload = vi.fn();
+
+    const fetchImpl = createRestartFetch(() => ({
+      onEvents: (_url, _clientId): Response => {
+        attempts += 1;
+        if (attempts === 1) {
+          return new Response(
+            createSseStream((controller) => {
+              controller.enqueue(
+                sseFrame({
+                  clientId: "client_web",
+                  type: "hello",
+                  ...recoveryBinding(),
+                }),
+              );
+              controller.close();
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          );
+        }
+        if (attempts === 2) {
+          // Transient drop: must not reload.
+          return new Response("{}", { status: 503 });
+        }
+        // Daemon restarted with a new auth token.
+        return new Response("{}", { status: 401 });
+      },
+    }));
+
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        directory: "/repo",
+        token: "token_1",
+      },
+      {
+        fetch: fetchImpl,
+        autoReloadOnRestart: {
+          now: () => 50_000,
+          reload,
+          storage,
+        },
+      },
+    );
+    try {
+      await runtime.ready;
+      await waitFor(
+        () => runtime.store.getSnapshot().connectionNotice === "restarted",
+        "runtime should detect daemon restart on 401",
+      );
+      expect(attempts).toBe(3);
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(storage.entries.get(AUTO_RELOAD_STORAGE_KEY)).toBe("50000");
+      expect(storage.entries.get("ohbaby:composer:session_1")).toBe(
+        JSON.stringify({ text: "unsent draft" }),
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("does not auto-reload when a side chat rejects with 401 or holds an unsent draft", async () => {
+    let mainAttempts = 0;
+    let sideAttempts = 0;
+    let releaseMainDrop: (() => void) | undefined;
+    const storage = memoryStorage();
+    const reload = vi.fn();
+
+    const fetchImpl = createRestartFetch(() => ({
+      onEvents: (_url, clientId): Response => {
+        const isMain = clientId === "client_web";
+        if (isMain) {
+          mainAttempts += 1;
+          if (mainAttempts === 1) {
+            return new Response(
+              createSseStream((controller) => {
+                controller.enqueue(
+                  sseFrame({
+                    clientId: "client_web",
+                    type: "hello",
+                    ...recoveryBinding(),
+                  }),
+                );
+                releaseMainDrop = (): void => {
+                  controller.close();
+                };
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            );
+          }
+          return new Response("{}", { status: 401 });
+        }
+        sideAttempts += 1;
+        if (sideAttempts === 1) {
+          return new Response(
+            createSseStream((controller) => {
+              controller.enqueue(
+                sseFrame({
+                  clientId: clientId ?? "side",
+                  type: "hello",
+                  ...recoveryBinding(),
+                }),
+              );
+              controller.close();
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          );
+        }
+        return new Response("{}", { status: 401 });
+      },
+    }));
+
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        directory: "/repo",
+        token: "token_1",
+      },
+      {
+        fetch: fetchImpl,
+        autoReloadOnRestart: {
+          now: () => 60_000,
+          reload,
+          storage,
+        },
+      },
+    );
+    const side = runtime.connectSideChat({
+      sideChatId: "side_1",
+      title: "Side",
+      boundaryMessageId: "m1",
+      workingDirectory: "/repo",
+    });
+    try {
+      await runtime.ready;
+      side.draft.set("unsent side-chat question");
+      await waitFor(
+        () => side.store.getSnapshot().connectionNotice === "restarted",
+        "side chat should observe restart without triggering page reload",
+      );
+      expect(reload).not.toHaveBeenCalled();
+
+      // Now main also sees 401, but unsent side-chat draft guards against losing it.
+      releaseMainDrop?.();
+      await waitFor(
+        () => runtime.store.getSnapshot().connectionNotice === "restarted",
+        "main client should observe restart",
+      );
+      expect(reload).not.toHaveBeenCalled();
+      expect(storage.entries.has(AUTO_RELOAD_STORAGE_KEY)).toBe(false);
+    } finally {
+      await side.close();
+      await runtime.dispose();
+    }
+  });
+
+  it("still auto-reloads on main restart when an open side chat has no unsent draft", async () => {
+    let mainAttempts = 0;
+    const storage = memoryStorage();
+    const reload = vi.fn();
+
+    const fetchImpl = createRestartFetch(() => ({
+      onEvents: (_url, clientId): Response => {
+        if (clientId === "client_web") {
+          mainAttempts += 1;
+          if (mainAttempts === 1) {
+            return new Response(
+              createSseStream((controller) => {
+                controller.enqueue(
+                  sseFrame({
+                    clientId: "client_web",
+                    type: "hello",
+                    ...recoveryBinding(),
+                  }),
+                );
+                controller.close();
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            );
+          }
+          return new Response("{}", { status: 401 });
+        }
+        return new Response(
+          createSseStream((controller) => {
+            controller.enqueue(
+              sseFrame({
+                clientId: clientId ?? "side",
+                type: "hello",
+                ...recoveryBinding(),
+              }),
+            );
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    }));
+
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        directory: "/repo",
+        token: "token_1",
+      },
+      {
+        fetch: fetchImpl,
+        autoReloadOnRestart: {
+          now: () => 70_000,
+          reload,
+          storage,
+        },
+      },
+    );
+    const side = runtime.connectSideChat({
+      sideChatId: "side_2",
+      title: "Empty side",
+      boundaryMessageId: "m1",
+      workingDirectory: "/repo",
+    });
+    try {
+      await runtime.ready;
+      side.draft.set("   ");
+      await waitFor(
+        () => runtime.store.getSnapshot().connectionNotice === "restarted",
+        "main client should observe restart",
+      );
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(storage.entries.get(AUTO_RELOAD_STORAGE_KEY)).toBe("70000");
+    } finally {
+      await side.close();
+      await runtime.dispose();
+    }
+  });
+});

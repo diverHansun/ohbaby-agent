@@ -2,6 +2,7 @@ import {
   createBrowserDaemonClient,
   type BrowserDaemonClient,
 } from "../api/daemon/client.js";
+import type { RestartAutoReloadOptions } from "../api/daemon/client-sync.js";
 import {
   readWebNavigationState,
   replaceNavigationHash,
@@ -37,6 +38,7 @@ export class InstanceLayer {
     private readonly config: OhbabyBootstrapConfig,
     private readonly fetchImpl: typeof fetch | undefined,
     private readonly store: OhbabyWebStore,
+    private readonly autoReloadOnRestart?: RestartAutoReloadOptions,
   ) {
     this.navigationState = readWebNavigationState();
     let priorIndex = this.store.getSnapshot().sessionIndex;
@@ -365,6 +367,9 @@ export class InstanceLayer {
     return createBrowserDaemonClient({
       config,
       ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
+      ...(this.autoReloadOnRestart === undefined
+        ? {}
+        : { autoReloadOnRestart: this.autoReloadOnRestart }),
       store: this.store,
     });
   }

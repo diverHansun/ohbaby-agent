@@ -1,3 +1,4 @@
+import { MAINTENANCE_ADMISSION_MESSAGE } from "../../coordination/maintenance-admission.js";
 import { shellJobForClient } from "../../coordination/session-access.js";
 import { globalSessionErrorStatus } from "../global-sessions.js";
 import type { Hono } from "hono";
@@ -953,6 +954,31 @@ export function createDaemonRpcSuccessResponse(
   return createDaemonRpcSuccess(request.id, result);
 }
 
+// Reads and completion waits cannot create new daemon work.
+const readsWithoutAdmission = new Set([
+  "getSnapshot",
+  "listSubagentExecutions",
+  "listShellJobs",
+  "getShellJobOutput",
+  "readShellJobLog",
+  "listSubagentInstances",
+  "getSubagentExecutionView",
+  "getSubagentConversationView",
+  "getSessionView",
+  "getSessionHistory",
+  "getSessionControl",
+  "getPromptReceipt",
+  "getSessionIndex",
+  "getSelectedSessionId",
+  "getPermissionSnapshot",
+  "getContextWindowUsage",
+  "getCurrentModel",
+  "listCommands",
+  "listSideChats",
+  "exportSession",
+  "waitForPrompt",
+]);
+
 export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
   app.post("/api/rpc", async (context) => {
     if (!ctx.isAuthorized(context.req.header("authorization"))) {
@@ -974,6 +1000,18 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
       ctx.clientViews.isRegistered(parsed.request.clientId)
     )
       ctx.touchClientActivity(parsed.request.clientId);
+    const tryEnter = ctx.options.tryEnterMaintenanceAdmission;
+    const requiresAdmission =
+      tryEnter && !readsWithoutAdmission.has(parsed.request.method);
+    const release = requiresAdmission ? tryEnter() : undefined;
+    if (requiresAdmission && !release)
+      return context.json(
+        createDaemonRpcFailure(
+          parsed.request.id,
+          new Error(MAINTENANCE_ADMISSION_MESSAGE),
+        ),
+        503,
+      );
     try {
       const controller = new AbortController();
       const abort = (): void => {
@@ -1070,6 +1108,8 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
         createDaemonRpcFailure(parsed.request.id, error),
         status,
       );
+    } finally {
+      release?.();
     }
   });
 }

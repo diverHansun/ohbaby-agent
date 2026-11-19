@@ -33,13 +33,37 @@
 
 ## Install
 
-Requires **Node.js 24** or later.
+The installer supplies a private copy of Node.js. Once this release is published, install the TUI and bundled Web UI with either script.
+
+**macOS and Linux**
+
+```sh
+curl -fsSL https://cdn.jsdelivr.net/npm/ohbaby-cli/install.sh | sh
+```
+
+**Windows PowerShell**
+
+```powershell
+irm https://cdn.jsdelivr.net/npm/ohbaby-cli/install.ps1 | iex
+```
+
+The scripts support macOS, Windows, and glibc Linux on x64 and arm64. Allow about 0.5 GB of disk space (0.6 GB on Linux arm64). On musl Linux, use npm with a supported Node.js installation.
+
+The Windows installer adds an `ohbaby.cmd` launcher. In PowerShell, avoid passing standalone arguments containing `&`, `|`, `<`, `>`, `^`, paired `%…%`, or embedded double quotes. Pass the prompt through standard input for those cases.
+
+**npm (Node.js 24 or later)**
 
 ```bash
 npm install -g ohbaby-cli
 ```
 
-This installs the `ohbaby` command.
+All three methods install the `ohbaby` command. Use `ohbaby` for the TUI and `ohbaby serve` for the Web UI.
+
+Run `ohbaby update` to update or `ohbaby update <version>` to install a specific version. Add `-y` for non-interactive use. Start `ohbaby serve` again after an update stops it. The Web UI refreshes when it detects the restarted daemon.
+
+Use `ohbaby update --auto on` to enable automatic updates when you start the TUI. Use `ohbaby update --auto off` to disable them, or set `OHBABY_NO_UPDATE_CHECK=1` to skip startup checks and automatic updates.
+
+Run `ohbaby uninstall` to remove the program and keep your configuration, sessions, and database. On Windows, script installations print a final directory removal command to run after `ohbaby uninstall` exits.
 
 ## Quick start
 

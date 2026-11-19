@@ -246,6 +246,17 @@ function prepareOfflineMigration(
   options.onMigrationBackup?.(backupPath);
 }
 
+export class DatabaseNewerThanProgramError extends Error {
+  readonly code = "DATABASE_NEWER_THAN_PROGRAM";
+
+  constructor(readonly versions: readonly string[]) {
+    super(
+      `A newer version of ohbaby used this database (unknown migrations: ${versions.join(", ")}). Run ohbaby update to continue.`,
+    );
+    this.name = "DatabaseNewerThanProgramError";
+  }
+}
+
 function runMigrations(
   connection: DatabaseConnection,
   migrations: readonly MigrationDefinition[],
@@ -253,6 +264,17 @@ function runMigrations(
   options: InitDatabaseOptions,
 ): void {
   ensureMigrationTable(connection);
+  const knownVersions = new Set(migrations.map(({ version }) => version));
+  const unknownVersions = connection
+    .prepare<{ version: string }>(
+      "SELECT version FROM migration ORDER BY version",
+    )
+    .all()
+    .map(({ version }) => version)
+    .filter((version) => !knownVersions.has(version));
+  if (unknownVersions.length > 0) {
+    throw new DatabaseNewerThanProgramError(unknownVersions);
+  }
   prepareOfflineMigration(connection, migrations, options);
   for (const migration of migrations) {
     if (hasMigration(connection, migration)) {

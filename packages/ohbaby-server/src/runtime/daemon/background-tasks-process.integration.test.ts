@@ -50,7 +50,10 @@ const childScript = `
   let server;
   if (options.web) {
     const {createDaemonHttpServer} = await import(${JSON.stringify(sourceUrl("packages/ohbaby-server/src/runtime/daemon/server.ts"))});
-    server = createDaemonHttpServer({backend,authToken:options.token,host:"127.0.0.1",port:0});
+    server = createDaemonHttpServer({
+      backend,authToken:options.token,host:"127.0.0.1",port:0,
+      pidToken:options.token, onShutdown: async () => { await server.stop(); },
+    });
     await server.start();
   }
   process.on("message", async ({id, method, args}) => {
@@ -59,6 +62,14 @@ const childScript = `
       if (method === "queue") result = calls.push(...args);
       else if (method === "requests") result = requests;
       else if (method === "jobs") result = getDatabase().prepare("SELECT * FROM shell_job").all();
+      else if (method === "idleShutdown") {
+        const response = await fetch(server.url + "/api/shutdown/idle", {
+          method: "POST",
+          headers: { authorization: "Bearer " + options.token },
+          body: JSON.stringify({ pidToken: options.token }),
+        });
+        result = { status: response.status, reasons: (await response.json()).reasons };
+      }
       else if (method === "shutdown") {
         await server?.stop();
         result = await backend.dispose();
@@ -421,6 +432,14 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
               "Start owner background task.",
             );
         const rootSessionId = completion.prompt.sessionId;
+        if (ownerIsWeb) {
+          await expect
+            .poll(() => owner.process.call("idleShutdown"))
+            .toEqual({
+              status: 409,
+              reasons: ["background shell jobs"],
+            });
+        }
         const peer = await fixture.start(!ownerIsWeb);
         if (peer.client) await peer.client.selectSession(rootSessionId);
         else await peer.process.call("selectSession", rootSessionId);

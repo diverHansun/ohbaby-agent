@@ -36,7 +36,7 @@ import {
 import type { OhbabyWebStore } from "../../store/store.js";
 import { ClientCommands } from "./client-commands.js";
 import { ClientPrompts } from "./client-prompts.js";
-import { ClientSync } from "./client-sync.js";
+import { ClientSync, type RestartAutoReloadOptions } from "./client-sync.js";
 import { FetchDaemonEventStream } from "./events.js";
 import { createDaemonHttpClient, type DaemonHttpClient } from "./http.js";
 import {
@@ -64,6 +64,7 @@ export class BrowserDaemonClient implements UiBackendClient {
     readonly events: FetchDaemonEventStream;
     readonly http: DaemonHttpClient;
     readonly store: OhbabyWebStore;
+    readonly autoReloadOnRestart?: boolean | RestartAutoReloadOptions;
   }) {
     this.http = input.http;
     this.sync = new ClientSync({
@@ -665,6 +666,7 @@ export function createBrowserDaemonClient(input: {
   readonly config: OhbabyBootstrapConfig;
   readonly fetch?: typeof fetch;
   readonly store: OhbabyWebStore;
+  readonly autoReloadOnRestart?: boolean | RestartAutoReloadOptions;
 }): BrowserDaemonClient {
   const http = createDaemonHttpClient(input.config, input.fetch);
   const events = new FetchDaemonEventStream({
@@ -679,5 +681,8 @@ export function createBrowserDaemonClient(input: {
     events,
     http,
     store: input.store,
+    ...(input.autoReloadOnRestart === undefined
+      ? {}
+      : { autoReloadOnRestart: input.autoReloadOnRestart }),
   });
 }

@@ -666,6 +666,18 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     });
   }
 
+  listOwnedUnfinished(scopeKey: string): readonly PromptSubmissionRecord[] {
+    return this.db
+      .prepare<PromptSubmissionRow>(
+        `SELECT * FROM ${this.tableName}
+         WHERE scope_key = ? AND owner_id = ? AND owner_pid = ?
+           AND status IN ('queued', 'starting', 'running')
+         ORDER BY accepted_at ASC, admission_order ASC, prompt_id ASC`,
+      )
+      .all(scopeKey, this.ownerId, this.ownerPid)
+      .map(promptSubmissionRowToRecord);
+  }
+
   async listQueued(
     scopeKey: string,
   ): Promise<readonly PromptSubmissionRecord[]> {

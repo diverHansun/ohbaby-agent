@@ -214,6 +214,7 @@ export {
 } from "./runtime/shutdown.js";
 export {
   beginDatabaseShutdown,
+  DatabaseNewerThanProgramError,
   DatabaseShutdownError,
 } from "./services/database/index.js";
 

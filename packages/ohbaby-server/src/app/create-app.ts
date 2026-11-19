@@ -80,6 +80,7 @@ export interface DaemonServerAppOptions {
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
   readonly onShutdown?: () => Promise<void> | void;
+  readonly tryEnterMaintenanceAdmission?: () => (() => void) | undefined;
   readonly packageVersion?: string;
   readonly permissionRouter?: PermissionRouter;
   readonly webAssets?: WebAssetsOptions;

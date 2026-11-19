@@ -1784,6 +1784,7 @@ export async function createUiRuntimeComposition(
         ...(toolScheduler.getPendingCalls().length > 0 ? ["active tools"] : []),
         ...(toolScheduler.getRunCleanup().cleaning ? ["tool cleanup"] : []),
         ...(shellJobRegistry.hasPendingCleanup() ? ["shell cleanup"] : []),
+        ...(pendingLifecycleCleanups.size ? ["session cleanup"] : []),
         ...(shellJobRegistry.hasBackgroundWork()
           ? ["background shell jobs"]
           : []),

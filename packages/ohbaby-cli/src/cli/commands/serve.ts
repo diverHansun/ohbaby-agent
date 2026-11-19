@@ -178,6 +178,10 @@ export function createServeCommand(
       const port = normalizePort(args.port, runtime);
       const webAssetsDir =
         args.webAssetsDir ?? defaultWebAssetsDirForHost(host);
+      const updateNotice = runtime.startupUpdate?.readNotice();
+      if (updateNotice !== undefined) {
+        runtime.stderr.write(`${updateNotice}\n`);
+      }
       const server = await runtime.startDaemonServer({
         ...(args.authToken === undefined ? {} : { authToken: args.authToken }),
         ...(args.dbPath === undefined ? {} : { dbPath: args.dbPath }),
@@ -185,6 +189,10 @@ export function createServeCommand(
         host,
         ...(port === undefined ? {} : { port }),
       });
+      if (!server.reused) {
+        // Only a newly started server owns the proxy installed before its backend.
+        runtime.startupUpdate?.refreshInBackground();
+      }
       runtime.stdout.write(`ohbaby web ready: ${server.url}\n`);
       if (!server.reused && server.diagnosticsFilePath) {
         runtime.stdout.write(`diagnostics: ${server.diagnosticsFilePath}\n`);

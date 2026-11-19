@@ -26,6 +26,8 @@ npm install -g ohbaby-cli
 ohbaby
 ```
 
+See the [project installation guide](https://github.com/diverHansun/ohbaby-agent#install) for the script installers and maintenance commands.
+
 Development remains in the pnpm workspace, while this package is published so
 the CLI can resolve the backend runtime from npm.
 

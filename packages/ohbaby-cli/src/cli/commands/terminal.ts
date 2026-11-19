@@ -81,7 +81,12 @@ export function createTerminalCommand(
       }
       if (remotePort === undefined) {
         await runtime.showServeCoexistenceNotice?.();
+        // Replace files before the core host loads modules or opens the database.
+        if ((await runtime.startupUpdate?.runAutomaticUpdate()) === "exit") {
+          return;
+        }
       }
+      const updateNotice = runtime.startupUpdate?.readNotice();
       const host = await runtime.createCoreHost({
         ...(args.continue === true ? { continue: true } : {}),
         diagnosticsRole: "tui",
@@ -101,6 +106,10 @@ export function createTerminalCommand(
             }),
         ...(resume === undefined ? {} : { resume }),
       });
+      if (remotePort === undefined) {
+        // The local host has initialized the proxy; remote TUI does not own one.
+        runtime.startupUpdate?.refreshInBackground();
+      }
       let unmount: (() => void) | undefined;
       const shutdown = createCliHostShutdown(host, () => {
         unmount?.();
@@ -112,7 +121,10 @@ export function createTerminalCommand(
           clearOnStart: resume === undefined && args.continue !== true,
           client: host.core,
           pendingPromptWorkspace: process.cwd(),
-          initialNotices: runtime.takeStartupNotices?.() ?? [],
+          initialNotices: [
+            ...(runtime.takeStartupNotices?.() ?? []),
+            ...(updateNotice === undefined ? [] : [updateNotice]),
+          ],
           remote: remotePort !== undefined,
           subscribeEvents: (handler) => host.callbacks.subscribeEvents(handler),
           ...(host.subscribeDiagnosticsUnavailable === undefined

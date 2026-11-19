@@ -63,6 +63,11 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: CLI installation, update, and idle shutdown
+        env:
+          OHBABY_TEST_SKIP_PACKAGE_BUILD: "1"
+        run: pnpm exec vitest run tests/integration/cli/packaging-smoke.integration.test.ts tests/integration/cli/install-unix.integration.test.ts tests/integration/cli/install-windows.integration.test.ts packages/ohbaby-server/src/runtime/daemon/server.integration.test.ts packages/ohbaby-server/src/runtime/daemon/stop.integration.test.ts packages/ohbaby-agent/src/services/database/database.integration.test.ts apps/ohbaby-web/src/api/daemon/client.integration.test.ts
+
   network-minimum-node:
     name: Network routing on minimum Node 24.0.0
     runs-on: ubuntu-latest

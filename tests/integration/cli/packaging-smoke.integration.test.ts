@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 import {
   createServer,
   type IncomingMessage,
@@ -383,6 +384,7 @@ async function handleRegistryRequest(input: {
       if (localPackage) {
         if (
           localPackageRequest.version !== undefined &&
+          localPackageRequest.version !== "latest" &&
           localPackageRequest.version !== localPackage.manifest.version
         ) {
           sendJson(input.response, 404, { error: "version not found" });
@@ -623,6 +625,8 @@ function expectNoWorkspaceDependencyRanges(packageJson: PackageJson): void {
 function expectCliPackIncludesWebAssets(entry: NpmPackEntry): void {
   const packedFiles = entry.files?.map((file) => file.path) ?? [];
   expect(packedFiles).toContain("dist/web/index.html");
+  expect(packedFiles).toContain("install.sh");
+  expect(packedFiles).toContain("install.ps1");
   expect(
     packedFiles.some((path) => path.startsWith("dist/web/assets/")),
     "ohbaby-cli package must include built ohbaby-web assets",
@@ -670,6 +674,8 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
     // Installed-package checks must resolve only their installed dependency tree.
     NODE_PATH: "",
     OHBABY_HOME: ohbabyHome,
+    OHBABY_DB_PATH: join(xdgDataHome, "ohbaby-test.db"),
+    OHBABY_NO_UPDATE_CHECK: "1",
     XDG_DATA_HOME: xdgDataHome,
   };
   await mkdir(packDestination, { recursive: true });
@@ -958,6 +964,8 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   expectSuccess(helpResult, "ohbaby --help");
   expect(helpResult.stdout).toContain("ohbaby run [prompt..]");
   expect(helpResult.stdout).toContain("ohbaby serve");
+  expect(helpResult.stdout).toContain("ohbaby update [targetVersion]");
+  expect(helpResult.stdout).toContain("ohbaby uninstall");
   expect(helpResult.stdout).not.toContain("-p, --prompt");
   expect(helpResult.stderr).toBe("");
 
@@ -971,4 +979,148 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   expectSuccess(versionResult, "ohbaby --version");
   expect(versionResult.stdout).toBe(`${packageJson.version}\n`);
   expect(versionResult.stderr).toBe("");
+
+  const target = await repackCliVersion(cliPack, packDestination);
+  const updateRegistry = await startLocalNpmRegistry([
+    sdkPack,
+    llmPack,
+    agentPack,
+    serverPack,
+    target,
+  ]);
+  try {
+    const updateEnv = {
+      ...isolatedEnv,
+      npm_config_registry: updateRegistry.url,
+      npm_config_cache: npmCache,
+      npm_config_tmp: npmTmp,
+      npm_config_ignore_scripts: "true",
+      npm_config_audit: "false",
+      npm_config_fund: "false",
+    };
+    const updateInvocation = {
+      command: ohbaby,
+      cwd: cliCwd,
+      env: updateEnv,
+      timeoutMs: 120_000,
+    };
+    const probe = join(tempRoot, "check-update-native-load.cjs");
+    await writeFile(
+      probe,
+      [
+        'if (process.argv[2] === "update") {',
+        '  process.dlopen = () => { throw new Error("update loaded a native addon"); };',
+        "}",
+      ].join("\n"),
+    );
+    const verifyUpdate = {
+      ...updateInvocation,
+      command: process.execPath,
+      env: { ...updateEnv, NODE_OPTIONS: "" },
+    };
+    const entrypoint = join(installedCliPackage, "dist", "bin.js");
+    expectSuccess(
+      await runCommand({
+        ...verifyUpdate,
+        args: ["-r", probe, entrypoint, "update", "--help"],
+      }),
+      "ohbaby update --help without native addons",
+    );
+    const updateResult = await runCommand({
+      ...verifyUpdate,
+      args: ["-r", probe, entrypoint, "update", "-y"],
+    });
+    expectSuccess(updateResult, "ohbaby update from local registry");
+    expect(updateResult.stdout).toContain(
+      `Updated ohbaby to ${target.packageJson.version}.`,
+    );
+    const installedVersion = await runCommand({
+      ...updateInvocation,
+      args: ["--version"],
+    });
+    expectSuccess(installedVersion, "ohbaby --version after update");
+    expect(installedVersion.stdout.trim()).toBe(target.packageJson.version);
+    const futureDatabase = new (process.getBuiltinModule(
+      "node:sqlite",
+    ).DatabaseSync)(isolatedEnv.OHBABY_DB_PATH);
+    try {
+      futureDatabase.exec(
+        "CREATE TABLE IF NOT EXISTS migration (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);" +
+          "INSERT INTO migration VALUES ('999_future', 0);",
+      );
+    } finally {
+      futureDatabase.close();
+    }
+    const incompatible = await runCommand({
+      ...updateInvocation,
+      args: ["run", "test"],
+    });
+    expect(incompatible.code).toBe(1);
+    expect(incompatible.stderr).toContain("unknown migrations: 999_future");
+    expect(incompatible.stderr).toContain("Run ohbaby update");
+    expect(incompatible.stderr).not.toContain("DatabaseNewerThanProgramError");
+    expectSuccess(
+      await runCommand({
+        ...updateInvocation,
+        args: ["update", target.packageJson.version, "-y"],
+      }),
+      "update remains available against a newer database",
+    );
+
+    const retained = join(ohbabyHome, "keep-configuration.txt");
+    await writeFile(retained, "keep this");
+    expectSuccess(
+      await runCommand({ ...updateInvocation, args: ["uninstall", "-y"] }),
+      "ohbaby uninstall",
+    );
+    await expect(readFile(retained, "utf8")).resolves.toBe("keep this");
+    await expect(
+      readFile(join(installedCliPackage, "package.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await updateRegistry.close();
+  }
+}
+
+async function repackCliVersion(
+  pack: PackedWorkspacePackage,
+  directory: string,
+): Promise<PackedWorkspacePackage> {
+  // Reuse the real compiled CLI and its dependency graph in both versions.
+  const source = join(directory, "second-version");
+  await mkdir(source);
+  expectSuccess(
+    await runCommand({
+      command: tarCommand(),
+      args: ["-xzf", pack.tarballPath, "-C", source],
+    }),
+    "extract CLI fixture for its second version",
+  );
+  const version = "999.0.0";
+  const packageJson = { ...pack.packageJson, version };
+  await writeFile(
+    join(source, "package", "package.json"),
+    JSON.stringify(packageJson),
+  );
+  const filename = `ohbaby-cli-${version}.tgz`;
+  const tarballPath = join(directory, filename);
+  expectSuccess(
+    await runCommand({
+      command: tarCommand(),
+      args: ["-czf", tarballPath, "-C", source, "package"],
+    }),
+    "pack CLI fixture for its second version",
+  );
+  const tarball = await readFile(tarballPath);
+  return {
+    entry: {
+      name: "ohbaby-cli",
+      version,
+      filename,
+      integrity: `sha512-${createHash("sha512").update(tarball).digest("base64")}`,
+      shasum: createHash("sha1").update(tarball).digest("hex"),
+    },
+    packageJson,
+    tarballPath,
+  };
 }

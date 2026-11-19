@@ -52,7 +52,9 @@ async function createRuntime(): Promise<OhbabyWebRuntime> {
       return createMockRuntime(scenario);
     }
   }
-  return createOhbabyWebRuntime(readBootstrapConfig());
+  return createOhbabyWebRuntime(readBootstrapConfig(), {
+    autoReloadOnRestart: true,
+  });
 }
 
 createRuntime()

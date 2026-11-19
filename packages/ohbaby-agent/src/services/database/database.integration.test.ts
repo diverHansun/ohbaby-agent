@@ -7,6 +7,7 @@ import {
   type DatabaseConnection,
   DatabaseBusyError,
   DatabaseNotInitializedError,
+  DatabaseNewerThanProgramError,
   getDatabase,
   initDatabase,
   MigrationError,
@@ -39,6 +40,32 @@ afterEach(async () => {
 describe("services/database", () => {
   it("throws a clear error when getDatabase is used before initialization", () => {
     expect(() => getDatabase()).toThrow(DatabaseNotInitializedError);
+  });
+
+  it("refuses to apply any migrations when the database records an unknown version", async () => {
+    const dbPath = await tempDbPath();
+    initDatabase({ dbPath, migrations: INITIAL_MIGRATIONS.slice(0, 1) });
+    getDatabase()
+      .prepare("INSERT INTO migration(version, applied_at) VALUES (?, ?)")
+      .run("999_future", 0);
+    closeDatabase();
+
+    expect(() => {
+      initDatabase({ dbPath });
+    }).toThrow(DatabaseNewerThanProgramError);
+    expect(() => {
+      initDatabase({ dbPath });
+    }).toThrow(/999_future.*ohbaby update/);
+    expect(() => getDatabase()).toThrow(DatabaseNotInitializedError);
+
+    const db = new NodeSqliteConnection(dbPath);
+    try {
+      expect(
+        db.prepare("SELECT version FROM migration ORDER BY version").all(),
+      ).toEqual([{ version: "001_initial" }, { version: "999_future" }]);
+    } finally {
+      db.close();
+    }
   });
 
   it("initializes a file database with pragma settings and the initial schema", async () => {

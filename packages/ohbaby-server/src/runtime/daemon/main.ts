@@ -530,7 +530,7 @@ async function startFreshDaemon(input: {
   };
   const logger = input.diagnosticsHandle?.logger ?? NOOP_LOGGER;
   const supervisor = new Supervisor({
-    async bootstrap(): Promise<DaemonRuntimeHandle> {
+    async bootstrap(identity): Promise<DaemonRuntimeHandle> {
       await input.options.beforeBackendStart?.();
       const createBackend = (workdir: string): PersistentUiBackendClient =>
         createPersistentUiBackendClient({
@@ -592,6 +592,7 @@ async function startFreshDaemon(input: {
           supervisor.clientDisconnected(clientId);
         },
         onShutdown: () => supervisor.stopAndExit("requested"),
+        pidToken: identity?.token,
         diagnosticsFile: input.diagnosticsHandle?.logFilePath,
         packageVersion: input.packageVersion,
         port: input.port,

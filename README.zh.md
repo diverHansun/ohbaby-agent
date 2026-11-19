@@ -33,13 +33,37 @@
 
 ## 安装
 
-需要 **Node.js 24** 及以上版本。
+安装脚本会下载一份专用的 Node.js。本版发布后，可用下面任一脚本安装 TUI 和随包提供的 Web UI。
+
+**macOS 和 Linux**
+
+```sh
+curl -fsSL https://cdn.jsdelivr.net/npm/ohbaby-cli/install.sh | sh
+```
+
+**Windows PowerShell**
+
+```powershell
+irm https://cdn.jsdelivr.net/npm/ohbaby-cli/install.ps1 | iex
+```
+
+脚本支持 x64 和 arm64 架构的 macOS、Windows 及使用 glibc 的 Linux。请预留约 0.5 GB 磁盘空间，Linux arm64 请预留约 0.6 GB。使用 musl 的 Linux 请通过受支持的 Node.js 和 npm 安装。
+
+Windows 安装脚本会生成 `ohbaby.cmd`。在 PowerShell 中，单独传入含 `&`、`|`、`<`、`>`、`^`、成对的 `%…%` 或双引号的参数时，cmd 可能会改写参数。这类提示词可通过标准输入传入。
+
+**npm（需要 Node.js 24 或更高版本）**
 
 ```bash
 npm install -g ohbaby-cli
 ```
 
-安装后会得到 `ohbaby` 命令。
+三种方式都会安装 `ohbaby` 命令。运行 `ohbaby` 打开 TUI，运行 `ohbaby serve` 启动 Web UI。
+
+运行 `ohbaby update` 更新，或用 `ohbaby update <版本>` 安装指定版本。非交互环境请加 `-y`。如果更新停止了 Web 服务，更新后重新运行 `ohbaby serve`，页面检测到服务重启后会自动刷新。
+
+运行 `ohbaby update --auto on` 可以开启 TUI 启动时的自动更新，运行 `ohbaby update --auto off` 可以关闭。设置 `OHBABY_NO_UPDATE_CHECK=1` 可跳过启动检查和自动更新。
+
+运行 `ohbaby uninstall` 卸载程序，配置、会话和数据库会保留。在 Windows 上通过脚本安装的用户，等卸载命令退出后，再执行它打印的目录删除命令。
 
 ## 快速开始
 

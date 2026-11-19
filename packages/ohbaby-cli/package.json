@@ -26,6 +26,8 @@
     "dist/**/*.d.ts",
     "dist/**/*.d.ts.map",
     "dist/web/**",
+    "install.sh",
+    "install.ps1",
     "!dist/**/*.test.d.ts",
     "!dist/**/*.test.d.ts.map",
     "!dist/**/*.unit.test.d.ts",
@@ -48,6 +50,7 @@
   "dependencies": {
     "@earendil-works/pi-tui": "1.0.1",
     "chalk": "^5.4.1",
+    "cross-spawn": "^7.0.6",
     "figlet": "^1.11.0",
     "ink": "8.0.0",
     "ink-gradient": "4.0.1",
@@ -55,10 +58,13 @@
     "ohbaby-sdk": "workspace:*",
     "ohbaby-server": "workspace:*",
     "react": "19.3.0",
+    "semver": "^7.7.3",
     "string-width": "8.3.0",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/semver": "^7.7.1",
     "@types/yargs": "^17.0.33"
   },
   "repository": {

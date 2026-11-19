@@ -17,6 +17,7 @@ import { JsonDaemonStateFile } from "./state-file.js";
 import type {
   DaemonPidFile,
   DaemonPidLock,
+  DaemonPidRecord,
   DaemonRuntimeHandle,
   DaemonSignalTarget,
   DaemonState,
@@ -48,7 +49,9 @@ export interface SupervisorOptions {
   readonly stateFile?: DaemonStateFile;
   readonly pidFilePath?: string;
   readonly stateFilePath?: string;
-  readonly bootstrap: () => DaemonRuntimeHandle | Promise<DaemonRuntimeHandle>;
+  readonly bootstrap: (
+    identity: DaemonPidRecord | undefined,
+  ) => DaemonRuntimeHandle | Promise<DaemonRuntimeHandle>;
   readonly signalTarget?: DaemonSignalTarget | null;
   readonly shutdownTimeoutMs?: number;
   readonly idleTimeoutMs?: number;
@@ -125,7 +128,7 @@ export class Supervisor {
         });
       }
       this.startedAt = this.now();
-      this.runtime = await this.options.bootstrap();
+      this.runtime = await this.options.bootstrap(this.pidLock.record);
       await this.runtime.start();
       await this.writeState("running");
       this.registerSignals();

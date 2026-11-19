@@ -34,3 +34,7 @@
 - `packages/ohbaby-cli/src/bin.ts` 装配 Agent/Server 动态依赖与 CLI surface。
 - TUI 和命令 handler 面向 SDK 派生 seam，不 import Agent 内部模块。
 - Agent core/service 不依赖 CLI。
+
+## CLI 维护入口
+
+`ohbaby update` 负责当前 npm 或脚本安装的版本更新。`ohbaby uninstall` 卸载程序并保留用户数据。TUI 和 `serve start` 可提示新版本，Web 页面检测到本地 daemon 重启后可刷新页面。

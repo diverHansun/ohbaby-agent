@@ -40,3 +40,9 @@ CLI 组合根随后统一用 SDK `createRPC()` 包裹两类 host。该 in-proces
 - TUI 提交采用 accepted 语义，并从事件流观察后续状态。
 - CLI 不把普通领域终态转换成传输异常；只按退出策略映射 process exit code。
 - local/remote host 必须共同经过 receiver-safe fake-RPC seam；不得为 remote 手写 method facade、逐方法 bind 或绕过 transport boundary。
+
+## 安装与维护
+
+npm 和安装脚本共用 `ohbaby-cli` 包。安装脚本按版本保留目录，启动时从 `current` 读取生效版本。TUI 和 `serve start` 读取版本检查缓存，并在后台刷新。只有 TUI 启动时会按用户设置执行自动更新。
+
+`ohbaby update` 和 `ohbaby uninstall` 共用安装方式识别和 daemon 停机检查。检查期间暂停接收新任务，确认原实例已退出且清理完成后才改动安装。维护命令无需打开数据库。

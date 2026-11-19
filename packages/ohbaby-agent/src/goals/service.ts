@@ -335,6 +335,17 @@ export class GoalService {
     this.driving.set(sessionId, loop);
   }
 
+  getActivityReasons(): readonly string[] {
+    return [
+      ...[...this.driving.keys()].map(
+        (sessionId) => `Active goal (session ${sessionId})`,
+      ),
+      ...[...this.interrupting.keys()].map(
+        (sessionId) => `Goal cleanup (session ${sessionId})`,
+      ),
+    ];
+  }
+
   /** Shutdown calls without a session after closing admission; join successor generations too. */
   async whenIdle(sessionId?: string): Promise<void> {
     for (;;) {
