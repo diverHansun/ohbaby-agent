@@ -144,8 +144,11 @@ it.each([
       expect(exitCode).toBe(code);
       expect(output).toContain(phrase);
       if (mode === "alive") expect(daemon?.exitCode).toBeNull();
-      else if (daemon)
+      else if (daemon) {
+        if (daemon.exitCode === null && daemon.signalCode === null)
+          await once(daemon, "exit");
         expect(daemon.exitCode).toBe(mode === "incomplete" ? 1 : 0);
+      }
     } finally {
       await reap(observer);
       await reap(daemon);
@@ -210,6 +213,8 @@ it("shares the host final-save deadline with an independent SQLite writer and co
       cleanup: "unconfirmed",
     });
     expect(result.reason).toMatch(/deadline|shutdown/i);
+    if (daemon.exitCode === null && daemon.signalCode === null)
+      await once(daemon, "exit");
     expect(daemon.exitCode).toBe(1);
   } finally {
     await reap(locker);
