@@ -230,11 +230,13 @@
         }
 
         $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-        if ([IO.File]::Exists($tar)) {
+        # Windows tar builds can convert non-ASCII arguments to the system code page.
+        if ([IO.File]::Exists($tar) -and $partial -cmatch '^[\x00-\x7F]+\z') {
             & $tar -xf $zipPath -C $partial
             if ($LASTEXITCODE -ne 0) { throw "Could not extract '$zipPath' (tar exit code $LASTEXITCODE)." }
         } else {
-            Expand-Archive -LiteralPath $zipPath -DestinationPath $partial
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $partial)
         }
         $extracted = Join-Path $partial $name
         if (-not (Test-ExecutableVersion (Join-Path $extracted 'node.exe') "v$nodeVersion")) {
