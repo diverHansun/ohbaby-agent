@@ -1,3 +1,4 @@
+import { Stream } from "@anthropic-ai/sdk/core/streaming";
 import { createTestContextManager as createContextManager } from "../../../fixtures/model-fixtures.js";
 import { resolvePreparedRequestSettings } from "ohbaby-llm";
 import type { RawMessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
@@ -178,72 +179,76 @@ it.each([
     });
     let calls = 0;
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
+      .spyOn(provider.client.messages, "create")
       .mockImplementation(() => {
         const attempt = ++calls;
-        return (async function* (): AsyncGenerator<RawMessageStreamEvent> {
-          await Promise.resolve();
-          yield {
-            type: "message_start",
-            message: {
-              id: `msg_${String(attempt)}`,
-              type: "message",
-              role: "assistant",
-              model: "fixture",
-              content: [],
-              container: null,
-              stop_details: null,
-              stop_reason: null,
-              stop_sequence: null,
-              usage: {
-                input_tokens: 65000,
-                output_tokens: 0,
-                cache_creation: null,
-                cache_creation_input_tokens: null,
-                cache_read_input_tokens: null,
-                inference_geo: null,
-                output_tokens_details: null,
-                server_tool_use: null,
-                service_tier: null,
-              },
-            },
-          };
-          yield {
-            type: "content_block_start",
-            index: 0,
-            content_block: { type: "text", text: "", citations: null },
-          };
-          yield {
-            type: "content_block_delta",
-            index: 0,
-            delta: { type: "text_delta", text: "Summary text" },
-          };
-          yield { type: "content_block_stop", index: 0 };
-          if (attempt > 1 || terminal) {
+        const events =
+          (async function* (): AsyncGenerator<RawMessageStreamEvent> {
+            await Promise.resolve();
             yield {
-              type: "message_delta",
-              delta: {
+              type: "message_start",
+              message: {
+                id: `msg_${String(attempt)}`,
+                type: "message",
+                role: "assistant",
+                model: "fixture",
+                content: [],
                 container: null,
                 stop_details: null,
-                stop_reason: attempt === 1 ? "max_tokens" : "end_turn",
+                stop_reason: null,
                 stop_sequence: null,
-              },
-              usage: {
-                output_tokens: attempt === 1 ? 16384 : 3,
-                input_tokens: null,
-                cache_creation_input_tokens: null,
-                cache_read_input_tokens: null,
-                output_tokens_details: null,
-                server_tool_use: null,
+                usage: {
+                  input_tokens: 65000,
+                  output_tokens: 0,
+                  cache_creation: null,
+                  cache_creation_input_tokens: null,
+                  cache_read_input_tokens: null,
+                  inference_geo: null,
+                  output_tokens_details: null,
+                  server_tool_use: null,
+                  service_tier: null,
+                },
               },
             };
-          }
-          if (attempt === 1)
-            throw Object.assign(new Error("connection reset"), {
-              code: "ECONNRESET",
-            });
-          yield { type: "message_stop" };
-        })();
+            yield {
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "text", text: "", citations: null },
+            };
+            yield {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "text_delta", text: "Summary text" },
+            };
+            yield { type: "content_block_stop", index: 0 };
+            if (attempt > 1 || terminal) {
+              yield {
+                type: "message_delta",
+                delta: {
+                  container: null,
+                  stop_details: null,
+                  stop_reason: attempt === 1 ? "max_tokens" : "end_turn",
+                  stop_sequence: null,
+                },
+                usage: {
+                  output_tokens: attempt === 1 ? 16384 : 3,
+                  input_tokens: null,
+                  cache_creation_input_tokens: null,
+                  cache_read_input_tokens: null,
+                  output_tokens_details: null,
+                  server_tool_use: null,
+                },
+              };
+            }
+            if (attempt === 1)
+              throw Object.assign(new Error("connection reset"), {
+                code: "ECONNRESET",
+              });
+            yield { type: "message_stop" };
+          })();
+        return Promise.resolve(
+          new Stream(() => events, new AbortController()),
+        ) as ReturnType<typeof provider.client.messages.create>;
       });
     const client: LLMClientInstance = {
       provider,

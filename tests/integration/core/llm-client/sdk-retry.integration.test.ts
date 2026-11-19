@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOpenAICompatibleProvider } from "ohbaby-llm";
 import {
   isRetryableProviderError,
+  isContextOverflowError,
+  providerErrorDetail,
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
 } from "ohbaby-llm";
@@ -209,6 +211,7 @@ function consume(
     signal?: AbortSignal;
     onFrame?: (frame: StreamingResponse) => void;
     maxRetriesPerStep?: number;
+    purpose?: NonNullable<Parameters<typeof streamResponse>[2]>["purpose"];
   } = {},
 ): {
   frames: StreamingResponse[];
@@ -222,6 +225,7 @@ function consume(
         [{ role: "user", content: "fixture" }],
         {
           signal: options.signal,
+          purpose: options.purpose,
           ...(options.maxRetriesPerStep === undefined
             ? {}
             : { retry: { maxRetriesPerStep: options.maxRetriesPerStep } }),
@@ -246,6 +250,234 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+function earlyEof(protocol: (typeof protocols)[number]): Response {
+  return new Response(protocol === "anthropic" ? "" : "data: [DONE]\n\n", {
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function anthropicSse(events: readonly { type: string }[]): Response {
+  return new Response(
+    events
+      .map(
+        (event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+      )
+      .join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+function streamFailure(protocol: (typeof protocols)[number]): Response {
+  if (protocol === "anthropic") {
+    const event = {
+      type: "error",
+      error: { type: "overloaded_error", message: "controlled overload" },
+    };
+    return anthropicSse([event]);
+  }
+  return sse([
+    { error: { code: "server_error", message: "controlled failure" } },
+  ]);
+}
+
+describe.each(protocols)("%s agent-step stream errors", (protocol) => {
+  it.each([
+    {
+      fault: "in-stream error",
+      response: streamFailure,
+      reason: protocol === "anthropic" ? "overloaded_error" : "server_error",
+    },
+    {
+      fault: "missing terminal event",
+      response: earlyEof,
+      reason: "stream_eof",
+    },
+  ])("retries $fault before any output", async ({ response, reason }) => {
+    const f = fixture(
+      (attempt) => (attempt === 1 ? response(protocol) : success(protocol)),
+      protocol,
+    );
+    const run = consume(f.client, { purpose: "agent-step" });
+    await vi.runAllTimersAsync();
+    expect(await run.done).toEqual({});
+    expect(f.attempts).toHaveLength(2);
+    expect(run.frames.flatMap((frame) => frame.retry?.reason ?? [])).toEqual([
+      reason,
+    ]);
+    expect(run.frames.at(-1)?.messageSnapshot.content).toBe("done");
+  });
+});
+
+it.each(["agent-step", "context-summary"] as const)(
+  "requires Anthropic message_stop even after receiving stop_reason for %s",
+  async (purpose) => {
+    const start = {
+      type: "message_start",
+      message: {
+        id: "msg_empty",
+        type: "message",
+        role: "assistant",
+        model: "fixture",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 12, output_tokens: 0 },
+      },
+    };
+    const delta = {
+      type: "message_delta",
+      delta: { stop_reason: "end_turn", stop_sequence: null },
+      usage: { output_tokens: 0 },
+    };
+    const f = fixture(
+      (attempt) =>
+        attempt === 1 ? anthropicSse([start, delta]) : success("anthropic"),
+      "anthropic",
+    );
+    const run = consume(f.client, { purpose });
+    await vi.runAllTimersAsync();
+    if (purpose === "context-summary") {
+      expect((await run.done).error).toMatchObject({ source: "eof" });
+      expect(f.attempts).toHaveLength(1);
+      expect(run.frames.some((frame) => frame.retry)).toBe(false);
+      return;
+    }
+    expect(await run.done).toEqual({});
+    expect(f.attempts).toHaveLength(2);
+    expect(run.frames.find((frame) => frame.retry)?.retry?.reason).toBe(
+      "stream_eof",
+    );
+    expect(run.frames.at(-1)?.messageSnapshot.content).toBe("done");
+  },
+);
+
+it.each([
+  { networkCode: "UND_ERR_SOCKET", attempts: 2 },
+  { networkCode: "CERT_HAS_EXPIRED", attempts: 1 },
+])(
+  "uses explicit network evidence in nested SDK causes ($networkCode)",
+  async ({ networkCode, attempts }) => {
+    const f = fixture((attempt) => {
+      if (attempt > 1) return success("openai-compatible");
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("underlying network fault"), {
+          code: networkCode,
+        }),
+      });
+    });
+    const run = consume(f.client, { purpose: "agent-step" });
+    await vi.runAllTimersAsync();
+    const { error } = await run.done;
+    expect(f.attempts).toHaveLength(attempts);
+    if (attempts === 2) {
+      expect(error).toBeUndefined();
+      expect(run.frames.find((frame) => frame.retry)?.retry?.reason).toBe(
+        "und_err_socket",
+      );
+    } else {
+      expect(providerErrorDetail(error)).toMatchObject({
+        kind: "tls",
+        networkCode,
+      });
+      expect(run.frames.some((frame) => frame.retry)).toBe(false);
+    }
+  },
+);
+
+it.each([
+  {
+    protocol: "openai-compatible",
+    response: () =>
+      sse([{ error: { type: "invalid_request_error", message: "fixture" } }]),
+    kind: "invalid_request",
+  },
+  {
+    protocol: "anthropic",
+    response: () => {
+      const event = {
+        type: "error",
+        error: { type: "invalid_request_error", message: "fixture" },
+      };
+      return anthropicSse([event]);
+    },
+    kind: "invalid_request",
+  },
+  {
+    protocol: "openai-compatible",
+    response: () =>
+      sse([{ error: { code: "unknown_error_fixture", message: "fixture" } }]),
+    kind: "unknown",
+  },
+  {
+    protocol: "openai-compatible",
+    response: () =>
+      Response.json(
+        {
+          error: {
+            code: "insufficient_quota",
+            type: "rate_limit_error",
+            message: "fixture",
+          },
+        },
+        { status: 429 },
+      ),
+    kind: "billing",
+  },
+] as const)(
+  "keeps $protocol $kind failures terminal",
+  async ({ protocol, response, kind }) => {
+    const f = fixture(response, protocol);
+    const run = consume(f.client, { purpose: "agent-step" });
+    await vi.runAllTimersAsync();
+    expect(f.attempts).toHaveLength(1);
+    expect(run.frames.some((frame) => frame.retry)).toBe(false);
+    expect(providerErrorDetail((await run.done).error)?.kind).toBe(kind);
+  },
+);
+
+describe("Responses explicit failure events", () => {
+  it.each([
+    { code: "server_error", attempts: 2, kind: undefined },
+    { code: "invalid_prompt", attempts: 1, kind: "invalid_request" },
+    { code: "context_length_exceeded", attempts: 1, kind: "context_overflow" },
+    { code: "unrecognized_fixture_error", attempts: 1, kind: "unknown" },
+    { code: null, attempts: 1, kind: "unknown" },
+  ])("handles response.failed with $code", async ({ code, attempts, kind }) => {
+    const f = fixture(
+      (attempt) =>
+        attempt === 1
+          ? sse([
+              {
+                type: "response.failed",
+                response: {
+                  id: "resp_failed",
+                  status: "failed",
+                  error: code
+                    ? { code, message: "upstream detail must not be exposed" }
+                    : null,
+                },
+              },
+            ])
+          : success("openai-responses"),
+      "openai-responses",
+    );
+    const run = consume(f.client, { purpose: "agent-step" });
+    await vi.runAllTimersAsync();
+    const { error } = await run.done;
+    expect(f.attempts).toHaveLength(attempts);
+    if (kind === undefined) {
+      expect(error).toBeUndefined();
+      expect(run.frames.find((frame) => frame.retry)?.retry?.reason).toBe(code);
+    } else {
+      const detail = providerErrorDetail(error);
+      expect(detail?.kind).toBe(kind);
+      expect(detail?.upstreamCode).toBe(kind === "unknown" ? undefined : code);
+      expect(detail?.message).not.toContain("upstream detail");
+      expect(isContextOverflowError(error)).toBe(kind === "context_overflow");
+    }
+  });
 });
 
 describe("installed SDK and project retry boundaries", () => {
@@ -486,6 +718,8 @@ describe.each(protocols)("%s Context summary HTTP budget", (protocol) => {
     { failures: 1, fault: "503", attempts: 2, status: "compacted" },
     { failures: 2, fault: "503", attempts: 2, status: "failed" },
     { failures: 1, fault: "ECONNRESET", attempts: 2, status: "compacted" },
+    { failures: 1, fault: "in-stream error", attempts: 1, status: "failed" },
+    { failures: 1, fault: "EOF", attempts: 1, status: "failed" },
   ] as const)(
     "limits $failures initial $fault failures to $attempts actual HTTP requests",
     async ({ failures, fault, attempts, status }) => {
@@ -496,6 +730,8 @@ describe.each(protocols)("%s Context summary HTTP budget", (protocol) => {
             code: "ECONNRESET",
           });
         }
+        if (fault === "in-stream error") return streamFailure(protocol);
+        if (fault === "EOF") return earlyEof(protocol);
         return unavailable();
       }, protocol);
       const bus = createBus();

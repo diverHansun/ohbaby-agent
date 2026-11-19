@@ -1,3 +1,5 @@
+import { APIUserAbortError } from "@anthropic-ai/sdk/error";
+import { Stream } from "@anthropic-ai/sdk/core/streaming";
 import type {
   MessageCreateParams,
   RawMessageStreamEvent,
@@ -12,17 +14,39 @@ import type {
 
 function createRawStream(
   events: readonly RawMessageStreamEvent[],
-): AsyncGenerator<RawMessageStreamEvent, void, unknown> {
-  return (async function* (): AsyncGenerator<
-    RawMessageStreamEvent,
-    void,
-    unknown
-  > {
+): Stream<RawMessageStreamEvent> {
+  return new Stream(async function* () {
     for (const event of events) {
       yield await Promise.resolve(event);
     }
-  })();
+  }, new AbortController());
 }
+
+const messageStart: RawMessageStreamEvent = {
+  type: "message_start",
+  message: {
+    id: "msg_fixture",
+    type: "message",
+    role: "assistant",
+    content: [],
+    model: "test",
+    container: null,
+    stop_reason: null,
+    stop_details: null,
+    stop_sequence: null,
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation: null,
+      cache_creation_input_tokens: null,
+      cache_read_input_tokens: null,
+      inference_geo: null,
+      output_tokens_details: null,
+      server_tool_use: null,
+      service_tier: null,
+    },
+  },
+};
 
 function customToolNames(tools: MessageCreateParams["tools"]): string[] {
   return (tools ?? []).map((tool) => {
@@ -34,6 +58,65 @@ function customToolNames(tools: MessageCreateParams["tools"]): string[] {
 }
 
 describe("anthropic provider", () => {
+  it.each([
+    {
+      description: "a missing message_start",
+      events: [{ type: "message_stop" }],
+    },
+    {
+      description: "a duplicate message_start",
+      events: [messageStart, messageStart],
+    },
+  ] as const)(
+    "rejects $description in a summary stream",
+    async ({ events }) => {
+      const provider = createAnthropicProvider({
+        id: "test",
+        apiKey: "test-key",
+        baseUrl: "http://localhost:1",
+      });
+      vi.spyOn(provider.client.messages, "create").mockResolvedValue(
+        createRawStream(events),
+      );
+      const result = await provider.streamResponse({
+        model: "test",
+        messages: [{ role: "user", content: "Summarize" }],
+        maxTokens: 32,
+        purpose: "context-summary",
+        promptCache: { strategy: "observe-only", reason: "test" },
+      });
+      await expect(result[Symbol.asyncIterator]().next()).rejects.toThrow(
+        "Unexpected Anthropic message event order.",
+      );
+    },
+  );
+
+  it.each(["caller", "provider"] as const)(
+    "recognizes a %s abort when the SDK stream ends",
+    async (source) => {
+      const provider = createAnthropicProvider({
+        id: "test",
+        apiKey: "test-key",
+        baseUrl: "http://localhost:1",
+      });
+      const caller = new AbortController();
+      const raw = createRawStream([messageStart]);
+      vi.spyOn(provider.client.messages, "create").mockResolvedValue(raw);
+      const result = await provider.streamResponse({
+        model: "test",
+        messages: [{ role: "user", content: "Summarize" }],
+        maxTokens: 32,
+        purpose: "context-summary",
+        promptCache: { strategy: "observe-only", reason: "test" },
+        signal: caller.signal,
+      });
+      (source === "caller" ? caller : raw.controller).abort();
+      await expect(
+        result[Symbol.asyncIterator]().next(),
+      ).rejects.toBeInstanceOf(APIUserAbortError);
+    },
+  );
+
   it("retains existing text filtering, system order and ignored rare fields", async () => {
     const provider = createAnthropicProvider({
       id: "test",
@@ -41,8 +124,8 @@ describe("anthropic provider", () => {
       baseUrl: "http://localhost:1",
     });
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockReturnValue(createRawStream([]));
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(createRawStream([]));
     const messages: ModelMessage[] = [
       {
         role: "system",
@@ -112,6 +195,7 @@ describe("anthropic provider", () => {
         { role: "assistant", content: "" },
       ],
       max_tokens: 32,
+      stream: true,
       temperature: 0,
     });
     expect(messages).toEqual(before);
@@ -136,8 +220,8 @@ describe("anthropic provider", () => {
       baseUrl: "http://localhost:1",
     });
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockReturnValue(createRawStream([]));
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(createRawStream([]));
     expect(() =>
       provider.streamResponse({
         model: "test",
@@ -156,27 +240,31 @@ describe("anthropic provider", () => {
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
-    const stream = vi.spyOn(provider.client.messages, "stream").mockReturnValue(
-      createRawStream([
-        {
-          type: "message_delta",
-          delta: {
-            container: null,
-            stop_reason: "end_turn",
-            stop_details: null,
-            stop_sequence: null,
+    const stream = vi
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(
+        createRawStream([
+          messageStart,
+          {
+            type: "message_delta",
+            delta: {
+              container: null,
+              stop_reason: "end_turn",
+              stop_details: null,
+              stop_sequence: null,
+            },
+            usage: {
+              input_tokens: 12,
+              output_tokens: 4,
+              cache_creation_input_tokens: null,
+              cache_read_input_tokens: null,
+              output_tokens_details: null,
+              server_tool_use: null,
+            },
           },
-          usage: {
-            input_tokens: 12,
-            output_tokens: 4,
-            cache_creation_input_tokens: null,
-            cache_read_input_tokens: null,
-            output_tokens_details: null,
-            server_tool_use: null,
-          },
-        },
-      ]),
-    );
+          { type: "message_stop" },
+        ]),
+      );
 
     const controller = new AbortController();
     const events: InterfaceProviderStreamEvent[] = [];
@@ -259,6 +347,7 @@ describe("anthropic provider", () => {
           },
         ],
         max_tokens: 512,
+        stream: true,
         temperature: 0.7,
         tools: [
           {
@@ -295,8 +384,9 @@ describe("anthropic provider", () => {
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
-    vi.spyOn(provider.client.messages, "stream").mockReturnValue(
+    vi.spyOn(provider.client.messages, "create").mockResolvedValue(
       createRawStream([
+        messageStart,
         {
           type: "content_block_start",
           index: 0,
@@ -438,8 +528,9 @@ describe("anthropic provider", () => {
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
-    vi.spyOn(provider.client.messages, "stream").mockReturnValue(
+    vi.spyOn(provider.client.messages, "create").mockResolvedValue(
       createRawStream([
+        messageStart,
         {
           type: "message_delta",
           delta: {
@@ -457,6 +548,7 @@ describe("anthropic provider", () => {
             server_tool_use: null,
           },
         },
+        { type: "message_stop" },
       ]),
     );
 
@@ -492,7 +584,7 @@ describe("anthropic provider", () => {
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
-    vi.spyOn(provider.client.messages, "stream").mockReturnValue(
+    vi.spyOn(provider.client.messages, "create").mockResolvedValue(
       createRawStream([
         {
           type: "message_start",
@@ -522,6 +614,7 @@ describe("anthropic provider", () => {
             server_tool_use: null,
           },
         },
+        { type: "message_stop" },
       ]),
     );
 
@@ -563,9 +656,10 @@ describe("anthropic provider", () => {
       baseUrl: "https://api.anthropic.com",
     });
     const stream = vi
-      .spyOn(provider.client.messages, "stream")
-      .mockImplementation(() =>
+      .spyOn(provider.client.messages, "create")
+      .mockResolvedValue(
         createRawStream([
+          messageStart,
           {
             type: "message_delta",
             delta: {
@@ -583,6 +677,7 @@ describe("anthropic provider", () => {
               server_tool_use: null,
             },
           },
+          { type: "message_stop" },
         ]),
       );
     const selectTools = {

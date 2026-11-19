@@ -1,3 +1,7 @@
+import {
+  ProviderStreamEofError,
+  ProviderStreamFailureError,
+} from "../providers/stream-errors.js";
 import { ModelRequestValidationError } from "../providers/request-validation-error.js";
 import {
   APIError as AnthropicAPIError,
@@ -14,7 +18,9 @@ import {
 } from "./errors.js";
 import { ProviderStreamIdleTimeoutError } from "./idle-watchdog.js";
 import {
+  isProviderTransportError,
   isRetryableProviderError,
+  retryReason,
   providerErrorStatus,
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
@@ -43,6 +49,7 @@ export const SAFE_PROVIDER_ERROR_CODES = [
   "invalid_api_key",
   "invalid_request_error",
   "invalid_request",
+  "invalid_prompt",
   "unsupported_parameter",
   "unsupported_value",
   "invalid_parameter",
@@ -52,12 +59,17 @@ export const SAFE_PROVIDER_ERROR_CODES = [
   "insufficient_balance",
   "billing_hard_limit_reached",
   "rate_limit_exceeded",
+  "server_is_overloaded",
   "context_length_exceeded",
   "permission_denied",
   "authentication_error",
   "overloaded_error",
   "server_error",
   "api_error",
+  "content_policy_violation",
+  "credit_balance_exhausted",
+  "organization_spend_limit_exceeded",
+  "project_spend_limit_exceeded",
 ] as const;
 
 export const SAFE_PROVIDER_ERROR_TYPES = [
@@ -108,6 +120,7 @@ export const SAFE_UPSTREAM_REASONS = [
   "concurrency_limit",
   "invalid_reasoning_content",
   "invalid_tool_request",
+  "stream_eof",
 ] as const;
 
 export function safeUpstreamId(value: unknown): string | undefined {
@@ -236,6 +249,8 @@ function providerNode(value: Record<string, unknown>): boolean {
     status(value) !== undefined ||
     value instanceof OpenAIAPIError ||
     value instanceof AnthropicAPIError ||
+    value instanceof ProviderStreamFailureError ||
+    value instanceof ProviderStreamEofError ||
     value instanceof ProviderStreamIdleTimeoutError ||
     allowed(value.code, SAFE_PROVIDER_NETWORK_CODES) !== undefined ||
     [value, nested].some(
@@ -247,6 +262,123 @@ function providerNode(value: Record<string, unknown>): boolean {
   );
 }
 
+const RATE_LIMIT_ERRORS = ["rate_limit_exceeded", "rate_limit_error"];
+
+const UNAVAILABLE_ERRORS = [
+  "server_error",
+  "api_error",
+  "overloaded_error",
+  "server_is_overloaded",
+];
+
+const BILLING_ERRORS = [
+  "insufficient_quota",
+  "insufficient_balance",
+  "billing_hard_limit_reached",
+  "credit_balance_exhausted",
+  "organization_spend_limit_exceeded",
+  "project_spend_limit_exceeded",
+];
+
+const INVALID_REQUEST_ERRORS = [
+  "invalid_request",
+  "invalid_request_error",
+  "invalid_prompt",
+  "unsupported_parameter",
+  "unsupported_value",
+  "invalid_parameter",
+  "invalid_argument",
+  "model_not_found",
+  "not_found_error",
+  "content_policy_violation",
+];
+
+function matchesErrorLabel(
+  value: Record<string, unknown>,
+  labels: readonly string[],
+): string | undefined {
+  return allowed(value.code, labels) ?? allowed(value.type, labels);
+}
+
+function isPermanentNetworkCode(code: unknown): boolean {
+  const safe = allowed(code, SAFE_PROVIDER_NETWORK_CODES);
+  return (
+    safe !== undefined &&
+    (safe === "OHBABY_PROXY_CONFIG" ||
+      /CERT|SELF_SIGNED|ISSUER|LEAF_SIGNATURE|TLS/u.test(safe))
+  );
+}
+
+/** Decide eligibility for agent steps independently of user-facing error normalization. */
+export function agentStepRetry(
+  error: unknown,
+): { reason: string; source?: "eof" | "transport" } | undefined {
+  if (error instanceof ProviderStreamInterruptedError && error.source === "eof")
+    return { reason: "stream_eof", source: "eof" };
+  if (error instanceof ProviderStreamIdleTimeoutError)
+    return { reason: "stream_idle_timeout" };
+
+  const chain = causeChain(error);
+  const upstream = chain.filter(
+    (node) =>
+      node instanceof OpenAIAPIError ||
+      node instanceof AnthropicAPIError ||
+      node instanceof ProviderStreamFailureError,
+  );
+  const evidence = upstream.flatMap((node) => {
+    const payload = record(node.error);
+    return payload ? [node, payload] : [node];
+  });
+  if (
+    evidence.some(
+      (node) =>
+        isContextOverflowError(node) ||
+        matchesErrorLabel(node, BILLING_ERRORS) !== undefined ||
+        matchesErrorLabel(node, INVALID_REQUEST_ERRORS) !== undefined ||
+        matchesErrorLabel(node, [
+          "invalid_api_key",
+          "authentication_error",
+          "permission_error",
+          "permission_denied",
+        ]) !== undefined,
+    ) ||
+    chain.some((node) => isPermanentNetworkCode(node.code)) ||
+    (providerErrorStatus(error) !== undefined &&
+      !isRetryableProviderError(error))
+  ) {
+    return undefined;
+  }
+
+  const transport = chain.find(
+    (node) =>
+      isProviderTransportError(node) ||
+      node.code === "UND_ERR_SOCKET" ||
+      node.code === "UND_ERR_CONNECT_TIMEOUT" ||
+      node.code === "UND_ERR_HEADERS_TIMEOUT" ||
+      node.code === "UND_ERR_BODY_TIMEOUT",
+  );
+  if (transport) {
+    const networkCode = chain
+      .map((node) => allowed(node.code, SAFE_PROVIDER_NETWORK_CODES))
+      .find((code) => code !== undefined);
+    return {
+      reason: networkCode?.toLowerCase() ?? retryReason(transport),
+      source: "transport",
+    };
+  }
+
+  for (const node of evidence) {
+    const reason =
+      matchesErrorLabel(node, RATE_LIMIT_ERRORS) ??
+      matchesErrorLabel(node, UNAVAILABLE_ERRORS);
+    if (reason !== undefined) return { reason };
+  }
+
+  if (isRetryableProviderError(error))
+    return { reason: retryReason(error) };
+  return undefined;
+}
+
 function classify(
   chain: readonly Record<string, unknown>[],
   evidence: readonly Record<string, unknown>[],
@@ -254,11 +386,7 @@ function classify(
   networkCode: SafeProviderNetworkCode | undefined,
 ): Exclude<ProviderErrorKind, "stream_interrupted"> {
   const has = (values: readonly string[]): boolean =>
-    evidence.some(
-      (value) =>
-        (typeof value.code === "string" && values.includes(value.code)) ||
-        (typeof value.type === "string" && values.includes(value.type)),
-    );
+    evidence.some((value) => matchesErrorLabel(value, values) !== undefined);
   const matches = (pattern: RegExp): boolean =>
     evidence.some(
       (value) =>
@@ -266,15 +394,7 @@ function classify(
     );
 
   if (has(["invalid_api_key"])) return "invalid_api_key";
-  if (
-    statusCode === 402 ||
-    has([
-      "insufficient_quota",
-      "insufficient_balance",
-      "billing_hard_limit_reached",
-    ])
-  )
-    return "billing";
+  if (statusCode === 402 || has(BILLING_ERRORS)) return "billing";
   if (statusCode === 400) {
     if (
       matches(
@@ -290,14 +410,9 @@ function classify(
     return "authentication";
   if (statusCode === 403 || has(["permission_denied", "permission_error"]))
     return "permission";
-  if (statusCode === 429 || has(["rate_limit_exceeded", "rate_limit_error"]))
-    return "rate_limit";
+  if (statusCode === 429 || has(RATE_LIMIT_ERRORS)) return "rate_limit";
   if (networkCode === "OHBABY_PROXY_CONFIG") return "proxy";
-  if (
-    networkCode &&
-    /CERT|SELF_SIGNED|ISSUER|LEAF_SIGNATURE|TLS/u.test(networkCode)
-  )
-    return "tls";
+  if (isPermanentNetworkCode(networkCode)) return "tls";
   if (
     networkCode !== undefined &&
     (statusCode === undefined || statusCode === 408)
@@ -315,22 +430,15 @@ function classify(
     )
   )
     return "timeout";
-  if (statusCode !== undefined && statusCode >= 500) return "unavailable";
+  if (
+    (statusCode !== undefined && statusCode >= 500) ||
+    has(UNAVAILABLE_ERRORS)
+  )
+    return "unavailable";
   if (statusCode !== undefined && statusCode >= 400) return "invalid_request";
   if (networkCode !== undefined || chain.some(isRetryableProviderError))
     return "connection";
-  if (
-    has([
-      "invalid_request",
-      "invalid_request_error",
-      "unsupported_parameter",
-      "unsupported_value",
-      "invalid_parameter",
-      "invalid_argument",
-      "model_not_found",
-    ])
-  )
-    return "invalid_request";
+  if (has(INVALID_REQUEST_ERRORS)) return "invalid_request";
   return "unknown";
 }
 
@@ -404,7 +512,13 @@ export function providerErrorDetail(
     } catch {
       /* Keep the already classified failure. */
     }
-    const reason = upstreamReason(evidence);
+    const reason = chain.some(
+      (value) =>
+        value instanceof ProviderStreamInterruptedError &&
+        value.source === "eof",
+    )
+      ? "stream_eof"
+      : upstreamReason(evidence);
     const causeKind = classify(chain, evidence, statusCode, networkCode);
     const kind = interrupted ? "stream_interrupted" : causeKind;
     return {
