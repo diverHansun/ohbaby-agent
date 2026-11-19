@@ -1,5 +1,6 @@
 import {
   listEndedTurns,
+  listRetriedAttemptIds,
   type UiMessage,
   type UiPromptError,
   type UiPromptSubmission,
@@ -64,6 +65,7 @@ export function projectRunProcesses(
   runs: readonly UiRun[] = [],
   allMessages: readonly UiMessage[] = messages,
 ): RunProcess[] {
+  const retried = listRetriedAttemptIds(messages);
   const sessionPrompts = prompts.filter(
     (prompt) => prompt.sessionId === sessionId,
   );
@@ -112,7 +114,8 @@ export function projectRunProcesses(
     const unsettled = owned.some(
       (message) =>
         message.status === "streaming" ||
-        message.status === "error" ||
+        // A retried attempt failed, but its retry settled the step.
+        (message.status === "error" && !retried.has(message.id)) ||
         reasoning[message.id]?.folded === false ||
         message.parts.some(
           (part) =>

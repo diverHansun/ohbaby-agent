@@ -16,7 +16,7 @@ import type {
   UiRun,
   UiUnconsumedSteer,
 } from "ohbaby-sdk";
-import { turnTriggerLabel } from "ohbaby-sdk";
+import { listRetriedAttemptIds, turnTriggerLabel } from "ohbaby-sdk";
 import type { ReactNode } from "react";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import {
@@ -151,6 +151,7 @@ export function ConversationStream(props: {
         message.runtimeInputKind !== "background-task-result",
     ),
   );
+  const retriedIds = listRetriedAttemptIds(messages);
   const timelineItems = [
     ...visibleMessages.map((message, index) => ({
       createdAt: message.createdAt,
@@ -843,6 +844,9 @@ export function ConversationStream(props: {
                       return failure;
                     }}
                   />
+                ) : retriedIds.has(item.message.id) ? (
+                  // The retry below replaced this answer; the model no longer sees it.
+                  <p className="ohb-retried-attempt">Interrupted · retried</p>
                 ) : (
                   <MessageRow
                     message={item.message}

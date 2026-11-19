@@ -3,6 +3,7 @@ import type {
   UiBackendClient,
   UiCompactSessionUsage,
   UiEvent,
+  UiMessage,
   UiPermissionRequest,
   UiPromptEditLease,
   UiPromptSubmission,
@@ -6675,6 +6676,137 @@ it("keeps one waiting row through retries and counts them without a timer", () =
   expect(row()).toBe(first);
   expect(row()?.getAttribute("aria-label")).toBe("Thinking");
   expect(row()?.textContent).toContain("8s");
+});
+
+it("waits through a step retry after partial text and leaves one line for the replaced attempt", () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const failed = {
+    requestId: "r1",
+    runId: "run_1",
+    messageId: "m1",
+    step: 1,
+    attempt: 1,
+    purpose: "agent-step" as const,
+    startedAt: 1000,
+    endedAt: 2000,
+    outcome: "error" as const,
+    retryScheduled: true as const,
+  };
+  const retry = {
+    ...failed,
+    requestId: "r2",
+    messageId: "m2",
+    attempt: 2,
+    startedAt: 3000,
+    endedAt: undefined,
+    outcome: "running" as const,
+    retryScheduled: undefined,
+  };
+  const partial: UiMessage = {
+    createdAt: timestamp,
+    id: "m1",
+    parts: [{ text: "Half an answer", type: "text" }],
+    role: "assistant",
+    runId: "run_1",
+    status: "error",
+    modelRequests: [failed],
+  };
+  const withMessages = (
+    ...messages: readonly UiMessage[]
+  ): UiSnapshot["sessions"] =>
+    initial.sessions.map((session) => ({
+      ...session,
+      messages: [...session.messages, ...messages],
+    }));
+  const fake = createFakeRuntime({
+    snapshot: {
+      ...initial,
+      serverNow: 2500,
+      sessions: withMessages(partial),
+      runs: [
+        {
+          ...initial.runs[0],
+          modelActivity: {
+            ...failed,
+            phase: "retrying",
+            waitingStartedAt: 1000,
+          },
+        },
+      ],
+    },
+  });
+  const app = mountApp(fake.runtime);
+  const row = (): Element | null =>
+    app.container.querySelector(".ohb-thinking");
+  // While the retry waits, the partial text stays and the wait still shows.
+  expect(app.container.textContent).toContain("Half an answer");
+  expect(row()?.getAttribute("aria-label")).toBe("Retrying #1");
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 3500,
+        sessions: withMessages(partial, {
+          createdAt: timestamp,
+          id: "m2",
+          parts: [],
+          role: "assistant",
+          runId: "run_1",
+          status: "streaming",
+          modelRequests: [retry],
+        }),
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: {
+              ...retry,
+              phase: "retrying",
+              waitingStartedAt: 1000,
+            },
+          },
+        ],
+      },
+      2,
+    );
+  });
+  expect(app.container.textContent).not.toContain("Half an answer");
+  expect(app.container.querySelector(".ohb-retried-attempt")?.textContent).toBe(
+    "Interrupted · retried",
+  );
+  expect(row()?.getAttribute("aria-label")).toBe("Retrying #1");
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 4000,
+        sessions: withMessages(partial, {
+          createdAt: timestamp,
+          id: "m2",
+          parts: [{ text: "The full answer", type: "text" }],
+          role: "assistant",
+          runId: "run_1",
+          status: "streaming",
+          modelRequests: [retry],
+        }),
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: {
+              ...retry,
+              phase: "requesting",
+              waitingStartedAt: 1000,
+            },
+          },
+        ],
+      },
+      3,
+    );
+  });
+  expect(row()).toBeNull();
+  expect(app.container.textContent).toContain("The full answer");
+  expect(app.container.querySelectorAll(".ohb-retried-attempt")).toHaveLength(
+    1,
+  );
 });
 
 it("does not resurrect A's unresolved Stop after B reaches a reliable terminal", async () => {

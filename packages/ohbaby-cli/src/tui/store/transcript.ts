@@ -1,5 +1,6 @@
 import {
   listEndedTurns,
+  listRetriedAttemptIds,
   type UiMessage,
   type UiPromptSubmission,
   type UiRun,
@@ -47,9 +48,12 @@ export function advanceTranscriptCommit(
   messages: readonly UiMessage[],
   runtime: TuiRuntimeStatus,
 ): TranscriptCommitState {
-  const split = splitTranscript(messages, runtime);
   const previousItems = previous?.committedItems ?? [];
   const previousCounts = previous?.committedPartCounts ?? {};
+  const split = splitTranscript(
+    withRetriedAttemptLines(messages, previousCounts),
+    runtime,
+  );
   const items = [...previousItems];
   const counts: Partial<Record<string, number>> = { ...previousCounts };
   const itemIndexById = new Map(
@@ -138,6 +142,58 @@ export function advanceTranscriptCommit(
   }
 
   return unchangedOrNext(previous, changed, items, counts, liveMessage);
+}
+
+const RETRIED_ATTEMPT_LINE = "Interrupted · retried";
+
+/**
+ * A step retry replaced these attempts, so each commits as one dim line. Parts
+ * already frozen in the scrollback stay; only the rest gives way to the line.
+ */
+export function withRetriedAttemptLines(
+  messages: readonly UiMessage[],
+  committedPartCounts: Readonly<Partial<Record<string, number>>> = {},
+): readonly UiMessage[] {
+  const retried = listRetriedAttemptIds(messages);
+  if (retried.size === 0) return messages;
+  // Once the line commits, the count covers the line too; only sealed parts of
+  // the attempt itself can have been frozen.
+  return messages.map((message) =>
+    retried.has(message.id)
+      ? retriedAttemptLine(
+          message,
+          Math.min(
+            committedPartCounts[message.id] ?? 0,
+            computeLiveStartIndex(message),
+          ),
+        )
+      : message,
+  );
+}
+
+// Same input, same object: commits compare messages by reference.
+const retriedLines = new WeakMap<
+  UiMessage,
+  { readonly frozen: number; readonly line: UiMessage }
+>();
+
+function retriedAttemptLine(message: UiMessage, frozen: number): UiMessage {
+  const cached = retriedLines.get(message);
+  if (cached?.frozen === frozen) return cached.line;
+  const line: UiMessage = {
+    ...message,
+    status: "completed",
+    parts: [
+      ...message.parts.slice(0, frozen),
+      {
+        type: "text",
+        text: RETRIED_ATTEMPT_LINE,
+        metadata: { kind: "retried-attempt" },
+      },
+    ],
+  };
+  retriedLines.set(message, { frozen, line });
+  return line;
 }
 
 /**

@@ -317,6 +317,115 @@ describe("advanceTranscriptCommit", () => {
   });
 });
 
+describe("retried attempts", () => {
+  const failed = {
+    requestId: "r1",
+    runId: "run_1",
+    messageId: "attempt_1",
+    step: 1,
+    attempt: 1,
+    purpose: "agent-step" as const,
+    startedAt: 1,
+    endedAt: 2,
+    outcome: "error" as const,
+    retryScheduled: true as const,
+  };
+  const attempt = (
+    parts: readonly UiMessagePart[],
+    status: UiMessage["status"],
+  ): UiMessage => ({
+    ...streaming(parts, "attempt_1"),
+    runId: "run_1",
+    status,
+    modelRequests: [failed],
+  });
+  const retry: UiMessage = {
+    ...streaming([], "attempt_2"),
+    runId: "run_1",
+  };
+  const lines = (state: ReturnType<typeof advanceTranscriptCommit>): string[] =>
+    state.committedItems.flatMap((item) =>
+      item.message.parts.flatMap((part) =>
+        part.type === "text" ? [part.text] : [],
+      ),
+    );
+
+  it("keeps frozen parts and commits the rest as one line once the retry starts", () => {
+    const user = userMessage("user_1");
+    let state = advanceTranscriptCommit(
+      undefined,
+      [user, attempt([reasoning("plan"), text("Half an")], "streaming")],
+      running(),
+    );
+    expect(state.committedItems.map((item) => item.id)).toEqual([
+      "user_1",
+      "attempt_1#0-1",
+    ]);
+    // Waiting for the retry: the failed attempt is still the live tail.
+    state = advanceTranscriptCommit(
+      state,
+      [user, attempt([reasoning("plan"), text("Half an")], "error")],
+      running(),
+    );
+    expect(state.liveMessage?.parts).toEqual([text("Half an")]);
+    state = advanceTranscriptCommit(
+      state,
+      [user, attempt([reasoning("plan"), text("Half an")], "error"), retry],
+      running(),
+    );
+    expect(state.committedItems.map((item) => item.id)).toEqual([
+      "user_1",
+      "attempt_1#0-1",
+      "attempt_1#1-2",
+    ]);
+    expect(lines(state)).toEqual(["user prompt", "Interrupted · retried"]);
+    expect(state.liveMessage?.id).toBe("attempt_2");
+    // The retry streams on: the committed line stays the only one.
+    const committed = state.committedItems;
+    state = advanceTranscriptCommit(
+      state,
+      [
+        user,
+        attempt([reasoning("plan"), text("Half an")], "error"),
+        { ...retry, parts: [text("Full answer")] },
+      ],
+      running(),
+    );
+    expect(state.committedItems).toBe(committed);
+  });
+
+  it("restores a retried attempt as one line and keeps one whose retry never ran", () => {
+    const user = userMessage("user_1");
+    const answer = { ...assistantMessage("attempt_2"), runId: "run_1" };
+    expect(
+      lines(
+        advanceTranscriptCommit(
+          undefined,
+          [user, attempt([text("Half an")], "error"), answer],
+          { kind: "idle" },
+        ),
+      ),
+    ).toEqual(["user prompt", "Interrupted · retried", "assistant answer"]);
+    // Nothing changed, so nothing re-renders.
+    const messages = [user, attempt([text("Half an")], "error"), answer];
+    const first = advanceTranscriptCommit(undefined, messages, {
+      kind: "idle",
+    });
+    expect(
+      advanceTranscriptCommit(first, messages, { kind: "idle" }).committedItems,
+    ).toBe(first.committedItems);
+    expect(
+      lines(
+        advanceTranscriptCommit(
+          undefined,
+          [user, attempt([text("Half an")], "error")],
+          { kind: "idle" },
+        ),
+      ),
+    ).toEqual(["user prompt", "Half an"]);
+  });
+});
+
 function running(): { kind: "running"; runId: string } {
   return { kind: "running", runId: "run_1" };
 }

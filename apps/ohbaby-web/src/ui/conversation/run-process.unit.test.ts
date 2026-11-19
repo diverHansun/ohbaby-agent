@@ -60,6 +60,31 @@ describe("run process eligibility", () => {
       ).toBe(false);
     },
   );
+  it("folds a succeeded turn whose step retry replaced an attempt", () => {
+    const replaced = msg("replaced", {
+      status: "error",
+      modelRequests: [
+        {
+          requestId: "q",
+          runId: "r",
+          messageId: "replaced",
+          step: 1,
+          attempt: 1,
+          purpose: "agent-step",
+          startedAt: 1,
+          endedAt: 2,
+          outcome: "error",
+          retryScheduled: true,
+        },
+      ],
+    });
+    const result = project([replaced, msg("answer")]);
+    expect(result.processIds).toEqual(["replaced"]);
+    expect(result.foldable).toBe(true);
+    expect(
+      project([msg("failed", { status: "error" }), msg("answer")]).foldable,
+    ).toBe(false);
+  });
   it("waits for the final message and reasoning to finish", () => {
     expect(
       project([msg("progress"), msg("answer", { status: "streaming" })])

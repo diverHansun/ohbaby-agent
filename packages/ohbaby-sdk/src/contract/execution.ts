@@ -80,13 +80,15 @@ export function projectModelActivity(
     latest.outcome === "error" && latest.retryScheduled === true;
   if (!active && !backingOff) return undefined;
 
-  // A reset to attempt 1 (including overflow recovery) starts a new wait.
+  // A reset to attempt 1 (including overflow recovery) starts a new wait. A
+  // step retry moves the chain to a new message; it stays one wait.
   let first = requests.length - 1;
   while (first > 0 && requests[first].attempt !== 1) {
     const previous = requests[first - 1];
     if (
-      previous.messageId !== latest.messageId ||
-      previous.step !== latest.step
+      previous.step !== latest.step ||
+      (previous.messageId !== requests[first].messageId &&
+        previous.retryScheduled !== true)
     )
       break;
     first--;
@@ -118,6 +120,42 @@ export function projectModelActivity(
         : "requesting",
     waitingStartedAt: requests[first].startedAt,
   };
+}
+/**
+ * Assistant messages a step retry replaced: each failed after output, its own
+ * last step request scheduled the retry, and a later assistant message of the
+ * same run holds that retry. The model no longer sees them, so frontends show
+ * each as one quiet line. A message whose retry never started (stopped while
+ * waiting) is not listed and keeps its text.
+ */
+export function listRetriedAttemptIds(
+  messages: readonly UiMessage[],
+): ReadonlySet<string> {
+  const retried = new Set<string>();
+  messages.forEach((message, index) => {
+    if (
+      isSupersededAttempt(message) &&
+      messages
+        .slice(index + 1)
+        .some(
+          (later) =>
+            later.role === "assistant" && later.runId === message.runId,
+        )
+    )
+      retried.add(message.id);
+  });
+  return retried;
+}
+
+function isSupersededAttempt(message: UiMessage): boolean {
+  if (message.role !== "assistant" || message.status !== "error") return false;
+  const last = message.modelRequests
+    ?.filter(
+      (request) =>
+        request.purpose === "agent-step" && request.messageId === message.id,
+    )
+    .at(-1);
+  return last?.outcome === "error" && last.retryScheduled === true;
 }
 /** Copy only public facts; internal admission owners never cross this boundary. */
 export function projectToolExecution(

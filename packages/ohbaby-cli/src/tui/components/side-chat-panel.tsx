@@ -16,7 +16,10 @@ import { DialogManager } from "../dialogs/manager.js";
 import { formatError } from "../format-error.js";
 import { useTuiLayout } from "../layout/context.js";
 import { wrapAnsi } from "../render/wrap.js";
-import { isVisibleTranscriptMessage } from "../store/transcript.js";
+import {
+  isVisibleTranscriptMessage,
+  withRetriedAttemptLines,
+} from "../store/transcript.js";
 import { useTheme } from "../theme/index.js";
 import { usePermissionSync } from "../use-permission-sync.js";
 import { renderMessageParts } from "./message/message-row.js";
@@ -139,9 +142,9 @@ export function SideChatPanel(props: {
     const boundary = messages.findIndex(
       (message) => message.id === props.boundaryMessageId,
     );
-    const shown = messages
-      .slice(boundary + 1)
-      .filter(isVisibleTranscriptMessage);
+    const shown = withRetriedAttemptLines(
+      messages.slice(boundary + 1).filter(isVisibleTranscriptMessage),
+    );
     // A failed turn says why under its last message, as in the main chat.
     const errorAfter = new Map<string, UiPromptError>();
     if (view) {
@@ -165,9 +168,15 @@ export function SideChatPanel(props: {
     return shown.flatMap((message) => {
       const parts = renderMessageParts(message, width - 2, theme).flatMap(
         (part) =>
-          wrapAnsi(part.kind === "text" ? part.text : part.label, width - 2, {
-            hyperlinks: true,
-          }),
+          wrapAnsi(
+            part.kind === "spinner"
+              ? part.label
+              : part.dimColor
+                ? chalk.dim(part.text)
+                : part.text,
+            width - 2,
+            { hyperlinks: true },
+          ),
       );
       const body = parts.every((line) => line.trim() === "")
         ? []
