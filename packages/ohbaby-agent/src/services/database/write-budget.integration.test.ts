@@ -9,6 +9,7 @@ import { NodeSqliteConnection } from "./connection.js";
 import { beginDatabaseShutdown, runWriteTransaction } from "./index.js";
 import {
   createDatabaseWriteBudget,
+  remainingDatabaseWriteBudget,
   withDatabaseWriteBudget,
 } from "./write-budget.js";
 
@@ -93,7 +94,9 @@ it("charges concurrent nested writes once to their shared parent allowance", asy
   const holders: ChildProcess[] = [];
   try {
     holders.push(await lock(path, 220));
-    await withDatabaseWriteBudget(createDatabaseWriteBudget(400), async () => {
+    await withDatabaseWriteBudget(createDatabaseWriteBudget(5000), async () => {
+      const availableBefore = remainingDatabaseWriteBudget();
+      const startedAt = performance.now();
       await Promise.all(
         [db, other].map((connection) =>
           withDatabaseWriteBudget(createDatabaseWriteBudget(5000), () =>
@@ -105,6 +108,12 @@ it("charges concurrent nested writes once to their shared parent allowance", asy
           ),
         ),
       );
+      const elapsed = performance.now() - startedAt;
+      const charged = availableBefore - remainingDatabaseWriteBudget();
+      expect(charged).toBeGreaterThan(0);
+      // Parallel writes share one clock, so they cannot charge more than wall time.
+      expect(charged).toBeLessThanOrEqual(elapsed + 1);
+
       holders.push(await lock(path, 80));
       await runWriteTransaction(db, (transaction) => {
         transaction
