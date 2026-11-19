@@ -8,7 +8,6 @@
 
 ```
 ~/.ohbaby/install/                    （OHBABY_INSTALL_DIR）
-  install.lock/                       安装期间存在的锁目录，内有 pid 文件
   runtime/node-v24.22.3/              私有 Node（Unix 为 bin/node，Windows 为 node.exe）
   releases/0.1.19/                    npm --prefix 安装结果
     node_modules/ohbaby-cli/…
@@ -25,6 +24,8 @@
 
 TypeScript 一侧只做两件事：判断自己是怎么装的（npm、脚本或其他），以及新增 `ohbaby uninstall` 命令。`ohbaby update` 在 [CLI 升级](../../2026-11-16-cli-upgrade/README.md) 议题实现，识别到脚本安装时，就重新运行目标版本的安装脚本。
 
+安装和脚本版卸载共用安装目录旁的 `<安装目录>.lock/`，内有持有者 PID。放在目录旁可使卸载删完安装目录后才释放锁。
+
 ## 2.2 设计决策表
 
 | 决策项 | 选择 | 理由 | 放弃的选项 | 代价 |
@@ -40,7 +41,7 @@ TypeScript 一侧只做两件事：判断自己是怎么装的（npm、脚本或
 
 ## 2.3 分阶段实施
 
-全部 Stage 属于 improve-1。Stage 1 先做，Stage 2 和 Stage 3 可以并行；Stage 4 依赖 Stage 2。
+全部 Stage 属于 improve-1。[daemon 前置议题](../../2026-11-19-daemon-lifecycle-cleanup/README.md) 完成 05 验收后再开工。Stage 1 先做，Stage 2 和 Stage 3 可以并行。Stage 4 依赖 Stage 2。
 
 与 CLI 升级议题的先后关系：
 
@@ -77,16 +78,16 @@ TypeScript 一侧只做两件事：判断自己是怎么装的（npm、脚本或
     OHBABY_INSTALL_DIR（默认 ~/.ohbaby/install）、OHBABY_NODE_MIRROR（默认 nodejs.org/dist）
     交互判断：Unix 能打开 /dev/tty 才算交互；Windows 看 [Environment]::UserInteractive 且未设非交互
  2. 平台检查：只支持 6 个平台（00 的 5.6 节）；musl、32 位、其他架构直接停止并提示用 npm；
-    Apple 芯片上的 Rosetta 终端改装 arm64
- 3. 找现有的 ohbaby（00 的 5.3 节）：读 <OHBABY_HOME>/server/daemon-state.json，daemon 活着就中止安装，
-    提示先运行 ohbaby serve stop（不管它是 npm 版还是脚本版启动的）；再记下 PATH 上有没有 npm 版，供第 12 步使用。
-    "活着"的判断：status 是 running 或 stopping，并且 pid 对应的进程存在（Unix 用 kill -0，Windows 用 Get-Process -Id）。
-    这一步还没有 Node，sh 用 sed 从这一行 JSON 里取 status 和 pid；文件不存在或取不出来就当作没有 daemon。
-    这只是安装前的粗略检查：daemon 崩溃后 pid 恰好被别的进程复用时会误拦，而 ohbaby serve stop 核对不上
-    pid 锁会拒绝处理。所以提示里同时写上：确认没有 daemon 在运行的话，删除这个 daemon-state.json 再重试。
-    文件格式以前置议题 daemon 停止残留与诊断日志为准（那边确认格式不变）
- 4. 加锁：mkdir <安装目录>/install.lock，写入 pid；目录已存在且 pid 已不在 → 视为过期锁，删除后重试；
-    pid 还在 → 停止并提示"另一个安装正在进行"
+    Linux 若无法确认 glibc，提示改用受支持的 Node/npm 安装路径。Apple 芯片上的 Rosetta 终端改装 arm64
+ 3. 检查 daemon：按 OHBABY_HOME 的路径规则读取 server/daemon.pid 和 daemon-state.json。
+    活锁即中止，包括状态尚未写出、正在停止或状态已经写成 stopped 的情况。
+    文件缺失与已存在但不可读、无法解析应区别处理。身份或进程存活无法确认时停止并提示。
+    若只剩明确不存活的旧记录，继续准备。安装脚本只检查，提示用户确认空闲后运行 ohbaby serve stop。
+    记录 PATH 上有没有 npm 版，供第 12 步使用。Unix 读取当前实际的多行 JSON，Windows 用 ConvertFrom-Json。
+ 4. 独占创建 <安装目录>.lock 并写入持有者 PID，仅锁持有者可继续。持有者还活着、
+    记录不明或无法读取时中止。权限不足或探测失败都不能作为进程已退出的证据。确认过期时，用同级短时接管锁串行处理。拿到接管锁后重读，
+    确认主锁仍过期才删除，再尝试独占创建，落败就退出。接管锁遗留时提示路径，用户确认无相关
+    安装进程和并发安装后再处理。正常退出只释放本次持有的锁。
  5. 准备 Node：runtime/node-v<NODE_VERSION> 不存在时，下载安装包和 SHASUMS256.txt，
     做 SHA-256 校验，解压到 runtime/.node-v<版本>.partial，跑 node --version，再改名。
     安装包格式：Unix 上有 xz 就用 .tar.xz，否则用 .tar.gz；Windows 用 .zip，
@@ -100,8 +101,8 @@ TypeScript 一侧只做两件事：判断自己是怎么装的（npm、脚本或
     写 node-version；试跑 <私有 node> …/dist/bin.js --version，输出必须等于目标版本；
     改名为 releases/<版本>。releases/<版本> 已存在且试跑通过时跳过安装（只认不带后缀的目录名）
  8. 写启动脚本：不存在、第二行的格式版本号不同，或（仅 Unix）脚本里写的安装目录和本次不同 → 写入
-    （先写临时文件再改名）。Windows 的启动脚本放在安装目录里，内容不含安装目录，每台机器都一样
- 9. 切换：先写 current.tmp 再改名为 current（文本不带 BOM）
+    （先写临时文件再改名）。新启动脚本须能读取旧 current 并启动旧版。Windows 的启动脚本放在安装目录里，内容不含安装目录
+ 9. 切换：在写入 current 前重新做第 3 步的 daemon 检查，通过后将 current.tmp 改名为 current（文本不带 BOM）。
 10. 写 PATH：除非 OHBABY_NO_MODIFY_PATH=1（规则见 00 的 5.7 节）。Windows 直接读写注册表
     HKCU\Environment 的 Path：读取时用 DoNotExpandEnvironmentNames，写回时用 ExpandString，
     写完广播 WM_SETTINGCHANGE（做法同 Step-Code 的 install.ps1:435-500）
@@ -111,13 +112,13 @@ TypeScript 一侧只做两件事：判断自己是怎么装的（npm、脚本或
     运行中的旧进程靠多保留的那个版本做缓冲。删除失败的 .trash-* 留着，每次清理时再删一遍；
     删除这两个版本都不用的 runtime/node-v*，同样先改名再删
 12. 3 里发现 npm 版时：交互模式询问是否卸载，同意就用 npm 前缀下的 npm 执行
-    npm uninstall -g --prefix <前缀> ohbaby-cli；卸载后（仅 Unix）再检查一次启动脚本，
+    先重新检查 daemon，仍通过时才执行 npm uninstall -g --prefix <前缀> ohbaby-cli。卸载后（仅 Unix）再检查一次启动脚本，
     不存在或第二行不是 ohbaby-launcher 就重写（npm 前缀是 ~/.local 时两者是同一个路径）。
     拒绝或非交互时，说明 PATH 上会先用到哪一个
 13. 释放锁，打印结果：版本、位置、需要重开终端或 source 哪个文件
 ```
 
-任何一步失败：释放锁，`current` 保持不变，旧版本照常可用；残留的 `.partial` 留给下次运行时清理。
+切换前失败时释放本次持有的锁，保留原有 `current` 和可用旧版，遗留的 `.partial` 留待下次清理。改名成功后版本已切换。此后若 PATH 写入、旧版清理或可选 npm 卸载失败，保留新版和前一版，输出当前版本及失败步骤。要求执行的后续步骤失败时返回非零，明确提示新版已切换。如果只有可延期的临时目录清理残留，按第 11 步提示并返回 0。仅空闲停机和清理报告的严格判定由调用安装脚本的 `ohbaby update` 负责。直接运行安装脚本时，最后一次检查之后仍可能手动启动 daemon，安装期间应保持 daemon 停止。
 
 写法要求：
 
@@ -167,7 +168,7 @@ Windows 这份按探针 P1、P2 的结果写成（00 的 5.11 节），有三处
 
 实施时以这两份为基准，可以补充错误提示，但不要加入版本判断、下载、清理等逻辑。路径中有空格和中文用户名的情况由 04 的 S9 覆盖。
 
-**完成定义**：04 的 U8 通过，S1–S9 在 CI 三个系统上通过；真机验收项 R1–R6、R8、L1–L5、W1–W4、W6、W7 通过。实施前探针 P1–P10 已于 2026-11-18 完成，结论已并入本文（00 的 5.11 节），实施时以本文为准。
+**完成定义**为 04 的 U8、S1–S9、S12 在 CI 三个系统上通过，真机验收项 R1–R6、R8、L1–L5、W1–W4、W6、W7 通过。实施前探针 P1–P10 的结论已并入本文。
 
 ### Stage 3：`ohbaby uninstall`
 
@@ -176,10 +177,11 @@ Windows 这份按探针 P1、P2 的结果写成（00 的 5.11 节），有三处
 **改动**：
 
 - 新增 `packages/ohbaby-cli/src/cli/commands/uninstall.ts`，在 `bin.ts:712-726` 的 yargs 链上注册。参数只有 `-y`（跳过确认）。
-- 流程按 00 的 5.4 节：判断安装方式 → 列出要删除的内容并确认 → 升级前检查（复用 CLI 升级议题的模块）→ 按安装方式分支 → 告诉用户数据在哪里。
-- npm 安装：用前缀下自带的 npm（Unix 为 `<前缀>/bin/npm`，Windows 为 `<前缀>\npm.cmd`），找不到再用 PATH 上的，执行 `npm uninstall -g --prefix <前缀> ohbaby-cli`。
+- 流程按 00 的 5.4 节：判断安装方式 → 列出要删除的内容并确认 → 按安装方式分支并执行升级前检查（复用 CLI 升级议题的模块） → 告诉用户数据在哪里。
+- npm 安装：升级前检查通过后，用前缀下自带的 npm（Unix 为 `<前缀>/bin/npm`，Windows 为 `<前缀>\npm.cmd`），找不到再用 PATH 上的，执行 `npm uninstall -g --prefix <前缀> ohbaby-cli`。
 - 脚本安装：
   - 先做安全检查：安装目录里同时有 `current` 和 `releases/`，并且安装目录不等于 `OHBABY_HOME`、不等于用户主目录，否则拒绝删除（00 的 5.9 节）。
+  - 安全检查通过后，独占创建与安装脚本共用的 `<安装目录>.lock`，同样写入一行正整数 PID。拿到锁后再做升级前检查，持锁到卸载命令结束。锁存在时退出并提示安装操作占用或检查遗留锁。卸载只走独占创建，正常结束释放锁，异常退出后由安装脚本按同一格式接管可确认的过期锁。Windows 提示手动删目录前先确认没有正在进行的安装。
   - 去掉 PATH 设置：删除 00 的 5.7 节列出的配置文件中的标记块，删除 fish 的 `conf.d/ohbaby.fish`；Windows 按 Stage 2 第 10 步的注册表写法，从用户 PATH 去掉 `<安装目录>\bin`（可以调用 `powershell -NoProfile` 执行同一段代码），不要用 `SetEnvironmentVariable`。
   - macOS、Linux：确认 `~/.local/bin/ohbaby` 第二行是 `# ohbaby-launcher`，是才删除；再删除整个安装目录。
   - Windows：不删任何安装文件，最后打印两行命令，PowerShell 用 `Remove-Item -Recurse -Force "<安装目录>"`，cmd 用 `rmdir /s /q "<安装目录>"`。
@@ -226,7 +228,7 @@ Windows 这份按探针 P1、P2 的结果写成（00 的 5.11 节），有三处
 | `OHBABY_INSTALL_DIR` | 安装目录的绝对路径（Windows 启动脚本从自身位置推出，Unix 启动脚本里写死） | 启动脚本（运行时）、用户（安装时） | 程序、安装脚本 |
 | 启动脚本第二行 | `# ohbaby-launcher <整数>`，`.cmd` 为 `rem ohbaby-launcher <整数>` | 安装脚本 | 安装脚本、uninstall |
 | PATH 标记块 | `# >>> ohbaby installer >>>` 到 `# <<< ohbaby installer <<<` | 安装脚本 | uninstall |
-| `install.lock/pid` | 一行进程号 | 安装脚本 | 安装脚本 |
+| `<安装目录>.lock/pid` | 一行进程号 | 安装脚本和脚本版卸载 | 安装脚本和脚本版卸载 |
 
 **环境变量**：安装脚本读的环境变量见 00 的 5.7 节，本轮只有这五个，不新增。CLI 升级议题另有一个 `OHBABY_NO_UPDATE_CHECK`，与安装脚本无关。
 
@@ -243,7 +245,7 @@ Windows 这份按探针 P1、P2 的结果写成（00 的 5.11 节），有三处
 |---|---|---|
 | 装坏的版本被启用 | 网络中断、npm 部分失败、包本身有问题 | 先装到 `.partial`，试跑 `--version` 通过才改名并切换 `current` |
 | 新版本有 bug | 发布后才发现 | 用户手动把 `current` 改回上一个版本号即可回滚（上一个版本始终保留）；或 `OHBABY_INSTALL_VERSION=<旧版本>` 重新运行安装脚本 |
-| 两个安装同时运行 | 两个终端同时 update | `install.lock` 目录锁 |
+| 两个安装同时运行 | 两个终端同时 update | `<安装目录>.lock` 独占锁和过期接管规则 |
 | sh 和 ps1 行为不一致 | 只改了其中一份 | 04 的 S 系列在三个系统上跑同一组场景；评审时两份脚本必须一起改 |
 | 卸载删错目录 | `OHBABY_INSTALL_DIR` 被设成 `~/.ohbaby` 或主目录 | Stage 3 的安全检查 |
 | BOM 导致路径错 | Windows PowerShell 5.1 写文件 | ps1 用无 BOM 写法；TypeScript 读取时去掉 BOM；`.cmd` 读不了 BOM（探针 P3），所以写入端必须无 BOM；W4 真机验证 |

@@ -34,6 +34,8 @@ minimax-code 内置了一份 pi 的代码（`minimax-code/third_party/pi-mono`�
 | Step-Code | 用户 PATH 直接读写注册表：读取时 `DoNotExpandEnvironmentNames`，写回时 `ExpandString`，再用 `SendMessageTimeout` 广播 `WM_SETTINGCHANGE`（`install.ps1:435-500`）；注释写明这是同时保留 `%变量%` 写法和值类型的唯一办法 | 探针 P6 证实 `SetEnvironmentVariable` 会把 `REG_EXPAND_SZ` 改成 `REG_SZ` | **采纳**（00 的 5.7 节、02 第 10 步） |
 | Step-Code | 脚本开头设置 TLS 1.2（`install.ps1:33`） | 旧版 Windows 上 PowerShell 5.1 默认可能不带 TLS 1.2 | **改造采纳**：Step-Code 直接赋值，ohbaby 在现有值上加上 TLS 1.2，不去掉系统已开的更新协议 |
 | pi | Windows 上同时写 `pi.cmd` 和 `pi.ps1`，路径都从自身位置推出（`%~dp0`、`$PSScriptRoot`，`scripts/local-release.mjs:58-64`） | 探针 P1 发现 PowerShell 经 `.cmd` 传参会被 cmd 改写，`.ps1` 能绕开 | **部分采纳**：采纳 `%~dp0` 推出路径；不加装 `.ps1`，原因见 3.3 |
+| Kimi Code | 在真正替换前已准备新版，替换与清理有明确阶段（`apps/kimi-code/src/cli/update/native-swap.ts:565–637`，`f082f04a0`） | 失败提示取决于切换是否生效 | **采纳**：`.partial` 试跑完成后再改 `current`，按切换前后报告结果 |
+| Kimi Code、ZCode | Kimi Code 串行接管过期锁，ZCode 先验证待启用版本再原子更新当前指针（`apps/kimi-code/src/cli/update/install-lock.ts:170`、`packages/zcode-server-cli/src/runtime/releaseManager.ts:151`，ZCode 为 `fec97590`） | 两个脚本同时接管过期锁可能同时修改安装目录 | **采纳**：单独保护过期锁接管，保留当前文本指针和上一版 |
 
 ## 3.3 明确不借鉴
 

@@ -13,7 +13,7 @@
 | pi（minimax-code 内置同一套代码） | `pi update`、每次启动检查、自管安装的自更新、会话格式版本 |
 | Step-Code | 独立二进制的自更新、跳过某个版本 |
 
-ZCode 只看到 Electron 界面的更新弹窗，和 CLI 升级关系不大，没有展开。
+新增核对的本地源码还包括 dsh 桌面 Host（`39163dd30f7`）和 ZCode Server CLI（`fec97590`）。两者分别提供任务接收保护和等待停机的参考。
 
 ## 3.2 可借鉴点
 
@@ -29,6 +29,8 @@ ZCode 只看到 Electron 界面的更新弹窗，和 CLI 升级关系不大，�
 | opencode、kimi-code、claude-code | 检查和安装加锁：opencode 用 Semaphore(1)（`commands/handlers/default.ts:62-83`），kimi-code 有安装锁（`install-lock.ts:144`），claude-code 有 5 分钟锁（`src/utils/autoUpdater.ts:161-194`） | 防止两个进程同时升级 | **改造采纳**：脚本安装由安装脚本的锁负责；npm 安装由 npm 自己处理并发，CLI 不另加锁 |
 | codex | 后台服务装完新版后，只有版本真变了才重启，带优雅退出等待（`app-server-daemon/update_loop.rs:441-495`、`lib.rs:565`） | ohbaby 升级也要处理 daemon | **改造采纳**：ohbaby 的 daemon 是用户前台启动的，只停不重启 |
 | kimi-code | native 版先把新文件放好，下次启动时再换上（`native-swap.ts:475`） | 避免替换正在运行的文件 | **改造采纳**：自动升级放在 TUI 加载前做，做完让用户重新运行 |
+| dsh | 限制新请求、等待已接收请求、检查后台作业并要求确认正常退出（`apps/desktop-host/src/update-tasks.ts:16,28`、`apps/desktop/src/host-process.ts:373`） | 查询和停止之间仍可能接到新任务，进程退出也可能缺少清理证明 | **采纳**：同一次仅空闲停机请求内检查，停机结果用现有报告确认 |
+| ZCode | `stopSupervisorAndWait` 等待本次的新停机状态和锁释放，活锁下身份无法确认就失败（`packages/zcode-server-cli/src/runtime/shutdownWait.ts:28,90`） | 升级需要确认本次停机，旧状态和 HTTP 应答都不足以放行 | **采纳**：继续用 ohbaby 的 PID、token、退出观察和清理结论 |
 
 ## 3.3 明确不借鉴
 

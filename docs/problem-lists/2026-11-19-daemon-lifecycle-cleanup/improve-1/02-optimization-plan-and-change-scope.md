@@ -4,6 +4,8 @@
 
 ## 2.1 方案总览
 
+本议题先经用户审阅定稿，再实施并按 [04](04-test-and-acceptance.md) 验收，结果记入 05。验收通过后再实施 CLI 升级和脚本安装。保留 `ohbaby serve` 前台运行和现有显式 stop 行为。
+
 daemon 的状态目录只由 daemon 自己清理，清理时机放在它持有 pid 锁、独占这个目录的时候。改完后，目录里正常情况下最多只有三个文件：
 
 ```
@@ -21,7 +23,8 @@ daemon 的状态目录只由 daemon 自己清理，清理时机放在它持有 p
         → 删除旧格式报告和 .tmp，失败只记警告                                          (B1)
         → bootstrap → 写 running（照旧）
 
-停止：顺序不变 …… → 释放 pid 锁 → 覆盖写 daemon-shutdown.json                          (A)
+停止：写入最终状态 → 关闭日志 → 释放 pid 锁 → 覆盖写 daemon-shutdown.json                  (A)
+      总时限到达时仍有状态写入未结束 → 保留锁，按停机失败收尾
 
 serve stop：目标进程退出后
         → 读 daemon-shutdown.json，pid/token 对得上就采用
@@ -48,7 +51,7 @@ serve stop：目标进程退出后
 
 三个 Stage 都在本轮内。Stage 1 和 Stage 2 都改 `state-file.ts`，按顺序做；Stage 3 和前两个互不相干。
 
-### Stage 1：固定报告文件名，写失败不留临时文件（A、B2）
+### Stage 1：固定报告文件名、安全写状态与停止（A、B2）
 
 **目标**：每次停止不再新增文件；写状态出错不留 `.tmp`；`serve stop` 能停新旧两种 daemon 并拿到清理结果。
 
@@ -60,19 +63,21 @@ serve stop：目标进程退出后
   - `writeShutdownReport` 改写固定路径，写法不变（直接 `writeFile`，`0o600`）。
   - `write()`：临时文件名改为 `${this.path}.${String(process.pid)}.${randomUUID()}.tmp`，每次写都唯一。`writeFile` 或 `rename` 抛错时，`unlink(tempPath)`（忽略 `ENOENT` 和删除本身的错误），再抛出原来的错误。
   - 为什么要唯一：停止时 `stopping` 写入超时后，底层写入还在跑，随后又写最终状态（`supervisor.ts:199-218`）。两次写如果共用一个临时文件，一次失败去删，可能删掉另一次刚写好的。改名后清扫规则不变。
+- `Supervisor.stopInternal()` 按顺序发布 `stopping` 和最终状态。运行时清理仍可和写 `stopping` 并行。如果先前的状态写入错过截止时间，必须等底层操作结束后才能开始下一次状态写入。总时限到达时如果还有可能落盘的状态写入，跳过后续状态发布和锁释放，按停机失败收尾。该分支不发布停机报告，观察方在进程退出后返回清理未知。显式停机路径以失败退出，下一次启动确认旧进程已退出后再接管锁。
 - `packages/ohbaby-server/src/runtime/daemon/stop.ts`
   - `confirmed()` 先读 `shutdownReportPath(statePath)`；文件不存在、解析失败，或 `pid`/`pidToken` 和目标对不上，再读 `legacyShutdownReportPath(statePath, target.token)`。两次用同一套校验。都不行时 `cleanup` 为 `unknown`，和现在一样。
   - 抽一个小函数做"读文件 + 校验"，两次调用复用。
 - 测试：`stop.unit.test.ts` 改写现有"别的 token 的报告"用例，并加上 04 的 U2；`state-file.unit.test.ts` 加 U1、U3。
 
-**完成定义**：04 的 U1–U3 通过；improve-4 的 T16、T42 相关测试照常通过。
+**完成定义**：04 的 U1–U3、U8 通过。improve-4 的 T16、T42 相关测试照常通过。
 
-### Stage 2：启动清扫与异常退出记录（B1、C）
+### Stage 2：安全接管过期锁、启动清扫与异常退出记录（B1、C）
 
 **目标**：daemon 启动时自动清掉旧残留；上次没有正常退出时，本次日志里有记录。
 
 **改动**：
 
+- `FilePidFile` 保留首次启动时的独占创建。自动接管只用于字段完整、PID 为正整数且平台确认进程不存在的锁。权限不足或探测失败时保留锁。用一个短时接管锁将恢复串行化，在其中重读记录并确认仍然过期，再删除并尝试独占创建。普通启动若先创建成功，接管方退出。独占创建到写完 PID 记录之间可能短暂读到空文件或半截 JSON。普通抢锁和过期接管都只作一次短暂等待后重读，读到有效活锁时按已有实例处理。仍无法解析、无法读取、身份不明或接管锁被占用时，报错并提示锁路径。若接管锁被遗留，由用户先确认相关进程已退出且没有并发启动，再移除该接管锁。
 - `packages/ohbaby-server/src/runtime/daemon/types.ts`：`DaemonStateFile` 加可选方法 `removeStaleFiles?(): Promise<void>`。可选是为了不影响测试里注入的假实现，和 `read?`、`writeShutdownReport?` 的写法一致。
 - `packages/ohbaby-server/src/runtime/daemon/state-file.ts`：`JsonDaemonStateFile.removeStaleFiles()`
   - `readdir(dirname(this.path))`，目录不存在直接返回。
@@ -83,13 +88,13 @@ serve stop：目标进程退出后
   - `serverPreviousRunUnclean`：`component: "server"`，`event: "server.previous_run.unclean"`，`level: "warn"`，字段 `previousPid: integer()`、`previousStatus: stringEnum(["running", "stopping"])`、`previousStartedAt: optional(integer())`、`previousUpdatedAt: integer()`。
   - `serverStateFilesCleanupFailed`：`component: "server"`，`event: "server.state_files.cleanup.failed"`，`level: "warn"`，字段 `error: externalError()`，写法参考 `sessionFilesCleanupFailed`。
 - `packages/ohbaby-server/src/runtime/daemon/supervisor.ts` 的 `start()`：在 `this.pidLock = await this.pidFile.acquire()` 之后、`this.startedAt = this.now()` 之前，依次调用两个私有方法：
-  1. `recordPreviousRun()`：`stateFile.read?.()`；读到的状态是 `running` 或 `stopping`，并且有 `pid`，就用 `emitDiagnosticSafely` 写 `serverPreviousRunUnclean`。读取抛错时什么也不做。这个方法不抛错。
+  1. `recordPreviousRun()`：`stateFile.read?.()`；读到的状态是 `running` 或 `stopping`，并且有 `pid`，就用 `emitDiagnosticSafely` 写 `serverPreviousRunUnclean`。读取抛错时什么也不做。这个方法不抛错。该事件只说明旧记录停在 `running` 或 `stopping`。旧记录如果已经写成 `stopped`，日志、锁释放或停机报告仍可能未完成。是否清理成功由匹配报告判定。
   2. `removeStaleStateFiles()`：调用 `stateFile.removeStaleFiles?.()`；抛错时写 `serverStateFilesCleanupFailed`。这个方法不抛错。
   - 两步都在 `acquire()` 成功之后。`acquire()` 抛 `DaemonAlreadyRunningError` 时一步都不执行。
-  - 停止流程 `stopInternal()` 的顺序不变。
+  - 正常停止保留原有收尾顺序。Stage 1 的超时约束保护启动清扫后的状态。
 - 测试：`state-file.unit.test.ts` 加 U4；`supervisor.unit.test.ts` 加 U5、U6；集成测试 I1、I2。
 
-**完成定义**：04 的 U4–U6、I1、I2 通过。
+**完成定义**：04 的 U4–U6、I1–I3 通过。
 
 ### Stage 3：serve-awareness 目录与文档同步（D）
 
@@ -111,7 +116,7 @@ serve stop：目标进程退出后
 
 | 包/目录 | 新增 | 修改 | 删除 | 说明 |
 |---|---|---|---|---|
-| `packages/ohbaby-server/src/runtime/daemon/` | `legacyShutdownReportPath`、`removeStaleFiles` | `state-file.ts`、`stop.ts`、`supervisor.ts`、`types.ts` 和对应测试；集成测试 | 无 | 主体 |
+| `packages/ohbaby-server/src/runtime/daemon/` | `legacyShutdownReportPath`、`removeStaleFiles` | `state-file.ts`、`stop.ts`、`supervisor.ts`、`pid-file.ts`、`types.ts` 和对应测试 | 无 | 主体 |
 | `packages/ohbaby-agent/src/observability/` | 两个事件 | `index.ts` 导出；`logger.ts` 枚举白名单 | 无 | |
 | `packages/ohbaby-cli/src/` | 无 | `serve-awareness.ts` 和测试 | 无 | |
 | `docs/problem-lists/` | 无 | 脚本安装 02、04；两个 README | 无 | 规划期已同步 |
@@ -138,15 +143,16 @@ serve stop：目标进程退出后
 
 | 风险 | 触发条件 | 应对 |
 |---|---|---|
-| 清扫误删正在运行的 daemon 的文件 | 没拿到锁就清扫 | 只在 `acquire()` 成功后清扫；U6 验证 `acquire` 失败时不清扫 |
+| 两次启动同时接管过期锁 | 两者都读到同一条过期记录 | 串行接管并重读。I3 验证只有一个实例启动，U6 验证失败方跳过清扫 |
+| 迟到写入覆盖新状态 | 等待超时但底层写入继续 | U8 验证超时仍在写时保留锁，旧实例交出锁后无法再发布状态 |
 | 匹配规则太宽，删了不该删的文件 | 前后缀写错 | 只认两种固定前后缀；U4 放入 `daemon-state.json.bak` 等干扰文件 |
 | 兼容读取采用了错误的报告 | 旧文件名的报告属于别的 token | 两次读取用同一套 pid/token 校验；U2 覆盖 |
 | 启动变慢 | 目录里文件很多 | 只 `readdir` 一个小目录；本机最多一次删 70 个文件 |
-| 旧 stop 读到被覆盖的报告 | 旧 daemon 退出后、stop 读报告前，新 daemon 完成一整轮启停 | 显示"未确认"，不误报成功；00 第 3.1 节已接受 |
-| 新 daemon 启动清扫删掉旧 stop 还没读的旧格式报告 | 新 CLI 停旧 daemon 的同时，又有新 daemon 拿到锁 | 同上，显示"未确认"；实际需要在几十毫秒内另起一个 daemon |
+| 旧 stop 读到被覆盖的报告 | 旧 daemon 退出后、stop 读报告前，新 daemon 完成一整轮启停，或旧实例释放锁后迟到的报告覆盖新报告 | 显示"未确认"，不误报成功；00 第 3.1 节已接受 |
+| 新 daemon 启动清扫删掉旧 stop 还没读的旧格式报告 | 新 CLI 停旧 daemon 的同时，又有新 daemon 拿到锁 | 返回清理未知，升级按前置检查处理 |
 | 新增的事件枚举值不在白名单里 | 忘了改 `logger.ts` 的 `DIAGNOSTIC_ENUM_VALUES` | `ohbaby-agent` 加载时就抛错，所有进程起不来。Stage 2 先改白名单；U5 断言事件定义能正常加载 |
 
-上面两条竞态的窗口都很小：stop 要等目标进程退出才去读报告，而报告是进程退出前写的，所以正常情况下只差一次 25ms 的轮询。第二条如果发生在 `ohbaby update` 里，结果是"未确认"、退出码 1，可能挡住那次升级。[CLI 升级议题](../../2026-11-16-cli-upgrade/README.md)实施时要知道有这种情况。
+`serve stop` 在观察到目标进程退出后才读报告。调度和文件读取都可能延迟，报告缺失或实例不匹配时统一返回清理未知。[CLI 升级前检查](../../2026-11-16-cli-upgrade/improve-1/02-optimization-plan-and-change-scope.md#stage-2升级前检查共用模块与-daemon-接口)明确如何处理这一结果。
 
 **回滚**：三个 Stage 都可以单独回退。回退 Stage 1 后，新 daemon 写的 `daemon-shutdown.json` 会留一个文件，不影响旧代码。回退 Stage 2 只是不再清扫、不再记日志。
 
@@ -184,6 +190,8 @@ serve stop：目标进程退出后
 | C6 | 代码 | `packages/ohbaby-agent/src/observability/events.ts` | 在 `serverStopFailed` 之后 | L151-163 | 新增两个事件 | P3 的日志格式 |
 | C6a | 代码 | `packages/ohbaby-agent/src/observability/logger.ts` | `DIAGNOSTIC_ENUM_VALUES` | L147-178 | 加入 `running`、`stopping` | 不加则 `ohbaby-agent` 加载即崩 |
 | C7 | 代码 | `packages/ohbaby-cli/src/serve-awareness.ts` | `readServeCoexistenceNotice` | L75-79 | 改用 `resolveOhbabyHome()` | P4 |
+| C8 | 代码 | `packages/ohbaby-server/src/runtime/daemon/pid-file.ts` | `FilePidFile.openExclusive` | L124–143 | 串行接管过期锁并重读持有者 | 清扫前必须确实独占目录 |
+| C9 | 代码 | `packages/ohbaby-server/src/runtime/daemon/supervisor.ts` | `stopInternal` | L199–246 | 顺序写状态，超时仍在写时保留锁 | 保护下一次启动的状态 |
 
 ### 连带影响面（不逐行列出）
 

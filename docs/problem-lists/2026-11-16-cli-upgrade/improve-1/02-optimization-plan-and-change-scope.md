@@ -13,9 +13,9 @@ ohbaby update [版本]
   1. 判断安装方式（脚本安装议题的 detectInstallMethod）；其他方式 → 打印命令，结束
   2. 确定目标版本；和当前版本相同 → 提示已是最新，结束
   3. 升级前检查（共用模块，uninstall 也用）
-       daemon 在跑 → 问它有没有正在运行的任务，有就停止并列出
-       Windows 的 npm 安装 → 有其他 ohbaby 进程就停止并列出
-       都通过 → 停掉 daemon
+       核对 daemon 身份。Windows 的 npm 安装同时检查其他 ohbaby 进程
+       daemon 在跑 → 请求仅空闲时停止，忙则列出任务并终止升级
+       确认本来没有待处理的 daemon，或目标进程已退出且清理已完成 → 继续
   4. 按安装方式升级
        npm → <前缀>/npm install -g --prefix <前缀> ohbaby-cli@<版本>
        脚本 → 下载 ohbaby-cli@<版本>/install.sh 或 install.ps1，以非交互方式运行
@@ -34,7 +34,7 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
 | 升级入口 | 只有 `ohbaby update`（00 第 2 节、第 5 节） | TUI 在自己进程里跑，界面里升级要处理自我替换 | TUI、Web 里的升级按钮 | 用户要回到终端 |
 | 按安装方式分支 | 依赖脚本安装议题的 `detectInstallMethod`（00 第 5 节） | update 和 uninstall 共用一份判断 | 只支持 npm | 本议题的脚本安装分支要等那边 Stage 1、2 |
 | 新版本检查 | 启动读缓存，后台刷新（00 第 2 节） | 不拖慢启动 | 启动时同步查询 | 新版本发布后，最多晚一次启动才提示 |
-| 升级与 daemon | 先检查任务，再停 daemon（00 第 2 节） | 避免打断任务，避免版本不一致报错 | 直接停；不停 | daemon 要新增一个接口 |
+| 升级与 daemon | 由 daemon 在同一次请求里确认空闲并停止 | 避免空闲查询与停机之间接收新任务 | 客户端分开查任务和停机 | 需要一个仅空闲时停止的入口 |
 | 其他进程 | 只在 Windows 的 npm 安装上检查并阻止（00 第 2 节） | 只有这个组合会因为文件占用而失败。脚本安装的新版本装进新目录，不冲突 | 所有平台都检查 | macOS、Linux 上其他窗口继续跑旧版本，直到重开 |
 | 数据库保护 | 发现不认识的迁移就拒绝启动（00 第 2 节）。**不可逆**：发布后迁移只能追加，不能改名或删除 | 防止旧程序写新结构的数据库 | 只警告不拒绝 | 降级的用户必须先升级回来 |
 | Web 刷新 | 收到"服务已重启"就自动刷新（00 第 2 节，按 01 的 1.5 节调整了触发条件） | daemon 每次启动都换 token，旧页面无法在刷新前读到新版本号；服务重启后旧页面本来也只能刷新 | 加一个不需要 token 的版本接口 | 非升级的重启也会自动刷新，这和现在点"刷新"按钮的效果一样 |
@@ -77,16 +77,21 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
 
 **改动**：
 
-- `ohbaby-server` 新增 `GET /api/runs/active`（放在 `protocols/web/routes/system.ts`，要求 Bearer token），返回 `{ runs: [{ sessionId, runId, createdAt }] }`（字段取自 `RunLedgerRecord`）。数据来自 daemon 的 `RunLedger.getActiveRuns()`。它只按状态过滤，路由里要再按记录的 owner 进程号过滤掉已经不存在的进程。数据库是共享的，所以结果也包含 TUI 等其他进程正在跑的任务，这正是升级前要知道的。
-- 新增 `packages/ohbaby-cli/src/update/preflight.ts`，导出 `runUpgradePreflight({ installMethod, platform })`，返回 `{ ok: true, stoppedDaemon: boolean }` 或 `{ ok: false, reasons: [...] }`：
-  1. 读 `<OHBABY_HOME>/server/daemon-state.json`。"daemon 活着"指 `status` 为 `running` 或 `stopping`，并且 `pid` 对应的进程存在，和脚本安装议题 02 第 3 步是同一条规则；文件不存在或读不出来，就当作没有 daemon。daemon 活着就调用 `/api/runs/active`；有正在运行的任务 → 不通过，列出会话。接口不存在（旧版本 daemon 返回 404）时，提示用户确认没有任务后先手动 `ohbaby serve stop`，然后不通过。
-  2. Windows 且是 npm 安装：用 PowerShell 的 `Get-CimInstance Win32_Process` 列出命令行里含 `node_modules\ohbaby-cli\` 的 `node.exe`，排除自己、自己的父进程链，以及 `daemon-state.json` 里记录的 daemon 进程（它会在第 3 步被停掉）→ 有就不通过，列出进程号和命令行。
-  3. 前两步都通过，并且 daemon 活着 → 调用 `stopDaemonFromState`（`ohbaby-server/src/runtime/daemon/stop.ts:225`），`stoppedDaemon = true`。
-  - 只有全部检查都通过才停 daemon，不会出现"停了一半"的情况。
+- `ohbaby-server` 在 `protocols/web/routes/system.ts` 新增认证接口 `POST /api/shutdown/idle`，升级和卸载复用。现有 `POST /api/shutdown` 继续用于显式 `serve stop`。
+  - 请求带上预检锁定的实例 `pidToken`，daemon 在动任务入口前核对自己的 token，不匹配就拒绝。身份最终观察也绑定原实例，避免复用端口和认证 token 时停到刚启动的新实例。
+  - daemon 在 REST 和 RPC 的任务入口暂时拒绝新任务和 PTY 创建，等已经接收的提交和创建请求完成，再检查活跃工作。这个入口可以恢复。等待已提交任务状态的长轮询无需排空。服务器范围内只允许一次仅空闲停机检查。复用 `getActivityReasons()`，检查所有已加载 workspace，把仍在创建后端的 workspace 纳入同一次检查。任何工作区的活跃运行、后台作业、清理或已接收且待执行的持久提交都算忙。已打开的 Web PTY 也算忙，提示用户先关闭终端，避免停机结束用户在终端中运行的命令。按原计划补查可见的、存活 owner 的共享账本回合。有活跃工作就恢复任务接收，返回 409 和忙碌原因，有可用标识时带上会话或任务标识。检查失败、超时或取消且尚未启动停机时，也要恢复任务接收。
+  - 空闲时保持任务入口关闭，返回停机已接收，随后走现有停止流程。使用现有任务入口和注册表。最终确认空闲后才调用会取消工具的 `closeAdmission()`。独立 TUI 仍按现有平台策略运行，这个入口只控制 daemon 的任务接收。
+- `packages/ohbaby-cli/src/update/preflight.ts` 提供 `runUpgradePreflight({ installMethod, platform })`，返回 `{ ok: true, stoppedDaemon: boolean }` 或 `{ ok: false, reasons: [...] }`：
+  1. 按 daemon 的路径规则核对 `daemon.pid`、状态文件和目标身份并保留目标 PID 和 token。活锁但状态尚未发布、读失败、身份不符或无法确认进程存活时，中止并给出原因。
+  2. Windows 且为 npm 安装时检查其他 ohbaby 进程，保留原有父进程链排除规则，只排除已核实身份的待停 daemon。其他 ohbaby 进程可能占用安装目录时，中止并列出进程。
+  3. 有可验证的运行实例时，通过 `stopDaemonFromState` 复用目标身份核对、退出等待和报告读取，停机请求改用仅空闲入口。任何阶段发现拿到的是另一实例就中止。409 提示等任务结束后重试。旧版返回 404 时，提示用户确认空闲后手动 `ohbaby serve stop`，本次中止。以上两种明确拒绝直接返回，传输结果不明时仍按现有规则观察目标进程。
+  4. 确认当前没有待处理实例才放行。目标进程必须确实退出，且需要确认本次停止结果时，报告的 PID 和 token 必须匹配、清理必须是 confirmed。CLI 升级阶段扩展现有报告读取，复用同一匹配规则处理调用前已经退出的已知实例。立即重试也适用，`not-running` 本身无法证明清理完成。真正没有锁和状态的初始环境可继续。遗留异常状态或报告缺失时，提示现有 serve 日志目录或可定位的日志路径。可以启动时，提示用户重新启动并正常停止一次，建立可验证的停机记录后再试。
+  5. 真正调用安装器或开始卸载前，按相同路径再看一次锁和身份。发现新锁、换代或读取不明时中止。最后一查后用户仍可能手动启动服务，升级时需保持 daemon 停止。
+  6. 只有本次确实发起停止且退出和清理均已确认时，`stoppedDaemon` 才为 true。其余中止分支均不得调用安装器或卸载删除步骤。
 - 本模块不打开数据库，也不导入会打开数据库的代码，这样数据库比程序新时 update 和 uninstall 仍然能用。
 - 注意 `runOhbabyCli` 在 yargs 分派前会动态导入整个 agent 运行时（`bin.ts:309-313` 的 `loadDefaultDependencies`）。导入本身不加载原生模块（node-pty、koffi 都是用到时才加载，探针 P2 已在 Windows 上证实），可以保留；但 update 和 uninstall 的执行路径不得调用 `buildCoreAPIImpl`，也不得调用 `initDatabase`。
 
-**完成定义**：04 的 U4–U6、I2、I3 通过。
+**完成定义**：04 的 U4–U6、U12、I2、I3、I11 通过。
 
 ### Stage 3：自动升级开关
 
@@ -96,7 +101,7 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
 
 - 新增 `packages/ohbaby-cli/src/update/settings.ts`：读写 `<OHBABY_HOME>/update/settings.json`，只有 `autoUpdate` 一个字段，默认 `false`。
 - `ohbaby update --auto on|off`：只改设置，不升级。
-- `bin.ts` 启动 TUI 前：`autoUpdate` 为 `true`、`readUpdateNotice` 有结果、并且没设 `OHBABY_NO_UPDATE_CHECK` 时，调用 Stage 4 的升级流程（跳过确认）。成功 → 打印"已自动升级到 x，请重新运行 ohbaby"，退出码 0。升级前检查没通过或升级失败 → 打印原因和"本次继续使用当前版本"，照常启动 TUI。
+- `bin.ts` 启动 TUI 前：`autoUpdate` 为 `true`、`readUpdateNotice` 有结果、并且没设 `OHBABY_NO_UPDATE_CHECK` 时，调用 Stage 4 的升级流程（跳过确认）。成功 → 打印"已自动升级到 x，请重新运行 ohbaby"，退出码 0。升级前检查未通过，或脚本安装失败但 `current` 明确仍指向可用旧版时，打印原因后照常启动 TUI。脚本已切换或无法确认安装仍可用时，打印当前状态并退出，提示重新运行或按 Stage 4 恢复。npm 已开始替换后失败也退出，避免旧进程加载混装文件。
 - Stage 1 的提示里加一句：`运行 ohbaby update --auto on 可以开启自动升级。`只在 `autoUpdate` 为 `false` 时加。
 - `serve` 启动时不自动升级，开关打开也只提示（00 第 5 节）。
 
@@ -123,9 +128,9 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
   6. 执行：
      - npm：优先用 `<前缀>/bin/npm`（Windows `<前缀>\npm.cmd`），找不到再用 PATH 上的 npm，执行 `npm install -g --prefix <前缀> ohbaby-cli@<版本>`，输出直接给用户看。
      - 脚本安装：下载 `https://cdn.jsdelivr.net/npm/ohbaby-cli@<版本>/install.sh`（Windows 为 `install.ps1`）到临时文件，带上 `OHBABY_INSTALL_VERSION=<版本>`、`OHBABY_INSTALL_DIR=<当前安装目录>`、`OHBABY_NON_INTERACTIVE=1` 运行：Unix 用 `sh <临时文件>`，Windows 用 `powershell -NoProfile -ExecutionPolicy Bypass -File <临时文件>`。
-  7. 确认结果：npm 安装运行 `<前缀>/bin/ohbaby --version`（Windows `<前缀>\ohbaby.cmd`），输出必须等于目标版本；脚本安装由安装脚本自己试跑过，这里读 `current` 确认。
+  7. 确认结果：npm 安装运行 `<前缀>/bin/ohbaby --version`（Windows `<前缀>\ohbaby.cmd`），输出必须等于目标版本；脚本安装不论退出码都读 `current`，区分未切换、已切换但有后续失败、状态无法确认。
   8. 打印"已升级到 b"；`stoppedDaemon` 为真时加一句"daemon 已停止，需要时重新运行 ohbaby serve"；Windows npm 安装加一句"如果看到'找不到批处理文件'，可以忽略"（同脚本安装议题 00 的 5.4 节）。
-- 失败时：打印 npm 或安装脚本的退出码和最后的输出，提示可以重试。npm 安装失败可能留下半装的状态，提示用户重新运行 `ohbaby update` 或手动 `npm install -g ohbaby-cli`。
+- 失败时打印退出码和失败步骤。脚本已切换但有后续失败时，用非零退出，明确版本已切换，提示重开终端。PATH 等后续步骤失败时，提示用户用同一目标版本的安装脚本重跑，`ohbaby update` 遇到同版本会直接退出。npm 替换可能留下一半的安装，提示用原安装方式修复。
 
 **完成定义**：04 的 U8、I4、I5、I7、I10 通过；真机项 R1–R4 通过。
 
@@ -161,7 +166,7 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
 | `packages/ohbaby-cli/src/update/` | `version-check.ts`、`preflight.ts`、`settings.ts` | — | — | 新目录 |
 | `packages/ohbaby-cli/src/cli/commands/` | `update.ts` | — | — | |
 | `packages/ohbaby-cli/src/bin.ts` | — | 注册命令；启动时接入检查和自动升级；新错误码的处理 | — | |
-| `packages/ohbaby-server/src/protocols/web/routes/` | — | `system.ts` 加 `/api/runs/active` | — | 路由上下文要能拿到 RunLedger |
+| `packages/ohbaby-server/src/protocols/web/routes/` 与 daemon 运行时 | 仅空闲时停止 | `system.ts`、`stop.ts` 和任务接收与停机前检查 | — | 复用任务入口、回合账本和后台作业注册表 |
 | `packages/ohbaby-agent/src/services/database/` | — | `index.ts` 加反向检查和错误类型 | — | |
 | `apps/ohbaby-web/src/api/daemon/` | — | `client-sync.ts` 自动刷新 | — | |
 | `tests/integration/cli/` | 升级集成测试 | — | — | 复用打包冒烟测试的本地 registry |
@@ -171,7 +176,7 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
 
 ## 2.5 接口、协议与兼容
 
-**新增 HTTP 接口**：`GET /api/runs/active`，需要 Bearer token，返回 `{ runs: Array<{ sessionId: string; runId: string; createdAt: number }> }`。旧 daemon 没有这个接口，返回 404，升级前检查按 Stage 2 的规则处理。
+**新增 HTTP 接口**为认证的 `POST /api/shutdown/idle`。200 表示已接收停机请求，409 表示有活跃工作或另一停机检查正在进行，并附带可展示的原因，旧版 daemon 返回 404。CLI 仍独立观察退出与清理结果。
 
 **新增文件**：
 
@@ -188,7 +193,7 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
 
 - 新程序遇到旧数据库：照常迁移，和现在一样。
 - 旧程序（不含 Stage 5 的版本）遇到新数据库：仍然不会拒绝。保护只对包含 Stage 5 的版本之后的降级有效。
-- 新 CLI 遇到旧 daemon：`/api/runs/active` 返回 404，按 Stage 2 处理。
+- 旧 daemon 不支持仅空闲停机入口时，提示用户手动确认空闲并停止。再次执行升级时，读取前置议题支持的旧格式停机报告。
 - 旧 Web 页面遇到新 daemon：旧页面没有自动刷新逻辑，仍是手动按钮；刷新一次之后就是新逻辑。
 
 **App 预留约束**（00 第 2 节，只写在文档里）：升级只停止 `daemon-state.json` 里记录的、由 npm 版 CLI 启动的 daemon，不能停止 App 自己的后端。App 适配时要保证两者的状态文件不混用。
@@ -198,7 +203,7 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
 | 风险 | 触发场景 | 应对 |
 |---|---|---|
 | 版本检查拖慢启动或导致不能退出 | 网络慢、DNS 卡住 | 后台执行、3 秒超时、`unref`；I1 验证断网时启动时间不变 |
-| 停 daemon 打断任务 | 用户在 Web 上跑着任务时执行 update | 先问 daemon 有没有任务，有就不停 |
+| 停 daemon 打断任务 | 空闲检查时刚好有新提交，或活跃回合已经结束但后台作业还在运行 | daemon 在同一次请求中保护任务入口并作最终判断，拒绝时恢复接收。I2、I11 覆盖 |
 | npm 安装升级到一半失败 | 网络中断、文件占用 | 打印原因，提示重试；Windows 先检查其他进程 |
 | npm 留下 `.ohbaby-cli-XXXX` 残留目录 | Windows 上升级时还有进程加载着旧版本的原生模块（探针 P1） | 升级本身成功，残留只占空间；Stage 2 的进程检查让这种情况很少出现。本轮不自动清理 |
 | 数据库保护误拦 | 有人改名或删除了已发布的迁移 | 写进迁移约定（D3）；U10 检查历史迁移全部保留 |
@@ -247,7 +252,7 @@ Web：收到"服务已重启" → 自动刷新整页（30 秒内只自动刷新�
 | C2 | 代码（新增） | `packages/ohbaby-cli/src/update/preflight.ts` | `runUpgradePreflight` | — | Stage 2 | update 和 uninstall 共用，决定会不会打断任务 |
 | C3 | 代码（新增） | `packages/ohbaby-cli/src/update/version-check.ts` | `readUpdateNotice`、`refreshVersionCacheInBackground` | — | Stage 1 | 每次启动都会运行 |
 | C4 | 代码 | `packages/ohbaby-cli/src/bin.ts` | yargs 链；`initializeProxy` 之后的启动流程 | L571、L617–633、L712–726 | 注册 update；接入检查、提示和自动升级 | 启动路径 |
-| C5 | 代码 | `packages/ohbaby-server/src/protocols/web/routes/system.ts` | `registerSystemRoutes` | L7–31 | 加 `GET /api/runs/active` | 升级前检查的数据来源 |
+| C5 | 代码 | `packages/ohbaby-server/src/protocols/web/routes/system.ts` 与 daemon 运行时 | `registerSystemRoutes`、`stopDaemonFromState` | L7–31 | 增加仅空闲时停止的入口，复用统一的停止观察 | 任务检查和停止在同一请求内完成 |
 | C6 | 代码 | `packages/ohbaby-agent/src/services/database/index.ts`、`packages/ohbaby-agent/src/index.ts` | `runMigrations`；包导出 | L249–262；index.ts L217 附近 | 反向检查，新错误类型并从包导出 | 不可逆的约束 |
 | C7 | 代码 | `apps/ohbaby-web/src/api/daemon/client-sync.ts` | `onError` 里的 `DaemonEventsRejectedError` 分支 | L221–224 | 自动刷新 | Web 体验 |
 | D1 | 文档 | `README.md`、`README.zh.md`、`packages/ohbaby-cli/README.md` | Install 一节 | 约 L35–41 | 写 `ohbaby update`、`--auto`、`OHBABY_NO_UPDATE_CHECK` | 用户唯一的说明 |

@@ -18,14 +18,15 @@
 | U1 | 版本比较与提示 | 缓存里的版本更新时返回提示，相同或更旧时不返回；`0.1.20-beta.1` 不提示给 `0.1.19` 的用户；缓存文件不存在、不是 JSON、字段缺失时都不提示、不报错；`autoUpdate` 为 `true` 时提示里没有"--auto on"那句 | 1 |
 | U2 | 后台刷新的时机 | 缓存未满 24 小时不发请求；满了才发；请求超时、返回非 200、返回内容不对都不写缓存、不抛错 | 1 |
 | U3 | 关闭检查 | 设置 `OHBABY_NO_UPDATE_CHECK=1` 时不读缓存、不发请求 | 1 |
-| U4 | 升级前检查：daemon 有任务 | daemon 返回非空的 `runs` → 不通过，原因里列出会话，且没有调用停止函数 | 2 |
-| U5 | 升级前检查：旧 daemon | `/api/runs/active` 返回 404 → 不通过，提示用户确认后手动 `serve stop`，没有调用停止函数 | 2 |
+| U4 | 升级前检查发现忙 | 仅空闲停机返回 409，原因列出相关会话或作业，安装器和卸载删除逻辑都未调用 | 2 |
+| U5 | 升级前检查遇到旧 daemon | 仅空闲停机返回 404，提示用户确认任务后手动 `serve stop`，未调用普通停机入口或安装器 | 2 |
 | U6 | 升级前检查：其他进程 | Windows 且 npm 安装，进程列表里有别的 ohbaby → 不通过；只有自己、父进程和 daemon-state 记录的 daemon → 通过；非 Windows 或脚本安装 → 不检查进程 | 2 |
 | U7 | 设置文件 | 不存在时 `autoUpdate` 为 `false`；`--auto on` 后为 `true`，并且没有查询版本、没有执行安装；文件损坏时按 `false` 处理 | 3 |
 | U8 | update 的决策 | 安装方式为 `other` → 退出码 1 并给出命令；目标版本等于当前版本 → 退出码 0；非 TTY 且没有 `-y` → 不升级并提示 | 4 |
 | U9 | 数据库反向检查 | `migration` 表多出一个未知版本 → 抛 `DatabaseNewerThanProgramError`，消息含该版本号；没有多出 → 照常迁移 | 5 |
 | U10 | 迁移只增不减 | 测试里固定一份当前全部迁移版本的清单，`INITIAL_MIGRATIONS` 必须包含清单里的每一项（以后新增迁移时把新版本加进清单） | 5 |
 | U11 | Web 自动刷新节流 | 第一次收到"服务已重启"时调用 `reload`；30 秒内再次收到时不调用，显示手动按钮；`sessionStorage` 抛错时不调用 | 6 |
+| U12 | 停机结果与重试 | 无实例可继续。活锁无状态、身份不明或无法确认退出时中止。退出已确认但清理未知、失败或报告 token 不匹配时中止，立即重试同一实例依然中止。调用前已经退出的已知实例，用匹配的 confirmed 报告放行，覆盖新旧格式。源实例退出后出现新实例，最终复查必须阻止安装和卸载 | 2 |
 
 ## 4.3 集成测试
 
@@ -34,15 +35,16 @@
 | ID | 场景 | 验证点 | 对应 Stage |
 |---|---|---|---|
 | I1 | 启动时的提示 | 缓存里写好新版本，启动 `ohbaby serve`：stderr 里有提示。把 `npm_config_registry` 指向一个不响应的端口：启动时间和不检查时相比没有明显增加，进程能正常退出 | 1 |
-| I2 | daemon 接口 | 启动 daemon，跑一个会停住的任务：`/api/runs/active` 返回它；任务结束后返回空；不带 token 返回 401 | 2 |
-| I3 | 检查通过后停 daemon | daemon 空闲时运行升级前检查：daemon 被停掉，`stoppedDaemon` 为真；daemon 有任务时：daemon 仍在运行 | 2 |
+| I2 | 仅空闲停机拒绝忙碌实例 | 活跃回合、另一 workspace 仅存后台 shell 作业、持久队列有待执行提交、仅有打开的 Web PTY 分别返回 409，任务继续运行，daemon 恢复接收任务；缺 token 返回 401 | 2 |
+| I3 | 空闲实例正常停止 | 确认目标实例退出且匹配报告为 confirmed，`stoppedDaemon` 为 true，前置检查通过 | 2 |
 | I4 | npm 安装从旧版升到新版 | 用 `npm install -g --prefix <临时前缀>` 装版本 1，运行 `<前缀>/bin/ohbaby update -y`：`--version` 变成版本 2，输出里有"已升级到" | 4 |
-| I5 | 升级时 daemon 在跑 | 版本 1 的 daemon 空闲运行中，执行 update：daemon 被停，升级完成，输出提示重新运行 `ohbaby serve`；之后用版本 2 运行 `ohbaby serve` 不再报版本不一致 | 4 |
-| I6 | 自动升级 | `--auto on` 后，在缓存里写好版本 2，启动 TUI 入口（用非交互方式驱动）：完成升级、打印"请重新运行"、退出码 0。让升级前检查不通过：打印原因并照常进入 TUI。开关打开、缓存里有版本 2 时：启动 `ohbaby serve` 只提示不升级；设置 `OHBABY_NO_UPDATE_CHECK=1` 后启动 TUI 不升级 | 3 |
-| I7 | 脚本安装分支的调用 | 用本地文件代替下载，替换成一个只记录参数和环境变量的假安装脚本：确认传入了 `OHBABY_INSTALL_VERSION`、`OHBABY_INSTALL_DIR`、`OHBABY_NON_INTERACTIVE=1`，Windows 上用的是 `powershell -NoProfile -ExecutionPolicy Bypass -File` | 4 |
+| I5 | 升级时 daemon 在跑 | 两个版本的测试都启动空闲 daemon。支持仅空闲接口的版本自动停机后升级。缺少接口的版本先提示手动停机，手动停妥并留下匹配旧格式报告后重试升级。之后手动运行目标版本的 `ohbaby serve`，服务可用 | 4 |
+| I6 | 自动升级 | `--auto on` 后，在缓存里写好版本 2，启动 TUI 入口（用非交互方式驱动）：完成升级、打印"请重新运行"、退出码 0。让升级前检查不通过：打印原因并照常进入 TUI。开关打开、缓存里有版本 2 时：启动 `ohbaby serve` 只提示不升级；设置 `OHBABY_NO_UPDATE_CHECK=1` 后启动 TUI 不升级。脚本已经切换但后续步骤非零退出时，提示已切换和恢复方式，旧进程退出，不加载 TUI。 | 3 |
+| I7 | 脚本安装分支的调用 | 用本地文件代替下载，替换成一个只记录参数和环境变量的假安装脚本：确认传入了 `OHBABY_INSTALL_VERSION`、`OHBABY_INSTALL_DIR`、`OHBABY_NON_INTERACTIVE=1`，Windows 上用的是 `powershell -NoProfile -ExecutionPolicy Bypass -File`。假脚本写入临时 `current`，同时验证退出 0 和切换后非零两条结果。 | 4 |
 | I8 | 降级被拦住 | 用临时数据库，手工往 `migration` 表插入 `999_future`，启动 `ohbaby run`：退出码 1，只打印提示消息、没有堆栈；`ohbaby update` 在这个数据库下仍然能运行到"确认"这一步 | 5 |
 | I9 | Web 重连后自动刷新 | 在现有 Web 连接测试的基础上，模拟 daemon 重启后返回 401：页面调用了 `reload` | 6 |
-| I10 | update 不加载原生模块 | 用 `node -r <钩子>` 运行 `bin.js update --help`，以及在本地 registry 上 `update -y` 到同一版本（走到"已是最新版本"），钩子包住 `process.dlopen` 并记录：两次都没有加载任何 `.node` 文件（做法同探针 P2） | 4 |
+| I10 | update 不加载原生模块 | 用 `node -r <钩子>` 运行 `bin.js update --help`，以及在本地 registry 上走一次包含真实停机预检的 npm 升级。钩子只监测当前 update 进程的 `process.dlopen`，两条路径均未加载任何 `.node` 文件（做法同探针 P2） | 4 |
+| I11 | 最后检查时有新任务 | 用可控时序让请求在停机检查前已接收但尚未登记，进入最终检查后再完成登记。daemon 必须等待该提交并返回 409，任务未被取消。最后检查期间拒绝新任务或第二个停机检查，明确拒绝或检查超时后恢复接收。另验证相同地址和 Bearer token 下，带旧实例 token 的请求不会停掉新实例 | 2 |
 
 ## 4.4 实施前探针（2026-11-18 SSH 执行）
 
@@ -84,19 +86,20 @@
 
 | ID | 标准 | 怎么验证 |
 |---|---|---|
-| A1 | U1–U11 通过 | `pnpm test:unit` |
-| A2 | I1–I10 在三个系统上通过 | CI |
+| A1 | U1–U12 通过 | `pnpm test:unit` |
+| A2 | I1–I11 在三个系统上通过 | CI |
 | A3 | 实施前探针 P1、P2 有结论，且 02 已按结论更新 | 已于 2026-11-18 完成，验收会话只需确认实现符合 02 Stage 4 的两点要求 |
 | A4 | 真机验收 R1–R5 通过 | 验收会话记录每项结果 |
 | A5 | 回归清单通过 | `pnpm test:integration`、`pnpm typecheck`、`pnpm lint` |
 | A6 | 文档 | README 写明 `update`、`--auto`、`OHBABY_NO_UPDATE_CHECK`；`docs/cli/` 和数据库设计文档按 02 的 D2、D3 更新 |
+| A7 | 前置议题验收通过 | 先完成 daemon 议题的 05 验收，再实施本议题 |
 
 ## 4.8 对抗性审查要点
 
 | 攻击面 | 可能出什么事 | 防御 | 残余风险 |
 |---|---|---|---|
 | 版本检查影响启动 | 网络卡住时 TUI 起不来或退不出去 | 后台执行、3 秒超时、`unref`；I1 | 无 |
-| 停 daemon 打断任务 | 检查和停止之间刚好有新任务开始 | 检查和停止间隔很短 | 存在很小的时间窗口，本轮接受 |
+| 停 daemon 打断任务 | 已接收的请求尚未登记，或只剩后台作业 | I2、I11 覆盖在 daemon 同一次请求中作最终判断和拒绝后的恢复 | 独立 TUI 保留现有的平台策略 |
 | 数据库保护误拦所有用户 | 有人改名或删除了已发布的迁移 | U10 把已有迁移清单固定在测试里；D3 写进约定 | 无 |
 | 降级后旧程序仍在运行 | 新版本迁移数据库时，另一个窗口里的旧版本还开着数据库 | update 先停 daemon；Windows 上检查其他进程 | macOS、Linux 上其他窗口里的旧版 TUI 不会被拦住，直到它重启。迁移大多是加表加列，风险较低 |
 | 自动刷新丢东西 | 刷新时用户正在输入 | 草稿已存本地；30 秒节流 | 打开着的弹窗、滚动位置会丢 |

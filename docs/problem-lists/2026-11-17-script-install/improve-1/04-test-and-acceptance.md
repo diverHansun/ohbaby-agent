@@ -38,17 +38,18 @@
 
 | ID | 场景 | 验证点 | 对应 Stage |
 |---|---|---|---|
-| S1 | 首次安装 | 目录布局与 02 的 2.1 一致；`current`、`node-version` 没有 BOM；启动脚本第二行是 `ohbaby-launcher 1`；通过启动脚本运行 `--version` 输出目标版本；`install.lock` 已删除 | 2 |
+| S1 | 首次安装 | 目录布局与 02 的 2.1 一致；`current`、`node-version` 没有 BOM；启动脚本第二行是 `ohbaby-launcher 1`；通过启动脚本运行 `--version` 输出目标版本；安装目录旁的 `<安装目录>.lock` 已删除 | 2 |
 | S2 | 同一版本重复运行 | 不重新安装（release 目录的修改时间不变）；启动脚本不重写；不清理任何东西；退出码为 0 | 2 |
 | S3 | 升级与清理 | 指定 `OHBABY_INSTALL_VERSION` 先装版本 1，再装版本 2：`current` 指向 2，版本 1 保留。再造一个假的版本 3 目录，并把 `current` 指向它后重新安装版本 2：两个版本之外的目录和没人用的 `runtime/node-v*` 被删掉，不留 `.trash-*` 目录；预先放一个残留的 `.trash-x` 目录，这次清理时也被删掉。换一个 `OHBABY_INSTALL_DIR` 重装：Unix 启动脚本里的安装目录被更新 | 2 |
 | S4 | 安装失败不影响旧版本 | 指定一个 registry 上没有的 `OHBABY_INSTALL_VERSION`：停止并提示可能是镜像未同步，什么都没改。让试跑失败（例如在 registry 上放一个 `bin.js` 会直接报错的版本）：退出码非 0，`current` 不变，旧版本仍能运行，锁已释放；下次运行时删掉残留的 `.partial` | 2 |
-| S5 | 加锁 | 预先建 `install.lock`，写入当前测试进程的 pid → 安装拒绝并提示；写入一个不存在的 pid → 视为过期锁，安装成功 | 2 |
+| S5 | 安装锁 | 活锁、不完整记录、探测不明或遗留接管锁均中止并给出路径。有效过期锁由单个脚本接管。再让两个真实脚本进程同时发现同一个过期锁，最多一个进入切换，失败方不删除胜出方的锁 | 2 |
 | S6 | Node 校验失败 | 本地 HTTP 服务返回被改过的安装包 → 停止安装，`runtime/` 下没有新目录，提示校验失败 | 2 |
 | S7 | PATH 写入 | Unix：分别模拟 zsh、bash、fish 用户（设置 `SHELL`），标记块写进 00 的 5.7 节规定的文件；运行两次只有一个标记块；设置 `OHBABY_NO_MODIFY_PATH=1` 时不改任何文件。Windows：用户 PATH 前面多了 `<安装目录>\bin`，运行两次不重复；注册表里的值类型保持 `REG_EXPAND_SZ`，原有的 `%变量%` 项没被展开（测试在 `finally` 里恢复原值，失败时也要恢复） | 2 |
-| S8 | 已有 npm 版 | 在临时前缀里用本地 registry 装一个 npm 版并放到 PATH 上：非交互模式下不卸载 npm 版，输出里说明 PATH 上会先用到哪一个。再写一个假的 `daemon-state.json`（`status` 为 `running`）指向一个存活的测试进程：提示先停止 daemon，并且不继续安装；`status` 为 `stopped`，或 pid 已不存在时：照常安装。Unix 再加一种：npm 前缀就是 `HOME/.local`，交互式同意卸载后，`~/.local/bin/ohbaby` 仍是脚本版启动脚本（02 第 12 步） | 2 |
+| S8 | 已有 npm 版与 daemon 检查 | 本地 registry 装 npm 版后设为 PATH 可见，非交互模式保留 npm 版，并说明实际优先版本。用真实格式的多行状态文件和 PID 锁覆盖活锁无状态、活锁与 stopped 状态并存、无权限或不可解析、运行中的旧记录。活着或无法确认就中止，明确已退出的旧记录允许准备。再让 daemon 在准备阶段取得锁，切换前复查必须拦住，原 `current` 保持不变。第 12 步的交互确认期间 daemon 取得锁时，跳过可选 npm 卸载并说明原因。Unix 同路径卸载后启动脚本仍可用 | 2 |
 | S9 | 路径中有空格和非 ASCII 字符 | `OHBABY_INSTALL_DIR` 设为 `<临时目录>/有 空格/安装`：安装、通过启动脚本运行、卸载都正常。Windows 上再用 `chcp 936` 运行一次启动脚本，结果相同 | 2 |
 | S10 | 卸载脚本安装 | 在 S1 的结果上运行 `ohbaby uninstall -y`。Unix：安装目录、启动脚本、PATH 标记块都没了，`OHBABY_HOME` 下的文件还在。Windows：用户 PATH 里没有 `<安装目录>\bin` 了，输出两行删除命令，复制执行后目录被删掉 | 3 |
-| S11 | 卸载的边界 | `OHBABY_INSTALL_DIR` 等于 `OHBABY_HOME` 时拒绝，不删除任何文件；npm 版执行 `ohbaby uninstall -y` 后，前缀下的 `ohbaby-cli` 被删除 | 3 |
+| S11 | 卸载的边界 | 安装持锁时卸载拒绝，卸载持锁时安装拒绝。卸载进程退出但留锁后，安装脚本可接管有效过期锁。被拒绝的操作不改目录、启动脚本或 PATH。 `OHBABY_INSTALL_DIR` 等于 `OHBABY_HOME` 时拒绝，不删除任何文件；npm 版执行 `ohbaby uninstall -y` 后，前缀下的 `ohbaby-cli` 被删除 | 3 |
+| S12 | 版本切换后的后续失败 | 试跑成功且 `current` 已切到新版后，模拟 PATH 写入失败。报告新版已切换及 PATH 失败，退出码非零，新旧两个发行目录仍在且新版可用。再模拟旧版临时目录清理失败，提示可延后清理的残留，已切换版本保持可用，且仅此警告时退出码为 0 | 2 |
 
 ## 4.4 实施前探针（2026-11-18 SSH 执行）
 
@@ -72,7 +73,7 @@
 | ID | 要确认的假设 | 怎么测 | 不符时怎么办 |
 |---|---|---|---|
 | P7 | linux-arm64 的私有 Node 加 npm 装出来的 ohbaby 能用 | 下载 node-v24 linux-arm64 安装包并按 SHASUMS256 校验；确认系统里有解压 `.tar.xz` 需要的 `xz`，没有就改用 `.tar.gz`；其余同 P4 | 记录要用哪种压缩格式，写进 02 第 5 步 |
-| P8 | 没有终端时，`( : </dev/tty )` 会失败，从而自动按非交互处理 | 分别执行 `ssh 主机 'sh -c "( : </dev/tty ) && echo tty || echo notty"'` 和加 `-t` 的版本 | 交互判断改用其他办法，更新 00 的 5.7 节 |
+| P8 | 没有终端时，`( : </dev/tty )` 会失败，从而自动按非交互处理 | 分别执行 `ssh 主机 'sh -c "( : </dev/tty ) && echo tty \|\| echo notty"'` 和加 `-t` 的版本 | 交互判断改用其他办法，更新 00 的 5.7 节 |
 | P9 | `~/.local/bin` 存在时，Ubuntu 的 `~/.profile` 会把它加进 PATH；但 `ssh 主机 命令` 不读 `~/.profile` | 建好 `~/.local/bin` 后分别看登录 shell 和 `ssh 主机 'echo $PATH'` 里的 PATH | 如果非登录 SSH 也需要能用，在安装完成的提示里加一句说明，方案不改 |
 | P10 | SD 卡上的耗时和空间占用可以接受 | P7 时记录下载、解压、npm 安装各自的耗时，以及最终目录大小 | 写进 README 的平台说明 |
 
@@ -148,11 +149,12 @@
 | ID | 标准 | 怎么验证 |
 |---|---|---|
 | A1 | U1–U8 通过 | `pnpm test:unit` |
-| A2 | S1–S11 在三个系统上通过 | CI 的安装脚本测试步骤 |
+| A2 | S1–S12 在三个系统上通过 | CI 的安装脚本测试步骤 |
 | A3 | 真机验收 R1–R8、L1–L5、W1–W7 通过 | 验收会话记录每项结果 |
 | A4 | 回归清单通过 | `pnpm test:integration`、`pnpm typecheck`、`pnpm lint` |
-| A5 | sh 和 ps1 行为一致 | 两份脚本按 02 Stage 2 的 13 步逐步对照；S 系列在三个系统上的断言相同 |
+| A5 | sh 和 ps1 行为一致 | 两份脚本按 02 Stage 2 的 13 步逐步对照，包括 Linux 无法确认 glibc 时应提示并退出；S 系列在三个系统上的断言相同 |
 | A6 | 文档与发版 | README 写明两种安装命令、`update`、`uninstall`、支持的平台，以及 Windows PowerShell 里的传参限制和加引号的写法；发布后用 jsDelivr 上带版本号的地址实际装一次 |
+| A7 | 前置议题验收通过 | 先完成 daemon 议题的 05 验收，再实施本议题 |
 
 ## 4.8 对抗性审查要点
 
