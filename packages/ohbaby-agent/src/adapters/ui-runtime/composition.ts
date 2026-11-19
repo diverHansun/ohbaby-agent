@@ -392,6 +392,7 @@ export async function createUiRuntimeComposition(
       return {
         name: instance?.name,
         unprocessedMessageCount: unprocessed?.length,
+        isInstanceOpen: instance !== null && instance.closedAt === undefined,
       };
     },
     store: subagentExecutionStore,

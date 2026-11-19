@@ -23,7 +23,7 @@
 | parsedToolCalls                    | 正常耗尽并解析后的完整调用；length/filter/abort 不发布可执行参数                         |
 | modelState                         | 正常耗尽且原生投影校验后的续接状态；失败/截断/过滤不接受                                 |
 | tokenUsage                         | provider 已报告用量，可缺失；有数值不自动代表步骤可信                                    |
-| retry                              | 项目层重试信息，不包含上层 overflow 或摘要恢复预算                                       |
+| retry                              | 当前步骤累计安排的临时故障重试次数和本次退避信息，强制压缩与摘要恢复使用各自的预算         |
 
 中间帧 isComplete=false。仅有正文、usage 或 reasoning 但没有终态的 EOF 是中断；空流也不能生成完成。显式 stop 且正文为空是合法终态，与空流不同。
 
@@ -37,7 +37,9 @@ Lifecycle 等生成器耗尽之后再发布一次 `llm:complete`。length/filter
 
 `ProviderStreamInterruptedError.source` 可为 transport、eof、protocol、provider_abort；不明来源保留 undefined。来源用于区分事实，不能据包装类名把所有异常都当网络断流。provider 自报 abort 但本地 signal 没取消属于失败。
 
-三个内置 adapter 均设置 SDK `maxRetries: 0`，没有 SDK 隐藏重试。项目默认额外重试 5 次，在一个不含 overflow 或摘要恢复的步骤请求通道最多 6 次 HTTP 尝试；这不是 Run 总预算。正文、推理、工具片段或完成信号出现后项目层不重发，不新增自动续写。摘要 transport 恢复和 context overflow 强制压缩恢复仍由 agent 上层管理。
+三个内置 adapter 均设置 SDK `maxRetries: 0`。同一逻辑步骤默认允许 1 次初始请求和 5 次临时故障重试，强制压缩另有一次恢复请求。Lifecycle 为 `purpose: "agent-step"` 传入 `priorFailedAttempts`，请求记录的 `attempt` 从该值加 1 起算，`retry.attempt` 报告累计安排的重试次数。强制压缩前后继续使用这份计数。
+
+交付正文、推理或工具片段后，如果当前步骤可以重来，`streamResponse` 在发出 `retry` 帧后抛出带 `stepRetry?: { delayMs: number }` 的 `ProviderStreamInterruptedError`。调用方按该延迟重新执行步骤。摘要和标题不传 `priorFailedAttempts`。
 
 模型窗口、缓存用量、reasoning/native 状态沿用前序合同；此处不定义新的计量或缓存控制算法。
 
@@ -60,9 +62,9 @@ Lifecycle 等生成器耗尽之后再发布一次 `llm:complete`。length/filter
 
 沿用原有 JSON 存储，不新增表或 SQL 列。
 
-`retryScheduled` 是失败 attempt 首次结束时已决定安排重试的历史事实。它与 `endedAt/outcome` 一起保存，不能事后补写；不证明下一次请求已发生。取消先封口时不带这个字段；安排后取消保留历史，但不再发送。保存失败仍以 `ModelObservationError` 阻断，诊断失败不影响模型结果。
+`retryScheduled` 表示失败请求结束时已经安排重试。LLM 层原地重试和交付输出后由 Lifecycle 重跑步骤都使用这个字段。它与 `endedAt/outcome` 一起保存，之后不可补写。对被取代的请求，带 `retryScheduled: true` 的结束记录挂在原助手消息上，先于消息失败状态送达 UI。先取消再封存时没有这个字段。先安排再取消时保留记录，停止下一次请求。保存失败仍以 `ModelObservationError` 阻断，诊断失败不影响模型结果。
 
-`ModelRequestObservation.failure?` 只携带当次失败的安全诊断：有限类别、状态码、筛选后的上游 code/type、网络错误码和本次退避时间。它不属于 `ModelRequestAttempt`，不进入消息 JSON 或模型输入。agent 在既有日志中以稳定指纹关联请求、run、消息、会话和模型。
+`ModelRequestObservation.failure?` 只携带当次失败的安全诊断，包括有限类别、状态码、筛选后的上游 code/type、网络错误码、可用的上游请求编号、固定原因和本次退避时间。缺终止事件使用 `stream_eof`。这些字段只用于观测，agent 在既有日志中以稳定指纹关联请求、run、消息、会话和模型。
 
 `providerErrorDetail` 是 core 和 runtime 共用的安全原因提取入口。它保留重试耗尽/流中断包装下的原因，只生成固定说明；未知上游正文不透传。已识别的 Chat＋工具＋推理协议限制提示切换 Responses，认证、余额、限流和连接错误分别说明。`retryable` 沿用重试资格语义，不授权部分输出重放。
 
@@ -72,4 +74,4 @@ Lifecycle 等生成器耗尽之后再发布一次 `llm:complete`。length/filter
 
 适配器本地请求校验使用 `ModelRequestValidationError`，保留可诊断的本地说明，归 runtime 且不重试。响应流中的上游未知错误仍走安全 provider 包装。保存失败终态的公开文字使用 lifecycle 摘要，与 run 状态一致。
 
-诊断收窄：不读取或保留供应商请求编号；关联依赖本地 request/run/session。错误分类仅有总兜底，已识别 provider 的畸形字段可降级为固定通用提示，不再逐字段补救；正常错误分类和前端契约不变。
+上游请求编号需要通过安全格式校验，日志关联主要依赖本地 request/run/session。已识别 provider 的畸形字段可降级为固定通用提示。
