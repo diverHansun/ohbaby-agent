@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,7 +45,15 @@ function createLLM(input: {
       streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
-        const all = JSON.stringify(request.messages);
+        const all = request.messages
+          .flatMap(({ content }) =>
+            typeof content === "string"
+              ? [content]
+              : (content?.map((part) =>
+                  part.type === "text" ? part.text : JSON.stringify(part),
+                ) ?? []),
+          )
+          .join("\n");
         const isTitle = all.includes(TITLE_MARKER);
         if (!isTitle) input.log.turns.push(all);
         const block =
@@ -103,7 +111,7 @@ function createClient(
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "ohbaby-session-move-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "ohbaby-session-move-")));
   vi.stubEnv("OHBABY_HOME", join(root, ".ohbaby"));
   workspaceA = join(root, "a");
   workspaceB = join(root, "b");

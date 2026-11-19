@@ -39,23 +39,27 @@ beforeAll(async () => {
   if (process.env.OHBABY_TEST_SKIP_PACKAGE_BUILD === "1") {
     return;
   }
+  const buildArgs = [
+    "-r",
+    "--filter",
+    "ohbaby-sdk",
+    "--filter",
+    "ohbaby-llm",
+    "--filter",
+    "ohbaby-agent",
+    "--filter",
+    "ohbaby-server",
+    "--filter",
+    "ohbaby-cli",
+    "--sort",
+    "build",
+  ];
+  const windows = process.platform === "win32";
   const result = spawnSync(
-    process.platform === "win32" ? "pnpm.cmd" : "pnpm",
-    [
-      "-r",
-      "--filter",
-      "ohbaby-sdk",
-      "--filter",
-      "ohbaby-llm",
-      "--filter",
-      "ohbaby-agent",
-      "--filter",
-      "ohbaby-server",
-      "--filter",
-      "ohbaby-cli",
-      "--sort",
-      "build",
-    ],
+    windows ? (process.env.ComSpec ?? "cmd.exe") : "pnpm",
+    windows
+      ? ["/d", "/s", "/c", ["pnpm.cmd", ...buildArgs].join(" ")]
+      : buildArgs,
     {
       cwd: repoRoot,
       encoding: "utf8",
@@ -174,8 +178,19 @@ try {
         home,
         profile,
       ]);
-      const events = await readFile(resultPath, "utf8");
-      expect(events).toContain(logFilePath);
+      const events: unknown = JSON.parse(await readFile(resultPath, "utf8"));
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "command.result.delivered",
+            output: expect.objectContaining({
+              data: expect.objectContaining({
+                diagnosticsFilePath: logFilePath,
+              }),
+            }),
+          }),
+        ]),
+      );
     } finally {
       await rm(root, { force: true, recursive: true });
     }

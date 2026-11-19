@@ -914,6 +914,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -994,6 +995,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1040,6 +1042,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1098,6 +1101,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       releaseBlocked.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1140,6 +1144,7 @@ describe("createPersistentUiBackendClient", () => {
       ).toEqual(completion.prompt.error);
     } finally {
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1184,6 +1189,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1227,6 +1233,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1277,6 +1284,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       release.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -1551,6 +1559,7 @@ describe("createPersistentUiBackendClient", () => {
     } finally {
       settleAbortedRun.resolve(undefined);
       await client.dispose();
+      closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
@@ -3575,6 +3584,7 @@ describe("persistent conversation rewind", () => {
   afterEach(async () => {
     await client.dispose();
     vi.unstubAllEnvs();
+    closeDatabase();
     await rm(directory, { force: true, recursive: true });
   });
 

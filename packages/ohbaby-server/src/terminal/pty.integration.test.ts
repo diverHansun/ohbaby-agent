@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
+import { realpath } from "node:fs/promises";
 import { createTerminalPty, type TerminalPty } from "./pty.js";
 
 import * as processTree from "./process-tree.js";
@@ -69,8 +70,9 @@ it("runs actual UTF-8 commands in the requested directory and applies terminal s
     pty.write(
       "Write-Output ('RESULT:{0}:{1}:{2}:中文' -f $PWD.Path, [Console]::WindowWidth, [Console]::WindowHeight)\r",
     );
-    const output = await waitFor(/RESULT:.*:101:35:中文/);
-    expect(output).toContain(`RESULT:${tmpdir()}:101:35:中文`);
+    const result = /RESULT:(.+):101:35:中文/;
+    const [, directory] = matchOutput(await waitFor(result), result);
+    expect(await realpath(directory)).toBe(await realpath(tmpdir()));
     return;
   }
   expect(shell).toBe("sh");
