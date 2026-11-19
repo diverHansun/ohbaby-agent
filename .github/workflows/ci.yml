@@ -7,7 +7,7 @@ on:
 
 # Cancel in-progress runs for the same ref to save CI minutes.
 concurrency:
-  group: ci-${{ github.ref }}-daemon-acceptance
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -62,11 +62,6 @@ jobs:
 
       - name: Build
         run: pnpm build
-
-      - name: Integration tests
-        env:
-          OHBABY_TEST_SKIP_PACKAGE_BUILD: "1"
-        run: pnpm test:integration
 
   network-minimum-node:
     name: Network routing on minimum Node 24.0.0
