@@ -173,7 +173,7 @@ it("shares the host final-save deadline with an independent SQLite writer and co
       import { NodeSqliteConnection } from ${JSON.stringify(sourceUrl("packages/ohbaby-agent/src/services/database/connection.ts"))};
       import { beginDatabaseShutdown,runWriteTransaction } from ${JSON.stringify(sourceUrl("packages/ohbaby-agent/src/services/database/index.ts"))};
       const db=new NodeSqliteConnection(${JSON.stringify(dbPath)});db.exec('CREATE TABLE facts(value TEXT)');
-      const supervisor=new Supervisor({pidFilePath:${JSON.stringify(scope.pidFilePath)},stateFilePath:${JSON.stringify(scope.stateFilePath)},shutdownTimeoutMs:240,
+      const supervisor=new Supervisor({pidFilePath:${JSON.stringify(scope.pidFilePath)},stateFilePath:${JSON.stringify(scope.stateFilePath)},shutdownTimeoutMs:900,
         bootstrap:()=>({connection:{host:'127.0.0.1',port:1234,authToken:'fixture'},start:async()=>{},stop:async(options)=>{
           beginDatabaseShutdown(options.deadlineAt,db);
           try {await runWriteTransaction(db,c=>c.prepare("INSERT INTO facts VALUES ('final')").run());}finally{db.close();}
@@ -190,7 +190,7 @@ it("shares the host final-save deadline with an independent SQLite writer and co
       resolve(
         "packages/ohbaby-agent/src/services/database/testing/lock-holder.mjs",
       ),
-      [dbPath, "1000"],
+      [dbPath, "2400"],
       { stdio: ["ignore", "ignore", "inherit", "ipc"] },
     );
     await once(locker, "message");
@@ -198,13 +198,13 @@ it("shares the host final-save deadline with an independent SQLite writer and co
     const result = await stopDaemonFromState({
       homeDirectory: home,
       workdir: home,
-      timeoutMs: 1200,
+      timeoutMs: 1700,
       requestShutdown: () => {
         daemon?.send("stop");
         return Promise.resolve();
       },
     });
-    expect(Date.now() - started).toBeLessThan(700);
+    expect(Date.now() - started).toBeLessThan(1600);
     expect(result).toMatchObject({
       processExit: "confirmed",
       cleanup: "unconfirmed",

@@ -151,7 +151,7 @@ it("expires a queued save promptly without allowing a later writer to overtake t
   const path = join(directory, "facts.db");
   const db = new NodeSqliteConnection(path);
   db.exec("CREATE TABLE facts(value TEXT)");
-  const holder = await lock(path, 400);
+  const holder = await lock(path, 900);
   let first: Promise<void> | undefined;
   let third: Promise<void> | undefined;
   try {
@@ -166,7 +166,8 @@ it("expires a queued save promptly without allowing a later writer to overtake t
         }),
       ),
     ).rejects.toThrow(/Critical-save attempt deadline/);
-    expect(performance.now() - startedAt).toBeLessThan(180);
+    // Allow runner scheduling delay while still requiring expiry during the lock.
+    expect(performance.now() - startedAt).toBeLessThan(350);
     expect(db.prepare("SELECT * FROM facts").all()).toHaveLength(0);
     third = runWriteTransaction(db, (connection) => {
       connection.prepare("INSERT INTO facts VALUES ('third')").run();

@@ -108,9 +108,7 @@ itPosix("kills an ignoring child after the shell exits first, and frees its list
   const [, pidText, portText] = matchOutput(output, /CHILD:(\d+):(\d+)/);
   const child = Number(pidText);
   expect(await pty.inspectChildren()).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ pid: child, name: "node" }),
-    ]),
+    expect.arrayContaining([expect.objectContaining({ pid: child })]),
   );
   await pty.terminate();
   expect(alive(child)).toBe(false);

@@ -1,6 +1,11 @@
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import { stripVTControlCharacters } from "node:util";
+import type { ReactNode } from "react";
+import type {
+  Instance,
+  RenderOptions,
+} from "../../../../packages/ohbaby-cli/node_modules/ink/build/index.js";
 
 // Resolve the CLI's installed public Ink entry without a root dependency.
 const cliRequire = createRequire(
@@ -8,9 +13,14 @@ const cliRequire = createRequire(
 );
 // SAFETY: the dynamic import resolves this same pinned CLI dependency.
 // Its type-only entry prevents `any` from leaking into process-level tests.
-export const { render, Box, useBoxMetrics } = (await import(
+const ink = (await import(
   cliRequire.resolve("ink")
 )) as typeof import("../../../../packages/ohbaby-cli/node_modules/ink/build/index.js");
+export const { Box, useBoxMetrics } = ink;
+// These streams emulate an interactive terminal, including when CI=true.
+export function render(node: ReactNode, options: RenderOptions): Instance {
+  return ink.render(node, { ...options, interactive: true });
+}
 
 export class TerminalOutput extends EventEmitter {
   columns = 80;
