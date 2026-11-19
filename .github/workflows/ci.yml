@@ -7,7 +7,7 @@ on:
 
 # Cancel in-progress runs for the same ref to save CI minutes.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-daemon-acceptance
   cancel-in-progress: true
 
 jobs:
