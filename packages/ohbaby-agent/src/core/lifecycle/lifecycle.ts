@@ -576,12 +576,23 @@ export class Lifecycle {
     const onRetry = (attempt: number): void => {
       failedStepAttempts = attempt;
     };
+    let preparedBeforeRetry: PreparedTurn | undefined;
     let forceRecoveryStep: number | undefined;
     let promptSnapshot: AgentRunPromptSnapshot | undefined;
     const activeReasoningByMessageId = new Map<string, string>();
 
     for (let step = 1; step <= maxSteps; step += 1) {
       if (params.signal?.aborted) {
+        if (preparedBeforeRetry) {
+          yield this.createTurnEndEvent({
+            contextScopeId: params.contextScopeId,
+            finalResponse,
+            finishReason: "error",
+            prepared: preparedBeforeRetry,
+            sessionId: params.sessionId,
+            step,
+          });
+        }
         return {
           success: false,
           finishReason: "error",
@@ -592,6 +603,7 @@ export class Lifecycle {
         };
       }
 
+      preparedBeforeRetry = undefined;
       const isFinalStep = step === maxSteps;
       const protectedInputs = await params.currentRunInputs?.beforeStep(
         params.signal,
@@ -734,6 +746,7 @@ export class Lifecycle {
         });
       } catch (error) {
         if (await waitForStepRetry(error, params.signal)) {
+          preparedBeforeRetry = prepared;
           step -= 1;
           continue;
         }
@@ -858,6 +871,7 @@ export class Lifecycle {
           });
         } catch (retryError) {
           if (await waitForStepRetry(retryError, params.signal)) {
+            preparedBeforeRetry = prepared;
             step -= 1;
             continue;
           }

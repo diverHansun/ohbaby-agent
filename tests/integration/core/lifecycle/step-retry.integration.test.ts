@@ -356,6 +356,9 @@ describe("lifecycle logical step retries", () => {
       });
       expect(f.bodies).toHaveLength(1);
       expect(
+        f.events.filter((event) => event.type === "turn:end"),
+      ).toMatchObject([{ step: 1, finishReason: "error" }]);
+      expect(
         f.events.find((event) => event.type === "llm:request-ended"),
       ).toMatchObject({
         request: { outcome: "error", retryScheduled: true },
