@@ -1,7 +1,7 @@
 import { Box, renderToString } from "ink";
 import type { UiMessage } from "ohbaby-sdk";
 import { CommittedTranscript } from "./components/transcript/committed-transcript.js";
-import { LiveTail } from "./components/transcript/live-tail.js";
+import { LiveTail, PendingSteers } from "./components/transcript/live-tail.js";
 import { LayoutProvider, TranscriptDocumentContext } from "./layout/context.js";
 import { computeLayoutMetrics } from "./layout/metrics.js";
 import type { TuiReasoningViewState } from "./store/snapshot.js";
@@ -13,6 +13,7 @@ export interface ExitTranscript {
   readonly committedItems: readonly TranscriptItem[];
   readonly liveMessage: UiMessage | null;
   readonly liveReasoning?: TuiReasoningViewState;
+  readonly pendingSteers?: readonly UiMessage[];
   readonly toolsExpanded: boolean;
 }
 
@@ -35,6 +36,7 @@ export function renderExitTranscript(
               reasoning={transcript.liveReasoning}
               toolsExpanded={transcript.toolsExpanded}
             />
+            <PendingSteers messages={transcript.pendingSteers} />
           </Box>
         </TranscriptDocumentContext.Provider>
       </LayoutProvider>

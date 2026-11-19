@@ -1,3 +1,5 @@
+import { listRetriedAttemptIds } from "ohbaby-sdk";
+import { messageToUiMessage } from "../../../../packages/ohbaby-agent/src/adapters/ui-state/persistent-store.js";
 import { isInterruptionFactPart } from "../../../../packages/ohbaby-agent/src/core/message/interruption.js";
 import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -434,6 +436,30 @@ describe("lifecycle logical step retries", () => {
       ]);
     },
   );
+
+  it("keeps the partial answer if a retry's assistant exists but Stop prevents its request", async () => {
+    const abort = new AbortController();
+    const f = await fixture([
+      (): Response => streamFailure("still the only partial"),
+    ]);
+    let assistantStarts = 0;
+    const result = await f.run({ signal: abort.signal }, (event) => {
+      if (event.type === "llm:start" && ++assistantStarts === 2) abort.abort();
+    });
+    expect(result.terminalReason).toBe("cancelled");
+    expect(assistantStarts).toBe(2);
+    expect(f.bodies).toHaveLength(1);
+    const history = await f.messageManager.listBySession(sessionId);
+    const assistants = history.flatMap((record) => {
+      if (record.info.role !== "assistant") return [];
+      const message = messageToUiMessage(record);
+      return message ? [message] : [];
+    });
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0].modelRequests?.at(-1)?.retryScheduled).toBe(true);
+    expect(assistants[1].modelRequests ?? []).toHaveLength(0);
+    expect(listRetriedAttemptIds(assistants)).toEqual(new Set());
+  });
 
   it("cancels during backoff after a partial response without opening another request", async () => {
     const controller = new AbortController();

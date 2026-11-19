@@ -6678,7 +6678,7 @@ it("keeps one waiting row through retries and counts them without a timer", () =
   expect(row()?.textContent).toContain("8s");
 });
 
-it("waits through a step retry after partial text and leaves one line for the replaced attempt", () => {
+it("thinks through a step retry after partial text and hides the replaced attempt", () => {
   const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
   const failed = {
     requestId: "r1",
@@ -6728,7 +6728,7 @@ it("waits through a step retry after partial text and leaves one line for the re
           ...initial.runs[0],
           modelActivity: {
             ...failed,
-            phase: "retrying",
+            phase: "requesting",
             waitingStartedAt: 1000,
           },
         },
@@ -6738,9 +6738,9 @@ it("waits through a step retry after partial text and leaves one line for the re
   const app = mountApp(fake.runtime);
   const row = (): Element | null =>
     app.container.querySelector(".ohb-thinking");
-  // While the retry waits, the partial text stays and the wait still shows.
+  // While the retry waits, the partial text stays under a plain Thinking row.
   expect(app.container.textContent).toContain("Half an answer");
-  expect(row()?.getAttribute("aria-label")).toBe("Retrying #1");
+  expect(row()?.getAttribute("aria-label")).toBe("Thinking");
   act(() => {
     fake.store.replaceSnapshot(
       {
@@ -6760,7 +6760,7 @@ it("waits through a step retry after partial text and leaves one line for the re
             ...initial.runs[0],
             modelActivity: {
               ...retry,
-              phase: "retrying",
+              phase: "requesting",
               waitingStartedAt: 1000,
             },
           },
@@ -6769,11 +6769,10 @@ it("waits through a step retry after partial text and leaves one line for the re
       2,
     );
   });
+  // The new request is out: the replaced answer is gone without a trace.
   expect(app.container.textContent).not.toContain("Half an answer");
-  expect(app.container.querySelector(".ohb-retried-attempt")?.textContent).toBe(
-    "Interrupted · retried",
-  );
-  expect(row()?.getAttribute("aria-label")).toBe("Retrying #1");
+  expect(app.container.textContent).not.toContain("Interrupted");
+  expect(row()?.getAttribute("aria-label")).toBe("Thinking");
   act(() => {
     fake.store.replaceSnapshot(
       {
@@ -6804,9 +6803,7 @@ it("waits through a step retry after partial text and leaves one line for the re
   });
   expect(row()).toBeNull();
   expect(app.container.textContent).toContain("The full answer");
-  expect(app.container.querySelectorAll(".ohb-retried-attempt")).toHaveLength(
-    1,
-  );
+  expect(app.container.textContent).not.toContain("Half an answer");
 });
 
 it("does not resurrect A's unresolved Stop after B reaches a reliable terminal", async () => {

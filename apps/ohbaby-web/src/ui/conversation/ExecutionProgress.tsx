@@ -12,8 +12,9 @@ import { useExecutionDuration } from "./use-execution-duration.js";
 
 /**
  * The model step's wait, one row for its whole request chain: Thinking while
- * a request is out, `Retrying #n` once the service has scheduled a retry. It
- * steps aside when the current step shows something the reader can see.
+ * a request is out, `Retrying #n` while the service retries a request that
+ * failed before any output. It steps aside when the current step shows
+ * something the reader can see.
  */
 export function ModelWaiting({
   run,

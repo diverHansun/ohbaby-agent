@@ -15,10 +15,9 @@ export interface WorkingSpinnerProps {
 }
 
 /**
- * One status slot for the whole agent run, as in pi: it holds the turn's
- * phrase and elapsed time while the run works, text streaming included, and
- * turns into `Retrying #n` while the service retries a failed model request.
- * It never comes and goes with single requests, so retries cannot blink it.
+ * One status slot with a phrase fixed for the whole turn. While model
+ * activity is available, the timer follows the current step's request chain.
+ * A retry before any output uses the same slot for `Retrying #n`.
  */
 export function WorkingSpinner({
   runtime,
@@ -74,8 +73,12 @@ function VisibleWorkingPhrase({
   readonly text: string;
   readonly run: UiRun;
 }): ReactElement {
-  // The turn's elapsed time, kept across requests and retries.
-  const duration = useExecutionDuration(run.id, Date.parse(run.startedAt));
+  const activity = run.modelActivity;
+  const startedAt =
+    activity?.waitingStartedAt ??
+    activity?.startedAt ??
+    Date.parse(run.startedAt);
+  const duration = useExecutionDuration(run.id, startedAt);
   return (
     <Box>
       <Box flexShrink={1}>

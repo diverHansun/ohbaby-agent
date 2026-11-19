@@ -9,7 +9,7 @@ import { useTuiLayout } from "../layout/context.js";
 import { useTheme } from "../theme/index.js";
 import {
   isVisibleTranscriptMessage,
-  withRetriedAttemptLines,
+  withoutRetriedAttempts,
 } from "../store/transcript.js";
 import { renderMessageParts } from "./message/message-row.js";
 import { wrapAnsi } from "../render/wrap.js";
@@ -51,7 +51,7 @@ export function SubagentBrowser({
         ...(view.execution.artifactPath
           ? plainLines(`Full result artifact: ${view.execution.artifactPath}`)
           : []),
-        ...withRetriedAttemptLines(
+        ...withoutRetriedAttempts(
           view.messages.filter(isVisibleTranscriptMessage),
         ).flatMap((message) => {
           const parts = message.parts.flatMap((part) => {

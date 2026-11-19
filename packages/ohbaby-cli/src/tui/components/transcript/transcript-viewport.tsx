@@ -16,7 +16,7 @@ import {
   shouldUseStaticTranscript,
 } from "./committed-transcript.js";
 import { ReplayableTranscript } from "./replayable-transcript.js";
-import { LiveTail } from "./live-tail.js";
+import { LiveTail, PendingSteers } from "./live-tail.js";
 import { NoticeLane } from "./notice-lane.js";
 
 export interface TranscriptViewportProps {
@@ -26,6 +26,7 @@ export interface TranscriptViewportProps {
   readonly committedItems: readonly TranscriptItem[];
   readonly liveMessage: UiMessage | null;
   readonly liveReasoning?: TuiReasoningViewState;
+  readonly pendingSteers?: readonly UiMessage[];
   readonly notices: readonly UiNotice[];
   readonly runtime: TuiRuntimeStatus;
   /** The run behind `runtime`, when the status slot may show it. */
@@ -39,6 +40,7 @@ export function TranscriptViewport({
   committedItems,
   liveMessage,
   liveReasoning,
+  pendingSteers,
   notices,
   runtime,
   run,
@@ -93,6 +95,7 @@ export function TranscriptViewport({
           />
         </>
       )}
+      <PendingSteers messages={pendingSteers} />
       <WorkingSpinner runtime={runtime} run={run} />
       <NoticeLane notices={notices} />
     </Box>

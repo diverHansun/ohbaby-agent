@@ -93,11 +93,27 @@ export function projectModelActivity(
       break;
     first--;
   }
-  const chain = requests.slice(first);
-  const message = messages.find(
-    (candidate) => candidate.id === latest.messageId,
-  );
-  const hasProgress =
+  // Say "retrying" only while the user has seen nothing: a retry after output
+  // reads as the model thinking again.
+  const failure = requests
+    .slice(first)
+    .findLast((request) => request.retryScheduled === true);
+  const progressOf = (messageId: string): boolean =>
+    hasVisibleOutput(messages.find((message) => message.id === messageId));
+  return {
+    ...latest,
+    phase:
+      failure !== undefined &&
+      !progressOf(failure.messageId) &&
+      !progressOf(latest.messageId)
+        ? "retrying"
+        : "requesting",
+    waitingStartedAt: requests[first].startedAt,
+  };
+}
+
+function hasVisibleOutput(message: UiMessage | undefined): boolean {
+  return (
     message?.hiddenToolCalls === true ||
     message?.parts.some((part) => {
       if (
@@ -110,52 +126,54 @@ export function projectModelActivity(
         : part.type === "tool-call" &&
             part.call.id.length > 0 &&
             part.call.name.length > 0;
-    });
-  return {
-    ...latest,
-    phase:
-      backingOff ||
-      (chain.some((request) => request.retryScheduled) && !hasProgress)
-        ? "retrying"
-        : "requesting",
-    waitingStartedAt: requests[first].startedAt,
-  };
+    }) === true
+  );
 }
-/**
- * Assistant messages a step retry replaced: each failed after output, its own
- * last step request scheduled the retry, and a later assistant message of the
- * same run holds that retry. The model no longer sees them, so frontends show
- * each as one quiet line. A message whose retry never started (stopped while
- * waiting) is not listed and keeps its text.
- */
+/** Assistant attempts that were followed by a started request in the same step. */
 export function listRetriedAttemptIds(
   messages: readonly UiMessage[],
 ): ReadonlySet<string> {
   const retried = new Set<string>();
-  messages.forEach((message, index) => {
+  for (const message of messages) {
+    const failed = getScheduledStepRetry(message);
     if (
-      isSupersededAttempt(message) &&
-      messages
-        .slice(index + 1)
-        .some(
-          (later) =>
-            later.role === "assistant" && later.runId === message.runId,
-        )
+      failed &&
+      messages.some(
+        (later) =>
+          later.id !== message.id &&
+          later.role === "assistant" &&
+          later.runId === failed.runId &&
+          later.modelRequests?.some(
+            (request) =>
+              request.purpose === "agent-step" &&
+              request.messageId === later.id &&
+              request.runId === failed.runId &&
+              request.step === failed.step &&
+              request.attempt > failed.attempt &&
+              request.startedAt > 0,
+          ),
+      )
     )
       retried.add(message.id);
-  });
+  }
   return retried;
 }
 
-function isSupersededAttempt(message: UiMessage): boolean {
-  if (message.role !== "assistant" || message.status !== "error") return false;
-  const last = message.modelRequests
-    ?.filter(
-      (request) =>
-        request.purpose === "agent-step" && request.messageId === message.id,
-    )
-    .at(-1);
-  return last?.outcome === "error" && last.retryScheduled === true;
+/** The failed request scheduling a retry, even before the message error is projected. */
+export function getScheduledStepRetry(
+  message: UiMessage,
+): UiAgentStepRequest | undefined {
+  if (message.role !== "assistant" || message.status === "completed")
+    return undefined;
+  const last = message.modelRequests?.findLast(
+    (request): request is UiAgentStepRequest =>
+      request.purpose === "agent-step" &&
+      request.messageId === message.id &&
+      request.runId === message.runId,
+  );
+  return last?.outcome === "error" && last.retryScheduled === true
+    ? last
+    : undefined;
 }
 /** Copy only public facts; internal admission owners never cross this boundary. */
 export function projectToolExecution(

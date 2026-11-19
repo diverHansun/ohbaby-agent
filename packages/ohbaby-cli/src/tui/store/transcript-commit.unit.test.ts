@@ -337,11 +337,32 @@ describe("retried attempts", () => {
     ...streaming(parts, "attempt_1"),
     runId: "run_1",
     status,
-    modelRequests: [failed],
+    modelRequests: [
+      status === "streaming"
+        ? {
+            ...failed,
+            endedAt: undefined,
+            outcome: "running",
+            retryScheduled: undefined,
+          }
+        : failed,
+    ],
   });
   const retry: UiMessage = {
     ...streaming([], "attempt_2"),
     runId: "run_1",
+    modelRequests: [
+      {
+        ...failed,
+        requestId: "r2",
+        messageId: "attempt_2",
+        attempt: 2,
+        startedAt: 3,
+        endedAt: undefined,
+        outcome: "running",
+        retryScheduled: undefined,
+      },
+    ],
   };
   const lines = (state: ReturnType<typeof advanceTranscriptCommit>): string[] =>
     state.committedItems.flatMap((item) =>
@@ -350,7 +371,7 @@ describe("retried attempts", () => {
       ),
     );
 
-  it("keeps frozen parts and commits the rest as one line once the retry starts", () => {
+  it("keeps frozen parts and drops the rest once the retry starts", () => {
     const user = userMessage("user_1");
     let state = advanceTranscriptCommit(
       undefined,
@@ -373,14 +394,15 @@ describe("retried attempts", () => {
       [user, attempt([reasoning("plan"), text("Half an")], "error"), retry],
       running(),
     );
+    // Only the closing spacer follows the frozen reasoning; the half answer goes.
     expect(state.committedItems.map((item) => item.id)).toEqual([
       "user_1",
       "attempt_1#0-1",
-      "attempt_1#1-2",
+      "attempt_1#final",
     ]);
-    expect(lines(state)).toEqual(["user prompt", "Interrupted · retried"]);
+    expect(lines(state)).toEqual(["user prompt"]);
     expect(state.liveMessage?.id).toBe("attempt_2");
-    // The retry streams on: the committed line stays the only one.
+    // The retry streams on: nothing more commits for the replaced attempt.
     const committed = state.committedItems;
     state = advanceTranscriptCommit(
       state,
@@ -394,9 +416,73 @@ describe("retried attempts", () => {
     expect(state.committedItems).toBe(committed);
   });
 
-  it("restores a retried attempt as one line and keeps one whose retry never ran", () => {
+  it("keeps a pending retry out of scrollback even when Steer is accepted", () => {
     const user = userMessage("user_1");
-    const answer = { ...assistantMessage("attempt_2"), runId: "run_1" };
+    const steer = {
+      ...userMessage("steer"),
+      parts: [text("Steer instruction")],
+    };
+    const partial = attempt([text("Half an answer")], "error");
+    const streaming = {
+      ...attempt(partial.parts, "streaming"),
+      status: undefined,
+    };
+    const waiting = advanceTranscriptCommit(
+      undefined,
+      [user, streaming],
+      running(),
+    );
+    const steered = advanceTranscriptCommit(
+      waiting,
+      [user, streaming, steer],
+      running(),
+    );
+    expect(steered.committedItems.map((item) => item.id)).toEqual(["user_1"]);
+    expect(steered.liveMessage?.parts).toEqual(partial.parts);
+
+    // The request end can arrive before the failed message state.
+    const scheduled = advanceTranscriptCommit(
+      steered,
+      [user, { ...partial, status: undefined }, steer],
+      running(),
+    );
+    expect(scheduled.committedItems).toBe(steered.committedItems);
+    expect(scheduled.liveMessage?.id).toBe(partial.id);
+
+    const placeholder = { ...retry, modelRequests: [] };
+    const opening = advanceTranscriptCommit(
+      scheduled,
+      [user, partial, steer, placeholder],
+      running(),
+    );
+    expect(opening.committedItems.map((item) => item.id)).toEqual(["user_1"]);
+    expect(opening.liveMessage?.id).toBe(partial.id);
+
+    const restarted = advanceTranscriptCommit(
+      opening,
+      [user, partial, steer, retry],
+      running(),
+    );
+    expect(lines(restarted)).toEqual(["user prompt", "Steer instruction"]);
+    expect(restarted.liveMessage?.id).toBe(retry.id);
+
+    const stopped = advanceTranscriptCommit(opening, [user, partial, steer], {
+      kind: "idle",
+    });
+    expect(lines(stopped)).toEqual([
+      "user prompt",
+      "Half an answer",
+      "Steer instruction",
+    ]);
+  });
+
+  it("restores without a retried attempt and keeps one whose retry never ran", () => {
+    const user = userMessage("user_1");
+    const answer = {
+      ...assistantMessage("attempt_2"),
+      runId: "run_1",
+      modelRequests: retry.modelRequests,
+    };
     expect(
       lines(
         advanceTranscriptCommit(
@@ -405,7 +491,7 @@ describe("retried attempts", () => {
           { kind: "idle" },
         ),
       ),
-    ).toEqual(["user prompt", "Interrupted · retried", "assistant answer"]);
+    ).toEqual(["user prompt", "assistant answer"]);
     // Nothing changed, so nothing re-renders.
     const messages = [user, attempt([text("Half an")], "error"), answer];
     const first = advanceTranscriptCommit(undefined, messages, {

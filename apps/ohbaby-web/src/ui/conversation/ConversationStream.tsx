@@ -142,16 +142,18 @@ export function ConversationStream(props: {
   const readingPosition =
     props.readingPosition ?? localReading.current.position;
   const messages = props.messages;
+  // A step retry replaced these answers and the model no longer sees them.
+  const retriedIds = listRetriedAttemptIds(messages);
   const visibleMessages = filterTodoToolMessages(
     messages.filter(
       (message) =>
+        !retriedIds.has(message.id) &&
         message.runtimeInputKind !== "subagent-status" &&
         message.runtimeInputKind !== "subagent-result" &&
         // Task results are for the agent only (background tasks README D6).
         message.runtimeInputKind !== "background-task-result",
     ),
   );
-  const retriedIds = listRetriedAttemptIds(messages);
   const timelineItems = [
     ...visibleMessages.map((message, index) => ({
       createdAt: message.createdAt,
@@ -844,9 +846,6 @@ export function ConversationStream(props: {
                       return failure;
                     }}
                   />
-                ) : retriedIds.has(item.message.id) ? (
-                  // The retry below replaced this answer; the model no longer sees it.
-                  <p className="ohb-retried-attempt">Interrupted · retried</p>
                 ) : (
                   <MessageRow
                     message={item.message}

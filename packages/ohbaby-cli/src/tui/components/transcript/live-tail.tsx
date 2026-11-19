@@ -83,3 +83,23 @@ export const LiveTail = memo(function LiveTail({
     </Box>
   );
 });
+
+export function PendingSteers({
+  messages,
+}: {
+  readonly messages?: readonly UiMessage[];
+}): ReactElement | null {
+  const { contentWidth } = useTuiLayout();
+  if (!messages?.length) return null;
+  return (
+    <Box flexDirection="column">
+      {messages.map((message) => (
+        <MessageRow
+          key={message.id}
+          message={message}
+          contentWidth={contentWidth}
+        />
+      ))}
+    </Box>
+  );
+}

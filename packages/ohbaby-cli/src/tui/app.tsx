@@ -80,6 +80,7 @@ import {
   selectLiveReasoning,
 } from "./store/selectors/transcript.js";
 import { createCoalescedTuiEventDispatcher } from "./store/stream-coalescer.js";
+import { steersAfterLiveMessage } from "./store/transcript.js";
 import { ThemeProvider } from "./theme/index.js";
 import type { ExitTranscript } from "./exit-transcript.js";
 import type {
@@ -1253,6 +1254,10 @@ export function OhbabyTerminalApp({
         committedItems: state.committedItems,
         liveMessage: state.liveMessage,
         liveReasoning: selectLiveReasoning(state),
+        pendingSteers: steersAfterLiveMessage(
+          state.messages,
+          state.liveMessage,
+        ),
         toolsExpanded: expanded,
       });
     },
@@ -1702,6 +1707,10 @@ function TranscriptViewportContainer({
         toolsExpanded={toolsExpanded}
         liveMessage={liveMessage}
         liveReasoning={liveReasoning}
+        pendingSteers={steersAfterLiveMessage(
+          activeSession?.messages ?? [],
+          liveMessage,
+        )}
         notices={notices}
         runtime={runtime}
         // Waiting on subagents has its own status; so does a lost connection.

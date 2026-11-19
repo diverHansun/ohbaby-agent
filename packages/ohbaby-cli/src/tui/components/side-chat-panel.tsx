@@ -18,7 +18,7 @@ import { useTuiLayout } from "../layout/context.js";
 import { wrapAnsi } from "../render/wrap.js";
 import {
   isVisibleTranscriptMessage,
-  withRetriedAttemptLines,
+  withoutRetriedAttempts,
 } from "../store/transcript.js";
 import { useTheme } from "../theme/index.js";
 import { usePermissionSync } from "../use-permission-sync.js";
@@ -142,7 +142,7 @@ export function SideChatPanel(props: {
     const boundary = messages.findIndex(
       (message) => message.id === props.boundaryMessageId,
     );
-    const shown = withRetriedAttemptLines(
+    const shown = withoutRetriedAttempts(
       messages.slice(boundary + 1).filter(isVisibleTranscriptMessage),
     );
     // A failed turn says why under its last message, as in the main chat.

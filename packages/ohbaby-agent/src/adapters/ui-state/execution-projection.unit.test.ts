@@ -96,7 +96,7 @@ describe("durable execution projection", () => {
       projectModelActivity(run, [{ ...message, runId: "child" }]),
     ).toBeUndefined();
   });
-  it("keeps one wait across a step retry's new message and lists the replaced attempt", () => {
+  it("keeps one Thinking wait across a step retry's new message and lists the replaced attempt", () => {
     const run: UiRun = {
       id: "run",
       sessionId: "s",
@@ -134,12 +134,42 @@ describe("durable execution projection", () => {
       modelRequests: [retry],
     };
     expect(listRetriedAttemptIds([replaced])).toEqual(new Set());
+    expect(
+      listRetriedAttemptIds([
+        replaced,
+        { ...next, modelRequests: [{ ...retry, startedAt: 0 }] },
+      ]),
+    ).toEqual(new Set());
+    expect(
+      listRetriedAttemptIds([
+        replaced,
+        { ...next, modelRequests: [{ ...retry, step: 2 }] },
+      ]),
+    ).toEqual(new Set());
     expect(listRetriedAttemptIds([replaced, next])).toEqual(new Set(["m"]));
+    // The reader saw output, so the backoff and the new request read as Thinking.
+    expect(projectModelActivity(run, [replaced])).toMatchObject({
+      phase: "requesting",
+      outcome: "error",
+    });
     expect(projectModelActivity(run, [replaced, next])).toMatchObject({
       requestId: "next",
-      phase: "retrying",
+      phase: "requesting",
       waitingStartedAt: 100,
     });
+    // The new request then fails before any output: now it says retrying.
+    expect(
+      projectModelActivity(run, [
+        replaced,
+        {
+          ...next,
+          modelRequests: [
+            { ...retry, endedAt: 350, outcome: "error", retryScheduled: true },
+            { ...retry, requestId: "third", attempt: 3, startedAt: 400 },
+          ],
+        },
+      ]),
+    ).toMatchObject({ phase: "retrying", attempt: 3, waitingStartedAt: 100 });
     // Another step's message never joins the chain.
     expect(
       projectModelActivity(run, [
@@ -173,6 +203,7 @@ describe("durable execution projection", () => {
     const nextFailed: UiMessage = {
       ...next,
       status: "error",
+      parts: [{ type: "text", text: "half again" }],
       modelRequests: [
         { ...retry, endedAt: 400, outcome: "error", retryScheduled: true },
       ],
@@ -182,7 +213,12 @@ describe("durable execution projection", () => {
     );
     expect(
       projectModelActivity(run, [replaced, nextFailed, third]),
-    ).toMatchObject({ requestId: "third", attempt: 3, waitingStartedAt: 100 });
+    ).toMatchObject({
+      requestId: "third",
+      attempt: 3,
+      phase: "requesting",
+      waitingStartedAt: 100,
+    });
   });
   it("retains model activity on zero-part assistant messages", () => {
     const record: MessageWithParts = {
