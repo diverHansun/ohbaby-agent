@@ -64,6 +64,8 @@ jobs:
         run: pnpm build
 
       - name: Integration tests
+        env:
+          OHBABY_TEST_SKIP_PACKAGE_BUILD: "1"
         run: pnpm test:integration
 
   network-minimum-node:

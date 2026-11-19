@@ -680,26 +680,28 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   await mkdir(cliCwd, { recursive: true });
   await writeFile(join(ohbabyHome, ".skip-auto-migrate"), "", "utf8");
 
-  const buildResult = await runCommand({
-    command: pnpmCommand(),
-    args: [
-      "-r",
-      "--filter",
-      "ohbaby-sdk",
-      "--filter",
-      "ohbaby-llm",
-      "--filter",
-      "ohbaby-cli",
-      "--filter",
-      "ohbaby-agent",
-      "--filter",
-      "ohbaby-server",
-      "--sort",
-      "build",
-    ],
-    timeoutMs: 180_000,
-  });
-  expectSuccess(buildResult, "pnpm package build");
+  if (process.env.OHBABY_TEST_SKIP_PACKAGE_BUILD !== "1") {
+    const buildResult = await runCommand({
+      command: pnpmCommand(),
+      args: [
+        "-r",
+        "--filter",
+        "ohbaby-sdk",
+        "--filter",
+        "ohbaby-llm",
+        "--filter",
+        "ohbaby-cli",
+        "--filter",
+        "ohbaby-agent",
+        "--filter",
+        "ohbaby-server",
+        "--sort",
+        "build",
+      ],
+      timeoutMs: 180_000,
+    });
+    expectSuccess(buildResult, "pnpm package build");
+  }
 
   const sdkPack = await packWorkspacePackage({
     packDestination,
