@@ -29,6 +29,7 @@ import { DraftHero } from "./DraftHero.js";
 import { isConnectionAbnormal } from "./selectors.js";
 import { SessionBanners, SessionSyncNotice } from "./SessionBanners.js";
 import { SessionConversation } from "./SessionConversation.js";
+import { SessionLoading } from "./SessionLoading.js";
 import { useCommandOverlays } from "./useCommandOverlays.js";
 import { useCompactRequest } from "./use-compact-request.js";
 import { usePromptSubmission } from "./usePromptSubmission.js";
@@ -303,6 +304,10 @@ export function SessionScreen({
     compactRequest.isCompacting(view.activeSession?.id) ||
     (compactRequest.notice !== null &&
       compactRequest.notice.sessionId === view.activeSession?.id);
+  // An existing session being read keeps the chat layout, so the greeting
+  // never flashes and the composer stays docked when the messages arrive.
+  const loading = !showMain && sessionSyncBanner === "loading";
+  const chatLayout = showMain || loading;
   const latestRun = view.snapshot?.runs
     .filter((run) => run.sessionId === view.activeSession?.id)
     .reduce<
@@ -339,8 +344,8 @@ export function SessionScreen({
     <div
       ref={contentRef}
       className={`ohb-main-body ${
-        showMain ? "ohb-main-body-chat" : "ohb-main-body-empty"
-      }${sessionSyncBanner === "loading" ? " is-loading" : ""}${
+        chatLayout ? "ohb-main-body-chat" : "ohb-main-body-empty"
+      }${
         view.activeTodoList ? " has-todos" : ""
       }${approvalDialogVisible ? " has-approval" : ""}`}
     >
@@ -419,6 +424,8 @@ export function SessionScreen({
             send: sendEdit,
           }}
         />
+      ) : loading ? (
+        <SessionLoading />
       ) : (
         <DraftHero
           picker={
@@ -435,7 +442,7 @@ export function SessionScreen({
       >
         <Composer
           client={client}
-          compact={!showMain}
+          compact={!chatLayout}
           draftScopeKey={draftScopeKey}
           onEditRevision={overlays.trackComposerRevision}
           isPromptAdmitting={isPromptAdmitting}

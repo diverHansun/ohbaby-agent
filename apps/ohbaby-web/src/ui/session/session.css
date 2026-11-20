@@ -1,5 +1,5 @@
 /* Conversation view layout: composer placement, empty-state hero, thinking
-   indicator, todo dock and the slow-load hint. */
+   indicator, todo dock and the first-read placeholder. */
 .ohb-root-conversation {
   display: flex;
   flex: 1;
@@ -70,10 +70,6 @@
   animation-delay: 110ms;
 }
 
-.ohb-main-body.is-loading .ohb-draft-hero {
-  visibility: hidden;
-}
-
 .ohb-workspace-slot {
   align-items: center;
   background: transparent;
@@ -124,15 +120,69 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   text-align: center;
 }
 
-/* A slow first read occupies conversation whitespace without moving the composer. */
-.ohb-conversation-loading {
-  color: var(--text-dim);
-  font-size: 13.5px;
-  inset-inline: 24px;
+/* First read of an existing conversation: the Lychee drained to gray, with a
+   light band sweeping across it. It waits 0.4s before fading in, so a fast
+   read shows only blank space (states.md). */
+.ohb-session-loading {
+  align-items: center;
+  animation: ohb-session-loading-in 0.2s ease-out 0.4s forwards;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  opacity: 0;
+  padding-bottom: 120px;
   pointer-events: none;
-  position: absolute;
-  text-align: center;
-  top: 30%;
+}
+
+.ohb-session-loading-mark .ohb-lychee-mark {
+  animation: ohb-session-loading-sweep 1.6s ease-in-out infinite;
+  color: var(--text-muted);
+  -webkit-mask-image: linear-gradient(
+    100deg,
+    color-mix(in srgb, black 30%, transparent) 35%,
+    black 50%,
+    color-mix(in srgb, black 30%, transparent) 65%
+  );
+  mask-image: linear-gradient(
+    100deg,
+    color-mix(in srgb, black 30%, transparent) 35%,
+    black 50%,
+    color-mix(in srgb, black 30%, transparent) 65%
+  );
+  -webkit-mask-size: 300% 100%;
+  mask-size: 300% 100%;
+}
+
+.ohb-session-loading-mark .ohb-lychee-leaf {
+  fill: var(--border-strong);
+  stroke: var(--text-muted);
+}
+
+@keyframes ohb-session-loading-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ohb-session-loading-sweep {
+  from {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+  to {
+    -webkit-mask-position: 0 0;
+    mask-position: 0 0;
+  }
+}
+
+/* Without motion the mark stays still and faint. */
+@media (prefers-reduced-motion: reduce) {
+  .ohb-session-loading-mark .ohb-lychee-mark {
+    animation: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    opacity: 0.45;
+  }
 }
 
 /* Thinking: three neutral dots breathing in turn, then the label and timer. */

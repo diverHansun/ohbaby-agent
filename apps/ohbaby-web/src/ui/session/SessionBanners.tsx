@@ -4,23 +4,16 @@ import { Banner } from "../shared/Banner.js";
 import { readableError } from "../shared/error-text.js";
 import type { SessionSyncBanner } from "./use-session-sync-banner.js";
 
-/** Loading and recovery state of the open conversation; silent when it is healthy. */
+/**
+ * Recovery and failure of the open conversation; silent when it is healthy.
+ * A first read shows `SessionLoading` in the conversation area instead.
+ */
 export function SessionSyncNotice(props: {
   readonly state: SessionSyncBanner;
   readonly error?: string;
   readonly onRetry: () => void;
 }): ReactElement | null {
-  if (!props.state) return null;
-  if (props.state === "loading")
-    return (
-      <div
-        className="ohb-conversation-loading"
-        role="status"
-        aria-live="polite"
-      >
-        Loading conversation…
-      </div>
-    );
+  if (!props.state || props.state === "loading") return null;
   return props.state === "recovering" ? (
     <Banner
       tone="info"

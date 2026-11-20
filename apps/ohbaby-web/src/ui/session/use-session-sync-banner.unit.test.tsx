@@ -2,10 +2,9 @@
 import type { SessionSyncState, UiSessionView } from "ohbaby-sdk";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SessionSyncNotice } from "./SessionBanners.js";
 import {
-  INITIAL_LOAD_BANNER_DELAY_MS,
   isSessionRecovery,
   useSessionSyncBanner,
 } from "./use-session-sync-banner.js";
@@ -44,13 +43,11 @@ function render(value: SessionSyncState): void {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
   container = document.createElement("div");
 });
 afterEach(() => {
   act(() => root?.unmount());
   root = undefined;
-  vi.useRealTimers();
 });
 
 describe("isSessionRecovery", () => {
@@ -66,29 +63,12 @@ describe("isSessionRecovery", () => {
 });
 
 describe("useSessionSyncBanner", () => {
-  it("does not flash for a fast first read after selecting a session", () => {
+  it("reports the first read at once and leaves the text to the placeholder", () => {
     render(state({}));
-    expect(current).toBeNull();
-    act(() => {
-      vi.advanceTimersByTime(100);
-    });
-    render(state({ status: "ready", view }));
-    act(() => {
-      vi.advanceTimersByTime(INITIAL_LOAD_BANNER_DELAY_MS);
-    });
-    expect(current).toBeNull();
-  });
-  it("reports a slow first read, and restarts the delay for a new scope", () => {
-    render(state({}));
-    act(() => {
-      vi.advanceTimersByTime(INITIAL_LOAD_BANNER_DELAY_MS);
-    });
     expect(current).toBe("loading");
-    const notice = container.querySelector('[role="status"]');
-    expect(notice?.textContent).toBe("Loading conversation…");
-    expect(notice?.getAttribute("aria-live")).toBe("polite");
+    expect(container.querySelector('[role="status"]')).toBeNull();
     expect(container.querySelector(".ohb-banner")).toBeNull();
-    render(state({ scope: { ...scope, bindingGeneration: 2 } }));
+    render(state({ status: "ready", view }));
     expect(current).toBeNull();
   });
   it("shows recovery and error immediately", () => {

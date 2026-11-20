@@ -3851,6 +3851,25 @@ describe("OhbabyWebApp slash command interactions", () => {
     await setTextareaValue(app.container, "keep this draft");
     expect(app.container.querySelector(".ohb-stop-button")).not.toBeNull();
   });
+  it("shows the loading mark, not the greeting, while a saved session is read", () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    act(() => {
+      fake.store.setSessionSync({
+        status: "syncing",
+        scope: { sessionId: "session_1", runtimeEpoch: "epoch" },
+        attempts: 1,
+      });
+    });
+    const app = mountApp(fake.runtime);
+    expect(app.container.querySelector(".ohb-draft-hero")).toBeNull();
+    expect(app.container.querySelector(".ohb-main-body-chat")).not.toBeNull();
+    expect(app.container.querySelector(".ohb-composer-hero")).toBeNull();
+    expect(
+      app.container.querySelector(".ohb-session-loading")?.textContent,
+    ).toBe("Loading conversation…");
+  });
   it("creates and selects sessions from the sidebar", async () => {
     const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
     const fake = createFakeRuntime({
