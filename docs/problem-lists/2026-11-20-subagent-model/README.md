@@ -6,7 +6,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-20 | 首轮 | Default 说明和全局子代理模型设置 | 后端完成，Web 和 TUI 界面待实施 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-20 | 首轮 | Default 说明和全局子代理模型设置 | 后端和 Web 完成，TUI 待实施 |
 
 ## 本轮文档地图
 
@@ -17,7 +17,7 @@
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 决策表、Stage 1 至 4、接口与兼容、风险 |
 | [03 参考项目](improve-1/03-reference-projects.md) | codex、kimi-code、claude-code、opencode、pi 的子代理模型做法与取舍 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 关键场景、回归清单、发布门、对抗性审查 |
-| [05 实施与验收](improve-1/05-implementation-acceptance.md) | 后端验收、真实请求和前端对接 |
+| [05 实施与验收](improve-1/05-implementation-acceptance.md) | 后端验收、真实请求、Web 实现与端到端走查 |
 
 ## 实施契约
 
