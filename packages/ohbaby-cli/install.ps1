@@ -442,9 +442,11 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
         if ($installDir -notmatch '^(?:[A-Za-z]:[\\/]|\\\\)') {
             throw 'OHBABY_INSTALL_DIR must be an absolute directory path.'
         }
-        $installDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($installDir).TrimEnd('\', '/')
+        $paths = $ExecutionContext.SessionState.Path
+        $installDir = $paths.GetUnresolvedProviderPathFromPSPath($installDir).TrimEnd('\', '/')
+        $homeDir = $paths.GetUnresolvedProviderPathFromPSPath($userHome).TrimEnd('\', '/')
         if (-not [IO.Path]::GetDirectoryName($installDir) -or
-            $installDir -ieq [IO.Path]::GetFullPath($userHome).TrimEnd('\', '/')) {
+            $installDir -ieq $homeDir) {
             throw 'Choose a separate installation directory.'
         }
         $installAttributes = Get-PathAttributes $installDir

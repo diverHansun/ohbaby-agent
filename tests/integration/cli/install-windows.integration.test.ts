@@ -7,6 +7,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   stat,
   symlink,
@@ -193,6 +194,12 @@ it.runIf(process.platform === "win32")(
       await expect(
         install(initialVersion, { OHBABY_INSTALL_DIR: root }),
       ).rejects.toThrow(/Choose a separate installation directory/);
+      const realHome = await realpath(root);
+      if (realHome.toLowerCase() !== root.toLowerCase()) {
+        await expect(
+          install(initialVersion, { OHBABY_INSTALL_DIR: realHome }),
+        ).rejects.toThrow(/Choose a separate installation directory/);
+      }
       await expect(install()).rejects.toThrow(/SHA-256 verification failed/);
       await expect(access(current)).rejects.toThrow();
       await expect(access(lock)).rejects.toThrow();
