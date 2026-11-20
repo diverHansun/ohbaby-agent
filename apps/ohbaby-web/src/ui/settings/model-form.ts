@@ -1,4 +1,5 @@
 import type {
+  UiReasoningConfig,
   UiSettingsFieldError,
   UiSettingsModel,
   UiSettingsModelCreate,
@@ -260,15 +261,24 @@ export function modelDeleteDescription(
   entry: UiSettingsModel,
   models: readonly UiSettingsModel[],
   defaultId: string | undefined,
+  subagentId?: string,
 ): string {
   const chats = "Chats using this model will switch to the default model.";
-  if (entry.id !== defaultId) return chats;
-  return models.some(
-    (model) => model.id !== entry.id && model.configurationComplete,
-  )
-    ? `The next available model becomes the default. ${chats}`
-    : "No model will be the default, so chats can't send until you add one.";
+  const description =
+    entry.id !== defaultId
+      ? chats
+      : models.some(
+            (model) => model.id !== entry.id && model.configurationComplete,
+          )
+        ? `The next available model becomes the default. ${chats}`
+        : "No model will be the default, so chats can't send until you add one.";
+  return entry.id === subagentId
+    ? `${description} ${SUBAGENT_DELETE_NOTE}`
+    : description;
 }
+
+/** Deleting the subagent model returns subagents to the chat's model (D10). */
+export const SUBAGENT_DELETE_NOTE = "Subagents will follow the chat's model.";
 
 export interface SettingsModelGroup {
   readonly provider: string;
@@ -297,6 +307,45 @@ export function modelDetecting(model: UiSettingsModel): boolean {
 }
 
 /** "model-x · Work", or the model name alone without a label. */
-export function modelTitle(model: UiSettingsModel): string {
+export function modelTitle(
+  model: Pick<UiSettingsModel, "model" | "label">,
+): string {
   return model.label ? `${model.model} · ${model.label}` : model.model;
+}
+
+/** `""` keeps the model's own default; the rest map to a saved preference. */
+export function reasoningValue(
+  reasoning: UiReasoningConfig | undefined,
+): string {
+  if (!reasoning) return "";
+  if (reasoning.enabled === false) return "off";
+  return reasoning.effort ?? "on";
+}
+
+/**
+ * The levels a capability offers, or `null` while there is nothing to pick.
+ * Levels already found stay usable while detection runs again.
+ */
+export function thinkingOptions(
+  view: UiSettingsModel["reasoning"],
+): readonly { readonly value: string; readonly label: string }[] | null {
+  if (
+    view.status === "unknown" ||
+    view.mode === undefined ||
+    view.mode === "none"
+  )
+    return null;
+  return [
+    ...(view.supportsDisabled ? [{ value: "off", label: "Off" }] : []),
+    ...(view.mode === "binary"
+      ? [{ value: "on", label: "On" }]
+      : view.efforts.map((effort) => ({ value: effort, label: effort }))),
+  ];
+}
+
+export function reasoningFrom(value: string): UiReasoningConfig | null {
+  if (value === "") return null;
+  if (value === "off") return { enabled: false };
+  if (value === "on") return { enabled: true };
+  return { enabled: true, effort: value };
 }

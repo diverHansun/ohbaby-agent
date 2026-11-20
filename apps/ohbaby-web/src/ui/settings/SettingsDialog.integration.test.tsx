@@ -132,6 +132,29 @@ function archivedTitles(): string[] {
   ].map((title) => title.textContent);
 }
 
+function subagentSelect(label: string): HTMLSelectElement {
+  const found = dialog().querySelector<HTMLSelectElement>(
+    `select[aria-label='${label}']`,
+  );
+  if (!found) throw new Error(`select not found: ${label}`);
+  return found;
+}
+
+function optionTexts(control: HTMLSelectElement): string[] {
+  return [...control.options].map((option) => option.textContent);
+}
+
+async function change(
+  control: HTMLSelectElement,
+  value: string,
+): Promise<void> {
+  await act(async () => {
+    control.value = value;
+    control.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 async function openSettings(
   container: HTMLElement,
 ): Promise<HTMLButtonElement> {
@@ -589,8 +612,8 @@ describe("settings dialog", () => {
       () => dialog().textContent.includes("deepseek-v4.1-pro"),
       "the model list",
     );
-    expect(dialog().textContent).not.toContain(
-      "New chats and chats that haven't picked a model use the default.",
+    expect(dialog().textContent).toContain(
+      "Default is used by new chats and chats that haven't picked a model.",
     );
     await click(button(dialog(), "deepseek-v4.1-pro actions"));
     await click(button(document.body, "Delete"));
@@ -617,6 +640,111 @@ describe("settings dialog", () => {
     if (confirm) await key(confirm, "Escape");
     expect(document.querySelector(".ohb-confirm-dialog")).toBeNull();
     expect(dialogOpen()).toBe(true);
+  });
+
+  it("sets the subagent model and its level, then follows the chat again", async () => {
+    const runtime = createMockRuntime("settings");
+    const select = vi.spyOn(runtime.settings, "selectSubagentModel");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () =>
+        dialog().querySelector("select[aria-label='Subagent model']") !== null,
+      "the subagent row",
+    );
+    const model = subagentSelect("Subagent model");
+    expect(model.value).toBe("");
+    expect(optionTexts(model)).toContain("Follow chat");
+    // Only complete entries can be picked.
+    expect(optionTexts(model)).not.toContain("gpt-4.1");
+    expect(
+      dialog().querySelector("select[aria-label='Subagent Reasoning Effort']"),
+    ).toBeNull();
+
+    await change(model, "m2");
+    expect(select).toHaveBeenLastCalledWith({ id: "m2" });
+    await until(
+      () =>
+        dialog().querySelector(
+          "select[aria-label='Subagent Reasoning Effort']",
+        ) !== null && !subagentSelect("Subagent model").disabled,
+      "the subagent levels",
+    );
+    const level = subagentSelect("Subagent Reasoning Effort");
+    expect(level.value).toBe("");
+    expect(optionTexts(level)[0]).toBe("Model default (high)");
+
+    await change(level, "low");
+    expect(select).toHaveBeenLastCalledWith({
+      id: "m2",
+      reasoning: { enabled: true, effort: "low" },
+    });
+    await until(
+      () =>
+        subagentSelect("Subagent Reasoning Effort").value === "low" &&
+        !subagentSelect("Subagent Reasoning Effort").disabled,
+      "the saved level",
+    );
+
+    await change(subagentSelect("Subagent model"), "");
+    expect(select).toHaveBeenLastCalledWith({ id: null });
+    await until(
+      () =>
+        dialog().querySelector(
+          "select[aria-label='Subagent Reasoning Effort']",
+        ) === null && !subagentSelect("Subagent model").disabled,
+      "Follow chat",
+    );
+  });
+
+  it("says subagents follow the chat when their model or provider is deleted", async () => {
+    const runtime = createMockRuntime("settings");
+    const container = mount(runtime);
+    await openSettings(container);
+    await until(
+      () => dialog().textContent.includes("deepseek-v4.1-pro"),
+      "the model list",
+    );
+    await act(async () => {
+      await runtime.settings.selectSubagentModel({ id: "m3" });
+    });
+    await until(
+      () => subagentSelect("Subagent model").value === "m3",
+      "the subagent model",
+    );
+    await click(button(dialog(), "gpt-5.2 actions"));
+    await click(button(document.body, "Delete"));
+    const single = document.querySelector<HTMLElement>(".ohb-confirm-dialog");
+    expect(single?.textContent).toContain(
+      "Subagents will follow the chat's model.",
+    );
+    await click(button(single ?? document.body, "Delete"));
+    await until(
+      () => subagentSelect("Subagent model").value === "",
+      "Follow chat after the delete",
+    );
+
+    await act(async () => {
+      await runtime.settings.selectSubagentModel({ id: "m1" });
+    });
+    await until(
+      () => subagentSelect("Subagent model").value === "m1",
+      "the subagent model",
+    );
+    await click(button(dialog(), "deepseek actions"));
+    await click(button(document.body, "Delete provider"));
+    const provider = document.querySelector<HTMLElement>(".ohb-confirm-dialog");
+    expect(provider?.textContent).toContain(
+      "Subagents will follow the chat's model.",
+    );
+    if (provider) await key(provider, "Escape");
+
+    // Another model's delete says nothing about subagents.
+    await click(button(dialog(), "claude-sonnet-5-5 actions"));
+    await click(button(document.body, "Delete"));
+    expect(
+      document.querySelector(".ohb-confirm-dialog")?.textContent,
+    ).not.toContain("Subagents");
   });
 
   it("shows a model's Reasoning Effort, detects it again and saves its default level", async () => {

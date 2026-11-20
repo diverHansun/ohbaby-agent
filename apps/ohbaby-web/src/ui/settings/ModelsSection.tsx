@@ -14,8 +14,10 @@ import {
   groupModels,
   modelDeleteDescription,
   modelDetecting,
+  SUBAGENT_DELETE_NOTE,
 } from "./model-form.js";
 import { SectionHeader, SectionStatus } from "./SectionFrame.js";
+import { SubagentModelRow } from "./SubagentModelRow.js";
 import { errorText, useSettingsResource } from "./useSettingsResource.js";
 
 type View =
@@ -184,10 +186,28 @@ export function ModelsSection(props: {
           </button>
         }
       />
+      {models && models.models.length > 0 ? (
+        <p className="ohb-settings-intro">
+          Default is used by new chats and chats that haven&apos;t picked a
+          model.
+        </p>
+      ) : null}
       <SectionStatus
         resource={resource}
         empty={models?.models.length === 0 ? "No models yet." : undefined}
       />
+      {models && models.models.length > 0 ? (
+        <SubagentModelRow
+          settings={settings}
+          models={models}
+          onSetup={(id) => {
+            setView({ kind: "edit", id });
+          }}
+          onMissing={() => {
+            void resource.reload();
+          }}
+        />
+      ) : null}
       {groups.map((group) => (
         <div key={group.provider} className="ohb-settings-group">
           <div className="ohb-settings-group-title">
@@ -377,6 +397,7 @@ function confirmText(
         confirm.model,
         models.models,
         models.active?.id,
+        models.subagent?.id,
       ),
     };
   const entries = models.models.filter(
@@ -386,10 +407,14 @@ function confirmText(
   const changesDefault = entries.some(
     (model) => model.id === models.active?.id,
   );
+  const chats = "Chats using these models will switch to the default model.";
+  const description = changesDefault
+    ? `The default model will change. ${chats}`
+    : chats;
   return {
     title: `Delete ${confirm.provider} and its ${String(count)} ${count === 1 ? "model" : "models"}?`,
-    description: changesDefault
-      ? "The default model will change. Chats using these models will switch to the default model."
-      : "Chats using these models will switch to the default model.",
+    description: entries.some((model) => model.id === models.subagent?.id)
+      ? `${description} ${SUBAGENT_DELETE_NOTE}`
+      : description,
   };
 }

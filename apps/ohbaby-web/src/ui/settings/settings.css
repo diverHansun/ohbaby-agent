@@ -240,6 +240,43 @@
   margin: 6px 0 8px;
 }
 
+/* Subagent model: keep the label readable when the controls need another line. */
+.ohb-subagent-model {
+  margin-top: 8px;
+}
+
+.ohb-subagent-model-row {
+  flex-wrap: wrap;
+}
+
+.ohb-subagent-model-row .ohb-settings-row-main {
+  flex-basis: 10rem;
+}
+
+.ohb-subagent-model-row .ohb-settings-row-control {
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.ohb-subagent-model-row .ohb-settings-select {
+  max-width: min(220px, 100%);
+  width: auto;
+}
+
+@media (max-width: 639px) {
+  .ohb-subagent-model-row .ohb-settings-row-control {
+    padding-bottom: 8px;
+    width: 100%;
+  }
+
+  /* Fill the row, but wrap rather than clip the selected text. */
+  .ohb-subagent-model-row .ohb-settings-select {
+    flex: 1 1 auto;
+    max-width: 100%;
+  }
+}
+
 /* Model rows keep lightweight hover feedback without a full-width bar. */
 [data-model-id] .ohb-settings-row.is-clickable .ohb-settings-row-main:hover {
   background: transparent;

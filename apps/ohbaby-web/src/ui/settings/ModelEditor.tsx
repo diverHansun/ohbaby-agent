@@ -1,7 +1,6 @@
 import { ArrowLeft } from "lucide-react";
 import {
   automaticTokenLimitText,
-  type UiReasoningConfig,
   type UiSettingsModel,
   type UiSettingsModels,
 } from "ohbaby-sdk";
@@ -22,6 +21,9 @@ import {
   modelDeleteDescription,
   modelPatchRequest,
   PROTOCOLS,
+  reasoningFrom,
+  reasoningValue,
+  thinkingOptions,
   UNCLEARABLE,
   TOKEN_FIELDS,
   validateModelForm,
@@ -96,41 +98,6 @@ const REASONING_NOTICE: Record<
   "unsupported-anthropic-effort-cleared":
     "Unsupported minimal effort was cleared. Using model default.",
 };
-
-/** `""` keeps the model's own default; the rest map to a saved preference. */
-function reasoningValue(reasoning: UiReasoningConfig | undefined): string {
-  if (!reasoning) return "";
-  if (reasoning.enabled === false) return "off";
-  return reasoning.effort ?? "on";
-}
-
-/**
- * The levels a capability offers, or `null` while there is nothing to pick.
- * Levels already found stay usable while detection runs again.
- */
-function thinkingOptions(
-  view: UiSettingsModel["reasoning"],
-): readonly { readonly value: string; readonly label: string }[] | null {
-  if (
-    view.status === "unknown" ||
-    view.mode === undefined ||
-    view.mode === "none"
-  )
-    return null;
-  return [
-    ...(view.supportsDisabled ? [{ value: "off", label: "Off" }] : []),
-    ...(view.mode === "binary"
-      ? [{ value: "on", label: "On" }]
-      : view.efforts.map((effort) => ({ value: effort, label: effort }))),
-  ];
-}
-
-function reasoningFrom(value: string): UiReasoningConfig | null {
-  if (value === "") return null;
-  if (value === "off") return { enabled: false };
-  if (value === "on") return { enabled: true };
-  return { enabled: true, effort: value };
-}
 
 /**
  * The add and edit sub-page of Models (03 §4.7). Common fields are listed;
@@ -569,6 +536,7 @@ export function ModelEditor(props: {
             entry,
             props.models.models,
             props.models.active?.id,
+            props.models.subagent?.id,
           )}
           confirmLabel="Delete"
           danger
