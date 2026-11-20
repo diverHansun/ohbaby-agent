@@ -6,7 +6,7 @@
 
 ### 开源 AI 编程 Agent，终端和浏览器里都能用。
 
-**模型自己选，能力靠 MCP 和 skills 扩展，危险操作先问你。**
+**模型随心选，可使用 MCP 和 skills 配置你想要的工具。**
 
 <a href="https://github.com/diverHansun/ohbaby-agent/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/diverHansun/ohbaby-agent/ci.yml?style=flat-square&label=CI&logo=github"></a>
 <a href="https://www.npmjs.com/package/ohbaby-cli"><img alt="npm" src="https://img.shields.io/npm/v/ohbaby-cli?style=flat-square&color=cb3837&logo=npm"></a>
@@ -24,7 +24,7 @@
 
 ## 亮点
 
-- **模型随你选**：OpenAI、Anthropic、智谱、DeepSeek、通义千问/DashScope，或任何 OpenAI 兼容的端点，本地模型也行。
+- **三种协议**：`openai-compatible`、`openai-responses`、`anthropic`。
 - **两个界面，同一个 Agent**：基于 [Ink](https://github.com/vadimdemedes/ink) 的终端界面，加上 `ohbaby serve` 启动的本地 Web UI。
 - **内置工具**：读写文件、执行 Shell 命令、联网搜索、管理待办。
 - **权限控制**：危险操作先等你批准；信得过的任务可以用 `/permission` 切到 Full access。
@@ -79,7 +79,7 @@ ohbaby
 | Base URL | SDK 的 base URL，不要带 `/chat/completions` 后缀 |
 | API key env | 可选。存放 API Key 的环境变量名，如 `OPENAI_API_KEY` |
 | API key value | 可选。LM Studio 这类无需鉴权的本地端点可以留空 |
-| Model name | 如 `gpt-5.5`、`claude-sonnet-4-5`、`glm-5.1`，或你的 provider 提供的模型 ID |
+| Model name | 如 `gpt-6.2-sol`、`claude-opus-5-5`、`glm-5.3`，或你的 provider 提供的模型 ID |
 | Context window / Max output tokens | 可选 |
 
 在这里填的 API Key 会保存到 `~/.ohbaby/.env`。
@@ -87,7 +87,7 @@ ohbaby
 参数模式不打开面板。它从环境变量读取 API Key，不接受直接写在命令里的 Key：
 
 ```bash
-/connect --provider openai --base-url https://api.openai.com/v1 --model gpt-5.5 --api-key-env OPENAI_API_KEY --interface-provider openai-responses
+/connect --provider openai --base-url https://api.openai.com/v1 --model gpt-6.2-sol --api-key-env OPENAI_API_KEY --interface-provider openai-responses
 ```
 
 `--interface-provider` 可选 `openai-compatible`、`openai-responses` 或 `anthropic`。不传时按 URL 推断，OpenAI 的 URL 默认走 Chat Completions。

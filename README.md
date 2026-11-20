@@ -6,7 +6,7 @@
 
 ### An open-source AI coding agent, in your terminal and your browser.
 
-**Bring your own model. Extend it with MCP and skills. Approve every risky step.**
+**Bring your own model. Extend it with MCP and skills.**
 
 <a href="https://github.com/diverHansun/ohbaby-agent/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/diverHansun/ohbaby-agent/ci.yml?style=flat-square&label=CI&logo=github"></a>
 <a href="https://www.npmjs.com/package/ohbaby-cli"><img alt="npm" src="https://img.shields.io/npm/v/ohbaby-cli?style=flat-square&color=cb3837&logo=npm"></a>
@@ -24,7 +24,7 @@
 
 ## Highlights
 
-- **Any model**: OpenAI, Anthropic, Zhipu, DeepSeek, Qwen/DashScope, or any OpenAI-compatible endpoint, local ones included.
+- **Three protocols**: `openai-compatible`, `openai-responses`, and `anthropic`.
 - **Two interfaces, one agent**: a fast [Ink](https://github.com/vadimdemedes/ink) terminal UI, and a local web UI started with `ohbaby serve`.
 - **Built-in tools**: read and edit files, run shell commands, search the web, and keep a todo list.
 - **Permissions**: risky actions wait for your approval; switch to Full access with `/permission` when you trust the task.
@@ -79,7 +79,7 @@ ohbaby
 | Base URL | The SDK base URL, without a `/chat/completions` suffix |
 | API key env | Optional. The environment variable that holds the key, such as `OPENAI_API_KEY` |
 | API key value | Optional. Leave it blank for keyless local endpoints such as LM Studio |
-| Model name | Such as `gpt-5.5`, `claude-sonnet-4-5`, `glm-5.1`, or your provider's model id |
+| Model name | Such as `gpt-6.2-sol`, `claude-opus-5-5`, `glm-5.3`, or your provider's model id |
 | Context window / Max output tokens | Optional |
 
 Keys you enter here are saved to `~/.ohbaby/.env`.
@@ -87,7 +87,7 @@ Keys you enter here are saved to `~/.ohbaby/.env`.
 Argument mode skips the panel. It reads the key from an environment variable and never takes it inline:
 
 ```bash
-/connect --provider openai --base-url https://api.openai.com/v1 --model gpt-5.5 --api-key-env OPENAI_API_KEY --interface-provider openai-responses
+/connect --provider openai --base-url https://api.openai.com/v1 --model gpt-6.2-sol --api-key-env OPENAI_API_KEY --interface-provider openai-responses
 ```
 
 `--interface-provider` takes `openai-compatible`, `openai-responses` or `anthropic`. Leave it out and ohbaby infers it from the URL; OpenAI URLs default to Chat Completions.
