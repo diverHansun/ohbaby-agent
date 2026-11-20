@@ -77,6 +77,8 @@ function createDeps(movePlan: SessionWorkspaceMovePlan): {
         Promise.resolve(directory.replace(/\/sub$/u, "")),
       isDefaultDirectory: (directory) =>
         directory === "/home/.ohbaby/workspace/default",
+      defaultDirectory: () =>
+        Promise.resolve("/home/.ohbaby/workspace/default"),
       discoverWorkspace,
       loadQueueOwner,
     },
@@ -94,7 +96,7 @@ describe("moveSessionWorkspace", () => {
 
     const moved = await moveSessionWorkspace(fixture.deps, "s1", "/repo/b/sub");
 
-    expect(fixture.planMove).toHaveBeenCalledWith("s1", "/repo/b");
+    expect(fixture.planMove).toHaveBeenCalledWith("s1", "/repo/b", undefined);
     expect(fixture.discoverWorkspace).toHaveBeenCalledWith("/repo/b");
     expect(fixture.commitMove).toHaveBeenCalledTimes(1);
     expect(fixture.loadQueueOwner).not.toHaveBeenCalled();
@@ -113,13 +115,55 @@ describe("moveSessionWorkspace", () => {
     expect(moved.pendingWorkingDirectory).toBe("/repo/b");
   });
 
-  it("leaves a project without resolving or registering a directory", async () => {
+  it("leaves a project without registering a directory", async () => {
     const fixture = createDeps(plan({ binding: {}, queueRoot: "/repo/a" }));
 
     await moveSessionWorkspace(fixture.deps, "s1", null);
 
-    expect(fixture.planMove).toHaveBeenCalledWith("s1", null);
+    expect(fixture.planMove).toHaveBeenCalledWith("s1", null, undefined);
     expect(fixture.discoverWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("runs a chat leaving its project in the default directory once its own is gone", async () => {
+    const fixture = createDeps(plan({ binding: {}, queueRoot: "/repo/a" }));
+    const deps: SessionWorkspaceMoveDeps = {
+      ...fixture.deps,
+      resolveScope: (directory) =>
+        directory === "/repo/a"
+          ? Promise.reject(new Error("missing"))
+          : Promise.resolve(directory),
+    };
+
+    await moveSessionWorkspace(deps, "s1", null);
+
+    expect(fixture.planMove).toHaveBeenCalledWith(
+      "s1",
+      null,
+      "/home/.ohbaby/workspace/default",
+    );
+  });
+
+  it("checks the updated working directory when a turn starts during removal", async () => {
+    const fixture = createDeps(plan({ binding: {}, queueRoot: "/repo/b" }));
+    let workingDirectory = "/repo/a";
+    const resolveScope = vi.fn((directory: string) => {
+      if (directory !== "/repo/a") return Promise.resolve(directory);
+      workingDirectory = "/repo/b";
+      return Promise.reject(new Error("missing"));
+    });
+    const deps: SessionWorkspaceMoveDeps = {
+      ...fixture.deps,
+      catalog: {
+        ...fixture.deps.catalog,
+        get: () => session({ workingDirectory }),
+      },
+      resolveScope,
+    };
+
+    await moveSessionWorkspace(deps, "s1", null);
+
+    expect(resolveScope.mock.calls).toEqual([["/repo/a"], ["/repo/b"]]);
+    expect(fixture.planMove).toHaveBeenCalledWith("s1", null, undefined);
   });
 
   it("refuses the default workspace as a project", async () => {

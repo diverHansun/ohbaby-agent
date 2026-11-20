@@ -103,7 +103,8 @@ async function start(withRegistry = true): Promise<void> {
       list: listGlobalSessions,
       search: searchGlobalSessions,
       get: getGlobalSession,
-      planMove: planSessionWorkspaceMove,
+      planMove: (id, directory, leaveTo) =>
+        planSessionWorkspaceMove(id, directory, undefined, leaveTo),
       commitMove: commitSessionWorkspaceMove,
       restore: restoreArchivedSession,
       delete: async (id) => {

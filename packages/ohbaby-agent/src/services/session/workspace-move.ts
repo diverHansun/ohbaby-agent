@@ -41,12 +41,14 @@ export interface SessionWorkspaceMovePlan {
 
 /**
  * Plans a workspace change. `workspaceDirectory` must already be a validated
- * workspace scope; null removes the session from its workspace.
+ * workspace scope; null removes the session from its workspace, and then
+ * `leaveTo` can name the next turn's directory.
  */
 export function planSessionWorkspaceMove(
   sessionId: string,
   workspaceDirectory: string | null,
   db: DatabaseConnection = getDatabase(),
+  leaveTo?: string,
 ): SessionWorkspaceMovePlan {
   const session = readSessionRow(db, sessionId);
   if (!session) {
@@ -56,7 +58,11 @@ export function planSessionWorkspaceMove(
     );
   }
   assertMovable(session);
-  const binding = resolveSessionWorkspaceBinding(session, workspaceDirectory);
+  const binding = resolveSessionWorkspaceBinding(
+    session,
+    workspaceDirectory,
+    leaveTo,
+  );
   const queueRoot = binding.pendingWorkingDirectory ?? session.workingDirectory;
   const queuedScopes = db
     .prepare<{ readonly scope_key: string }>(

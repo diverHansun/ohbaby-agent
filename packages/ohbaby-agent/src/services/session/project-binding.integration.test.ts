@@ -135,6 +135,30 @@ describe("session project binding", () => {
     );
   });
 
+  it("leaves a project for a named directory at the next turn", async () => {
+    const session = await manager.create("/repo/a");
+
+    const db = getDatabase();
+    const leave = planSessionWorkspaceMove(session.id, null, db, "/default");
+    expect(leave).toMatchObject({
+      binding: { pendingWorkingDirectory: "/default" },
+      queueRoot: "/default",
+    });
+    const removed = await commitSessionWorkspaceMove(leave);
+    expect(removed).toMatchObject({
+      workingDirectory: "/repo/a",
+      pendingWorkingDirectory: "/default",
+    });
+    expect(removed.workspaceDirectory).toBeUndefined();
+    // Naming the directory it already runs in leaves nothing pending.
+    expect(
+      planSessionWorkspaceMove(session.id, null, db, "/repo/a").binding,
+    ).toEqual({});
+    expect(planSessionWorkspaceMove(session.id, null, db).queueRoot).toBe(
+      "/repo/a",
+    );
+  });
+
   it("moves to another project at the next turn and leaves a project keeping the directory", async () => {
     const session = await manager.create("/repo/a");
 

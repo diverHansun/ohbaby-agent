@@ -15,6 +15,7 @@ import type {
   UiPromptReceipt,
   UiPromptResubmissionReceipt,
   UiPromptSubmission,
+  UiSessionExport,
 } from "ohbaby-sdk";
 import { NodeSqliteConnection } from "../../../../ohbaby-agent/src/services/database/connection.js";
 import { createRemoteUiBackendClient } from "../../protocols/jsonrpc/client.js";
@@ -350,6 +351,117 @@ async function startedCount(path: string): Promise<number> {
 }
 
 describe("global single serve across real processes", () => {
+  it.each([
+    ["into another workspace", true],
+    ["out of every workspace", false],
+  ])(
+    "keeps a chat in the catalog after its workspace is deleted and preserves its history when moved %s",
+    async (_into, intoTarget) => {
+      const root = await realpath(
+        await mkdtemp(join(tmpdir(), "ohbaby-real-missing-chat-workspace-")),
+      );
+      cleanupDirectories.push(root);
+      const source = join(root, "source");
+      const target = join(root, "target");
+      await mkdir(source);
+      await mkdir(target);
+      const gatePath = join(root, "release");
+      await writeFile(gatePath, "");
+      const child = spawnServe({
+        authToken: "missing-chat-e2e",
+        blockingProvider: { gatePath, startedPath: join(root, "started.log") },
+        dbPath: join(root, "agent.db"),
+        homeDirectory: join(root, "home"),
+        ohbabyHome: join(root, "config"),
+        workdir: source,
+      });
+      const { url } = await waitForReady(child);
+      const origin = new URL(url).origin;
+      const globalHeaders = {
+        authorization: "Bearer missing-chat-e2e",
+        "content-type": "application/json",
+      };
+      const register = async (
+        directory: string,
+      ): Promise<Record<string, string>> => {
+        const headers = {
+          ...globalHeaders,
+          "x-ohbaby-directory": directory,
+          "x-ohbaby-client-id": "missing-chat-client",
+        };
+        const response = await fetch(`${origin}/v1/clients`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ clientId: "missing-chat-client" }),
+        });
+        expect(response.status).toBe(200);
+        return headers;
+      };
+      const sourceHeaders = await register(source);
+      const id = await createServerSession(origin, sourceHeaders);
+      const prompt = "A message saved before deleting the folder";
+      const accepted = await fetch(`${origin}/v1/prompts`, {
+        method: "POST",
+        headers: sourceHeaders,
+        body: JSON.stringify({
+          clientRequestId: "saved-prompt",
+          sessionId: id,
+          text: prompt,
+        }),
+      });
+      expect(accepted.status).toBe(202);
+      const { promptId } = (await accepted.json()) as UiPromptReceipt;
+      await waitForPromptStatus(origin, sourceHeaders, promptId, "succeeded");
+      await rm(source, { recursive: true });
+
+      const catalog = await fetch(`${origin}/v1/sessions`, {
+        headers: globalHeaders,
+      });
+      expect(await catalog.json()).toMatchObject({ sessions: [{ id }] });
+      const sessionUrl = `${origin}/v1/sessions/${id}`;
+      const unavailable = await fetch(`${sessionUrl}/select`, {
+        method: "PATCH",
+        headers: sourceHeaders,
+      });
+      expect(unavailable.status).toBe(400);
+      expect(await unavailable.json()).toMatchObject({
+        error: {
+          code: "directory-unavailable",
+          message: "The workspace folder is missing or unreadable.",
+        },
+      });
+      // Out of every workspace, the chat runs where new chats without one do.
+      const destination = intoTarget
+        ? target
+        : join(root, "config", "workspace", "default");
+      const move = await fetch(`${sessionUrl}/workspace`, {
+        method: "POST",
+        headers: globalHeaders,
+        body: JSON.stringify({
+          workspaceDirectory: intoTarget ? target : null,
+        }),
+      });
+      expect(move.status).toBe(200);
+      expect(await move.json()).toMatchObject({
+        session: { id, pendingWorkingDirectory: destination },
+      });
+
+      const targetHeaders = await register(destination);
+      const select = await fetch(`${sessionUrl}/select`, {
+        method: "PATCH",
+        headers: targetHeaders,
+      });
+      expect(select.status).toBe(200);
+      const exported = await fetch(`${sessionUrl}/export?format=jsonl`, {
+        headers: targetHeaders,
+      });
+      expect(exported.status).toBe(200);
+      const artifact = (await exported.json()) as { export: UiSessionExport };
+      expect(artifact.export.content).toContain(prompt);
+    },
+    PROCESS_TEST_TIMEOUT_MS,
+  );
+
   it(
     "archives, restores, restarts and permanently deletes sessions through the real daemon",
     async () => {

@@ -580,8 +580,13 @@ async function startFreshDaemon(input: {
           list: (query) => listGlobalSessions(query),
           search: (query) => searchGlobalSessions(query),
           get: (sessionId) => getGlobalSession(sessionId),
-          planMove: (sessionId, workspaceDirectory) =>
-            planSessionWorkspaceMove(sessionId, workspaceDirectory),
+          planMove: (sessionId, workspaceDirectory, leaveTo) =>
+            planSessionWorkspaceMove(
+              sessionId,
+              workspaceDirectory,
+              undefined,
+              leaveTo,
+            ),
           commitMove: (plan) => commitSessionWorkspaceMove(plan),
         },
         workspaceRegistry,

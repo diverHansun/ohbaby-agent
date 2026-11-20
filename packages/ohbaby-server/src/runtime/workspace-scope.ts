@@ -38,21 +38,26 @@ export async function resolveWorkspaceScope(
   }
 
   let canonicalDirectory: string;
+  let isDirectory: boolean;
   try {
     canonicalDirectory = await realpath(requestedDirectory);
-    await access(canonicalDirectory, constants.R_OK);
+    isDirectory = (await stat(canonicalDirectory)).isDirectory();
+    await access(
+      canonicalDirectory,
+      isDirectory ? constants.R_OK | constants.X_OK : constants.R_OK,
+    );
   } catch (error) {
     throw new WorkspaceScopeError(
       "directory-unavailable",
-      "x-ohbaby-directory does not exist or is not readable",
+      "The workspace folder is missing or unreadable.",
       { cause: error },
     );
   }
 
-  if (!(await stat(canonicalDirectory)).isDirectory()) {
+  if (!isDirectory) {
     throw new WorkspaceScopeError(
       "directory-not-directory",
-      "x-ohbaby-directory must identify a directory",
+      "The workspace path is not a folder.",
     );
   }
 

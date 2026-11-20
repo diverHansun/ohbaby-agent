@@ -347,6 +347,61 @@ describe("global daemon workspace routing", () => {
     }
   });
 
+  it("reports a loaded workspace as unavailable once its folder is deleted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-global-gone-"));
+    cleanupDirs.push(root);
+    const repoA = join(root, "repo-a");
+    const repoB = join(root, "repo-b");
+    await mkdir(join(repoA, ".git"), { recursive: true });
+    await mkdir(join(repoB, ".git"), { recursive: true });
+    const canonicalA = await realpath(repoA);
+    const canonicalB = await realpath(repoB);
+    const server = createDaemonHttpServer({
+      authToken: "token",
+      backend: createBackend(),
+      createWorkspaceBackend: () => createBackend(),
+      listKnownWorkspaceScopes: () => [canonicalB],
+      port: 0,
+      scopeRoot: canonicalA,
+      workspaceRegistry: createRegistry(() => 42_000),
+    });
+    await server.start();
+
+    try {
+      const authorization = daemonAuthHeader("token");
+      await fetch(`${server.url}/v1/snapshot`, {
+        headers: {
+          authorization,
+          "x-ohbaby-client-id": "client_b",
+          "x-ohbaby-directory": canonicalB,
+        },
+      });
+      // Listing registers the workspace while its folder still exists.
+      await fetch(`${server.url}/v1/scopes`, { headers: { authorization } });
+      await rm(repoB, { force: true, recursive: true });
+
+      const scopes = await fetch(`${server.url}/v1/scopes`, {
+        headers: { authorization },
+      });
+      const body = (await scopes.json()) as {
+        readonly scopes: readonly {
+          readonly available: boolean;
+          readonly directory: string;
+          readonly loaded: boolean;
+        }[];
+      };
+      expect(body.scopes).toContainEqual(
+        expect.objectContaining({
+          available: false,
+          directory: canonicalB,
+          loaded: true,
+        }),
+      );
+    } finally {
+      await server.stop();
+    }
+  });
+
   it("opens and hides projects through authenticated global routes", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-global-projects-"));
     cleanupDirs.push(root);
@@ -831,7 +886,7 @@ describe("global daemon session routes", () => {
       await expect(moved.json()).resolves.toMatchObject({
         session: { workspaceDirectory: repoB, pendingWorkingDirectory: repoB },
       });
-      expect(planMove).toHaveBeenCalledWith("s1", repoB);
+      expect(planMove).toHaveBeenCalledWith("s1", repoB, undefined);
       expect(adopt).toHaveBeenCalledTimes(1);
       expect(registry.list().some((entry) => entry.scopeKey === repoB)).toBe(
         true,

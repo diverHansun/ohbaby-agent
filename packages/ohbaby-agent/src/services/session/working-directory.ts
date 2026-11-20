@@ -46,16 +46,22 @@ export function assertSessionInWorkspace(
 /**
  * Moving to a workspace changes the next turn's directory unless the session
  * already runs there. Leaving a workspace keeps the current directory and
- * cancels a change that has not started yet.
+ * cancels a change that has not started yet; `leaveTo` names another
+ * directory for the next turn instead.
  */
 export function resolveSessionWorkspaceBinding(
   session: SessionRootFields,
   workspaceDirectory: string | null,
+  leaveTo?: string,
 ): {
   readonly workspaceDirectory?: string;
   readonly pendingWorkingDirectory?: string;
 } {
-  if (workspaceDirectory === null) return {};
+  if (workspaceDirectory === null)
+    return leaveTo === undefined ||
+      sameSessionDirectory(session.workingDirectory, leaveTo)
+      ? {}
+      : { pendingWorkingDirectory: leaveTo };
   return sameSessionDirectory(session.workingDirectory, workspaceDirectory)
     ? { workspaceDirectory }
     : { workspaceDirectory, pendingWorkingDirectory: workspaceDirectory };

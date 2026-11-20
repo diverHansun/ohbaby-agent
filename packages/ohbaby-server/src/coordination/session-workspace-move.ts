@@ -29,6 +29,7 @@ export interface GlobalSessionCatalog {
   planMove(
     sessionId: string,
     workspaceDirectory: string | null,
+    leaveTo?: string,
   ): SessionWorkspaceMovePlan;
   commitMove(plan: SessionWorkspaceMovePlan): Promise<CoreSession>;
 }
@@ -43,6 +44,8 @@ export interface SessionWorkspaceMoveDeps {
   /** Canonical workspace scope; rejects missing or non-directory paths. */
   readonly resolveScope: (directory: string) => Promise<string>;
   readonly isDefaultDirectory: (directory: string) => boolean;
+  /** Where chats without a workspace run; created when missing. */
+  readonly defaultDirectory: () => Promise<string>;
   /** Makes a workspace that was never opened visible; hidden ones stay hidden. */
   readonly discoverWorkspace?: (directory: string) => Promise<unknown>;
   readonly loadQueueOwner: (
@@ -70,13 +73,33 @@ export async function moveSessionWorkspace(
   requestedDirectory: string | null,
 ): Promise<CoreSession> {
   let workspaceDirectory: string | null = null;
+  let leaveTo: string | undefined;
   if (requestedDirectory !== null) {
     workspaceDirectory = await deps.resolveScope(requestedDirectory);
     if (deps.isDefaultDirectory(workspaceDirectory)) {
       throw new DefaultDirectoryNotWorkspaceError();
     }
+  } else {
+    // A chat leaving its workspace keeps its directory. If that folder is
+    // gone the chat could not open again, so it runs where chats without a
+    // workspace do.
+    let current = deps.catalog.get(sessionId)?.workingDirectory;
+    while (current !== undefined) {
+      const reachable = await deps.resolveScope(current).then(
+        () => true,
+        () => false,
+      );
+      const fallback = reachable ? undefined : await deps.defaultDirectory();
+      const latest = deps.catalog.get(sessionId)?.workingDirectory;
+      if (latest === current) {
+        leaveTo = fallback;
+        break;
+      }
+      // A turn may have applied a pending directory while we checked the old one.
+      current = latest;
+    }
   }
-  const plan = deps.catalog.planMove(sessionId, workspaceDirectory);
+  const plan = deps.catalog.planMove(sessionId, workspaceDirectory, leaveTo);
   if (workspaceDirectory !== null)
     await deps.discoverWorkspace?.(workspaceDirectory);
   if (!plan.needsQueueHandover) {

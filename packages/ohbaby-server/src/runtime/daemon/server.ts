@@ -527,9 +527,13 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         (directory) => !isDefaultDirectory(directory),
       ),
     );
-    const available = new Set<string>(loaded);
-    for (const directory of (await this.options.listKnownWorkspaceScopes?.()) ??
-      []) {
+    // A loaded instance outlives its folder, so loaded scopes are checked on
+    // disk too: new clients there fail the same check.
+    const available = new Set<string>();
+    for (const directory of [
+      ...loaded,
+      ...((await this.options.listKnownWorkspaceScopes?.()) ?? []),
+    ]) {
       try {
         const scope = await resolveWorkspaceScope(directory);
         if (!isDefaultDirectory(scope)) available.add(scope);
@@ -901,6 +905,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
           catalog,
           resolveScope: resolveWorkspaceScope,
           isDefaultDirectory: isDefaultDirectory,
+          defaultDirectory: () => ensureDefaultDirectory(),
           discoverWorkspace: (directory) =>
             this.options.workspaceRegistry?.ensureDiscovered([directory]) ??
             Promise.resolve(),

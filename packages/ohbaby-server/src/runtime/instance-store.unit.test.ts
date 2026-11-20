@@ -1,4 +1,5 @@
 import {
+  chmod,
   mkdir,
   mkdtemp,
   realpath,
@@ -87,6 +88,24 @@ describe("resolveWorkspaceScope", () => {
         .map((directory) => rm(directory, { force: true, recursive: true })),
     );
   });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "rejects a readable directory without search permission",
+    async () => {
+      const root = await mkdtemp(
+        join(tmpdir(), "ohbaby-workspace-permission-"),
+      );
+      cleanupDirs.push(root);
+      await chmod(root, 0o400);
+      try {
+        await expect(resolveWorkspaceScope(root)).rejects.toMatchObject({
+          code: "directory-unavailable",
+        });
+      } finally {
+        await chmod(root, 0o700);
+      }
+    },
+  );
 
   it("canonicalizes a nested directory to its git root", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-workspace-"));
