@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { readableError } from "./error-text.js";
+import { readableError, sessionOpenError } from "./error-text.js";
 
 describe("readableError", () => {
   it("words network failures from each browser the same way", () => {
@@ -27,5 +27,27 @@ describe("readableError", () => {
 
   it("passes other messages through", () => {
     expect(readableError("Session not found")).toBe("Session not found");
+  });
+});
+
+describe("sessionOpenError", () => {
+  it("points to Move to workspace when the chat's folder is gone", () => {
+    for (const code of ["directory-unavailable", "directory-not-directory"]) {
+      const error = Object.assign(new Error("raw server wording"), {
+        status: 400,
+        code,
+      });
+      expect(sessionOpenError(error)).toBe(
+        "This chat's folder is missing or unreadable. Use Move to workspace in the chat menu to choose an available folder.",
+      );
+    }
+  });
+
+  it("keeps other failures as they are", () => {
+    const error = Object.assign(new Error("Session not found"), {
+      status: 404,
+      code: "SESSION_NOT_FOUND",
+    });
+    expect(sessionOpenError(error)).toBe("Session not found");
   });
 });

@@ -314,12 +314,38 @@
 .ohb-notice-stack {
   display: flex;
   flex-direction: column;
-  gap: 6px;
   max-width: min(460px, calc(100vw - 32px));
   position: fixed;
   right: 16px;
   top: calc(var(--header-height) + 10px);
   z-index: 200;
+}
+
+.ohb-notice {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-bottom: 6px;
+  transition:
+    grid-template-rows 200ms var(--ease),
+    margin-bottom 200ms var(--ease),
+    opacity 200ms var(--ease),
+    transform 200ms var(--ease);
+}
+
+.ohb-notice-body {
+  min-height: 0;
+}
+
+.ohb-notice.is-exiting {
+  grid-template-rows: 0fr;
+  margin-bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+
+.ohb-notice.is-exiting .ohb-notice-body {
+  overflow: hidden;
 }
 
 /* Notice card (pi-web): plain surface, hairline edge, soft shadow; nothing

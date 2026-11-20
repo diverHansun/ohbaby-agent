@@ -407,3 +407,93 @@ it("refocuses an already open search with the global shortcut", () => {
     container.querySelector('input[aria-label="Search chats"]'),
   );
 });
+
+it("shows one actionable notice for repeated failures to open a chat and animates it out", async () => {
+  const runtime = createMockRuntime("typical");
+  runtime.openSession = vi.fn().mockRejectedValue(
+    Object.assign(new Error("Internal directory validation failed"), {
+      status: 400,
+      code: "directory-unavailable",
+    }),
+  );
+  vi.useFakeTimers();
+  try {
+    const container = mount(runtime);
+    const select = button(container, "Select Refactor the session sidebar");
+    await act(async () => {
+      select.click();
+      select.click();
+      await Promise.resolve();
+    });
+    const notices = (): NodeListOf<Element> =>
+      container.querySelectorAll(".ohb-notice-stack .ohb-banner");
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0].textContent).toContain("Move to workspace");
+    expect(notices()[0].textContent).not.toContain("Internal directory");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    expect(container.querySelector(".ohb-notice.is-exiting")).not.toBeNull();
+    expect(notices()).toHaveLength(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(notices()).toHaveLength(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps a notice open until both the pointer and keyboard focus leave it", async () => {
+  const runtime = createMockRuntime("typical");
+  runtime.openSession = vi
+    .fn()
+    .mockRejectedValue(new Error("Session not found"));
+  vi.useFakeTimers();
+  try {
+    const container = mount(runtime);
+    await act(async () => {
+      button(container, "Select Refactor the session sidebar").click();
+      await Promise.resolve();
+    });
+    const notice = container.querySelector(".ohb-notice");
+    if (!(notice instanceof HTMLElement)) throw new Error("No notice shown");
+    act(() => {
+      notice.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(notice.classList.contains("is-exiting")).toBe(false);
+
+    const dismiss = button(notice, "Dismiss");
+    act(() => {
+      dismiss.focus();
+      notice.dispatchEvent(
+        new MouseEvent("mouseout", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(notice.classList.contains("is-exiting")).toBe(false);
+
+    act(() => {
+      dismiss.blur();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    expect(notice.classList.contains("is-exiting")).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(container.querySelector(".ohb-notice")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});

@@ -14,6 +14,7 @@ import { DraftFallback } from "../session/DraftFallback.js";
 import { selectViewModel } from "../session/selectors.js";
 import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
+import { readableError, sessionOpenError } from "../shared/error-text.js";
 import { type NoticeItem, NoticeStack } from "../shared/Notice.js";
 import { ConnectionOverlay } from "./ConnectionOverlay.js";
 import type { SubagentReadingCache } from "../session/SubagentConversationBody.js";
@@ -46,6 +47,7 @@ import { MainHeader } from "./MainHeader.js";
 
 const NO_HIDDEN_PAGES: readonly SidePageKind[] = [];
 const HIDE_BACKGROUND_TASKS: readonly SidePageKind[] = ["backgroundTasks"];
+const MAX_NOTICES = 3;
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -110,14 +112,20 @@ export function AppController(props: {
   );
 
   const pushError = useCallback((error: unknown): void => {
-    setNotices((current) => [
-      ...current,
-      {
-        id: globalThis.crypto.randomUUID(),
-        kind: "error",
-        message: message(error),
-      },
-    ]);
+    const text = readableError(message(error));
+    const notice: NoticeItem = {
+      id: globalThis.crypto.randomUUID(),
+      kind: "error",
+      message: text,
+    };
+    setNotices((current) =>
+      current.some((item) => item.kind === notice.kind && item.message === text)
+        ? current
+        : [...current.slice(1 - MAX_NOTICES), notice],
+    );
+  }, []);
+  const dismissNotice = useCallback((id: string): void => {
+    setNotices((current) => current.filter((notice) => notice.id !== id));
   }, []);
   const runAction = useCallback(
     async (action: () => Promise<void>): Promise<boolean> => {
@@ -384,9 +392,16 @@ export function AppController(props: {
             }}
             onSelectSession={(session) => {
               dismissDrawer();
-              void runAction(() =>
-                runtime.openSession(session.id, session.requestDirectory),
+              const opening = runtime.openSession(
+                session.id,
+                session.requestDirectory,
               );
+              const generation = runtime.getSelectionGeneration();
+              void opening.catch((error: unknown) => {
+                if (generation === runtime.getSelectionGeneration()) {
+                  pushError(sessionOpenError(error));
+                }
+              });
             }}
             onArchiveSession={(session) =>
               runAction(() =>
@@ -504,14 +519,7 @@ export function AppController(props: {
         }
         overlays={
           <>
-            <NoticeStack
-              notices={notices}
-              onDismiss={(id) => {
-                setNotices((current) =>
-                  current.filter((notice) => notice.id !== id),
-                );
-              }}
-            />
+            <NoticeStack notices={notices} onDismiss={dismissNotice} />
             {terminalTabs.confirmation ? (
               <ConfirmDialog
                 title="Close terminal?"
