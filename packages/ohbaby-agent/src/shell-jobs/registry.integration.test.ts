@@ -379,7 +379,16 @@ const ready = setInterval(() => {
       const script = path.join(workdir, "large-output.mjs");
       await writeFile(
         script,
-        "import fs from 'node:fs'; fs.writeSync(1, Buffer.alloc(524288, 65)); fs.writeSync(2, Buffer.alloc(524288, 66)); fs.writeSync(1, 'stdout-end'); fs.writeSync(2, 'stderr-end');",
+        `function write(stream, text) {
+  return new Promise((resolve, reject) => {
+    stream.write(text, (error) => error ? reject(error) : resolve());
+  });
+}
+await Promise.all([
+  write(process.stdout, 'A'.repeat(524288) + 'stdout-end'),
+  write(process.stderr, 'B'.repeat(524288) + 'stderr-end'),
+]);
+`,
       );
       const base = createContext(workdir);
       if (!base.environment) throw new Error("Missing fixture environment");
