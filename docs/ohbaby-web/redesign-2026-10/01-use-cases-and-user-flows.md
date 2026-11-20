@@ -193,7 +193,7 @@ ohbaby Web
 
 **Skills**：只读列表，只列全局 Skills，按来源分组；点一行展开描述和路径。
 
-**Web search**：一页表单：API key（Configured / Not set，替换、清除）；More options 里是 key 变量名、Base URL 和默认搜索参数。Save 后下一次搜索生效。
+**Web search**：一页表单。标题下一行注明内置搜索用的是 Tavily，并附上获取 API key 的链接；然后是 API key（Configured / Not set，替换、清除）和三个默认搜索参数（Search depth、Max results、Topic）；More options 里是超时、Base URL 和 key 变量名。Save 后下一次搜索生效。
 
 **About**：版本、ohbaby home、默认目录，以及有的话显示诊断文件和日志目录，每项可复制。
 
@@ -285,7 +285,7 @@ ohbaby Web
 
 ### UC-SETTINGS-04 配置联网搜索（第二批）
 
-- **主流程**：Web search → 替换或清除 API key，按需改 More options → Save。
+- **主流程**：Web search → 没有 key 时点 Get an API key 去 Tavily 申请 → 替换或清除 API key，按需改默认搜索参数或 More options → Save。
 - **完成结果**：下一次搜索使用新配置；页面只显示 Configured / Not set 和变量名。
 
 ### UC-SETTINGS-05 查看 Skills 与 About（第二批）

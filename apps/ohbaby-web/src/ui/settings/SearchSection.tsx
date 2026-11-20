@@ -1,3 +1,4 @@
+import { ArrowUpRight } from "lucide-react";
 import type { UiSettingsSearch } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useId, useState } from "react";
@@ -17,10 +18,14 @@ import { SecretField } from "./SecretField.js";
 import { SectionHeader, SectionStatus } from "./SectionFrame.js";
 import { errorText, useSettingsResource } from "./useSettingsResource.js";
 
+const TAVILY_KEY_URL = "https://app.tavily.com";
+
 /**
- * Web search: one form (03 §4.7). The API key shows Configured or Not set;
- * More options holds the key variable, Base URL and search defaults. Only
- * changed fields are sent, and Save goes back to disabled on success.
+ * Web search: one form (03 §4.7). A line under the title names Tavily and
+ * links to its key page. The API key shows Configured or Not set; search
+ * depth, max results and topic sit below it, and More options holds the
+ * timeout, Base URL and key variable. Only changed fields are sent, and
+ * Save goes back to disabled on success.
  */
 export function SearchSection(props: {
   readonly settings: SettingsLayer;
@@ -30,6 +35,18 @@ export function SearchSection(props: {
   return (
     <section className="ohb-settings-section" aria-label="Web search">
       <SectionHeader title="Web search" />
+      <p className="ohb-settings-intro">
+        Built-in search by Tavily ·{" "}
+        <a
+          className="ohb-settings-link"
+          href={TAVILY_KEY_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Get an API key
+          <ArrowUpRight aria-hidden="true" size={13} />
+        </a>
+      </p>
       <SectionStatus resource={resource} />
       {resource.data ? (
         <SearchFormView settings={props.settings} saved={resource.data} />
@@ -136,30 +153,66 @@ function SearchFormView(props: {
             }}
           />
         </FieldRow>
+        <FieldRow
+          id={id("searchDepth")}
+          label="Search depth"
+          error={errorFor("searchDepth")}
+        >
+          <select
+            id={id("searchDepth")}
+            className="ohb-settings-select"
+            value={form.searchDepth}
+            onChange={(event) => {
+              set(
+                "searchDepth",
+                event.target.value as SearchForm["searchDepth"],
+              );
+            }}
+          >
+            <option value="basic">Basic</option>
+            <option value="advanced">Advanced</option>
+          </select>
+        </FieldRow>
+        <FieldRow
+          id={id("maxResults")}
+          label="Max results"
+          hint="1–20"
+          error={errorFor("maxResults")}
+        >
+          {text("maxResults", "number")}
+        </FieldRow>
+        <FieldRow id={id("topic")} label="Topic" error={errorFor("topic")}>
+          <select
+            id={id("topic")}
+            className="ohb-settings-select"
+            value={form.topic}
+            onChange={(event) => {
+              set("topic", event.target.value as SearchForm["topic"]);
+            }}
+          >
+            <option value="general">General</option>
+            <option value="news">News</option>
+            <option value="finance">Finance</option>
+          </select>
+        </FieldRow>
         <MoreOptions
           open={
             moreOpen ||
-            (
-              [
-                "apiKeyEnv",
-                "baseUrl",
-                "searchDepth",
-                "maxResults",
-                "topic",
-                "timeout",
-              ] as const
-            ).some((field) => errorFor(field) !== undefined)
+            (["timeout", "baseUrl", "apiKeyEnv"] as const).some(
+              (field) => errorFor(field) !== undefined,
+            )
           }
           onToggle={() => {
             setMoreOpen((open) => !open);
           }}
         >
           <FieldRow
-            id={id("apiKeyEnv")}
-            label="Key variable"
-            error={errorFor("apiKeyEnv")}
+            id={id("timeout")}
+            label="Timeout"
+            hint="seconds"
+            error={errorFor("timeout")}
           >
-            {text("apiKeyEnv")}
+            {text("timeout", "number")}
           </FieldRow>
           <FieldRow
             id={id("baseUrl")}
@@ -169,54 +222,11 @@ function SearchFormView(props: {
             {text("baseUrl", "url")}
           </FieldRow>
           <FieldRow
-            id={id("searchDepth")}
-            label="Search depth"
-            error={errorFor("searchDepth")}
+            id={id("apiKeyEnv")}
+            label="Key variable"
+            error={errorFor("apiKeyEnv")}
           >
-            <select
-              id={id("searchDepth")}
-              className="ohb-settings-select"
-              value={form.searchDepth}
-              onChange={(event) => {
-                set(
-                  "searchDepth",
-                  event.target.value as SearchForm["searchDepth"],
-                );
-              }}
-            >
-              <option value="basic">Basic</option>
-              <option value="advanced">Advanced</option>
-            </select>
-          </FieldRow>
-          <FieldRow
-            id={id("maxResults")}
-            label="Max results"
-            hint="1–20"
-            error={errorFor("maxResults")}
-          >
-            {text("maxResults", "number")}
-          </FieldRow>
-          <FieldRow id={id("topic")} label="Topic" error={errorFor("topic")}>
-            <select
-              id={id("topic")}
-              className="ohb-settings-select"
-              value={form.topic}
-              onChange={(event) => {
-                set("topic", event.target.value as SearchForm["topic"]);
-              }}
-            >
-              <option value="general">General</option>
-              <option value="news">News</option>
-              <option value="finance">Finance</option>
-            </select>
-          </FieldRow>
-          <FieldRow
-            id={id("timeout")}
-            label="Timeout"
-            hint="seconds"
-            error={errorFor("timeout")}
-          >
-            {text("timeout", "number")}
+            {text("apiKeyEnv")}
           </FieldRow>
         </MoreOptions>
         <div className="ohb-settings-form-footer">

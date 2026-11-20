@@ -173,7 +173,7 @@
 | 整体 | 全部 | 1440 | 与 Claude、Codex、Cursor 参考截图并排对比：中性偏暖白、侧栏深一档、玻璃只在浮起元素上、留白和密度接近；界面上除字标外没有金粉蓝 |
 | 设置页 · Models | `settings` | 1440、390 | 居中弹窗（390 下铺满全屏）；按 provider 分组的行；Default、Needs setup 的层次；弹窗内不再套卡片 |
 | 设置页 · 模型编辑 | `settings` | 1440 | 字段顺序与线框一致；More options 折叠；只有 Save 是实心按钮；Delete 是危险色文字 |
-| 设置页 · Web search | `settings` | 1440 | 单页表单；API key 显示 Configured / Not set，不回显值；More options 折叠；字段错误在输入框下 |
+| 设置页 · Web search | `settings` | 1440 | 单页表单；标题下一行注明 Tavily 并有 Get an API key 外链；API key 显示 Configured / Not set，不回显值；Search depth、Max results、Topic 平铺；More options（Timeout、Base URL、Key variable）折叠；字段错误在输入框下 |
 | 设置页 · MCP | `settings` | 1440 | 名称与状态文字、原地展开的只读配置和工具列表；无输入框、开关或写操作按钮；Refresh 是文字按钮 |
 | 设置页 · 空态与错误 | `settings-empty`、`settings-errors` | 1440 | 空态各一行；模型/搜索字段错误在输入框下；MCP 状态读取失败时配置仍可查看 |
 

@@ -125,7 +125,7 @@ Port `4096` is the default. If it's taken, ohbaby picks a free port and prints t
 
 <br>
 
-Get a free API key from [Tavily](https://tavily.com), type `/connect-search` and paste the key. ohbaby saves it as `TAVILY_API_KEY` in `~/.ohbaby/.env`.
+Built-in search uses Tavily. Get a free API key from [Tavily](https://app.tavily.com), then type `/connect-search` and paste the key, or add it under Settings → Web search in the web UI. ohbaby saves it as `TAVILY_API_KEY` in `~/.ohbaby/.env`.
 
 You can also put the key in `~/.ohbaby/.env` (global) or `<your-project>/.env` (project):
 
@@ -134,6 +134,8 @@ TAVILY_API_KEY=tvly-...
 ```
 
 Shell environment variables win over the project `.env`, which wins over the global one.
+
+To use another search service, add it as an MCP server or a skill.
 
 </details>
 

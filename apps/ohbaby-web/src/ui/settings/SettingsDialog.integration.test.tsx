@@ -784,6 +784,30 @@ describe("settings dialog", () => {
     expect(button(dialog(), "Save").disabled).toBe(true);
   });
 
+  it("names Tavily with a key link and shows search defaults up front", async () => {
+    const runtime = createMockRuntime("settings");
+    const container = mount(runtime);
+    await openSettings(container);
+    await click(button(dialog(), "Web search"));
+    await until(
+      () => dialog().textContent.includes("Configured"),
+      "the search form",
+    );
+    const link = dialog().querySelector<HTMLAnchorElement>(
+      "a.ohb-settings-link",
+    );
+    expect(link?.textContent).toBe("Get an API key");
+    expect(link?.href).toBe("https://app.tavily.com/");
+    expect(link?.target).toBe("_blank");
+    expect(link?.rel).toBe("noopener noreferrer");
+    expect(dialog().textContent).toContain("Built-in search by Tavily");
+    for (const label of ["Search depth", "Max results", "Topic"])
+      expect(field(label)).toBeTruthy();
+    expect(button(dialog(), "More options").getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
   it("keeps a search edit's original baseline when settings refresh", async () => {
     const runtime = createMockRuntime("settings");
     const update = vi.spyOn(runtime.settings, "updateSearch");

@@ -10,7 +10,7 @@ import { useContext, useRef, useState } from "react";
 import { OverlayBodyRowsContext } from "./overlay-card.js";
 import { useTheme } from "../../theme/index.js";
 
-type SearchFieldKey = "provider" | "apiKeyEnv" | "apiKey";
+type SearchFieldKey = "apiKey" | "apiKeyEnv";
 
 interface SearchField {
   readonly key: SearchFieldKey;
@@ -19,7 +19,6 @@ interface SearchField {
 }
 
 interface SearchDraft {
-  readonly provider: string;
   readonly apiKeyEnv: string;
   readonly apiKey: string;
 }
@@ -36,16 +35,18 @@ type SaveState =
   | { readonly kind: "saved"; readonly envPath: string }
   | { readonly kind: "error"; readonly message: string };
 
+// Tavily is the only built-in provider; other search services come in as
+// MCP servers or Skills, so the panel has no provider field.
 const SEARCH_FIELDS: readonly SearchField[] = [
-  { key: "provider", label: "Provider" },
-  { key: "apiKeyEnv", label: "API key env" },
   { key: "apiKey", label: "API key value", secret: true },
+  { key: "apiKeyEnv", label: "API key env" },
 ];
+
+const TAVILY_KEY_URL = "https://app.tavily.com";
 
 const EMPTY_DRAFT: SearchDraft = {
   apiKey: "",
   apiKeyEnv: "TAVILY_API_KEY",
-  provider: "tavily",
 };
 
 export interface ConnectSearchPanelProps {
@@ -156,12 +157,6 @@ export function ConnectSearchPanel({
       }
       return;
     }
-    if (payload.kind === "error") {
-      latestSaveKeyRef.current = null;
-      pendingSaveRef.current = null;
-      setSaveState({ kind: "error", message: payload.message });
-      return;
-    }
     if (isRunning) {
       return;
     }
@@ -254,11 +249,15 @@ export function ConnectSearchPanel({
     { isActive: true },
   );
 
+  // Compact mode reserves rows for the Tavily line, key hints and status.
   const fieldRows =
-    bodyRows === undefined ? SEARCH_FIELDS.length : Math.max(1, bodyRows - 2);
+    bodyRows === undefined ? SEARCH_FIELDS.length : Math.max(1, bodyRows - 3);
   const fieldStart = Math.max(0, selectedIndex - fieldRows + 1);
   return (
     <Box flexDirection="column">
+      <Text dimColor wrap="truncate-end">
+        Tavily · Get an API key: {TAVILY_KEY_URL}
+      </Text>
       <Box flexDirection="column" marginTop={bodyRows === undefined ? 1 : 0}>
         {SEARCH_FIELDS.slice(fieldStart, fieldStart + fieldRows).map(
           (field, index) => (
@@ -364,19 +363,14 @@ function savedState(
 
 type PayloadBuildResult =
   | { readonly kind: "incomplete" }
-  | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "ready"; readonly input: UiSetSearchApiKeyInput };
 
 function buildPayload(draft: SearchDraft): PayloadBuildResult {
-  const provider = draft.provider.trim().toLowerCase();
   const apiKeyEnv = draft.apiKeyEnv.trim();
   const apiKey = draft.apiKey.trim();
 
-  if (!provider || !apiKeyEnv) {
+  if (!apiKeyEnv) {
     return { kind: "incomplete" };
-  }
-  if (provider !== "tavily") {
-    return { kind: "error", message: "Provider must be tavily" };
   }
 
   return {

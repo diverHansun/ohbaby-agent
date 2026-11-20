@@ -405,11 +405,6 @@ it.each([24, 12])(
       await drain();
       input.write("\r");
       screen = await drain();
-      expect(screen).toContain("> Provider");
-      input.write("\u001b[B");
-      await drain();
-      input.write("\u001b[B");
-      screen = await drain();
       expect(screen).toContain("> API key value");
       input.write("\r");
       await drain();

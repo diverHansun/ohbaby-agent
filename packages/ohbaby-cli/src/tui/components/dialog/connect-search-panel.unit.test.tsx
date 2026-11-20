@@ -4,6 +4,24 @@ import { describe, expect, it, vi } from "vitest";
 import { ConnectSearchPanel } from "./connect-search-panel.js";
 
 describe("ConnectSearchPanel", () => {
+  it("names Tavily with its key page and has no provider field", () => {
+    const client = {
+      setSearchApiKey: vi.fn(() => Promise.resolve({ envPath: "/tmp/x" })),
+    } as unknown as CoreAPI;
+    const app = render(
+      <ConnectSearchPanel
+        client={client}
+        onClose={vi.fn()}
+        runtime={{ kind: "idle" }}
+      />,
+    );
+    const frame = app.lastFrame() ?? "";
+    expect(frame).toContain("Tavily · Get an API key: https://app.tavily.com");
+    expect(frame).toContain("> API key value");
+    expect(frame).not.toContain("Provider");
+    app.unmount();
+  });
+
   it("shows an active editing marker and caret, with page-key navigation", async () => {
     const client = {
       setSearchApiKey: vi.fn(() => Promise.resolve({ envPath: "/tmp/x" })),
@@ -23,7 +41,7 @@ describe("ConnectSearchPanel", () => {
     app.stdin.write("\r");
     await until(() => !(app.lastFrame() ?? "").includes("[editing]"));
     app.stdin.write("\u001b[5~");
-    await until(() => (app.lastFrame() ?? "").includes("> Provider"));
+    await until(() => (app.lastFrame() ?? "").includes("> API key value"));
     app.unmount();
   });
 
@@ -38,9 +56,6 @@ describe("ConnectSearchPanel", () => {
         runtime={{ kind: "idle" }}
       />,
     );
-    app.stdin.write("\u001b[6~");
-    await until(() => (app.lastFrame() ?? "").includes("> API key env"));
-    app.stdin.write("\u001b[6~");
     await until(() => (app.lastFrame() ?? "").includes("> API key value"));
     app.stdin.write("\r");
     await until(() => (app.lastFrame() ?? "").includes("[editing]"));

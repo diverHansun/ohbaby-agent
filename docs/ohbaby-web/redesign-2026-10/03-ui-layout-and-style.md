@@ -355,7 +355,7 @@ Start in、Timeout (ms)、Trust、Include / Exclude tools，以及实际连接�
 
 MCP 只有展开/收起、Refresh 和读取失败后的 Retry；Refresh 只重新读取数据，不触发重连。不显示添加、编辑、删除、启停或 Save 按钮，也不常驻配置教程（D16、D25）。
 
-Web search 是一页表单（API key、> More options：Key variable、Base URL、Search depth、Max results、Topic、Timeout、Save）。Skills 是按来源分组的只读列表，点一行原地展开描述和路径。About 是只读的行，每行右侧一个复制图标。
+Web search 是一页表单。标题下有一行灰字 "Built-in search by Tavily · Get an API key ↗"，链接在新标签页打开 Tavily 的 key 页面。下面依次是 API key、Search depth、Max results、Topic，最后是 > More options（Timeout、Base URL、Key variable）和 Save。其他搜索服务通过 MCP 或 Skills 接入，这页不提供服务商选择。Skills 是按来源分组的只读列表，点一行原地展开描述和路径。About 是只读的行，每行右侧一个复制图标。
 
 - 选中的导航项和会话行一样：左侧竖条加选中底色。
 - 内容区最大宽度初值 680px。列表和表单都是“标签 | 值或控件”的行，行之间用细线分隔，不用卡片包。

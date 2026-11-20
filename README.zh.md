@@ -125,7 +125,7 @@ ohbaby serve stop    # 停止 daemon
 
 <br>
 
-先去 [Tavily](https://tavily.com) 申请一个免费 API Key，然后输入 `/connect-search` 并粘贴进去。ohbaby 会把它作为 `TAVILY_API_KEY` 保存到 `~/.ohbaby/.env`。
+内置搜索用的是 Tavily。先去 [Tavily](https://app.tavily.com) 申请一个免费 API Key，然后输入 `/connect-search` 并粘贴进去，也可以在 Web 界面的 Settings → Web search 里填写。ohbaby 会把它作为 `TAVILY_API_KEY` 保存到 `~/.ohbaby/.env`。
 
 也可以手动写进 `~/.ohbaby/.env`（全局）或 `<你的项目>/.env`（项目）：
 
@@ -134,6 +134,8 @@ TAVILY_API_KEY=tvly-...
 ```
 
 优先级：Shell 环境变量 > 项目 `.env` > 全局 `.env`。
+
+想用其他搜索服务，可以把它作为 MCP server 或 skill 接入。
 
 </details>
 

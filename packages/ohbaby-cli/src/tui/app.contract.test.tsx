@@ -4288,8 +4288,6 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await openConnectSearchForm(app);
-    await sendConnectKey(app, "\u001B[B");
-    await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "tvly-search-secret");
     const secretFrame = app.lastFrame() ?? "";
     expect(secretFrame).not.toContain("tvly-search-secret");
