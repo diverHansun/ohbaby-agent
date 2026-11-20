@@ -54,3 +54,21 @@ it.each(["live", "saved"] as const)(
     expect(details?.open).toBe(source === "live");
   },
 );
+
+it("renders nothing for a message with no parts and no reasoning (T13)", () => {
+  const empty = {
+    id: "empty",
+    createdAt: "2026-11-20T00:00:00Z",
+    role: "assistant" as const,
+    parts: [],
+  };
+  expect(renderToStaticMarkup(<MessageRow message={empty} />)).toBe("");
+  expect(
+    renderToStaticMarkup(
+      <MessageRow
+        message={empty}
+        reasoning={{ content: "thinking", folded: false }}
+      />,
+    ),
+  ).toContain("thinking");
+});

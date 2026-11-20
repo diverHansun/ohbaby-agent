@@ -332,7 +332,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     retryPermissions: () => undefined,
     retrySession: () => undefined,
     reconnectNow: () => undefined,
-    loadEarlierHistory: resolved,
+    loadEarlierHistory: () => Promise.resolve(false),
     retryUnknownPrompts: resolved,
     forgetUnknownPrompt: () => undefined,
     abortSession: resolved,

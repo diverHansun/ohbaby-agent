@@ -121,7 +121,6 @@ export function SubagentConversationBody({
           }
           historyHasMore={conversation?.history.hasMore ?? false}
           historyStale={false}
-          historyError={state.error}
           onLoadHistory={() => reader.loadEarlier()}
           promptRows={[]}
           messages={conversation?.messages ?? []}

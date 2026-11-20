@@ -5270,7 +5270,7 @@ function createFakeRuntime(input: {
       retryPermissions: vi.fn(),
       retrySession: vi.fn(),
       reconnectNow: vi.fn(),
-      loadEarlierHistory: vi.fn(() => Promise.resolve()),
+      loadEarlierHistory: vi.fn(() => Promise.resolve(false)),
       retryUnknownPrompts: vi.fn(() => Promise.resolve()),
       forgetUnknownPrompt: vi.fn(),
       abortSession,

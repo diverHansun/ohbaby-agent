@@ -57,7 +57,7 @@ export interface OhbabyWebRuntime {
   retrySession(): void;
   /** Retries a dropped daemon connection now rather than after the backoff. */
   reconnectNow(): void;
-  loadEarlierHistory(): Promise<void>;
+  loadEarlierHistory(): Promise<boolean>;
   retryUnknownPrompts(): Promise<void>;
   forgetUnknownPrompt(clientRequestId: string): void;
   /** Submits to the connected instance, following `SESSION_MOVED` to the new directory. */
@@ -234,8 +234,8 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   reconnectNow(): void {
     this.instance.client?.reconnectNow();
   }
-  async loadEarlierHistory(): Promise<void> {
-    await this.instance.client?.loadEarlierHistory();
+  async loadEarlierHistory(): Promise<boolean> {
+    return (await this.instance.client?.loadEarlierHistory()) ?? false;
   }
   async retryUnknownPrompts(): Promise<void> {
     await this.instance.client?.retryUnknownPrompts();

@@ -1262,4 +1262,46 @@ describe("subagent conversation reader", () => {
     ).toEqual(["parent-b"]);
     reader.dispose();
   });
+
+  it("tells whether loadEarlier moved the cursor (T21)", async () => {
+    const page = (
+      before: string | undefined,
+      hasMore: boolean,
+    ): UiSubagentConversationView => ({
+      ...conversation([message(`older-${before ?? "end"}`, "older")]),
+      history: { before, hasMore, hasLater: false },
+    });
+    const read = vi
+      .fn<
+        (
+          query: UiSubagentConversationQuery,
+        ) => Promise<UiSubagentConversationView>
+      >()
+      .mockResolvedValue(conversation());
+    const reader = createSubagentConversationReader(
+      {
+        getSubagentConversationView: read,
+        watchSubagentConversation: () => Promise.resolve(selection("watch")),
+      },
+      "root",
+    );
+    await reader.selectInstance({ subagentId: "child" });
+    // The same cursor back is no progress.
+    read.mockResolvedValueOnce(page("before", true));
+    await expect(reader.loadEarlier()).resolves.toBe(false);
+    read.mockResolvedValueOnce(page("older", true));
+    await expect(reader.loadEarlier()).resolves.toBe(true);
+    read.mockRejectedValueOnce(new Error("offline"));
+    await expect(reader.loadEarlier()).resolves.toBe(false);
+    expect(reader.getSnapshot().error).toBe("offline");
+    // A last page ends paging even without a new cursor.
+    read.mockResolvedValueOnce(page(undefined, false));
+    await expect(reader.loadEarlier()).resolves.toBe(true);
+    expect(reader.getSnapshot().error).toBeUndefined();
+    // Nothing earlier: no request and no progress.
+    const calls = read.mock.calls.length;
+    await expect(reader.loadEarlier()).resolves.toBe(false);
+    expect(read).toHaveBeenCalledTimes(calls);
+    reader.dispose();
+  });
 });

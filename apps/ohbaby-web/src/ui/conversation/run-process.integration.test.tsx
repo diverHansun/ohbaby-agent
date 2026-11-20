@@ -113,7 +113,7 @@ it.each(["prompt-first", "message-first"])(
             historyState="ready"
             historyHasMore={false}
             historyStale={false}
-            onLoadHistory={() => Promise.resolve()}
+            onLoadHistory={() => Promise.resolve(false)}
             commandNotices={null}
           />,
         );

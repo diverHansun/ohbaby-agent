@@ -195,9 +195,10 @@ export function SideChatPage(props: {
             <ConversationStream
               variant="side-chat"
               historyState={snapshot.historyState}
+              // Nothing before the boundary belongs to the side chat, so a
+              // loaded boundary stops paging, even when pages went stale.
               historyHasMore={!boundaryLoaded && snapshot.historyHasMore}
-              historyStale={snapshot.historyStale}
-              historyError={snapshot.historyError}
+              historyStale={!boundaryLoaded && snapshot.historyStale}
               onLoadHistory={() => connection.loadEarlierHistory()}
               promptRows={rows}
               startupThinkingAt={projection.startupThinkingAt}

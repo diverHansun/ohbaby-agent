@@ -39,7 +39,8 @@ export interface UiSubagentConversationReader {
   ) => Promise<void>;
   readonly close: () => void;
   readonly refresh: () => Promise<void>;
-  readonly loadEarlier: () => Promise<void>;
+  /** Resolves true when the cursor moved or no earlier page remains. */
+  readonly loadEarlier: () => Promise<boolean>;
   readonly loadLater: () => Promise<void>;
   readonly jumpToLatest: () => Promise<void>;
   readonly dispose: () => void;
@@ -636,15 +637,16 @@ export function createSubagentConversationReader(
     }
   };
   const unsubEvents = client.subscribeEvents?.(onEvent);
-  const loadPage = async (direction: "earlier" | "later"): Promise<void> => {
+  /** Resolves true when a page merged and its cursor moved or ran out. */
+  const loadPage = async (direction: "earlier" | "later"): Promise<boolean> => {
     const selected = state.selectedInstance;
     const base = state.conversation;
-    if (!selected || !base || !watch || state.loading) return;
+    if (!selected || !base || !watch || state.loading) return false;
     const cursor =
       direction === "earlier" ? base.history.before : base.history.after;
     const needed =
       direction === "earlier" ? base.history.hasMore : base.history.hasLater;
-    if (!needed || !cursor) return;
+    if (!needed || !cursor) return false;
     const current = ticket;
     const selection = watch;
     const active = new AbortController();
@@ -654,14 +656,14 @@ export function createSubagentConversationReader(
       const page = await query(selected, active.signal, {
         [direction === "earlier" ? "before" : "after"]: cursor,
       });
-      if (current !== ticket || disposed || watch !== selection) return;
+      if (current !== ticket || disposed || watch !== selection) return false;
       const latest = state.conversation;
       if (
         !latest ||
         !sameSessionGeneration(latest.view.version, page.view.version)
       ) {
         void refresh();
-        return;
+        return false;
       }
       const conversation = mergePage(latest, page, direction);
       publish({
@@ -669,9 +671,15 @@ export function createSubagentConversationReader(
         conversation,
         loading: false,
       });
+      return direction === "earlier"
+        ? !conversation.history.hasMore ||
+            conversation.history.before !== cursor
+        : !conversation.history.hasLater ||
+            conversation.history.after !== cursor;
     } catch (error) {
       if (current === ticket && !disposed && !handleClosedError(error))
         publish({ loading: false, error: errorText(error) });
+      return false;
     } finally {
       if (controller === active) controller = undefined;
     }
@@ -740,8 +748,10 @@ export function createSubagentConversationReader(
       });
     },
     refresh,
-    loadEarlier: (): Promise<void> => loadPage("earlier"),
-    loadLater: (): Promise<void> => loadPage("later"),
+    loadEarlier: (): Promise<boolean> => loadPage("earlier"),
+    loadLater: async (): Promise<void> => {
+      await loadPage("later");
+    },
     async jumpToLatest(): Promise<void> {
       const selected = state.selectedInstance;
       if (!selected || !watch) return;

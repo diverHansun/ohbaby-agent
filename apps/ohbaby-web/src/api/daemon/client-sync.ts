@@ -185,6 +185,13 @@ export class ClientSync {
           state.status === "ready" &&
           this.store.getSnapshot().sessionSync.status !== "ready";
         this.store.setSessionSync(state);
+        // A page asked for before a rebaseline describes the old baseline; its
+        // revision can equal the new one, so drop it by ticket instead.
+        if (state.status !== "ready") {
+          ++this.historyTicket;
+          if (this.store.getSnapshot().historyState === "loading")
+            this.store.setHistoryState("ready");
+        }
         if (becameReady) void this.refreshControl();
       },
     });
@@ -626,15 +633,29 @@ export class ClientSync {
     void this.refreshControl();
   }
 
-  async loadEarlierHistory(): Promise<void> {
+  /** Resolves true when a page moved the cursor or no earlier page remains. */
+  async loadEarlierHistory(): Promise<boolean> {
     const state = this.sessionSync.getState();
     const scope = this.currentScope();
-    if (!scope || state.status !== "ready" || !state.view) return;
+    if (!scope || state.status !== "ready" || !state.view) return false;
     const stored = this.store.getSnapshot();
     const before = stored.historyStale
       ? state.view.history.before
       : stored.historyBefore;
-    if (!before) return;
+    if (!before) {
+      if (!stored.historyStale) return false;
+      // The live window already holds the whole session: an empty last page
+      // clears the stale pages through the usual install path.
+      return this.store.installSessionHistory({
+        version: state.view.version,
+        bindingGeneration: state.view.bindingGeneration,
+        messages: [],
+        runs: [],
+        prompts: [],
+        hasMore: false,
+        reasoningMissing: false,
+      });
+    }
     const ticket = ++this.historyTicket;
     const scopeTicket = this.scopeTicketValue;
     this.store.setHistoryState("loading");
@@ -652,15 +673,16 @@ export class ClientSync {
         scopeTicket !== this.scopeTicketValue ||
         ticket !== this.historyTicket
       )
-        return;
+        return false;
       if (
         !current ||
         history.bindingGeneration !== scope.bindingGeneration ||
         !sameSessionGeneration(history.version, current.version)
       )
         throw new Error("History changed while loading; retry the page");
-      this.store.installSessionHistory(history);
+      const installed = this.store.installSessionHistory(history);
       this.store.setHistoryState("ready");
+      return installed && (history.before !== before || !history.hasMore);
     } catch (error) {
       if (
         !this.closedValue &&
@@ -668,6 +690,7 @@ export class ClientSync {
         ticket === this.historyTicket
       )
         this.store.setHistoryState("error", errorMessage(error));
+      return false;
     }
   }
 

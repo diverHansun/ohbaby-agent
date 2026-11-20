@@ -32,6 +32,7 @@ import {
   Split,
 } from "lucide-react";
 import { UserMessageEditor } from "./UserMessageEditor.js";
+import { Spinner } from "../shared/Spinner.js";
 import { IconButton } from "../shared/IconButton.js";
 import { CopyButton } from "../shared/CopyButton.js";
 import { SelectionAction } from "./SelectionAction.js";
@@ -52,6 +53,58 @@ export interface PromptProjectionModel {
   readonly id: string;
   readonly label?: string;
   readonly text: string;
+}
+
+/** Opencode's quiet retry pause: a failed page retries on a later user scroll. */
+const HISTORY_RETRY_COOLDOWN_MS = 2000;
+
+/** A row the user can see: not hidden, and not collapsed by CSS :empty. */
+function visibleRowRect(node: HTMLElement): DOMRect | undefined {
+  if (node.hidden) return undefined;
+  const rect = node.getBoundingClientRect();
+  return rect.height > 0 ? rect : undefined;
+}
+
+function findRow(
+  element: HTMLElement,
+  messageId: string,
+): HTMLElement | undefined {
+  return [...element.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+    (node) => node.dataset.messageId === messageId,
+  );
+}
+
+/** The first visible row at the top of the stream, and its offset there. */
+function captureReadingRow(
+  element: HTMLElement,
+  position: ConversationReadingPosition,
+): void {
+  const top = element.getBoundingClientRect().top;
+  for (const node of element.querySelectorAll<HTMLElement>(
+    "[data-message-id]",
+  )) {
+    const rect = visibleRowRect(node);
+    if (rect && rect.bottom > top) {
+      position.messageId = node.dataset.messageId;
+      position.offset = rect.top - top;
+      return;
+    }
+  }
+  position.messageId = undefined;
+  position.offset = undefined;
+}
+
+/** Moves the reading row back to where the user last saw it. */
+function restoreReadingRow(
+  element: HTMLElement,
+  position: ConversationReadingPosition,
+): void {
+  if (!position.messageId) return;
+  const row = findRow(element, position.messageId);
+  const rect = row ? visibleRowRect(row) : undefined;
+  if (rect)
+    element.scrollTop +=
+      rect.top - element.getBoundingClientRect().top - (position.offset ?? 0);
 }
 
 export interface ConversationReadingPosition {
@@ -77,8 +130,11 @@ export function ConversationStream(props: {
   readonly historyState: "loading" | "ready" | "error";
   readonly historyHasMore: boolean;
   readonly historyStale: boolean;
-  readonly historyError?: string;
-  readonly onLoadHistory: () => Promise<void>;
+  /**
+   * Loads one earlier page. Resolves true only when the cursor moved or no
+   * earlier page remains; only then does the stream check for another page.
+   */
+  readonly onLoadHistory: () => Promise<boolean>;
   readonly promptRows: readonly PromptProjectionModel[];
   readonly startupThinkingAt?: string;
   readonly messages: readonly UiMessage[];
@@ -125,7 +181,8 @@ export function ConversationStream(props: {
   const streamInnerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const scheduledScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const anchorRef = useRef<{ top: number; height: number } | null>(null);
+  const requestPendingRef = useRef(false);
+  const requestEndedAtRef = useRef(0);
   const localReading = useRef<{
     sessionId: string | null;
     position: ConversationReadingPosition;
@@ -141,6 +198,11 @@ export function ConversationStream(props: {
   }
   const readingPosition =
     props.readingPosition ?? localReading.current.position;
+  // Listeners and request callbacks read the latest props, not their closure's.
+  const latest = useRef({ props, readingPosition });
+  useLayoutEffect(() => {
+    latest.current = { props, readingPosition };
+  });
   const messages = props.messages;
   // A step retry replaced these answers and the model no longer sees them.
   const retriedIds = listRetriedAttemptIds(messages);
@@ -300,13 +362,25 @@ export function ConversationStream(props: {
   const edit = props.variant === "side-chat" ? undefined : props.edit;
   // One bubble at a time; the state is gone on reload by design.
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Rewinding to before a compaction is refused by the backend
+  // (session-rewind.ts REWIND_BEFORE_COMPACTION), so those prompts hide Edit.
+  let lastCompaction = visibleMessages.length - 1;
+  while (
+    lastCompaction >= 0 &&
+    !isCompactionMessage(visibleMessages[lastCompaction])
+  )
+    lastCompaction -= 1;
+  const beforeCompaction = new Set(
+    visibleMessages.slice(0, Math.max(0, lastCompaction)).map(({ id }) => id),
+  );
   const editablePrompt = (
     message: UiMessage,
   ): UiPromptSubmission | undefined =>
     edit &&
     message.role === "user" &&
     message.runtimeInputKind === undefined &&
-    !isCompactionMessage(message)
+    !isCompactionMessage(message) &&
+    !beforeCompaction.has(message.id)
       ? props.prompts.find(
           (prompt) =>
             prompt.userMessageId === message.id && prompt.status !== "steered",
@@ -494,7 +568,6 @@ export function ConversationStream(props: {
   }, []);
 
   useLayoutEffect(() => {
-    anchorRef.current = null;
     toggleAnchor.current = null;
     stickToBottomRef.current = readingPosition.sticky;
     if (streamRef.current) streamRef.current.scrollTop = readingPosition.top;
@@ -505,7 +578,6 @@ export function ConversationStream(props: {
   // re-arms following that an upward scroll or a manual disclosure turned off.
   useLayoutEffect(() => {
     if (!props.followToken) return;
-    anchorRef.current = null;
     toggleAnchor.current = null;
     stickToBottomRef.current = true;
     readingPosition.sticky = true;
@@ -628,14 +700,65 @@ export function ConversationStream(props: {
     scheduleStickScroll,
   ]);
 
+  // Earlier pages land above the reading row: put it back before paint. The
+  // row is the one from the user's latest scroll, not from the request start.
   useLayoutEffect(() => {
-    const anchor = anchorRef.current;
     const element = streamRef.current;
-    if (anchor && element && props.historyState !== "loading") {
-      element.scrollTop = anchor.top + (element.scrollHeight - anchor.height);
-      anchorRef.current = null;
-    }
-  }, [messagesSignature, props.historyState]);
+    if (element && !stickToBottomRef.current)
+      restoreReadingRow(element, readingPosition);
+  }, [messagesSignature]);
+
+  /** Loads an earlier page near the top; see 02 §2.5 for the rules. */
+  const maybeLoadEarlier = useCallback(
+    (element: HTMLElement, userInput: boolean): void => {
+      const { props: current, readingPosition: position } = latest.current;
+      if (!(current.historyHasMore || current.historyStale)) return;
+      if (requestPendingRef.current || current.historyState === "loading")
+        return;
+      if (
+        current.historyState === "error" &&
+        (!userInput ||
+          Date.now() - requestEndedAtRef.current < HISTORY_RETRY_COOLDOWN_MS)
+      )
+        return;
+      const near = stickToBottomRef.current
+        ? element.scrollHeight <= element.clientHeight + 1
+        : element.scrollTop <= element.clientHeight;
+      if (!near) return;
+      // The new page lands above: pin a row the user can actually see now.
+      if (!stickToBottomRef.current) {
+        const row = position.messageId
+          ? findRow(element, position.messageId)
+          : undefined;
+        if (!row || !visibleRowRect(row)) captureReadingRow(element, position);
+      }
+      requestPendingRef.current = true;
+      void current
+        .onLoadHistory()
+        .catch(() => false)
+        .then((advanced) => {
+          requestPendingRef.current = false;
+          requestEndedAtRef.current = Date.now();
+          // No progress: stop and wait for the user or new messages.
+          if (!advanced) return;
+          requestAnimationFrame(() => {
+            const stream = streamRef.current;
+            if (stream) maybeLoadEarlier(stream, false);
+          });
+        });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const element = streamRef.current;
+    if (element) maybeLoadEarlier(element, false);
+  }, [
+    messagesSignature,
+    props.historyHasMore,
+    props.historyStale,
+    maybeLoadEarlier,
+  ]);
 
   useEffect(() => {
     const element = streamRef.current;
@@ -663,6 +786,7 @@ export function ConversationStream(props: {
     const onWheel = (event: WheelEvent): void => {
       if (event.deltaY < 0 && !scrollsNested(event.target, element)) {
         leaveBottom();
+        maybeLoadEarlier(element, true);
       } else {
         markUserScroll();
       }
@@ -678,18 +802,20 @@ export function ConversationStream(props: {
         y !== undefined &&
         y > touchY &&
         !scrollsNested(event.target, element)
-      )
+      ) {
         leaveBottom();
-      else markUserScroll();
+        maybeLoadEarlier(element, true);
+      } else markUserScroll();
       touchY = y;
     };
     const onKeyDown = (event: KeyboardEvent): void => {
       if (
         ["ArrowUp", "PageUp", "Home"].includes(event.key) &&
         !scrollsNested(event.target, element)
-      )
+      ) {
         leaveBottom();
-      else markUserScroll();
+        maybeLoadEarlier(element, true);
+      } else markUserScroll();
     };
     const onScroll = (): void => {
       const movedUp = element.scrollTop < lastTop;
@@ -702,20 +828,13 @@ export function ConversationStream(props: {
       }
       readingPosition.top = element.scrollTop;
       readingPosition.sticky = stickToBottomRef.current;
-      const top = element.getBoundingClientRect().top;
-      const row = [
-        ...element.querySelectorAll<HTMLElement>("[data-message-id]"),
-      ].find(
-        (node) => !node.hidden && node.getBoundingClientRect().bottom > top,
-      );
-      readingPosition.messageId = row?.dataset.messageId;
-      readingPosition.offset = row
-        ? row.getBoundingClientRect().top - top
-        : undefined;
+      captureReadingRow(element, readingPosition);
       if (userScroll && stickToBottomRef.current) {
         props.onNearEnd?.();
       }
+      const userInput = userScroll;
       userScroll = false;
+      maybeLoadEarlier(element, userInput);
     };
     element.addEventListener("scroll", onScroll);
     element.addEventListener("wheel", onWheel, { passive: true });
@@ -731,7 +850,7 @@ export function ConversationStream(props: {
       element.removeEventListener("pointerdown", markUserScroll);
       element.removeEventListener("keydown", onKeyDown);
     };
-  }, [readingPosition, props.onNearEnd]);
+  }, [readingPosition, props.onNearEnd, maybeLoadEarlier]);
 
   useEffect(() => {
     const inner = streamInnerRef.current;
@@ -739,18 +858,9 @@ export function ConversationStream(props: {
       return;
     }
     const observer = new ResizeObserver(() => {
-      const position = readingPosition;
       const element = streamRef.current;
-      if (element && !stickToBottomRef.current && position.messageId) {
-        const row = [
-          ...element.querySelectorAll<HTMLElement>("[data-message-id]"),
-        ].find((node) => node.dataset.messageId === position.messageId);
-        if (row)
-          element.scrollTop +=
-            row.getBoundingClientRect().top -
-            element.getBoundingClientRect().top -
-            (position.offset ?? 0);
-      }
+      if (element && !stickToBottomRef.current)
+        restoreReadingRow(element, readingPosition);
       scheduleStickScroll();
     });
     observer.observe(inner);
@@ -785,37 +895,15 @@ export function ConversationStream(props: {
       }}
     >
       <div className="ohb-stream-inner" ref={streamInnerRef}>
-        {props.historyHasMore ||
-        props.historyStale ||
-        props.historyState === "error" ? (
-          <div className="ohb-history-more" role="status">
-            {props.historyStale ? (
-              <span>
-                Earlier history changed. Refresh to see the latest version.{" "}
-              </span>
-            ) : null}
-            {props.historyError ? <span>{props.historyError} </span> : null}
-            <button
-              type="button"
-              disabled={props.historyState === "loading"}
-              onClick={() => {
-                const element = streamRef.current;
-                if (element) {
-                  anchorRef.current = {
-                    top: element.scrollTop,
-                    height: element.scrollHeight,
-                  };
-                  stickToBottomRef.current = false;
-                }
-                void props.onLoadHistory();
-              }}
-            >
+        {props.historyHasMore || props.historyStale ? (
+          // One fixed-height slot in every state; only a spinner shows.
+          <div className="ohb-history-slot">
+            <div className="ohb-visually-hidden" role="status">
               {props.historyState === "loading"
-                ? "Loading history…"
-                : props.historyStale
-                  ? "Refresh earlier history"
-                  : "Load earlier messages"}
-            </button>
+                ? "Loading earlier messages"
+                : ""}
+            </div>
+            {props.historyState === "loading" ? <Spinner /> : null}
           </div>
         ) : null}
         {timelineItems.map((item) =>

@@ -37,11 +37,8 @@ export function MessageRow(props: {
   const firstText = pairedParts.findIndex(
     (entry) => entry.kind === "part" && entry.part.type === "text",
   );
-  if (
-    props.reasoning === undefined &&
-    props.message.parts.length > 0 &&
-    visibleParts.length === 0
-  ) {
+  // Nothing to show: the row's wrapper collapses through CSS :empty.
+  if (props.reasoning === undefined && visibleParts.length === 0) {
     return null;
   }
   return (

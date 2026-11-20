@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+  UiSessionHistory,
   UiSessionView,
   UiMessage,
   UiRun,
@@ -315,6 +316,58 @@ describe("session view store", () => {
       store.getSnapshot().view.snapshot?.sessions[0]?.messages,
     ).toHaveLength(2);
     expect(store.getSnapshot().permissionSync).toBe(permissions);
+  });
+  it("keeps loaded pages on window eviction and marks a rebaseline stale (T19)", () => {
+    const page = (revision: number, before?: string): UiSessionHistory => ({
+      runs: [],
+      version: { ...view().version, sessionRevision: revision },
+      messages: [message(`old${String(revision)}`)],
+      prompts: [],
+      before,
+      hasMore: before !== undefined,
+      reasoningMissing: false,
+    });
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view(1)));
+    // Not loaded yet: a rebaseline has nothing to mark.
+    store.setSessionSync({ ...ready(view(1)), status: "syncing" });
+    store.setSessionSync(ready(view(1)));
+    expect(store.getSnapshot().historyStale).toBe(false);
+    expect(store.installSessionHistory(page(1, "c1"))).toBe(true);
+    // ① Eviction only: pages, cursor and in-flight pages stay valid.
+    store.invalidateSessionHistory({
+      type: "session.changed",
+      version: { ...view().version, sessionRevision: 2 },
+      historyInvalidated: true,
+      evictedMessageIds: ["x"],
+    });
+    expect(store.getSnapshot()).toMatchObject({
+      historyStale: false,
+      historyBefore: "c1",
+      historyHasMore: true,
+    });
+    expect(store.installSessionHistory(page(1, "c0"))).toBe(true);
+    expect(store.getSnapshot().historyBefore).toBe("c0");
+    expect(
+      store.getSnapshot().view.snapshot?.sessions[0]?.messages,
+    ).toHaveLength(2);
+    // ③ Same scope, back to ready: stale until a page at the new baseline.
+    store.setSessionSync({ ...ready(view(1)), status: "syncing" });
+    store.setSessionSync(ready(view(3)));
+    expect(store.getSnapshot().historyStale).toBe(true);
+    // ⑤ Too old or ahead of the view: not installed.
+    expect(store.installSessionHistory(page(2, "c"))).toBe(false);
+    expect(store.installSessionHistory(page(4, "c"))).toBe(false);
+    expect(store.getSnapshot().historyStale).toBe(true);
+    expect(store.installSessionHistory(page(3, "c"))).toBe(true);
+    expect(store.getSnapshot().historyStale).toBe(false);
+    // ② A real edit without evicted ids still marks stale.
+    store.invalidateSessionHistory({
+      type: "session.changed",
+      version: { ...view().version, sessionRevision: 4 },
+      historyInvalidated: true,
+    });
+    expect(store.getSnapshot().historyStale).toBe(true);
   });
   it("rejects legacy replacement and isolates throwing listeners", () => {
     const store = createOhbabyWebStore();

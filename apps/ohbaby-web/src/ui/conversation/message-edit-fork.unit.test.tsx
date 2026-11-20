@@ -72,7 +72,7 @@ function render(
         historyState="ready"
         historyHasMore={false}
         historyStale={false}
-        onLoadHistory={() => Promise.resolve()}
+        onLoadHistory={() => Promise.resolve(false)}
         promptRows={[]}
         messages={messages}
         sessionId="session"

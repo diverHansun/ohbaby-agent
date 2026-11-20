@@ -48,7 +48,8 @@ export interface OhbabyWebStore {
   clearCommands(): void;
   setSessionSync(state: SessionSyncState): void;
   setSessionControl(control: UiSessionControl | null): void;
-  installSessionHistory(page: UiSessionHistory): void;
+  /** Returns false when the page is for another view or is too old. */
+  installSessionHistory(page: UiSessionHistory): boolean;
   invalidateSessionHistory(event: UiSessionChangedEvent): void;
   setHistoryState(state: "loading" | "ready" | "error", error?: string): void;
   setUnknownPromptRequests(records: readonly UnknownPromptRequest[]): void;
@@ -421,6 +422,16 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         !!previous.view &&
         view.version.viewGeneration !== previous.view.version.viewGeneration;
       if (newGeneration) invalidatedAt = -1;
+      // A new baseline in the same scope (reconnect, event gap, failed
+      // apply) may have missed changes to loaded pages.
+      const rebaselined =
+        !changedScope &&
+        !newGeneration &&
+        !!view &&
+        sessionSync.status === "ready" &&
+        previous.status !== "ready" &&
+        historyLoaded;
+      if (rebaselined) invalidatedAt = view.version.sessionRevision;
       if (view) {
         for (const message of view.session.messages) {
           if (deleted.has(message.id)) continue;
@@ -461,7 +472,8 @@ export function createOhbabyWebStore(): OhbabyWebStore {
                 : {}),
               historyStale:
                 !changedScope &&
-                (snapshot.historyStale || (newGeneration && historyLoaded)),
+                (snapshot.historyStale ||
+                  ((newGeneration || rebaselined) && historyLoaded)),
             }
           : changedScope
             ? {
@@ -481,7 +493,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     setHistoryState(historyState, historyError): void {
       publish({ ...snapshot, historyState, historyError });
     },
-    installSessionHistory(page): void {
+    installSessionHistory(page): boolean {
       const view = snapshot.sessionSync.view;
       if (
         page.version.sessionId !== view?.version.sessionId ||
@@ -489,12 +501,12 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         page.version.viewGeneration !== view.version.viewGeneration ||
         page.bindingGeneration !== view.bindingGeneration
       )
-        return;
+        return false;
       if (
         page.version.sessionRevision < invalidatedAt ||
         page.version.sessionRevision > view.version.sessionRevision
       )
-        return;
+        return false;
       if (snapshot.historyStale)
         for (const id of loaded.keys()) {
           const version = observed.get(id);
@@ -540,6 +552,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
           page.serverNow ?? snapshot.view.snapshot?.serverNow,
         ),
       });
+      return true;
     },
     invalidateSessionHistory(event): void {
       const view = snapshot.sessionSync.view;
@@ -560,6 +573,11 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         observed.delete(id);
         deleted.add(id);
       }
+      // Leaving the live window is committed on its own today
+      // (source-session-projection evicts in a separate change), so an event
+      // with evicted ids carries no edit to older pages and keeps them. If
+      // eviction is ever merged with a real edit, revisit this branch.
+      if ((event.evictedMessageIds?.length ?? 0) > 0) return;
       if (event.historyInvalidated)
         invalidatedAt = event.version.sessionRevision;
       if (event.historyInvalidated && historyLoaded)

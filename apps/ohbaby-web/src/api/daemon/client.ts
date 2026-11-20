@@ -102,7 +102,7 @@ export class BrowserDaemonClient implements UiBackendClient {
     this.sync.reconnectNow();
   }
 
-  loadEarlierHistory(): Promise<void> {
+  loadEarlierHistory(): Promise<boolean> {
     return this.sync.loadEarlierHistory();
   }
 

@@ -586,3 +586,68 @@ it("keeps reading places apart for subagents sharing one child session", () => {
   expect(readingCache.get("root:worker")?.position.top).toBe(25);
   expect(readingCache.get("root:other")?.position.top).toBe(12);
 });
+it("pages a subagent conversation through its reader and keeps its error bar (T16)", async () => {
+  const element = document.createElement("div");
+  document.body.append(element);
+  const root = createRoot(element);
+  const loadEarlier = vi.fn(() => Promise.resolve(false));
+  const reader = {
+    ...createSubagentConversationReader({}, "root"),
+    loadEarlier,
+  };
+  const readingCache: SubagentReadingCache = new Map();
+  mounted.push(() => {
+    act(() => {
+      root.unmount();
+    });
+    reader.dispose();
+    element.remove();
+  });
+  const base = state();
+  const withHistory = (
+    patch: Partial<UiSubagentConversationReaderState>,
+  ): UiSubagentConversationReaderState => ({
+    ...base,
+    ...patch,
+    conversation: base.conversation
+      ? {
+          ...base.conversation,
+          history: { before: "older", hasMore: true, hasLater: false },
+        }
+      : undefined,
+  });
+  const render = (data: UiSubagentConversationReaderState): void => {
+    act(() => {
+      root.render(
+        <ChildReading
+          reader={reader}
+          readingCache={readingCache}
+          state={data}
+        />,
+      );
+    });
+  };
+  // At the top with more history: the reader's own loadEarlier runs.
+  render(withHistory({}));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(loadEarlier).toHaveBeenCalledTimes(1);
+  // A failed page shows the reader's error bar, and nothing in the slot.
+  render(withHistory({ error: "offline" }));
+  expect(element.querySelector('[role="alert"]')?.textContent).toContain(
+    "offline",
+  );
+  expect(element.querySelector(".ohb-history-slot")?.textContent).toBe("");
+  // A retry clears the bar while it runs; a new failure brings it back.
+  render(withHistory({ loading: true }));
+  expect(element.querySelector('[role="alert"]')).toBeNull();
+  expect(
+    element.querySelector(".ohb-history-slot .ohb-spinner"),
+  ).not.toBeNull();
+  render(withHistory({ error: "offline again" }));
+  expect(element.querySelector('[role="alert"]')?.textContent).toContain(
+    "offline again",
+  );
+  expect(loadEarlier).toHaveBeenCalledTimes(1);
+});

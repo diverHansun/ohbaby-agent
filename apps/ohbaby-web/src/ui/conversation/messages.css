@@ -24,6 +24,11 @@
   padding: 0 24px;
 }
 
+/* A message row with nothing to show takes no space and no gap. */
+.ohb-stream-inner > [data-message-id]:empty {
+  display: none;
+}
+
 .ohb-message {
   display: flex;
   flex-direction: column;
@@ -484,39 +489,16 @@
   }
 }
 
-/* Earlier history: a quiet centred pill above the first message, the same in
-   the chat and in a subagent's conversation. */
-.ohb-history-more {
+/* Earlier history: a fixed-height slot above the first message, the same in
+   the chat, a side chat and a subagent's conversation. Paging starts on its
+   own near the top; the slot shows only the shared spinner while it loads, so
+   nothing below moves when the spinner comes and goes. */
+.ohb-history-slot {
   align-items: center;
-  color: var(--text-dim);
   display: flex;
-  flex-wrap: wrap;
-  font-size: 12px;
-  gap: 8px;
+  flex: none;
+  height: 20px;
   justify-content: center;
-  margin: 4px 0 16px;
-}
-
-.ohb-history-more button {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--text-muted);
-  font-size: 12px;
-  height: 26px;
-  padding: 0 12px;
-  transition:
-    background var(--duration-fast) var(--ease),
-    color var(--duration-fast) var(--ease);
-}
-
-.ohb-history-more button:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.ohb-history-more button:disabled {
-  color: var(--text-dim);
 }
 
 /* Message actions (copy topic): a quiet icon row under the user bubble and

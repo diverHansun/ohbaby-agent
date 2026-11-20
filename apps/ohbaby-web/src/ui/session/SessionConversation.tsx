@@ -139,7 +139,6 @@ export function SessionConversation(props: {
             historyState={storeSnapshot.historyState}
             historyHasMore={storeSnapshot.historyHasMore}
             historyStale={storeSnapshot.historyStale}
-            historyError={storeSnapshot.historyError}
             onLoadHistory={() => runtime.loadEarlierHistory()}
             promptRows={props.promptProjection.rows}
             startupThinkingAt={props.promptProjection.startupThinkingAt}

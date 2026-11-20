@@ -43,7 +43,7 @@ export interface SideChatConnection {
   abortSession(sessionId: string, runId?: string): Promise<void>;
   retryPermissions(): void;
   retrySession(): void;
-  loadEarlierHistory(): Promise<void>;
+  loadEarlierHistory(): Promise<boolean>;
   /** Drops the client and its stream; the side chat itself is kept. */
   close(): Promise<void>;
 }

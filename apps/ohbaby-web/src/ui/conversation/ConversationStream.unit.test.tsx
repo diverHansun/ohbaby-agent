@@ -45,7 +45,7 @@ describe("shared conversation visibility", () => {
                 historyState="ready"
                 historyHasMore={false}
                 historyStale={false}
-                onLoadHistory={() => Promise.resolve()}
+                onLoadHistory={() => Promise.resolve(false)}
                 promptRows={[]}
                 messages={messages}
                 sessionId="session"
@@ -132,7 +132,7 @@ function conversationHarness(): {
     historyState: "ready",
     historyHasMore: false,
     historyStale: false,
-    onLoadHistory: () => Promise.resolve(),
+    onLoadHistory: () => Promise.resolve(false),
     promptRows: [],
     messages: [
       runMessage("user", { role: "user" }),
@@ -511,7 +511,7 @@ describe("failed turn reason", () => {
           historyState="ready"
           historyHasMore={false}
           historyStale={false}
-          onLoadHistory={() => Promise.resolve()}
+          onLoadHistory={() => Promise.resolve(false)}
           promptRows={[]}
           messages={[user, assistant]}
           sessionId="session"
@@ -556,7 +556,7 @@ describe("failed turn reason", () => {
             historyState="ready"
             historyHasMore={false}
             historyStale={false}
-            onLoadHistory={() => Promise.resolve()}
+            onLoadHistory={() => Promise.resolve(false)}
             promptRows={[]}
             messages={messages}
             sessionId="session"
@@ -625,7 +625,7 @@ it("links an automatic failure only to its backend-associated result sources", (
           historyState="ready"
           historyHasMore={false}
           historyStale={false}
-          onLoadHistory={() => Promise.resolve()}
+          onLoadHistory={() => Promise.resolve(false)}
           promptRows={[]}
           messages={[]}
           sessionId="session"

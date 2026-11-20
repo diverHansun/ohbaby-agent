@@ -943,4 +943,164 @@ describe("browser session recovery", () => {
     await f.runtime.loadEarlierHistory();
     expect(cursors).toEqual(["recent", "recent"]);
   });
+  it("tells whether a history load moved the cursor (T21)", async () => {
+    const pages: Promise<Response>[] = [];
+    const f = fixture({
+      query: () =>
+        Promise.resolve(
+          Response.json({
+            ok: true,
+            view: { ...view(), history: { hasMore: true, before: "recent" } },
+          }),
+        ),
+      history: () => pages.shift() ?? Promise.reject(new Error("offline")),
+    });
+    const page = (before: string | undefined, revision = 0): Response =>
+      Response.json({
+        ok: true,
+        history: {
+          version: { ...view().version, sessionRevision: revision },
+          bindingGeneration: 1,
+          messages: [
+            {
+              id: `older-${before ?? "end"}`,
+              role: "user",
+              createdAt: "2025",
+              parts: [],
+            },
+          ],
+          runs: [],
+          prompts: [],
+          reasoningMissing: false,
+          hasMore: before !== undefined,
+          before,
+        },
+      });
+    await f.runtime.ready;
+    await vi.waitFor(() => {
+      expect(f.runtime.store.getSnapshot().sessionSync.status).toBe("ready");
+    });
+    const store = f.runtime.store;
+    pages.push(Promise.resolve(page("deep")));
+    await expect(f.runtime.loadEarlierHistory()).resolves.toBe(true);
+    // The same cursor back is no progress.
+    pages.push(Promise.resolve(page("deep")));
+    await expect(f.runtime.loadEarlierHistory()).resolves.toBe(false);
+    await expect(f.runtime.loadEarlierHistory()).resolves.toBe(false);
+    expect(store.getSnapshot().historyState).toBe("error");
+    // A real edit while the page is in flight drops the page.
+    const inFlight = deferred<Response>();
+    pages.push(inFlight.promise);
+    const loading = f.runtime.loadEarlierHistory();
+    f.emit({
+      type: "ui.event",
+      event: {
+        type: "session.changed",
+        version: { ...view().version, sessionRevision: 1 },
+        bindingGeneration: 1,
+        historyInvalidated: true,
+      },
+    });
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().historyStale).toBe(true);
+    });
+    inFlight.resolve(page("x"));
+    await expect(loading).resolves.toBe(false);
+    expect(store.getSnapshot().historyStale).toBe(true);
+    // Stale with no cursor in the live window: an empty last page clears it.
+    f.emit({
+      type: "ui.event",
+      event: {
+        type: "session.changed",
+        version: { ...view().version, sessionRevision: 2 },
+        bindingGeneration: 1,
+        history: { hasMore: false },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(
+        store.getSnapshot().sessionSync.view?.history.before,
+      ).toBeUndefined();
+    });
+    const requests = f.calls.length;
+    await expect(f.runtime.loadEarlierHistory()).resolves.toBe(true);
+    expect(f.calls).toHaveLength(requests);
+    expect(store.getSnapshot()).toMatchObject({
+      historyStale: false,
+      historyHasMore: false,
+    });
+    expect(
+      store
+        .getSnapshot()
+        .view.snapshot?.sessions.flatMap((session) => session.messages)
+        .map((message) => message.id),
+    ).toEqual(["message"]);
+  });
+  it("drops a page from before a same-scope rebaseline even at the same revision (T19)", async () => {
+    const pending = deferred<Response>();
+    let calls = 0;
+    const f = fixture({
+      query: () =>
+        Promise.resolve(
+          Response.json({
+            ok: true,
+            view: { ...view(), history: { hasMore: true, before: "recent" } },
+          }),
+        ),
+      history: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve(
+              Response.json({
+                ok: true,
+                history: {
+                  version: view().version,
+                  bindingGeneration: 1,
+                  messages: [],
+                  runs: [],
+                  prompts: [],
+                  reasoningMissing: false,
+                  hasMore: true,
+                  before: "deep",
+                },
+              }),
+            )
+          : pending.promise;
+      },
+    });
+    await f.runtime.ready;
+    await vi.waitFor(() => {
+      expect(f.runtime.store.getSnapshot().sessionSync.status).toBe("ready");
+    });
+    await expect(f.runtime.loadEarlierHistory()).resolves.toBe(true);
+    const loading = f.runtime.loadEarlierHistory();
+    f.emit({ type: "resync-required", maxSeqNum: 2, minSeqNum: 1 });
+    await vi.waitFor(() => {
+      expect(f.runtime.store.getSnapshot().historyStale).toBe(true);
+    });
+    expect(f.runtime.store.getSnapshot().sessionSync.status).toBe("ready");
+    // Same revision 0 as the new baseline, but asked for before it.
+    pending.resolve(
+      Response.json({
+        ok: true,
+        history: {
+          version: view().version,
+          bindingGeneration: 1,
+          messages: [
+            { id: "old-page", role: "user", createdAt: "2025", parts: [] },
+          ],
+          runs: [],
+          prompts: [],
+          reasoningMissing: false,
+          hasMore: true,
+          before: "deeper",
+        },
+      }),
+    );
+    await expect(loading).resolves.toBe(false);
+    expect(f.runtime.store.getSnapshot()).toMatchObject({
+      historyStale: true,
+      historyState: "ready",
+    });
+  });
 });
