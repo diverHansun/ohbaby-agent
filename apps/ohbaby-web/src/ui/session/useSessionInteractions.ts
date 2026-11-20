@@ -40,15 +40,41 @@ export function useSessionInteractions(input: {
   );
   useEffect(() => {
     if (!sessionId) return;
-    void subagents.refresh();
-    const timer = setInterval(() => {
-      void subagents.refresh();
-    }, 1000);
+    let disposed = false;
+    let refreshing = false;
+    let refreshRequested = false;
+    const refresh = async (): Promise<void> => {
+      refreshRequested = true;
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        // An in-flight list may predate an event. Read once more for any
+        // changes that arrived during it.
+        while (refreshRequested && !disposed) {
+          refreshRequested = false;
+          await subagents.refresh();
+        }
+      } finally {
+        refreshing = false;
+      }
+    };
+    const unsubscribe = client.subscribeEvents((event) => {
+      if (
+        (event.type === "subagent.instances.invalidated" &&
+          event.rootSessionId === sessionId) ||
+        (event.type === "session.resync-required" &&
+          !event.disconnected &&
+          (event.sessionId === null || event.sessionId === sessionId))
+      )
+        void refresh();
+    });
+    void refresh();
     return (): void => {
-      clearInterval(timer);
+      disposed = true;
+      unsubscribe();
       subagents.dispose();
     };
-  }, [subagents, sessionId]);
+  }, [client, subagents, sessionId]);
   const approvalDialogVisible = view.pendingPermissions.length > 0;
 
   const composerFocusBeforeApproval = useRef<HTMLElement | null>(null);
