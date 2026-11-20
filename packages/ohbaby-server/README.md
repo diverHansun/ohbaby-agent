@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.18/assets/images/lychee-logo.png" alt="ohbaby-agent" width="120">
+  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.19/assets/images/lychee-logo.png" alt="ohbaby-agent" width="120">
 </p>
 
 # ohbaby-server

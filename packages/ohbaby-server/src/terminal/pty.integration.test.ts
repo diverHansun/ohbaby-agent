@@ -102,31 +102,34 @@ it("cleans a paused shell and shares simultaneous termination", async () => {
   await first;
   await expect.poll(() => alive(pid), { timeout: 5_000 }).toBe(false);
 });
-itPosix("kills an ignoring child after the shell exits first, and frees its listening port", async () => {
-  const { pty, waitFor } = await open();
-  const command = `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>console.log("CHILD:"+process.pid+":"+s.address().port));' &`;
-  pty.write(command + "\r");
-  const output = await waitFor(/CHILD:\d+:\d+/);
-  const [, pidText, portText] = matchOutput(output, /CHILD:(\d+):(\d+)/);
-  const child = Number(pidText);
-  expect(await pty.inspectChildren()).toEqual(
-    expect.arrayContaining([expect.objectContaining({ pid: child })]),
-  );
-  await pty.terminate();
-  expect(alive(child)).toBe(false);
-  expect(alive(pty.pid)).toBe(false);
-  const { createServer } = await import("node:net");
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(Number(portText), "127.0.0.1", resolve);
-  });
-  await new Promise<void>((resolve) =>
-    server.close(() => {
-      resolve();
-    }),
-  );
-});
+itPosix(
+  "kills an ignoring child after the shell exits first, and frees its listening port",
+  async () => {
+    const { pty, waitFor } = await open();
+    const command = `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>console.log("CHILD:"+process.pid+":"+s.address().port));' &`;
+    pty.write(command + "\r");
+    const output = await waitFor(/CHILD:\d+:\d+/);
+    const [, pidText, portText] = matchOutput(output, /CHILD:(\d+):(\d+)/);
+    const child = Number(pidText);
+    expect(await pty.inspectChildren()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ pid: child })]),
+    );
+    await pty.terminate();
+    expect(alive(child)).toBe(false);
+    expect(alive(pty.pid)).toBe(false);
+    const { createServer } = await import("node:net");
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(Number(portText), "127.0.0.1", resolve);
+    });
+    await new Promise<void>((resolve) =>
+      server.close(() => {
+        resolve();
+      }),
+    );
+  },
+);
 itPosix("escalates when the shell itself ignores hangup", async () => {
   const { pty, waitFor } = await open();
   pty.write("trap '' HUP; printf 'TRAPPED\\n'\r");
@@ -135,28 +138,32 @@ itPosix("escalates when the shell itself ignores hangup", async () => {
   expect(alive(pty.pid)).toBe(false);
 });
 
-itPosix("retains captured children after failed cleanup so a later attempt can finish", async () => {
-  const { pty, waitFor } = await open();
-  pty.write(
-    `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("RETRY:"+process.pid)' &\r`,
-  );
-  const output = await waitFor(/RETRY:\d+/);
-  const child = Number(matchOutput(output, /RETRY:(\d+)/)[1]);
-  const signal = processTree.signalTerminalProcess;
-  vi.spyOn(processTree, "signalTerminalProcess").mockImplementation(
-    (member, kind) => {
-      if (member.pid === child && kind === "SIGKILL")
-        throw new Error("simulated permission failure");
-      signal(member, kind);
-    },
-  );
-  await expect(pty.terminate()).rejects.toThrow("Terminal cleanup failed");
-  expect(alive(pty.pid)).toBe(false);
-  expect(alive(child)).toBe(true);
-  vi.restoreAllMocks();
-  await pty.terminate();
-  expect(alive(child)).toBe(false);
-}, 10000);
+itPosix(
+  "retains captured children after failed cleanup so a later attempt can finish",
+  async () => {
+    const { pty, waitFor } = await open();
+    pty.write(
+      `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("RETRY:"+process.pid)' &\r`,
+    );
+    const output = await waitFor(/RETRY:\d+/);
+    const child = Number(matchOutput(output, /RETRY:(\d+)/)[1]);
+    const signal = processTree.signalTerminalProcess;
+    vi.spyOn(processTree, "signalTerminalProcess").mockImplementation(
+      (member, kind) => {
+        if (member.pid === child && kind === "SIGKILL")
+          throw new Error("simulated permission failure");
+        signal(member, kind);
+      },
+    );
+    await expect(pty.terminate()).rejects.toThrow("Terminal cleanup failed");
+    expect(alive(pty.pid)).toBe(false);
+    expect(alive(child)).toBe(true);
+    vi.restoreAllMocks();
+    await pty.terminate();
+    expect(alive(child)).toBe(false);
+  },
+  10000,
+);
 
 function matchOutput(output: string, pattern: RegExp): RegExpExecArray {
   const match = pattern.exec(output);
@@ -164,28 +171,31 @@ function matchOutput(output: string, pattern: RegExp): RegExpExecArray {
   return match;
 }
 
-itPosix("cleans an observed background child after the shell naturally exits", async () => {
-  const { pty, waitFor } = await open();
-  pty.write(
-    `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("NATURAL:"+process.pid)' &\r`,
-  );
-  const output = await waitFor(/NATURAL:\d+/);
-  const child = Number(matchOutput(output, /NATURAL:(\d+)/)[1]);
-  expect(await pty.inspectChildren()).toEqual(
-    expect.arrayContaining([expect.objectContaining({ pid: child })]),
-  );
-  const exited = new Promise<void>((resolve) => {
-    pty.onExit(() => {
-      resolve();
+itPosix(
+  "cleans an observed background child after the shell naturally exits",
+  async () => {
+    const { pty, waitFor } = await open();
+    pty.write(
+      `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("NATURAL:"+process.pid)' &\r`,
+    );
+    const output = await waitFor(/NATURAL:\d+/);
+    const child = Number(matchOutput(output, /NATURAL:(\d+)/)[1]);
+    expect(await pty.inspectChildren()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ pid: child })]),
+    );
+    const exited = new Promise<void>((resolve) => {
+      pty.onExit(() => {
+        resolve();
+      });
     });
-  });
-  pty.write("exit 0\r");
-  await exited;
-  expect(alive(pty.pid)).toBe(false);
-  expect(alive(child)).toBe(true);
-  await pty.terminate();
-  expect(alive(child)).toBe(false);
-});
+    pty.write("exit 0\r");
+    await exited;
+    expect(alive(pty.pid)).toBe(false);
+    expect(alive(child)).toBe(true);
+    await pty.terminate();
+    expect(alive(child)).toBe(false);
+  },
+);
 
 itPosix.each(["/bin/sh", "/bin/zsh"])(
   "cleans unobserved jobs from %s after natural exit without touching another terminal or a detached process",
@@ -257,55 +267,64 @@ itPosix.each(["/bin/sh", "/bin/zsh"])(
   15000,
 );
 
-itPosix("leaves cleanup retryable when process-session inspection fails", async () => {
-  const { pty } = await open();
-  vi.spyOn(processTree, "readProcessTable").mockRejectedValue(
-    new Error("session inspection unavailable"),
-  );
-  await expect(pty.terminate()).rejects.toThrow(
-    "session inspection unavailable",
-  );
-  expect(alive(pty.pid)).toBe(true);
-  vi.restoreAllMocks();
-  await pty.terminate();
-  expect(alive(pty.pid)).toBe(false);
-});
-itPosix("never reopens a session number after a complete scan proved it empty", async () => {
-  const { pty } = await open();
-  const other = await open();
-  await pty.terminate();
-  const unrelated = (await processTree.readProcessTable()).find(
-    ({ pid }) => pid === other.pty.pid,
-  );
-  if (!unrelated) throw new Error("Other terminal must remain alive");
-  vi.spyOn(processTree, "readProcessTable").mockResolvedValue([
-    { ...unrelated, parentPid: 1, sessionId: pty.pid },
-  ]);
-  expect(await pty.inspectChildren()).toEqual([]);
-  expect(alive(other.pty.pid)).toBe(true);
-});
-
-itPosix("rescans a seemingly empty session before sealing when a successor was absent from the first process sample", async () => {
-  const { pty, waitFor } = await open();
-  pty.write(
-    `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("SUCCESSOR:"+process.pid)' &\r`,
-  );
-  const child = Number(
-    matchOutput(await waitFor(/SUCCESSOR:\d+/), /SUCCESSOR:(\d+)/)[1],
-  );
-  try {
-    const exited = new Promise<void>((resolve) => {
-      pty.onExit(() => {
-        resolve();
-      });
-    });
-    pty.write("exit 0\r");
-    await exited;
-    vi.spyOn(processTree, "readProcessTable").mockResolvedValueOnce([]);
-    await pty.terminate();
-    expect(alive(child)).toBe(false);
-  } finally {
+itPosix(
+  "leaves cleanup retryable when process-session inspection fails",
+  async () => {
+    const { pty } = await open();
+    vi.spyOn(processTree, "readProcessTable").mockRejectedValue(
+      new Error("session inspection unavailable"),
+    );
+    await expect(pty.terminate()).rejects.toThrow(
+      "session inspection unavailable",
+    );
+    expect(alive(pty.pid)).toBe(true);
     vi.restoreAllMocks();
-    if (alive(child)) process.kill(child, "SIGKILL");
-  }
-});
+    await pty.terminate();
+    expect(alive(pty.pid)).toBe(false);
+  },
+);
+itPosix(
+  "never reopens a session number after a complete scan proved it empty",
+  async () => {
+    const { pty } = await open();
+    const other = await open();
+    await pty.terminate();
+    const unrelated = (await processTree.readProcessTable()).find(
+      ({ pid }) => pid === other.pty.pid,
+    );
+    if (!unrelated) throw new Error("Other terminal must remain alive");
+    vi.spyOn(processTree, "readProcessTable").mockResolvedValue([
+      { ...unrelated, parentPid: 1, sessionId: pty.pid },
+    ]);
+    expect(await pty.inspectChildren()).toEqual([]);
+    expect(alive(other.pty.pid)).toBe(true);
+  },
+);
+
+itPosix(
+  "rescans a seemingly empty session before sealing when a successor was absent from the first process sample",
+  async () => {
+    const { pty, waitFor } = await open();
+    pty.write(
+      `${JSON.stringify(process.execPath)} -e 'process.on("SIGHUP",()=>{});setInterval(()=>{},1000);console.log("SUCCESSOR:"+process.pid)' &\r`,
+    );
+    const child = Number(
+      matchOutput(await waitFor(/SUCCESSOR:\d+/), /SUCCESSOR:(\d+)/)[1],
+    );
+    try {
+      const exited = new Promise<void>((resolve) => {
+        pty.onExit(() => {
+          resolve();
+        });
+      });
+      pty.write("exit 0\r");
+      await exited;
+      vi.spyOn(processTree, "readProcessTable").mockResolvedValueOnce([]);
+      await pty.terminate();
+      expect(alive(child)).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+      if (alive(child)) process.kill(child, "SIGKILL");
+    }
+  },
+);
