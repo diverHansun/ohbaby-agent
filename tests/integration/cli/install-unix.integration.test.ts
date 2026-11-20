@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   stat,
   symlink,
@@ -347,13 +348,58 @@ if (action === "view") {
       install({ TEST_PAUSE_VIEW: "1" }),
       install({ TEST_PAUSE_VIEW: "1" }),
     ]);
-    expect(results.map((result) => result.code).sort()).toEqual([0, 1]);
+    expect(
+      results.map((result) => result.code).sort(),
+      JSON.stringify(results),
+    ).toEqual([0, 1]);
     expect(await currentVersion()).toBe(first);
     await expect(stat(lock)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(lock + ".reclaim")).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
+
+  it.each(["install", "recovery"] as const)(
+    "rejects a silent mkdir success for a contested %s lock",
+    async (kind) => {
+      const fakeBin = join(root, "fake-bin");
+      await mkdir(fakeBin);
+      await writeFile(
+        join(fakeBin, "mkdir"),
+        `#!/bin/sh
+for arg do target=$arg; done
+if [ "$target" = "$TEST_CONTESTED_LOCK" ]; then
+  if [ ! -d "$target" ]; then /bin/mkdir "$target" || exit 1; fi
+  exit 0
+fi
+exec /bin/mkdir "$@"
+`,
+        { mode: 0o755 },
+      );
+      await mkdir(lock);
+      const owner = kind === "install" ? process.pid : deadPid;
+      const pidFile = join(lock, "pid");
+      await writeFile(pidFile, String(owner) + "\n");
+      const canonicalLock = await realpath(lock);
+      const contested =
+        kind === "install" ? canonicalLock : canonicalLock + ".reclaim";
+
+      const result = await install({
+        PATH: fakeBin + ":" + systemPath,
+        TEST_CONTESTED_LOCK: contested,
+      });
+      expect(result).toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining(
+          kind === "install"
+            ? "Install lock is active or cannot be verified"
+            : "Install recovery lock is in use",
+        ),
+      });
+      expect(await readFile(pidFile, "utf8")).toBe(String(owner) + "\n");
+      expect((await stat(contested)).isDirectory()).toBe(true);
+    },
+  );
 
   it("reads real multi-line daemon lock and state, and refuses ambiguous records", async () => {
     const pidPath = join(ohbabyHome, daemonLock);

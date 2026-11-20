@@ -201,15 +201,21 @@ require_stale_install_lock() {
     fi
 }
 
+create_lock_directory() (
+    # Some uutils mkdir releases return success when another process created
+    # the directory first. Only an actual creation prints the verbose message.
+    output=$(mkdir -v "$1" 2>/dev/null) && [ -n "$output" ]
+)
+
 take_install_lock() {
     if [ -e "$reclaim_lock" ] || [ -L "$reclaim_lock" ]; then
         fail "Install recovery lock exists at $reclaim_lock. Confirm no install or uninstall is running before removing it."
     fi
-    if ! mkdir "$install_lock" 2>/dev/null; then
+    if ! create_lock_directory "$install_lock"; then
         [ -d "$install_lock" ] && [ ! -L "$install_lock" ] ||
             fail "Cannot create install lock at $install_lock."
         require_stale_install_lock
-        mkdir "$reclaim_lock" 2>/dev/null ||
+        create_lock_directory "$reclaim_lock" ||
             fail "Install recovery lock is in use at $reclaim_lock."
         reclaim_owned=1
 
@@ -221,7 +227,7 @@ take_install_lock() {
             rm -rf "$reclaim_lock/stale" ||
                 fail "Cannot clean stale install lock at $reclaim_lock."
         fi
-        mkdir "$install_lock" 2>/dev/null ||
+        create_lock_directory "$install_lock" ||
             fail "Install lock is in use at $install_lock."
     fi
     lock_owned=1
