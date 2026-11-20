@@ -785,6 +785,27 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain("/ for commands");
   });
 
+  it("shows the launch directory in the footer before a session exists", async () => {
+    const client = createFakeClient({
+      activeSessionId: null,
+      permissions: [],
+      runs: [],
+      sessions: [],
+      status: { kind: "idle" },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+        pendingPromptWorkspace="/launch/project"
+      />,
+    );
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("/launch/project");
+  });
+
   it("renders typed prompt text without adding a cursor glyph to the buffer", async () => {
     const client = createFakeClient(snapshot());
     const app = render(

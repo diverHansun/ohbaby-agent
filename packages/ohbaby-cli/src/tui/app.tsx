@@ -106,6 +106,10 @@ export interface TerminalUiOptions {
   /** A fixed transcript viewport and dock, owned by Ink alternate screen. */
   readonly fullscreen?: boolean;
   readonly reportDurationClockAnomaly?: (identity: string) => void;
+  /**
+   * Directory this TUI was launched in. Pending prompts are keyed by it, and
+   * the footer shows it until a session supplies its own working directory.
+   */
   readonly pendingPromptWorkspace?: string;
   readonly clearOnStart?: boolean;
   readonly client: CoreAPI;
@@ -439,6 +443,9 @@ export function OhbabyTerminalApp({
   const activeSession = useTuiStoreSelector(store, (state) =>
     state.sessions.find((session) => session.id === state.activeSessionId),
   );
+  // A new TUI session starts in the launch directory, so show it before one exists.
+  const footerWorkingDirectory =
+    activeSession?.workingDirectory ?? pendingPromptWorkspace;
   useEffect(() => {
     if (activeSessionId === null) return;
     setPendingReasoning(null);
@@ -1361,7 +1368,7 @@ export function OhbabyTerminalApp({
                 mainNeedsApproval={permissions.length > 0}
                 footer={{
                   model: footerModel,
-                  workingDirectory: activeSession?.workingDirectory,
+                  workingDirectory: footerWorkingDirectory,
                 }}
                 onClose={closeSideChat}
               />
@@ -1606,7 +1613,7 @@ export function OhbabyTerminalApp({
             loadCatalog={loadCatalog}
             onCommandPanelOpen={openCommandPanel}
             permission={permission}
-            workingDirectory={activeSession?.workingDirectory}
+            workingDirectory={footerWorkingDirectory}
             model={footerModel}
             reasoning={activeSession?.reasoning}
             queuedPrompts={queuedPrompts}
