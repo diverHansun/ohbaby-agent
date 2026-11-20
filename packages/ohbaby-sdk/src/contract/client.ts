@@ -285,6 +285,10 @@ export interface UiCommandClient
   selectDefaultModel(
     entryId: string,
   ): Promise<import("./settings.js").UiSettingsModelsResponse>;
+  selectSubagentModel(input: {
+    readonly entryId: string | null;
+    readonly reasoning?: UiReasoningConfig;
+  }): Promise<import("./settings.js").UiSettingsModelsResponse>;
   updateSessionReasoning(input: {
     readonly sessionId: string;
     readonly reasoning: UiReasoningConfig | null;

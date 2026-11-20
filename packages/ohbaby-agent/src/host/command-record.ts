@@ -13,6 +13,7 @@ export type UiCommandMethod =
   | "updateSessionReasoning"
   | "updateSessionModel"
   | "selectDefaultModel"
+  | "selectSubagentModel"
   | "connectModel"
   | "setSearchApiKey"
   | "setPermission"
@@ -199,6 +200,7 @@ export function buildUiCommandDetails(
     case "updateSessionReasoning":
     case "updateSessionModel":
     case "selectDefaultModel":
+    case "selectSubagentModel":
     case "steerQueuedPrompt":
     case "resendSteerInput":
     case "cancelQueuedPrompt":

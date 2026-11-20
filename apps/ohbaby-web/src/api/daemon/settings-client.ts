@@ -5,6 +5,7 @@ import type {
   UiSettingsModelCreate,
   UiSettingsModelPatch,
   UiSettingsModelProbeResponse,
+  UiSettingsModelSubagentSelect,
   UiSettingsModels,
   UiSettingsSearch,
   UiSettingsSearchUpdate,
@@ -28,6 +29,9 @@ export interface SettingsApi {
     patch: UiSettingsModelPatch,
   ): Promise<UiSettingsModels>;
   selectModel(id: string): Promise<UiSettingsModels>;
+  selectSubagentModel(
+    input: UiSettingsModelSubagentSelect,
+  ): Promise<UiSettingsModels>;
   deleteModel(id: string): Promise<UiSettingsModels>;
   deleteProvider(provider: string): Promise<UiSettingsModels>;
   /** Detects the entry's reasoning again; the result is also saved on the entry. */
@@ -96,6 +100,12 @@ export class SettingsClient implements SettingsApi {
 
   selectModel(id: string): Promise<UiSettingsModels> {
     return this.modelWrite("/v1/settings/models/active", "POST", { id });
+  }
+
+  selectSubagentModel(
+    input: UiSettingsModelSubagentSelect,
+  ): Promise<UiSettingsModels> {
+    return this.modelWrite("/v1/settings/models/subagent", "POST", input);
   }
 
   deleteModel(id: string): Promise<UiSettingsModels> {

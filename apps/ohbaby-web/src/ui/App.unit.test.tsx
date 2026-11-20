@@ -5149,6 +5149,7 @@ function createFakeRuntime(input: {
     acquirePromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
     updateSessionModel: vi.fn(() => Promise.reject(new Error("unused"))),
     selectDefaultModel: vi.fn(() => Promise.reject(new Error("unused"))),
+    selectSubagentModel: vi.fn(() => Promise.reject(new Error("unused"))),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),

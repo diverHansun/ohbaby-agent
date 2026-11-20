@@ -12,6 +12,7 @@ import type {
 import type {
   CommandHandler,
   CommandMcpServerSummary,
+  CommandModelList,
   CommandModelSummary,
   CommandPermissionState,
   CommandRunContext,
@@ -61,11 +62,38 @@ const HELP_COMMAND_ORDER = [
 async function listModels(
   options: CommandServiceOptions,
   sessionId?: string,
-): Promise<readonly CommandModelSummary[]> {
-  const models = await (options.models?.listModels(sessionId) ?? []);
-  return models
-    .map(sanitizeModelSummary)
-    .filter((model): model is CommandModelSummary => model !== null);
+): Promise<CommandModelList> {
+  const result = await options.models?.listModelsWithSubagent?.(sessionId);
+  const models =
+    result?.models ?? (await options.models?.listModels(sessionId)) ?? [];
+  const subagent = result?.subagent;
+  const reasoning = subagent?.reasoning;
+  return {
+    models: models
+      .map(sanitizeModelSummary)
+      .filter((model): model is CommandModelSummary => model !== null),
+    subagent: subagent
+      ? {
+          id: subagent.id,
+          provider: subagent.provider,
+          model: subagent.model,
+          ...(subagent.label === undefined ? {} : { label: subagent.label }),
+          configurationComplete: subagent.configurationComplete,
+          ...(reasoning === undefined
+            ? {}
+            : {
+                reasoning: {
+                  ...(reasoning.enabled === undefined
+                    ? {}
+                    : { enabled: reasoning.enabled }),
+                  ...(reasoning.effort === undefined
+                    ? {}
+                    : { effort: reasoning.effort }),
+                },
+              }),
+        }
+      : null,
+  };
 }
 
 async function currentModel(
@@ -145,6 +173,7 @@ function sanitizeModelSummary(
     ...(model.apiKeyEnv === undefined ? {} : { apiKeyEnv: model.apiKeyEnv }),
     ...(model.active === undefined ? {} : { active: model.active }),
     ...(model.default === undefined ? {} : { default: model.default }),
+    ...(model.subagent === undefined ? {} : { subagent: model.subagent }),
   };
 }
 
@@ -295,7 +324,7 @@ async function handleStatus(
       diagnosticsFilePath: options.getDiagnosticsFilePath?.() ?? null,
       mcps: summarizeMcpServers(mcpServers),
       model,
-      models,
+      models: models.models,
       permission,
       promptCacheUsage,
       projectRoot,
@@ -358,7 +387,7 @@ async function handleModels(
   context.emitOutput(
     dataOutput("models.current", {
       current: await currentModel(options, sessionId),
-      models: await listModels(options, sessionId),
+      ...(await listModels(options, sessionId)),
     }),
   );
 }

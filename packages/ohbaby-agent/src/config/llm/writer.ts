@@ -59,10 +59,12 @@ import {
   clearUnsupportedAnthropicEffortPreference,
   normalizeModelDocument,
   readModelDocument,
+  subagentModelSummary,
   ModelSettingsError,
   type ModelDocument,
   type ModelEntry,
 } from "./model-document.js";
+import { resolveSubagentReasoning } from "./subagent-reasoning.js";
 export { ModelSettingsError } from "./model-document.js";
 const DEFAULT_INTERFACE_PROVIDER: InterfaceProviderKind = "openai-compatible";
 
@@ -148,6 +150,9 @@ export const ModelEntryPatchSchema = z
 export const ModelEntrySelectSchema = z
   .object({ id: z.string().min(1) })
   .strict();
+export const ModelEntrySubagentSelectSchema = z
+  .object({ id: z.string().min(1).nullable(), reasoning: fields.reasoning })
+  .strict();
 const generations = new Map<string, number>();
 function generationKey(id: string, options: ModelSettingsOptions): string {
   return `${resolve(options.modelJsonPath ?? getModelJsonPath())}\0${id}`;
@@ -205,6 +210,7 @@ async function projectSettings(
     active: active
       ? { id: active.id, provider: active.provider, model: active.model }
       : null,
+    subagent: subagentModelSummary(document),
     models: document.models.map((entry) => ({
       id: entry.id,
       provider: entry.provider,
@@ -483,6 +489,53 @@ export function selectModelEntry(
     return projectSettings(document, options);
   });
 }
+
+export function selectSubagentModel(
+  id: string | null,
+  reasoning: ReasoningConfig | undefined,
+  options: ModelSettingsOptions = {},
+): Promise<UiSettingsModels> {
+  return coordinateModelConfig(options.modelJsonPath, async () => {
+    const document = await readModelDocument(options);
+    if (id === null) {
+      if (document.subagentModel) {
+        delete document.subagentModel;
+        await persistDocument(document, options);
+      }
+      return projectSettings(document, options);
+    }
+    const entry = requireEntry(document, id);
+    if (!configurationComplete(entry))
+      throw new ModelSettingsError("MODEL_CONFIG_INCOMPLETE");
+    try {
+      validateReasoningConfig(reasoning);
+      if (reasoning?.enabled !== undefined || reasoning?.effort !== undefined) {
+        resolveSubagentReasoning(entryReasoningOptions(entry), reasoning);
+      } else {
+        reasoning = undefined;
+      }
+    } catch (error) {
+      if (!(error instanceof ConfigError) || error.code !== "INVALID_FIELD")
+        throw error;
+      throw Object.assign(new Error(error.message, { cause: error }), {
+        code: "VALIDATION_FAILED",
+        issues: [
+          {
+            code: "custom",
+            path:
+              reasoning?.effort === undefined
+                ? ["reasoning"]
+                : ["reasoning", "effort"],
+          },
+        ],
+      });
+    }
+    document.subagentModel = { entryId: id, ...(reasoning && { reasoning }) };
+    await persistDocument(document, options);
+    await startModelEntryDiscovery(id, { ...options, background: true });
+    return projectSettings(document, options);
+  });
+}
 /** Refresh one saved entry without changing the active selection. */
 export async function probeModelEntry(
   id: string,
@@ -526,6 +579,8 @@ async function deleteEntries(
         (entry) => !predicate(entry) && configurationComplete(entry),
       )?.id;
     }
+    if (removed.some((entry) => entry.id === document.subagentModel?.entryId))
+      delete document.subagentModel;
     document.models = document.models.filter((entry) => !predicate(entry));
     await persistDocument(document, options);
     for (const entry of removed) bumpGeneration(entry.id, options);

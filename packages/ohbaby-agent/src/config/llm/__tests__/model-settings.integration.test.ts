@@ -8,6 +8,7 @@ import {
   deleteModelEntry,
   deleteModelProvider,
   selectModelEntry,
+  selectSubagentModel,
   readModelSettings,
   setActiveLLMConfig,
 } from "../writer.js";
@@ -39,6 +40,99 @@ async function add(fields = {}): Promise<import("ohbaby-sdk").UiSettingsModel> {
   if (!entry) throw new Error("Missing saved entry");
   return entry;
 }
+
+describe("subagent model settings", () => {
+  it("round-trips an independent choice and clears it when the referenced provider is deleted", async () => {
+    const first = await add();
+    const child = await add({
+      provider: "openai",
+      model: "gpt-5.2",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OHBABY_TEST_MISSING_SUBAGENT_KEY",
+      label: "Child",
+      reasoning: { enabled: false },
+    });
+    expect((await readModelSettings(opts)).subagent).toBeNull();
+    const preference = { enabled: true, effort: "low" };
+    const onDiscovery = vi.fn();
+    const saved = await selectSubagentModel(child.id, preference, {
+      ...opts,
+      onDiscovery,
+    });
+    await vi.waitFor(() => {
+      expect(onDiscovery).toHaveBeenCalled();
+    });
+    expect(saved.active?.id).toBe(first.id);
+    expect(saved.subagent).toEqual({
+      id: child.id,
+      provider: "openai",
+      model: "gpt-5.2",
+      label: "Child",
+      configurationComplete: true,
+      reasoning: preference,
+    });
+    await updateModelEntry(first.id, { label: "Parent" }, opts);
+    expect(await disk()).toMatchObject({
+      schemaVersion: 2,
+      subagentModel: { entryId: child.id, reasoning: preference },
+    });
+    expect((await deleteModelEntry(first.id, opts)).subagent).toEqual(
+      saved.subagent,
+    );
+    expect(
+      (await deleteModelProvider(child.provider, opts)).subagent,
+    ).toBeNull();
+    expect(await disk()).not.toHaveProperty("subagentModel");
+  });
+
+  it("rejects unknown entries, incomplete entries and unsupported explicit reasoning", async () => {
+    const complete = await add({
+      provider: "openai",
+      model: "gpt-4o",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OHBABY_TEST_MISSING_SUBAGENT_KEY",
+    });
+    const document = await disk();
+    document.models.push({
+      id: "incomplete",
+      provider: "custom",
+      model: "old",
+    });
+    await writeFile(opts.modelJsonPath, JSON.stringify(document));
+    await expect(
+      selectSubagentModel("missing", undefined, opts),
+    ).rejects.toMatchObject({ code: "MODEL_NOT_FOUND" });
+    await expect(
+      selectSubagentModel("incomplete", undefined, opts),
+    ).rejects.toMatchObject({ code: "MODEL_CONFIG_INCOMPLETE" });
+    await expect(
+      selectSubagentModel(complete.id, { effort: "high" }, opts),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    expect(
+      (await selectSubagentModel(complete.id, undefined, opts)).subagent?.id,
+    ).toBe(complete.id);
+    expect(
+      (await selectSubagentModel(null, undefined, opts)).subagent,
+    ).toBeNull();
+  });
+
+  it("leaves a bad preference on disk while reading the rest of the file", async () => {
+    const entry = await add();
+    const original = await disk();
+    for (const subagentModel of [
+      { entryId: "   " },
+      { entryId: 1 },
+      { entryId: "missing" },
+      { entryId: entry.id, reasoning: { enabled: "on" } },
+    ]) {
+      const contents = JSON.stringify({ ...original, subagentModel });
+      await writeFile(opts.modelJsonPath, contents);
+      expect(await disk()).toEqual(original);
+      expect(await readFile(opts.modelJsonPath, "utf8")).toBe(contents);
+    }
+  });
+});
+
 describe("independent model settings", () => {
   it("appends identical routes without deduplication and keeps the first default without persisting automatic limits", async () => {
     const a = await add({ apiKey: "secret-a", label: "Work" });

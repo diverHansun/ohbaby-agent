@@ -17,6 +17,7 @@ import type {
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
   UiSnapshot,
+  UiSettingsSubagentModel,
 } from "ohbaby-sdk";
 import type { BusInstance } from "../bus/index.js";
 import type { GoalBudgetLimits, GoalSnapshot } from "../goals/index.js";
@@ -68,6 +69,7 @@ export interface CommandModelSummary {
   readonly active?: boolean;
   /** The entry new chats, and chats that never picked one, use. */
   readonly default?: boolean;
+  readonly subagent?: boolean;
 }
 
 export interface CommandSessionSummary {
@@ -90,11 +92,19 @@ export interface CommandMcpProvider {
     | readonly CommandMcpServerSummary[];
 }
 
+export interface CommandModelList {
+  /** Selectable entries only. The selected subagent entry can need setup. */
+  readonly models: readonly CommandModelSummary[];
+  readonly subagent: UiSettingsSubagentModel | null;
+}
+
 export interface CommandModelProvider {
-  /** Complete entries only; choosing one goes through `updateSessionModel`. */
   listModels(
     sessionId?: string,
   ): Promise<readonly CommandModelSummary[]> | readonly CommandModelSummary[];
+  listModelsWithSubagent?(
+    sessionId?: string,
+  ): Promise<CommandModelList> | CommandModelList;
   currentModel(
     sessionId?: string,
   ): Promise<CommandModelSummary | null> | CommandModelSummary | null;

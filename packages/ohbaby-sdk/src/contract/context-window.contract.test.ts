@@ -158,6 +158,9 @@ describe("context window UI contract", () => {
       > {
         throw new Error("unused");
       },
+      selectSubagentModel(): ReturnType<CoreAPI["selectSubagentModel"]> {
+        throw new Error("unused");
+      },
       updateSessionReasoning(): ReturnType<CoreAPI["updateSessionReasoning"]> {
         return Promise.reject(new Error("Unused reasoning test stub"));
       },

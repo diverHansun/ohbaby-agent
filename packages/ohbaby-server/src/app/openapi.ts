@@ -208,6 +208,19 @@ export function createOpenApiDocument(
       required: ["id"],
       properties: { id: { type: "string", minLength: 1 } },
     },
+    SettingsModelSubagentSelect: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id"],
+      properties: {
+        id: {
+          type: ["string", "null"],
+          minLength: 1,
+          description: "Stable saved entry ID. Null follows the chat model.",
+        },
+        reasoning: ref("ReasoningConfig"),
+      },
+    },
     SettingsModel: {
       type: "object",
       required: [
@@ -241,7 +254,7 @@ export function createOpenApiDocument(
     },
     SettingsModelsResponse: {
       type: "object",
-      required: ["ok", "active", "models"],
+      required: ["ok", "active", "subagent", "models"],
       properties: {
         ok: { const: true },
         active: {
@@ -251,6 +264,25 @@ export function createOpenApiDocument(
               type: "object",
               required: ["id", "provider", "model"],
               properties: { id: string, provider: string, model: string },
+            },
+          ],
+        },
+        subagent: {
+          description:
+            "Global subagent model preference. Null follows the chat model.",
+          anyOf: [
+            { type: "null" },
+            {
+              type: "object",
+              required: ["id", "provider", "model", "configurationComplete"],
+              properties: {
+                id: string,
+                provider: string,
+                model: string,
+                label: string,
+                configurationComplete: { type: "boolean" },
+                reasoning: ref("ReasoningConfig"),
+              },
             },
           ],
         },
@@ -649,6 +681,13 @@ export function createOpenApiDocument(
         "Select a complete saved entry without network validation; next round uses it and background discovery may actively probe",
         "SettingsModelsResponse",
         { request: "SettingsModelTarget", errors: targetErrors },
+      ),
+    },
+    "/v1/settings/models/subagent": {
+      post: settingsOperation(
+        "Select a saved entry and optional reasoning for future subagent executions, or follow the chat model",
+        "SettingsModelsResponse",
+        { request: "SettingsModelSubagentSelect", errors: targetErrors },
       ),
     },
     "/v1/settings/models/probe": {

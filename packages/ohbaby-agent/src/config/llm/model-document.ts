@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   inferConnectModelInterfaceProvider,
   type UiModelSettingsNumericView,
+  type UiSettingsSubagentModel,
 } from "ohbaby-sdk";
 import {
   activeModelBudgetProfiles,
@@ -13,6 +14,7 @@ import {
   modelProfileRouteKey,
   hasUnsupportedAnthropicEffortPreference,
   validateModelJson,
+  validateReasoningConfig,
   type ReasoningConfig,
   type ResolveRequestReasoningOptions,
   type InterfaceProviderKind,
@@ -46,6 +48,7 @@ export interface ModelEntry extends Omit<
 export interface ModelDocument {
   schemaVersion?: 2;
   activeProfileId?: string;
+  subagentModel?: { entryId: string; reasoning?: ReasoningConfig };
   models: ModelEntry[];
 }
 export type ReasoningNotice = "unsupported-anthropic-effort-cleared";
@@ -90,6 +93,25 @@ export function configurationComplete(
     !entry.needsConfiguration &&
     Boolean(entry.baseUrl && entry.interfaceProvider)
   );
+}
+
+export function subagentModelSummary(
+  document: ModelDocument,
+): UiSettingsSubagentModel | null {
+  const setting = document.subagentModel;
+  if (!setting) return null;
+  const entry = document.models.find(({ id }) => id === setting.entryId);
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    model: entry.model,
+    provider: entry.provider,
+    ...(entry.label === undefined ? {} : { label: entry.label }),
+    configurationComplete: configurationComplete(entry),
+    ...(setting.reasoning === undefined
+      ? {}
+      : { reasoning: setting.reasoning }),
+  };
 }
 export function hasCurrentDetection(entry: ModelEntry): boolean {
   return entry.detectedRouteKey === modelProfileRouteKey(entry, entry.provider);
@@ -275,6 +297,34 @@ function entriesFrom(source: Record<string, unknown>): ModelEntry[] {
     } as ModelEntry;
   });
 }
+function normalizeSubagentModel(
+  value: unknown,
+  models: readonly ModelEntry[],
+): ModelDocument["subagentModel"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const { entryId, reasoning } = value as Record<string, unknown>;
+  if (
+    typeof entryId !== "string" ||
+    !models.some((entry) => entry.id === entryId)
+  )
+    return;
+  try {
+    validateReasoningConfig(reasoning);
+  } catch (error) {
+    if (error instanceof ConfigError) return;
+    throw error;
+  }
+  const { enabled, effort } = reasoning ?? {};
+  if (enabled === undefined && effort === undefined) return { entryId };
+  return {
+    entryId,
+    reasoning: {
+      ...(enabled === undefined ? {} : { enabled }),
+      ...(effort === undefined ? {} : { effort }),
+    },
+  };
+}
+
 /** Pure validation/normalization of current intent, never historical numeric migration. */
 export function normalizeModelDocument(raw: unknown): ModelDocument {
   const source = sourceRecord(raw);
@@ -291,11 +341,13 @@ export function normalizeModelDocument(raw: unknown): ModelDocument {
     throw new ConfigError("Invalid active model id", "INVALID_FIELD");
   const models = entriesFrom(source);
   for (const entry of models) validateEntry(entry);
+  const subagentModel = normalizeSubagentModel(source.subagentModel, models);
   const document: ModelDocument = {
     schemaVersion: 2,
     ...(source.activeProfileId === undefined
       ? {}
       : { activeProfileId: source.activeProfileId }),
+    ...(subagentModel === undefined ? {} : { subagentModel }),
     models,
   };
   projectModelDocument(document);

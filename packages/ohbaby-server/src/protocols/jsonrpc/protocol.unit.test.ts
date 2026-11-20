@@ -195,6 +195,7 @@ describe("daemon protocol", () => {
       "updateSessionReasoning",
       "updateSessionModel",
       "selectDefaultModel",
+      "selectSubagentModel",
       "getCurrentModel",
       "probeModelContextWindow",
       "connectModel",

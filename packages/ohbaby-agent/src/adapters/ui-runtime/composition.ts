@@ -95,6 +95,7 @@ import {
   InMemorySubagentExecutionStore,
   type SubagentExecutionStore,
   SessionSubagentHost,
+  type SessionSubagentHostOptions,
   type StartSessionParams,
   SUBAGENT_ROLES,
   type SubagentInstanceStore,
@@ -191,6 +192,7 @@ export interface UiRuntimeCompositionOptions {
     sessionId: string;
     modelEntryId?: string;
   }) => Promise<RunModel>;
+  readonly resolveSubagentSetting?: SessionSubagentHostOptions["resolveSubagentSetting"];
   readonly messageManager: MessageManager;
   readonly now?: () => number;
   readonly onNotice?: (
@@ -1137,6 +1139,7 @@ export async function createUiRuntimeComposition(
     ): RunModel | Promise<RunModel> =>
       runManager.getActiveRunModel(sessionId, contextScopeId) ??
       options.resolveRunModel({ sessionId }),
+    resolveSubagentSetting: options.resolveSubagentSetting,
     agentManager,
     createSubagentId: options.createSubagentId,
     createRunId: options.createRunId,

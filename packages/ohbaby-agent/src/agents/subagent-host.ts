@@ -121,6 +121,10 @@ export interface SessionSubagentHostOptions {
     wake: () => void,
   ) => () => void;
   readonly onFatal?: (error: Error, rootRunId: string) => void;
+  readonly resolveSubagentSetting?: () => Promise<
+    | { readonly runModel: RunModel; readonly reasoning?: ReasoningIntent }
+    | undefined
+  >;
   readonly getParentReasoning?: (
     sessionId: string,
     contextScopeId?: string,
@@ -579,6 +583,10 @@ export class SessionSubagentHost {
         );
         // Admission can wait behind another child; observe resolution failures immediately.
         void Promise.resolve(inheritedModel).catch(() => undefined);
+        const resolveSetting = this.options.resolveSubagentSetting;
+        const configured =
+          resolveSetting && Promise.resolve().then(resolveSetting);
+        void configured?.catch(() => undefined);
         const job = Promise.resolve().then(async () => {
           await previousAdmission;
           try {
@@ -605,19 +613,21 @@ export class SessionSubagentHost {
               ),
             );
             this.assertRootOpen(root.rootRunId, input.parentSessionId);
+            const selected = await configured;
             return await this.startExecution({
               record,
               prompt: input.prompt,
               environment: input.environment,
               timeoutMs,
               signal: lease?.controller.signal,
-              reasoning:
-                inherited === undefined
+              reasoning: selected
+                ? selected.reasoning
+                : inherited === undefined
                   ? undefined
                   : mergeReasoningIntent(inherited),
               execution,
               onAdmitted: releaseAdmission,
-              runModel: await inheritedModel,
+              runModel: selected?.runModel ?? (await inheritedModel),
             });
           } catch (error) {
             releaseAdmission();

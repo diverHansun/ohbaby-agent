@@ -48,14 +48,14 @@ async function renderModelEditor(saved: UiSettingsModel = entry): Promise<{
   roots.push(root);
   const updateModel = vi
     .fn<SettingsLayer["updateModel"]>()
-    .mockResolvedValue({ active: null, models: [] });
+    .mockResolvedValue({ active: null, subagent: null, models: [] });
   const settings = { updateModel } as unknown as SettingsLayer;
   await act(async () => {
     root.render(
       <ModelEditor
         entry={saved}
         settings={settings}
-        models={{ active: null, models: [saved] }}
+        models={{ active: null, subagent: null, models: [saved] }}
         onBack={() => undefined}
         onSaved={() => undefined}
         onMissing={() => undefined}

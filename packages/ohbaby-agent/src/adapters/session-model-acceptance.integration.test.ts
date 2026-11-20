@@ -479,7 +479,7 @@ it("T13b filters a frozen effort against the default selected at queued executio
 it("T25 lists complete entries for /models, marking the chat's model and the default", async () => {
   await writeModels([
     entry("a"),
-    entry("b"),
+    entry("b", { apiKeyEnv: "OHBABY_TEST_MISSING_SUBAGENT_KEY" }),
     entry("c", { needsConfiguration: true }),
   ]);
   const client = createClient();
@@ -534,4 +534,31 @@ it("T25 lists complete entries for /models, marking the chat's model and the def
   await expect(
     client.getCurrentModel({ modelEntryId: "b" }),
   ).resolves.toMatchObject({ id: "b", model: "model-b" });
+  expect(await run("inv_follow")).toMatchObject({ data: { subagent: null } });
+  await client.selectSubagentModel({ entryId: "b" });
+  expect(await run("inv_child", sessionId)).toMatchObject({
+    data: {
+      models: [
+        { id: "a", subagent: false },
+        { id: "b", subagent: true },
+      ],
+      subagent: { id: "b", model: "model-b", configurationComplete: true },
+    },
+  });
+
+  await writeFile(
+    join(home, "model.json"),
+    JSON.stringify({
+      schemaVersion: 2,
+      activeProfileId: "a",
+      subagentModel: { entryId: "b" },
+      models: [entry("a"), entry("b", { needsConfiguration: true })],
+    }),
+  );
+  expect(await run("inv_needs_setup")).toMatchObject({
+    data: {
+      models: [{ id: "a", subagent: false }],
+      subagent: { id: "b", model: "model-b", configurationComplete: false },
+    },
+  });
 });

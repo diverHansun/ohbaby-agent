@@ -22,6 +22,7 @@ import {
 } from "ohbaby-agent";
 import { McpManager } from "../../../ohbaby-agent/src/mcp/core/manager.js";
 import { createDaemonHttpServer } from "../runtime/daemon/server.js";
+import { createRemoteUiBackendClient } from "../protocols/jsonrpc/client.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -723,6 +724,113 @@ it("global model CRUD preserves independent ids and publishes candidate metadata
     );
   }
 });
+it("writes a global subagent model independently of Default and validates its reasoning", async () => {
+  const events = await eventStream(join(root, "a"), "subagent-settings");
+  const route = {
+    provider: "local",
+    baseUrl: "http://localhost:1/v1",
+    interfaceProvider: "openai-compatible",
+  };
+  await json(join(home, "model.json"), {
+    schemaVersion: 2,
+    activeProfileId: "chat",
+    models: [
+      { ...route, id: "chat", model: "chat-model" },
+      {
+        ...route,
+        id: "fast",
+        model: "fast-model",
+        label: "Fast",
+        reasoningCapabilities: {
+          mode: "effort",
+          wire: "openai",
+          efforts: ["low"],
+          supportsDisabled: false,
+        },
+      },
+      { id: "legacy", model: "legacy-model", provider: "local" },
+    ],
+  });
+  expect(await (await request("models")).json()).toMatchObject({
+    subagent: null,
+  });
+  const unsupported = await request("models/subagent", "POST", {
+    id: "fast",
+    reasoning: { enabled: true, effort: "high" },
+  });
+  expect(unsupported.status).toBe(400);
+  expect(await unsupported.json()).toMatchObject({
+    error: {
+      code: "VALIDATION_FAILED",
+      fields: [{ path: ["reasoning", "effort"] }],
+    },
+  });
+  for (const [input, status, code] of [
+    [{}, 400, "VALIDATION_FAILED"],
+    [{ id: "fast", reasoning: { enabled: "yes" } }, 400, "VALIDATION_FAILED"],
+    [{ id: "missing" }, 404, "MODEL_NOT_FOUND"],
+    [{ id: "legacy" }, 400, "MODEL_CONFIG_INCOMPLETE"],
+  ] as const) {
+    const response = await request("models/subagent", "POST", input);
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ error: { code } });
+  }
+  const before = events().length;
+  const selected = {
+    id: "fast",
+    model: "fast-model",
+    provider: "local",
+    label: "Fast",
+    configurationComplete: true,
+    reasoning: { enabled: true, effort: "low" },
+  };
+  const saved = await request("models/subagent", "POST", {
+    id: selected.id,
+    reasoning: selected.reasoning,
+  });
+  expect(saved.status).toBe(200);
+  expect(await saved.json()).toMatchObject({
+    ok: true,
+    active: { id: "chat" },
+    subagent: selected,
+  });
+  expect(await (await request("models")).json()).toMatchObject({
+    subagent: selected,
+  });
+  await vi.waitFor(() => {
+    expect(events().slice(before)).toContain('"domains":["model"]');
+  });
+  const cleared = await request("models/subagent", "POST", {
+    id: null,
+    reasoning: { enabled: true, effort: "high" },
+  });
+  expect(cleared.status).toBe(200);
+  expect(await cleared.json()).toMatchObject({
+    active: { id: "chat" },
+    subagent: null,
+  });
+  const remote = createRemoteUiBackendClient({
+    authToken: "test-token",
+    clientId: "subagent-settings-tui",
+    directory: join(root, "a"),
+    port: Number(new URL(required(server).url).port),
+  });
+  try {
+    await expect(
+      remote.selectSubagentModel({ entryId: "fast" }),
+    ).resolves.toMatchObject({
+      active: { id: "chat" },
+      subagent: { id: "fast" },
+    });
+    expect(await (await request("models")).json()).toMatchObject({
+      active: { id: "chat" },
+      subagent: { id: "fast" },
+    });
+  } finally {
+    await remote.dispose();
+  }
+});
+
 it("returns MODEL_CONFIG_INCOMPLETE for legacy history and redacts successful model URLs", async () => {
   await json(join(home, "model.json"), {
     provider: "legacy",

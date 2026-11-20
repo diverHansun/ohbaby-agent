@@ -2,6 +2,7 @@ import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_MAX_OUTPUT_TOKENS,
   type UiReasoningCapabilityView,
+  type UiReasoningConfig,
   type UiSettingsChangedEvent,
   type UiSettingsGlobalMcpServer,
   type UiSettingsMcpServer,
@@ -374,19 +375,39 @@ export function createMockSettingsApi(
             : fullState();
   const failing = scenario === "settings-errors";
   let nextId = 100;
-  const models = (): UiSettingsModels => ({
-    active: ((): UiSettingsModels["active"] => {
-      const active = state.models.find((model) => model.id === state.activeId);
-      return active
+  let subagent: { id: string; reasoning?: UiReasoningConfig } | null = null;
+  const models = (): UiSettingsModels => {
+    const active = state.models.find((model) => model.id === state.activeId);
+    const selected = state.models.find((model) => model.id === subagent?.id);
+    return {
+      active: active
         ? { id: active.id, provider: active.provider, model: active.model }
-        : null;
-    })(),
-
-    models: state.models,
-  });
+        : null,
+      subagent: selected
+        ? {
+            id: selected.id,
+            provider: selected.provider,
+            model: selected.model,
+            label: selected.label,
+            configurationComplete: selected.configurationComplete,
+            reasoning: subagent?.reasoning,
+          }
+        : null,
+      models: state.models,
+    };
+  };
   const find = (id: string): UiSettingsModel => {
     const model = state.models.find((candidate) => candidate.id === id);
     if (!model) throw notFound();
+    return model;
+  };
+  const findComplete = (id: string): UiSettingsModel => {
+    const model = find(id);
+    if (!model.configurationComplete)
+      throw Object.assign(new Error("Model configuration incomplete"), {
+        code: "MODEL_CONFIG_INCOMPLETE",
+        status: 400,
+      });
     return model;
   };
   const after = async <T>(work: () => T): Promise<T> => {
@@ -398,7 +419,10 @@ export function createMockSettingsApi(
     configurationComplete:
       model.baseUrl !== undefined && model.interfaceProvider !== undefined,
   });
-  const nextDefault = (): void => {
+  const synchronizeModelSelections = (): void => {
+    const subagentId = subagent?.id;
+    if (subagentId && !state.models.some((model) => model.id === subagentId))
+      subagent = null;
     if (state.models.some((model) => model.id === state.activeId)) return;
     state.activeId =
       state.models.find((model) => model.configurationComplete)?.id ?? null;
@@ -470,7 +494,7 @@ export function createMockSettingsApi(
             }),
           ),
         ];
-        nextDefault();
+        synchronizeModelSelections();
         void detect(id);
         return models();
       }),
@@ -540,7 +564,7 @@ export function createMockSettingsApi(
               ? next
               : { ...next, label },
         );
-        nextDefault();
+        synchronizeModelSelections();
         if (
           next.configurationComplete &&
           (routeChanged ||
@@ -560,20 +584,43 @@ export function createMockSettingsApi(
     },
     selectModel: (id) =>
       after(() => {
-        const model = find(id);
-        if (!model.configurationComplete)
-          throw Object.assign(new Error("Model configuration incomplete"), {
-            code: "MODEL_CONFIG_INCOMPLETE",
-            status: 400,
-          });
+        findComplete(id);
         state.activeId = id;
+        return models();
+      }),
+    selectSubagentModel: ({ id, reasoning }) =>
+      after(() => {
+        if (id === null) {
+          subagent = null;
+          return models();
+        }
+        const capability = findComplete(id).reasoning;
+        const effort = reasoning?.effort;
+        const enabled = reasoning?.enabled;
+        if (enabled !== undefined || effort !== undefined) {
+          const supported =
+            capability.mode !== undefined &&
+            (enabled === false
+              ? capability.supportsDisabled
+              : capability.mode !== "none" &&
+                (effort === undefined || capability.efforts.includes(effort)));
+          if (!supported)
+            throw validationError(
+              effort === undefined ? ["reasoning"] : ["reasoning", "effort"],
+              "Is not valid",
+            );
+          subagent = { id, reasoning };
+        } else {
+          subagent = { id };
+        }
+        void detect(id);
         return models();
       }),
     deleteModel: (id) =>
       after(() => {
         find(id);
         state.models = state.models.filter((model) => model.id !== id);
-        nextDefault();
+        synchronizeModelSelections();
         return models();
       }),
     deleteProvider: (provider) =>
@@ -581,7 +628,7 @@ export function createMockSettingsApi(
         state.models = state.models.filter(
           (model) => model.provider !== provider,
         );
-        nextDefault();
+        synchronizeModelSelections();
         return models();
       }),
     getSearch: () => after(() => state.search),

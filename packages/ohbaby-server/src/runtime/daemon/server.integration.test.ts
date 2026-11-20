@@ -621,7 +621,23 @@ class FakeBackend implements UiBackendClient {
     });
   }
   selectDefaultModel(): ReturnType<UiBackendClient["selectDefaultModel"]> {
-    return Promise.resolve({ ok: true, active: null, models: [] });
+    return Promise.resolve({
+      ok: true,
+      active: null,
+      subagent: null,
+      models: [],
+    });
+  }
+
+  selectSubagentModel(
+    _input: Parameters<UiBackendClient["selectSubagentModel"]>[0],
+  ): ReturnType<UiBackendClient["selectSubagentModel"]> {
+    return Promise.resolve({
+      ok: true,
+      active: null,
+      subagent: null,
+      models: [],
+    });
   }
 
   updateSessionReasoning(
@@ -3198,8 +3214,13 @@ it("does not send unchanged binding hellos for repeated REST prompts or another 
   });
 });
 
-it("transports session model choices, scoped queries and default selection over RPC", async () => {
+it("transports session and subagent model choices and scoped queries over RPC", async () => {
   const backend = new FakeBackend();
+  const selectSubagentModel = vi.fn<UiBackendClient["selectSubagentModel"]>(
+    () =>
+      Promise.resolve({ ok: true, active: null, models: [], subagent: null }),
+  );
+  backend.selectSubagentModel = selectSubagentModel;
   const queried: (
     | { readonly sessionId?: string; readonly modelEntryId?: string }
     | undefined
@@ -3261,6 +3282,22 @@ it("transports session model choices, scoped queries and default selection over 
     expect(await (await rpc("selectDefaultModel", ["a"])).json()).toMatchObject(
       { ok: true },
     );
+    const subagent = {
+      entryId: "a",
+      reasoning: { enabled: true, effort: "low" },
+    };
+    for (const input of [subagent, { entryId: null }]) {
+      expect(
+        await (await rpc("selectSubagentModel", [input])).json(),
+      ).toMatchObject({ ok: true, result: { ok: true, subagent: null } });
+      expect(selectSubagentModel).toHaveBeenLastCalledWith(input);
+    }
+    for (const input of [{ entryId: "" }, { entryId: "a", reasoning: false }]) {
+      expect(
+        await (await rpc("selectSubagentModel", [input])).json(),
+      ).toMatchObject({ ok: false, error: { code: "VALIDATION_FAILED" } });
+    }
+    expect(selectSubagentModel).toHaveBeenCalledTimes(2);
     for (const modelEntryId of [undefined, "", 42, {}]) {
       expect(
         await (

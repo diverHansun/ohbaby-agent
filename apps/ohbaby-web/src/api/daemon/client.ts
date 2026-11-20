@@ -491,6 +491,12 @@ export class BrowserDaemonClient implements UiBackendClient {
     return this.commands.selectDefaultModel(entryId);
   }
 
+  selectSubagentModel(
+    input: Parameters<UiBackendClient["selectSubagentModel"]>[0],
+  ): ReturnType<UiBackendClient["selectSubagentModel"]> {
+    return this.commands.selectSubagentModel(input);
+  }
+
   updateSessionReasoning(
     input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
   ): ReturnType<UiBackendClient["updateSessionReasoning"]> {

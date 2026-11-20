@@ -14,7 +14,11 @@ import { inferConnectModelInterfaceProvider } from "ohbaby-sdk";
 import type { LLMConfig } from "ohbaby-llm";
 import { ConfigError } from "ohbaby-llm";
 import { loadApiKey, loadEnvFile } from "./loaders.js";
-import { loadProjectedModelJson } from "./model-document.js";
+import {
+  loadProjectedModelJson,
+  projectModelDocument,
+  type ModelDocument,
+} from "./model-document.js";
 import {
   firstNonEmptyApiKey,
   OPTIONAL_API_KEY_PLACEHOLDER,
@@ -85,6 +89,7 @@ class LLMConfigManager {
   async loadEntry(
     options: LLMConfigLoadOptions,
     entryId?: string,
+    document?: ModelDocument,
   ): Promise<LLMConfig> {
     return coordinateModelConfig(options.modelJsonPath, () => {
       assertModelConfigConsistent(options.modelJsonPath);
@@ -97,6 +102,7 @@ class LLMConfigManager {
         }),
         entryId,
         false,
+        document,
       );
     });
   }
@@ -183,16 +189,17 @@ class LLMConfigManager {
       Pick<LLMConfigLoadOptions, "modelJsonPath" | "envPath">,
     entryId?: string,
     cache = true,
+    document?: ModelDocument,
   ): Promise<LLMConfig> {
     try {
-      const modelJson = await loadProjectedModelJson(
-        {
-          ...(options.modelJsonPath === undefined
-            ? {}
-            : { modelJsonPath: options.modelJsonPath }),
-        },
-        entryId,
-      );
+      const modelJson = document
+        ? projectModelDocument(document, entryId)
+        : await loadProjectedModelJson(
+            { modelJsonPath: options.modelJsonPath },
+            entryId,
+          );
+      if (!modelJson)
+        throw new ConfigError("No active model configured", "FILE_NOT_FOUND");
 
       // Load API key from environment when configured.
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;
@@ -293,6 +300,7 @@ export { LLMConfigManager };
 export function loadModelEntryConfig(
   options: LLMConfigLoadOptions = {},
   entryId?: string,
+  document?: ModelDocument,
 ): Promise<LLMConfig> {
-  return LLMConfigManager.getInstance().loadEntry(options, entryId);
+  return LLMConfigManager.getInstance().loadEntry(options, entryId, document);
 }

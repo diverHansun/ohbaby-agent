@@ -4,6 +4,7 @@ import { globalSessionErrorStatus } from "../global-sessions.js";
 import type { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import {
+  ModelEntrySubagentSelectSchema,
   parseNewSessionCommandArgs,
   SessionRunBusyError,
   type UiPromptQueueExecutionPort,
@@ -665,6 +666,23 @@ export async function callDaemonBackend(input: {
           code: "VALIDATION_FAILED",
         });
       return backend.selectDefaultModel(entryId);
+    }
+    case "selectSubagentModel": {
+      const value = request.params[0];
+      const parsed = ModelEntrySubagentSelectSchema.safeParse(
+        isRecord(value)
+          ? { id: value.entryId, reasoning: value.reasoning }
+          : value,
+      );
+      if (!parsed.success)
+        throw Object.assign(new Error("Invalid subagent model selection"), {
+          code: "VALIDATION_FAILED",
+        });
+      const { id, reasoning } = parsed.data;
+      return backend.selectSubagentModel({
+        entryId: id,
+        ...(reasoning === undefined ? {} : { reasoning }),
+      });
     }
     case "updateSessionReasoning":
       return backend.updateSessionReasoning(

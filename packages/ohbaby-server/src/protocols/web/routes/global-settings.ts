@@ -13,12 +13,14 @@ import {
   createModelEntry,
   updateModelEntry,
   selectModelEntry,
+  selectSubagentModel,
   probeModelEntry,
   deleteModelEntry,
   deleteModelProvider,
   ModelEntryCreateSchema,
   ModelEntryPatchSchema,
   ModelEntrySelectSchema,
+  ModelEntrySubagentSelectSchema,
   readSearchSettings,
   updateSearchSettings,
   SearchSettingsPatchSchema,
@@ -113,6 +115,22 @@ export function registerGlobalSettingsRoutes(
       if (!parsed.ok) return unreadableBody(context, parsed);
       const { id } = ModelEntrySelectSchema.parse(parsed.value);
       const result = await selectModelEntry(id, modelOptions);
+      await ctx.notify(["model"]);
+      return context.json({
+        ok: true,
+        ...result,
+      } satisfies UiSettingsModelsResponse);
+    }),
+  );
+  app.post(
+    "/v1/settings/models/subagent",
+    handle(async (context) => {
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) return unreadableBody(context, parsed);
+      const { id, reasoning } = ModelEntrySubagentSelectSchema.parse(
+        parsed.value,
+      );
+      const result = await selectSubagentModel(id, reasoning, modelOptions);
       await ctx.notify(["model"]);
       return context.json({
         ok: true,

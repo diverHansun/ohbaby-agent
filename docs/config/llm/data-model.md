@@ -2,12 +2,13 @@
 
 ## 磁盘模型库：ModelDocument
 
-`~/.ohbaby/model.json` 保存 `schemaVersion: 2`、可选 `activeProfileId` 和 `models`。`OHBABY_HOME` 可覆盖配置目录。默认 id 属于模型库；会话的 `modelEntryId` 属于会话，未指定时每轮跟随当时的默认模型。
+`~/.ohbaby/model.json` 保存 `schemaVersion: 2`、可选的 `activeProfileId` 和 `subagentModel`，以及 `models`。`OHBABY_HOME` 可覆盖配置目录。会话的 `modelEntryId` 保存在会话中，未指定时每轮使用当时的全局默认模型。
 
 ```json
 {
   "schemaVersion": 2,
   "activeProfileId": "work",
+  "subagentModel": { "entryId": "work" },
   "models": [
     {
       "id": "work",
@@ -36,6 +37,8 @@
 
 没有默认条目或默认 id 已失效时，第一个完整条目可成为默认。存在但不完整的默认条目不会被其他新条目替代。修改默认不会改写条目的 reasoning 偏好。
 
+`subagentModel.entryId` 引用一个模型条目，适用于所有子代理角色。省略 `subagentModel` 时，子代理继承父会话这一轮的模型和思考档位。指定了条目时，省略 `subagentModel.reasoning` 表示使用该条目的默认档位。显式选择整体应用。删除被引用的条目时，同一次写入清除子代理设置。读取时会忽略结构非法或引用不存在条目的子代理设置，其他模型数据照常读取。
+
 ## 投影与运行配置
 
 `projectModelDocument(document, entryId?)` 生成供 LLM 包消费的完整 `ModelJsonConfig`；其中的 `provider`、`defaultModel`、`apiConfig` 和 `llmParams` 不再作为顶层存储格式写回。
@@ -45,7 +48,7 @@
 | context | 用户覆盖 → 同路由检测值 → 1000000 |
 | 普通输出上限 | 用户覆盖 → 32768 |
 
-默认常量定义在 `ohbaby-sdk` 的 `contract/connect-model.ts`，由 `services/llm-model/modelProfiles.ts` 重新导出，Web 和 TUI 用同一份值显示占位文字。运行层 `maxTokens` 仍为必填数字，主、子代理共用解析后的 RunModel；effort 不改变普通输出上限。标题、摘要和 probe 的专用上限独立。1000000 是本地预算兜底，不代表已知模型容量；真实窗口更小时依靠超长报错后的强制压缩恢复。
+默认常量定义在 `ohbaby-sdk` 的 `contract/connect-model.ts`，由 `services/llm-model/modelProfiles.ts` 重新导出，Web 和 TUI 用同一份值显示占位文字。运行层 `maxTokens` 仍为必填数字，主、子代理各自按本次执行的 `RunModel` 计算预算。effort 不改变普通输出上限。标题、摘要和 probe 的专用上限独立。1000000 是本地预算兜底，不代表已知模型容量；真实窗口更小时依靠超长报错后的强制压缩恢复。
 
 Settings 和 current-model 读取视图保留可选覆盖值、可选检测值，并必返 `effectiveContextWindowTokens`、`effectiveMaxOutputTokens`、`contextDiscovery`。context 状态为 `detecting | identified | unknown`，可带内存中的失败 `reason`。reasoning 复用能力视图，重新探测失败且有旧证据时保持 identified 并附 reason，不再使用 stale。
 

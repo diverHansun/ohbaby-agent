@@ -26,6 +26,7 @@ export type {
   CommandMcpServerStatus,
   CommandMcpServerSummary,
   CommandModelProvider,
+  CommandModelList,
   CommandModelSummary,
   CommandRunContext,
   CommandService,

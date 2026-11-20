@@ -445,7 +445,24 @@ class FakeBackend implements UiBackendClient {
     });
   }
   selectDefaultModel(): ReturnType<UiBackendClient["selectDefaultModel"]> {
-    return Promise.resolve({ ok: true, active: null, models: [] });
+    return Promise.resolve({
+      ok: true,
+      active: null,
+      subagent: null,
+      models: [],
+    });
+  }
+
+  selectSubagentModel(
+    input: Parameters<UiBackendClient["selectSubagentModel"]>[0],
+  ): ReturnType<UiBackendClient["selectSubagentModel"]> {
+    this.calls.push({ args: [input], method: "selectSubagentModel" });
+    return Promise.resolve({
+      ok: true,
+      active: null,
+      subagent: null,
+      models: [],
+    });
   }
 
   updateSessionReasoning(
@@ -908,6 +925,10 @@ describe("createRemoteUiBackendClient", () => {
     const backend = new FakeBackend();
     const listQuery = { surface: "tui" } as const;
     const contextInput = { sessionId: "session_1" };
+    const subagentChoice = {
+      entryId: "entry_b",
+      reasoning: { enabled: true, effort: "low" },
+    };
     const compactOptions = { force: true, sessionId: "session_1" };
     const connectInput = {
       apiKeyEnv: "FAKE_API_KEY",
@@ -978,6 +999,9 @@ describe("createRemoteUiBackendClient", () => {
       const tui = createRPC<CoreAPI>();
       tui.connectImpl(client);
       await tui.createProxy(client).getCurrentModel(undefined);
+      await expect(
+        tui.createProxy(client).selectSubagentModel(subagentChoice),
+      ).resolves.toMatchObject({ ok: true, subagent: null });
       await client.getCurrentModel({ modelEntryId: "entry_b" });
       await client.probeModelContextWindow(probeInput);
       await client.connectModel(connectInput);
@@ -1010,6 +1034,7 @@ describe("createRemoteUiBackendClient", () => {
         method: "compactSession",
       },
       { args: [], method: "getCurrentModel" },
+      { args: [subagentChoice], method: "selectSubagentModel" },
       { args: [{ modelEntryId: "entry_b" }], method: "getCurrentModel" },
       { args: [probeInput], method: "probeModelContextWindow" },
       { args: [connectInput], method: "connectModel" },

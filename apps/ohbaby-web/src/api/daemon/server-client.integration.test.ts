@@ -522,7 +522,21 @@ class FakeBackend implements UiBackendClient {
     });
   }
   selectDefaultModel(): ReturnType<UiBackendClient["selectDefaultModel"]> {
-    return Promise.resolve({ ok: true, active: null, models: [] });
+    return Promise.resolve({
+      ok: true,
+      active: null,
+      subagent: null,
+      models: [],
+    });
+  }
+
+  selectSubagentModel(): ReturnType<UiBackendClient["selectSubagentModel"]> {
+    return Promise.resolve({
+      ok: true,
+      active: null,
+      subagent: null,
+      models: [],
+    });
   }
 
   updateSessionReasoning(

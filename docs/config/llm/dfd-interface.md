@@ -30,7 +30,7 @@ Create / Patch / connect → 校验用户输入 → 配置锁内原子发布
       写回时核对 generation + routeKey → 只写检测字段
 ```
 
-新建、连接变化、unknown 时有修改的 Save、Detect again、设为默认是触发点。普通保存复用可信能力，Detect again 强制刷新自动能力；无关字段修改不打断在途发现。同路由重探失败保留旧值和 identified，附内存 reason；没有旧值才为 unknown。所有结束路径通知，启动、读取、热重载、准备新 run 均不探测。
+新建、连接变化、unknown 时有修改的 Save、Detect again、设为默认、指定子代理模型都会触发探测。普通保存复用可信能力，Detect again 强制刷新自动能力；无关字段修改不打断在途发现。同路由重探失败保留旧值和 identified，附内存 reason；没有旧值才为 unknown。所有结束路径通知，启动、读取、热重载、准备新 run 均不探测。
 
 `reloadLLMConfig()` 清缓存后重新加载；新 run 使用新快照，在途 run 保留旧快照。未知 reasoning 不阻塞新 run，按 service-default 发送；已知能力才应用、校验显式偏好。
 
@@ -44,7 +44,7 @@ Create / Patch / connect → 校验用户输入 → 配置锁内原子发布
 
 | 接口 | 返回与用途 |
 | --- | --- |
-| `readModelSettings(options?)` / `GET /v1/settings/models` | 完整有序模型库、默认条目及每项发现/预算状态 |
+| `readModelSettings(options?)` / `GET /v1/settings/models` | 完整有序模型库、默认条目、子代理模型设置及每项发现/预算状态 |
 | `getCurrentModel({ sessionId?, modelEntryId? }?)` | 指定会话或草稿模型的下一轮配置；未指定则默认 |
 | `loadModelEntryConfig(options, entryId?)` | 目标条目的完整运行 LLMConfig |
 | `getLLMConfig(options?)` / `reloadLLMConfig(options?)` | 默认模型旧接口的缓存读取与重新加载 |
@@ -82,7 +82,9 @@ interface ModelSettingsNumericView {
 | null | 拒绝 | 删除覆盖 |
 | 0、负数、小数、空字符串 | 拒绝 | 拒绝 |
 
-`createModelEntry`、`updateModelEntry`、`selectModelEntry`、删除接口和 `applyActiveModelConfig` 共用发布协调。旧 `setActiveLLMConfig.maxTokens` 仍可用，但正式字段 `maxOutputTokens`（包括 null）优先。`probeModelEntry` 对 unknown 仍返回成功结果；独立只读 context probe 保留其既有数值接口，不接受 null 清空语义。
+`createModelEntry`、`updateModelEntry`、`selectModelEntry`、`selectSubagentModel`、删除接口和 `applyActiveModelConfig` 共用发布协调。旧 `setActiveLLMConfig.maxTokens` 仍可用，但正式字段 `maxOutputTokens`（包括 null）优先。`probeModelEntry` 对 unknown 仍返回成功结果；独立只读 context probe 保留其既有数值接口，不接受 null 清空语义。
+
+Web 通过 `POST /v1/settings/models/subagent` 提交 `{ id, reasoning? }`。TUI 通过 `selectSubagentModel({ entryId, reasoning? })` 提交同一设置。传 `null` 恢复跟随聊天，省略 `reasoning` 则使用所选模型的默认档位。显式档位需要已识别的模型能力，无法应用时返回 `VALIDATION_FAILED`。设置接口返回完整模型库，`subagent` 为 `null` 或包含 `id`、`provider`、`model`、可选 `label`、`configurationComplete` 和可选 `reasoning`。`/models` 使用同一个子代理设置视图，列表行的 `subagent` 标记表示该行是否被选中。
 
 输入框只显示覆盖值。留空时占位文字显示生效值及来源，例如 `1,050,000 (detected)`、`1,000,000 (default)`，探测中显示 `Detecting…`；不再另起一行提示。表单只提交脏字段，主动输入与检测值相同也属于覆盖；后台通知只刷新只读状态，不替换草稿或打开基线。清空已有覆盖提交 null。配置标签统一为 Reasoning Effort。
 

@@ -17,7 +17,7 @@ function models(
 ): UiSettingsModels {
   return {
     active: active ? { id: active, provider: "p", model: active } : null,
-
+    subagent: null,
     models: ids.map((id) => ({
       id,
       provider: "p",
@@ -61,6 +61,42 @@ async function started(
 }
 
 describe("settings data through the real client", () => {
+  it("updates the settings cache from an independent subagent model write", async () => {
+    const daemon = fakeDaemon();
+    const reasoning = { enabled: true, effort: "low" };
+    const subagent = {
+      id: "b",
+      provider: "p",
+      model: "b",
+      configurationComplete: true,
+      reasoning,
+    };
+    daemon.settings = (
+      method,
+      path,
+      directory,
+      body,
+    ): Promise<Response | undefined> => {
+      if (method === "GET" && path === "/v1/settings/models")
+        return Promise.resolve(
+          Response.json({ ok: true, ...models(["a", "b"], "a") }),
+        );
+      if (method !== "POST" || path !== "/v1/settings/models/subagent")
+        return Promise.resolve(undefined);
+      expect(directory).toBeUndefined();
+      expect(body).toEqual({ id: "b", reasoning });
+      return Promise.resolve(
+        Response.json({ ok: true, ...models(["a", "b"], "a"), subagent }),
+      );
+    };
+    const runtime = await started(daemon);
+    await runtime.settings.load("models");
+    await runtime.settings.selectSubagentModel({ id: "b", reasoning });
+    expect(
+      selectSettings(runtime.settings.cache.getSnapshot(), "models").data,
+    ).toMatchObject({ active: { id: "a" }, subagent });
+  });
+
   it("keeps the last model choice when the first write response is delayed", async () => {
     const daemon = fakeDaemon();
     let active = "a";

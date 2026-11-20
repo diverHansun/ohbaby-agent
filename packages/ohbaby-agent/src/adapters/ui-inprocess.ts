@@ -109,6 +109,7 @@ import {
   type SettingsConfigVersions,
 } from "../config/llm/config-coordination.js";
 import { createModelClientPool } from "./ui-inprocess/model-client-pool.js";
+import { createSubagentModelResolver } from "./ui-inprocess/subagent-model.js";
 import { createRunModel } from "./ui-runtime/run-model.js";
 import type { RunModel } from "../core/run-model.js";
 import {
@@ -116,8 +117,9 @@ import {
   configurationComplete,
   ModelSettingsError,
   modelEntryNumericView,
+  subagentModelSummary,
 } from "../config/llm/model-document.js";
-import { selectModelEntry } from "../config/llm/writer.js";
+import { selectModelEntry, selectSubagentModel } from "../config/llm/writer.js";
 import { createPermissionProjection } from "./app-events/permission-projection.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -180,6 +182,7 @@ import type { LLMClientInstance } from "ohbaby-llm";
 import { createBus } from "../bus/index.js";
 import type {
   CommandGoalBackend,
+  CommandModelList,
   CommandModelSummary,
   CommandSessionSummary,
 } from "../commands/index.js";
@@ -1294,6 +1297,11 @@ export function createInProcessUiBackendClient(
         displayReasoning: sourceProjection.reasoning,
         goalExecutionControl: { interruptGoalExecution },
         resolveRunModel,
+        resolveSubagentSetting: createSubagentModelResolver(
+          (directory) => modelClients.resolveSubagent(directory),
+          baseProjectRoot,
+          publishNotice,
+        ),
         messageManager,
         hookExecutor: options.hookExecutor,
         now: () => now().getTime(),
@@ -3472,21 +3480,24 @@ export function createInProcessUiBackendClient(
     return updated;
   }
 
-  /** Complete entries, marking the session's model and the default (D20). */
+  /** One list snapshot drives both the row markers and the selected subagent. */
   async function listModelsFromOptions(
     sessionId?: string,
-  ): Promise<readonly CommandModelSummary[]> {
+  ): Promise<CommandModelList> {
     const current = await currentModelFromOptions(sessionId);
-    const complete = (await readModelDocument()).models.filter(
-      configurationComplete,
-    );
+    const document = await readModelDocument();
+    const complete = document.models.filter(configurationComplete);
+    const subagent = subagentModelSummary(document);
     // An injected client has no entries on disk; show what runs.
     if (complete.length === 0)
-      return current ? [{ ...current, default: true }] : [];
+      return {
+        models: current ? [{ ...current, default: true, subagent: false }] : [],
+        subagent,
+      };
     const defaultId = sessionId
       ? (await currentConnectModelFromOptions())?.id
       : current?.id;
-    return complete.map((entry) => ({
+    const models = complete.map((entry) => ({
       id: entry.id,
       label: entry.label ?? entry.model,
       provider: entry.provider,
@@ -3496,7 +3507,9 @@ export function createInProcessUiBackendClient(
       ...(entry.apiKeyEnv === undefined ? {} : { apiKeyEnv: entry.apiKeyEnv }),
       active: entry.id === current?.id,
       default: entry.id === defaultId,
+      subagent: entry.id === subagent?.id,
     }));
+    return { models, subagent };
   }
 
   async function resolveCoreSessionDisplayTitle(
@@ -5366,7 +5379,9 @@ export function createInProcessUiBackendClient(
     },
     models: {
       currentModel: currentModelFromOptions,
-      listModels: listModelsFromOptions,
+      listModels: async (sessionId): Promise<readonly CommandModelSummary[]> =>
+        (await listModelsFromOptions(sessionId)).models,
+      listModelsWithSubagent: listModelsFromOptions,
     },
     sessions: {
       createSession: createSessionFromCommand,
@@ -6243,6 +6258,16 @@ export function createInProcessUiBackendClient(
     updateSessionModel: updateSessionModelInternal,
     async selectDefaultModel(entryId) {
       const result = await selectModelEntry(entryId, {
+        onDiscovery: publishModelInvalidation,
+      });
+      await publishModelInvalidation();
+      return { ...result, ok: true };
+    },
+    async selectSubagentModel({
+      entryId,
+      reasoning,
+    }): ReturnType<UiBackendClient["selectSubagentModel"]> {
+      const result = await selectSubagentModel(entryId, reasoning, {
         onDiscovery: publishModelInvalidation,
       });
       await publishModelInvalidation();

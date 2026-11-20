@@ -175,6 +175,10 @@ export type UiSettingsModelPatch = Partial<
 export interface UiSettingsModelSelect {
   readonly id: string;
 }
+export interface UiSettingsModelSubagentSelect {
+  readonly id: string | null;
+  readonly reasoning?: import("./connect-model.js").UiReasoningConfig;
+}
 export interface UiSettingsModel extends UiModelSettingsNumericView {
   readonly reasoningDefault?: import("./connect-model.js").UiReasoningConfig;
   readonly id: string;
@@ -195,7 +199,16 @@ export interface UiSettingsModels {
     readonly provider: string;
     readonly model: string;
   } | null;
+  readonly subagent: UiSettingsSubagentModel | null;
   readonly models: readonly UiSettingsModel[];
+}
+export interface UiSettingsSubagentModel {
+  readonly id: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly label?: string;
+  readonly configurationComplete: boolean;
+  readonly reasoning?: import("./connect-model.js").UiReasoningConfig;
 }
 export interface UiSettingsModelsResponse extends UiSettingsModels {
   readonly ok: true;

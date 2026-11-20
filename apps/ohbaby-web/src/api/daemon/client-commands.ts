@@ -215,6 +215,19 @@ export class ClientCommands {
     });
   }
 
+  selectSubagentModel({
+    entryId,
+    reasoning,
+  }: Parameters<UiBackendClient["selectSubagentModel"]>[0]): ReturnType<
+    UiBackendClient["selectSubagentModel"]
+  > {
+    return this.sync.http.request("/v1/settings/models/subagent", {
+      method: "POST",
+      body: { id: entryId, reasoning },
+      includeDirectory: false,
+    });
+  }
+
   async updateSessionReasoning(
     input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
   ): ReturnType<UiBackendClient["updateSessionReasoning"]> {

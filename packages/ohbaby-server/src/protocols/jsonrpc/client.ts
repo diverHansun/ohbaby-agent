@@ -566,6 +566,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("selectDefaultModel", [entryId]);
   }
 
+  selectSubagentModel(
+    input: Parameters<UiBackendClient["selectSubagentModel"]>[0],
+  ): ReturnType<UiBackendClient["selectSubagentModel"]> {
+    return this.rpc("selectSubagentModel", [input]);
+  }
+
   updateSessionReasoning(
     input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
   ): ReturnType<UiBackendClient["updateSessionReasoning"]> {

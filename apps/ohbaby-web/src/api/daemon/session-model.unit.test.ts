@@ -37,6 +37,10 @@ it("forwards model writes and scoped reads without reusing the global model resp
   await client.getCurrentModel({ sessionId: "chat/a b" });
   await client.updateSessionModel({ sessionId: "chat/a b", modelEntryId: "a" });
   await client.selectDefaultModel("a");
+  await client.selectSubagentModel({
+    entryId: "agent",
+    reasoning: { enabled: true, effort: "low" },
+  });
   expect(
     requests.map(
       (request) => new URL(request.url).pathname + new URL(request.url).search,
@@ -46,6 +50,7 @@ it("forwards model writes and scoped reads without reusing the global model resp
     "/v1/model?sessionId=chat%2Fa+b",
     "/v1/sessions/chat%2Fa%20b/model",
     "/v1/settings/models/active",
+    "/v1/settings/models/subagent",
   ]);
   expect(JSON.parse(requests[2]?.init?.body as string)).toEqual({
     modelEntryId: "a",
@@ -53,5 +58,12 @@ it("forwards model writes and scoped reads without reusing the global model resp
   expect(JSON.parse(requests[3]?.init?.body as string)).toEqual({ id: "a" });
   expect(
     new Headers(requests[3]?.init?.headers).has("x-ohbaby-directory"),
+  ).toBe(false);
+  expect(JSON.parse(requests[4]?.init?.body as string)).toEqual({
+    id: "agent",
+    reasoning: { enabled: true, effort: "low" },
+  });
+  expect(
+    new Headers(requests[4]?.init?.headers).has("x-ohbaby-directory"),
   ).toBe(false);
 });

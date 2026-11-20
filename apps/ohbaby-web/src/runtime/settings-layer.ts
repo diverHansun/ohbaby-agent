@@ -2,6 +2,7 @@ import type {
   UiSettingsChangedEvent,
   UiSettingsModelCreate,
   UiSettingsModelPatch,
+  UiSettingsModelSubagentSelect,
   UiSettingsModels,
   UiSettingsSearch,
   UiSettingsSearchUpdate,
@@ -178,6 +179,14 @@ export class SettingsLayer {
 
   selectModel(id: string): Promise<UiSettingsModels> {
     return this.enqueueWrite("models", () => this.api.selectModel(id));
+  }
+
+  selectSubagentModel(
+    input: UiSettingsModelSubagentSelect,
+  ): Promise<UiSettingsModels> {
+    return this.enqueueWrite("models", () =>
+      this.api.selectSubagentModel(input),
+    );
   }
 
   deleteModel(id: string): Promise<UiSettingsModels> {

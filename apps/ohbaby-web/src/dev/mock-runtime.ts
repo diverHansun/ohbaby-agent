@@ -227,6 +227,16 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
             ok: true,
             ...(await settings.selectModel(entryId)),
           });
+        if (key === "selectSubagentModel")
+          return async ({
+            entryId,
+            reasoning,
+          }: Parameters<UiBackendClient["selectSubagentModel"]>[0]): ReturnType<
+            UiBackendClient["selectSubagentModel"]
+          > => ({
+            ok: true,
+            ...(await settings.selectSubagentModel({ id: entryId, reasoning })),
+          });
         if (key === "updateSessionModel")
           return async (
             input: Parameters<UiBackendClient["updateSessionModel"]>[0],

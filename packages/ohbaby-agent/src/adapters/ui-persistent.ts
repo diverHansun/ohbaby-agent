@@ -612,6 +612,12 @@ function withStartupRecovery(
       await ready();
       return client.selectDefaultModel(entryId);
     },
+    async selectSubagentModel(
+      input,
+    ): ReturnType<UiBackendClient["selectSubagentModel"]> {
+      await ready();
+      return client.selectSubagentModel(input);
+    },
     async forkSession(input): ReturnType<UiBackendClient["forkSession"]> {
       await ready();
       return client.forkSession(input);

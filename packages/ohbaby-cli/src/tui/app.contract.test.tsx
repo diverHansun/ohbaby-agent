@@ -6079,6 +6079,7 @@ function createFakeClient(
   readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly updateSessionModel: ReturnType<typeof vi.fn>;
   readonly selectDefaultModel: ReturnType<typeof vi.fn>;
+  readonly selectSubagentModel: ReturnType<typeof vi.fn>;
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
   readonly forkSession: ReturnType<typeof vi.fn>;
   readonly rewindSession: ReturnType<typeof vi.fn>;
@@ -6278,7 +6279,20 @@ function createFakeClient(
     }),
     updateSessionModel: vi.fn(() => Promise.reject(new Error("unused"))),
     selectDefaultModel: vi.fn(() =>
-      Promise.resolve({ ok: true as const, active: null, models: [] }),
+      Promise.resolve({
+        ok: true as const,
+        active: null,
+        subagent: null,
+        models: [],
+      }),
+    ),
+    selectSubagentModel: vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        active: null,
+        subagent: null,
+        models: [],
+      }),
     ),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),

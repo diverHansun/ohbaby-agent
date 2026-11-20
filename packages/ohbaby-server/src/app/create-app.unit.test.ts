@@ -649,7 +649,21 @@ class FakeBackend implements UiBackendClient {
     });
   }
   selectDefaultModel(): ReturnType<UiBackendClient["selectDefaultModel"]> {
-    return Promise.resolve({ ok: true, active: null, models: [] });
+    return Promise.resolve({
+      ok: true,
+      active: null,
+      subagent: null,
+      models: [],
+    });
+  }
+
+  selectSubagentModel(): ReturnType<UiBackendClient["selectSubagentModel"]> {
+    return Promise.resolve({
+      ok: true,
+      active: null,
+      subagent: null,
+      models: [],
+    });
   }
 
   updateSessionReasoning(
@@ -1707,6 +1721,7 @@ describe("createDaemonServerApp", () => {
         "/v1/settings/models/profiles/{id}": ["patch", "delete"],
         "/v1/settings/models/providers/{providerId}": ["delete"],
         "/v1/settings/models/active": ["post"],
+        "/v1/settings/models/subagent": ["post"],
         "/v1/settings/models/probe": ["post"],
       };
       const instanceRoutes = {
@@ -1761,6 +1776,16 @@ describe("createDaemonServerApp", () => {
             },
             SettingsModelPatch: {
               properties: { label: { type: ["string", "null"] } },
+            },
+            SettingsModelSubagentSelect: {
+              required: ["id"],
+              properties: {
+                id: { type: ["string", "null"] },
+                reasoning: { $ref: "#/components/schemas/ReasoningConfig" },
+              },
+            },
+            SettingsModelsResponse: {
+              required: expect.arrayContaining(["subagent"]) as unknown,
             },
             SettingsModelProbeResponse: {
               properties: {

@@ -52,7 +52,20 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
       }),
     ),
     selectDefaultModel: vi.fn(() =>
-      Promise.resolve({ ok: true as const, active: null, models: [] }),
+      Promise.resolve({
+        ok: true as const,
+        active: null,
+        subagent: null,
+        models: [],
+      }),
+    ),
+    selectSubagentModel: vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        active: null,
+        subagent: null,
+        models: [],
+      }),
     ),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),

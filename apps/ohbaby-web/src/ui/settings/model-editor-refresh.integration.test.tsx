@@ -63,7 +63,7 @@ function setup(): EditorHarness {
   roots.push(root);
   const updateModel = vi
     .fn<SettingsLayer["updateModel"]>()
-    .mockResolvedValue({ active: null, models: [] });
+    .mockResolvedValue({ active: null, subagent: null, models: [] });
   const settings = { updateModel } as unknown as SettingsLayer;
   const render = async (entry: UiSettingsModel): Promise<void> => {
     await act(async () => {
@@ -71,7 +71,7 @@ function setup(): EditorHarness {
         <ModelEditor
           entry={entry}
           settings={settings}
-          models={{ active: null, models: [entry] }}
+          models={{ active: null, subagent: null, models: [entry] }}
           onBack={() => undefined}
           onSaved={() => undefined}
           onMissing={() => undefined}

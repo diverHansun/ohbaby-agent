@@ -47,6 +47,7 @@ export const DAEMON_RPC_METHODS = [
   "updateSessionReasoning",
   "updateSessionModel",
   "selectDefaultModel",
+  "selectSubagentModel",
   "getCurrentModel",
   "probeModelContextWindow",
   "connectModel",
