@@ -335,8 +335,15 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         onShutdown: this.options.onShutdown,
       });
       this.app.use("/v1/*", async (context, next) => {
+        const { method, path } = context.req;
+        const controlsExistingWork =
+          method === "POST" &&
+          /^\/v1\/(?:sessions\/[^/]+\/abort|permissions\/[^/]+|interactions\/[^/]+\/respond)$/.test(
+            path,
+          );
         if (
-          ["GET", "HEAD", "OPTIONS"].includes(context.req.method) ||
+          ["GET", "HEAD", "OPTIONS"].includes(method) ||
+          controlsExistingWork ||
           !isAuthorizedDaemonRequest(
             context.req.header("authorization"),
             this.options.authToken,

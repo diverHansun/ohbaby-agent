@@ -65,7 +65,8 @@ daemon_record_pid() {
                         encode_json($record->{port}) =~ /^[0-9]+$/ &&
                         encode_json($record->{authToken}) =~ /^".+"/;
                 }
-                exit 0 if !exists $record->{pid} && $status =~ /\A(?:stopped|crashed)\z/;
+                # Final state is written before the lock is released, so the lock check covers it.
+                exit 0 if $status =~ /\A(?:stopped|crashed)\z/;
             }
             my $pid = encode_json($record->{pid});
             die unless $pid =~ /\A[1-9][0-9]*\z/;
@@ -85,7 +86,7 @@ daemon_record_pid() {
                     !Number.isFinite(updatedAt)) process.exit(1);
                 if (status === "running" &&
                     (!text(host) || !Number.isInteger(port) || !text(authToken))) process.exit(1);
-                if (pid === undefined && (status === "stopped" || status === "crashed")) process.exit(0);
+                if (status === "stopped" || status === "crashed") process.exit(0);
             }
             if (!Number.isSafeInteger(pid) || pid <= 0) process.exit(1);
             console.log(pid);
@@ -119,7 +120,7 @@ else:
         text(record.get("host")) and type(record.get("port")) is int and text(record.get("authToken"))
     ):
         sys.exit(1)
-    if "pid" not in record and status in ("stopped", "crashed"):
+    if status in ("stopped", "crashed"):
         sys.exit(0)
 pid = record.get("pid")
 if type(pid) is not int or pid <= 0:
@@ -447,7 +448,7 @@ clean_old_installations() {
     for old_release in "$releases_dir"/*; do
         [ -d "$old_release" ] || continue
         old_version=${old_release##*/}
-        version_is_safe "$old_version" || continue
+        version_is_safe "${old_version%.partial}" || continue
         if [ "$old_version" != "$version" ] && [ "$old_version" != "$previous" ]; then
             remove_old_directory "$old_release"
         fi

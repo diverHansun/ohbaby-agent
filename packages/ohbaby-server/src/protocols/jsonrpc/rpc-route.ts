@@ -954,8 +954,8 @@ export function createDaemonRpcSuccessResponse(
   return createDaemonRpcSuccess(request.id, result);
 }
 
-// Reads and completion waits cannot create new daemon work.
-const readsWithoutAdmission = new Set([
+// Reads and controls for existing work stay available during an idle check.
+const methodsWithoutAdmission = new Set([
   "getSnapshot",
   "listSubagentExecutions",
   "listShellJobs",
@@ -977,6 +977,9 @@ const readsWithoutAdmission = new Set([
   "listSideChats",
   "exportSession",
   "waitForPrompt",
+  "abortRun",
+  "respondPermission",
+  "respondInteraction",
 ]);
 
 export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
@@ -1002,7 +1005,7 @@ export function registerRpcRoute(app: Hono, ctx: DaemonRouteContext): void {
       ctx.touchClientActivity(parsed.request.clientId);
     const tryEnter = ctx.options.tryEnterMaintenanceAdmission;
     const requiresAdmission =
-      tryEnter && !readsWithoutAdmission.has(parsed.request.method);
+      tryEnter && !methodsWithoutAdmission.has(parsed.request.method);
     const release = requiresAdmission ? tryEnter() : undefined;
     if (requiresAdmission && !release)
       return context.json(

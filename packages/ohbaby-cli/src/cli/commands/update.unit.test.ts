@@ -8,6 +8,7 @@ import { runInstallerCommand } from "../../install/child-command.js";
 import { detectInstallMethod } from "../../install/install-method.js";
 import { getCliPackageVersion } from "../../package-version.js";
 import { readAutoUpdate } from "../../update/settings.js";
+import * as versionCheck from "../../update/version-check.js";
 import type { CliCommandRuntime } from "./types.js";
 import { createUpdateCommand, runAutomaticUpdate } from "./update.js";
 
@@ -114,6 +115,42 @@ it("accepts the actual version and requires confirmation for a different one", a
   expect(runInstallerCommand).not.toHaveBeenCalled();
 });
 
+it("does not downgrade to the registry's latest version unless requested explicitly", async () => {
+  const runtime = createRuntime();
+  const latest = vi
+    .spyOn(versionCheck, "fetchLatestVersion")
+    .mockResolvedValue("0.1.17");
+  try {
+    await command(["update", "-y"], runtime);
+    expect(runtime.stdout.write).toHaveBeenCalledWith(
+      "ohbaby 0.1.18 is already installed.\n",
+    );
+    expect(runtime.runUpgradePreflight).not.toHaveBeenCalled();
+
+    await command(["update", "0.1.17"], runtime);
+    expect(runtime.stdout.write).toHaveBeenCalledWith(
+      "Update ohbaby from 0.1.18 to 0.1.17 (script)?\n",
+    );
+  } finally {
+    latest.mockRestore();
+  }
+});
+
+it("skips automatic updates quietly for an unrecognized installation", async () => {
+  const runtime = createRuntime();
+  vi.mocked(detectInstallMethod).mockReturnValue({ kind: "other" });
+  await expect(
+    runAutomaticUpdate({
+      ohbabyHome: home,
+      currentVersion: "0.1.18",
+      targetVersion: "0.1.19",
+      runtime: runtime as unknown as CliCommandRuntime,
+    }),
+  ).resolves.toBe("continue");
+  expect(runtime.stderr.write).not.toHaveBeenCalled();
+  expect(runtime.runUpgradePreflight).not.toHaveBeenCalled();
+});
+
 it("downloads the pinned script before stopping the daemon and forwards its install parameters", async () => {
   const runtime = createRuntime();
   const fetch = vi.fn(() => Promise.resolve(new Response("test installer")));
@@ -195,6 +232,80 @@ it("lets automatic startup continue on download/preflight failure, and exits if 
   expect(runtime.setExitCode).toHaveBeenCalledWith(1);
   expect(runtime.stderr.write).toHaveBeenCalledWith(
     expect.stringContaining("Switched to ohbaby 0.1.19"),
+  );
+  expect(runtime.stderr.write).toHaveBeenCalledWith(
+    expect.stringContaining("ohbaby update --auto off"),
+  );
+});
+
+it("exits automatic startup once npm has run and failed, but continues if npm never started", async () => {
+  const runtime = createRuntime();
+  const prefix = join(home, "npm-prefix");
+  await mkdir(
+    join(
+      prefix,
+      process.platform === "win32" ? "node_modules" : "lib/node_modules",
+    ),
+    { recursive: true },
+  );
+  vi.mocked(detectInstallMethod).mockReturnValue({ kind: "npm", prefix });
+  const update = (): ReturnType<typeof runAutomaticUpdate> =>
+    runAutomaticUpdate({
+      ohbabyHome: home,
+      currentVersion: "0.1.18",
+      targetVersion: "0.1.19",
+      runtime: runtime as unknown as CliCommandRuntime,
+    });
+
+  vi.mocked(runInstallerCommand).mockRejectedValueOnce(new Error("ENOENT"));
+  await expect(update()).resolves.toBe("continue");
+  expect(runtime.setExitCode).not.toHaveBeenCalled();
+
+  vi.mocked(runInstallerCommand).mockResolvedValueOnce({
+    status: "1",
+    output: "",
+  });
+  await expect(update()).resolves.toBe("exit");
+  expect(runtime.setExitCode).toHaveBeenCalledWith(1);
+  expect(runtime.stderr.write).toHaveBeenCalledWith(
+    expect.stringContaining("npm install failed (1)"),
+  );
+  expect(runtime.stderr.write).toHaveBeenCalledWith(
+    expect.stringContaining("ohbaby update --auto off"),
+  );
+
+  runtime.setExitCode.mockClear();
+  vi.mocked(runInstallerCommand)
+    .mockResolvedValueOnce({ status: "0", output: "" })
+    .mockResolvedValueOnce({ status: "0", output: "0.1.18" });
+  await expect(update()).resolves.toBe("exit");
+  expect(runtime.setExitCode).toHaveBeenCalledWith(1);
+  expect(runtime.stderr.write).toHaveBeenCalledWith(
+    expect.stringContaining("Version verification failed"),
+  );
+});
+
+it("exits automatic startup when a failed script install leaves current unreadable", async () => {
+  const runtime = createRuntime();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(new Response("test installer"))),
+  );
+  vi.mocked(runInstallerCommand).mockImplementation(async () => {
+    await rm(join(installDir, "current"));
+    return { status: "1", output: "" };
+  });
+  await expect(
+    runAutomaticUpdate({
+      ohbabyHome: home,
+      currentVersion: "0.1.18",
+      targetVersion: "0.1.19",
+      runtime: runtime as unknown as CliCommandRuntime,
+    }),
+  ).resolves.toBe("exit");
+  expect(runtime.setExitCode).toHaveBeenCalledWith(1);
+  expect(runtime.stderr.write).toHaveBeenCalledWith(
+    expect.stringContaining("Active version: unknown"),
   );
   expect(runtime.stderr.write).toHaveBeenCalledWith(
     expect.stringContaining("ohbaby update --auto off"),

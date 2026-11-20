@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  DatabaseNewerThanProgramError,
   NOOP_LOGGER,
   collectCleanup,
   createShutdownOptions,
@@ -133,10 +134,14 @@ export class Supervisor {
       await this.writeState("running");
       this.registerSignals();
     } catch (error) {
-      try {
-        await this.writeState("crashed", errorToMessage(error));
-      } catch {
-        // The original startup failure remains authoritative.
+      // A rejected database is closed before a runtime exists. Keep the
+      // previous lifecycle record so this attempt does not block an update.
+      if (this.runtime || !(error instanceof DatabaseNewerThanProgramError)) {
+        try {
+          await this.writeState("crashed", errorToMessage(error));
+        } catch {
+          // The original startup failure remains authoritative.
+        }
       }
       try {
         await this.runtime?.stop();

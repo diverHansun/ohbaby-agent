@@ -216,9 +216,14 @@ if (action === "view") {
     expect((await install({ OHBABY_NO_MODIFY_PATH: "1" })).code).toBe(0);
     const releases = join(installDir, "releases");
     const unusedRelease = join(releases, "0.0.0-install.old");
+    const partialRelease = join(releases, "0.0.1.partial");
     const unusedNode = join(installDir, "runtime", "node-v24.0.0");
     const trash = join(releases, ".trash-leftover");
-    await Promise.all([mkdir(unusedRelease), mkdir(unusedNode), mkdir(trash)]);
+    await Promise.all(
+      [unusedRelease, partialRelease, unusedNode, trash].map((path) =>
+        mkdir(path),
+      ),
+    );
     const result = await install({
       OHBABY_INSTALL_VERSION: second,
       OHBABY_NO_MODIFY_PATH: "1",
@@ -229,6 +234,7 @@ if (action === "view") {
     expect((await stat(join(releases, first))).isDirectory()).toBe(true);
     for (const removed of [
       unusedRelease,
+      partialRelease,
       unusedNode,
       trash,
       join(home, ".zshrc"),
@@ -379,6 +385,27 @@ if (action === "view") {
       ),
     );
     expect(await install()).toMatchObject({ code: 0, stderr: "" });
+  });
+
+  it("ignores a reused PID in a stopped or crashed state once the lock is gone", async () => {
+    const state = join(ohbabyHome, "server", "daemon-state.json");
+    const writeState = (status: string): Promise<void> =>
+      writeFile(
+        state,
+        JSON.stringify(
+          { status, pid: process.pid, pidToken: "old", updatedAt: 2 },
+          null,
+          2,
+        ),
+      );
+    await writeState("stopping");
+    expect((await install()).stderr).toContain("ohbaby serve stop");
+    for (const status of ["stopped", "crashed"]) {
+      await writeState(status);
+      expect(await install()).toMatchObject({ code: 0, stderr: "" });
+    }
+    await writeFile(join(ohbabyHome, daemonLock), daemonPidRecord(process.pid));
+    expect((await install()).stderr).toContain("ohbaby serve stop");
   });
 
   it("uses the installed private Node to inspect daemon metadata without system JSON readers", async () => {

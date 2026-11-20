@@ -116,6 +116,17 @@ function matchesIdentity(
   return record?.pid === target.pid && record.token === target.token;
 }
 
+/**
+ * The daemon writes its final state before releasing the PID lock. Once the
+ * lock is gone, its historical PID may belong to another process.
+ */
+function exitedWithoutLock(
+  state: DaemonState,
+  lock: DaemonPidRecord | undefined,
+): boolean {
+  return !lock && (state.status === "stopped" || state.status === "crashed");
+}
+
 class IdleShutdownRefusedError extends Error {
   constructor(readonly reasons: readonly string[]) {
     super(reasons.join(" "));
@@ -349,7 +360,9 @@ export async function inspectDaemonForMaintenance(
     const target = { pid: state.pid, token: state.pidToken };
     if (lock && !matchesIdentity(lock, target))
       return blocked("The daemon state and process lock do not match.");
-    const liveness = observeProcess(target.pid);
+    const liveness = exitedWithoutLock(state, lock)
+      ? "dead"
+      : observeProcess(target.pid);
     if (liveness === "unknown")
       return blocked(`Could not verify daemon process ${String(target.pid)}.`);
     if (liveness === "alive") {
@@ -423,7 +436,9 @@ async function observeDaemonStop(
         ...(reason ? { reason } : {}),
       };
     };
-    const initial = observe(target.pid);
+    const initial = exitedWithoutLock(state, lock)
+      ? "dead"
+      : observe(target.pid);
     if (initial === "unknown")
       return failure("Process liveness could not be verified", target);
     if (initial === "dead") {

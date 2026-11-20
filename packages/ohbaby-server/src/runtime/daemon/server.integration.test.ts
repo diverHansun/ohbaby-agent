@@ -1148,6 +1148,31 @@ describe("createDaemonHttpServer", () => {
               params: ["new", null],
             });
             expect(newRpc.status).toBe(503);
+            const abort = await postRpc(url, {
+              clientId: "client_1",
+              id: "abort",
+              method: "abortRun",
+              params: ["run_1", {}],
+            });
+            // Aborting reaches the normal session binding validation.
+            expect(abort.status).toBe(400);
+            expect(await abort.json()).toMatchObject({
+              error: { code: "INVALID_SESSION_QUERY" },
+            });
+            for (const path of [
+              "/v1/sessions/session_1/abort",
+              "/v1/permissions/permission_1",
+              "/v1/interactions/interaction_1/respond",
+            ]) {
+              const control = await fetch(url + path, {
+                method: "POST",
+                headers: authHeaders(),
+              });
+              expect(control.status, path).toBe(400);
+              expect(await control.json()).toMatchObject({
+                error: { message: "clientId is required" },
+              });
+            }
             expect((await postIdle("current")).status).toBe(409);
           } finally {
             finishSubmit.resolve();

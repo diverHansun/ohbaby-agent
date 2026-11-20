@@ -1042,14 +1042,22 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
     } finally {
       futureDatabase.close();
     }
-    const incompatible = await runCommand({
-      ...updateInvocation,
-      args: ["run", "test"],
-    });
-    expect(incompatible.code).toBe(1);
-    expect(incompatible.stderr).toContain("unknown migrations: 999_future");
-    expect(incompatible.stderr).toContain("Run ohbaby update");
-    expect(incompatible.stderr).not.toContain("DatabaseNewerThanProgramError");
+    for (const args of [
+      ["run", "test"],
+      ["serve", "--port", "0", "--no-open"],
+    ]) {
+      const incompatible = await runCommand({
+        ...updateInvocation,
+        args,
+        timeoutMs: 30_000,
+      });
+      expect(incompatible.code).toBe(1);
+      expect(incompatible.stderr).toContain("unknown migrations: 999_future");
+      expect(incompatible.stderr).toContain("Run ohbaby update");
+      expect(incompatible.stderr).not.toContain(
+        "DatabaseNewerThanProgramError",
+      );
+    }
     expectSuccess(
       await runCommand({
         ...updateInvocation,

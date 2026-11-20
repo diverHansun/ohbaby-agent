@@ -59,7 +59,8 @@
 
     function Assert-DaemonStopped([string]$ConfigHome) {
         $serverDir = Join-Path $ConfigHome 'server'
-        foreach ($name in 'daemon.pid', 'daemon-state.json') {
+        # Startup takes the PID lock before publishing state, so read the lock last.
+        foreach ($name in 'daemon-state.json', 'daemon.pid') {
             $path = Join-Path $serverDir $name
             try {
                 $text = Read-TextIfPresent $path
@@ -82,7 +83,8 @@
                          $record.authToken -isnot [string] -or -not $record.authToken)) {
                         throw 'Incomplete running daemon state.'
                     }
-                    if ($null -eq $record.pid -and $record.status -cin @('stopped', 'crashed')) { continue }
+                    # Final state is written before the lock is released, so the lock check covers it.
+                    if ($record.status -cin @('stopped', 'crashed')) { continue }
                     if ($record.pid -isnot [int] -or $record.pid -le 0) { throw 'Invalid daemon PID.' }
                 }
                 $running = Test-ProcessPresent $record.pid
@@ -360,7 +362,7 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
     function Clear-OldReleases([string]$Releases, [string]$Runtime, [string]$Version, [string]$Previous) {
         $keep = @($Version)
         if ($Previous) { $keep += $Previous }
-        Clear-OldDirectories $Releases $versionPattern $keep
+        Clear-OldDirectories $Releases ($versionPattern.Replace('\z', '(?:\.partial)?\z')) $keep
         $nodes = foreach ($release in $keep) {
             try {
                 $record = Read-VersionPointer (Join-Path $Releases "$release\node-version") '^[0-9]+\.[0-9]+\.[0-9]+\z'
@@ -437,9 +439,13 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
         $configHome = [IO.Path]::GetFullPath($configHome)
         $installDir = $env:OHBABY_INSTALL_DIR
         if (-not $installDir) { $installDir = Join-Path $userHome '.ohbaby\install' }
+        if ($installDir -notmatch '^(?:[A-Za-z]:[\\/]|\\\\)') {
+            throw 'OHBABY_INSTALL_DIR must be an absolute directory path.'
+        }
         $installDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($installDir).TrimEnd('\', '/')
-        if ($installDir -notmatch '^(?:[A-Za-z]:[\\/]|\\\\)' -or -not [IO.Path]::GetDirectoryName($installDir)) {
-            throw 'OHBABY_INSTALL_DIR must name a directory inside a filesystem root.'
+        if (-not [IO.Path]::GetDirectoryName($installDir) -or
+            $installDir -ieq [IO.Path]::GetFullPath($userHome).TrimEnd('\', '/')) {
+            throw 'Choose a separate installation directory.'
         }
         $installAttributes = Get-PathAttributes $installDir
         if ($null -ne $installAttributes) {

@@ -187,6 +187,12 @@ it.runIf(process.platform === "win32")(
           )
         ).stdout.trim();
 
+      await expect(
+        install(initialVersion, { OHBABY_INSTALL_DIR: "relative" }),
+      ).rejects.toThrow(/must be an absolute directory path/);
+      await expect(
+        install(initialVersion, { OHBABY_INSTALL_DIR: root }),
+      ).rejects.toThrow(/Choose a separate installation directory/);
       await expect(install()).rejects.toThrow(/SHA-256 verification failed/);
       await expect(access(current)).rejects.toThrow();
       await expect(access(lock)).rejects.toThrow();
@@ -224,6 +230,26 @@ it.runIf(process.platform === "win32")(
       );
       await expect(install(nextVersion)).rejects.toThrow(/Daemon PID/);
       await rm(daemonPid);
+      const daemonState = join(configHome, "server", "daemon-state.json");
+      const writeDaemonState = (status: string): Promise<void> =>
+        writeFile(
+          daemonState,
+          JSON.stringify(
+            {
+              status,
+              pid: process.pid,
+              pidToken: "test",
+              updatedAt: Date.now(),
+            },
+            null,
+            2,
+          ),
+        );
+      await writeDaemonState("stopping");
+      await expect(install(nextVersion)).rejects.toThrow(/Daemon PID/);
+      // A stopped daemon keeps its old PID. Once the lock is gone, a reused PID
+      // must not block the install below.
+      await writeDaemonState("stopped");
       await mkdir(lock);
       await writeFile(join(lock, "pid"), String(process.pid));
       await expect(install(nextVersion)).rejects.toThrow(/already running/);
@@ -237,10 +263,13 @@ it.runIf(process.platform === "win32")(
       await expect(install(brokenVersion)).rejects.toThrow(
         /failed its version check/,
       );
+      const partialRelease = join(releases, brokenVersion + ".partial");
+      await expect(access(partialRelease)).resolves.toBeUndefined();
       expect(await installedVersion()).toBe(nextVersion);
       await install(thirdVersion);
       expect(await installedVersion()).toBe(thirdVersion);
       await expect(access(join(releases, initialVersion))).rejects.toThrow();
+      await expect(access(partialRelease)).rejects.toThrow();
       await expect(
         access(join(releases, nextVersion)),
       ).resolves.toBeUndefined();

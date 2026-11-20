@@ -3,6 +3,7 @@ import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
+import semver from "semver";
 import type { Argv, CommandModule } from "yargs";
 import {
   installedCliCommand,
@@ -267,10 +268,7 @@ export async function runAutomaticUpdate(
 ): Promise<"continue" | "exit"> {
   const { runtime, targetVersion } = request;
   const method = detectInstallMethod();
-  if (method.kind === "other") {
-    runtime.stderr.write(`${unsupportedInstall}\n`);
-    return "continue";
-  }
+  if (method.kind === "other") return "continue";
   runtime.stderr.write(
     `Checking if ohbaby can automatically update to ${targetVersion}.\n`,
   );
@@ -345,7 +343,11 @@ export function createUpdateCommand(
           );
         }
         const currentVersion = getCliPackageVersion();
-        if (targetVersion === currentVersion) {
+        if (
+          targetVersion === currentVersion ||
+          (requestedVersion === undefined &&
+            semver.lte(targetVersion, currentVersion))
+        ) {
           runtime.stdout.write(
             `ohbaby ${currentVersion} is already installed.\n`,
           );

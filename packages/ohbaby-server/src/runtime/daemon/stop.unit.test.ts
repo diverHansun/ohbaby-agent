@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
-import { stopDaemonFromState } from "./stop.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { inspectDaemonForMaintenance, stopDaemonFromState } from "./stop.js";
 import { resolveDaemonScope } from "./scope.js";
 
 const roots: string[] = [];
@@ -156,4 +156,79 @@ it("does not classify existing malformed identity files as an absent daemon", as
   await expect(stopDaemonFromState(f)).resolves.toMatchObject({
     processExit: "unconfirmed",
   });
+});
+
+describe.each(["stopped", "crashed"])(
+  "a %s state whose PID was reused after the lock was released",
+  (status) => {
+    async function reusedPidFixture(): Promise<
+      Awaited<ReturnType<typeof fixture>>
+    > {
+      const f = await fixture();
+      await rm(f.pidFilePath);
+      await writeFile(
+        f.stateFilePath,
+        JSON.stringify({
+          pid: process.pid,
+          pidToken: "original",
+          status,
+          updatedAt: 2,
+        }),
+      );
+      return f;
+    }
+
+    it("is not signalled by serve stop", async () => {
+      const f = await reusedPidFixture();
+      const kill = vi.fn();
+      await expect(
+        stopDaemonFromState({ ...f, kill, observeProcess: () => "alive" }),
+      ).resolves.toMatchObject({ processExit: "not-running" });
+      expect(kill).not.toHaveBeenCalled();
+    });
+
+    it("passes the maintenance check with its matching cleanup report", async () => {
+      const f = await reusedPidFixture();
+      const withoutReport = await inspectDaemonForMaintenance(f);
+      expect(withoutReport.kind).toBe("blocked");
+      expect(withoutReport.kind === "blocked" && withoutReport.reason).toMatch(
+        /^Cleanup/,
+      );
+      await writeFile(
+        join(dirname(f.stateFilePath), "daemon-shutdown.json"),
+        JSON.stringify({
+          pid: process.pid,
+          pidToken: "original",
+          recordedAt: 2,
+          cleanup: { status: "confirmed", errors: [] },
+        }),
+      );
+      await expect(inspectDaemonForMaintenance(f)).resolves.toMatchObject({
+        kind: "stopped",
+        target: { pid: process.pid, token: "original" },
+      });
+    });
+  },
+);
+
+it("still treats a live stopped daemon that holds its lock as unsettled", async () => {
+  const f = await fixture();
+  await writeFile(
+    f.pidFilePath,
+    JSON.stringify({ pid: process.pid, token: "original", startedAt: 1 }),
+  );
+  await writeFile(
+    f.stateFilePath,
+    JSON.stringify({
+      pid: process.pid,
+      pidToken: "original",
+      status: "stopped",
+      updatedAt: 2,
+    }),
+  );
+  const result = await inspectDaemonForMaintenance(f);
+  expect(result.kind).toBe("blocked");
+  expect(result.kind === "blocked" && result.reason).toContain(
+    "starting, stopping",
+  );
 });
