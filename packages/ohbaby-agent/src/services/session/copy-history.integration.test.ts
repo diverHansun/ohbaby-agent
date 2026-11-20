@@ -691,6 +691,81 @@ describe("copySessionHistory", () => {
     );
   });
 
+  it.each([false, true])(
+    "uses the summary's position at the same timestamp as the fork (summary included: %s)",
+    async (includeSummary) => {
+      run("answered", 1);
+      message("question", "answered", 1);
+      part("question", "text", {
+        text: "original question",
+        time: { compacted: 2 },
+      });
+      const summary = (): void => {
+        message("summary", null, 2, "assistant", { agent: "context" });
+        part("summary", "text", {
+          text: "short version",
+          metadata: { kind: "context-summary" },
+        });
+      };
+      if (includeSummary) summary();
+      message("answer", "answered", 2, "assistant");
+      part("answer", "text", {
+        text: "final answer",
+        ...(includeSummary ? {} : { time: { compacted: 2 } }),
+      });
+      if (!includeSummary) summary();
+
+      const expected = [
+        "system",
+        includeSummary
+          ? "<context_summary>\nshort version\n</context_summary>"
+          : "original question",
+        "final answer",
+      ];
+      const { sessionId } = await copy("answered");
+      expect(
+        (await modelMessages(sessionId)).map((item) => item.content),
+      ).toEqual(expected);
+      const fork = await forkSession(
+        getDatabase(),
+        { sessionId: main, runId: "answered" },
+        "/next",
+      );
+      expect(
+        (await modelMessages(fork.id)).map((item) => item.content),
+      ).toEqual(expected);
+    },
+  );
+
+  it("restores parts compacted after a cut between two summaries", async () => {
+    run("original-turn", 1);
+    message("original", "original-turn", 1);
+    part("original", "text", { text: "first prompt", time: { compacted: 2 } });
+    message("first-summary", null, 2, "assistant", { agent: "context" });
+    part("first-summary", "text", {
+      text: "first summary",
+      metadata: { kind: "context-summary" },
+      time: { compacted: 4 },
+    });
+    run("middle-turn", 3);
+    message("middle", "middle-turn", 3);
+    part("middle", "text", { text: "second prompt", time: { compacted: 4 } });
+    message("second-summary", null, 4, "assistant", { agent: "context" });
+    part("second-summary", "text", {
+      text: "second summary",
+      metadata: { kind: "context-summary" },
+    });
+
+    const { sessionId } = await copy("middle-turn");
+    expect(
+      (await modelMessages(sessionId)).map((item) => item.content),
+    ).toEqual([
+      "system",
+      "<context_summary>\nfirst summary\n</context_summary>",
+      "second prompt",
+    ]);
+  });
+
   it("replays native tool calls and rebuilds todos without copying live state", async () => {
     const db = getDatabase();
     run("tool-run", 1);

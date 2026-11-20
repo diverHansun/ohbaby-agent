@@ -149,16 +149,6 @@ export class SourceSessionProjection {
     return this.options.metadata(sessionId);
   }
 
-  projectComplete(record: MessageWithParts): UiMessage | undefined {
-    return this.project({
-      ...record,
-      parts: record.parts.map((part) => ({
-        ...part,
-        time: { ...part.time, compacted: undefined },
-      })),
-    });
-  }
-
   private async seed(
     sessionId: string,
   ): Promise<Omit<UiSessionView, "version">> {
@@ -245,7 +235,7 @@ export class SourceSessionProjection {
     };
   }
 
-  private project(record: MessageWithParts): UiMessage | undefined {
+  project(record: MessageWithParts): UiMessage | undefined {
     this.releaseAcceptedSaves(record.info.sessionId);
     const pending = new Set(
       this.reasoning.pendingPartIds(record.info.sessionId),
@@ -423,7 +413,10 @@ export class SourceSessionProjection {
       ...(!isDeepStrictEqual(view.runs, runs) ? { runs } : {}),
       messages,
       reasoningMissing: change.missingCount > 0,
-      historyInvalidated: change.kind === "missing" || change.kind === "saved",
+      historyInvalidated:
+        part.contextScopeId === undefined &&
+        current === undefined &&
+        (change.kind === "missing" || change.kind === "saved"),
     });
     if (change.kind === "missing") this.acceptedReasoning.delete(part.partId);
     else this.acceptedReasoning.set(part.partId, part);
@@ -601,15 +594,7 @@ export class SourceSessionProjection {
         { before, limit, scope: { contextScopeId }, includeRunSummaries },
       );
       const messages = page.messages
-        .map((record) =>
-          this.project({
-            ...record,
-            parts: record.parts.map((part) => ({
-              ...part,
-              time: { ...part.time, compacted: undefined },
-            })),
-          }),
-        )
+        .map((record) => this.project(record))
         .filter((message): message is UiMessage => message !== undefined);
       const view = this.owner.read(sessionId);
       return {

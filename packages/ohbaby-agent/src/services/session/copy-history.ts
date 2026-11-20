@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
-import { isActivePart } from "../../core/context/filters.js";
 import {
   isContextSummaryPart,
   isTranscriptPart,
@@ -90,13 +89,12 @@ export function findForkableMainRun(
         parts.some(isContextSummaryPart)
       )
         continue;
-      const active = parts.filter(isActivePart);
-      const visible = active.filter(isTranscriptPart);
       if (
-        !active.some((part) => part.type === "tool") &&
-        visible.some(
+        !parts.some((part) => part.type === "tool") &&
+        parts.some(
           (part) =>
             part.type === "text" &&
+            isTranscriptPart(part) &&
             part.metadata?.kind !== "lifecycle-interruption" &&
             transcriptText(part).trim() !== "",
         )
@@ -121,7 +119,12 @@ interface CopyHistoryInput {
 
 type Row = Record<string, SqliteValue>;
 type MessageRow = Row & { id: string; data: string; created_at: number };
-type PartRow = Row & { id: string; data: string };
+type PartRow = Row & {
+  id: string;
+  message_id: string;
+  type: Part["type"];
+  data: string;
+};
 type PromptRow = Row & {
   prompt_id: string;
   run_id: string | null;
@@ -350,12 +353,21 @@ export function copySessionHistory(
     if (prompt.resend_of_prompt_id && !ids.has(prompt.resend_of_prompt_id))
       prompt.resend_of_prompt_id = null;
   }
+  // Parts are ordered by source message. Only summaries inside the copied cut
+  // can justify retiring the original text, even at the cut's exact timestamp.
+  const lastSummary = parts.findLast(
+    (row) =>
+      row.type === "text" && isContextSummaryPart(JSON.parse(row.data) as Part),
+  );
+  const lastSummaryAt = lastSummary
+    ? messages.find((message) => message.id === lastSummary.message_id)
+        ?.created_at
+    : undefined;
   for (const part of parts) {
     const parsed = JSON.parse(part.data) as { time?: { compacted?: number } };
     if (
       parsed.time?.compacted !== undefined &&
-      lastMessageAt !== null &&
-      parsed.time.compacted > lastMessageAt
+      (lastSummaryAt === undefined || parsed.time.compacted > lastSummaryAt)
     ) {
       delete parsed.time.compacted;
       part.data = JSON.stringify(parsed);

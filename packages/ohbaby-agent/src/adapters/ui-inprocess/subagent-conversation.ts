@@ -74,7 +74,7 @@ export class SubagentConversationProjection {
       executions: options.executions,
       messages: options.messages,
       project: (record, execution) => {
-        const message = options.source.projectComplete(record);
+        const message = options.source.project(record);
         return message &&
           options.shellJobStore &&
           execution.childSessionId &&
@@ -468,7 +468,7 @@ export class SubagentConversationProjection {
       );
       for (const record of records) {
         if (record.info.contextScopeId !== scope.scopeId) continue;
-        const projected = this.options.source.projectComplete(record);
+        const projected = this.options.source.project(record);
         if (projected) {
           const parent = [...scope.executions.values()].find(
             (r) => r.childUserMessageId === projected.id,

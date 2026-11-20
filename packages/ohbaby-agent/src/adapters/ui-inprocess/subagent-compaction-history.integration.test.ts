@@ -244,7 +244,7 @@ async function fixture(
       web: createSubagentConversationHistory({
         executions,
         messages,
-        project: (record) => source.projectComplete(record),
+        project: (record) => source.project(record),
       }),
       cli: createSubagentViewReader({
         executions,
@@ -594,7 +594,9 @@ describe.each(["memory", "database"] as const)(
           ["root-old", "root-summary"],
           ["root-summary"],
         );
-        expect(root.messages[0].parts).toEqual([]);
+        expect(root.messages[0].parts).toMatchObject([
+          { type: "text", text: "root history" },
+        ]);
         await f.add("a-late-07", "scope-a", f.second.childRunId, 2400);
         assertTranscript(
           await backwardCli(cli, f.second.executionId),

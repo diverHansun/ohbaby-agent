@@ -2,10 +2,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type {
   UiPromptSubmission,
   UiRun,
+  UiSessionChangedEvent,
   UiSession,
   UiSnapshot,
 } from "ohbaby-sdk";
 import { createBus } from "../../bus/index.js";
+import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
 import {
   createDatabaseMessageStore,
   createMessageManager,
@@ -18,7 +20,10 @@ import {
 } from "../../services/database/index.js";
 import { createInProcessUiBackendClient } from "../ui-inprocess.js";
 import { runToUiRun } from "./persistent-store.js";
-import { SourceSessionProjection } from "./source-session-projection.js";
+import {
+  SourceSessionProjection,
+  type SourceSessionChange,
+} from "./source-session-projection.js";
 
 const sessionId = "session";
 const metadata: Omit<UiSession, "messages"> = {
@@ -45,6 +50,217 @@ beforeEach(() => {
     .run(sessionId);
 });
 afterEach(closeDatabase);
+
+it("only invalidates main history when saved reasoning is outside the main live window", async () => {
+  let clock = 0;
+  const manager = createMessageManager({
+    store: createDatabaseMessageStore(),
+    bus: createBus(),
+    now: () => ++clock,
+  });
+  const oldest = await manager.createMessage({
+    agent: "default",
+    role: "assistant",
+    sessionId,
+  });
+  for (let i = 0; i < 49; i++) {
+    await manager.createMessage({ agent: "default", role: "user", sessionId });
+  }
+  const newest = await manager.createMessage({
+    agent: "default",
+    role: "assistant",
+    sessionId,
+  });
+  const child = await manager.createMessage({
+    agent: "default",
+    role: "assistant",
+    sessionId,
+    contextScopeId: "child",
+  });
+  const events: UiSessionChangedEvent[] = [];
+  const scopedChanges: SourceSessionChange[] = [];
+  const source = new SourceSessionProjection({
+    runtimeEpoch: "epoch",
+    messageManager: manager,
+    metadata: (): Promise<typeof metadata> => Promise.resolve(metadata),
+    currentRuns: (): Promise<UiRun[]> => Promise.resolve([]),
+    runsByIds: (): Promise<UiRun[]> => Promise.resolve([]),
+    prompts: (): Promise<UiPromptSubmission[]> => Promise.resolve([]),
+    publish: (event): void => {
+      if (event.type === "session.changed") events.push(event);
+    },
+  });
+  const unsubscribe = source.subscribeScopeChanges((event) => {
+    scopedChanges.push(event);
+  });
+  try {
+    await source.owner.initialize(sessionId);
+    const live = source.owner.read(sessionId).session.messages;
+    expect(live.some((message) => message.id === newest.id)).toBe(true);
+    expect(live.some((message) => message.id === oldest.id)).toBe(false);
+
+    await source.reasoning.update(
+      { sessionId, messageId: newest.id, partId: "live-reasoning" },
+      "Live thinking",
+    );
+    await source.reasoning.finish("live-reasoning", "normal");
+    await vi.waitFor(() => {
+      const saved = events.find((event) =>
+        event.messages?.some((message) =>
+          message.parts.some(
+            (part) =>
+              part.type === "reasoning" &&
+              part.id === "live-reasoning" &&
+              part.saveState === "saved",
+          ),
+        ),
+      );
+      expect(saved).toBeDefined();
+      expect(saved?.historyInvalidated).not.toBe(true);
+    });
+
+    events.length = 0;
+    await source.reasoning.update(
+      { sessionId, messageId: oldest.id, partId: "old-reasoning" },
+      "Earlier thinking",
+    );
+    await source.reasoning.finish("old-reasoning", "normal");
+    await vi.waitFor(() => {
+      expect(events.some((event) => event.historyInvalidated === true)).toBe(
+        true,
+      );
+    });
+
+    events.length = 0;
+    await source.reasoning.update(
+      {
+        sessionId,
+        contextScopeId: "child",
+        messageId: child.id,
+        partId: "child-reasoning",
+      },
+      "Child thinking",
+    );
+    await source.reasoning.finish("child-reasoning", "normal");
+    await vi.waitFor(() => {
+      expect(
+        scopedChanges.some(
+          (event) =>
+            event.kind === "reasoning" &&
+            event.change.kind === "saved" &&
+            event.change.part.messageId === child.id,
+        ),
+      ).toBe(true);
+    });
+    expect(events.some((event) => event.historyInvalidated === true)).toBe(
+      false,
+    );
+  } finally {
+    unsubscribe();
+    source.reasoning.dispose();
+    source.owner.dispose();
+  }
+});
+
+it("pages through compacted original messages and their summary marker", async () => {
+  let clock = 0;
+  const messageManager = createMessageManager({
+    store: createDatabaseMessageStore(),
+    bus: createBus(),
+    now: () => ++clock,
+  });
+  const user = await messageManager.createMessage({
+    agent: "default",
+    sessionId,
+    role: "user",
+  });
+  const userText = await messageManager.appendPart(user.id, {
+    type: "text",
+    text: "Original request",
+  });
+  const assistant = await messageManager.createMessage({
+    agent: "default",
+    sessionId,
+    role: "assistant",
+  });
+  const answerText = await messageManager.appendPart(assistant.id, {
+    type: "text",
+    text: "Original answer",
+  });
+  const summaryId = "summary";
+  const compaction = await messageManager.commitCompaction({
+    sessionId,
+    compactedAt: ++clock,
+    expectedParts: [userText, answerText],
+    summary: {
+      messageId: summaryId,
+      agent: SUMMARY_AGENT_NAME,
+      text: "Internal model summary",
+    },
+  });
+  expect(compaction?.updatedParts).toHaveLength(2);
+  for (let i = 0; i < 50; i++) {
+    const message = await messageManager.createMessage({
+      agent: "default",
+      sessionId,
+      role: "user",
+    });
+    await messageManager.appendPart(message.id, {
+      type: "text",
+      text: `Recent message ${String(i)}`,
+    });
+  }
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: snapshot,
+    messageManager,
+  });
+  try {
+    const view = await client.getSessionView({ sessionId });
+    expect(view.session.messages).toHaveLength(50);
+    expect(view.history.hasMore).toBe(true);
+    expect(view.history.before).toBeDefined();
+
+    const later = await client.getSessionHistory({
+      sessionId,
+      before: view.history.before,
+      limit: 2,
+    });
+    expect(later.hasMore).toBe(true);
+    expect(later.before).toBeDefined();
+    expect(later.messages).toMatchObject([
+      {
+        id: assistant.id,
+        role: "assistant",
+        parts: [{ type: "text", text: "Original answer" }],
+      },
+      {
+        id: summaryId,
+        role: "system",
+        parts: [{ type: "text", metadata: { kind: "context-compaction" } }],
+      },
+    ]);
+    expect(JSON.stringify(later.messages)).not.toContain(
+      "Internal model summary",
+    );
+
+    const earliest = await client.getSessionHistory({
+      sessionId,
+      before: later.before,
+      limit: 2,
+    });
+    expect(earliest.hasMore).toBe(false);
+    expect(earliest.before).toBeUndefined();
+    expect(earliest.messages).toMatchObject([
+      {
+        id: user.id,
+        role: "user",
+        parts: [{ type: "text", text: "Original request" }],
+      },
+    ]);
+  } finally {
+    await client.dispose();
+  }
+});
 
 it("loads the latest main run in full and returns only the main runs of each history page", async () => {
   let clock = 0;

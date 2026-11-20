@@ -29,7 +29,6 @@ import {
   transcriptText,
 } from "../../core/message/origin.js";
 import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
-import { isActivePart } from "../../core/context/filters.js";
 import type {
   RunLedger,
   RunLedgerRecord,
@@ -252,9 +251,6 @@ export function overlayShellJobFacts(
 export function messageToUiMessage(
   message: MessageWithParts,
 ): UiMessage | undefined {
-  const activeParts = message.parts
-    .filter(isActivePart)
-    .sort(compareMessagePartOrder);
   // Retired summaries remain durable compaction boundaries; never project their body.
   const summaryPart = message.parts.find(isContextSummaryPart);
   if (message.info.agent === SUMMARY_AGENT_NAME && summaryPart !== undefined) {
@@ -291,10 +287,13 @@ export function messageToUiMessage(
     };
   }
 
-  const parts = activeParts.flatMap(partToUiParts);
+  // Context compaction changes model input, while the transcript keeps the original parts.
+  const parts = message.parts
+    .toSorted(compareMessagePartOrder)
+    .flatMap(partToUiParts);
   // Hidden tools leave no part behind, so say that this step called one:
   // clients must not take its text for a final answer.
-  const hiddenToolCalls = activeParts.some(
+  const hiddenToolCalls = message.parts.some(
     (part) => part.type === "tool" && HIDDEN_TRANSCRIPT_TOOLS.has(part.tool),
   );
   if (

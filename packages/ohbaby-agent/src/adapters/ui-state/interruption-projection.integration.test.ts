@@ -78,7 +78,7 @@ describe("interruption display ordering", () => {
           contextScopeId,
         });
         return contextScopeId
-          ? source.projectComplete(record)
+          ? source.project(record)
           : source.owner.read("session").session.messages[0];
       };
       try {

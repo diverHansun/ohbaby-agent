@@ -3436,9 +3436,11 @@ describe("createInProcessUiBackendClient", () => {
   it("exposes manual compact through the SDK client", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const bus = createBus();
+    let clock = Date.now();
     const messageManager = createMessageManager({
       bus,
       store: createInMemoryMessageStore(),
+      now: () => ++clock,
     });
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
@@ -3453,7 +3455,7 @@ describe("createInProcessUiBackendClient", () => {
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third long message ".repeat(5000),
+      text: "third long message ".repeat(7000),
     });
     const client = createInProcessUiBackendClient({
       bus,
@@ -3484,7 +3486,14 @@ describe("createInProcessUiBackendClient", () => {
         requests,
       ),
       messageManager,
+      now: () => new Date(++clock),
     });
+    const beforeCompaction = await client.getSessionView({
+      sessionId: "session_1",
+    });
+    expect(
+      beforeCompaction.session.messages.map((message) => message.role),
+    ).toEqual(["user", "assistant", "user"]);
     const events: UiEvent[] = [];
     client.subscribeEvents((event) => {
       events.push(event);
@@ -3515,14 +3524,16 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       manualWindowEvents[0]?.usage.composition?.["summarized-conversation"],
     ).toBeGreaterThan(0);
-    const compactMessages = (
-      await client.getSessionView({ sessionId: "session_1" })
-    ).session.messages.filter((message) =>
+    const afterCompaction = await client.getSessionView({
+      sessionId: "session_1",
+    });
+    const compactMessages = afterCompaction.session.messages.filter((message) =>
       message.parts.some(
         (part) => part.metadata?.kind === "context-compaction",
       ),
     );
     expect(compactMessages).toHaveLength(1);
+    expect(JSON.stringify(compactMessages)).not.toContain("manual summary");
     expect(
       events.some(
         (event) =>
@@ -3532,17 +3543,43 @@ describe("createInProcessUiBackendClient", () => {
     expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
       false,
     );
-    expect(
-      (await client.getSessionView({ sessionId: "session_1" })).context,
-    ).toMatchObject({ status: "ready", value: expectedWindowUsage });
+    expect(afterCompaction.context).toMatchObject({
+      status: "ready",
+      value: expectedWindowUsage,
+    });
 
-    const savedSummary = (await messageManager.listBySession("session_1"))
+    const savedMessages = await messageManager.listBySession("session_1");
+    const savedSummary = savedMessages
       .flatMap((message) => message.parts)
       .find((part) => part.metadata?.kind === "context-summary");
     expect(savedSummary).toMatchObject({
       metadata: { kind: "context-summary" },
       text: "<state_snapshot>manual summary</state_snapshot>",
     });
+    const compactedOriginals = savedMessages.filter((message) =>
+      message.parts.some(
+        (part) => part.type === "text" && part.time?.compacted !== undefined,
+      ),
+    );
+    expect(compactedOriginals.map((message) => message.info.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+    for (const { info } of compactedOriginals) {
+      const original = beforeCompaction.session.messages.find(
+        (message) => message.id === info.id,
+      );
+      const current = afterCompaction.session.messages.find(
+        (message) => message.id === info.id,
+      );
+      expect(original?.parts).toHaveLength(1);
+      expect(current?.parts[0]).toMatchObject({ type: "text" });
+      expect(
+        current?.parts[0]?.type === "text" &&
+          original?.parts[0]?.type === "text" &&
+          current.parts[0].text === original.parts[0].text,
+      ).toBe(true);
+    }
   });
 
   it("keeps a committed manual compact successful when the usage refresh fails", async () => {

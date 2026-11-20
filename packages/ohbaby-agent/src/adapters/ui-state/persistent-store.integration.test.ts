@@ -723,8 +723,9 @@ describe("createPersistentUiStateStore", () => {
       });
 
       const messages = (await store.readSnapshot()).sessions[0]?.messages ?? [];
+      const notices = messages.filter((message) => message.role === "system");
 
-      expect(messages).toEqual([
+      expect(notices).toEqual([
         expect.objectContaining({
           id: "summary_1",
           role: "system",
@@ -748,12 +749,13 @@ describe("createPersistentUiStateStore", () => {
           ],
         }),
       ]);
+      expect(JSON.stringify(messages)).not.toContain("raw summary body");
       if (contextScopeId === undefined) {
-        expect(JSON.stringify(messages)).not.toMatch(
-          /raw summary body|old prompt|modelRequests|context-summary/u,
+        expect(JSON.stringify(notices)).not.toMatch(
+          /modelRequests|context-summary/u,
         );
       } else {
-        expect(messages[0]?.modelRequests).toEqual([
+        expect(notices[0]?.modelRequests).toEqual([
           {
             requestId: "request_summary_1",
             compactionId: "compaction_summary_1",
@@ -765,24 +767,21 @@ describe("createPersistentUiStateStore", () => {
             outcome: "success",
           },
         ]);
-        expect(messages[1]?.modelRequests?.[0]).toMatchObject({
+        expect(notices[1]?.modelRequests?.[0]).toMatchObject({
           messageId: "summary_2",
           purpose: "context-summary",
           startedAt: 1,
         });
-        for (const notice of messages) {
+        for (const notice of notices) {
           expect(notice).not.toHaveProperty("runId");
           expect(notice.modelRequests?.[0]).not.toHaveProperty("runId");
           expect(notice.modelRequests?.[0]).not.toHaveProperty("step");
         }
-        expect(JSON.stringify(messages)).not.toMatch(
-          /raw summary body|old prompt/u,
-        );
       }
     },
   );
 
-  it("omits compacted message parts from persistent UI snapshots", async () => {
+  it("keeps compacted conversation text in persistent UI snapshots", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createDatabaseMessageStore(),
@@ -835,11 +834,10 @@ describe("createPersistentUiStateStore", () => {
     const snapshot = await store.readSnapshot();
     const messages = snapshot.sessions[0]?.messages ?? [];
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.parts).toMatchObject([
-      { text: "still visible prompt", type: "text" },
+    expect(messages.map((message) => message.parts)).toMatchObject([
+      [{ text: "already compacted prompt", type: "text" }],
+      [{ text: "still visible prompt", type: "text" }],
     ]);
-    expect(JSON.stringify(messages)).not.toContain("already compacted prompt");
   });
 
   it("includes the active session even when it falls outside the recent session limit", async () => {
