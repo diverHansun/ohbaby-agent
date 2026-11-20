@@ -738,13 +738,18 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       this.workspaceOf(failed) === this.draft.getSnapshot().workspaceDirectory
     )
       this.draft.setWorkspace(null);
-    const directory = this.draftDirectory();
-    if (directory !== null && directory !== failed && !this.instance.client) {
+    // The draft's workspace, then the default directory: a listed workspace
+    // can still be gone from disk.
+    while (!this.instance.client) {
+      const directory = this.draftDirectory();
+      if (directory === null || directory === failed) break;
       try {
         await this.instance.openDraft(directory);
         return;
       } catch {
-        // Fall through: no instance, the draft shows why.
+        // With no workspace left to drop, the draft shows why.
+        if (this.draft.getSnapshot().workspaceDirectory === null) break;
+        this.draft.setWorkspace(null);
       }
     }
     this.store.setError(message);

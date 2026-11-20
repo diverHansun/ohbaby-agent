@@ -340,6 +340,18 @@ describe("session-centric runtime", () => {
     expect(readWebNavigationState().lastSession).toBeNull();
   });
 
+  it("falls back to the default directory when a linked workspace is listed but gone", async () => {
+    const daemon = fakeDaemon();
+    daemon.unavailable.add("/b");
+    const runtime = start(daemon, { directory: "/b" });
+
+    await runtime.ready;
+    await waitForSession(runtime, null);
+
+    expect(instanceDirectory(runtime)).toBe(DEFAULT);
+    expect(runtime.draft.getSnapshot().workspaceDirectory).toBeNull();
+  });
+
   it("opens a draft when the remembered session no longer exists, so the picker matches", async () => {
     vi.stubGlobal("localStorage", memoryStorage());
     writeWebNavigationState({
@@ -413,6 +425,125 @@ describe("session-centric runtime", () => {
 
     expect(instanceDirectory(runtime)).toBe(DEFAULT);
     expect(runtime.draft.getSnapshot().workspaceDirectory).toBeNull();
+  });
+
+  it("returns to the open chat when the user retries a missing folder before the first attempt fails", async () => {
+    const daemon = fakeDaemon([
+      session("current", "/a", "/a"),
+      session("orphaned", "/deleted", "/deleted"),
+    ]);
+    let releaseFirst = (): void => undefined;
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let held = false;
+    const runtime = start({
+      ...daemon,
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        if (
+          !held &&
+          new URL(request.url).pathname === "/v1/clients" &&
+          request.headers.get("x-ohbaby-directory") === "%2Fdeleted"
+        ) {
+          held = true;
+          await firstHeld;
+        }
+        return daemon.fetch(input, init);
+      },
+    });
+    await runtime.ready;
+    await runtime.openSession("current");
+    await waitForSession(runtime, "current");
+    daemon.unavailable.add("/deleted");
+
+    const first = runtime.openSession("orphaned");
+    await vi.waitFor(() => {
+      expect(held).toBe(true);
+    });
+    const second = runtime.openSession("orphaned");
+    releaseFirst();
+
+    await expect(first).rejects.toMatchObject({
+      code: "directory-unavailable",
+    });
+    await expect(second).rejects.toMatchObject({
+      code: "directory-unavailable",
+    });
+    await waitForSession(runtime, "current");
+    expect(instanceDirectory(runtime)).toBe("/a");
+  });
+
+  it("keeps the previous chat selected when a chat's directory disappears, and opens it after a move", async () => {
+    const daemon = fakeDaemon([
+      session("current", "/a", "/a"),
+      session("orphaned", "/deleted", "/deleted"),
+    ]);
+    const runtime = start(daemon);
+    await runtime.ready;
+    await runtime.openSession("current");
+    await waitForSession(runtime, "current");
+    daemon.unavailable.add("/deleted");
+
+    await expect(runtime.openSession("orphaned")).rejects.toMatchObject({
+      code: "directory-unavailable",
+    });
+    await waitForSession(runtime, "current");
+    expect(instanceDirectory(runtime)).toBe("/a");
+    expect(daemon.sessions.get("orphaned")?.workspaceDirectory).toBe(
+      "/deleted",
+    );
+
+    await runtime.moveSession("orphaned", "/b");
+    await runtime.openSession("orphaned");
+    await waitForSession(runtime, "orphaned");
+    expect(instanceDirectory(runtime)).toBe("/b");
+  });
+
+  it("rolls back to the previous chat after a superseded workspace connects without opening its chat", async () => {
+    const daemon = fakeDaemon([
+      session("current", "/a", "/a"),
+      session("intermediate", "/b", "/b"),
+      session("orphaned", "/deleted", "/deleted"),
+    ]);
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let connecting = false;
+    const runtime = start({
+      ...daemon,
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        if (
+          new URL(request.url).pathname === "/v1/clients" &&
+          request.headers.get("x-ohbaby-directory") === "%2Fb"
+        ) {
+          connecting = true;
+          await held;
+        }
+        return daemon.fetch(input, init);
+      },
+    });
+    await runtime.ready;
+    await runtime.openSession("current");
+    await waitForSession(runtime, "current");
+    daemon.unavailable.add("/deleted");
+
+    const intermediate = runtime.openSession("intermediate");
+    await vi.waitFor(() => {
+      expect(connecting).toBe(true);
+    });
+    const missing = expect(
+      runtime.openSession("orphaned"),
+    ).rejects.toMatchObject({
+      code: "directory-unavailable",
+    });
+    release();
+
+    await Promise.all([intermediate, missing]);
+    await waitForSession(runtime, "current");
+    expect(instanceDirectory(runtime)).toBe("/a");
   });
 
   it("does not re-read the whole list when switching instances", async () => {

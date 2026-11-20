@@ -197,7 +197,17 @@ export class InstanceLayer {
   }
 
   private async connect(directory: string): Promise<BrowserDaemonClient> {
-    const previousDirectory = this.directoryValue;
+    // A superseded selection can connect without binding a chat. Use the
+    // last bound chat in that case. Opening a draft clears it explicitly.
+    const boundSession =
+      this.store.getSnapshot().permissionSync.binding?.rootSessionId;
+    const remembered =
+      this.directoryValue !== null && !boundSession
+        ? this.navigationState.lastSession
+        : null;
+    const previousDirectory = remembered?.directory ?? this.directoryValue;
+    const previousSession = boundSession ?? remembered?.sessionId;
+    const generation = this.selectionGeneration;
     await this.activeClient?.close();
     this.store.reset();
     const client = this.createClient(directory, this.config.clientId);
@@ -231,7 +241,19 @@ export class InstanceLayer {
             );
       this.directoryValue = previousDirectory;
       this.notify();
-      await this.activeClient?.connect().catch(() => undefined);
+      const rollbackClient = this.activeClient;
+      if (rollbackClient) {
+        try {
+          await rollbackClient.connect();
+          if (this.isDisposed()) return client;
+          if (generation === this.selectionGeneration && previousSession) {
+            await rollbackClient.selectSessionForRuntime(previousSession);
+          }
+          if (!this.isDisposed()) this.connectedClient = rollbackClient;
+        } catch {
+          // Report the original failure. The rollback client owns its state.
+        }
+      }
       throw error;
     }
   }
