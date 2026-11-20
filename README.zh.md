@@ -4,9 +4,7 @@
 
 # ohbaby-agent
 
-### 开源 AI 编程 Agent，终端和浏览器里都能用。
-
-**模型随心选，可使用 MCP 和 skills 配置你想要的工具。**
+<p>一个开源的 AI 编程 Agent，带终端 TUI 和本地 Web 界面。<br>接上自己的模型 API 就能用，支持接入 MCP 和 skills。</p>
 
 <a href="https://github.com/diverHansun/ohbaby-agent/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/diverHansun/ohbaby-agent/ci.yml?style=flat-square&label=CI&logo=github"></a>
 <a href="https://www.npmjs.com/package/ohbaby-cli"><img alt="npm" src="https://img.shields.io/npm/v/ohbaby-cli?style=flat-square&color=cb3837&logo=npm"></a>
@@ -18,18 +16,18 @@
 
 <br>
 
-<img src="assets/images/ohbaby-web.png" alt="ohbaby 的 Web UI：Agent 给一个小 CLI 加上 --units 参数，然后汇报改了什么、怎么验证的" width="900">
+<img src="assets/images/ohbaby-web.png" alt="ohbaby Web UI" width="900">
 
 </div>
 
-## 亮点
+## 主要功能
 
-- **三种协议**：`openai-compatible`、`openai-responses`、`anthropic`。
-- **两个界面，同一个 Agent**：基于 [Ink](https://github.com/vadimdemedes/ink) 的终端界面，加上 `ohbaby serve` 启动的本地 Web UI。
-- **内置工具**：读写文件、执行 Shell 命令、联网搜索、管理待办。
-- **权限控制**：危险操作先等你批准；信得过的任务可以用 `/permission` 切到 Full access。
-- **MCP 与 skills**：接入 [MCP](https://modelcontextprotocol.io) server；添加的 skill 会变成 slash 命令。
-- **子 Agent**：把复杂的多步任务交给专注的子 Agent。
+- **多协议接入**：支持 `openai-compatible`、`openai-responses` 和 `anthropic` 三种协议，主流厂商 API 或本地跑的模型都能接。
+- **终端 + 本地 Web**：终端界面基于 [Ink](https://github.com/vadimdemedes/ink)，习惯浏览器的也可以运行 `ohbaby serve` 打开本地 Web UI，两边共用同一套运行时和会话记录。
+- **内置工具**：包含文件读写、代码检索、Shell 命令执行、联网搜索和待办列表。
+- **权限控制**：有风险的操作默认会先询问确认，放心的任务可以用 `/permission` 切到 Full access。
+- **MCP 与 skills**：可以连接 [MCP](https://modelcontextprotocol.io) server 引入外部工具，本地配好的 skill 会注册成 `/` 斜杠命令。
+- **子 Agent**：遇到耗时的代码搜索或多步任务，可以拆给独立的子 Agent 去跑。
 
 ## 安装
 
@@ -45,7 +43,7 @@ curl -fsSL https://cdn.jsdelivr.net/npm/ohbaby-cli/install.sh | sh
 irm https://cdn.jsdelivr.net/npm/ohbaby-cli/install.ps1 | iex
 ```
 
-脚本会自带一份 Node.js，不需要提前安装。
+安装脚本会自动拉取独立的 Node.js 运行时，不需要提前安装 Node。
 
 **npm**（需要 **Node.js 24** 及以上版本）
 
@@ -53,23 +51,25 @@ irm https://cdn.jsdelivr.net/npm/ohbaby-cli/install.ps1 | iex
 npm install -g ohbaby-cli
 ```
 
-安装后会得到 `ohbaby` 命令。运行 `ohbaby update` 更新，运行 `ohbaby uninstall` 卸载。
+装好后直接用 `ohbaby` 命令启动，后续可用 `ohbaby update` 更新、`ohbaby uninstall` 卸载。
 
 ## 快速开始
+
+在项目目录下运行：
 
 ```bash
 ohbaby
 ```
 
-1. 输入 `/connect`，填好 provider、base URL 和模型名，保存。
-2. 说出你想做的事，就这么简单。
+1. 输入 `/connect`，填好 provider、base URL 和模型名称后保存。
+2. 直接输入你的需求开始对话，也可以在命令行用 `ohbaby run "..."` 单次执行。
 
 <p align="center">
-  <img src="assets/images/dashboard.png" alt="ohbaby 终端界面，打开了 slash 命令菜单" width="760">
+  <img src="assets/images/dashboard.png" alt="ohbaby 终端界面" width="760">
 </p>
 
 <details>
-<summary><b>/connect 字段与参数模式</b></summary>
+<summary><b>/connect 字段说明与命令行参数</b></summary>
 
 <br>
 
@@ -78,31 +78,31 @@ ohbaby
 | Provider | `openai`、`anthropic`、`zhipu` 等 |
 | Base URL | SDK 的 base URL，不要带 `/chat/completions` 后缀 |
 | API key env | 可选。存放 API Key 的环境变量名，如 `OPENAI_API_KEY` |
-| API key value | 可选。LM Studio 这类无需鉴权的本地端点可以留空 |
-| Model name | 如 `gpt-6.2-sol`、`claude-opus-5-5`、`glm-5.3`，或你的 provider 提供的模型 ID |
+| API key value | 可选。连接 LM Studio 这类免鉴权的本地服务时可留空 |
+| Model name | 服务商提供的模型 ID，如 `gpt-6.2-sol`、`claude-opus-5-5`、`glm-5.3` |
 | Context window / Max output tokens | 可选 |
 
-在这里填的 API Key 会保存到 `~/.ohbaby/.env`。
+在面板里填写的 API Key 会保存到 `~/.ohbaby/.env`。
 
-参数模式不打开面板。它从环境变量读取 API Key，不接受直接写在命令里的 Key：
+不想打开面板的话，也可以直接带参数执行 `/connect`。参数模式只从环境变量读取密钥，不支持把明文 Key 直接写在命令里：
 
 ```bash
 /connect --provider openai --base-url https://api.openai.com/v1 --model gpt-6.2-sol --api-key-env OPENAI_API_KEY --interface-provider openai-responses
 ```
 
-`--interface-provider` 可选 `openai-compatible`、`openai-responses` 或 `anthropic`。不传时按 URL 推断，OpenAI 的 URL 默认走 Chat Completions。
+`--interface-provider` 可选 `openai-compatible`、`openai-responses` 或 `anthropic`。不传时会按 URL 自动判断，OpenAI 官方地址默认走 Chat Completions。
 
 </details>
 
 ## Web UI
 
-在项目根目录执行：
+在项目目录下执行：
 
 ```bash
 ohbaby serve
 ```
 
-它会启动本地 daemon，并打开它打印出的地址，通常是 `http://127.0.0.1:4096`。
+启动本地 daemon 后，浏览器会自动打开 Web 界面（默认地址是 `http://127.0.0.1:4096`）。
 
 ```bash
 ohbaby serve status  # 查看 daemon 状态和地址
@@ -110,11 +110,11 @@ ohbaby serve stop    # 停止 daemon
 ```
 
 <details>
-<summary><b>端口</b></summary>
+<summary><b>端口说明</b></summary>
 
 <br>
 
-默认使用 `4096` 端口。被占用时，ohbaby 会自动换一个空闲端口并打印地址。显式传入 `--port` 时不会自动换：`ohbaby serve --port 4096` 在端口被占用时直接报错。
+默认使用 `4096` 端口。如果该端口已被占用，ohbaby 会自动换一个空闲端口并打印实际地址。显式传入 `--port` 时不做自动切换，`ohbaby serve --port 4096` 遇到端口占用会直接报错退出。
 
 </details>
 
@@ -125,17 +125,17 @@ ohbaby serve stop    # 停止 daemon
 
 <br>
 
-内置搜索用的是 Tavily。先去 [Tavily](https://app.tavily.com) 申请一个免费 API Key，然后输入 `/connect-search` 并粘贴进去，也可以在 Web 界面的 Settings → Web search 里填写。ohbaby 会把它作为 `TAVILY_API_KEY` 保存到 `~/.ohbaby/.env`。
+内置联网搜索用的是 [Tavily](https://app.tavily.com)。申请免费 API Key 后，可以在终端输入 `/connect-search` 粘贴保存，也可以在 Web 界面的 Settings → Web search 中填写，Key 会以 `TAVILY_API_KEY` 写入 `~/.ohbaby/.env`。
 
-也可以手动写进 `~/.ohbaby/.env`（全局）或 `<你的项目>/.env`（项目）：
+也可以直接写进 `~/.ohbaby/.env`（全局）或 `<你的项目>/.env`（项目）：
 
 ```dotenv
 TAVILY_API_KEY=tvly-...
 ```
 
-优先级：Shell 环境变量 > 项目 `.env` > 全局 `.env`。
+读取优先级：Shell 环境变量 > 项目 `.env` > 全局 `.env`。
 
-想用其他搜索服务，可以把它作为 MCP server 或 skill 接入。
+如果想换其他搜索服务，可以通过 MCP 或 skill 接入。
 
 </details>
 
@@ -144,7 +144,7 @@ TAVILY_API_KEY=tvly-...
 
 <br>
 
-MCP server 可以在全局或项目的 `.ohbaby/mcp/` 下配置。Skills 从 ohbaby 兼容的 skill 目录中发现，并作为 slash 命令出现。用 `/mcps` 查看已连接的 server，用 `/skills` 列出可用 skill。
+MCP server 配置文件放在全局的 `~/.ohbaby/mcp/settings.json` 或项目的 `.ohbaby/mcp/settings.json`。Skills 会从 `.ohbaby/skills/` 以及兼容的 `.claude/skills/`、`.agents/skills/` 目录加载，加载后直接通过 `/` 斜杠命令调用。可以用 `/mcps` 查看连接状态，用 `/skills` 查看已加载的列表。
 
 </details>
 
@@ -153,7 +153,7 @@ MCP server 可以在全局或项目的 `.ohbaby/mcp/` 下配置。Skills 从 ohb
 
 <br>
 
-ohbaby 会读取两份说明文件：全局的放在 `~/.ohbaby/`，项目的放在项目根目录（或 `<project>/.ohbaby/`）。两处各按 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md` 的顺序取第一个找到的文件。主 Agent 和子 Agent 都会读取它们，冲突时以项目文件为准。这些文件是给 Agent 的说明，不是长期记忆。
+ohbaby 会从全局 `~/.ohbaby/` 和项目根目录（未找到时回退到 `<project>/.ohbaby/`）各读取一份说明文件，按 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md` 的顺序取第一个存在的文件。主 Agent 和子 Agent 都会加载这两份文件，冲突时以项目级为准。这里放的是固定指令，不会当作长期记忆自动改写。
 
 </details>
 
@@ -162,15 +162,15 @@ ohbaby 会读取两份说明文件：全局的放在 `~/.ohbaby/`，项目的放
 
 <br>
 
-配置放在 `~/.ohbaby`（Windows 上是 `%USERPROFILE%\.ohbaby`），包括模型、密钥、MCP、skills、子 Agent、工具配置和 daemon 状态。想整体换位置，把 `OHBABY_HOME` 设为一个绝对路径即可。项目级配置放在 `<project>/.ohbaby`。
+配置文件统一放在 `~/.ohbaby`（Windows 上为 `%USERPROFILE%\.ohbaby`），包含模型、密钥、MCP、skills、子 Agent、工具设置和 daemon 状态。想换位置可以把 `OHBABY_HOME` 设为绝对路径。项目级配置放在 `<project>/.ohbaby`。
 
-运行数据放在系统的数据目录：
+会话等运行数据存放在系统数据目录：
 
 - Linux：`${XDG_DATA_HOME:-~/.local/share}/ohbaby`
 - macOS：`~/Library/Application Support/ohbaby`
 - Windows：`%LOCALAPPDATA%\ohbaby`
 
-首次启动时，ohbaby 会把旧的 `.ohbaby-agent` 配置和 `ohbaby-agent` 数据复制到新位置，旧文件原样保留。新旧冲突时以新路径为准，旧路径在一个 minor 版本内仍可读取。如果运行中的 daemon 挡住了 SQLite 迁移，先执行 `ohbaby serve stop` 再重新启动。
+首次启动时，ohbaby 会自动把旧版 `.ohbaby-agent` 配置和 `ohbaby-agent` 数据复制到新目录，原文件保持不动。出现冲突时以新路径为准，旧路径在一个 minor 版本内仍兼容读取。如果运行中的 daemon 占用了 SQLite 导致迁移受阻，先执行 `ohbaby serve stop` 再重新启动即可。
 
 </details>
 
@@ -186,15 +186,16 @@ pnpm test        # 运行测试
 pnpm preflight   # format + lint + typecheck + test + build
 ```
 
-| 包 | 作用 |
+| 包 / 目录 | 说明 |
 | --- | --- |
-| `ohbaby-cli` | 终端界面和内置的 Web UI，安装后提供 `ohbaby` 命令 |
-| `ohbaby-agent` | 运行时：适配器、工具、会话、策略、MCP、skills |
-| `ohbaby-llm` | 不绑定厂商的 LLM 客户端、流式输出与配置 |
-| `ohbaby-server` | 本地服务端，以及远程客户端的传输层 |
-| `ohbaby-sdk` | 运行时与各个界面共享的稳定 TypeScript 契约 |
+| `packages/ohbaby-cli` | 终端 TUI 与 CLI 入口，提供 `ohbaby` 命令并内置打包后的 Web 静态资源 |
+| `apps/ohbaby-web` | `ohbaby serve` 托管的浏览器前端界面 |
+| `packages/ohbaby-agent` | 核心运行时：Agent 循环、工具、会话、权限策略、MCP、skills、子 Agent |
+| `packages/ohbaby-llm` | 多协议 LLM 客户端与流式解析 |
+| `packages/ohbaby-server` | 本地 daemon 服务端与客户端通信层 |
+| `packages/ohbaby-sdk` | 运行时与各端界面共用的 TypeScript 类型和 RPC 契约 |
 
-设计文档和模块说明都在 [`docs/`](docs/) 下。
+各模块的设计文档见 [`docs/`](docs/)。
 
 ## 许可证
 
