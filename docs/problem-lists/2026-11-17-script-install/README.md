@@ -30,6 +30,7 @@
 |---|---|
 | [daemon 停止残留与诊断日志](../2026-11-19-daemon-lifecycle-cleanup/README.md) | 前置议题，先实施。修好 daemon 状态目录的残留文件、异常退出记录，以及 `serve-awareness.ts` 的目录（原本在本议题 Stage 1） |
 | [CLI 升级](../2026-11-16-cli-upgrade/README.md) | `ohbaby update` 在那边实现。它识别出脚本安装后，按本议题定的方式升级。`ohbaby uninstall` 在本议题，与 update 共用"判断安装方式"的代码 |
+| [安装器进度显示](../2026-11-21-installer-progress/README.md) | 后续议题。给本议题的两份安装脚本加上阶段提示、下载进度条和完成摘要 |
 | App 端适配（尚未开题） | 那边会做独立可执行文件（Node SEA）。到时安装脚本可以改成下载可执行文件，安装目录布局和升级入口保持不变 |
 
 ## 实施契约
