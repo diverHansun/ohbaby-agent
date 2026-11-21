@@ -163,13 +163,88 @@
         }
     }
 
-    function Get-NodeDownload([string]$Url, [string]$Destination) {
-        # Windows PowerShell's per-chunk progress reporting can slow large downloads.
-        $ProgressPreference = 'SilentlyContinue'
+    function Write-Stage([int]$Number, [string]$Text) {
+        if ($useColor) {
+            Write-Host "[$Number/4]" -ForegroundColor DarkYellow -NoNewline
+            Write-Host " $Text"
+        } else {
+            Write-Host "[$Number/4] $Text"
+        }
+    }
+
+    # 1 MB is 1,048,576 bytes, shown with one decimal place in any culture.
+    function Format-Megabytes([long]$Bytes) {
+        $tenths = [long][Math]::Floor(($Bytes * 10 + 524288) / 1048576)
+        return '{0}.{1}' -f [long][Math]::Floor($tenths / 10), ($tenths % 10)
+    }
+
+    function Write-DownloadProgress([long]$Received, [long]$Total, [int]$Columns, $Color) {
+        $err = [Console]::Error
+        if ($Total -le 0) {
+            $err.Write("`r      $(Format-Megabytes $Received) MB  ")
+            return
+        }
+        $percent = [Math]::Min(100, [long][Math]::Floor($Received * 100 / $Total))
+        $text = '{0,3}%  {1} / {2} MB  ' -f $percent, (Format-Megabytes $Received), (Format-Megabytes $Total)
+        if ($Columns -lt 60) {
+            $err.Write("`r      $text")
+            return
+        }
+        $filled = [int][Math]::Floor($percent * 24 / 100)
+        $err.Write("`r      ")
+        if ($useColor) { [Console]::ForegroundColor = [ConsoleColor]::DarkYellow }
+        $err.Write($barDone * $filled)
+        if ($useColor) { [Console]::ForegroundColor = [ConsoleColor]::DarkGray }
+        $err.Write($barTodo * (24 - $filled))
+        if ($useColor) { [Console]::ForegroundColor = $Color }
+        $err.Write(" $text")
+    }
+
+    # Invoke-WebRequest in Windows PowerShell 5.1 is built on HttpWebRequest and
+    # slows large downloads when it reports progress. Reading the response here
+    # keeps the same proxy, PAC and TLS behaviour and draws a lighter bar.
+    function Get-NodeDownload([string]$Url, [string]$Destination, [switch]$ShowProgress) {
+        $drawing = $ShowProgress -and $drawProgress
+        $drawn = $false
+        $color = [Console]::ForegroundColor
+        $columns = 80
+        $response = $null
+        $source = $null
+        $target = $null
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Destination
+            $request = [Net.WebRequest]::Create($Url)
+            # Invoke-WebRequest always sent a User-Agent. Some proxies and mirrors require one.
+            $request.UserAgent = 'ohbaby-installer'
+            $response = $request.GetResponse()
+            $total = [long]$response.ContentLength
+            $source = $response.GetResponseStream()
+            $target = [IO.File]::Create($Destination)
+            $buffer = New-Object byte[] 65536
+            $received = [long]0
+            if ($drawing) {
+                try { $columns = [Console]::WindowWidth } catch { $columns = 80 }
+                if ($columns -le 0) { $columns = 80 }
+            }
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            while (($read = $source.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $target.Write($buffer, 0, $read)
+                $received += $read
+                if ($drawing -and $clock.ElapsedMilliseconds -ge 250) {
+                    Write-DownloadProgress $received $total $columns $color
+                    $drawn = $true
+                    $clock.Restart()
+                }
+            }
         } catch {
             throw "Could not download '$Url'. Check your proxy settings or set OHBABY_NODE_MIRROR. $($_.Exception.Message)"
+        } finally {
+            if ($target) { $target.Dispose() }
+            if ($source) { $source.Dispose() }
+            if ($response) { $response.Dispose() }
+            if ($drawing) {
+                [Console]::ForegroundColor = $color
+                if ($drawn) { [Console]::Error.Write("`r" + (' ' * ($columns - 1)) + "`r") }
+            }
         }
     }
 
@@ -206,6 +281,7 @@
     function Initialize-Node([string]$RuntimeDir, [string]$Architecture, [string]$Mirror) {
         $destination = Join-Path $RuntimeDir "node-v$nodeVersion"
         if ($null -ne (Get-PathAttributes $destination)) {
+            Write-Stage 2 "Node.js $nodeVersion is already present"
             if (-not (Test-ExecutableVersion (Join-Path $destination 'node.exe') "v$nodeVersion")) {
                 throw "Existing Node.js runtime at '$destination' failed its version check."
             }
@@ -220,8 +296,8 @@
         $zipPath = Join-Path $partial $archive
         $checksums = Join-Path $partial 'SHASUMS256.txt'
         $from = "$($Mirror.TrimEnd('/'))/v$nodeVersion"
-        Write-Host "Downloading Node.js $nodeVersion for Windows $Architecture..."
-        Get-NodeDownload "$from/$archive" $zipPath
+        Write-Stage 2 "Downloading Node.js $nodeVersion for win-$Architecture"
+        Get-NodeDownload "$from/$archive" $zipPath -ShowProgress
         Get-NodeDownload "$from/SHASUMS256.txt" $checksums
         $pattern = '^([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape($archive) + '\z'
         $expectedHash = @([IO.File]::ReadLines($checksums) | ForEach-Object {
@@ -230,6 +306,7 @@
         if ($expectedHash.Count -ne 1 -or (Get-Sha256 $zipPath) -ine $expectedHash[0]) {
             throw "SHA-256 verification failed for '$archive'."
         }
+        Write-Host "      Node.js $nodeVersion  $(Format-Megabytes (Get-Item -LiteralPath $zipPath).Length) MB  verified"
 
         $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
         # Windows tar builds can convert non-ASCII arguments to the system code page.
@@ -254,6 +331,7 @@
         $bin = 'node_modules\ohbaby-cli\dist\bin.js'
         $nodePattern = '^[0-9]+\.[0-9]+\.[0-9]+\z'
         if ($null -ne (Get-PathAttributes $ReleaseDir)) {
+            Write-Stage 3 "ohbaby $Version is already installed"
             $releaseNode = Read-VersionPointer (Join-Path $ReleaseDir 'node-version') $nodePattern
             if ($releaseNode -and
                 (Test-ExecutableVersion (Join-Path $RuntimeDir "node-v$releaseNode\node.exe") $Version (Join-Path $ReleaseDir $bin))) {
@@ -262,6 +340,7 @@
             throw "Existing release at '$ReleaseDir' failed its version check. Keep any working release and remove the broken release before retrying."
         }
 
+        Write-Stage 3 "Installing ohbaby $Version"
         $partial = "$ReleaseDir.partial"
         Remove-TreeIfPresent $partial
         [void][IO.Directory]::CreateDirectory($partial)
@@ -325,8 +404,10 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
         return (@($Entry) + $rest) -join ';'
     }
 
+    # Returns $true when the user PATH in the registry was rewritten.
     function Add-InstallPath([string]$BinDir) {
         if ($BinDir.Contains(';')) { throw "Cannot add '$BinDir' to PATH because it contains a semicolon. Set OHBABY_NO_MODIFY_PATH=1 to skip this step." }
+        $changed = $false
         $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
         try {
             $rawPath = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
@@ -334,11 +415,13 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
             if ($newPath -cne $rawPath -or $key.GetValueKind('Path') -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) {
                 $key.SetValue('Path', $newPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
                 Send-EnvironmentChange
+                $changed = $true
             }
         } finally {
             $key.Dispose()
         }
         $env:Path = Add-PathEntryFirst $env:Path $BinDir
+        return $changed
     }
 
     function Clear-OldDirectories([string]$Root, [string]$Pattern, [string[]]$Keep) {
@@ -423,6 +506,19 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
     }
 
     function Invoke-OhbabyInstall {
+        # Display state is read once by the helpers above. Progress is drawn on
+        # stderr only when stderr is the console.
+        $useColor = -not $env:NO_COLOR -and $env:TERM -ne 'dumb'
+        $drawProgress = -not [Console]::IsErrorRedirected -and $env:TERM -ne 'dumb'
+        # Code pages other than UTF-8 may lack these glyphs or draw them double-width.
+        if ([Console]::OutputEncoding.CodePage -eq 65001) {
+            $barDone = [string][char]0x2501
+            $barTodo = [string][char]0x2500
+        } else {
+            $barDone = '#'
+            $barTodo = '-'
+        }
+        Write-Stage 1 'Checking the current installation'
         $architecture = $env:PROCESSOR_ARCHITEW6432
         if (-not $architecture) { $architecture = $env:PROCESSOR_ARCHITECTURE }
         $architecture = switch ($architecture) {
@@ -485,6 +581,7 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
             $npm = Join-Path $privateNode 'node_modules\npm\bin\npm-cli.js'
             $version = Resolve-InstallVersion $node $npm $requested
             Install-Release (Join-Path $releases $version) $runtime $node $npm $version
+            Write-Stage 4 "Activating ohbaby $version"
             Install-Launcher $binDir
             if ($version -cne $previous) {
                 $stage = 'switch the current version'
@@ -493,9 +590,14 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
                 $switched = $true
             }
 
+            $pathNote = "Not changed. Add $binDir to PATH, or run the launcher directly."
             if ($env:OHBABY_NO_MODIFY_PATH -ne '1') {
                 $stage = 'update the user PATH'
-                Add-InstallPath $binDir
+                if (Add-InstallPath $binDir) {
+                    $pathNote = 'Added to your user PATH. This window is ready; open a new terminal for other windows.'
+                } else {
+                    $pathNote = "$binDir is already in PATH."
+                }
             }
             if ($switched) {
                 $stage = 'clean up previous releases'
@@ -503,12 +605,23 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
             }
             $stage = 'handle the existing npm installation'
             Remove-OldNpmInstall $npmPrefix $configHome $node $npm
-            Write-Host "Installed ohbaby $version at '$installDir'."
-            if ($env:OHBABY_NO_MODIFY_PATH -eq '1') {
-                Write-Host "Run '$binDir\ohbaby.cmd' or add '$binDir' to PATH."
-            } else {
-                Write-Host 'Reopen other terminals to pick up the PATH change.'
+
+            if (-not $previous) { $headline = "Installed ohbaby $version." }
+            elseif ($previous -cne $version) { $headline = "Updated ohbaby from $previous to $version." }
+            else { $headline = "ohbaby $version is already installed." }
+            $launcher = Join-Path $binDir 'ohbaby.cmd'
+            # Show the bare name only if this window would run our launcher.
+            $start = $launcher
+            $first = Get-Command ohbaby -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($first -and $first.Path -and
+                [IO.Path]::GetFullPath($first.Path) -ieq [IO.Path]::GetFullPath($launcher)) {
+                $start = 'ohbaby'
             }
+            Write-Host ''
+            Write-Host $headline
+            Write-Host "  Launcher  $launcher"
+            Write-Host "  PATH      $pathNote"
+            Write-Host "  Start     $start"
         } catch {
             if ($switched) {
                 throw "ohbaby switched to $version, but could not $stage. Rerun the installer for $version to retry. $($_.Exception.Message)"

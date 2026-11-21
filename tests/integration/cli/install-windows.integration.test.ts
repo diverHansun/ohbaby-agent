@@ -204,7 +204,44 @@ it.runIf(process.platform === "win32")(
       await expect(access(current)).rejects.toThrow();
       await expect(access(lock)).rejects.toThrow();
       brokenDownload = false;
-      await install();
+      const fresh = await install();
+      const stdout = fresh.stdout.replace(/\r\n/gu, "\n");
+      const platform = "win-" + process.arch;
+      const stages = [
+        "[1/4] Checking the current installation\n",
+        `[2/4] Downloading Node.js ${nodeVersion} for ${platform}\n`,
+        `      Node.js ${nodeVersion}  `,
+        " MB  verified\n",
+        `[3/4] Installing ohbaby ${initialVersion}\n`,
+        `[4/4] Activating ohbaby ${initialVersion}\n`,
+        `\nInstalled ohbaby ${initialVersion}.\n`,
+        // The install path is not ASCII, and redirected Windows PowerShell
+        // output uses the console code page, so match around the paths.
+        "  Launcher  ",
+        "\\bin\\ohbaby.cmd\n",
+        "  PATH      Not changed. Add ",
+        " to PATH, or run the launcher directly.\n",
+        "  Start     ",
+        "\\bin\\ohbaby.cmd\n",
+      ];
+      let offset = 0;
+      for (const part of stages) {
+        const at = stdout.indexOf(part, offset);
+        expect(
+          at,
+          `${JSON.stringify(part)} in:\n${stdout}`,
+        ).toBeGreaterThanOrEqual(0);
+        offset = at + part.length;
+      }
+      // Redirected streams get neither colour nor progress.
+      expect(stdout).not.toMatch(/[\x1b\r]/u);
+      expect(fresh.stderr).not.toMatch(/[\x1b\r%]/u);
+      for (const removed of [
+        "Installed ohbaby " + initialVersion + " at",
+        "Reopen other terminals",
+      ]) {
+        expect(stdout).not.toContain(removed);
+      }
       expect(await readFile(current, "utf8")).toBe(initialVersion + "\r\n");
       expect(
         await readFile(join(releases, initialVersion, "node-version"), "utf8"),
@@ -212,7 +249,17 @@ it.runIf(process.platform === "win32")(
       expect(await installedVersion()).toBe(initialVersion);
       const launcherStamp = (await stat(launcher)).mtimeMs;
       const releaseStamp = (await stat(join(releases, initialVersion))).mtimeMs;
-      await install();
+      const rerun = (await install()).stdout.replace(/\r\n/gu, "\n");
+      expect(rerun).toContain(
+        `[2/4] Node.js ${nodeVersion} is already present\n`,
+      );
+      expect(rerun).toContain(
+        `[3/4] ohbaby ${initialVersion} is already installed\n`,
+      );
+      expect(rerun).toContain(
+        `\nohbaby ${initialVersion} is already installed.\n`,
+      );
+      expect(rerun).not.toContain("verified");
       expect((await stat(launcher)).mtimeMs).toBe(launcherStamp);
       expect((await stat(join(releases, initialVersion))).mtimeMs).toBe(
         releaseStamp,
@@ -261,7 +308,9 @@ it.runIf(process.platform === "win32")(
       await writeFile(join(lock, "pid"), String(process.pid));
       await expect(install(nextVersion)).rejects.toThrow(/already running/);
       await writeFile(join(lock, "pid"), "2147483647\n");
-      await install(nextVersion);
+      expect((await install(nextVersion)).stdout).toContain(
+        `Updated ohbaby from ${initialVersion} to ${nextVersion}.`,
+      );
       expect(await installedVersion()).toBe(nextVersion);
       await expect(access(lock)).rejects.toThrow();
       await expect(
