@@ -10,7 +10,14 @@ export type UninstallAction =
       readonly kind: "shell-config" | "fish-config" | "launcher" | "directory";
       readonly path: string;
     }
-  | { readonly kind: "windows-path" | "windows-manual"; readonly path: string };
+  | { readonly kind: "windows-path"; readonly path: string }
+  | { readonly kind: "windows-manual"; readonly path: string };
+
+/** Actions that change files or PATH. Each one is a numbered step. */
+export type UninstallStep = Exclude<
+  UninstallAction,
+  { kind: "windows-manual" }
+>;
 
 export function planUninstall(
   method: ManagedInstallMethod,
@@ -68,6 +75,31 @@ export function describeUninstallAction(action: UninstallAction): string {
       return `Remove ${action.path} from the user PATH.`;
     case "windows-manual":
       return `Print instructions to delete ${action.path} after this command exits.`;
+  }
+}
+
+/** The line printed while a step runs. Home paths use ~ outside Windows. */
+export function describeUninstallStep(
+  step: UninstallStep,
+  platform: NodeJS.Platform,
+  homeDirectory: string,
+): string {
+  const shown = (path: string): string =>
+    platform !== "win32" && path.startsWith(`${homeDirectory}/`)
+      ? `~${path.slice(homeDirectory.length)}`
+      : path;
+  switch (step.kind) {
+    case "npm":
+      return `Uninstalling ohbaby-cli from ${shown(step.prefix)}`;
+    case "shell-config":
+    case "fish-config":
+      return `Removing the PATH block from ${shown(step.path)}`;
+    case "launcher":
+      return `Removing the launcher at ${shown(step.path)}`;
+    case "directory":
+      return `Removing ${shown(step.path)}`;
+    case "windows-path":
+      return `Removing ${step.path} from your user PATH`;
   }
 }
 

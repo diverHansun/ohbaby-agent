@@ -2,6 +2,7 @@ import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
+import { Chalk } from "chalk";
 import type { Argv, CommandModule } from "yargs";
 import {
   npmCommand,
@@ -18,17 +19,22 @@ import {
 } from "../../install/script-uninstall.js";
 import {
   describeUninstallAction,
+  describeUninstallStep,
   planUninstall,
-  type UninstallAction,
+  type UninstallStep,
 } from "../../install/uninstall-plan.js";
-import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
+import type {
+  CliCommandRuntime,
+  CliGlobalOptions,
+  CliWritable,
+} from "./types.js";
 
 interface UninstallArgs extends CliGlobalOptions {
   readonly yes?: boolean;
 }
 
-async function executeUninstallAction(
-  action: UninstallAction,
+async function executeUninstallStep(
+  action: UninstallStep,
   installDir: string | undefined,
   runtime: CliCommandRuntime,
 ): Promise<void> {
@@ -62,18 +68,56 @@ async function executeUninstallAction(
     case "windows-path":
       await removeWindowsUserPath(action.path);
       break;
-    case "windows-manual": {
-      const literal = action.path.replaceAll("'", "''");
-      runtime.stdout.write(
-        "After this command exits, make sure no installation is running. Then delete the installation directory using your shell.\n" +
-          `PowerShell: Remove-Item -LiteralPath '${literal}' -Recurse -Force\n`,
-      );
-      // cmd expands these characters even inside double quotes.
-      if (!/[%!]/.test(action.path)) {
-        runtime.stdout.write(`cmd: rmdir /s /q "${action.path}"\n`);
-      }
-      break;
+  }
+}
+
+// The running command still uses the Node runtime inside the installation
+// directory on Windows, so the user deletes it after this process exits.
+function writeWindowsDeleteCommands(path: string, stdout: CliWritable): void {
+  const literal = path.replaceAll("'", "''");
+  stdout.write(
+    `PowerShell: Remove-Item -LiteralPath '${literal}' -Recurse -Force\n`,
+  );
+  // cmd expands these characters even inside double quotes.
+  if (!/[%!]/.test(path)) stdout.write(`cmd: rmdir /s /q "${path}"\n`);
+}
+
+// Same gold as the installer's step numbers: truecolor when the terminal
+// says so, otherwise the nearest basic colour.
+function stepNumberColor(runtime: CliCommandRuntime): (text: string) => string {
+  const env = process.env;
+  const enabled = runtime.isStdoutTTY() && !env.NO_COLOR && env.TERM !== "dumb";
+  const truecolor = env.COLORTERM === "truecolor" || env.COLORTERM === "24bit";
+  return new Chalk({ level: enabled ? (truecolor ? 3 : 1) : 0 }).hex("#D4A24F");
+}
+
+async function runUninstallSteps(
+  steps: readonly UninstallStep[],
+  installDir: string | undefined,
+  userHome: string,
+  runtime: CliCommandRuntime,
+): Promise<void> {
+  const texts = steps.map((step) =>
+    describeUninstallStep(step, process.platform, userHome),
+  );
+  const width = Math.max(0, ...texts.map((text) => text.length));
+  const number = stepNumberColor(runtime);
+  for (const [index, step] of steps.entries()) {
+    const label = number(`[${String(index + 1)}/${String(steps.length)}]`);
+    // npm prints its own progress and result, so its line stands alone.
+    if (step.kind === "npm") {
+      runtime.stdout.write(`${label} ${texts[index]}\n`);
+      await executeUninstallStep(step, installDir, runtime);
+      continue;
     }
+    runtime.stdout.write(`${label} ${texts[index].padEnd(width)}`);
+    try {
+      await executeUninstallStep(step, installDir, runtime);
+    } catch (error) {
+      runtime.stdout.write("  failed\n");
+      throw error;
+    }
+    runtime.stdout.write("  done\n");
   }
 }
 
@@ -140,10 +184,25 @@ export function createUninstallCommand(
             installMethod: method,
           });
           if (!preflight.ok) throw new Error(preflight.reasons.join("\n"));
-          for (const action of actions)
-            await executeUninstallAction(action, installDir, runtime);
+          await runUninstallSteps(
+            actions.filter((action) => action.kind !== "windows-manual"),
+            installDir,
+            userHome,
+            runtime,
+          );
         } finally {
           await release?.();
+        }
+        const manual = actions.find(
+          (action) => action.kind === "windows-manual",
+        );
+        if (manual) {
+          runtime.stdout.write(
+            "\nohbaby is removed from your PATH. To finish, delete the installation directory after this command exits:\n",
+          );
+          writeWindowsDeleteCommands(manual.path, runtime.stdout);
+        } else {
+          runtime.stdout.write("\nohbaby is uninstalled.\n");
         }
         runtime.stdout.write(
           `Kept your configuration at ${ohbabyHome}, sessions at ${join(ohbabyHome, "sessions")}, and database at ${databasePath}.\n`,

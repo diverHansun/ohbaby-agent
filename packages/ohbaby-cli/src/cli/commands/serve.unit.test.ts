@@ -89,6 +89,7 @@ function createRuntime(): CreatedRuntime {
       throw new Error(message);
     },
     isStdinTTY: (): boolean => true,
+    isStdoutTTY: (): boolean => false,
     listDaemonConnections,
     openUrl,
     readDaemonStatus,

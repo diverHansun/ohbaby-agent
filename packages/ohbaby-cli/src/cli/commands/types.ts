@@ -115,6 +115,7 @@ export interface CliCommandRuntime {
   readonly createStdoutRenderer: typeof createStdoutRenderer;
   readonly failUsage: (message: string) => never;
   readonly isStdinTTY: () => boolean;
+  readonly isStdoutTTY: () => boolean;
   readonly listDaemonConnections?: () => Promise<
     readonly CliDaemonConnection[]
   >;

@@ -831,6 +831,9 @@ export async function runOhbabyCli(
     isStdinTTY() {
       return stdin.isTTY === true;
     },
+    isStdoutTTY() {
+      return (stdout as { readonly isTTY?: boolean }).isTTY === true;
+    },
     listDaemonConnections,
     openUrl,
     readDaemonStatus,
