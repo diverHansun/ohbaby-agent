@@ -28,6 +28,30 @@ const nodeVersion = "24.22.3";
 const pathMarker = "# >>> ohbaby installer >>>";
 const daemonLock = join("server", "daemon.pid");
 const systemPath = "/usr/bin:/bin";
+const platformLabel = `${process.platform === "darwin" ? "darwin" : "linux"}-${
+  process.arch === "arm64" ? "arm64" : "x64"
+}`;
+const sshNote =
+  "For non-login SSH commands without the updated PATH, use the launcher path directly.";
+
+function expectInOrder(text: string, parts: string[]): void {
+  let from = 0;
+  for (const part of parts) {
+    const at = text.indexOf(part, from);
+    expect(
+      at,
+      `${JSON.stringify(part)} after offset ${String(from)} in:\n${text}`,
+    ).toBeGreaterThanOrEqual(0);
+    from = at + part.length;
+  }
+}
+
+function summaryRow(stdout: string, name: string): string | undefined {
+  return stdout
+    .split("\n")
+    .find((line) => line.startsWith(`  ${name.padEnd(8)}  `))
+    ?.slice(12);
+}
 
 describe.skipIf(process.platform === "win32")("POSIX CLI installer", () => {
   let root: string;
@@ -186,6 +210,28 @@ if (action === "view") {
   it("installs and reruns without rewriting the launcher or release", async () => {
     const initial = await install();
     expect(initial).toMatchObject({ code: 0, stderr: "" });
+    const stdout = initial.stdout ?? "";
+    expectInOrder(stdout, [
+      "[1/4] Checking the current installation\n",
+      `[2/4] Downloading Node.js ${nodeVersion} for ${platformLabel}\n`,
+      `      Node.js ${nodeVersion}  `,
+      " MB  verified\n",
+      `[3/4] Installing ohbaby ${first}\n`,
+      `[4/4] Activating ohbaby ${first}\n`,
+      `\nInstalled ohbaby ${first}.\n`,
+      "  Launcher  ~/.local/bin/ohbaby\n",
+      '  PATH      Added to ~/.zshrc. For this terminal, run: export PATH="$HOME/.local/bin:$PATH"\n',
+      "  Start     ~/.local/bin/ohbaby\n",
+    ]);
+    expect(stdout).not.toMatch(/[\x1b\r]/u);
+    for (const removed of ["Activated ohbaby", "Launcher: ", installDir]) {
+      expect(stdout).not.toContain(removed);
+    }
+    if (process.platform === "linux") {
+      expect(stdout.trimEnd().split("\n").at(-1)).toBe(sshNote);
+    } else {
+      expect(stdout).not.toContain(sshNote);
+    }
     expect(await currentVersion()).toBe(first);
     expect(await readFile(join(installDir, "current"))).toEqual(
       Buffer.from(first + "\n"),
@@ -205,7 +251,16 @@ if (action === "view") {
     const launcherBefore = await stat(launcher);
     const release = join(installDir, "releases", first);
     const releaseBefore = await stat(release);
-    expect((await install()).code).toBe(0);
+    const rerun = await install();
+    expect(rerun).toMatchObject({ code: 0, stderr: "" });
+    expectInOrder(rerun.stdout ?? "", [
+      "[1/4] Checking the current installation\n",
+      `[2/4] Node.js ${nodeVersion} is already present\n`,
+      `[3/4] ohbaby ${first} is already installed\n`,
+      `[4/4] Activating ohbaby ${first}\n`,
+      `\nohbaby ${first} is already installed.\n`,
+    ]);
+    expect(rerun.stdout).not.toContain("verified");
     expect((await stat(launcher)).ino).toBe(launcherBefore.ino);
     expect((await stat(release)).mtimeMs).toBe(releaseBefore.mtimeMs);
     expect(
@@ -230,6 +285,12 @@ if (action === "view") {
       OHBABY_NO_MODIFY_PATH: "1",
     });
     expect(result).toMatchObject({ code: 0, stderr: "" });
+    expect(result.stdout).toContain(
+      `\nUpdated ohbaby from ${first} to ${second}.\n`,
+    );
+    expect(summaryRow(result.stdout ?? "", "PATH")).toBe(
+      "Not changed. Add ~/.local/bin to PATH, or run the launcher directly.",
+    );
     expect(await currentVersion()).toBe(second);
     expect(await runLauncher()).toBe(second);
     expect((await stat(join(releases, first))).isDirectory()).toBe(true);
@@ -263,6 +324,14 @@ if (action === "view") {
       code: 1,
       stderr: expect.stringContaining("ohbaby serve stop"),
     });
+    // The daemon record left by the last run stops this one at the first check.
+    const earlyFailure = await install();
+    await rm(join(ohbabyHome, daemonLock));
+    expect(earlyFailure.code).toBe(1);
+    expect(earlyFailure.stderr).toMatch(/^ohbaby installer: [^\n]*\n$/u);
+    expect(earlyFailure.stdout).toBe(
+      "[1/4] Checking the current installation\n",
+    );
     expect(await currentVersion()).toBe(first);
     expect(await runLauncher()).toBe(first);
     await expect(stat(lock)).rejects.toMatchObject({ code: "ENOENT" });
@@ -296,21 +365,48 @@ if (action === "view") {
   });
 
   it("edits the supported shell configurations once and skips when PATH already contains the launcher", async () => {
-    expect(
-      await install({
-        SHELL: "/bin/bash",
-        PATH: join(home, ".local", "bin") + ":" + systemPath,
-      }),
-    ).toMatchObject({
+    const inPath = await install({
+      SHELL: "/bin/bash",
+      PATH: join(home, ".local", "bin") + ":" + systemPath,
+    });
+    expect(inPath).toMatchObject({
       code: 0,
       stdout: expect.stringContaining("is already in PATH"),
     });
+    expect(summaryRow(inPath.stdout ?? "", "PATH")).toBe(
+      "~/.local/bin is already in PATH.",
+    );
+    expect(summaryRow(inPath.stdout ?? "", "Start")).toBe("ohbaby");
+    // A trailing slash makes command -v print ".../bin//ohbaby".
+    const slashed = await install({
+      SHELL: "/bin/bash",
+      PATH: join(home, ".local", "bin") + "/:" + systemPath,
+    });
+    expect(summaryRow(slashed.stdout ?? "", "Start")).toBe("ohbaby");
+    const unknownShell = await install({ SHELL: "/bin/tcsh" });
+    expect(summaryRow(unknownShell.stdout ?? "", "PATH")).toBe(
+      "Not changed. Add ~/.local/bin to PATH, or run the launcher directly.",
+    );
+    expect(summaryRow(unknownShell.stdout ?? "", "Start")).toBe(
+      "~/.local/bin/ohbaby",
+    );
     await expect(stat(join(home, ".bashrc"))).rejects.toMatchObject({
       code: "ENOENT",
     });
+    const notes = new Map<string, string | undefined>();
     for (const shell of ["bash", "fish", "bash", "fish"]) {
-      expect((await install({ SHELL: "/bin/" + shell })).code).toBe(0);
+      const result = await install({ SHELL: "/bin/" + shell });
+      expect(result.code).toBe(0);
+      notes.set(shell, summaryRow(result.stdout ?? "", "PATH"));
     }
+    expect(notes.get("bash")).toBe(
+      `Added to ~/.bashrc${
+        process.platform === "darwin" ? " and ~/.bash_profile" : ""
+      }. For this terminal, run: export PATH="$HOME/.local/bin:$PATH"`,
+    );
+    expect(notes.get("fish")).toBe(
+      'Added to ~/.config/fish/conf.d/ohbaby.fish. For this terminal, run: set -gx PATH "$HOME/.local/bin" $PATH',
+    );
     const files = [
       join(home, ".bashrc"),
       join(home, ".config", "fish", "conf.d", "ohbaby.fish"),
@@ -328,12 +424,16 @@ if (action === "view") {
     const lockPid = join(lock, "pid");
     for (const pid of [String(process.pid), ""]) {
       await writeFile(lockPid, pid + "\n");
-      expect(await install()).toMatchObject({
+      const result = await install();
+      expect(result).toMatchObject({
         code: 1,
         stderr: expect.stringContaining(
           "Install lock is active or cannot be verified",
         ),
       });
+      // The exit trap is already set here. Under set -u, any cleanup variable
+      // that is not initialized yet would add a second error line.
+      expect(result.stderr).toMatch(/^ohbaby installer: [^\n]*\n$/u);
       expect(await readFile(lockPid, "utf8")).toBe(pid + "\n");
     }
     await writeFile(lockPid, String(deadPid) + "\n");
@@ -510,12 +610,17 @@ exec /bin/mkdir "$@"
   it("reports a failed PATH step after switching and keeps both versions", async () => {
     expect((await install({ OHBABY_NO_MODIFY_PATH: "1" })).code).toBe(0);
     await mkdir(join(home, ".zshrc"));
-    expect(await install({ OHBABY_INSTALL_VERSION: second })).toMatchObject({
+    const result = await install({ OHBABY_INSTALL_VERSION: second });
+    expect(result).toMatchObject({
       code: 1,
       stderr: expect.stringContaining(
         `ohbaby ${second} is active, but PATH setup failed`,
       ),
     });
+    expect(result.stdout).toContain(
+      `\nUpdated ohbaby from ${first} to ${second}.\n`,
+    );
+    expect(summaryRow(result.stdout ?? "", "PATH")).toMatch(/^Not changed\./u);
     expect(await currentVersion()).toBe(second);
     expect(await runLauncher()).toBe(second);
     expect(

@@ -35,7 +35,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Installer scripts
-        run: pnpm exec vitest run tests/integration/cli/install-unix.integration.test.ts tests/integration/cli/install-windows.integration.test.ts
+        run: pnpm exec vitest run tests/integration/cli/install-unix.integration.test.ts tests/integration/cli/install-unix-tty.integration.test.ts tests/integration/cli/install-windows.integration.test.ts
 
       - name: Typecheck
         run: pnpm typecheck

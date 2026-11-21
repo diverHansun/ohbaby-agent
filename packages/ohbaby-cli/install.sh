@@ -9,6 +9,99 @@ warn() {
     printf 'ohbaby installer: %s\n' "$*" >&2
 }
 
+# Display state is decided once. Progress goes to stderr and is drawn only on a
+# terminal. Colour follows NO_COLOR and TERM=dumb for each stream separately.
+init_display() {
+    term_is_dumb=0
+    if [ "${TERM:-}" = dumb ]; then term_is_dumb=1; fi
+    draw_progress_bar=0
+    if [ -t 2 ] && [ "$term_is_dumb" = 0 ]; then draw_progress_bar=1; fi
+    case "${COLORTERM:-}" in
+        truecolor|24bit) gold='\033[38;2;212;162;79m' ;;
+        *) gold='\033[33m' ;;
+    esac
+    out_gold=
+    out_reset=
+    err_gold=
+    err_dim=
+    err_reset=
+    if [ -z "${NO_COLOR:-}" ] && [ "$term_is_dumb" = 0 ]; then
+        if [ -t 1 ]; then out_gold=$gold; out_reset='\033[0m'; fi
+        if [ -t 2 ]; then err_gold=$gold; err_dim='\033[2m'; err_reset='\033[0m'; fi
+    fi
+    # Octal escapes keep this file ASCII. U+2501 and U+2500 need a UTF-8 locale.
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) bar_done='\342\224\201' bar_todo='\342\224\200' ;;
+        *) bar_done='#' bar_todo='-' ;;
+    esac
+}
+
+stage() {
+    printf "$out_gold%s$out_reset %s\\n" "[$1/4]" "$2"
+}
+
+home_path() {
+    case "$1" in
+        "$HOME"/*) printf '~%s\n' "${1#"$HOME"}" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+file_bytes() {
+    if [ -f "$1" ]; then LC_ALL=C ls -ln "$1" | awk '{print $5}'; else printf '0\n'; fi
+}
+
+# 1 MB is 1,048,576 bytes, shown with one decimal place.
+megabytes() {
+    tenths=$(( ($1 * 10 + 524288) / 1048576 ))
+    printf '%s.%s\n' "$(( tenths / 10 ))" "$(( tenths % 10 ))"
+}
+
+# Only the response after the last status line counts. Redirects write their own
+# headers first, with the length of their short body, so a 3xx length is ignored.
+content_length() {
+    length=$(awk '
+        /^HTTP\// { length_value = ""; redirect = ($2 ~ /^3/) }
+        !redirect && tolower($1) == "content-length:" { length_value = $2; sub(/\r$/, "", length_value) }
+        END { print length_value }
+    ' "$1" 2>/dev/null) || length=
+    case "$length" in ''|0*|*[!0-9]*) length=0 ;; esac
+    printf '%s\n' "$length"
+}
+
+terminal_columns() {
+    size=$( ( stty size </dev/tty ) 2>/dev/null ) || size=
+    columns=${size##* }
+    case "$columns" in ''|0|*[!0-9]*) columns=${COLUMNS:-} ;; esac
+    case "$columns" in ''|0|*[!0-9]*) columns=80 ;; esac
+}
+
+draw_progress() {
+    received=$1
+    total=$2
+    if [ "$total" -le 0 ]; then
+        printf '\r      %s MB\033[K' "$(megabytes "$received")" >&2
+        return 0
+    fi
+    percent=$(( received * 100 / total ))
+    if [ "$percent" -gt 100 ]; then percent=100; fi
+    sizes="$(megabytes "$received") / $(megabytes "$total") MB"
+    if [ "$columns" -lt 60 ]; then
+        printf '\r      %3d%%  %s\033[K' "$percent" "$sizes" >&2
+        return 0
+    fi
+    filled=$(( percent * 24 / 100 ))
+    done_cells=
+    todo_cells=
+    cell=0
+    while [ "$cell" -lt 24 ]; do
+        if [ "$cell" -lt "$filled" ]; then done_cells="$done_cells$bar_done"; else todo_cells="$todo_cells$bar_todo"; fi
+        cell=$(( cell + 1 ))
+    done
+    printf "\\r      $err_gold$done_cells$err_reset$err_dim$todo_cells$err_reset %3d%%  %s\\033[K" \
+        "$percent" "$sizes" >&2
+}
+
 version_is_safe() {
     case "$1" in ''|*[!0-9A-Za-z.-]*) return 1 ;; esac
     printf '%s\n' "$1" | LC_ALL=C grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
@@ -240,6 +333,17 @@ take_install_lock() {
 }
 
 cleanup_on_exit() {
+    # A non-interactive shell starts background jobs with SIGINT ignored, so
+    # Ctrl-C does not stop curl. End it before its directory is removed.
+    if [ -n "$curl_pid" ]; then
+        kill "$curl_pid" 2>/dev/null || :
+        wait "$curl_pid" 2>/dev/null || :
+        curl_pid=
+    fi
+    if [ "$cursor_hidden" = 1 ]; then
+        printf '\r\033[K\033[?25h' >&2 || :
+        cursor_hidden=0
+    fi
     if [ -n "$download_dir" ]; then rm -rf "$download_dir" || :; fi
     if [ -n "$launcher_temp" ]; then rm -f "$launcher_temp" || :; fi
     if [ "$lock_owned" = 1 ]; then
@@ -257,6 +361,37 @@ download() {
         fail "Download failed: $1. Check your proxy or set OHBABY_NODE_MIRROR."
 }
 
+# Run curl in the background and poll the file size, as opencode's installer
+# does. ls reads the size without reading the file, unlike busybox wc -c.
+download_node_archive() {
+    if [ "$draw_progress_bar" != 1 ]; then
+        download "$1" "$2"
+        return 0
+    fi
+    headers="$download_dir/headers"
+    curl_errors="$download_dir/curl-errors"
+    poll=1
+    if sleep 0.1 2>/dev/null; then poll=0.1; fi
+    terminal_columns
+    curl -fsSL --connect-timeout 15 -D "$headers" -o "$2" "$1" 2>"$curl_errors" &
+    curl_pid=$!
+    printf '\033[?25l' >&2
+    cursor_hidden=1
+    while kill -0 "$curl_pid" 2>/dev/null; do
+        draw_progress "$(file_bytes "$2")" "$(content_length "$headers")"
+        sleep "$poll"
+    done
+    curl_status=0
+    wait "$curl_pid" || curl_status=$?
+    curl_pid=
+    printf '\r\033[K\033[?25h' >&2
+    cursor_hidden=0
+    if [ "$curl_status" != 0 ]; then
+        cat "$curl_errors" >&2 || :
+        fail "Download failed: $1. Check your proxy or set OHBABY_NODE_MIRROR."
+    fi
+}
+
 file_sha256() (
     if command -v sha256sum >/dev/null 2>&1; then
         result=$(sha256sum < "$1") || exit 1
@@ -271,18 +406,21 @@ file_sha256() (
 
 prepare_node() {
     if [ ! -e "$node_dir" ]; then
+        stage 2 "Downloading Node.js $NODE_VERSION for $os-$arch"
         node_archive="node-v$NODE_VERSION-$os-$arch.tar.gz"
         if command -v xz >/dev/null 2>&1; then node_archive="${node_archive%.gz}.xz"; fi
         node_url="${OHBABY_NODE_MIRROR:-https://nodejs.org/dist}"
         node_url="${node_url%/}/v$NODE_VERSION"
         download_dir=$(mktemp -d "$runtime_dir/.download-XXXXXXXX")
-        download "$node_url/$node_archive" "$download_dir/$node_archive"
+        download_node_archive "$node_url/$node_archive" "$download_dir/$node_archive"
         download "$node_url/SHASUMS256.txt" "$download_dir/SHASUMS256.txt"
         expected=$(awk -v name="$node_archive" '$2 == name {print $1}' "$download_dir/SHASUMS256.txt")
         actual=$(file_sha256 "$download_dir/$node_archive") ||
             fail "Cannot compute SHA-256 for $node_archive."
         [ -n "$expected" ] && [ "$actual" = "$expected" ] ||
             fail "SHA-256 verification failed for $node_archive."
+        printf '      Node.js %s  %s MB  verified\n' "$NODE_VERSION" \
+            "$(megabytes "$(file_bytes "$download_dir/$node_archive")")"
         node_partial="$runtime_dir/.node-v$NODE_VERSION.partial"
         rm -rf "$node_partial"
         mkdir "$node_partial"
@@ -291,6 +429,7 @@ prepare_node() {
         verify_node "$node_partial"
         mv "$node_partial" "$node_dir"
     else
+        stage 2 "Node.js $NODE_VERSION is already present"
         verify_node "$node_dir"
     fi
 }
@@ -317,10 +456,12 @@ release_works() (
 prepare_release() {
     release="$releases_dir/$version"
     if [ -e "$release" ] || [ -L "$release" ]; then
+        stage 3 "ohbaby $version is already installed"
         release_works "$release" ||
             fail "Existing release at $release did not pass the version check. Repair that directory before retrying."
         return
     fi
+    stage 3 "Installing ohbaby $version"
     partial="$release.partial"
     rm -rf "$partial"
     mkdir "$partial"
@@ -407,32 +548,41 @@ append_path_block() (
     printf '%b%s\n%s\n%s\n' "$separator" "$path_begin" "$path_line" "$path_end" >> "$rc_file"
 )
 
+# Sets path_note for the summary instead of printing.
 configure_path() {
+    path_note="Not changed. Add $(home_path "$launcher_dir") to PATH, or run the launcher directly."
     if [ "${OHBABY_NO_MODIFY_PATH:-}" = 1 ]; then return 0; fi
     case ":$PATH:" in
-        *":$launcher_dir:"*|*":$launcher_dir/:"*) printf '%s is already in PATH.\n' "$launcher_dir"; return 0 ;;
+        *":$launcher_dir:"*|*":$launcher_dir/:"*)
+            path_note="$(home_path "$launcher_dir") is already in PATH."
+            return 0 ;;
     esac
     path_begin='# >>> ohbaby installer >>>'
     path_end='# <<< ohbaby installer <<<'
     # shellcheck disable=SC2016
     path_command='export PATH="$HOME/.local/bin:$PATH"'
     case "${shell_name##*/}" in
-        zsh) append_path_block "$HOME/.zshrc" "$path_command" || return 1 ;;
+        zsh)
+            append_path_block "$HOME/.zshrc" "$path_command" || return 1
+            path_files='~/.zshrc' ;;
         bash)
             append_path_block "$HOME/.bashrc" "$path_command" || return 1
+            path_files='~/.bashrc'
             if [ "$os" = darwin ]; then
                 append_path_block "$HOME/.bash_profile" "$path_command" || return 1
+                path_files='~/.bashrc and ~/.bash_profile'
             fi ;;
         fish)
             mkdir -p "$HOME/.config/fish/conf.d" || return 1
             # shellcheck disable=SC2016
             append_path_block "$HOME/.config/fish/conf.d/ohbaby.fish" \
-                'contains -- "$HOME/.local/bin" $PATH; or set -gx PATH "$HOME/.local/bin" $PATH' || return 1 ;;
-        *)
-            printf 'Add %s to PATH to use ohbaby by name.\n' "$launcher_dir"
-            return 0 ;;
+                'contains -- "$HOME/.local/bin" $PATH; or set -gx PATH "$HOME/.local/bin" $PATH' || return 1
+            # shellcheck disable=SC2016
+            path_command='set -gx PATH "$HOME/.local/bin" $PATH'
+            path_files='~/.config/fish/conf.d/ohbaby.fish' ;;
+        *) return 0 ;;
     esac
-    printf 'Open a new terminal or source your shell configuration to load the updated PATH.\n'
+    path_note="Added to $path_files. For this terminal, run: $path_command"
 }
 
 remove_old_directory() (
@@ -500,14 +650,24 @@ offer_npm_removal() {
     esac
 }
 
-finish_install() {
-    if [ "$previous" != "$version" ]; then
-        printf 'Activated ohbaby %s at %s.\n' "$version" "$install_dir"
+# The command that runs now in this shell decides the Start row. PATH entries
+# written with a trailing slash make command -v return ".../bin//ohbaby".
+start_command() {
+    visible=$(command -v ohbaby || :)
+    visible_dir=
+    if [ -n "$visible" ]; then visible_dir=$(normalize_directory "$(dirname "$visible")" || :); fi
+    launcher_home=$(normalize_directory "$launcher_dir" || :)
+    if [ -n "$visible_dir" ] && [ "$visible_dir" = "$launcher_home" ]; then
+        printf 'ohbaby\n'
     else
-        printf 'ohbaby %s is installed at %s.\n' "$version" "$install_dir"
+        home_path "$launcher"
     fi
+}
+
+finish_install() {
     status=0
     if ! configure_path; then
+        path_note="Not changed. Add $(home_path "$launcher_dir") to PATH, or run the launcher directly."
         warn "ohbaby $version is active, but PATH setup failed. Fix your shell configuration and rerun the installer."
         status=1
     fi
@@ -516,7 +676,17 @@ finish_install() {
         warn "ohbaby $version is active, but the optional npm uninstall did not complete."
         status=1
     fi
-    printf 'Launcher: %s\n' "$launcher"
+    if [ -z "$previous" ]; then
+        headline="Installed ohbaby $version."
+    elif [ "$previous" != "$version" ]; then
+        headline="Updated ohbaby from $previous to $version."
+    else
+        headline="ohbaby $version is already installed."
+    fi
+    printf '\n%s\n' "$headline"
+    printf '  Launcher  %s\n' "$(home_path "$launcher")"
+    printf '  PATH      %s\n' "$path_note"
+    printf '  Start     %s\n' "$(start_command)"
     if [ "$os" = linux ]; then
         printf 'For non-login SSH commands without the updated PATH, use the launcher path directly.\n'
     fi
@@ -534,6 +704,8 @@ main() {
         fail "OHBABY_INSTALL_DIR must be an absolute directory path."
     shell_name=${SHELL:-}
 
+    init_display
+    stage 1 "Checking the current installation"
     select_platform
     check_daemon || exit 1
     requested=${OHBABY_INSTALL_VERSION:-latest}
@@ -568,6 +740,8 @@ main() {
     launcher_temp=
     lock_owned=0
     reclaim_owned=0
+    curl_pid=
+    cursor_hidden=0
     trap cleanup_on_exit 0
     trap 'exit 129' HUP
     trap 'exit 130' INT
@@ -586,6 +760,7 @@ main() {
         fail "The npm registry did not return ohbaby-cli@$requested. A mirror may not have synced the version yet. Retry later."
     fi
     prepare_release
+    stage 4 "Activating ohbaby $version"
     prepare_launcher
 
     if [ "$previous" != "$version" ]; then
