@@ -166,7 +166,7 @@ stderr ─ 进度条（只在 TTY 上画）、npm spinner、警告和错误（�
 在 `Invoke-OhbabyInstall` 开头初始化一次：
 
 - 是否上色：`NO_COLOR` 没有设置或为空，`TERM` 不是 `dumb`。
-- 是否画进度条：`-not [Console]::IsErrorRedirected`，并且 `TERM` 不是 `dumb`。
+- 是否画进度条：`-not [Console]::IsErrorRedirected`，并且 `TERM` 不是 `dumb`。进程级 stderr 重定向会关闭进度。同进程 PowerShell 的 `2>` 重定向错误流，控制台的 `[Console]::Error` 仍会绘制。
 - 字符：`[Console]::OutputEncoding.CodePage -eq 65001` 时用 `[char]0x2501`（`━`）和 `[char]0x2500`（`─`），否则用 `#` 和 `-`。脚本文件保持纯 ASCII，现有测试会检查。
 - 终端宽度：`[Console]::WindowWidth`，拿不到（会抛异常）时按 80 列。
 
@@ -214,8 +214,8 @@ PowerShell 7 的 `irm | iex` 也会运行这段代码。`HttpWebRequest` 在 .NE
 |---|---|
 | 第一行 | 与 sh 相同的三种情况，`$previous` 为空、不同、相同 |
 | `Launcher` | `$binDir\ohbaby.cmd` 的完整路径 |
-| `PATH` | `Add-InstallPath` 返回 `$true`：`Added to your user PATH. This window is ready; open a new terminal for other windows.`；返回 `$false`：`<binDir> is already in PATH.`；`OHBABY_NO_MODIFY_PATH=1`：`Not changed. Add <binDir> to PATH, or run the launcher directly.` |
-| `Start` | `Get-Command ohbaby` 的第一个结果正好是我们的 `ohbaby.cmd` 时显示 `ohbaby`，否则显示启动器完整路径 |
+| `PATH` | `Add-InstallPath` 返回 `$true`：`Added to your user PATH. Open a new terminal to use the updated PATH.`；返回 `$false`：`<binDir> is already in your user PATH.`；`OHBABY_NO_MODIFY_PATH=1`：`Not changed. Add <binDir> to PATH, or run the launcher directly.` |
+| `Start` | 固定显示可复制的 PowerShell 命令 `& '<启动器完整路径>'`。路径中的单引号按 PowerShell 规则写成两个单引号。 |
 
 ps1 在第 4 步出错时会抛异常、不打印摘要，这一点保持不变。`Write-Warning` 输出的清理警告会出现在摘要之前。
 
@@ -305,7 +305,7 @@ ps1 在第 4 步出错时会抛异常、不打印摘要，这一点保持不变�
 | Windows 上 `HttpWebRequest` 的代理行为和 `Invoke-WebRequest` 不同 | 低 | 企业网络下载失败 | 依据见 00 §2.1.1；真机在系统代理和 PAC 下各验一次 |
 | conhost 里 `` `r `` 重画闪烁、颜色残留 | 中 | 只是不好看 | 250 ms 刷新；`finally` 恢复颜色；真机验收 |
 | 中文 Windows 上 `━` 按双宽显示 | 低 | 进度条折行 | 非 65001 编码一律用 ASCII |
-| 摘要的 `Start` 行判断错 | 低 | 告诉用户运行 `ohbaby` 却启动了旧的 npm 副本 | 用 `command -v` 和 `Get-Command` 的实际结果判断，不靠推测 |
+| 摘要的 `Start` 行判断错 | 低 | 告诉用户运行 `ohbaby` 却启动了旧的 npm 副本 | Unix 用 `command -v` 判断，Windows 固定给出安装器生成的启动器命令 |
 
 回滚：每个 Stage 只涉及上表列出的文件，`git revert` 对应提交即可。安装目录、锁和版本指针的格式没有变化，新旧脚本装出来的东西完全一样，回滚后不需要用户做任何事。
 

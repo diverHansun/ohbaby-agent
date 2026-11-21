@@ -594,9 +594,9 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
             if ($env:OHBABY_NO_MODIFY_PATH -ne '1') {
                 $stage = 'update the user PATH'
                 if (Add-InstallPath $binDir) {
-                    $pathNote = 'Added to your user PATH. This window is ready; open a new terminal for other windows.'
+                    $pathNote = 'Added to your user PATH. Open a new terminal to use the updated PATH.'
                 } else {
-                    $pathNote = "$binDir is already in PATH."
+                    $pathNote = "$binDir is already in your user PATH."
                 }
             }
             if ($switched) {
@@ -610,18 +610,12 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hwnd, uint m
             elseif ($previous -cne $version) { $headline = "Updated ohbaby from $previous to $version." }
             else { $headline = "ohbaby $version is already installed." }
             $launcher = Join-Path $binDir 'ohbaby.cmd'
-            # Show the bare name only if this window would run our launcher.
-            $start = $launcher
-            $first = Get-Command ohbaby -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($first -and $first.Path -and
-                [IO.Path]::GetFullPath($first.Path) -ieq [IO.Path]::GetFullPath($launcher)) {
-                $start = 'ohbaby'
-            }
+            $quotedLauncher = $launcher.Replace("'", "''")
             Write-Host ''
             Write-Host $headline
             Write-Host "  Launcher  $launcher"
             Write-Host "  PATH      $pathNote"
-            Write-Host "  Start     $start"
+            Write-Host "  Start     & '$quotedLauncher'"
         } catch {
             if ($switched) {
                 throw "ohbaby switched to $version, but could not $stage. Rerun the installer for $version to retry. $($_.Exception.Message)"

@@ -51,7 +51,7 @@ v0.1.19 发布了脚本安装（`install.sh` 和 `install.ps1`）。一次全新
 - 不用 `curl.exe`：它只读环境变量和 `--proxy`，不读系统代理，也不支持 PAC，企业网络用户会下载失败。
 - 不开 PowerShell 5.1 自带的进度显示：它每读 10 KB 刷新一次，下载 30 MB 要刷新约 3000 次，正是现在设 `SilentlyContinue` 的原因。我们每 250 ms 刷新一次。
 - 选 `HttpWebRequest` 的理由：现在的 `Invoke-WebRequest` 在 5.1 里就基于它，所以系统代理、PAC、TLS 设置的行为与现状一致；不需要 `Add-Type`；不会先把整个文件读进内存。
-- 只在 `-not [Console]::IsErrorRedirected` 时画进度条，写到 stderr。
+- 只在 `-not [Console]::IsErrorRedirected` 时通过 `[Console]::Error` 画进度。进程级 stderr 重定向时停止绘制。同进程 PowerShell 的 `2>` 只捕获 PowerShell 错误流，终端仍会画进度。
 - 代理凭据维持现状，默认不发送。本议题只改显示，不改网络行为。
 - 以上依据来自 MicrosoftDocs、dotnet-api-docs、curl 文档，以及 PowerShell 仓库 `v6.0.0-alpha.18` 中从 Windows PowerShell 移植的 Web cmdlet 源码（旁证，5.1 源码不公开）。各启动方式下 `IsErrorRedirected` 的取值、`` `r `` 刷新效果、配色、代理环境下的下载和速度，都要在 Windows 真机上验证，列入 04。
 
@@ -120,17 +120,17 @@ PATH 行：
 |---|---|
 | 已经在 PATH 中 | `~/.local/bin is already in PATH.` |
 | sh 刚写入 shell 配置 | `Added to ~/.zshrc. For this terminal, run: export PATH=…` |
-| Windows 刚写入用户 PATH | `Added to your user PATH. This window is ready; open a new terminal for other windows.` |
+| Windows 刚写入用户 PATH | `Added to your user PATH. Open a new terminal to use the updated PATH.` |
 | 设置了 `OHBABY_NO_MODIFY_PATH=1`，或识别不出 shell | `Not changed. Add ~/.local/bin to PATH, or run the launcher directly.` |
 
 - sh 给出 `export` 命令而不是 `source ~/.zshrc`，参考 codex：`source` 会重新执行整份配置文件。
-- Windows 脚本会改写当前进程的 `$env:Path`，`irm | iex` 在当前进程中运行，所以当前窗口已经可以直接使用，只需提示其他窗口重开。
-- `Start` 行：当前终端能直接运行 `ohbaby` 时显示 `ohbaby`，否则显示启动器的完整路径。
+- Windows 脚本会改写执行它的 PowerShell 的 `$env:Path`。`ohbaby update` 在子进程里执行脚本，所以摘要提示打开新终端。
+- Windows 的 `Start` 固定给出可复制的 PowerShell 启动命令 `& '<完整路径>'`。Unix 上能按命令名启动时显示 `ohbaby`，否则给出启动器路径。
 - 不再打印安装目录。`ohbaby uninstall` 会自己找到它，用户需要的是启动器位置。
 - Linux 上关于非登录 SSH 命令的提示保留，放在摘要最后。
 - 警告（PATH 写入失败、npm 副本卸载失败等）仍写 stderr，打印在摘要之前，退出码仍为 1。
 - `ohbaby update` 走脚本安装时，脚本摘要之后还会出现 update 自己的 "Updated ohbaby to X."。这处重复保留，不新增环境变量，也不删除 update 的提示，因为自动更新时那句 "Run ohbaby again to start the new version" 仍然有用。
-- 现有集成测试断言 stdout 包含 "is already in PATH"，新文案保留这几个词。
+- Unix 集成测试断言 stdout 包含 "is already in PATH"，Unix 文案保留这几个词。
 
 ### 2.5 测试方式（2026-11-21 确认）
 

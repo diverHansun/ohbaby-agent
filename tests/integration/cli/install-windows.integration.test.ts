@@ -43,7 +43,8 @@ it.runIf(process.platform === "win32")(
     const runtimeFixture = join(root, bundle);
     const npmDir = join(runtimeFixture, "node_modules", "npm", "bin");
     const script = join(root, "install.ps1");
-    const installDir = join(root, "ohbaby 安 装");
+    const strictScript = join(root, "install-strict.ps1");
+    const installDir = join(root, "ohbaby's 安 装");
     const configHome = join(root, "home");
     const current = join(installDir, "current");
     const releases = join(installDir, "releases");
@@ -57,6 +58,7 @@ it.runIf(process.platform === "win32")(
       OHBABY_NO_MODIFY_PATH: "1",
       OHBABY_INSTALL_VERSION: "",
       OHBABY_TEST_LAUNCHER: launcher,
+      OHBABY_TEST_INSTALL_SCRIPT: script,
       USERPROFILE: root,
     };
     let archiveBytes: Buffer;
@@ -121,6 +123,15 @@ it.runIf(process.platform === "win32")(
           "$nodeVersion = '" + nodeVersion + "'",
         ),
       );
+      await writeFile(
+        strictScript,
+        [
+          "Set-StrictMode -Version Latest",
+          "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)",
+          'function ohbaby { throw "The existing command must not run" }',
+          "& $env:OHBABY_TEST_INSTALL_SCRIPT",
+        ].join("\n"),
+      );
       await new Promise<void>((started) =>
         mirror.listen(0, "127.0.0.1", started),
       );
@@ -132,6 +143,7 @@ it.runIf(process.platform === "win32")(
       const install = async (
         version = "",
         environment: NodeJS.ProcessEnv = {},
+        entryPoint = script,
       ) => {
         const firstRequest = mirrorRequests.length;
         const startedAt = Date.now();
@@ -144,7 +156,7 @@ it.runIf(process.platform === "win32")(
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              script,
+              entryPoint,
             ],
             {
               env: { ...env, OHBABY_INSTALL_VERSION: version, ...environment },
@@ -204,7 +216,7 @@ it.runIf(process.platform === "win32")(
       await expect(access(current)).rejects.toThrow();
       await expect(access(lock)).rejects.toThrow();
       brokenDownload = false;
-      const fresh = await install();
+      const fresh = await install("", {}, strictScript);
       const stdout = fresh.stdout.replace(/\r\n/gu, "\n");
       const platform = "win-" + process.arch;
       const stages = [
@@ -221,8 +233,7 @@ it.runIf(process.platform === "win32")(
         "\\bin\\ohbaby.cmd\n",
         "  PATH      Not changed. Add ",
         " to PATH, or run the launcher directly.\n",
-        "  Start     ",
-        "\\bin\\ohbaby.cmd\n",
+        `  Start     & '${launcher.replaceAll("'", "''")}'\n`,
       ];
       let offset = 0;
       for (const part of stages) {

@@ -27,8 +27,8 @@
 | T1 | 全新安装 | stdout 依次出现 `[1/4] Checking the current installation`、`[2/4] Downloading Node.js 24.22.3 for <平台>`、收尾行 `Node.js 24.22.3 … verified`、`[3/4] Installing ohbaby <版本>`、`[4/4] Activating ohbaby <版本>`、空行、`Installed ohbaby <版本>.`、`Launcher`、`PATH`、`Start` 行 | 1、2 |
 | T2 | 用同一版本重跑 | 第 2 步是 `Node.js 24.22.3 is already present`；第 3 步是 `ohbaby <版本> is already installed`；摘要第一行是 `ohbaby <版本> is already installed.` | 1、2 |
 | T3 | 从 A 版本切换到 B 版本 | 摘要第一行是 `Updated ohbaby from A to B.` | 1、2 |
-| T4 | PATH 的四种情况 | 已在 PATH：包含 `is already in PATH`（现有断言保留）；sh 刚写入：`Added to ~/.zshrc. For this terminal, run: export PATH=`；`OHBABY_NO_MODIFY_PATH=1`：`Not changed.`；sh 识别不出 shell：`Not changed.`。Windows 刚写入：`Added to your user PATH. This window is ready` | 1、2 |
-| T5 | `Start` 行 | 启动器目录在 PATH 中时是 `ohbaby`；否则是启动器完整路径 | 1、2 |
+| T4 | PATH 的四种情况 | Unix 已在 PATH：包含 `is already in PATH`；Windows 已在用户 PATH：包含 `is already in your user PATH`；sh 刚写入：`Added to ~/.zshrc. For this terminal, run: export PATH=`；`OHBABY_NO_MODIFY_PATH=1`：`Not changed.`；sh 识别不出 shell：`Not changed.`。Windows 刚写入：`Added to your user PATH. Open a new terminal to use the updated PATH.` | 1、2 |
+| T5 | `Start` 行 | Unix 沿用命令名或路径判断。Windows 总是输出带引号的完整 PowerShell 启动命令，严格模式下已有同名函数也能完成安装 | 1、2 |
 | T6 | 输出流 | 成功安装时 stderr 为空（现有断言保留，不放宽）；stdout 里没有 `\x1b` 和 `\r` | 1、2 |
 | T7 | 旧提示已删除 | stdout 里没有 `Activated ohbaby`、`Launcher: `、安装目录路径 | 1、2 |
 | T8 | 第 4 步出现警告（PATH 写入失败，现有用例） | 警告在 stderr；摘要仍然打印；退出码为 1 | 1 |
@@ -76,7 +76,7 @@ T26 是本轮风险最高的用例，必须在 macOS 和 Linux（dash）上都�
 | ID | 检查项 | 通过标准 |
 |---|---|---|
 | W1 | `irm … \| iex` 全新安装 | 进度条正常刷新、不折行；结束后清掉并出现收尾行；摘要正确 |
-| W2 | `[Console]::IsErrorRedirected` 的取值 | `irm \| iex`、`powershell -File`（即 `ohbaby update` 的调用方式）下都是 False，进度条可见；`2>err.txt` 时为 True，不画进度条，err.txt 里没有进度内容 |
+| W2 | 区分进程 stderr 与 PowerShell 错误流 | 进程 stderr 连接终端时，`irm \| iex` 和 `powershell -File` 可见进度。重定向 PowerShell 进程的 stderr 时不画进度。同进程执行 `irm … \| iex 2>err.txt` 时终端仍可见进度，文件没有进度内容 |
 | W3 | 中文系统（代码页 936） | 用 `#` 和 `-`，进度条不折行 |
 | W4 | Windows Terminal 下 `chcp 65001` | 用 `━` 和 `─` |
 | W5 | 配色 | 金色编号和进度条可读；中断或完成后，控制台颜色恢复原样 |
@@ -85,7 +85,7 @@ T26 是本轮风险最高的用例，必须在 macOS 和 Linux（dash）上都�
 | W8 | PAC 脚本 | 下载成功 |
 | W9 | 下载速度 | 与改动前的版本相比，同一网络下用时没有明显增加（差距在 20% 以内） |
 | W10 | `ohbaby update` | 能看到阶段行和进度条；最后是脚本摘要加 update 自己的 `Updated ohbaby to X.` |
-| W11 | 已在 PATH、刚写入 PATH 两种情况 | PATH 行文案正确；`Start` 行为 `ohbaby` 时，当前窗口确实能直接运行 |
+| W11 | 已在用户 PATH、刚写入用户 PATH、升级后的父终端 | PATH 行描述用户 PATH 的变更。父终端 PATH 尚未更新时，仍可复制 `Start` 命令启动新版本 |
 | W12 | `ohbaby uninstall` | 步骤行和结尾文案与 T42 一致 |
 
 **macOS 和 Linux**：
@@ -141,5 +141,5 @@ Windows 真机项没做完，不发布。
 | **sh 的信号处理**：后台 curl 在 Ctrl-C、终端关闭（HUP）、`kill`（TERM）时残留，继续往已删除的目录里写；或者清理顺序不对，锁先被释放，另一个安装进程进来时旧 curl 还在跑 | `cleanup_on_exit` 先 `kill` 加 `wait` curl，再删临时目录、释放锁；T26、T27 | SIGKILL 无法处理，curl 会残留到下载结束。它写的是临时目录，下次运行会重新创建，不影响正确性 |
 | **把非 TTY 误判成 TTY**：日志里混进 `\r` 和颜色码，CI 日志变乱 | 只看 `[ -t 2 ]` 和 `IsErrorRedirected`；T6 断言非 TTY 时没有控制字符 | 某些 CI 会给进程分配伪终端（比如开了 `tty: true` 的容器），这时确实会画进度条。这是用户环境的选择，和 npm 的行为一致 |
 | **Windows 网络行为变化**：换成 `HttpWebRequest` 后，某些企业代理下失败 | 只换调用方式，不改 `Proxy` 和 `Credentials`；W7、W8 | 需要认证的代理仍然不支持，和现状相同（00 §4） |
-| **摘要误导用户**：`Start` 行说可以直接运行 `ohbaby`，实际运行的是旧的 npm 副本，或者当前终端根本找不到命令 | 用 `command -v`、`Get-Command` 的实际结果判断；T5、W11 | 用户在别的终端里，PATH 状态可能和安装脚本看到的不同，摘要只对当前终端负责 |
+| **摘要误导用户**：`Start` 行说可以直接运行 `ohbaby`，实际运行的是旧的 npm 副本，或者当前终端根本找不到命令 | Unix 用 `command -v` 判断；Windows 固定给出启动器命令；T5、W11 | 其他终端可能需要重新载入 PATH；Windows 可先用 `Start` 命令 |
 | **进度条把终端弄乱**：窄终端折行、双宽字符、颜色残留 | 窄于 60 列不画进度条；非 UTF-8 用 ASCII；`finally` 恢复颜色；T24、W3、W5 | 安装过程中用户调整窗口大小，进度条可能折行一次。宽度只在开始时读一次，不处理窗口大小变化 |
