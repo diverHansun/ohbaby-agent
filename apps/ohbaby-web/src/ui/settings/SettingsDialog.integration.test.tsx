@@ -1222,7 +1222,7 @@ describe("composer controls", () => {
     await until(
       () =>
         trigger().querySelector(".ohb-model-button-effort")?.textContent ===
-        "Low",
+        "low",
       "the reasoning capability",
     );
     await click(trigger());
@@ -1231,12 +1231,12 @@ describe("composer controls", () => {
       if (!element) throw new Error("menu not found");
       return element;
     };
-    await click(button(menu(), "Effort, Low"));
+    await click(button(menu(), "Effort, low"));
     expect(button(menu(), "Effort").className).toContain("ohb-menu-back");
     // Esc goes back to the first level instead of closing.
     await key(menu(), "Escape");
-    await click(button(menu(), "Effort, Low"));
-    await click(button(menu(), "High"));
+    await click(button(menu(), "Effort, low"));
+    await click(button(menu(), "high"));
     expect(updates).toEqual([{ enabled: true, effort: "high" }]);
     // A choice closes the menu and returns focus to the model button.
     expect(document.querySelector(".ohb-menu")).toBeNull();

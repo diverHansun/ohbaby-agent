@@ -6038,18 +6038,18 @@ it("shows raw reasoning labels inside the input and persists session preference"
     reasoning: { effort: "max" },
   });
   const app = mountApp(fake.runtime);
-  await waitFor(() => buttonEffort(app.container) === "High");
-  expect(openEffortLevel(app.container)).toEqual(["High", "Max"]);
+  await waitFor(() => buttonEffort(app.container) === "high");
+  expect(openEffortLevel(app.container)).toEqual(["high", "max"]);
   closeMenu();
   closeMenu();
-  await pickEffort(app.container, "Max");
+  await pickEffort(app.container, "max");
   expect(fake.client.updateSessionReasoning).toHaveBeenCalledWith({
     sessionId: "session_1",
     reasoning: { enabled: true, effort: "max" },
   });
   // A choice closes the menu (A6) and the button shows it.
   expect(document.querySelector(".ohb-model-menu")).toBeNull();
-  expect(buttonEffort(app.container)).toBe("Max");
+  expect(buttonEffort(app.container)).toBe("max");
   const effort = app.container.querySelector(".ohb-model-button-effort");
   expect(effort?.closest(".ohb-composer-input")).not.toBeNull();
   expect(effort?.closest(".ohb-composer-tools")).toBeNull();
@@ -6143,8 +6143,8 @@ it("keeps the reasoning selector for an identified model that cannot disable rea
     },
   });
   const app = mountApp(fake.runtime);
-  await waitFor(() => buttonEffort(app.container) === "On");
-  expect(openEffortLevel(app.container)).toEqual(["On"]);
+  await waitFor(() => buttonEffort(app.container) === "on");
+  expect(openEffortLevel(app.container)).toEqual(["on"]);
   closeMenu();
   closeMenu();
 });
@@ -6175,8 +6175,8 @@ it("clears old workspace reasoning while the new client metadata is pending", as
     deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
   vi.mocked(second.client.getCurrentModel).mockReturnValue(next.promise);
   const app = mountApp(first.runtime);
-  await waitFor(() => buttonEffort(app.container) === "High");
-  await pickEffort(app.container, "High");
+  await waitFor(() => buttonEffort(app.container) === "high");
+  await pickEffort(app.container, "high");
   await act(async () => {
     app.root.render(<OhbabyWebApp runtime={second.runtime} />);
     await Promise.resolve();
@@ -6217,8 +6217,8 @@ it.each(["pending", "acknowledged"])(
       >();
     vi.mocked(fake.client.updateSessionReasoning).mockReturnValue(save.promise);
     const app = mountApp(fake.runtime);
-    await waitFor(() => buttonEffort(app.container) === "Medium");
-    await pickEffort(app.container, "High");
+    await waitFor(() => buttonEffort(app.container) === "medium");
+    await pickEffort(app.container, "high");
     if (phase === "acknowledged") {
       await act(async () => {
         save.resolve({
@@ -6241,7 +6241,7 @@ it.each(["pending", "acknowledged"])(
       );
       await Promise.resolve();
     });
-    expect(buttonEffort(app.container)).toBe("High");
+    expect(buttonEffort(app.container)).toBe("high");
     await setTextareaValue(app.container, "use high");
     await pressTextareaKey(app.container, "Enter");
     expect(fake.submitPromptAccepted).toHaveBeenCalledWith(
@@ -6255,7 +6255,7 @@ it.each(["pending", "acknowledged"])(
       });
       await Promise.resolve();
     });
-    expect(buttonEffort(app.container)).toBe("High");
+    expect(buttonEffort(app.container)).toBe("high");
     await act(async () => {
       fake.store.replaceSnapshot(
         {
@@ -6269,7 +6269,7 @@ it.each(["pending", "acknowledged"])(
       );
       await Promise.resolve();
     });
-    expect(buttonEffort(app.container)).toBe("High");
+    expect(buttonEffort(app.container)).toBe("high");
   },
 );
 

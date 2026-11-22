@@ -17,14 +17,9 @@ import type { ReasoningState } from "./useReasoning.js";
 /** Longer lists get the filter field (05 Menu). */
 const FILTER_FROM = 9;
 
-/** `high` reads as High on the button and in the Effort list; the saved value is unchanged. */
-function effortLabel(label: string): string {
-  return label.charAt(0).toUpperCase() + label.slice(1);
-}
-
 /** Why a chosen level is not sent yet, for titles and screen readers. */
 function inactiveReasoningText(level: string): string {
-  return `${effortLabel(level)} isn't active until Reasoning Effort is detected; the service default is used`;
+  return `${level} isn't active until Reasoning Effort is detected; the service default is used`;
 }
 
 /**
@@ -85,7 +80,7 @@ export function ModelMenu(props: {
       : undefined;
   const effort =
     reasoning.kind === "choice" && reasoning.value !== ""
-      ? effortLabel(effortOption?.label ?? reasoning.value)
+      ? (effortOption?.label ?? reasoning.value)
       : undefined;
   const effortError = reasoning.kind === "choice" ? reasoning.error : undefined;
 
@@ -205,9 +200,7 @@ export function ModelMenu(props: {
                   close(true);
                 }}
               >
-                <span className="ohb-menu-item-text">
-                  {effortLabel(option.label)}
-                </span>
+                <span className="ohb-menu-item-text">{option.label}</span>
                 {current ? (
                   <Check
                     aria-hidden="true"
@@ -328,7 +321,7 @@ function EffortRow(props: {
   const { state } = props;
   if (state.kind === "choice") {
     const option = state.options.find((item) => item.value === state.value);
-    const value = effortLabel(option?.label ?? state.value);
+    const value = option?.label ?? state.value;
     return (
       <button
         type="button"
@@ -348,7 +341,7 @@ function EffortRow(props: {
   }
   const status =
     state.inactive !== undefined
-      ? `${effortLabel(state.inactive)} · inactive`
+      ? `${state.inactive} · inactive`
       : state.kind === "detecting"
         ? "Detecting…"
         : "Unknown";

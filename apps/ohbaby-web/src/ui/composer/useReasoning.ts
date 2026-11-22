@@ -200,9 +200,9 @@ export function useReasoning(
   const fallback = entry?.reasoningDefault ?? view.default;
   const effective = compatible ? preference : fallback;
   const options = [
-    ...(view.supportsDisabled ? [{ value: "off", label: "Off" }] : []),
+    ...(view.supportsDisabled ? [{ value: "off", label: "off" }] : []),
     ...(view.mode === "binary"
-      ? [{ value: "on", label: "On" }]
+      ? [{ value: "on", label: "on" }]
       : view.efforts.map((effort) => ({ value: effort, label: effort }))),
   ];
   return {

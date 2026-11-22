@@ -482,8 +482,8 @@ it.each(["detecting", "unknown"] as const)(
       ".ohb-model-effort-row",
     );
     expect(effortRow?.disabled).toBe(true);
-    expect(effortRow?.textContent).toContain("High · inactive");
-    expect(effortRow?.title ?? "").toContain("High isn't active");
+    expect(effortRow?.textContent).toContain("high · inactive");
+    expect(effortRow?.title ?? "").toContain("high isn't active");
     act(() => {
       document
         .querySelector(".ohb-menu")
@@ -534,12 +534,12 @@ it("keeps known levels usable while Reasoning Effort is detected again", async (
   }
   await render(<Control />);
   expect(document.querySelector(".ohb-model-button-effort")?.textContent).toBe(
-    "High",
+    "high",
   );
   openMenu();
   expect(
     document
-      .querySelector("[aria-label='Effort, High']")
+      .querySelector("[aria-label='Effort, high']")
       ?.hasAttribute("disabled"),
   ).toBe(false);
 });

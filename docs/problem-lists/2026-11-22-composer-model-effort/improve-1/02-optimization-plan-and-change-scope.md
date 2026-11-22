@@ -8,7 +8,7 @@
 
 ```
 桌面（底部一行）
-[权限 ▾]                    [gpt-5.2 High ▾] (↑)
+[权限 ▾]                    [gpt-5.2 high ▾] (↑)
                                   │
                                   ▼
              ┌─────────────────────────────┐
@@ -19,7 +19,7 @@
              │ DeepSeek                    │
              │   deepseek-v4               │
              │ ─────────────────────────── │
-             │ Effort           High   ›   │  ← 不随列表滚动，不参与筛选
+             │ Effort           high   ›   │  ← 不随列表滚动，不参与筛选
              │ ─────────────────────────── │
              │ Manage models…              │
              └─────────────────────────────┘
@@ -28,9 +28,9 @@
              ┌─────────────────────────────┐
              │ ‹ Effort                    │
              │   Off                       │
-             │   Low                       │
-             │   Medium                    │
-             │   High               ✓      │
+             │   low                       │
+             │   medium                    │
+             │   high               ✓      │
              └─────────────────────────────┘
 ```
 
@@ -39,14 +39,14 @@
 | 决策项 | 选择 | 理由 | 放弃的选项 | 代价 |
 |---|---|---|---|---|
 | A1 模型菜单怎么拿到思考强度状态 | `Composer` 的 `modelControl` 从现成节点改成函数 `(reasoning: ReasoningState) => ReactNode`，`ComposerControls` 调用时把 `useReasoning` 的结果传进去 | `useReasoning` 需要的会话、客户端、`onReasoningChange` 都在 `ComposerControls` 手里，原地不动；`ModelMenu` 只多一个参数 | 把 `useReasoning` 提到 `SessionScreen`：要多传好几个参数，`Composer` 里其他用到它的地方也得跟着改。用 React Context：一处用法不值得 | `Composer` 和 `SessionScreen` 的传参写法要改 |
-| A2 按钮文字 | 模型名 + 空格 + 强度。强度用 `--text-dim`；只在状态为 `choice` 且有值时显示；识别中、未知、不支持思考时只显示模型名。强度文字首字母大写显示（`high` 显示为 High），按钮和二级列表一致；保存的值不变 | 按钮只显示真正生效的设置。识别中、未知这些暂时状态放到菜单里的 Effort 一行说明 | 继续在按钮上显示转圈的脑袋图标或 `unknown`：按钮变宽，和"合并后更清爽"相违背 | 识别中的反馈从按钮挪进菜单，不打开菜单就看不到 |
+| A2 按钮文字 | 模型名 + 空格 + 强度。强度用 `--text-dim`；只在状态为 `choice` 且有值时显示；识别中、未知、不支持思考时只显示模型名。强度文字按保存的值原样小写显示（如 `high`），按钮和二级列表一致 | 按钮只显示真正生效的设置。识别中、未知这些暂时状态放到菜单里的 Effort 一行说明 | 继续在按钮上显示转圈的脑袋图标或 `unknown`：按钮变宽，和"合并后更清爽"相违背 | 识别中的反馈从按钮挪进菜单，不打开菜单就看不到 |
 | A3 宽度不够时 | 模型名先用省略号截断，强度文字不截断 | 强度一般只有 2–6 个字母，模型名可长可短 | 两段一起截断：强度可能只剩一两个字母，看不懂 | 极窄时模型名只剩几个字母，悬停的 `title` 显示全名 |
-| A4 Effort 一行 | 放在模型列表和"Manage models…"之间，带 `data-menu-filter="false"`，不随列表滚动。右侧灰色显示当前强度和 `›`。识别中显示"Detecting…"、未知显示"Unknown"（有保留但未生效的档位时显示"High · inactive"），这两种状态下这一行不能点，`title` 是原因。不支持思考（`hidden`）时整行不出现 | 和"Manage models…"一样固定在可见位置，长列表也不用滚到底找 | 放在列表最上面：打开菜单时焦点在当前模型上，Effort 在上面反而离得远 | 无 |
+| A4 Effort 一行 | 放在模型列表和"Manage models…"之间，带 `data-menu-filter="false"`，不随列表滚动。右侧灰色显示当前强度和 `›`。识别中显示"Detecting…"、未知显示"Unknown"（有保留但未生效的档位时显示"high · inactive"），这两种状态下这一行不能点，`title` 是原因。不支持思考（`hidden`）时整行不出现 | 和"Manage models…"一样固定在可见位置，长列表也不用滚到底找 | 放在列表最上面：打开菜单时焦点在当前模型上，Effort 在上面反而离得远 | 无 |
 | A5 Effort 二级 | 用 `Menu` 现有的 `level`：根层 `"models"`，二级 `"effort"`。二级第一行是"‹ Effort"返回，下面是强度选项，当前项打勾。Esc 和返回行都回到根层 | 手机"更多"菜单已经这样做，交互一致，不写新代码 | 嵌套的侧边子菜单：`Menu` 明确不支持（`shared/Menu.tsx` 注释），手机上也展不开 | 无 |
 | A6 选完是否关闭 | 选模型后关闭（和现在一样），选强度后也关闭，焦点回到按钮 | 选模型后要等会话回传才生效，这期间菜单里的 Effort 还是旧模型的档位，保持打开容易误选 | ZCode 选完模型菜单不关：会出现上面说的错位 | 换模型再调强度要打开两次 |
 | A7 保存强度失败 | 错误文字显示在 Effort 一行下方（`role="alert"`），按钮上的强度文字换成 danger 色 | 原来错误显示在下拉框旁边，合并后没有那个位置；菜单关着时用颜色提示 | 走 `onError` 弹全局错误：强度失败不值得打断用户 | 菜单关着时只有颜色提示 |
 | A8 手机 | 合并按钮在手机上照常显示（含强度）；"更多"菜单删掉 Reasoning Effort 二级，只留 Full access 开关 | 一件事只放一个地方 | 手机上保留"更多"里的强度：同一设置两个入口 | "更多"菜单只剩一项。先保留这个菜单（D29 的位置不变，后续还会放别的） |
-| A9 无障碍 | 按钮 `aria-haspopup="menu"`，`title` 改成"Model and reasoning effort for this chat"；Effort 一行的可读文字包含当前档位或状态（如"Effort, High"），识别中这一行带 `aria-busy` | 原来 `role="status"`、`role="alert"` 的语义要保留 | 无 | 无 |
+| A9 无障碍 | 按钮 `aria-haspopup="menu"`，`title` 改成"Model and reasoning effort for this chat"；Effort 一行的可读文字包含当前档位或状态（如"Effort, high"），识别中这一行带 `aria-busy` | 原来 `role="status"`、`role="alert"` 的语义要保留 | 无 | 无 |
 
 ## 2.3 分阶段实施
 

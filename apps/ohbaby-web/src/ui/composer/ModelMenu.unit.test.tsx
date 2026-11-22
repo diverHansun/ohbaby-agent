@@ -96,13 +96,13 @@ function effortRow(): HTMLButtonElement | null {
   );
 }
 
-it("A-1: shows the model name and a dim, capitalised effort", () => {
+it("A-1: shows the model name and a dim, lowercase effort", () => {
   render(choice());
   const effort = trigger().querySelector(".ohb-model-button-effort");
-  expect(effort?.textContent).toBe("High");
+  expect(effort?.textContent).toBe("high");
   expect(trigger().textContent).toContain(models.models[0]?.model ?? "");
   expect(trigger().title).toBe(
-    `Model and reasoning effort for this chat: ${models.models[0]?.model ?? ""}, High`,
+    `Model and reasoning effort for this chat: ${models.models[0]?.model ?? ""}, high`,
   );
 });
 
@@ -119,14 +119,14 @@ it("A-4: drills into Effort, marks the current level and closes after a choice",
   render(choice({ select }));
   click(trigger());
   const row = effortRow();
-  expect(row?.getAttribute("aria-label")).toBe("Effort, High");
+  expect(row?.getAttribute("aria-label")).toBe("Effort, high");
   click(row);
   const current = document.querySelector("[aria-current='true']");
-  expect(current?.textContent).toBe("High");
+  expect(current?.textContent).toBe("high");
   expect(current?.querySelector(".ohb-menu-check")).not.toBeNull();
   const low = Array.from(
     document.querySelectorAll<HTMLButtonElement>("[role='menuitem']"),
-  ).find((item) => item.textContent === "Low");
+  ).find((item) => item.textContent === "low");
   click(low);
   expect(select).toHaveBeenCalledWith("low");
   expect(document.querySelector(".ohb-menu")).toBeNull();
