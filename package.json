@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-agent-workspace",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Workspace for the ohbaby CLI, web UI, runtime, LLM clients, server, and SDK",
   "private": true,
   "type": "module",

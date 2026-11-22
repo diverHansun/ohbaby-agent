@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-server",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Explicit local server and remote client adapters for ohbaby",
   "type": "module",
   "publishConfig": {

@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-cli",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Terminal and bundled web interfaces for the ohbaby AI coding agent",
   "type": "module",
   "engines": {

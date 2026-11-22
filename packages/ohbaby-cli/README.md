@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.19/assets/images/lychee-logo.png" alt="ohbaby-agent" width="120">
+<img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.20/assets/images/lychee-logo.png" alt="ohbaby-agent" width="120">
 
 # ohbaby-agent
 
@@ -10,15 +10,15 @@
 
 <a href="https://github.com/diverHansun/ohbaby-agent/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/diverHansun/ohbaby-agent/ci.yml?style=flat-square&label=CI&logo=github"></a>
 <a href="https://www.npmjs.com/package/ohbaby-cli"><img alt="npm" src="https://img.shields.io/npm/v/ohbaby-cli?style=flat-square&color=cb3837&logo=npm"></a>
-<a href="https://github.com/diverHansun/ohbaby-agent/blob/v0.1.19/LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
+<a href="https://github.com/diverHansun/ohbaby-agent/blob/v0.1.20/LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
 <img alt="node" src="https://img.shields.io/badge/node-%3E%3D24-339933?style=flat-square&logo=node.js">
 <img alt="typescript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript">
 
-**[Install](#install)** &nbsp;·&nbsp; **[Quick start](#quick-start)** &nbsp;·&nbsp; **[Web UI](#web-ui)** &nbsp;·&nbsp; **[Docs](https://github.com/diverHansun/ohbaby-agent/tree/v0.1.19/docs)** &nbsp;·&nbsp; **English** · [简体中文](https://github.com/diverHansun/ohbaby-agent/blob/v0.1.19/README.zh.md)
+**[Install](#install)** &nbsp;·&nbsp; **[Quick start](#quick-start)** &nbsp;·&nbsp; **[Web UI](#web-ui)** &nbsp;·&nbsp; **[Docs](https://github.com/diverHansun/ohbaby-agent/tree/v0.1.20/docs)** &nbsp;·&nbsp; **English** · [简体中文](https://github.com/diverHansun/ohbaby-agent/blob/v0.1.20/README.zh.md)
 
 <br>
 
-<img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.19/assets/images/ohbaby-web.png" alt="The ohbaby web UI: the agent adds a --units flag to a small CLI, then reports what it changed and how it verified it" width="900">
+<img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.20/assets/images/ohbaby-web.png" alt="The ohbaby web UI: the agent adds a --units flag to a small CLI, then reports what it changed and how it verified it" width="900">
 
 </div>
 
@@ -65,7 +65,7 @@ ohbaby
 2. Describe what you want done. That's it.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.19/assets/images/dashboard.png" alt="The ohbaby terminal UI with the slash-command menu open" width="760">
+  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/v0.1.20/assets/images/dashboard.png" alt="The ohbaby terminal UI with the slash-command menu open" width="760">
 </p>
 
 <details>
@@ -194,8 +194,8 @@ pnpm preflight   # format + lint + typecheck + test + build
 | `ohbaby-server` | The local server and remote client transport |
 | `ohbaby-sdk` | Stable TypeScript contracts shared by the runtime and its interfaces |
 
-Design notes and module docs live in [`docs/`](https://github.com/diverHansun/ohbaby-agent/tree/v0.1.19/docs).
+Design notes and module docs live in [`docs/`](https://github.com/diverHansun/ohbaby-agent/tree/v0.1.20/docs).
 
 ## License
 
-[MIT](https://github.com/diverHansun/ohbaby-agent/blob/v0.1.19/LICENSE)
+[MIT](https://github.com/diverHansun/ohbaby-agent/blob/v0.1.20/LICENSE)
