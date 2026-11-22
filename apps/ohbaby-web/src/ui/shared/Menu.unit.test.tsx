@@ -113,6 +113,16 @@ describe("placeMenu", () => {
     });
   });
 
+  it("stays above when the anchor asks, even if it would fit below", () => {
+    expect(
+      placeMenu(
+        { ...anchor, above: true },
+        { width: 160, height: 60 },
+        viewport,
+      ).top,
+    ).toBe(20);
+  });
+
   it("aligns to the anchor's right edge when asked and never leaves the viewport", () => {
     const right: MenuAnchor = { x: 120, y: 100, aboveY: 80, alignRight: true };
     expect(placeMenu(right, { width: 160, height: 120 }, viewport).left).toBe(

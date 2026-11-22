@@ -11,7 +11,7 @@
 | 侧栏顶栏格子（New、Search） | default / hover / active | active（搜索展开）：顶部 2px `--accent` 线 + `--bg-selected` | 空间不够时 New 只剩图标，宽度不跳 |
 | 输入框卡片 | idle / focused / has-text / submitting / running / steerable / disabled | focused：描边加深；running 且可插话：描边变浅琥珀；disabled（daemon 断开、会话已归档、执行目录不可用）：输入可用，发送按钮不可用。模型未配置不算 disabled（§2.1） | 高度随内容增长，到上限后在框内滚动；IME 输入中按 Enter 不发送（沿用现有逻辑） |
 | 发送按钮 | empty / ready / submitting / hidden | 圆形；empty：`--bg-hover` 底、`--text-dim`；ready：`--accent` 底；submitting：转圈，宽度不变，不响应点击 | 运行中且草稿为空时，Stop 占主位（沿用现有规则） |
-| 卡片底部控制按钮（模型、思考强度、权限模式） | default / hover / open / disabled | hover 和 open：`--bg-hover`；open 时弹出菜单向上展开 | 按钮宽度随文字变化，最大宽度截断 |
+| 卡片底部控制按钮（模型及其思考强度、权限模式；D37） | default / hover / open / disabled | hover 和 open：`--bg-hover`；open 时弹出菜单向上展开 | 按钮宽度随文字变化，最大宽度截断 |
 | Stop | default / hover / stopping | 和发送一样的黑色圆钮（D32）；stopping：转圈 | 点击后在请求返回前不可重复点击 |
 | 菜单 | open / item-hover / item-disabled / filtering | item-hover 和键盘高亮同一个样式 | Esc：有过滤文字时先清空，再按一次关闭；关闭后焦点回到触发按钮 |
 | 工作区选择条（草稿） | default / hover / open | 无边框，hover 才有底色 | 换工作区不清空输入框文字 |

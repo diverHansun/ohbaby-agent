@@ -7,14 +7,17 @@ import type {
 } from "ohbaby-sdk";
 import type { ReactElement, ReactNode } from "react";
 import { ComposerMoreMenu } from "./ComposerMoreMenu.js";
-import { ReasoningControl } from "./ReasoningControl.js";
-import { useReasoning, type ReasoningClient } from "./useReasoning.js";
+import {
+  useReasoning,
+  type ReasoningClient,
+  type ReasoningState,
+} from "./useReasoning.js";
 
 /**
- * Bottom row inside the composer card: permission control on the left; model,
- * Reasoning Effort and the round send (or Stop) button on the right (D22).
- * Below 640px CSS swaps the permission and Reasoning Effort controls for one More
- * menu (D29); both read the same reasoning state, so nothing is fetched twice.
+ * Bottom row inside the composer card: permission control on the left; the
+ * model button (which also carries Reasoning Effort, D37) and the round send
+ * (or Stop) button on the right (D22). Below 640px CSS swaps the permission
+ * control for one More menu (D29).
  */
 export function ComposerControls(props: {
   readonly client: ReasoningClient;
@@ -27,8 +30,8 @@ export function ComposerControls(props: {
     readonly disabled: boolean;
     readonly onSet: (input: { readonly level: UiPermissionLevel }) => void;
   };
-  /** The model menu; absent while no settings are reachable. */
-  readonly modelControl?: ReactNode;
+  /** The model menu, given this chat's Reasoning Effort; absent while no settings are reachable. */
+  readonly modelControl?: (reasoning: ReasoningState) => ReactNode;
   readonly onReasoningChange: (
     reasoning: UiReasoningConfig | undefined,
   ) => void;
@@ -50,15 +53,13 @@ export function ComposerControls(props: {
   return (
     <div className="ohb-composer-bar">
       <ComposerMoreMenu
-        reasoning={reasoning}
         permissionLevel={props.permission.level}
         permissionDisabled={props.permission.disabled}
         onSetPermission={props.permission.onSet}
       />
       {props.permissionControl}
       <div className="ohb-composer-bar-spacer" />
-      {props.modelControl}
-      <ReasoningControl state={reasoning} />
+      {props.modelControl?.(reasoning)}
       {props.showStop ? (
         <button
           aria-busy={props.stopLabel !== undefined}

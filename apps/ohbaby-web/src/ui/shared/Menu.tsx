@@ -8,12 +8,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isPhoneViewport } from "./viewport.js";
 
-/** Where a menu opens: below `y`, or above `aboveY` when it would overflow the viewport. */
+/**
+ * Where a menu opens: below `y`, or above `aboveY` when it would overflow the
+ * viewport or `above` keeps it on that side (a second level stays where the
+ * first one opened).
+ */
 export interface MenuAnchor {
   readonly x: number;
   readonly y: number;
   readonly aboveY: number;
   readonly alignRight: boolean;
+  readonly above?: boolean;
 }
 
 const VIEWPORT_MARGIN = 8;
@@ -32,6 +37,7 @@ export function placeMenu(
       ? anchor.x - size.width
       : anchor.x;
   const top =
+    anchor.above === true ||
     anchor.y + size.height > viewport.height - VIEWPORT_MARGIN
       ? anchor.aboveY - size.height
       : anchor.y;

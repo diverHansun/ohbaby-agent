@@ -33,6 +33,7 @@ import { isImeComposing } from "./ime.js";
 import { PromptQueue } from "./PromptQueue.js";
 import { UnconsumedSteers } from "./UnconsumedSteers.js";
 import { useComposerDraft } from "./useComposerDraft.js";
+import type { ReasoningState } from "./useReasoning.js";
 import { useSlashPalette } from "./useSlashPalette.js";
 import { useSteerQueue } from "./useSteerQueue.js";
 
@@ -96,7 +97,7 @@ export function Composer(props: {
   readonly onEditRevision: (revision: number) => void;
   readonly model: ComposerModel;
   /** The model menu in the control row (D15). */
-  readonly modelControl?: ReactNode;
+  readonly modelControl?: (reasoning: ReasoningState) => ReactNode;
   readonly onOpenModelSettings: () => void;
   /** The settings entry the next turn uses; feeds the reasoning control. */
   readonly modelEntry?: UiSettingsModel;

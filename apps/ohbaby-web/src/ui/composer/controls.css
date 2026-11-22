@@ -1,84 +1,3 @@
-.ohb-reasoning-control {
-  display: inline-flex;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.ohb-reasoning-control select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-md);
-  color: var(--text-muted);
-  cursor: pointer;
-  font-family: var(--font-ui);
-  font-size: 13px;
-  min-height: 28px;
-  padding: 0 24px 0 28px;
-}
-
-.ohb-reasoning-control select:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.ohb-reasoning-control select:focus-visible {
-  border-color: var(--border-strong);
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.ohb-reasoning-icon,
-.ohb-reasoning-chevron {
-  color: var(--text-dim);
-  pointer-events: none;
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.ohb-reasoning-icon {
-  left: 10px;
-}
-
-.ohb-reasoning-chevron {
-  right: 9px;
-}
-
-.ohb-reasoning-status {
-  color: var(--text-dim);
-  font-family: var(--font-ui);
-  font-size: 12px;
-}
-
-.ohb-reasoning-detecting,
-.ohb-reasoning-unknown {
-  align-items: center;
-  display: inline-flex;
-  gap: 5px;
-  min-height: 30px;
-}
-
-/* Detecting: the brain stays upright and breathes. A turning brain reads
-   as a broken icon, not as loading. */
-.ohb-reasoning-pending {
-  animation: ohb-pulse 0.9s ease-in-out infinite alternate;
-}
-
-.ohb-reasoning-error {
-  background: var(--bg-elevated);
-  border: 1px solid var(--danger-border);
-  border-radius: 7px;
-  bottom: calc(100% + 8px);
-  color: var(--danger-ink);
-  font-size: 12px;
-  max-width: min(300px, 80vw);
-  padding: 8px 10px;
-  position: absolute;
-  right: 0;
-  width: max-content;
-}
-
 .ohb-composer-hint {
   align-items: center;
   color: var(--text-dim);
@@ -113,6 +32,18 @@
   white-space: nowrap;
 }
 
+/* The model button's Reasoning Effort (D37): dim, and never truncated; the
+   model name gives way first. */
+.ohb-control-button > .ohb-model-button-effort {
+  color: var(--text-dim);
+  flex: none;
+  overflow: visible;
+}
+
+.ohb-control-button > .ohb-model-button-effort.is-error {
+  color: var(--danger-ink);
+}
+
 .ohb-control-button:hover {
   background: var(--bg-hover);
   color: var(--text);
@@ -123,19 +54,11 @@
   flex: none;
 }
 
+/* The button also carries Reasoning Effort (D37), so it gets a little more
+   room on phones; the More button and send still fit on one line. */
 @media (max-width: 420px) {
-  .ohb-reasoning-control select {
-    max-width: 82px;
-    padding-right: 18px;
-    text-overflow: ellipsis;
-  }
-
-  .ohb-reasoning-chevron {
-    right: 4px;
-  }
-
   .ohb-model-button {
-    max-width: 120px;
+    max-width: 180px;
   }
 }
 
@@ -170,25 +93,35 @@
   letter-spacing: 0.02em;
 }
 
+/* The Effort row's current value, and its save error (D37). */
+.ohb-model-effort-value {
+  color: var(--text-dim);
+  flex: none;
+  font-size: 12px;
+}
+
+.ohb-model-effort-error {
+  color: var(--danger-ink);
+  font-size: 12px;
+  padding: 2px 9px 4px;
+}
+
 /* The More menu exists for phones only (D29). */
 .ohb-composer-more {
   display: none;
 }
 
 @media (max-width: 639px) {
-  .ohb-control-button,
-  .ohb-reasoning-control select {
+  .ohb-control-button {
     min-height: 44px;
   }
 
-  /* One breakpoint swaps permission and thinking for More; no second state. */
+  /* One breakpoint swaps the permission control for More; no second state. */
   .ohb-composer-more {
     display: inline-flex;
   }
 
-  .ohb-composer-bar > .ohb-permission-button,
-  .ohb-composer-bar > .ohb-reasoning-control,
-  .ohb-composer-bar > .ohb-reasoning-status {
+  .ohb-composer-bar > .ohb-permission-button {
     display: none;
   }
 }

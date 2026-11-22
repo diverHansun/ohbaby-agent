@@ -5789,6 +5789,62 @@ async function flushTimers(): Promise<void> {
   });
 }
 
+/** The dim Reasoning Effort on the model button (D37); "" when not shown. */
+function buttonEffort(container: ParentNode): string {
+  return container.querySelector(".ohb-model-button-effort")?.textContent ?? "";
+}
+
+function openModelMenu(container: ParentNode): void {
+  const trigger =
+    container.querySelector<HTMLButtonElement>(".ohb-model-button");
+  if (!trigger) throw new Error("Model button missing");
+  act(() => {
+    trigger.click();
+  });
+}
+
+/** Opens the model menu and drills into Effort; returns the option labels. */
+function openEffortLevel(container: ParentNode): string[] {
+  openModelMenu(container);
+  const row = document.querySelector<HTMLButtonElement>(
+    "[role='menuitem'][aria-label^='Effort, ']",
+  );
+  if (!row) throw new Error("Effort row missing");
+  act(() => {
+    row.click();
+  });
+  return Array.from(
+    document.querySelectorAll<HTMLElement>(
+      ".ohb-model-menu [role='menuitem']:not(.ohb-menu-back)",
+    ),
+  ).map((item) => item.textContent);
+}
+
+async function pickEffort(container: ParentNode, label: string): Promise<void> {
+  openEffortLevel(container);
+  const option = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(
+      ".ohb-model-menu [role='menuitem']:not(.ohb-menu-back)",
+    ),
+  ).find((item) => item.textContent === label);
+  if (!option) throw new Error(`Effort option ${label} missing`);
+  await act(async () => {
+    option.click();
+    await Promise.resolve();
+  });
+}
+
+/** Escape as the menu receives it: one level back, or closed at the root. */
+function closeMenu(): void {
+  const menu = document.querySelector(".ohb-menu");
+  if (!menu) throw new Error("Menu missing");
+  act(() => {
+    menu.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+}
+
 function slashPaletteText(container: ParentNode): string {
   return container.querySelector(".ohb-slash-palette")?.textContent ?? "";
 }
@@ -5982,29 +6038,21 @@ it("shows raw reasoning labels inside the input and persists session preference"
     reasoning: { effort: "max" },
   });
   const app = mountApp(fake.runtime);
-  await waitFor(() =>
-    Boolean(app.container.querySelector('[aria-label="Reasoning effort"]')),
-  );
-  const select = app.container.querySelector<HTMLSelectElement>(
-    '[aria-label="Reasoning effort"]',
-  );
-  if (!select) throw new Error("Reasoning selector missing");
-  expect(Array.from(select.options).map((option) => option.text)).toEqual([
-    "high",
-    "max",
-  ]);
-  expect(select.value).toBe("high");
-  await act(async () => {
-    await Promise.resolve();
-    select.value = "max";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  await waitFor(() => buttonEffort(app.container) === "High");
+  expect(openEffortLevel(app.container)).toEqual(["High", "Max"]);
+  closeMenu();
+  closeMenu();
+  await pickEffort(app.container, "Max");
   expect(fake.client.updateSessionReasoning).toHaveBeenCalledWith({
     sessionId: "session_1",
     reasoning: { enabled: true, effort: "max" },
   });
-  expect(select.closest(".ohb-composer-input")).not.toBeNull();
-  expect(select.closest(".ohb-composer-tools")).toBeNull();
+  // A choice closes the menu (A6) and the button shows it.
+  expect(document.querySelector(".ohb-model-menu")).toBeNull();
+  expect(buttonEffort(app.container)).toBe("Max");
+  const effort = app.container.querySelector(".ohb-model-button-effort");
+  expect(effort?.closest(".ohb-composer-input")).not.toBeNull();
+  expect(effort?.closest(".ohb-composer-tools")).toBeNull();
 });
 it("unknown capability keeps send available and labels the control unknown without fake tiers", async () => {
   const fake = createFakeRuntime({
@@ -6021,22 +6069,27 @@ it("unknown capability keeps send available and labels the control unknown witho
     reasoning: { status: "unknown", efforts: [] },
   });
   const app = mountApp(fake.runtime);
-  await waitFor(() => app.container.textContent.includes("unknown"));
-  expect(
-    app.container
-      .querySelector(".ohb-reasoning-unknown")
-      ?.closest(".ohb-composer-input"),
-  ).not.toBeNull();
-  expect(app.container.textContent).not.toContain("推理默认");
-  expect(
-    app.container.querySelector('[aria-label="Reasoning effort"]'),
-  ).toBeNull();
+  await waitFor(() =>
+    Boolean(app.container.querySelector(".ohb-model-button")),
+  );
+  openModelMenu(app.container);
+  await waitFor(() =>
+    Boolean(document.querySelector(".ohb-model-effort-row.is-unknown")),
+  );
+  const row = document.querySelector<HTMLButtonElement>(
+    ".ohb-model-effort-row.is-unknown",
+  );
+  expect(row?.disabled).toBe(true);
+  expect(row?.textContent).toContain("Unknown");
+  expect(buttonEffort(app.container)).toBe("");
+  expect(document.body.textContent).not.toContain("推理默认");
+  closeMenu();
   await setTextareaValue(app.container, "hello");
   expect(
     app.container.querySelector<HTMLTextAreaElement>("textarea")?.disabled,
   ).toBe(false);
 });
-it("shows only a spinning brain while reasoning capability is detecting", async () => {
+it("shows a disabled Detecting Effort row while reasoning capability is detecting", async () => {
   const fake = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
@@ -6052,14 +6105,22 @@ it("shows only a spinning brain while reasoning capability is detecting", async 
   });
   const app = mountApp(fake.runtime);
   await waitFor(() =>
-    Boolean(app.container.querySelector(".ohb-reasoning-detecting")),
+    Boolean(app.container.querySelector(".ohb-model-button")),
   );
-  const status = app.container.querySelector(".ohb-reasoning-detecting");
-  expect(status?.closest(".ohb-composer-input")).not.toBeNull();
-  expect(status?.querySelector(".ohb-reasoning-pending")).not.toBeNull();
-  expect(status?.textContent).toBe("");
-  expect(app.container.textContent).not.toContain("检测中");
-  expect(app.container.textContent).not.toContain("推理默认");
+  openModelMenu(app.container);
+  await waitFor(() =>
+    Boolean(document.querySelector(".ohb-model-effort-row.is-detecting")),
+  );
+  const row = document.querySelector<HTMLButtonElement>(
+    ".ohb-model-effort-row.is-detecting",
+  );
+  expect(row?.disabled).toBe(true);
+  expect(row?.getAttribute("aria-busy")).toBe("true");
+  expect(row?.textContent).toContain("Detecting…");
+  expect(buttonEffort(app.container)).toBe("");
+  expect(document.body.textContent).not.toContain("检测中");
+  expect(document.body.textContent).not.toContain("推理默认");
+  closeMenu();
 });
 it("keeps the reasoning selector for an identified model that cannot disable reasoning", async () => {
   const fake = createFakeRuntime({
@@ -6082,15 +6143,10 @@ it("keeps the reasoning selector for an identified model that cannot disable rea
     },
   });
   const app = mountApp(fake.runtime);
-  await waitFor(() =>
-    Boolean(app.container.querySelector('[aria-label="Reasoning effort"]')),
-  );
-  const select = app.container.querySelector<HTMLSelectElement>(
-    '[aria-label="Reasoning effort"]',
-  );
-  expect(
-    Array.from(select?.options ?? []).map((option) => option.text),
-  ).toEqual(["On"]);
+  await waitFor(() => buttonEffort(app.container) === "On");
+  expect(openEffortLevel(app.container)).toEqual(["On"]);
+  closeMenu();
+  closeMenu();
 });
 it("clears old workspace reasoning while the new client metadata is pending", async () => {
   const first = createFakeRuntime({
@@ -6119,25 +6175,13 @@ it("clears old workspace reasoning while the new client metadata is pending", as
     deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
   vi.mocked(second.client.getCurrentModel).mockReturnValue(next.promise);
   const app = mountApp(first.runtime);
-  await waitFor(() =>
-    Boolean(app.container.querySelector('[aria-label="Reasoning effort"]')),
-  );
-  const oldSelect = app.container.querySelector<HTMLSelectElement>(
-    '[aria-label="Reasoning effort"]',
-  );
-  if (!oldSelect) throw new Error("Old selector missing");
-  await act(async () => {
-    oldSelect.value = "high";
-    oldSelect.dispatchEvent(new Event("change", { bubbles: true }));
-    await Promise.resolve();
-  });
+  await waitFor(() => buttonEffort(app.container) === "High");
+  await pickEffort(app.container, "High");
   await act(async () => {
     app.root.render(<OhbabyWebApp runtime={second.runtime} />);
     await Promise.resolve();
   });
-  expect(
-    app.container.querySelector('[aria-label="Reasoning effort"]'),
-  ).toBeNull();
+  expect(buttonEffort(app.container)).toBe("");
   await setTextareaValue(app.container, "new workspace");
   await pressTextareaKey(app.container, "Enter");
   expect(second.submitPromptAccepted.mock.calls[0]?.[0]).toBe("new workspace");
@@ -6173,18 +6217,8 @@ it.each(["pending", "acknowledged"])(
       >();
     vi.mocked(fake.client.updateSessionReasoning).mockReturnValue(save.promise);
     const app = mountApp(fake.runtime);
-    await waitFor(() =>
-      Boolean(app.container.querySelector('[aria-label="Reasoning effort"]')),
-    );
-    const select = app.container.querySelector<HTMLSelectElement>(
-      '[aria-label="Reasoning effort"]',
-    );
-    if (!select) throw new Error("Selector missing");
-    await act(async () => {
-      select.value = "high";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-      await Promise.resolve();
-    });
+    await waitFor(() => buttonEffort(app.container) === "Medium");
+    await pickEffort(app.container, "High");
     if (phase === "acknowledged") {
       await act(async () => {
         save.resolve({
@@ -6207,7 +6241,7 @@ it.each(["pending", "acknowledged"])(
       );
       await Promise.resolve();
     });
-    expect(select.value).toBe("high");
+    expect(buttonEffort(app.container)).toBe("High");
     await setTextareaValue(app.container, "use high");
     await pressTextareaKey(app.container, "Enter");
     expect(fake.submitPromptAccepted).toHaveBeenCalledWith(
@@ -6221,7 +6255,7 @@ it.each(["pending", "acknowledged"])(
       });
       await Promise.resolve();
     });
-    expect(select.value).toBe("high");
+    expect(buttonEffort(app.container)).toBe("High");
     await act(async () => {
       fake.store.replaceSnapshot(
         {
@@ -6235,7 +6269,7 @@ it.each(["pending", "acknowledged"])(
       );
       await Promise.resolve();
     });
-    expect(select.value).toBe("high");
+    expect(buttonEffort(app.container)).toBe("High");
   },
 );
 

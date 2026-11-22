@@ -458,7 +458,7 @@ export function SessionScreen({
             ...view.composer,
             disabled: view.composer.disabled || approvalDialogVisible,
           }}
-          modelControl={
+          modelControl={(reasoning) => (
             <ModelMenu
               key={activeSessionId ?? "draft"}
               settings={runtime.settings}
@@ -472,8 +472,9 @@ export function SessionScreen({
                 onOpenModelSettings(false);
               }}
               onError={onError}
+              reasoning={reasoning}
             />
-          }
+          )}
           modelEntry={modelEntry}
           onOpenModelSettings={() => {
             onOpenModelSettings(false);

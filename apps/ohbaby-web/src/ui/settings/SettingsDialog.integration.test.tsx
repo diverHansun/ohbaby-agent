@@ -1113,10 +1113,13 @@ describe("composer controls", () => {
       if (!element) throw new Error("model button not found");
       return element;
     };
+    // The name alone; the dim effort after it is checked in ModelMenu tests.
+    const modelName = (): string | undefined =>
+      trigger().querySelector("span")?.textContent;
     // The connected model shows first; wait for the list behind the menu.
     await until(
       () =>
-        trigger().textContent === "deepseek-v4.1-flash" &&
+        modelName() === "deepseek-v4.1-flash" &&
         selectSettings(runtime.settings.cache.getSnapshot(), "models").data !==
           undefined,
       "the label and the list",
@@ -1133,8 +1136,7 @@ describe("composer controls", () => {
     expect(items.at(-1)).toBe("Manage models…");
     await click(button(menu, "claude-sonnet-5-5 · Personal"));
     await until(
-      () =>
-        trigger().textContent === "claude-sonnet-5-5" && !trigger().disabled,
+      () => modelName() === "claude-sonnet-5-5" && !trigger().disabled,
       "the draft's model",
     );
     expect(select).not.toHaveBeenCalled();
@@ -1154,7 +1156,7 @@ describe("composer controls", () => {
       await runtime.settings.deleteModel("m5");
     });
     await until(
-      () => trigger().textContent === "deepseek-v4.1-flash",
+      () => modelName() === "deepseek-v4.1-flash",
       "the default again",
     );
     await type(composer, "again");
@@ -1163,13 +1165,15 @@ describe("composer controls", () => {
     expect(submit.mock.calls[1]?.[1]).not.toHaveProperty("modelEntryId");
   });
 
-  it("puts Reasoning Effort and full access in the phone More menu", async () => {
+  it("keeps only full access in the phone More menu", async () => {
     const runtime = createMockRuntime("settings");
     const container = mount(runtime);
     const more = button(container, "More controls");
     await click(more);
     const menu = document.querySelector<HTMLElement>(".ohb-menu");
     if (!menu) throw new Error("More menu not found");
+    // Reasoning Effort moved to the model menu (D37).
+    expect(menu.textContent).not.toContain("Reasoning Effort");
     const fullAccess = button(menu, "Full access: off");
     await click(fullAccess);
     expect(document.body.textContent).toContain("Enable full access?");
@@ -1177,7 +1181,7 @@ describe("composer controls", () => {
     await until(() => document.activeElement === more, "focus back on More");
   });
 
-  it("opens Reasoning Effort options in place and returns to the first level", async () => {
+  it("opens the Effort levels from the model menu and closes after a choice", async () => {
     const base = createMockRuntime("running");
     const mock = base.client;
     if (!mock) throw new Error("mock client missing");
@@ -1209,25 +1213,33 @@ describe("composer controls", () => {
     });
     const runtime: OhbabyWebRuntime = { ...base, client };
     const container = mount(runtime);
+    const trigger = (): HTMLButtonElement => {
+      const element =
+        container.querySelector<HTMLButtonElement>(".ohb-model-button");
+      if (!element) throw new Error("model button not found");
+      return element;
+    };
     await until(
-      () => container.querySelector("[aria-label='Reasoning effort']") !== null,
+      () =>
+        trigger().querySelector(".ohb-model-button-effort")?.textContent ===
+        "Low",
       "the reasoning capability",
     );
-    await click(button(container, "More controls"));
+    await click(trigger());
     const menu = (): HTMLElement => {
       const element = document.querySelector<HTMLElement>(".ohb-menu");
       if (!element) throw new Error("menu not found");
       return element;
     };
-    await click(button(menu(), "Reasoning Effort: low"));
-    expect(button(menu(), "Reasoning Effort").className).toContain(
-      "ohb-menu-back",
-    );
-    await click(button(menu(), "high"));
-    expect(updates).toEqual([{ enabled: true, effort: "high" }]);
-    // Back on the first level, with the draft untouched.
-    expect(button(menu(), "Reasoning Effort: high")).toBeDefined();
+    await click(button(menu(), "Effort, Low"));
+    expect(button(menu(), "Effort").className).toContain("ohb-menu-back");
+    // Esc goes back to the first level instead of closing.
     await key(menu(), "Escape");
+    await click(button(menu(), "Effort, Low"));
+    await click(button(menu(), "High"));
+    expect(updates).toEqual([{ enabled: true, effort: "high" }]);
+    // A choice closes the menu and returns focus to the model button.
     expect(document.querySelector(".ohb-menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger());
   });
 });

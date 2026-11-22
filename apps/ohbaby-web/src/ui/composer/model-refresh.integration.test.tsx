@@ -9,8 +9,11 @@ import { AUTO_LIMITS } from "../../runtime/model-limits.test-support.js";
 import { resolveModelEntry, useSettingsModels } from "./model-choice.js";
 import { ComposerMoreMenu } from "./ComposerMoreMenu.js";
 import { ModelMenu } from "./ModelMenu.js";
-import { ReasoningControl } from "./ReasoningControl.js";
-import { useReasoning, type ReasoningClient } from "./useReasoning.js";
+import {
+  useReasoning,
+  type ReasoningClient,
+  type ReasoningState,
+} from "./useReasoning.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -32,6 +35,7 @@ async function render(element: ReactElement): Promise<void> {
 }
 
 type MenuProps = Parameters<typeof ModelMenu>[0];
+const HIDDEN: ReasoningState = { kind: "hidden" };
 
 /** The menu as the session screen mounts it, reading the shared list. */
 function MenuHarness(props: Omit<MenuProps, "models">): ReactElement {
@@ -52,6 +56,7 @@ function menu(
       missing={false}
       onManage={() => undefined}
       onError={() => undefined}
+      reasoning={HIDDEN}
       {...overrides}
     />
   );
@@ -334,6 +339,7 @@ it("keeps an incomplete selected entry visible without offering it or falling ba
       missing={false}
       onManage={() => undefined}
       onError={() => undefined}
+      reasoning={HIDDEN}
     />,
   );
   expect(document.querySelector(".ohb-model-button")?.textContent).toContain(
@@ -451,13 +457,16 @@ it.each(["detecting", "unknown"] as const)(
       reasoningDefault: { enabled: true, effort: "high" },
     };
     const onChange = vi.fn();
+    const settings = new SettingsLayer(
+      createMockSettingsApi("settings", () => Promise.resolve()),
+      () => "/test",
+    );
     function Control(): ReactElement {
       const state = useReasoning(client, null, onChange, entry);
       return (
         <>
-          <ReasoningControl state={state} />
+          {menu(settings, { reasoning: state })}
           <ComposerMoreMenu
-            reasoning={state}
             permissionLevel="default"
             permissionDisabled={false}
             onSetPermission={() => undefined}
@@ -467,21 +476,29 @@ it.each(["detecting", "unknown"] as const)(
     }
     await render(<Control />);
     // Not presented as a working selection, and the preference is kept.
-    expect(
-      document.querySelector("[aria-label='Reasoning effort']"),
-    ).toBeNull();
-    const control = document.querySelector<HTMLElement>(
-      ".ohb-reasoning-status",
+    expect(document.querySelector(".ohb-model-button-effort")).toBeNull();
+    openMenu();
+    const effortRow = document.querySelector<HTMLButtonElement>(
+      ".ohb-model-effort-row",
     );
-    expect(control?.title ?? "").toContain("high isn't active");
+    expect(effortRow?.disabled).toBe(true);
+    expect(effortRow?.textContent).toContain("High · inactive");
+    expect(effortRow?.title ?? "").toContain("High isn't active");
+    act(() => {
+      document
+        .querySelector(".ohb-menu")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+    });
+    expect(document.querySelector(".ohb-model-menu")).toBeNull();
+    // Phones keep only Full access in More (D37).
     act(() => {
       document
         .querySelector<HTMLButtonElement>("[aria-label='More controls']")
         ?.click();
     });
-    expect(document.body.textContent).toContain(
-      "Reasoning Effort: high (inactive)",
-    );
+    expect(document.body.textContent).not.toContain("Reasoning Effort");
     expect(onChange).not.toHaveBeenCalled();
   },
 );
@@ -507,13 +524,22 @@ it("keeps known levels usable while Reasoning Effort is detected again", async (
     },
     reasoningDefault: { enabled: true, effort: "high" },
   };
+  const settings = new SettingsLayer(
+    createMockSettingsApi("settings", () => Promise.resolve()),
+    () => "/test",
+  );
   function Control(): ReactElement {
     const state = useReasoning(client, null, () => undefined, entry);
-    return <ReasoningControl state={state} />;
+    return menu(settings, { reasoning: state });
   }
   await render(<Control />);
-  const select = document.querySelector<HTMLSelectElement>(
-    "[aria-label='Reasoning effort']",
+  expect(document.querySelector(".ohb-model-button-effort")?.textContent).toBe(
+    "High",
   );
-  expect(select?.value).toBe("high");
+  openMenu();
+  expect(
+    document
+      .querySelector("[aria-label='Effort, High']")
+      ?.hasAttribute("disabled"),
+  ).toBe(false);
 });

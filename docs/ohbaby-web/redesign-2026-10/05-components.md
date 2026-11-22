@@ -45,8 +45,8 @@
 | `McpSection` / `McpDetails` | 功能区 / 组合 | MCP 配置与状态列表、原地展开的只读详情 | `ui/settings/mcp/` | 新增 |
 | `SearchSection`、`SkillsSection`、`AboutSection` | 功能区 | 单页表单与只读列表 | `ui/settings/` | 新增 |
 | `ArchivedSection` | 功能区 | 已归档会话列表：自己分页，不进设置缓存；每行恢复或确认后永久删除（归档会话议题 D9） | `ui/settings/` | 新增 |
-| `ModelMenu` | 组合 | 输入框控制行的模型菜单（第二批） | `ui/composer/` | 新增 |
-| `ComposerMoreMenu` | 组合 | 手机（< 640px）控制行的“更多”：Thinking 二级列表和 Full access 开关，复用 `Menu`（improve-4 4b，D29） | `ui/composer/` | 新增 |
+| `ModelMenu` | 组合 | 输入框控制行的模型菜单，带思考强度（第二批；D37） | `ui/composer/` | 新增 |
+| `ComposerMoreMenu` | 组合 | 手机（< 640px）控制行的“更多”：只有 Full access 开关，复用 `Menu`（improve-4 4b，D29；思考强度已并入模型按钮，D37） | `ui/composer/` | 新增 |
 | `SidePanel` | 组合 | 右侧栏：Tab 栏、添加页面菜单、改宽把手、入口页、窄屏覆盖（D33） | `ui/side-panel/` | 新增 |
 | `SubagentsPage` | 功能区 | Subagents 页：实例列表（Active/Done）和详情之间切换 | `ui/side-panel/subagents/` | 新增 |
 | `SubagentInstanceList` / `SubagentInstanceDetail` | 组合 | 实例列表；实例详情（标题、状态、停止、只读消息流） | `ui/side-panel/subagents/` | 新增，消息流复用 `SubagentConversationBody` |
@@ -61,7 +61,7 @@
 ### Menu
 
 - **Purpose**：所有弹出菜单的唯一实现，照 pi-web `SidebarMenu.tsx`。
-- **Use when**：会话菜单、工作区菜单、工作区选择下拉、控制行里的模型 / 思考强度 / 权限模式选择。
+- **Use when**：会话菜单、工作区菜单、工作区选择下拉、控制行里的模型（含思考强度二级）/ 权限模式选择。
 - **Do not use when**：需要用户填写多个字段（用现有模态）；审批（用 `ApprovalPanel`）。
 - **Anatomy**：可选的过滤框 / 条目（图标、文字、右侧快捷键或勾选）/ 分隔线 / 小标题。
 - **States**：见 04 §1。
@@ -116,8 +116,8 @@
 ### ComposerControls
 
 - **Purpose**：输入卡片内底部的一行控制按钮（D22）。
-- **Anatomy**：顺序以 D22 和 03 §4.3 为准：左边权限模式；右边模型、思考强度、圆形发送。附件入口的范围见 README 的实施约定。
-- **API**：接收现有 `ReasoningControl`、`PermissionPolicyControl` 需要的数据与回调，加上 `running`、`onStop()`；模型按钮第一批沿用现有 `modelLabel`、`onOpenModel()`，第二批换成 `ModelMenu`。
+- **Anatomy**：顺序以 D22 和 03 §4.3 为准：左边权限模式；右边模型按钮（带思考强度，D37）、圆形发送。附件入口的范围见 README 的实施约定。
+- **API**：接收 `PermissionPolicyControl` 需要的数据与回调，加上 `running`、`onStop()`；在内部用 `useReasoning` 读这个会话的思考强度，交给 `modelControl(reasoning)` 渲染模型按钮（D37）。模型按钮第一批沿用现有 `modelLabel`、`onOpenModel()`，第二批换成 `ModelMenu`。
 - **约束**：选择控件为无边框文字按钮；发送和 Stop 都是深色圆形按钮（D32）。沿用现有提交规则：运行中且草稿为空时主位是 Stop，有草稿时仍能发送插话或排队；不增加第二套 Send/Stop 状态机。手机（< 640px）次要项收进“更多”菜单；按 D29 放在 improve-4，与模型菜单一起实现。
 
 ### ApprovalPanel
@@ -138,7 +138,8 @@
 
 - **Purpose**：在输入框卡片底部的控制行里给当前会话选模型（D15，2026-10-26 改为会话级）。不改全局默认。
 - **Anatomy**：触发按钮显示这个会话下一轮要用的模型：会话选过且条目仍完整时是它，否则是默认模型；都没有时显示 `Choose model`。菜单按 provider 分组，每项是“模型名 + 备注”，勾打在下一轮要用的那一项上，默认模型旁有一个不显眼的 `default` 标记；最后一项 `Manage models…`。不加说明文字。桌面弹出菜单的模型列表限高滚动，`Manage models…` 固定在列表下方；手机底部面板整体滚动。打开时把打勾的一项滚到中间。
-- **API**：`settings`（读共享的模型列表缓存，只列配置完整的条目）、`selectedEntryId?`（会话或草稿自己的选择，跟随默认时为空）、`onSelect(id)`、`onManage()`、`onError(error)`。已打开的会话里 `onSelect` 调 `updateSessionModel`；草稿里只记在内存，第一条消息带上 `modelEntryId`。
+- **Effort（D37）**：按钮在模型名后面跟一个灰色的思考强度（首字母大写，如 `High`），只在能选强度时显示。菜单在模型列表和 `Manage models…` 之间加一行 `Effort`，右边是当前档位和 `›`；点进去是强度二级列表，第一行 `‹ Effort` 返回，当前档位打勾，选完关闭菜单、焦点回到按钮。识别中、未知时这一行不可点，显示 `Detecting…`、`Unknown` 或 `High · inactive`，悬停看原因；不支持思考的模型没有这一行。筛选框不隐藏这一行。保存失败时这一行下面出现错误文字（`role="alert"`），按钮上的强度变成 `--danger-ink`。
+- **API**：`settings`（读共享的模型列表缓存，只列配置完整的条目）、`selectedEntryId?`（会话或草稿自己的选择，跟随默认时为空）、`onSelect(id)`、`onManage()`、`onError(error)`、`reasoning`（`useReasoning` 的结果，由 `ComposerControls` 传入）。已打开的会话里 `onSelect` 调 `updateSessionModel`；草稿里只记在内存，第一条消息带上 `modelEntryId`。
 - **States**：default / open / selecting（触发按钮转圈）/ error（右上角通知，按钮恢复原来的模型）。跟随默认的会话点默认模型也会把它固定到这个会话上。
 
 ### SecretField
