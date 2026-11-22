@@ -8,7 +8,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-21 | 首轮 | `install.sh`、`install.ps1` 的阶段提示、下载进度条和完成摘要；`ohbaby uninstall` 的过程提示 | 已实施，本机离线验收完成，三平台发布验收待补齐 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-21 | 首轮 | `install.sh`、`install.ps1` 的阶段提示、下载进度条和完成摘要；`ohbaby uninstall` 的过程提示 | 已实施，验收部分通过：Windows CI 测试夹具失败，PAC、公网测速和 macOS 两款终端外观待验收 |
 
 ## 本轮文档地图
 
@@ -19,7 +19,7 @@
 | [02 方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 3 个 Stage（`install.sh`、`install.ps1`、`ohbaby uninstall`）、设计决策、改动面、风险与回滚。不写关键改动清单 |
 | [03 参考项目](improve-1/03-reference-projects.md) | opencode、codex、Step-Code 的安装脚本，以及 npm、PowerShell 源码的取舍 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 四层测试、关键用例、Windows 和 macOS/Linux 真机清单、发布门 |
-| [05 实施与验收](improve-1/05-implementation-and-acceptance.md) | 本机验收证据、发现的问题和待完成的发布验证 |
+| [05 实施与验收](improve-1/05-implementation-and-acceptance.md) | 对照 02、04 的验收结论、SWE 评估、真机记录和发布门余项 |
 
 ## 相关议题
 

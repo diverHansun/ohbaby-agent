@@ -1,104 +1,155 @@
-# 实施与验收
+# 5. 实施验收文档
 
-2026-11-21 在 `feat/installer-progress` 的当前工作区验收，基线为 `86473f63`。**独立复验结论为部分通过，发布门未通过。** Windows 原生运行新增卸载单测时有两条失败。另有 Windows 摘要问题已复现，详见下文。发布标准见 [04](04-test-and-acceptance.md#45-验收标准发布门)。
+本文对照 [02](02-optimization-plan-and-change-scope.md) 和 [04](04-test-and-acceptance.md) 验收 improve-1 的实施结果。实施会话的自测和真机记录收在 §5.7，结论以 §5.1 和 §5.5 为准。
 
-## 安装边界
+## 5.1 元信息
 
-当前脚本和 npm 安装交付 `ohbaby` 命令，用于启动默认的进程内 TUI，或通过 `ohbaby serve` 启动 Web 后台。脚本提供四步安装、Node.js 下载进度及摘要，`ohbaby update` 沿用目标版本脚本，`ohbaby uninstall` 在终端显示步骤并保留配置、会话和数据库。
-
-桌面 App 通过独立的 Electron 安装包分发和更新，包内自带 Node SEA 运行时。CLI 和 App 各自管理安装文件，按同一版本发布，共用用户数据。Web 和 App 可连接同一个后台服务，TUI 用 `--remote-port` 加入同一后台。本次改动范围与两个 App 议题一致。见[多客户端与版本](../../2026-11-21-app-multi-client/improve-1/00-discussion.md)和[App 打包](../../2026-11-21-app-packaging/improve-1/00-discussion.md)。
-
-## 首次验收
-
-所有安装操作在临时 HOME、安装目录和数据目录内执行。测试用本机已有的 Node.js 24.22.3、当前分支构建出的 CLI 和 Web 文件、局部 npm 包及依赖。下载和版本分发来自本地素材，升级用本地响应替代 CDN 请求。测试期间使用真实的 `curl | sh` 入口、npm、CLI 启动器及升级和卸载代码。
-
-| 场景 | 结果 |
+| 项 | 值 |
 |---|---|
-| macOS 非 TTY 首次安装、同版本重跑、升级 | 通过。四步顺序、校验行、三种摘要状态和无控制字符输出符合预期。运行摘要里的 `export` 后可按命令名启动。实际执行 `ohbaby update 0.1.20 -y`，版本切换成功并保留上一版，出现脚本和 CLI 两条更新摘要。 |
-| macOS 伪终端 | 通过。用分块文件下载替身验证 UTF-8 真彩色、ASCII 和 `NO_COLOR`、重定向后有长度和无长度、`TERM=dumb`、保留 npm 的原生 spinner。50 列通过 `COLUMNS=50` 验证文字回退。当前环境拒绝经 `/dev/tty` 读取大小，实际终端自动测宽留给正常环境测试。 |
-| 取消与失败路径 | `curl \| sh` 中按 Ctrl-C 返回 130，dash 下向脚本发送 SIGTERM 返回 143。两次均结束测试下载子进程、恢复光标、清理下载目录及安装锁。归档校验失败时未发布运行时或启动器，PATH 写入失败返回 1，摘要仍打印，启动器可用。 |
-| macOS 脚本和 npm 卸载 | 通过。脚本卸载无 `-y` 时要求确认，带 `-y` 时输出六个步骤，清除安装器的 PATH 配置块、启动器和安装目录，保留用户配置、会话和数据库。npm 全局卸载输出一个编号步骤、npm 自己的结果及完成提示。 |
-| Web 和 TUI | CLI 包内有构建后的 Web 资源。实际启动器在伪终端绘制了默认 TUI 的初始界面。Web 应用、TUI 和服务端应用的三组单测及契约测试共 502 项通过。浏览器到后台的端到端连接受本地端口限制。 |
-| 静态检查和相关单测 | `pnpm build`、`pnpm typecheck`、`pnpm lint`、改动涉及的 TypeScript 文件格式检查、`sh -n`、`dash -n`、`git diff --check` 通过。CLI 相关单测共 80 项通过。PowerShell 纯 ASCII 和启动器标记检查通过。 |
+| 议题 / 轮次 | 安装器进度显示 / improve-1 |
+| 规划文档版本 | `817b0088` 首次入库。`6e7bba30` 在实施中修订了 00、02、04 的 Windows 摘要和 W2 定义，见 §5.3 |
+| 实施范围 | `86473f63..6e7bba30`：`a57ae43a`（install.sh）、`4dfd230d`（install.ps1）、`b79d92c1`（uninstall）、`817b0088`（文档）、`6e7bba30`（Windows 摘要修正）。`f1fa5606` 是 App 议题文档，不在本轮 |
+| 验收日期 | 2026-11-21 |
+| 结论 | **部分通过。** 三个 Stage 的功能都已落地，本机全量测试、树莓派和 Windows 真机主流程通过。发布门未通过：HEAD 的 GitHub Actions Windows 作业失败（测试夹具问题，见 §5.5.2 #1），W8、W9、U3 仍未验收 |
 
-## 发现的问题
+## 5.2 实施概况（对照 02）
 
-1. **Windows 的当前窗口提示可能误导。** 脚本更新的是执行脚本的 PowerShell 进程。`ohbaby update` 使用子 PowerShell 执行 `-File`，调用它的父终端不会因此刷新 PATH。若父终端未加载新 PATH，照摘要直接输入 `ohbaby` 仍可能找不到命令或运行旧副本。建议用一条适合两种入口的摘要，保留可直接调用的启动器路径，避免新增调用模式。见 [install.ps1](../../../../packages/ohbaby-cli/install.ps1#L593) 和 [update.ts](../../../../packages/ohbaby-cli/src/cli/commands/update.ts#L84)。
-2. **W2 混用了两种 stderr 重定向。** 进度使用 `[Console]::Error`，`IsErrorRedirected` 看的是系统标准错误句柄。同一 PowerShell 进程执行 `irm … | iex 2>err.txt` 时，`2>` 捕获的是 PowerShell 错误流，按现实现仍会在控制台画进度。建议把进程级 stderr 重定向与 PowerShell 的错误流重定向分别列入验收，先确认产品需要保证哪一种行为。见 [install.ps1](../../../../packages/ohbaby-cli/install.ps1#L181) 和 [PowerShell 重定向说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_redirection?view=powershell-5.1)。
-3. **Unix 重跑误报本次写入了 shell 配置。** 在含安装器配置块、当前 PATH 尚未刷新时复现。配置块保持一份，摘要仍显示 `Added to ~/.zshrc`。改成 `Configured in …` 就能同时覆盖首次安装和重跑。见 [install.sh](../../../../packages/ohbaby-cli/install.sh#L536)。
-4. **Windows 卸载摘要的 PATH 范围可写清楚。** 已执行的操作是删除注册表中的用户 PATH 项。现有终端仍可能解析到启动器，安装目录要等命令退出后手动删除。建议把摘要中的 `your PATH` 改为 `your user PATH`。见 [uninstall.ts](../../../../packages/ohbaby-cli/src/cli/commands/uninstall.ts#L199)。
-5. **Windows 的 `Start` 检查在严格模式下可能报错。** 若调用者启用了 `Set-StrictMode` 且已有同名函数或别名，`Get-Command` 的第一个结果可能没有 `Path` 属性。可先检查结果是不是应用程序，再读取路径。此项来自代码审查，待 Windows 复现。见 [install.ps1](../../../../packages/ohbaby-cli/install.ps1#L612)。
+| 02 条目 | 状态 | 实际实施摘要 | 证据 |
+|---|---|---|---|
+| Stage 1 · 输出辅助函数（TTY、颜色、字符、宽度） | 完成 | 按 02 实现。stdout、stderr 分开判断颜色，`TERM=dumb` 不画进度 | [install.sh](../../../../packages/ohbaby-cli/install.sh)、T21–T24、T29 |
+| Stage 1 · 4 个阶段行 | 完成 | 文案、位置与 02 表一致；第 1 步之前没有输出 | T1、T8 |
+| Stage 1 · 后台 curl 下载进度条 | 调整 | 按 02 实现。另外让 `content_length` 跳过 3xx 响应头里的长度（02 只要求取最后一段），因为树莓派真机发现轮询时会读到重定向自带的非零长度 | [install.sh#L62](../../../../packages/ohbaby-cli/install.sh#L62)、T25 |
+| Stage 1 · 收尾行、清理与 Ctrl-C | 完成 | trap 恢复光标、结束 curl、删下载目录和锁；INT 返回 130，TERM 返回 143 | T26、T27，真机 U1、U2 |
+| Stage 1 · 成功摘要与 `Start` 行 | 部分 | 三种首行和 `Start` 判断与 02 一致。重跑时 PATH 行仍说 `Added to`，与实际不符，见 §5.5.2 #3 | [install.sh#L585](../../../../packages/ohbaby-cli/install.sh#L585) |
+| Stage 2 · `Write-Stage` 和阶段行 | 完成 | 与 sh 同一套文案 | W1，Windows CI 的 ASCII 用例 |
+| Stage 2 · `HttpWebRequest` 分块下载 | 完成 | 64 KB 缓冲、250 ms 重画、`ohbaby-installer` User-Agent、`finally` 恢复颜色并清行 | W1、W3–W7，受控镜像测速 |
+| Stage 2 · 成功摘要 | 调整 | `Start` 由"按 `Get-Command` 判断"改为固定输出 `& '<启动器>'`；PATH 行改为"打开新终端"。原因是升级子进程和严格模式下的真机问题，02 已同步修订 | `6e7bba30`、W11 |
+| Stage 3 · 步骤行、`done`/`failed`、npm 行 | 完成 | `UninstallStep` 类型排除 `windows-manual`，手动删除命令移到步骤之后 | T40–T46 |
+| Stage 3 · 颜色与 `isStdoutTTY` | 完成 | 用局部 `Chalk` 实例，不影响全局 chalk | [uninstall.ts](../../../../packages/ohbaby-cli/src/cli/commands/uninstall.ts) |
+| 收尾 · 发布说明 | 完成 | `unreleased.md` 新增 4 条。最后一条是发布前检查，不是面向用户的变更，见 §5.5.2 #10 | [unreleased.md](../../../releases/unreleased.md) |
+| 2.4 · CI、`@lydell/node-pty` | 完成 | CI 的 Installer scripts 步骤加入 TTY 测试文件 | [ci.yml](../../../../.github/workflows/ci.yml) |
 
-Windows 两条 PATH 提示与重定向差异来自代码审查。以上修改建议本轮仅记录，便于逐项确认。
+越界扫描：diff 中没有 02 未提及的代码改动。`serve.unit.test.ts` 多一行，是给测试 runtime 补 `isStdoutTTY`。
 
-### 首次验收环境的限制
+## 5.3 规划 vs 实际差异
 
-- 两组 POSIX 安装器集成测试共 26 项，均在测试镜像启动时遇到本地端口 `listen EPERM`。上面的离线验证覆盖了核心路径，三平台 GitHub Actions 的结果仍待确认。
-- 当前环境无法解析 `nodejs.org`，macOS 的公网下载及 Terminal.app、iTerm2 两套外观尚未复验。用户已报告树莓派 Ubuntu 和台式机跑过真机测试。独立复验尝试通过 `ssh hansun-pi` 和 `ssh hansun-desktop` 连接，两个连接均在建立前返回 `Operation not permitted`。未在远端创建测试文件。
-- Windows 实跑用例在 macOS 跳过。PowerShell 5.1 和 7 的进度、Ctrl-C、PATH、卸载、代理与 PAC 待汇总到 [04 的真机清单](04-test-and-acceptance.md#l4-真机验收)。
-- Pi 的默认配置目录无法创建信任锁，临时配置也没有可用模型，`copilot/gemini-4-neon` 未返回审核结果。独立代码审查的要点已并入上文。
+| 维度 | 规划方案 | 实际实施 | 差异原因 | 影响评估 |
+|---|---|---|---|---|
+| 数据结构 | 02 §Stage 3：步骤类型由 `UninstallAction` 派生 | 新增 `UninstallStep = Exclude<UninstallAction, windows-manual>`，`windows-manual` 拆成独立分支 | 让手动删除不进入编号步骤，由类型保证 | 正面。编译期就挡住"手动步骤被编号" |
+| 数据流 | 02 §Stage 1-3：取最后一段响应头的 `Content-Length` | 同时跳过 3xx 段的长度 | 真机重定向响应带正文和真实长度，轮询时会把它当成总大小 | 修好一个真实缺陷。`Content-Length:123`（无空格）和带前导零的长度会被当作未知大小，只显示 MB，无害 |
+| 协议 / 接口 | 规划初版：Windows `Start` 按 `Get-Command` 结果显示 `ohbaby` 或路径；W2 只看 `IsErrorRedirected` | 固定输出 `& '<启动器>'`；W2 区分进程 stderr 与 PowerShell 错误流 | `ohbaby update` 在子 PowerShell 里运行，父终端 PATH 不刷新；严格模式下读 `.Path` 会抛错 | 更可靠，代价是 Windows 用户总看到一条较长的命令。实施会话改了 00、02、04，属于规划修订，应由用户确认过 |
+| 文件 / 包结构 | 02 §2.4 | 一致。新增 `install-unix-tty.integration.test.ts` 和 `uninstall.unit.test.ts` | — | 无 |
+| 错误处理 / 边界 | 02 §Stage 1-5：PATH 写入失败时摘要照常打印 | 一致。但 macOS bash 写完 `.bashrc`、写 `.bash_profile` 失败时，摘要显示 `Not changed` | 部分写入没有单独的文案 | 低。极少见，警告行已写到 stderr |
+| 依赖变更 | 根 `devDependencies` 加 `@lydell/node-pty` | 一致，版本与 ohbaby-server 相同 | — | 只影响测试 |
 
-## 2026-11-21 独立复验
+## 5.4 实施理由与注意事项
 
-使用本轮工作区构建的 CLI 和 Web 资源做测试包。已有依赖继续使用公开的 0.1.19 包。测试用的 0.1.20 仅改 CLI 包版本号。npm 使用回环测试源分发这两个包，升级命令的 CDN 脚本请求指向同一测试源。Node.js 归档和校验文件来自 nodejs.org。安装和数据使用临时路径。Windows 通过 `hansun-desktop-ts` 连接，局域网别名连接超时。
+- **sh 的后台 curl 和轮询**沿用 opencode 的做法，只依赖 POSIX sh 和 curl。代价是要自己管 curl 的结束和 Ctrl-C，trap 里已按"先结束 curl、再删目录和锁"的顺序处理。改这段代码时要保持这个顺序。
+- **3xx 长度过滤**是树莓派真机上发现的。旧实现只取最后一段响应头，但轮询时 curl 可能刚写完重定向那段，百分比会按一个 154 字节的总大小计算。T25 的夹具已改成带正文和真实长度的 302，并让最终响应延迟 600 ms，能在旧解析上复现失败。
+- **Windows `Start` 固定给启动器命令**是因为脚本看不到调用它的终端：`irm | iex` 时是同一进程，`ohbaby update` 时是子进程。固定给出可复制的命令，在两种入口下都对。
+- **W2 的两种重定向**：`powershell ... 2>err.txt`（进程级）关闭进度；同进程 `iex ... 2>err.txt` 只重定向 PowerShell 错误流，控制台仍画进度、文件为空。发布说明已写明后一种行为。
+- **Windows CI 与本地结果不一致的原因**：本地 Windows 用户名没有 8.3 短名，CI 的 `runneradmin` 有（`RUNNER~1`）。断言里的路径来自 `tmpdir()`，脚本打印的是展开后的长路径。以后在 Windows 测试里比较脚本输出的路径时，要先把临时目录转成长路径。
 
-| 检查 | 实测结果 |
-|---|---|
-| macOS arm64 自动化 | 相关测试 34 项通过，Windows 专用用例跳过。全量单测 5,525 项通过、2 项跳过。构建、类型检查、相关格式检查、`sh -n` / `dash -n` 和 diff 检查通过。Lint 退出码为 0，报告 266 条警告。 |
-| macOS arm64 安装与卸载 | 用 `curl \| sh` 下载并校验真实 Node.js 24.22.3。伪终端显示进度，重跑显示已安装，`ohbaby update 0.1.20 -y` 切换版本并保留上一版。安装后的 TUI 能启动并正常退出。内置浏览器打开了安装包提供的 Web 界面，从测试 daemon 加载工作区。脚本版卸载清掉启动器、PATH 配置块及安装目录，保留会话文件与独立 SQLite 文件。另在临时 npm 全局前缀验证了编号行、npm 自己的结果和卸载后的数据保留。 |
-| Ubuntu aarch64 自动化 | 两组 POSIX 安装器集成测试共 24 项通过。测试确认 `/bin/sh` 是 dash，Ctrl-C 与 SIGTERM 均释放安装锁并关闭下载连接。 |
-| Ubuntu aarch64 安装与卸载 | 树莓派经 SSH 伪终端用 `curl \| sh` 下载官方 Node.js 归档，观察到 UTF-8 进度条。SSH 在 npm 阶段断开。重新连接后复用已校验的私有 Node 完成首次安装及重跑，摘要含非登录 SSH 提示。执行 PATH 指引后可按命令名启动，`ohbaby update 0.1.20 -y` 成功。卸载输出五步，移除测试安装、启动器和配置块，保留会话和数据库标记文件。 |
-| Windows x64 自动化 | 原生 Windows 安装器集成测试 2 项通过。卸载单测 5 项通过、2 项失败，失败用例模拟 macOS 后仍使用 Windows 路径。 |
-| Windows 终端与下载 | 原生 PowerShell 5.1 和 7.7 经 SSH 终端运行 `irm \| iex`。回环慢速镜像提供官方 ZIP，5.1 在 936 下绘制 ASCII，7.7 在 65001 下绘制 Unicode。两种终端记录均观察到金色、正常颜色恢复和进度行清除。5.1 也完成公网 Node.js 下载和哈希校验。进程 stderr 重定向时无进度帧，同进程 PowerShell 的 `2>` 文件为空而控制台仍有进度。5.1 下载途中 Ctrl-C 清行并释放锁，随后重跑成功。 |
-| Windows PATH、升级与卸载 | 在测试项上实际写入及删除用户 PATH，恢复后核对了原值。直接执行安装脚本时，当前 PowerShell 可以用 `ohbaby` 启动，重跑能识别已有 PATH。实际调用 `ohbaby update 0.1.20 -y` 成功切换版本并保留上一版。此时摘要说当前窗口已就绪，父终端实际仍解析到原命令。卸载打印单步及两种删除命令，用户 PATH 项已删除，父终端仍能解析待手动删除的启动器。执行手动删除后，会话和数据库标记文件均保留。 |
+## 5.5 实施成果（对照 04）
 
-### 发布前需要处理的问题
+### 5.5.1 验收项结果
 
-1. **Windows CI 的两条卸载单测失败。** 测试用 `node:path` 的原生 `join` 构造路径，只切换了 `process.platform`。结果在 Windows 上给模拟 macOS 的格式化函数传入反斜杠路径，断言仍要求 `~/install` 和 `~/npm-global`。修正测试夹具即可。见 [卸载单测](../../../../packages/ohbaby-cli/src/cli/commands/uninstall.unit.test.ts#L95)。
-2. **Windows 安装后可能以错误退出。** 实机启用 `Set-StrictMode -Version Latest` 并定义一个同名 `ohbaby` 函数后，安装器在读第一个命令的 `.Path` 时抛错。摘要只需先确认找到的是 `Application`。见 [install.ps1](../../../../packages/ohbaby-cli/install.ps1#L612)。
-3. **PATH 和重定向的文案要与实际行为一致。** Unix 复验再次观察到已有配置块时重跑仍显示 `Added to`。macOS 的第二个 bash 配置文件写入失败时，第一个文件可能已改，摘要却写 `Not changed`。Windows 真机已复现升级子进程提示 `Start ohbaby`，父终端仍运行原命令。摘要可以直接给出可运行的启动器路径。卸载结尾应写明清理的是用户 PATH。W2 应分别定义进程 stderr 与 PowerShell 错误流的行为。见 [Unix 摘要](../../../../packages/ohbaby-cli/install.sh#L585)、[Windows 摘要](../../../../packages/ohbaby-cli/install.ps1#L593)和 [Windows 卸载结尾](../../../../packages/ohbaby-cli/src/cli/commands/uninstall.ts#L199)。
-4. **T25 的带长度重定向用例可漏报。** 当前断言允许没有任何百分比帧。给返回长度的分支加一条必须有百分比帧的断言。当前解析也会把 `Content-Length:123` 和带前导零的合法长度降级为未知大小。见 [PTY 用例](../../../../tests/integration/cli/install-unix-tty.integration.test.ts#L320)。
+验收会话在 HEAD `6e7bba30`、macOS arm64 上复跑：安装器和卸载相关测试 34 项通过、1 项跳过（Windows 专用）；全量单测 5,525 项通过、2 项跳过；`pnpm typecheck` 通过；`pnpm lint` 0 错误、266 条警告；`sh -n`、`dash -n` 通过；`install.ps1` 纯 ASCII。GitHub Actions 结果见下表的 CI 行。
 
-四步输出、npm 自带 spinner 和现有激活、卸载机制能满足本轮主流程。POSIX 后台 curl 的结束、等待和光标恢复有两套 shell 的实测支撑。平台保留各自的小段显示代码即可。上述差异可以在路径夹具、文案和现有判断中修正。
+**L1 非 TTY（T1–T11）**
 
-### App 的安装边界和两项待补设计
+| ID | 结果 | 证据与说明 |
+|---|---|---|
+| T1、T2、T3 | 通过 | `install-unix` "installs and reruns"；Windows 主用例。顺序用 `expectInOrder` 检查，空行没有严格断言 |
+| T4 | 部分 | Unix 四种情况都有断言。Windows 的 `is already in your user PATH` 和 `Added to your user PATH` 没有自动化断言（所有 Windows 用例都设了 `OHBABY_NO_MODIFY_PATH=1`），由真机 W11 覆盖 |
+| T5 | 通过 | Unix 三种情况；Windows 严格模式、同名函数、含 `'` 和中文的路径 |
+| T6 | 部分 | Unix 断言 stderr 为空。Windows 只断言 stdout 无控制字符，没有断言 stderr 为空 |
+| T7 | 通过 | Unix 断言旧三行已删除。Windows 断言旧的两种提示已删除。04 写的"不含安装目录路径"与新摘要的 `Launcher` 行冲突，04 措辞应修订 |
+| T8、T10、T11 | 通过 | — |
+| T9 | 部分 | 只有"早期 daemon 检查失败"证明了 stderr 只有一行错误、stdout 无摘要。其他失败路径只用 `stringContaining` |
 
-- CLI 安装提供默认的进程内 TUI 和 Web 所需的 `ohbaby serve`。Electron 安装包负责自身的 sidecar、分发和更新。两条安装路径可以保持独立，共享同版本服务及用户数据。脚本安装 README 和本轮 02 §2.8 仍把「CLI 脚本改下载 SEA」写成 App 的后续工作，应按最新决定更新这两处。见 [脚本安装 README](../../2026-11-17-script-install/README.md)、[02 §2.8](02-optimization-plan-and-change-scope.md#28-不在本轮)和 [App 打包方案](../../2026-11-21-app-packaging/improve-1/00-discussion.md)。
-- 多客户端方案第 6 节称仅设置 `OHBABY_HOME` 即可隔离数据库。当前默认 SQLite 路径仍走系统数据目录。开发版还需要显式设置 `OHBABY_DB_PATH` 或对应启动参数，并验证 TUI、daemon 和数据库迁移都落在测试范围。另需注意 CLI 维护检查可能从调用目录读旧的项目内 daemon 状态，测试脚本也应从隔离目录启动。见 [App 多客户端方案](../../2026-11-21-app-multi-client/improve-1/00-discussion.md#6-已确认自改自测靠-ohbaby_home-隔离2026-11-21)、[数据路径](../../../../packages/ohbaby-agent/src/paths/ohbaby-home.ts#L125)和 [daemon 范围](../../../../packages/ohbaby-server/src/runtime/daemon/scope.ts#L42)。
-- CLI 更新、卸载会尝试停止同一 `OHBABY_HOME` 下的空闲 daemon。当前空闲检查覆盖运行中的任务和终端，普通 App 或 Web 连接仍可能断开。App 接入后应验收一个场景：App 可见且空闲时运行 CLI 维护命令，检查断线提示和重连。见 [CLI 维护检查](../../../../packages/ohbaby-cli/src/update/preflight.ts#L82)和 [daemon 空闲检查](../../../../packages/ohbaby-server/src/runtime/daemon/server.ts#L426)。
+**L2 PTY（T20–T29）**
 
-### 发布验收余项
+| ID | 结果 | 证据与说明 |
+|---|---|---|
+| T20、T22、T23、T24、T28、T29 | 通过 | `install-unix-tty` 对应用例 |
+| T21 | 通过（偏弱） | 帧宽 24 格、只含 `#` 和 `-`，但没断言出现过 `#` |
+| T25 | 部分 | 无长度的分支可靠。有长度的分支允许全程只有 MB 帧，百分比检查在 `if` 里，可以空过。04 要求的 `Content-Length: 0` 重定向没有单独用例（解析逻辑已覆盖这种情况） |
+| T26、T27 | 通过（有保留） | macOS 的 `/bin/sh`、`/bin/dash` 和 Ubuntu CI 的 dash 都跑过，退出码、`\x1b[?25h`、锁和下载目录都有断言。保留意见：测试里 sh 是会话首进程，它退出时内核会给前台进程组发 SIGHUP，curl 即使没被 trap 结束也会断开，所以"连接已关闭"这条断言证明不了 trap 生效。此推断未做实验验证。真机 Ctrl-C（`curl | sh`，交互 shell 仍在）已确认锁释放、下载结束 |
 
-- 当前工作区需要修复两条 Windows 单测后再跑 GitHub Actions 三平台矩阵。
-- Windows 的系统代理、PAC 和与旧版的同网络速度对照尚未验收。受控镜像收到了 `ohbaby-installer` User-Agent。
-- macOS 的输出已用真实下载及伪终端复验。Terminal.app 与 iTerm2 的双应用外观仍待看。Windows 终端外观以 SSH 终端记录为证据。
-- 本轮升级复用了已校验的私有 Node。升级中重新下载 Node 的进度由单独的全新安装验证。测试包通过回环分发，尚无正式发布后的 CDN 与 npm 链路结果。
+**L3 卸载（T40–T46）**：全部通过，在三个平台上都能跑（用模拟 `process.platform`）。T43 把 npm 输出模拟成空，04 §4.3 说的"npm 输出与步骤行交错"没有自动化覆盖，由 U5 和 W12 真机覆盖。
 
-本地、树莓派和 Windows 的临时安装、数据、测试脚本和缓存已清理。核查了测试进程退出、回环端口释放和远端测试目录移除。Windows 用户 PATH 已恢复原值，两台远端机器的原有启动器仍能解析。
+**4.4 回归**：目录布局、锁、PATH 失败退出 1、损坏下载不发布、ASCII、`script-uninstall` 原有用例都在。下载失败提示里的代理和 `OHBABY_NODE_MIRROR`、`OHBABY_NON_INTERACTIVE=1` 跳过 npm 副本询问、非 TTY 卸载不带 `-y` 报错，这三项没有测试，代码未改动，风险低。
 
-### 分批提交前复查
+**L4 真机与发布门（04 §4.5）**
 
-卸载单测现在用模拟平台的路径格式构造命令输入，实际临时文件仍用宿主平台的路径。macOS 上复跑安装器及卸载相关测试，37 项通过，跳过 1 项 Windows 专用用例。这次两条 Windows SSH 路径均连接超时，修正后的卸载单测仍待 Windows CI 或真机复核。
+| 项 | 结果 | 证据 |
+|---|---|---|
+| CI 三平台 | **未通过** | 运行 `44916993222`：macOS、Ubuntu 通过；Windows 在 Installer scripts 步骤失败，`Start` 行断言用 `RUNNER~1` 短路径，脚本输出长路径。Windows 作业后续的 typecheck、lint、单测、build 都没有执行 |
+| T26 在 macOS 和 Linux | 通过 | 同一次运行的 macOS、Ubuntu 作业 |
+| W1–W7、W10–W12 | 通过 | §5.7。W7 在系统手动代理下完成下载，User-Agent 在受控镜像上确认，未看到代理日志 |
+| W8 PAC | 未做 | 台式机没有配置 PAC |
+| W9 速度 | 部分 | 受控限速镜像：旧 7.15 / 7.36 秒，新 7.15 / 7.13 秒。公网对照未完成 |
+| U1、U2、U4、U5 | 通过 | macOS、树莓派真机，§5.7 |
+| U3 Terminal.app、iTerm2 | 未做 | — |
+| 发布说明 | 通过 | `unreleased.md` |
 
-### Windows 再验收（2026-11-21）
+### 5.5.2 SWE 层面评估（聚焦改动面）
 
-从台式机 D 盘的仓库建立临时副本，通过 Git bundle 检出 `817b0088`。Windows 原生 `pnpm build` 完成。Node 25.6.0 与官方 Node 24.22.3 各通过 12 项 Windows 安装器和卸载测试，包含此前失败的两条卸载单测。
+总体看，这一轮改动守住了 KISS。三个 Stage 各改一个文件或一个命令，没有为了"两个平台共用"去造抽象，每个平台保留一小段自己的显示代码。输出流分工清楚：进度只走 stderr，摘要只走 stdout，非 TTY 下的输出和以前一样干净。卸载侧用类型把"手动步骤"排除在编号之外，比运行时判断更稳。sh 的后台进程管理是全轮最复杂的部分，trap 顺序、`set -e` 下的 `wait` 写法、dash 除零都按 02 处理了，并有两种 shell 的自动化和真机证据。
 
-- PowerShell 5.1（936）与 7.7（UTF-8）分别观察到 ASCII 和 Unicode 进度帧。7.7 下载途中 Ctrl-C 释放安装锁，同目录重跑成功。进程级 stderr 重定向无进度帧，同进程 PowerShell `2>` 的文件为空且终端仍画进度。
-- 台式机已有系统手动代理。5.1 通过实际系统代理下载并校验了官方 Node.js 归档。台式机未配置 PAC，PAC 项仍待验收。
-- 回环测试源分发本提交构建的 CLI、Web 和工作区依赖包。测试版 CLI 实际完成首次安装、相同版本重跑、0.1.19 到测试版 0.1.20 的升级和卸载。Web 通过安装后启动器启动，HTTP 页面和 JS 资源可读取，服务可正常停止。TUI 在原生终端绘制输入界面并正常退出。卸载移除测试 PATH 项，完成手动目录删除后保留会话与数据库标记。
-- 两处 Windows 摘要问题均再次复现。严格模式遇到同名函数时访问 `.Path` 报错。升级摘要说当前窗口已就绪，但父终端还解析不到测试启动器。卸载后原终端也仍能解析等待手动删除的启动器。
-- 5.1 使用同一个限速回环镜像交替测旧、新下载函数，每次校验同一份 ZIP。旧版 7.15、7.36 秒，新版 7.15、7.13 秒。该受控结果未见明显变化。公网旧版对照未在测试时限内完成，公网速度对照仍待验收。
+剩下的问题集中在两类：一是测试断言强度不够或与环境耦合，二是几处摘要文案和实际状态对不上。都不涉及架构，修起来是局部改动。
 
-再验收结束后已删除本地和台式机的临时目录、测试脚本和缓存。Windows 原项目仍在 `4d56a247`，工作区干净，用户 PATH 恢复原值，原有启动器仍能解析。
+| # | 发现 | 严重性 | SWE 依据 | 建议 |
+|---|---|---|---|---|
+| 1 | Windows 集成测试用 `tmpdir()` 拼期望路径，CI 上是 8.3 短路径，与脚本输出的长路径不符，导致 Windows 作业失败、后续步骤全部跳过。见 [install-windows 测试#L39](../../../../tests/integration/cli/install-windows.integration.test.ts#L39) | 高（阻塞发布门） | 测试与运行环境耦合；本地通过不能代表 CI | 用 `realpath.native(root)` 得到长路径再拼 `installDir`，或在比较前统一展开。修后重跑三平台 CI |
+| 2 | Windows 作业因 #1 没有跑 typecheck、lint、全量单测和 build，Windows 上这些检查在 HEAD 没有 CI 证据 | 高（随 #1 解决） | 发布门要求三平台全绿 | 修 #1 后确认完整运行 |
+| 3 | Unix 重跑时，配置块已存在，PATH 行仍显示 `Added to …`。见 [install.sh#L585](../../../../packages/ohbaby-cli/install.sh#L585) | 中 | 摘要要反映实际状态（02 §2.6"摘要误导用户"） | 改成 `Configured in …`，首次和重跑都成立；或者让 `append_path_block` 返回是否真的写入 |
+| 4 | macOS bash 写入 `.bashrc` 成功、`.bash_profile` 失败时，摘要显示 `Not changed`。见 [install.sh#L572](../../../../packages/ohbaby-cli/install.sh#L572) | 低 | 同上 | 失败时保留已写入的文件名，例如 `Added to ~/.bashrc; could not update ~/.bash_profile` |
+| 5 | T25 有长度的用例可以在没有任何百分比帧的情况下通过。见 [install-unix-tty 测试#L327](../../../../tests/integration/cli/install-unix-tty.integration.test.ts#L327) | 中 | 断言必须能在目标缺陷存在时失败 | 对 `redirect-length` 断言至少出现一帧百分比；补一个 `Content-Length: 0` 的 302 用例，与 04 对齐 |
+| 6 | T26、T27 的"连接关闭"可能由 SIGHUP 而非 trap 造成（推断，未实验） | 低 | 测试应能区分修复前后 | 断言连接关闭早于 PTY 退出，或检查 curl PID；也可以让 PTY 里的外层 shell 比脚本活得久 |
+| 7 | Windows 缺少 T4 两种 PATH 文案和 T6 stderr 为空的断言 | 低 | 04 写明了 Windows 也要覆盖 | 加一个 `OHBABY_NO_MODIFY_PATH=0`、隔离注册表项的用例，或至少断言 stderr 为空 |
+| 8 | T9 的多数失败路径没断言 stdout 无摘要；三个回归项没有测试 | 低 | 回归清单要能被自动发现 | 在现有失败用例里补 `expect(stdout).not.toContain("Launcher")`；回归项可后续补 |
+| 9 | 卸载结尾写 `removed from your PATH`，实际删的是用户 PATH。见 [uninstall.ts#L201](../../../../packages/ohbaby-cli/src/cli/commands/uninstall.ts#L201) | 低 | 与安装摘要的"user PATH"用词一致 | 改成 `your user PATH` |
+| 10 | `unreleased.md` 第 4 条是发布前检查，不是用户能感知的变更 | 低 | 发布说明面向用户 | 移到发布检查清单或 04 §4.5 |
+| 11 | 04 T7 要求 stdout 不含安装目录路径，与新摘要的 `Launcher` 行冲突 | 低 | 规划文档自相矛盾 | 回规划模式把 T7 改成"不含旧的三行" |
+| 12 | `Content-Length:123` 和前导零长度被当作未知大小 | 极低 | 失败方向安全，只少了百分比 | 不改 |
 
-### Windows 摘要修正后复验（2026-11-21）
+建议修复顺序：#1（解锁发布门）→ #3、#5 → #9、#4、#7 → 其余随手处理。#11 需要回到规划模式修订 04。
 
-Windows 摘要固定输出可复制的 PowerShell 启动命令，转义路径中的单引号，用户 PATH 行提示打开新终端。PowerShell `2>` 保留原行为，04 的 W2 已区分进程级 stderr 与同进程 PowerShell 错误流。
+## 5.6 重要文件修改清单
 
-- 自动化先在原脚本上复现严格模式下的 `.Path` 异常。修复后 Windows 相关 12 项通过，含严格模式、同名函数、带单引号和中文的路径，以及完整 `Start` 行断言。Windows 原生构建通过。
-- PowerShell 5.1 实机完成 Node.js 下载校验、严格模式下首次安装、同版本重跑、升级和卸载。父终端仍使用旧 PATH 时，复制 `Start` 可直接启动测试版 0.1.20。卸载后实际执行手动删除并核对会话、数据库标记和注册表用户 PATH。
-- PowerShell 7.7 实机用同进程 `2>` 安装。终端有 Unicode 进度帧，错误流文件为空，`Start` 命令实跑通过。
-- 本机全量单测 5,525 项通过、2 项跳过。安装器相关 27 项通过、1 项 Windows 用例跳过。PAC、公网下载速度对照和 macOS 两款终端外观仍按发版清单跟踪。
+| 文件 | 修改摘要 | 类型 |
+|---|---|---|
+| [install.sh](../../../../packages/ohbaby-cli/install.sh) | 显示状态初始化、`stage`、后台 curl 进度条、3xx 长度过滤、trap 清理、统一摘要 | 修改（+188 / −13） |
+| [install.ps1](../../../../packages/ohbaby-cli/install.ps1) | `Write-Stage`、`HttpWebRequest` 分块下载与进度、`Add-InstallPath` 返回值、统一摘要和启动命令 | 修改（+120 / −13） |
+| [uninstall.ts](../../../../packages/ohbaby-cli/src/cli/commands/uninstall.ts) | 步骤行、`done`/`failed`、金色编号、Windows 手动删除命令后置、结尾文案 | 修改（+76 / −17） |
+| [uninstall-plan.ts](../../../../packages/ohbaby-cli/src/install/uninstall-plan.ts) | `UninstallStep` 类型、`describeUninstallStep` | 修改 |
+| [types.ts](../../../../packages/ohbaby-cli/src/cli/commands/types.ts)、[bin.ts](../../../../packages/ohbaby-cli/src/bin.ts) | runtime 增加 `isStdoutTTY` | 修改 |
+| [uninstall.unit.test.ts](../../../../packages/ohbaby-cli/src/cli/commands/uninstall.unit.test.ts) | T40–T46 | 新增 |
+| [install-unix-tty.integration.test.ts](../../../../tests/integration/cli/install-unix-tty.integration.test.ts) | T20–T29，含重定向和 Ctrl-C | 新增 |
+| [install-unix.integration.test.ts](../../../../tests/integration/cli/install-unix.integration.test.ts)、[install-windows.integration.test.ts](../../../../tests/integration/cli/install-windows.integration.test.ts) | L1 新文案、严格模式与特殊路径 | 修改 |
+| [ci.yml](../../../../.github/workflows/ci.yml)、根 `package.json`、`pnpm-lock.yaml` | CI 跑 TTY 测试；加 `@lydell/node-pty` | 修改 |
+| [unreleased.md](../../../releases/unreleased.md) | Installer progress 一节 | 修改 |
 
-0.1.20 是回环测试源中的临时包版本，仅用于验证升级。仓库包版本仍是 0.1.19。实机测试后已清理两台机器上的临时文件，Windows 原仓库和用户 PATH 已核对。
+## 5.7 真机与自测记录
+
+所有安装都在临时 HOME、安装目录和数据目录里进行，结束后已清理，远端用户 PATH 已恢复原值。0.1.20 只是回环测试源里的临时版本，用于验证升级，仓库版本仍是 0.1.19。
+
+| 环境 | 做了什么 | 结果 |
+|---|---|---|
+| macOS arm64（实施会话） | 真实 `curl \| sh` 从 nodejs.org 下载；伪终端看进度；重跑；`ohbaby update 0.1.20 -y`；TUI 启动退出；内置浏览器打开安装包里的 Web；脚本卸载和 npm 卸载 | 通过。Ctrl-C 返回 130，dash 下 SIGTERM 返回 143，锁和下载目录都清掉 |
+| 树莓派 Ubuntu aarch64（`/bin/sh` 为 dash） | 两组 POSIX 集成测试 24 项；SSH 伪终端真实下载；首次安装、重跑、重定向长度、ASCII、窄终端、Ctrl-C；真实 0.1.18 → 0.1.19 升级；卸载五步 | 通过。在这里发现 3xx 长度缺陷并修复，T25 夹具同步加强。摘要末尾有非登录 SSH 提示 |
+| Windows x64，PowerShell 5.1（代码页 936） | `irm \| iex` 走回环慢速镜像和公网；系统手动代理下载；严格模式首次安装、重跑、升级、卸载；Ctrl-C | 通过。ASCII 进度条、金色、颜色恢复、清行；Ctrl-C 释放锁后重跑成功；父终端旧 PATH 时复制 `Start` 能启动新版本 |
+| Windows x64，PowerShell 7.7（UTF-8） | 同进程 `2>` 安装；Ctrl-C | 通过。Unicode 进度条，错误流文件为空，`Start` 命令实跑通过 |
+| Windows 自动化（台式机） | Node 25.6.0 和 24.22.3 各跑 12 项 Windows 安装器和卸载测试 | 通过。注意：台式机用户名没有 8.3 短名，所以没复现 CI 的 #1 |
+
+实施过程中发现并已修复的问题：卸载单测在 Windows 上用宿主平台路径模拟 macOS；Windows 严格模式下读 `Get-Command` 结果的 `.Path` 报错；Windows 升级子进程里说"当前窗口已就绪"误导父终端；W2 两种重定向未区分；重定向响应的 `Content-Length` 被当成总大小。
+
+## 5.8 本轮以外的记录
+
+以下事项来自实施会话的观察，不属于本议题，供相关议题跟进：
+
+- [脚本安装 README](../../2026-11-17-script-install/README.md) 和本轮 [02 §2.8](02-optimization-plan-and-change-scope.md#28-不在本轮) 仍写着"CLI 脚本改下载 SEA"。按 [App 打包方案](../../2026-11-21-app-packaging/improve-1/00-discussion.md)，CLI 和 App 各自安装，这两处应更新。
+- [App 多客户端方案](../../2026-11-21-app-multi-client/improve-1/00-discussion.md) 第 6 节说只设 `OHBABY_HOME` 就能隔离数据库，但默认 SQLite 路径仍走系统数据目录（[ohbaby-home.ts](../../../../packages/ohbaby-agent/src/paths/ohbaby-home.ts#L125)），还需要 `OHBABY_DB_PATH`。
+- CLI 更新、卸载会停止同一 `OHBABY_HOME` 下的空闲 daemon（[preflight.ts](../../../../packages/ohbaby-cli/src/update/preflight.ts#L82)），App 或 Web 连接可能被断开。App 接入后应验收这个场景的提示和重连。
