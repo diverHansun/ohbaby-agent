@@ -218,6 +218,8 @@ it.runIf(process.platform === "win32")(
       brokenDownload = false;
       const fresh = await install("", {}, strictScript);
       const stdout = fresh.stdout.replace(/\r\n/gu, "\n");
+      // The installer expands short Windows paths before printing the summary.
+      const realLauncher = await realpath(launcher);
       const platform = "win-" + process.arch;
       const stages = [
         "[1/4] Checking the current installation\n",
@@ -233,7 +235,7 @@ it.runIf(process.platform === "win32")(
         "\\bin\\ohbaby.cmd\n",
         "  PATH      Not changed. Add ",
         " to PATH, or run the launcher directly.\n",
-        `  Start     & '${launcher.replaceAll("'", "''")}'\n`,
+        `  Start     & '${realLauncher.replaceAll("'", "''")}'\n`,
       ];
       let offset = 0;
       for (const part of stages) {
