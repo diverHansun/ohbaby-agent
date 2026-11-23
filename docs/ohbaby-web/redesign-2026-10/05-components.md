@@ -172,6 +172,7 @@
 - 中文加粗兜底：CommonMark 的规则让 `**注意：**内容` 这类写法保留星号。`Marked` 实例的 `emStrong` 分词在标准规则失败后再试一次，只接受内部没有 `*` 和换行、且内部或紧邻一侧有中日韩文字的 `**...**`，判断规则取自 deepseek-harness。`2 ** 3`、`src/**/*.ts` 这类文本不受影响。
 - 输出中的消息用 `StreamingMarkdown`，排版和完成后一样。增量逻辑在 `ui/shared/markdown-stream.ts`：除最后两个顶层块外的内容冻结，只追加一次，之后不再碰；最后两块每次重新解析并替换。冻结前先校验 token 的 `raw` 能拼回原文，遇到引用式链接定义（`marked` 不为它生成 token）就不再冻结，只重算结尾。结尾最后一行里写了一半的 `**` 和反引号会先补全，标记后面还没内容时先隐藏；代码、HTML 和未闭合的代码围栏里不补全。冻结片段和结尾片段各自经过 `DOMPurify`。DOM 在 `useLayoutEffect` 里用 `insertAdjacentHTML` 更新，`.ohb-markdown` 下保持扁平，自动滚动在同一帧看到新高度，已冻结段落里的选区不会丢。新文本不是在旧文本后面追加时，清空重来。消息完成后仍切回 `MarkdownBlock` 全量渲染一次，全量结果是权威版本。
 - 阅读位置：读者停在一条长回答中间时，`ConversationStream` 除了记消息行和偏移，还记正在读的顶层块序号（`.ohb-markdown > *`）和它的偏移，恢复时按这个块对齐，所以同一条消息上方的内容变高或变矮，正在读的内容不动。块找不到时退回按消息行恢复。委托锚点和折叠回退改写阅读位置时，会同时清掉块序号。
+- Mermaid 图：渲染器给 `mermaid`、`mmd` 代码块加 `data-mermaid`，值是本页的 `COPY_TOKEN`，模型自己写的同名属性因为对不上值而被忽略。只有完成的助手消息（`MarkdownBlock` 的 `diagrams` 属性，默认关）才画图，输出中、用户消息、命令结果、文件预览和压缩摘要都保持代码。画图是渐进增强，在 `ui/shared/markdown-mermaid.ts`：第一次遇到 Mermaid 才按需加载 Pele，画好的 SVG 再用 `DOMPurify` 的 SVG 配置清一遍，然后放在隐藏的 `<pre>` 前面，所以 Copy 和代码视图不变；超过 20,000 字符、类型不认识或语法错误时保持代码。Copy 旁边的切换按钮（lucide `workflow`、`code-xml` 图标）在图和代码之间切换，不重画。比容器宽的图在自己的框里横向滚动，溢出时才变成可聚焦的 `role="region"`（`ui/shared/markdown-scroll-region.ts`，一个 `ResizeObserver` 跟踪所有框）。
 
 ### SidePanel
 
