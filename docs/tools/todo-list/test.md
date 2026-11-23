@@ -87,7 +87,9 @@
 ### CS9：Web 行为
 
 - 1、5、10 项均全量 DOM 渲染并保持数组顺序。
-- 容器超高时内部滚动。
+- 容器超高时内部滚动；第一个进行中的任务变化时把它滚入列表视野，索引不变时不动用户的滚动位置，也不调用 `scrollIntoView`。
+- 三种状态分别是空心环、淡蓝 spinner 和勾，行文本只含任务内容。
+- 折叠时第 2、4 项进行中，显示第 2 项和 `+1`，`aria-label` 含 `1 more in progress`；只有一个进行中时不显示 `+N`。
 - session 切换、run 结束、清空和 snapshot replace 正确。
 
 ### CS10：TUI 行为
@@ -99,6 +101,8 @@
 ### CS11：Agent Prompt 与工具能力
 
 - primary base 对复杂任务、简单任务、创建时机、更新节奏、多 `in_progress`、完成验证和清空生命周期有确定性断言。
+- primary base 断言计划顺序不是严格队列、完成项留在原位、满 10 条时先移除最早完成的项、允许不相邻的 `in_progress`。
+- `todo_write` 写入第 2、4 项同时 `in_progress` 的列表后，`todo_read` 原样返回顺序和状态。
 - Plan Agent 同时注册 `todo_read` 与 `todo_write`。
 - 两个工具 description 只包含接口语义；状态和字段边界由 schema 断言。
 

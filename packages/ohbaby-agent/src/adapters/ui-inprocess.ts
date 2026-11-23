@@ -2418,6 +2418,14 @@ export function createInProcessUiBackendClient(
       timestamp: now().getTime(),
       type: "goal.updated",
     });
+    // A Goal that stopped after its run ended leaves nothing in progress; an
+    // active prompt hides the list itself when its run settles.
+    if (
+      snapshot?.status !== "active" &&
+      !activePromptsBySession.has(sessionId)
+    ) {
+      hideTodoAfterRun(sessionId);
+    }
   }
 
   function snapshotGoalsFor(

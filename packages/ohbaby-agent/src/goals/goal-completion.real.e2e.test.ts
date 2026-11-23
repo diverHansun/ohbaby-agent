@@ -73,7 +73,7 @@ const todoTools: ModelToolDefinition[] = [
   },
   {
     description:
-      "Replace the todo list for the current task with a complete ordered list. Maximum 10 items; an empty list clears it.",
+      "Replace the todo list for the current task with the complete list in planned order. Keep each item in place when its status changes. Maximum 10 items; an empty list clears it.",
     name: "todo_write",
     inputSchema: {
       additionalProperties: false,

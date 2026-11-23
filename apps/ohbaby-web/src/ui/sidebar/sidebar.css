@@ -107,7 +107,7 @@
   gap: 8px;
   min-height: var(--row-height);
   min-width: 0;
-  /* 10px, like the section heading text and Pinned/Recents chat titles. */
+  /* 10px, like the section heading text and the session status column. */
   padding: 0 4px 0 10px;
   text-align: left;
 }
@@ -167,7 +167,7 @@
   flex-direction: column;
   gap: 1px;
   overflow-anchor: none;
-  padding: 2px 0 6px 14px;
+  padding: 2px 0 6px;
 }
 
 .ohb-sidebar-section-actions {
@@ -211,8 +211,8 @@
 .ohb-group-footer {
   display: flex;
   gap: 4px;
-  /* Lines Show more up with the chat titles above it. */
-  padding: 0 0 6px 14px;
+  /* Lines Show more (10px padding of its own) up with the chat titles. */
+  padding: 0 0 6px 23px;
 }
 
 .ohb-group-more {
@@ -285,12 +285,37 @@ button.ohb-group-more:hover {
   gap: 8px;
   min-height: var(--row-height);
   min-width: 0;
-  padding: 0 4px 0 10px;
+  /* Titles line up with workspace names: 10px + 15px icon + 8px gap. The
+     space keeps a status mark from pushing the title when a run starts. */
+  padding: 0 4px 0 33px;
   text-align: left;
 }
 
 .ohb-session-row.ohb-session-active .ohb-session-main {
   color: var(--text);
+}
+
+/* The status column, directly under the workspace folder icon. */
+.ohb-session-lead {
+  align-items: center;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 10px;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 15px;
+}
+
+.ohb-session-lead .ohb-activity-mark {
+  height: 14px;
+  width: 14px;
+}
+
+/* Sidebar rows stay neutral: one ink instead of the brand's three colors. */
+.ohb-session-lead .ohb-activity-mark i:nth-child(n) {
+  background: currentcolor;
 }
 
 .ohb-session-main:disabled {
@@ -464,21 +489,9 @@ button.ohb-group-more:hover {
   }
 }
 
-/* Recents spans all workspaces; rows sit flush with workspace headings. */
-/* Pinned and Recents hold chats directly, not under a folder: no indent. */
-.ohb-sidebar-pinned .ohb-sidebar-list,
-.ohb-sidebar-recents .ohb-sidebar-list {
-  padding-left: 0;
-}
-
-.ohb-sidebar-pinned .ohb-group-footer,
-.ohb-sidebar-recents .ohb-group-footer {
-  padding-left: 0;
-}
-
 .ohb-sidebar-empty {
   color: var(--text-dim);
   font-size: 13px;
   margin: 0;
-  padding: 4px 0 8px 24px;
+  padding: 4px 0 8px 33px;
 }

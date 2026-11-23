@@ -137,13 +137,23 @@ describe("system prompt template assets", () => {
       "Read the current list before revising an existing plan",
     );
     expect(PRIMARY_BASE_PROMPT).toContain(
-      "Preserve still-valid items and their execution order",
+      "Preserve still-valid items and their planned order",
     );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Keep completed items in place",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "when the 10-item limit leaves no room for new work (then remove the earliest completed items first)",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "List order is the planned order, not a strict queue",
+    );
+    expect(PRIMARY_BASE_PROMPT).not.toContain("execution order");
     expect(PRIMARY_BASE_PROMPT).toContain(
       "Update the list at meaningful milestones or when scope changes, not after every command",
     );
     expect(PRIMARY_BASE_PROMPT).toContain(
-      "Multiple items may be `in_progress`",
+      "Several items, adjacent or not, may be `in_progress`",
     );
     expect(PRIMARY_BASE_PROMPT).toContain(
       "Mark an item `completed` only after its relevant verification succeeds",

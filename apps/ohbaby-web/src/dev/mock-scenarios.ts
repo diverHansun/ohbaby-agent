@@ -209,6 +209,27 @@ const base = {
   status: { kind: "idle" },
 } satisfies Partial<UiSnapshot>;
 
+const parallelTodos = {
+  sessionId: "session_1",
+  visible: true,
+  todos: [
+    { content: "Read the dock and composer styles", status: "completed" },
+    { content: "Rewrite the todo prompt rules", status: "completed" },
+    { content: "Regenerate the prompt templates", status: "completed" },
+    { content: "Hide the dock once a Goal stops", status: "completed" },
+    { content: "Add the stop and failure contract tests", status: "completed" },
+    { content: "Add the progress tokens", status: "completed" },
+    { content: "Restyle the dock as floating glass", status: "pending" },
+    { content: "Run the web unit tests", status: "in_progress" },
+    {
+      content:
+        "Check the dock over a dark code block, at phone width, with a tall composer and the Goal strip showing",
+      status: "pending",
+    },
+    { content: "Update the design docs", status: "in_progress" },
+  ],
+} satisfies NonNullable<UiSnapshot["todos"]>[number];
+
 function running(withApproval: boolean): UiSnapshot {
   return {
     ...base,
@@ -795,6 +816,53 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
   }),
   running: () => ({
     snapshot: running(false),
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, agentWorkspace),
+      ...typicalSessions(),
+    ]),
+  }),
+  /** A full todo list with two tasks in progress, far apart and below the fold. */
+  todos: () => ({
+    snapshot: { ...running(false), todos: [parallelTodos] },
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("session_1", runningSession.title, 1, agentWorkspace),
+      ...typicalSessions(),
+    ]),
+  }),
+  /** The same list under a running Goal, with a prompt queued behind it. */
+  "todos-goal": () => ({
+    snapshot: {
+      ...running(false),
+      todos: [parallelTodos],
+      goals: [
+        {
+          sessionId: "session_1",
+          goal: {
+            objective: "Ship the floating todo dock",
+            status: "active",
+            turnsUsed: 3,
+            wallClockMs: 420_000,
+          },
+        },
+      ],
+      prompts: [
+        {
+          promptId: "prompt_queued",
+          clientRequestId: "request_queued",
+          scopeKey: "session_1",
+          sessionId: "session_1",
+          userMessageId: "queued-user",
+          text: "After this, update the design docs too.",
+          status: "queued",
+          createdAt: iso(0),
+          updatedAt: iso(0),
+        },
+      ],
+    },
     workspace,
     model,
     sessions: byRecency([

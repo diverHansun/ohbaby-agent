@@ -7753,6 +7753,102 @@ describe("createInProcessUiBackendClient", () => {
     expect(requests).toHaveLength(6);
   });
 
+  it("hides Goal Todos when a stopped Goal run leaves the session idle", async () => {
+    const goalBlocked = createDeferred<undefined>();
+    const goalTodos = [
+      { content: "Keep the goal going", status: "in_progress" as const },
+    ];
+    const client = createInProcessUiBackendClient({
+      llmClient: createPauseResumeTodoLLMClient({
+        goalBlocked,
+        goalTodos,
+        ordinaryTodos: [],
+        requests: [],
+        resumeRelease: new Promise(() => undefined),
+        resumeStarted: createDeferred<undefined>(),
+      }),
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_goal_todo_stop_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "web",
+    });
+    await client.executeCommand({
+      argv: ["stop", "me"],
+      clientInvocationId: "inv_goal_todo_stop_create",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal stop me",
+      rawArgs: "stop me",
+      surface: "web",
+    });
+    await withTimeout(goalBlocked.promise, 1_000, "Goal run did not block");
+    const running = (await client.getSnapshot()).runs.at(0);
+    if (!running) {
+      throw new Error("expected an active Goal run");
+    }
+    await client.abortRun(running.id);
+
+    await vi.waitFor(async () => {
+      await expect(client.getSnapshot()).resolves.toMatchObject({
+        goals: [{ goal: { status: "paused" } }],
+        todos: [{ todos: goalTodos, visible: false }],
+      });
+    });
+  });
+
+  it("hides Goal Todos when a failed model request pauses the Goal", async () => {
+    const goalTodos = [
+      { content: "Survive a model failure", status: "in_progress" as const },
+    ];
+    const client = createInProcessUiBackendClient({
+      llmClient: createControlledSequentialFakeLLMClient(
+        [
+          {
+            events: [
+              todoWriteToolCallEvent({
+                callId: "call_goal_todo_before_failure",
+                todos: goalTodos,
+              }),
+            ],
+          },
+        ],
+        [],
+      ),
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_goal_todo_failure_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "web",
+    });
+    await client.executeCommand({
+      argv: ["fail", "later"],
+      clientInvocationId: "inv_goal_todo_failure_create",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal fail later",
+      rawArgs: "fail later",
+      surface: "web",
+    });
+
+    await vi.waitFor(async () => {
+      await expect(client.getSnapshot()).resolves.toMatchObject({
+        goals: [{ goal: { status: "paused" } }],
+        todos: [{ todos: goalTodos, visible: false }],
+      });
+    });
+  });
+
   it("continues a model-created goal after the creating prompt settles", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({

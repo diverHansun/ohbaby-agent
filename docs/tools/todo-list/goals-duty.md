@@ -16,7 +16,7 @@ Agent 可用三态有序列表表达正在做、等待做和已经完成的步�
 
 - 保留 `todo_read` 和 `todo_write` 两个 snake_case 工具。
 - 每项只有 `content` 和 `status`。
-- 数组顺序就是执行顺序和隐式优先级。
+- 数组顺序是计划顺序，不是严格队列；状态变化时条目留在原位，已完成项划线保留。
 - 允许多个 `in_progress`，不要求 Agent 维护无业务价值的 id。
 
 ### G3：让 Web/TUI 低延迟且一致地显示
@@ -112,7 +112,7 @@ Web/TUI 不扫描 transcript、tool parts 或本地缓存来重建 Todo。
 | session/message | 恢复来源 | 保存底层成功/失败工具事务 |
 | UI runtime/state | 投影方 | 维护 snapshot、发布事件、统一生命周期可见性 |
 | ohbaby-sdk | 契约 | 定义 Todo snapshot/event 类型 |
-| ohbaby-web | 消费方 | OpenCode 风格 TodoDock，全量最多 10 项、限高滚动 |
+| ohbaby-web | 消费方 | 输入框上方的悬浮玻璃 TodoDock，全量最多 10 项、限高滚动；进行中用淡蓝 spinner，折叠时显示 `+N` |
 | ohbaby-cli | 消费方 | Kimi 风格 TodoPanel，紧凑 5 项、Ctrl+T 展开 |
 | goals | 平行模块 | 提供 run owner + goalId 供 adapter 选择内部 scope；不读取 Todo 内容、不把 Todo 变为 Goal 状态权威 |
 | system-prompt | 使用策略 | 在 primary base 定义 Todo 触发、更新与生命周期 |

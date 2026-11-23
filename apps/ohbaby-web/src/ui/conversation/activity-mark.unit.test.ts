@@ -8,11 +8,18 @@ import {
 } from "./activity-mark.js";
 
 const SAMPLES = 480;
-const motions: readonly ActivityMotion[] = ["thinking", "compacting"];
+const motions: readonly ActivityMotion[] = [
+  "thinking",
+  "compacting",
+  "running",
+];
 const dotSize: Readonly<Record<ActivityMotion, number>> = {
   thinking: 3.2,
   compacting: 2.5,
+  running: 2.8,
 };
+const RUNNING_BEATS = 20;
+const GRID_PITCH = 5.4;
 
 function dots(motion: ActivityMotion): number[] {
   return Array.from({ length: activityDotCount(motion) }, (_, dot) => dot);
@@ -63,6 +70,46 @@ describe("activity mark motion", () => {
       expect(activityPose("compacting", wrap % 1, dot).opacity).toBeLessThan(
         0.01,
       );
+    }
+  });
+
+  it("lands the running dots on separate cells that cover the 3x3 grid", () => {
+    const visited = new Set<string>();
+    for (let beat = 0; beat < RUNNING_BEATS; beat += 1) {
+      const cells = dots("running").map((dot) => {
+        const pose = activityPose("running", beat / RUNNING_BEATS, dot);
+        expect(pose.opacity).toBe(1);
+        expect(pose.scale).toBe(1);
+        const column = pose.x / GRID_PITCH;
+        const row = pose.y / GRID_PITCH;
+        expect([-1, 0, 1]).toContainEqual(Math.round(column));
+        expect(column).toBeCloseTo(Math.round(column), 6);
+        expect(row).toBeCloseTo(Math.round(row), 6);
+        return `${String(Math.round(column))},${String(Math.round(row))}`;
+      });
+      expect(new Set(cells).size).toBe(cells.length);
+      cells.forEach((cell) => visited.add(cell));
+    }
+    expect(visited.size).toBe(9);
+  });
+
+  it("keeps a running dot faint while it travels between cells", () => {
+    for (const dot of dots("running")) {
+      for (let beat = 0; beat < RUNNING_BEATS; beat += 1) {
+        const start = activityPose("running", beat / RUNNING_BEATS, dot);
+        const middle = activityPose(
+          "running",
+          (beat + 0.5) / RUNNING_BEATS,
+          dot,
+        );
+        const end = activityPose(
+          "running",
+          ((beat + 1) % RUNNING_BEATS) / RUNNING_BEATS,
+          dot,
+        );
+        const hops = start.x !== end.x || start.y !== end.y;
+        expect(middle.opacity).toBeCloseTo(hops ? 0.1 : 1, 6);
+      }
     }
   });
 

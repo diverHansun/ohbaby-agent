@@ -51,6 +51,9 @@
   --success: #10b981;
   --success-ink: #166534;
   --success-soft: rgba(16, 185, 129, 0.09);
+  /* In progress: the todo spinner's arc on a faint track of the same blue. */
+  --progress: #2a78d6;
+  --progress-track: rgba(42, 120, 214, 0.22);
 
   /* Brand: the wordmark (D5), the Lychee mark (D26) and the waiting marks */
   --brand-oh: #c9a23f;
@@ -101,6 +104,9 @@
     0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
   --shadow-modal:
     0 2px 6px rgba(0, 0, 0, 0.06), 0 24px 60px -18px rgba(0, 0, 0, 0.28);
+  /* The borderless todo dock; its hairline is an outline (session.css). */
+  --shadow-dock:
+    0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 34px -18px rgba(0, 0, 0, 0.24);
 
   /* Native select arrow: a thin chevron in --text-dim (%2371717a). */
   --icon-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");

@@ -127,6 +127,24 @@ describe("todo builtin tools", () => {
     expect(otherSession.output).toBe("No todos.");
   });
 
+  it("keeps non-adjacent in-progress items in their planned order", async () => {
+    const runner = createToolRunner();
+    const todos = [
+      { content: "Read the dock", status: "completed" },
+      { content: "Rewrite the prompt", status: "in_progress" },
+      { content: "Fix the goal projection", status: "pending" },
+      { content: "Restyle the dock", status: "in_progress" },
+      { content: "Run the browser check", status: "pending" },
+    ];
+
+    await runner.run("todo_write", { todos });
+    const read = await runner.run("todo_read", {});
+
+    expect(read.output?.split("\n")).toEqual(
+      todos.map((todo) => `[${todo.status}] ${todo.content}`),
+    );
+  });
+
   it("isolates todo lists by context scope within one session", async () => {
     const onWrite = vi.fn();
     const runner = createToolRunner(new TodoService({ onWrite }));
@@ -376,7 +394,7 @@ describe("todo builtin tools", () => {
       "Read the todo list for the current task.",
     );
     expect(tools.find((tool) => tool.name === "todo_write")?.description).toBe(
-      "Replace the todo list for the current task with a complete ordered list. Maximum 10 items; an empty list clears it.",
+      "Replace the todo list for the current task with the complete list in planned order. Keep each item in place when its status changes. Maximum 10 items; an empty list clears it.",
     );
   });
 });

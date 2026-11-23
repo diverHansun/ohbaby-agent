@@ -948,11 +948,14 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(items).toHaveLength(10);
     expect(items.map((item) => item.textContent)).toEqual(
-      todos.map(
-        (todo) =>
-          `${todo.status === "completed" ? "✓" : todo.status === "in_progress" ? "●" : "○"}${todo.content}`,
-      ),
+      todos.map((todo) => todo.content),
     );
+    expect(items.map((item) => item.className)).toEqual(
+      todos.map((todo) => `ohb-todo-item ohb-todo-${todo.status}`),
+    );
+    expect(
+      items.map((item) => item.querySelector(".ohb-spinner") !== null),
+    ).toEqual(todos.map((todo) => todo.status === "in_progress"));
     expect(app.container.textContent).not.toContain("not active");
     const dock = app.container.querySelector(".ohb-todo-dock");
     const scrollRegion = app.container.querySelector(".ohb-todo-items");
@@ -977,7 +980,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toBe("false");
     expect(app.container.querySelectorAll(".ohb-todo-item")).toHaveLength(1);
     expect(app.container.querySelector(".ohb-todo-item")?.textContent).toBe(
-      "●task 2",
+      "task 2",
     );
 
     await clickButton(app.container, "Expand todo list");

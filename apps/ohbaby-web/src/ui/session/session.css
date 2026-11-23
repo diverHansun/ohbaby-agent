@@ -277,18 +277,51 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   font-size: 13px;
 }
 
-/* Todo dock: a flat tray attached above the composer card. */
+/* Todo dock: a floating glass panel above the composer card (D21). It is as
+   wide as the card and the message column, so no text peeks out at its sides. */
 .ohb-todo-dock {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-bottom: 0;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  margin: 0 auto -8px;
-  max-width: calc(var(--content-width) - 32px);
-  padding: 8px 10px 16px;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  background: var(--bg-glass);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-dock);
+  margin: 0 auto 8px;
+  max-width: var(--content-width);
+  /* An outline, not a shadow ring: outlines paint above the strip below. */
+  outline: 0.5px solid var(--border-strong);
+  padding: 9px 10px 8px;
   position: relative;
-  width: calc(100% - 32px);
+  width: 100%;
   z-index: 1;
+}
+
+/* The 8px gap under the dock, and the card's rounded top corners below it,
+   stay plain canvas whatever height the card grows to, so no cut-off text
+   shows between the two panels. The card sits above this strip. */
+.ohb-todo-dock::after {
+  background: var(--bg);
+  content: "";
+  height: calc(var(--radius-xl) + 8px + var(--radius-2xl));
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: calc(100% - var(--radius-xl));
+  z-index: -1;
+}
+
+/* With a dock showing, only the strip under the card stays opaque, so the
+   messages behind the glass show through. */
+.ohb-main-body.has-todos .ohb-composer:not(.ohb-composer-hero) {
+  background: linear-gradient(to top, var(--bg) 52px, transparent 132px);
+}
+
+/* Layers between the dock and the card turn to glass too, or scrolled text
+   would show through their faint tint. */
+.ohb-main-body.has-todos
+  :is(.ohb-prompt-queue, .ohb-goal-strip, .ohb-steer-recovery) {
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  background: var(--bg-glass);
 }
 
 .ohb-todo-dock > header {
@@ -317,13 +350,13 @@ button.ohb-workspace-slot:hover:not(:disabled) {
 }
 
 .ohb-todo-progress {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11.5px;
   justify-self: end;
 }
 
 .ohb-todo-chevron {
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-left: 6px;
   transition: transform var(--duration-fast) var(--ease);
 }
@@ -340,7 +373,8 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   overflow: hidden;
 }
 
-.ohb-todo-preview .ohb-todo-item > span:last-child {
+.ohb-todo-preview .ohb-todo-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -356,39 +390,46 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   scrollbar-gutter: stable;
 }
 
+/* Icons sit on the first line, so a wrapped task keeps them aligned. */
 .ohb-todo-item {
   align-items: flex-start;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
   display: flex;
   font-size: 12.5px;
-  gap: 8px;
+  gap: 9px;
   line-height: 1.45;
   min-width: 0;
-  padding: 4px 6px;
+  padding: 3px 4px;
 }
 
 .ohb-todo-marker {
+  display: grid;
   flex: none;
-  font-family: var(--font-mono);
-  text-align: center;
-  width: 13px;
+  height: 1.45em;
+  place-items: center;
+  width: 14px;
 }
 
-.ohb-todo-pending .ohb-todo-marker {
-  color: var(--text-dim);
+.ohb-todo-ring {
+  border: 1.2px solid var(--border-focus);
+  border-radius: 50%;
+  height: 11px;
+  width: 11px;
+}
+
+/* The spinner is the whole "working on it" signal: no tinted row, no blue text. */
+.ohb-todo-marker .ohb-spinner {
+  border-color: var(--progress-track);
+  border-top-color: var(--progress);
 }
 
 .ohb-todo-in_progress {
-  background: var(--bg-hover);
   color: var(--text);
+  font-weight: 500;
 }
 
-.ohb-todo-completed {
-  color: var(--text-dim);
-}
-
-.ohb-todo-completed > span:last-child {
+.ohb-todo-completed .ohb-todo-text {
   text-decoration: line-through;
 }
 
@@ -396,8 +437,14 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   color: var(--success-ink);
 }
 
+.ohb-todo-more {
+  color: var(--text-muted);
+  flex: none;
+  font-weight: 400;
+}
+
 .ohb-main-body.has-todos .ohb-stream {
-  padding-bottom: calc(350px + var(--steer-recovery-space, 0px));
+  padding-bottom: calc(380px + var(--steer-recovery-space, 0px));
 }
 
 @media (max-width: 720px) {
@@ -409,11 +456,7 @@ button.ohb-workspace-slot:hover:not(:disabled) {
     padding: 0;
   }
 
-  .ohb-todo-dock {
-    max-width: none;
-  }
-
   .ohb-main-body.has-todos .ohb-stream {
-    padding-bottom: calc(370px + var(--steer-recovery-space, 0px));
+    padding-bottom: calc(400px + var(--steer-recovery-space, 0px));
   }
 }
