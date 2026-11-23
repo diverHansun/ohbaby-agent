@@ -19,6 +19,7 @@ import { DEFAULT_WORKSPACE, mockScenarios } from "./mock-scenarios.js";
 import { createMockShellJobs, isTaskScenario } from "./mock-shell-jobs.js";
 import { createMockSettingsApi } from "./mock-settings.js";
 import { mockSessionFiles } from "./mock-files.js";
+import { startMarkdownReplay } from "./mock-markdown.js";
 
 /** A few real-shaped commands so the slash palette can be previewed. */
 const MOCK_COMMANDS: UiWebCommandCatalog = {
@@ -143,6 +144,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
   installSnapshot(store, scenario.snapshot);
   store.setCurrentModel(scenario.model);
   store.setConnectionState("live");
+  if (name === "markdown") startMarkdownReplay(store, scenario.snapshot);
   let sessions = [...scenario.sessions];
   let workspace = scenario.workspace;
   const hidden = new Set<string>();

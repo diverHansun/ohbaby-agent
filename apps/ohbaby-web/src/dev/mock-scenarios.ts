@@ -7,6 +7,7 @@ import type {
   UiSnapshot,
 } from "ohbaby-sdk";
 import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
+import { markdownMessages } from "./mock-markdown.js";
 
 /**
  * Dev-only scenarios for `vite dev` with `?mock=<name>` (06 §5). improve-1 ships
@@ -1004,5 +1005,22 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     workspace,
     model: null,
     sessions: typicalSessions(),
+  }),
+  /** Every Markdown element; `&stream=1` replays a second answer (mock-markdown). */
+  markdown: () => ({
+    snapshot: {
+      ...base,
+      activeSessionId: "md_session",
+      sessions: [
+        session("md_session", "Markdown 渲染", 1, markdownMessages()),
+        ...history,
+      ],
+    },
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("md_session", "Markdown 渲染", 1, agentWorkspace),
+      ...typicalSessions(),
+    ]),
   }),
 };
