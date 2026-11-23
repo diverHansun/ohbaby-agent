@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 import { Marked, Renderer, Tokenizer } from "marked";
 import type { Tokens } from "marked";
+import { isMermaidLang } from "./markdown-mermaid.js";
 
 /**
  * Markdown renders to one sanitized HTML string, so a code block's copy
@@ -91,7 +92,11 @@ export const markdown = new Marked({
     code(token): string {
       // The default output keeps escaping and the language class as they were;
       // the wrapper holds the button still while the code scrolls sideways.
-      return `<div class="ohb-code-block">${COPY_BUTTON}${defaults.code(token)}</div>`;
+      // A Mermaid block carries the page token, which forged HTML cannot.
+      const mermaid = isMermaidLang(token.lang)
+        ? ` data-mermaid="${COPY_TOKEN}"`
+        : "";
+      return `<div class="ohb-code-block"${mermaid}>${COPY_BUTTON}${defaults.code(token)}</div>`;
     },
     /**
      * The wrapper scrolls so the table keeps table layout: three columns or

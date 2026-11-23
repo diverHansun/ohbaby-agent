@@ -17,6 +17,7 @@
     "lucide-react": "^0.468.0",
     "marked": "^15.0.3",
     "ohbaby-sdk": "workspace:*",
+    "pele": "1.13.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

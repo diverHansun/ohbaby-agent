@@ -1,7 +1,8 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { writeClipboard } from "./clipboard.js";
 import { COPY_LABEL, COPY_TOKEN, renderMarkdown } from "./markdown-renderer.js";
+import { enhanceMermaidBlocks } from "./markdown-mermaid.js";
 import { createMarkdownStream } from "./markdown-stream.js";
 
 const RESET_MS = 1500;
@@ -46,14 +47,31 @@ function onCodeCopy(event: MouseEvent<HTMLDivElement>): void {
   });
 }
 
-export function MarkdownBlock(props: { readonly text: string }): ReactElement {
+/**
+ * `diagrams` draws the Mermaid blocks once the HTML is on the page. The same
+ * HTML string keeps React from rewriting the DOM, so drawn diagrams and the
+ * code/diagram choice survive re-renders; new text cancels the old drawing.
+ */
+export function MarkdownBlock(props: {
+  readonly text: string;
+  readonly diagrams?: boolean;
+}): ReactElement {
+  const container = useRef<HTMLDivElement>(null);
+  const html = useMemo(() => renderMarkdown(props.text), [props.text]);
+  const diagrams = props.diagrams === true;
+  useEffect(() => {
+    const node = container.current;
+    if (!diagrams || !node) return;
+    return enhanceMermaidBlocks(node, COPY_TOKEN).cancel;
+  }, [html, diagrams]);
   return (
     // Clicks bubble here from the code blocks' own buttons, which keyboards
     // reach as ordinary buttons; the div itself is not a control.
     <div
+      ref={container}
       className="ohb-markdown"
       onClick={onCodeCopy}
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(props.text) }}
+      dangerouslySetInnerHTML={{ __html: html }}
     />
   );
 }
