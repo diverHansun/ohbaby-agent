@@ -477,8 +477,8 @@
 }
 
 /* Inside the grey user bubble the panel would vanish; use the page colour. */
-.ohb-message-user-bubble .ohb-code-block pre {
-  background: var(--bg);
+.ohb-message-user-bubble .ohb-code-block {
+  --ohb-code-surface: var(--bg);
 }
 
 @media (hover: none), (pointer: coarse) {

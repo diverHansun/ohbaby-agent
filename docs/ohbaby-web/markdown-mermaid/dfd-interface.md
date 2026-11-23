@@ -91,7 +91,7 @@ flowchart TD
 
 ```html
 <div class="ohb-code-block" data-mermaid="<本页标记>" data-mermaid-state="ready">
-  <button class="ohb-code-copy">Copy</button>
+  <button class="ohb-code-copy" aria-label="Copy code"><!-- 图标 --></button>
   <button class="ohb-mermaid-toggle" aria-label="Show code"><!-- 图标 --></button>
   <div class="ohb-mermaid-diagram">
     <svg role="img" aria-label="Mermaid diagram"><!-- 图 --></svg>
@@ -124,14 +124,14 @@ flowchart TD
 .ohb-mermaid-diagram[hidden] { display: none; }
 .ohb-mermaid-diagram svg { display: block; margin: 0 auto; max-width: none; }
 
-/* 切换按钮沿用 Copy 的定位和显隐方式。 */
-.ohb-mermaid-toggle { height: 22px; position: absolute; right: 6px; top: 6px; width: 24px; }
+/* Copy 和切换按钮共用一套样式：没有边框的图标，底色跟随代码块。 */
+.ohb-code-copy, .ohb-mermaid-toggle { background: var(--ohb-code-surface); border: 0; height: 22px; position: absolute; right: 6px; top: 6px; width: 24px; }
 .ohb-code-block[data-mermaid-state] .ohb-code-copy { right: 34px; z-index: 1; }
 
 @media (hover: none), (pointer: coarse) {
-  .ohb-mermaid-toggle { opacity: 1; }
-  .ohb-mermaid-toggle::after { content: ""; inset: -12px -11px; position: absolute; }
-  .ohb-code-block[data-mermaid-state] .ohb-code-copy { right: 44px; }
+  .ohb-code-copy, .ohb-mermaid-toggle { opacity: 1; }
+  .ohb-code-copy::after, .ohb-mermaid-toggle::after { content: ""; inset: -11px -10px; position: absolute; }
+  .ohb-code-block[data-mermaid-state] .ohb-code-copy { right: 50px; }
   .ohb-mermaid-diagram { padding-top: 34px; }
 }
 ```

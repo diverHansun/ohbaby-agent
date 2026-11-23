@@ -205,16 +205,22 @@
   max-width: 100%;
 }
 
-/* Code blocks: a soft panel with a small Copy label in the corner, shown on
+/* Code blocks: a soft panel with a bare copy icon in the corner, shown on
    hover or focus (Claude, Cursor). The wrapper keeps the button in place
    while long lines scroll sideways. */
 .ohb-code-block {
+  --ohb-code-surface: var(--bg-panel);
   margin: 0 0 12px;
   position: relative;
 }
 
+/* A diagram or formula sits on the page, with no panel behind its buttons. */
+.ohb-code-block:has(> pre[hidden]) {
+  --ohb-code-surface: transparent;
+}
+
 .ohb-code-block pre {
-  background: var(--bg-panel);
+  background: var(--ohb-code-surface);
   border-radius: var(--radius-md);
   margin: 0;
   padding: 10px 12px;
@@ -231,26 +237,33 @@
   display: none;
 }
 
+/* No box of their own: the fill is the code's surface, so it cannot be seen
+   but long lines do not show through the icon (deepseek-harness). The shadows
+   carry it to the block's right edge and fade the text out on the left. */
 .ohb-code-copy,
 .ohb-mermaid-toggle {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  align-items: center;
+  background: var(--ohb-code-surface);
+  border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-family: var(--font-ui);
-  font-size: 11.5px;
+  box-shadow:
+    6px 0 0 var(--ohb-code-surface),
+    -6px 0 6px var(--ohb-code-surface);
+  color: var(--text-dim);
+  display: inline-flex;
   height: 22px;
+  justify-content: center;
   opacity: 0;
-  padding: 0 8px;
+  padding: 0;
   position: absolute;
   right: 6px;
   top: 6px;
   transition:
     opacity var(--duration-fast) var(--ease),
-    background var(--duration-fast) var(--ease),
     color var(--duration-fast) var(--ease);
-  /* Keeps the label out of a drag-selection across the block. */
+  /* Keeps the button out of a drag-selection across the block. */
   user-select: none;
+  width: 24px;
 }
 
 .ohb-code-block:hover :is(.ohb-code-copy, .ohb-mermaid-toggle),
@@ -261,8 +274,8 @@
 }
 
 .ohb-code-copy:hover,
-.ohb-mermaid-toggle:hover {
-  background: var(--bg-hover);
+.ohb-mermaid-toggle:hover,
+.ohb-code-copy[data-copy-state="copied"] {
   color: var(--text);
 }
 
@@ -303,16 +316,7 @@
   outline-offset: 2px;
 }
 
-/* The toggle takes the corner; Copy sits to its left, so a longer Copy label
-   grows leftwards and never covers it. */
-.ohb-mermaid-toggle {
-  align-items: center;
-  display: inline-flex;
-  justify-content: center;
-  padding: 0;
-  width: 24px;
-}
-
+/* The toggle takes the corner; Copy sits to its left. */
 .ohb-code-block[data-mermaid-state] .ohb-code-copy {
   right: 34px;
   z-index: 1;
@@ -374,13 +378,15 @@ div.ohb-math:not([data-math-state="ready"]) {
   }
 
   /* A 44px touch target without a bigger button. */
+  .ohb-code-copy::after,
   .ohb-mermaid-toggle::after {
     content: "";
     inset: -11px -10px;
     position: absolute;
   }
 
+  /* Far enough left that the two touch targets do not overlap. */
   .ohb-code-block[data-mermaid-state] .ohb-code-copy {
-    right: 44px;
+    right: 50px;
   }
 }

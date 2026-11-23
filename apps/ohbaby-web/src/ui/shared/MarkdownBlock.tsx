@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { ClipboardEvent, MouseEvent, ReactElement } from "react";
 import { writeClipboard } from "./clipboard.js";
-import { COPY_LABEL, COPY_TOKEN, renderMarkdown } from "./markdown-renderer.js";
+import { ALERT_ICON, CHECK_ICON, COPY_ICON } from "./markdown-icons.js";
+import { COPY_TOKEN, renderMarkdown } from "./markdown-renderer.js";
 import { enhanceMermaidBlocks } from "./markdown-mermaid.js";
 import { copyMathAsTex, enhanceMath } from "./markdown-math.js";
 import { createMarkdownStream } from "./markdown-stream.js";
@@ -20,15 +21,14 @@ function codeBlockText(button: HTMLButtonElement): string | undefined {
 }
 
 function showResult(button: HTMLButtonElement, copied: boolean): void {
-  const label = copied ? "Copied" : "Copy failed";
-  button.textContent = label;
-  button.setAttribute("aria-label", label);
+  button.innerHTML = copied ? CHECK_ICON : ALERT_ICON;
+  button.setAttribute("aria-label", copied ? "Copied" : "Copy failed");
   button.dataset.copyState = copied ? "copied" : "failed";
   const previous = Number(button.dataset.resetTimer);
   if (previous) window.clearTimeout(previous);
   button.dataset.resetTimer = String(
     window.setTimeout(() => {
-      button.textContent = COPY_LABEL;
+      button.innerHTML = COPY_ICON;
       button.setAttribute("aria-label", "Copy code");
       delete button.dataset.copyState;
       delete button.dataset.resetTimer;

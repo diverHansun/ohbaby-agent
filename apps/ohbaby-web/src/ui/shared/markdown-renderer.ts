@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 import { Marked, Renderer, Tokenizer } from "marked";
 import type { MarkedExtension, Tokens } from "marked";
+import { COPY_ICON } from "./markdown-icons.js";
 import { isMermaidLang } from "./markdown-mermaid.js";
 import {
   createMathExtension,
@@ -11,22 +12,18 @@ import {
 
 /**
  * Markdown renders to one sanitized HTML string, so a code block's copy
- * button is part of that string and the container handles its clicks. Its
- * label is text: icon components cannot live inside the HTML.
- */
-export const COPY_LABEL = "Copy";
-
-/**
- * Marks the buttons this renderer wrote. Model output may carry raw HTML that
- * survives sanitizing (class, data-*, style), so a forged block could show one
- * command and copy a hidden one; a value it cannot know rules that out.
- * `getRandomValues` works without a secure context, unlike `randomUUID`.
+ * button is part of that string and the container handles its clicks.
+ *
+ * The token marks the buttons this renderer wrote. Model output may carry raw
+ * HTML that survives sanitizing (class, data-*, style), so a forged block could
+ * show one command and copy a hidden one; a value it cannot know rules that
+ * out. `getRandomValues` works without a secure context, unlike `randomUUID`.
  */
 export const COPY_TOKEN = Array.from(
   globalThis.crypto.getRandomValues(new Uint8Array(12)),
   (byte) => byte.toString(16).padStart(2, "0"),
 ).join("");
-const COPY_BUTTON = `<button type="button" class="ohb-code-copy" data-code-copy="${COPY_TOKEN}" aria-label="Copy code">${COPY_LABEL}</button>`;
+const COPY_BUTTON = `<button type="button" class="ohb-code-copy" data-code-copy="${COPY_TOKEN}" aria-label="Copy code">${COPY_ICON}</button>`;
 
 /**
  * CommonMark only lets `**` open or close beside punctuation when a space or

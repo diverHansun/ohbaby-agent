@@ -71,20 +71,25 @@ describe("code block copy (T7)", () => {
     expect(holder.querySelectorAll("button")).toHaveLength(2);
   });
 
-  it("copies the code exactly, without the button label or trailing newline", async () => {
+  it("copies the code exactly, without a trailing newline, and shows a check", async () => {
     const view = mount(SOURCE);
     const button = view.querySelector<HTMLButtonElement>(
       "button[data-code-copy]",
     );
     if (!button) throw new Error("no button");
+    // An icon, with no visible word, survives sanitizing.
+    expect(button.textContent).toBe("");
+    expect(button.querySelector("svg rect")).not.toBeNull();
     await click(button);
     expect(writeText).toHaveBeenCalledWith(
       'if (a < b && c > 0) {\n  return "<tag>";\n}',
     );
-    expect(button.textContent).toBe("Copied");
+    expect(button.textContent).toBe("");
+    expect(button.dataset.copyState).toBe("copied");
+    expect(button.querySelector('path[d="M20 6 9 17l-5-5"]')).not.toBeNull();
   });
 
-  it("returns to Copy, and says when copying failed", async () => {
+  it("returns to the copy icon, and shows when copying failed", async () => {
     vi.useFakeTimers();
     const view = mount(SOURCE);
     const buttons = view.querySelectorAll<HTMLButtonElement>(
@@ -96,7 +101,8 @@ describe("code block copy (T7)", () => {
     act(() => {
       vi.advanceTimersByTime(1500);
     });
-    expect(first.textContent).toBe("Copy");
+    expect(first.querySelector("svg rect")).not.toBeNull();
+    expect(first.getAttribute("aria-label")).toBe("Copy code");
     expect(first.dataset.copyState).toBeUndefined();
 
     writeText.mockImplementation(() => Promise.reject(new Error("denied")));
@@ -105,7 +111,8 @@ describe("code block copy (T7)", () => {
       value: () => false,
     });
     await click(second);
-    expect(second.textContent).toBe("Copy failed");
+    expect(second.querySelector("svg circle")).not.toBeNull();
+    expect(second.getAttribute("aria-label")).toBe("Copy failed");
     expect(second.dataset.copyState).toBe("failed");
   });
 
@@ -124,9 +131,11 @@ describe("code block copy (T7)", () => {
       "button[data-code-copy]",
     );
     expect(buttons).toHaveLength(2);
-    for (const button of buttons) await click(button);
+    for (const button of buttons) {
+      await click(button);
+      expect(button.dataset.copyState).toBeUndefined();
+    }
     expect(writeText).not.toHaveBeenCalled();
-    expect(view.textContent).not.toContain("Copied");
   });
 
   it("announces the result to screen readers", async () => {
