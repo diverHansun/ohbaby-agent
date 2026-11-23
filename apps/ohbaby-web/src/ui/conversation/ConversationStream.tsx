@@ -74,12 +74,22 @@ function findRow(
   );
 }
 
-/** The first visible row at the top of the stream, and its offset there. */
+/** The top-level Markdown blocks of a row, in reading order. */
+const readingBlocks = (row: HTMLElement): NodeListOf<HTMLElement> =>
+  row.querySelectorAll<HTMLElement>(".ohb-markdown > *");
+
+/**
+ * The first visible row at the top of the stream, and its offset there. When
+ * the reader is partway into a long answer, the block they are reading is
+ * kept too, so content above it in the same answer can change height.
+ */
 function captureReadingRow(
   element: HTMLElement,
   position: ConversationReadingPosition,
 ): void {
   const top = element.getBoundingClientRect().top;
+  position.blockIndex = undefined;
+  position.blockOffset = undefined;
   for (const node of element.querySelectorAll<HTMLElement>(
     "[data-message-id]",
   )) {
@@ -87,6 +97,17 @@ function captureReadingRow(
     if (rect && rect.bottom > top) {
       position.messageId = node.dataset.messageId;
       position.offset = rect.top - top;
+      if (rect.top < top) {
+        const blocks = [...readingBlocks(node)];
+        const index = blocks.findIndex(
+          (block) => block.getBoundingClientRect().bottom > top,
+        );
+        if (index >= 0) {
+          position.blockIndex = index;
+          position.blockOffset =
+            blocks[index].getBoundingClientRect().top - top;
+        }
+      }
       return;
     }
   }
@@ -94,7 +115,10 @@ function captureReadingRow(
   position.offset = undefined;
 }
 
-/** Moves the reading row back to where the user last saw it. */
+/**
+ * Moves the reading row back to where the user last saw it, aligning the
+ * block they were reading when it is still there and the row otherwise.
+ */
 function restoreReadingRow(
   element: HTMLElement,
   position: ConversationReadingPosition,
@@ -102,9 +126,15 @@ function restoreReadingRow(
   if (!position.messageId) return;
   const row = findRow(element, position.messageId);
   const rect = row ? visibleRowRect(row) : undefined;
-  if (rect)
-    element.scrollTop +=
-      rect.top - element.getBoundingClientRect().top - (position.offset ?? 0);
+  if (!row || !rect) return;
+  const block =
+    position.blockIndex === undefined
+      ? undefined
+      : readingBlocks(row).item(position.blockIndex);
+  const targetTop = block ? block.getBoundingClientRect().top : rect.top;
+  const offset = block ? position.blockOffset : position.offset;
+  element.scrollTop +=
+    targetTop - element.getBoundingClientRect().top - (offset ?? 0);
 }
 
 export interface ConversationReadingPosition {
@@ -112,6 +142,9 @@ export interface ConversationReadingPosition {
   sticky: boolean;
   messageId?: string;
   offset?: number;
+  /** The top-level Markdown block being read inside `messageId`. */
+  blockIndex?: number;
+  blockOffset?: number;
 }
 
 export function ConversationStream(props: {
@@ -522,6 +555,8 @@ export function ConversationStream(props: {
                   stickToBottomRef.current = false;
                   readingPosition.sticky = false;
                   readingPosition.messageId = undefined;
+                  readingPosition.blockIndex = undefined;
+                  readingPosition.blockOffset = undefined;
                   setExpandedRuns((current) => ({
                     ...current,
                     [runKey(process)]: current[runKey(process)] !== true,
@@ -613,6 +648,8 @@ export function ConversationStream(props: {
       readingPosition.sticky = stickToBottomRef.current;
       readingPosition.messageId = props.anchorMessageId;
       readingPosition.offset = 12;
+      readingPosition.blockIndex = undefined;
+      readingPosition.blockOffset = undefined;
     }
   }, [
     props.anchorMessageId,
@@ -681,6 +718,8 @@ export function ConversationStream(props: {
         position.offset =
           answer.getBoundingClientRect().top -
           element.getBoundingClientRect().top;
+        position.blockIndex = undefined;
+        position.blockOffset = undefined;
         position.top = element.scrollTop;
       }
     }

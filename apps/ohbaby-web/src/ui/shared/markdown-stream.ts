@@ -28,7 +28,7 @@ export function createMarkdownStream(): {
   let previous = "";
   let frozenEnd = 0;
   return {
-    update(text) {
+    update(text): MarkdownStreamUpdate {
       const reset = !text.startsWith(previous);
       if (reset) frozenEnd = 0;
       previous = text;
