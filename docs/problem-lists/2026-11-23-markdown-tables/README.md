@@ -25,7 +25,7 @@
 
 | 轮次 | 开启日期 | 触发 | 范围 | 状态 |
 |---|---|---|---|---|
-| [improve-1](improve-1/00-discussion.md) | 2026-11-23 | 首轮 | 表格渲染器、表格样式、设计文档同步 | 规划中 |
+| [improve-1](improve-1/00-discussion.md) | 2026-11-23 | 首轮 | 表格渲染器、表格样式、设计文档同步 | 已实施，待用户审核 |
 
 ## 本轮文档地图
 
@@ -36,7 +36,7 @@
 | [02 优化方案与改动面](improve-1/02-optimization-plan-and-change-scope.md) | 交给实施会话的方案和改动范围 |
 | [03 参考项目借鉴](improve-1/03-reference-projects.md) | deepseek-harness、opencode、ZCode 的做法 |
 | [04 测试与验收](improve-1/04-test-and-acceptance.md) | 测试场景和验收标准 |
-| 05 实施验收 | 本轮实施完成后，由验收模式写入 `05-implementation-acceptance.md` |
+| [05 实施验收](improve-1/05-implementation-acceptance.md) | 实际交付、commit、测试和浏览器验收结果 |
 
 ## 实施约定
 

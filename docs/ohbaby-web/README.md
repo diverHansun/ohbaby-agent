@@ -26,8 +26,8 @@ web 端是 daemon 会话状态的**投影与 adapter**，不持有独立事实�
 | [`ui/`](./ui/README.md) | **视图层设计**：组件规格、状态可视化、设计 token、最终屏幕参考 |
 | [`ui/slash-commands/structured-overlays.md`](./ui/slash-commands/structured-overlays.md) | `/connect`、`/connect-search`、`/compact` 的结构化 REST + overlay 契约 |
 | [`session-archive/`](./session-archive/README.md) | Web-only session 归档语义、REST/API 设计、侧边栏交互与实现计划 |
-| [`markdown-mermaid/`](./markdown-mermaid/goals-duty.md) | 助手回答里的 Mermaid 图表：懒加载 Pele、失败退回代码、安全边界与验收（已设计，未实施） |
-| [`markdown-math/`](./markdown-math/goals-duty.md) | 助手回答里的 LaTeX 公式：五种写法、输出中显示、懒加载 KaTeX、安全边界与验收（已设计，未实施） |
+| [`markdown-mermaid/`](./markdown-mermaid/goals-duty.md) | 助手回答里的 Mermaid 图表：懒加载 Pele、失败退回代码、安全边界与验收（已实施，见 [验收记录](./markdown-mermaid/acceptance.md)） |
+| [`markdown-math/`](./markdown-math/goals-duty.md) | 助手回答里的 LaTeX 公式：五种写法、输出中显示、懒加载 KaTeX、安全边界与验收（已实施，见 [验收记录](./markdown-math/acceptance.md)） |
 
 ## 版本范围与当前演进
 
