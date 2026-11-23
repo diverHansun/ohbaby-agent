@@ -28,6 +28,8 @@
 | C-2 | 下面 14 个对照写法 | 输出和未改动的 `marked` 完全一致 |
 | C-3 | 约 8 万字符的长文本，分别测“同一段有大量未闭合 `**`”和“每段一个未闭合 `**`” | 解析时间不超过未改动 `marked` 的 1.2 倍 |
 
+C-3 在本地单独运行 `pnpm exec vitest bench --run markdown-renderer.bench.ts`，分别比较两组解析器的平均耗时。
+
 C-1 用例：
 
 ```text

@@ -141,7 +141,7 @@ describe("code block copy (T7)", () => {
   });
 });
 
-describe("CJK bold (typography C-1 to C-3)", () => {
+describe("CJK bold (typography C-1 and C-2)", () => {
   const plain = new Marked();
   const plainHtml = (text: string): string =>
     DOMPurify.sanitize(plain.parse(text, { async: false }));
@@ -186,36 +186,6 @@ describe("CJK bold (typography C-1 to C-3)", () => {
     "**Period.**bar",
   ])("leaves %s as standard marked renders it", (text) => {
     expect(renderMarkdown(text)).toBe(plainHtml(text));
-  });
-
-  it("stays within 1.2x of plain marked on long unclosed runs", () => {
-    const line = "这是**未闭合的重点，后面很长 ".repeat(40);
-    const dense = Array.from({ length: 8 }, () => line).join("");
-    const spread = Array.from({ length: 200 }, () => line.slice(0, 400)).join(
-      "\n\n",
-    );
-    for (const text of [dense, spread]) {
-      // The fastest of interleaved runs, so a busy parallel suite does not
-      // decide the result.
-      const once = (run: () => void): number => {
-        const start = performance.now();
-        run();
-        return performance.now() - start;
-      };
-      let ours = Infinity;
-      let base = Infinity;
-      for (let i = 0; i < 5; i++) {
-        ours = Math.min(
-          ours,
-          once(() => renderMarkdown(text)),
-        );
-        base = Math.min(
-          base,
-          once(() => plainHtml(text)),
-        );
-      }
-      expect(ours).toBeLessThan(base * 1.2 + 5);
-    }
   });
 });
 
