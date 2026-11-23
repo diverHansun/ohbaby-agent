@@ -11,6 +11,7 @@ import { BackgroundTaskEntry, backgroundJobId } from "./BackgroundTaskEntry.js";
 export function MessageRow(props: {
   readonly steerState?: "unconsumed" | "unconfirmed";
   readonly message: UiMessage;
+  readonly activeRunId?: string;
   readonly reasoning?: ReasoningViewState;
   readonly beforeText?: ReactNode;
   readonly reasoningHidden?: boolean;
@@ -26,6 +27,13 @@ export function MessageRow(props: {
   );
   const isUser = props.message.role === "user";
   const isCompaction = isCompactionMessage(props.message);
+  // The daemon can publish partial text before attaching a completion status.
+  const isStreaming =
+    props.message.status === "streaming" ||
+    (props.message.role === "assistant" &&
+      props.message.status === undefined &&
+      props.activeRunId !== undefined &&
+      props.message.runId === props.activeRunId);
   const visibleParts = filterTodoToolParts(props.message.parts).filter(
     (part) =>
       !(
@@ -123,7 +131,7 @@ export function MessageRow(props: {
             >
               {index === firstText ? props.beforeText : null}
               <MessagePart
-                isStreaming={props.message.status === "streaming"}
+                isStreaming={isStreaming}
                 rich={props.message.role === "assistant" && !isCompaction}
                 part={entry.part}
                 hidden={

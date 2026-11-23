@@ -168,6 +168,28 @@ function readAt(stream: HTMLElement, top: number): void {
 }
 
 describe("block-level reading position (streaming Stage 4)", () => {
+  it("keeps settled Markdown nodes while the active daemon message has no status", () => {
+    const initial = answer(paragraphs(8), undefined);
+    const message = { ...initial, runId: "run" };
+    const h = harness({
+      messages: [message],
+      activeRun: {
+        id: "run",
+        sessionId: "session",
+        startedAt: initial.createdAt,
+        updatedAt: initial.createdAt,
+        status: { kind: "running", runId: "run" },
+      },
+      isRunning: true,
+    });
+    const settledBlock = h.block(0);
+    h.render({
+      messages: [{ ...answer(paragraphs(10), undefined), runId: "run" }],
+    });
+    expect(h.block(0)).toBe(settledBlock);
+    expect(h.block(9).textContent).toBe("段落 9");
+  });
+
   it("B-9: keeps the block being read still when a block above grows or shrinks", () => {
     const readingPosition: ConversationReadingPosition = {
       top: 0,

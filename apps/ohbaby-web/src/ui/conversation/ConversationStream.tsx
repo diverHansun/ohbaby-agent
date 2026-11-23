@@ -976,6 +976,7 @@ export function ConversationStream(props: {
                 ) : (
                   <MessageRow
                     message={item.message}
+                    activeRunId={activeRunId}
                     steerState={
                       props.unconsumedSteers?.find(
                         (input) => input.messageId === item.message.id,
