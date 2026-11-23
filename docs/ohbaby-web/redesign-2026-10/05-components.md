@@ -82,7 +82,7 @@
 - **Purpose**：在侧栏表示一个会话，并作为打开和菜单的入口。
 - **Use when**：侧栏会话树、Pinned 区。
 - **Do not use when**：搜索结果（结构不同，由 `SidebarSearch` 自己渲染）。
-- **Anatomy**：选中竖条 / 标题 / 行尾区域（awaiting 点、转圈或时间；hover 时换成归档和菜单按钮）。
+- **Anatomy**：选中竖条 / 状态位（running 点阵或 moving 转圈）/ 标题 / 行尾区域（awaiting 点或时间；hover 时换成归档和菜单按钮）。
 - **States**：default、hover、selected、running、awaiting、menu-open、moving。
 - **API**：
   - `session: SidebarSessionItem`（06 §2 的 ViewModel）
