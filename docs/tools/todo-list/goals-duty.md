@@ -112,7 +112,7 @@ Web/TUI 不扫描 transcript、tool parts 或本地缓存来重建 Todo。
 | session/message | 恢复来源 | 保存底层成功/失败工具事务 |
 | UI runtime/state | 投影方 | 维护 snapshot、发布事件、统一生命周期可见性 |
 | ohbaby-sdk | 契约 | 定义 Todo snapshot/event 类型 |
-| ohbaby-web | 消费方 | OpenCode 风格 TodoDock，全量最多 10 项、限高滚动 |
+| ohbaby-web | 消费方 | 输入框上方的悬浮玻璃 TodoDock，全量最多 10 项、限高滚动；进行中用淡蓝 spinner，折叠时显示 `+N` |
 | ohbaby-cli | 消费方 | Kimi 风格 TodoPanel，紧凑 5 项、Ctrl+T 展开 |
 | goals | 平行模块 | 提供 run owner + goalId 供 adapter 选择内部 scope；不读取 Todo 内容、不把 Todo 变为 Goal 状态权威 |
 | system-prompt | 使用策略 | 在 primary base 定义 Todo 触发、更新与生命周期 |

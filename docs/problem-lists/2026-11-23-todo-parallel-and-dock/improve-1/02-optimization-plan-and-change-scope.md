@@ -133,8 +133,7 @@ function publishGoalUpdated(
 --progress: #2a78d6;
 --progress-track: rgba(42, 120, 214, 0.22);
 --shadow-dock:
-  0 0 0 0.5px rgba(0, 0, 0, 0.09), 0 1px 2px rgba(0, 0, 0, 0.04),
-  0 14px 34px -18px rgba(0, 0, 0, 0.24);
+  0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 34px -18px rgba(0, 0, 0, 0.24);
 ```
 
 修改 `apps/ohbaby-web/src/ui/session/session.css`：
@@ -142,7 +141,8 @@ function publishGoalUpdated(
 | 选择器 | 目标样式 |
 |---|---|
 | `.ohb-main-body.has-todos .ohb-composer:not(.ohb-composer-hero)` | `background: linear-gradient(to top, var(--bg) 52px, transparent 132px)` |
-| `.ohb-todo-dock` | `--bg-glass`、`--glass-blur`（含 `-webkit-` 前缀）、无边框、`--radius-xl`、`--shadow-dock`、`margin: 0 auto 8px`、`padding: 9px 10px 8px`、`width: calc(100% - 20px)`、`max-width: calc(var(--content-width) - 20px)` |
+| `.ohb-todo-dock` | `--bg-glass`、`--glass-blur`（含 `-webkit-` 前缀）、无边框、`--radius-xl`、`--shadow-dock`、`outline: 0.5px solid var(--border-strong)`、`margin: 0 auto 8px`、`padding: 9px 10px 8px`、`width: 100%`、`max-width: var(--content-width)`（与输入框卡片和消息栏同宽） |
+| `.ohb-todo-dock::after` | 底色条，从面板下圆角到卡片上圆角（`top: calc(100% - var(--radius-xl))`，高 `radius-xl + 8px + radius-2xl`，`z-index: -1`），盖住缝隙和圆角缺口 |
 | `.ohb-todo-item` | `gap: 9px`、`padding: 3px 4px`，保持 `align-items: flex-start`，长文本换行时图标对齐首行 |
 | `.ohb-todo-marker` | `display: grid`、`place-items: center`、`width: 14px`、`height: 1.45em`，移除等宽字体 |
 | `.ohb-todo-marker .ohb-spinner` | 轨道 `--progress-track`，转动的弧 `--progress`；转速和减弱动效规则沿用共享 `.ohb-spinner` |
@@ -155,11 +155,16 @@ function publishGoalUpdated(
 | `.ohb-todo-more` | `flex: none`，颜色 `--text-muted`，普通字重 |
 | `.ohb-todo-progress`、`.ohb-todo-chevron` | 颜色改为 `--text-muted` |
 | `.ohb-main-body.has-todos :is(.ohb-prompt-queue, .ohb-goal-strip, .ohb-steer-recovery)` | 背景改为 `--bg-glass`，加 `--glass-blur`（含 `-webkit-` 前缀），避免消息文字从这些浅色条背后透出 |
-| `.ohb-main-body.has-todos .ohb-stream` | 底部留白从 350px / 370px 调整为 360px / 380px，保留 `--steer-recovery-space` |
+| `.ohb-main-body.has-todos .ohb-stream` | 底部留白从 350px / 370px 调整为 380px / 400px，保留 `--steer-recovery-space` |
 
 渐变固定在输入框下方，不增加 JS 测量。输入框本身已经是玻璃卡片，变高时仍能保持可读。如果浏览器验收发现文字穿帮，只调整渐变的两个像素值。
 
 Goal 状态条会多占约 18px，这是现有留白的缺口。B5 要在 Goal 状态条和排队消息都显示时验收；如果最后一条消息被挡住，把留白调整为 380px / 400px。
+
+**实施时的调整（2026-11-23 浏览器验收）**：
+
+- 面板按原方案比卡片窄 20px 时，滚到面板后面的消息会从两侧露出半截字母，面板和卡片之间的 8px 缝里也能看到文字。改为与卡片同宽，并在缝隙和圆角处垫一条底色。底色条会盖住阴影描边的底部，所以细描边改用 `outline`（outline 画在最上层）。
+- 实测 Goal 状态条高约 41px，留白已调整为 380px / 400px，只有 Goal 状态条时最后一条消息离面板约 16px。再叠加排队消息（约 64px）时仍会挡住最后一两行。这个问题在没有 todo 的普通聊天里同样存在（固定 144px 留白），根治需要按输入区实际高度设置留白，不在本轮处理。
 
 #### 测试和文档
 
