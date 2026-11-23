@@ -118,7 +118,7 @@ function approvals(): {
   let response: ApprovalResponse = "reject";
   bus.subscribe(PermissionEvent.Updated, ({ info }) => {
     requests.push(info);
-    if (response === "cancel") manager.cancelPending(info.sessionId);
+    if (response === "cancel") manager.revokeBySession(info.sessionId, "test");
     else if (response)
       manager.respond(info.sessionId, info.id, { type: response });
   });

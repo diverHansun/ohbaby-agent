@@ -1,133 +1,135 @@
-/* Approval panel (03 §4.6): floats at the bottom of the message area, about
-   560px wide, no page scrim. Collapsed it shrinks to its title row. */
+/* Approval card (03 §4.6): takes the composer's place and lines up with it. A
+   small label line, the question in bold, the command as plain coloured mono
+   text (no inner box), then the actions. No header or footer bars, so nothing
+   reads as a card inside a card. */
 .ohb-approval-layer {
   bottom: 16px;
   display: flex;
   justify-content: center;
-  left: 16px;
+  left: 24px;
   pointer-events: none;
   position: absolute;
-  right: 16px;
+  right: 24px;
   z-index: 18;
 }
 
 .ohb-approval-panel {
   animation: ohb-slide-up var(--duration) var(--ease);
   background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-menu);
-  display: flex;
-  flex-direction: column;
+  box-shadow: var(--shadow-card);
   max-height: calc(100dvh - 120px);
-  overflow: hidden;
+  padding: 12px 14px 12px 18px;
   pointer-events: auto;
   width: min(var(--content-width), 100%);
 }
 
-/* Header (after pi-web's request dialog): a status line, then the title. */
-.ohb-approval-header {
-  align-items: flex-start;
-  display: flex;
-  gap: 6px;
-  padding: 14px 10px 10px 18px;
-}
-
-.ohb-approval-heading {
-  flex: 1;
-  min-width: 0;
-}
-
-.ohb-approval-source {
+.ohb-approval-kicker {
   align-items: center;
   color: var(--text-dim);
   display: flex;
   font-size: 12px;
   gap: 7px;
-  margin-bottom: 4px;
+  min-height: 24px;
 }
 
-.ohb-approval-heading h2 {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.4;
-  margin: 0;
-  overflow-wrap: anywhere;
+.ohb-approval-kicker svg {
+  flex: none;
 }
 
-/* The backend's reason under a command's question, like Codex's Reason line.
-   It sits below the header so it spans the card, not the column beside the
-   pager, and outside the scrolling body so it is never clipped. */
-.ohb-approval-reason {
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.45;
-  margin: -6px 0 10px;
-  overflow-wrap: anywhere;
-  padding: 0 18px;
-}
-
-.ohb-approval-panel.is-collapsed .ohb-approval-header {
-  padding-bottom: 14px;
-}
-
-.ohb-approval-panel.is-collapsed .ohb-approval-heading h2 {
+.ohb-approval-source {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ohb-approval-heading h2:focus {
-  outline: none;
+.ohb-approval-kicker .ohb-icon-button {
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  height: 24px;
+  width: 24px;
 }
 
 .ohb-approval-pager {
   align-items: center;
-  color: var(--text-dim);
   display: flex;
-  font-size: 12px;
+  flex: none;
   font-variant-numeric: tabular-nums;
-  gap: 2px;
 }
 
-.ohb-approval-body {
-  min-height: 0;
-  overflow: auto;
-  padding: 0 18px 14px;
+.ohb-approval-panel h2 {
+  font-size: 14px;
+  font-weight: 580;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  margin: 4px 0 6px;
+  overflow-wrap: anywhere;
 }
 
-.ohb-approval-detail {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+.ohb-approval-panel.is-collapsed h2 {
+  margin-bottom: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-approval-panel:focus,
+.ohb-approval-panel h2:focus {
+  outline: none;
+}
+
+/* Shell colours are for reading only; the text is the command verbatim. */
+.ohb-approval-command {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.6;
   margin: 0;
-  max-height: 200px;
+  max-height: 96px;
   overflow: auto;
   overflow-wrap: anywhere;
-  padding: 10px 12px;
   white-space: pre-wrap;
 }
 
-/* A shell command after a dim prompt; wrapped lines hang under the command. */
-.ohb-approval-command {
-  display: flex;
-  gap: 8px;
+/* Always visible when it overflows: the rest of a command must not look absent. */
+.ohb-approval-command::-webkit-scrollbar {
+  width: 6px;
 }
 
-.ohb-approval-command > span {
-  color: var(--text-dim);
-  flex: none;
-  user-select: none;
+.ohb-approval-command::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
 }
 
-.ohb-approval-command > code {
+.ohb-approval-command code {
   font: inherit;
-  min-width: 0;
+}
+
+.ohb-approval-detail {
+  color: var(--text-muted);
+}
+
+.ohb-sh-command {
+  color: var(--syntax-command);
+}
+
+.ohb-sh-string {
+  color: var(--syntax-string);
+}
+
+.ohb-sh-variable {
+  color: var(--syntax-variable);
+}
+
+.ohb-sh-flag {
+  color: var(--text-muted);
+}
+
+.ohb-sh-operator {
+  color: var(--text-dim);
 }
 
 .ohb-approval-status {
@@ -136,7 +138,7 @@
   display: flex;
   font-size: 12px;
   gap: 8px;
-  padding: 0 18px 12px;
+  margin-top: 10px;
 }
 
 .ohb-approval-status button,
@@ -150,109 +152,124 @@
   text-decoration: underline;
 }
 
-/* Footer bar: Stop on the left, choices on the right, primary last. */
 .ohb-permission-actions {
   align-items: center;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
   display: flex;
-  gap: 8px;
-  padding: 10px 12px 10px 14px;
-}
-
-.ohb-permission-choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   justify-content: flex-end;
-  margin-left: auto;
+  margin-top: 12px;
 }
 
 .ohb-perm-btn {
   align-items: center;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--radius-md);
   display: inline-flex;
-  font-size: 13px;
-  font-weight: 500;
-  gap: 7px;
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 520;
+  gap: 6px;
+  height: 28px;
   justify-content: center;
-  letter-spacing: -0.01em;
-  min-height: 32px;
-  padding: 0 14px;
+  padding: 0 11px;
   transition:
     background var(--duration-fast) var(--ease),
-    border-color var(--duration-fast) var(--ease);
+    color var(--duration-fast) var(--ease);
+  white-space: nowrap;
 }
 
-/* Shortcut hint inside a button; tinted from the button's own ink. */
+.ohb-perm-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .ohb-perm-kbd {
-  background: color-mix(in srgb, currentColor 14%, transparent);
-  border-radius: var(--radius-xs);
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  opacity: 0.85;
-  padding: 3px 5px;
-}
-
-.ohb-perm-allow-primary {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  order: 2;
-}
-
-.ohb-perm-allow-primary:not(:disabled):hover {
-  background: var(--accent-hover);
-}
-
-.ohb-perm-allow-secondary {
-  background: var(--bg-elevated);
-  border-color: var(--border-strong);
-  color: var(--text);
-  order: 1;
+  font-weight: 450;
+  opacity: 0.6;
 }
 
 .ohb-perm-deny {
   background: transparent;
   color: var(--text-muted);
-  order: 0;
 }
 
-.ohb-perm-allow-secondary:not(:disabled):hover,
 .ohb-perm-deny:not(:disabled):hover {
   background: var(--bg-hover);
   color: var(--text);
 }
 
-.ohb-perm-abort {
-  background: transparent;
-  border-color: var(--danger-border);
-  color: var(--danger-ink);
+.ohb-perm-allow {
+  background: var(--accent);
+  color: var(--accent-contrast);
 }
 
-.ohb-perm-abort:not(:disabled):hover {
-  background: var(--danger-soft);
+.ohb-perm-allow:not(:disabled):hover {
+  background: var(--accent-hover);
 }
 
-/* Stopping is a quiet text action here; the black Stop lives in the composer. */
-.ohb-approval-stop {
-  align-items: center;
+.ohb-perm-allow .ohb-perm-kbd {
+  opacity: 0.72;
+}
+
+/* Allow once with a chevron for the other allow choices, which open above. */
+.ohb-perm-split {
+  display: inline-flex;
+  position: relative;
+}
+
+.ohb-perm-split.has-menu > .ohb-perm-allow:first-child {
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  padding-right: 10px;
+}
+
+.ohb-perm-more {
+  border-left: 1px solid
+    color-mix(in srgb, var(--accent-contrast) 18%, transparent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: 0 7px;
+}
+
+.ohb-perm-menu {
+  animation: ohb-fade var(--duration-fast) var(--ease);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  bottom: calc(100% + 6px);
+  box-shadow: var(--shadow-menu);
+  display: flex;
+  flex-direction: column;
+  min-width: 236px;
+  padding: 5px;
+  position: absolute;
+  right: 0;
+  z-index: 5;
+}
+
+.ohb-perm-menu button {
   background: transparent;
   border: 0;
   border-radius: var(--radius-md);
-  color: var(--text-muted);
-  display: inline-flex;
+  color: var(--text);
+  display: block;
   font-size: 13px;
-  gap: 7px;
-  min-height: 32px;
-  padding: 0 10px;
+  padding: 7px 10px;
+  text-align: left;
+  width: 100%;
 }
 
-.ohb-approval-stop:not(:disabled):hover {
+.ohb-perm-menu small {
+  color: var(--text-dim);
+  display: block;
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.ohb-perm-menu button:hover,
+.ohb-perm-menu button:focus-visible {
   background: var(--bg-hover);
-  color: var(--text);
 }
 
 .ohb-permission-sync {
@@ -275,14 +292,23 @@
   padding-bottom: var(--approval-space, 176px);
 }
 
-@media (max-width: 639px) {
+/* Same breakpoint and gutter as the composer it replaces. */
+@media (max-width: 720px) {
   .ohb-approval-layer {
-    bottom: 10px;
-    left: 10px;
-    right: 10px;
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+  }
+}
+
+@media (max-width: 639px) {
+  .ohb-perm-btn {
+    font-size: 15px;
+    height: auto;
+    min-height: 44px;
   }
 
-  .ohb-perm-btn {
+  .ohb-perm-menu button {
     font-size: 15px;
     min-height: 44px;
   }
@@ -291,9 +317,13 @@
     display: none;
   }
 
+  .ohb-approval-kicker .ohb-icon-button {
+    height: 44px;
+    width: 44px;
+  }
+
   .ohb-approval-status button,
-  .ohb-permission-sync button,
-  .ohb-approval-stop {
+  .ohb-permission-sync button {
     min-height: 44px;
   }
 }

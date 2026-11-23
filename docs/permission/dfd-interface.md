@@ -48,7 +48,6 @@ sequenceDiagram
 | `revokeByRun(runId, reason)`                                | 精确撤销该真实 run 的所有请求；正常 run 终态使用此入口                                                                                                 |
 | `revokeBySession(sessionId, reason)`                        | 匹配实际来源、root 或冻结祖先链，用于来源失效/会话删除                                                                                                 |
 | `clearSession(sessionId)`                                   | 清除该 session 的规则，并按来源链撤销相关请求                                                                                                          |
-| `cancelPending(sessionId)`                                  | 保留的兼容入口，只撤销该实际来源 session；不能替代正常 run 精确清理                                                                                    |
 | `isHealthy(rootSessionId)`                                  | 查询 manager 独立健康状态                                                                                                                              |
 | `freezeRoot(rootSessionId, error)` / `freezeRuntime(error)` | 严重内部故障隔离；结束受影响等待，不依赖坏投影                                                                                                         |
 | `dispose()`                                                 | 禁止新准入并撤销当前 manager 的全部 pending                                                                                                            |

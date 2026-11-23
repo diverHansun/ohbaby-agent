@@ -25,7 +25,7 @@ export interface PermissionDialogProps {
 /** Fixed chrome and a shared reading window keep every original description reachable. */
 export function PermissionDialog({
   client,
-  request: original,
+  request,
   ready,
   context,
   onResync,
@@ -37,12 +37,6 @@ export function PermissionDialog({
   const theme = useTheme();
   const layout = useTuiLayout();
   const width = Math.max(1, layout.contentWidth);
-  const request = {
-    ...original,
-    choices: original.choices.filter(
-      (c) => c.id !== "cancel" && c.intent !== "abort",
-    ),
-  };
   const initial = (): string | undefined =>
     (
       request.choices.find((c) => c.intent === "allow") ??

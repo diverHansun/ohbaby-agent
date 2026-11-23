@@ -118,6 +118,102 @@ it("allows an explicit retry after response failure", async () => {
   }
 });
 
+it("pages between requests and opens other allow choices above the primary", () => {
+  const element = document.createElement("div");
+  document.body.append(element);
+  const root = createRoot(element);
+  const onRespond = vi.fn(() => new Promise<boolean>(() => undefined));
+  const choices = [
+    { id: "allow_once", intent: "allow", label: "Allow once" },
+    { id: "allow_always", intent: "allow", label: "Always allow" },
+    { id: "reject", intent: "deny", label: "Reject" },
+  ] as const;
+  const first = { ...request, choices };
+  try {
+    act(() => {
+      root.render(
+        <ApprovalPanel
+          disabled={false}
+          syncing={false}
+          permissions={[first, { ...first, id: "two" }]}
+          onRetry={() => undefined}
+          onRespond={onRespond}
+        />,
+      );
+    });
+    expect(element.textContent).toContain("1 / 2");
+    // Always allow is not a button of its own; it waits behind the chevron.
+    expect(element.textContent).not.toContain("Always allow");
+    const more = element.querySelector<HTMLButtonElement>(
+      '[aria-label="More approval options"]',
+    );
+    act(() => {
+      more?.click();
+    });
+    expect(more?.getAttribute("aria-expanded")).toBe("true");
+    // Esc closes the menu instead of rejecting the request.
+    act(() => {
+      element
+        .querySelector('[role="menuitem"]')
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }),
+        );
+    });
+    expect(element.querySelector('[role="menu"]')).toBeNull();
+    expect(onRespond).not.toHaveBeenCalled();
+    act(() => {
+      more?.click();
+    });
+    act(() => {
+      element.querySelector<HTMLButtonElement>('[role="menuitem"]')?.click();
+    });
+    expect(onRespond).toHaveBeenLastCalledWith(first, choices[1]);
+    expect(element.querySelector('[role="menu"]')).toBeNull();
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    element.remove();
+  }
+});
+
+it.each([
+  ["stays in another chat's input", false],
+  ["moves from the composer the card replaces", true],
+])("focus %s", (_name, hiddenComposer) => {
+  const element = document.createElement("div");
+  const wrapper = document.createElement("div");
+  const textarea = document.createElement("textarea");
+  wrapper.append(textarea);
+  document.body.append(wrapper, element);
+  const root = createRoot(element);
+  try {
+    textarea.value = "wait, use the staging bucket";
+    textarea.focus();
+    if (hiddenComposer) wrapper.setAttribute("inert", "");
+    act(() => {
+      root.render(
+        <ApprovalPanel
+          disabled={false}
+          syncing={false}
+          permissions={[request]}
+          onRetry={() => undefined}
+          onRespond={() => Promise.resolve(true)}
+        />,
+      );
+    });
+    expect(document.activeElement).toBe(
+      hiddenComposer ? element.querySelector("h2") : textarea,
+    );
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    element.remove();
+    wrapper.remove();
+  }
+});
+
 it("collapses to its title row and expands back without losing the request", () => {
   const element = document.createElement("div");
   document.body.append(element);
@@ -136,7 +232,9 @@ it("collapses to its title row and expands back without losing the request", () 
     });
     const dialog = element.querySelector('[role="dialog"]');
     expect(dialog?.getAttribute("aria-modal")).toBe("false");
-    expect(element.textContent).toContain("1 of 2");
+    // A click on the card's text keeps focus inside, so its shortcuts still work.
+    expect(dialog?.getAttribute("tabindex")).toBe("-1");
+    expect(element.textContent).toContain("1 / 2");
     act(() => {
       element
         .querySelector<HTMLButtonElement>('[aria-label="Collapse approval"]')
@@ -196,17 +294,23 @@ it("asks about a shell command, shows it verbatim, and answers from the keyboard
     });
   };
   try {
+    render([{ ...shell, commandDescription: "Show working tree status" }]);
+    expect(element.querySelector("h2")?.textContent).toBe(
+      "Show working tree status",
+    );
     render([shell]);
     expect(element.querySelector("h2")?.textContent).toBe("Run this command?");
-    expect(element.querySelector(".ohb-approval-reason")?.textContent).toBe(
-      shell.title,
-    );
+    // The policy reason is for the log, not the card.
+    expect(element.textContent).not.toContain(shell.title);
     expect(
       element.querySelector(".ohb-approval-command code")?.textContent,
     ).toBe("git status");
     expect(element.textContent).not.toContain("bash(");
     // Plain Enter on the focused title must not approve.
     press({ key: "Enter" });
+    // Neither must a key that is still held from the previous request.
+    press({ key: "Escape", repeat: true });
+    press({ key: "Enter", metaKey: true, repeat: true });
     expect(onRespond).not.toHaveBeenCalled();
     press({ key: "Escape" });
     expect(onRespond).toHaveBeenLastCalledWith(shell, shell.choices[1]);
@@ -216,6 +320,42 @@ it("asks about a shell command, shows it verbatim, and answers from the keyboard
       { ...shell, id: "two" },
       shell.choices[0],
     );
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    element.remove();
+  }
+});
+
+it("names only whether the main agent or a subagent asks", () => {
+  const element = document.createElement("div");
+  document.body.append(element);
+  const root = createRoot(element);
+  const render = (permission: UiPermissionRequest): string => {
+    act(() => {
+      root.render(
+        <ApprovalPanel
+          disabled={false}
+          syncing={false}
+          permissions={[permission]}
+          onRetry={() => undefined}
+          onRespond={() => Promise.resolve(true)}
+        />,
+      );
+    });
+    return element.querySelector(".ohb-approval-kicker")?.textContent ?? "";
+  };
+  try {
+    expect(render(request)).toBe("Permission · Main agent");
+    expect(
+      render({
+        ...request,
+        sessionId: "child",
+        sourceLabel: "Explorer",
+        command: "ls",
+      }),
+    ).toBe("Terminal · Sub agent");
   } finally {
     act(() => {
       root.unmount();

@@ -706,7 +706,7 @@ describe("PermissionManager", () => {
         params: { file_path: "docs/blocked.txt" },
       }),
     );
-    permission.cancelPending("session_1");
+    permission.revokeBySession("session_1", "deleted");
     await expect(pending).resolves.toBe("cancel");
 
     await expect(

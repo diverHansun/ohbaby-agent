@@ -102,7 +102,13 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
       ? (snapshotStatus ?? { kind: "idle" })
       : { kind: "idle" };
   const permission = snapshot.permission ?? daemonSnapshot?.permission;
-  const pendingPermissions = snapshot.permissionSync.requests;
+  // After a failed sync these requests cannot be answered. Give the screen back
+  // to the composer so the run can still be stopped.
+  const { status: permissionStatus, requests } = snapshot.permissionSync;
+  const pendingPermissions =
+    permissionStatus === "error" || permissionStatus === "unavailable"
+      ? []
+      : requests;
   const attentionStatus: UiRunStatus = pendingPermissions.length
     ? { kind: "waiting-for-permission", requestId: pendingPermissions[0].id }
     : runStatus;

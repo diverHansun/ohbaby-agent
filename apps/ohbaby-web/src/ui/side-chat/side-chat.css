@@ -17,8 +17,11 @@
   padding: 0 16px;
 }
 
-.ohb-side-chat.has-approval .ohb-stream {
-  padding-bottom: 240px;
+/* The approval takes the input's place in the column; the stream just shrinks. */
+.ohb-side-chat .ohb-approval-layer {
+  flex: none;
+  padding: 0 12px 12px;
+  position: static;
 }
 
 .ohb-side-chat-empty {

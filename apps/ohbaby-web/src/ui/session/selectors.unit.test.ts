@@ -659,6 +659,36 @@ describe("independent session recovery gates", () => {
     }
   });
 
+  it.each(["error", "unavailable"] as const)(
+    "does not hold the screen for approvals after a sync %s",
+    (status) => {
+      const state = store(baseSnapshot());
+      const view = selectViewModel({
+        ...state,
+        permissionSync: {
+          ...state.permissionSync,
+          status,
+          error: "sync failed",
+          requests: [
+            {
+              id: "approval",
+              sessionId: "session_1",
+              rootSessionId: "session_1",
+              runId: "verified-run",
+              messageId: "message",
+              callId: "call",
+              createdAt: 1,
+              title: "Permission required",
+              description: "Read file",
+              choices: [],
+            },
+          ],
+        },
+      });
+      expect(view.pendingPermissions).toEqual([]);
+    },
+  );
+
   it("allows drafting and exact Stop while core baseline is unavailable", () => {
     const state = store(baseSnapshot());
     if (!state.sessionControl) throw new Error("Missing control");

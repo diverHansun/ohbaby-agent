@@ -1,30 +1,17 @@
 import type { UiPermissionChoice, UiPermissionRequest } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  LoaderCircle,
   Maximize2,
   Minus,
-  Square,
+  ShieldQuestion,
   SquareTerminal,
 } from "lucide-react";
 import { IconButton } from "../shared/IconButton.js";
-
-function permissionButtonClass(choice: UiPermissionChoice): string {
-  const base = "ohb-perm-btn";
-  if (choice.id === "allow_always") {
-    return `${base} ohb-perm-allow-secondary`;
-  }
-  if (choice.intent === "allow") {
-    return `${base} ohb-perm-allow-primary`;
-  }
-  if (choice.intent === "abort") {
-    return `${base} ohb-perm-abort`;
-  }
-  return `${base} ohb-perm-deny`;
-}
+import { tokenizeShell } from "./shell-tokens.js";
 
 const MOD_KEY =
   typeof navigator !== "undefined" &&
@@ -33,12 +20,45 @@ const MOD_KEY =
     : "Ctrl";
 
 /**
- * Tool approval floating inside the message area (03 §4.6). Choices come from
- * the backend; several pending requests page with previous/next. The title
- * takes focus rather than the first choice so Enter never approves by accident;
- * from inside the card Esc rejects and ⌘/Ctrl+Enter allows once, like Claude
- * and Codex. A shell command reads as a question over the command itself, with
- * the backend's reason as the subtitle.
+ * True while the user has words in a field that is still on screen, such as
+ * the other chat's input. The composer this card replaces is inert by now.
+ */
+function isTypingElsewhere(): boolean {
+  const active = document.activeElement;
+  return (
+    (active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLInputElement) &&
+    active.value.trim() !== "" &&
+    active.closest("[inert]") === null
+  );
+}
+
+function ShellCommand(props: { readonly command: string }): ReactElement {
+  return (
+    <pre className="ohb-approval-command">
+      <code>
+        {tokenizeShell(props.command).map((token, index) =>
+          token.kind === "text" ? (
+            token.text
+          ) : (
+            <span className={`ohb-sh-${token.kind}`} key={index}>
+              {token.text}
+            </span>
+          ),
+        )}
+      </code>
+    </pre>
+  );
+}
+
+/**
+ * Tool approval in the composer's place (03 §4.6): the composer is hidden with
+ * its draft kept, so nothing can be sent while a request waits. The card only
+ * answers the request; stopping the run stays with the composer. Choices come
+ * from the backend; several pending requests page with previous/next. The
+ * title takes focus so Enter never approves by accident; inside the card Esc
+ * rejects and ⌘/Ctrl+Enter allows once, like Claude and Codex. Other allow
+ * choices (Always allow) open above the primary button.
  */
 export function ApprovalPanel(props: {
   readonly disabled: boolean;
@@ -49,27 +69,38 @@ export function ApprovalPanel(props: {
     request: UiPermissionRequest,
     choice: UiPermissionChoice,
   ) => Promise<boolean>;
-  readonly onCancel?: () => void;
-  readonly canCancel?: boolean;
-  readonly cancelLabel?: string;
   readonly permissions: readonly UiPermissionRequest[];
 }): ReactElement | null {
+  const titleId = useId();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const selectedIndex = Math.max(
     0,
     props.permissions.findIndex((request) => request.id === selectedId),
   );
   const request = props.permissions.at(selectedIndex);
   const heading = useRef<HTMLHeadingElement>(null);
+  const menu = useRef<HTMLSpanElement>(null);
   const pending = useRef(new Set<string>());
   const [, update] = useState(0);
   useLayoutEffect(() => {
     for (const id of pending.current)
       if (!props.permissions.some((item) => item.id === id))
         pending.current.delete(id);
-    heading.current?.focus({ preventScroll: true });
+    setMenuOpen(false);
+    if (!isTypingElsewhere()) heading.current?.focus({ preventScroll: true });
   }, [request?.id]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: PointerEvent): void => {
+      if (!menu.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return (): void => {
+      document.removeEventListener("pointerdown", close);
+    };
+  }, [menuOpen]);
   const responding = request ? pending.current.has(request.id) : false;
   if (!request) {
     return props.error ? (
@@ -83,14 +114,17 @@ export function ApprovalPanel(props: {
   }
   const multiple = props.permissions.length > 1;
   const { command } = request;
-  const choices = request.choices.filter(
-    (choice) => choice.id !== "cancel" && choice.intent !== "abort",
-  );
-  const allowOnce = choices.find((choice) => choice.id === "allow_once");
-  const reject = choices.find((choice) => choice.intent === "deny");
+  const allows = request.choices.filter((choice) => choice.intent === "allow");
+  const primary =
+    allows.find((choice) => choice.id === "allow_once") ?? allows.at(0);
+  const extras = allows.filter((choice) => choice !== primary);
+  const denies = request.choices.filter((choice) => choice.intent === "deny");
+  const reject = denies.at(0);
+  const blocked = props.disabled || responding;
   const respond = (choice: UiPermissionChoice): void => {
     if (pending.current.has(request.id) || props.disabled) return;
     pending.current.add(request.id);
+    setMenuOpen(false);
     update((value) => value + 1);
     const settle = (): void => {
       pending.current.delete(request.id);
@@ -100,26 +134,32 @@ export function ApprovalPanel(props: {
       if (!success) settle();
     }, settle);
   };
-  const shortcut = (choice: UiPermissionChoice): string | undefined =>
-    choice === reject
-      ? "Esc"
-      : choice === allowOnce
-        ? `${MOD_KEY} ↵`
-        : undefined;
+  // Only whether a subagent asks; its name and role stay in the subagent view.
+  const fromRoot = request.sessionId === request.rootSessionId;
+  const source = fromRoot ? "Main agent" : "Sub agent";
   return (
     <div className="ohb-approval-layer">
       <section
         className={`ohb-approval-panel${collapsed ? " is-collapsed" : ""}`}
         role="dialog"
         aria-modal="false"
-        aria-labelledby="ohb-approval-title"
+        aria-labelledby={titleId}
+        // Clicking the command text must not drop the card's shortcuts.
+        tabIndex={-1}
         onKeyDown={(event) => {
           if (collapsed || event.defaultPrevented) return;
+          if (menuOpen && event.key === "Escape") {
+            event.preventDefault();
+            setMenuOpen(false);
+            return;
+          }
+          // Holding a key must not answer the next request as well.
+          if (event.repeat) return;
           const choice =
             event.key === "Escape"
               ? reject
               : event.key === "Enter" && (event.metaKey || event.ctrlKey)
-                ? allowOnce
+                ? primary
                 : undefined;
           if (!choice) return;
           event.preventDefault();
@@ -127,19 +167,15 @@ export function ApprovalPanel(props: {
           respond(choice);
         }}
       >
-        <header className="ohb-approval-header">
-          <div className="ohb-approval-heading">
-            <span className="ohb-approval-source">
-              {command ? <SquareTerminal aria-hidden="true" size={13} /> : null}
-              Needs approval ·{" "}
-              {request.sessionId === request.rootSessionId
-                ? "Main agent"
-                : (request.sourceLabel ?? request.sessionId)}
-            </span>
-            <h2 id="ohb-approval-title" ref={heading} tabIndex={-1}>
-              {command ? "Run this command?" : request.title}
-            </h2>
-          </div>
+        <header className="ohb-approval-kicker">
+          {command ? (
+            <SquareTerminal aria-hidden="true" size={14} />
+          ) : (
+            <ShieldQuestion aria-hidden="true" size={14} />
+          )}
+          <span className="ohb-approval-source">
+            {command ? "Terminal" : "Permission"} · {source}
+          </span>
           {multiple ? (
             <nav className="ohb-approval-pager" aria-label="Pending approvals">
               <IconButton
@@ -149,10 +185,10 @@ export function ApprovalPanel(props: {
                   setSelectedId(props.permissions[selectedIndex - 1].id);
                 }}
               >
-                <ChevronLeft aria-hidden="true" size={15} />
+                <ChevronLeft aria-hidden="true" size={14} />
               </IconButton>
               <span>
-                {selectedIndex + 1} of {props.permissions.length}
+                {selectedIndex + 1} / {props.permissions.length}
               </span>
               <IconButton
                 label="Next approval"
@@ -163,7 +199,7 @@ export function ApprovalPanel(props: {
                   setSelectedId(props.permissions[selectedIndex + 1].id);
                 }}
               >
-                <ChevronRight aria-hidden="true" size={15} />
+                <ChevronRight aria-hidden="true" size={14} />
               </IconButton>
             </nav>
           ) : null}
@@ -171,32 +207,30 @@ export function ApprovalPanel(props: {
             label={collapsed ? "Expand approval" : "Collapse approval"}
             aria-expanded={!collapsed}
             onClick={() => {
+              setMenuOpen(false);
               setCollapsed((value) => !value);
             }}
           >
             {collapsed ? (
-              <Maximize2 aria-hidden="true" size={13} />
+              <Maximize2 aria-hidden="true" size={12} />
             ) : (
-              <Minus aria-hidden="true" size={15} />
+              <Minus aria-hidden="true" size={14} />
             )}
           </IconButton>
         </header>
+        <h2 id={titleId} ref={heading} tabIndex={-1}>
+          {command
+            ? (request.commandDescription ?? "Run this command?")
+            : request.title}
+        </h2>
         {collapsed ? null : (
           <>
             {command ? (
-              <>
-                <p className="ohb-approval-reason">{request.title}</p>
-                <div className="ohb-approval-body">
-                  <pre className="ohb-approval-detail ohb-approval-command">
-                    <span aria-hidden="true">$</span>
-                    <code>{command}</code>
-                  </pre>
-                </div>
-              </>
+              <ShellCommand command={command} />
             ) : request.description ? (
-              <div className="ohb-approval-body">
-                <pre className="ohb-approval-detail">{request.description}</pre>
-              </div>
+              <pre className="ohb-approval-command ohb-approval-detail">
+                {request.description}
+              </pre>
             ) : null}
             {props.syncing || props.error ? (
               <div className="ohb-approval-status" role="status">
@@ -209,57 +243,86 @@ export function ApprovalPanel(props: {
               </div>
             ) : null}
             <footer className="ohb-permission-actions">
-              {props.onCancel ? (
+              {denies.map((choice) => (
                 <button
+                  className="ohb-perm-btn ohb-perm-deny"
+                  disabled={blocked}
+                  key={`${request.id}:${choice.id}`}
+                  onClick={(event) => {
+                    if (event.detail > 1) return;
+                    respond(choice);
+                  }}
                   type="button"
-                  className="ohb-approval-stop"
-                  aria-label={props.cancelLabel ?? "Stop run"}
-                  title={props.cancelLabel ?? "Stop the whole run"}
-                  aria-busy={props.cancelLabel !== undefined}
-                  disabled={!props.canCancel || props.cancelLabel !== undefined}
-                  onClick={props.onCancel}
                 >
-                  {props.cancelLabel ? (
-                    <LoaderCircle
-                      aria-hidden="true"
-                      className="ohb-stop-pending"
-                      size={13}
-                    />
-                  ) : (
-                    <Square aria-hidden="true" size={11} fill="currentColor" />
-                  )}
-                  <span>Stop</span>
+                  {choice.label}
+                  {choice === reject ? (
+                    <kbd className="ohb-perm-kbd" aria-hidden="true">
+                      Esc
+                    </kbd>
+                  ) : null}
                 </button>
-              ) : null}
-              <span className="ohb-permission-choices">
-                {choices.map((choice) => {
-                  const keys = shortcut(choice);
-                  return (
-                    <button
-                      className={permissionButtonClass(choice)}
-                      disabled={props.disabled || responding}
-                      key={`${request.id}:${choice.id}`}
-                      onClick={(event) => {
-                        if (event.detail > 1) return;
-                        respond(choice);
-                      }}
-                      title={
-                        choice.id === "allow_always"
-                          ? "Don't ask again for matching requests in this session"
-                          : undefined
-                      }
-                      type="button"
-                    >
-                      {choice.label}
-                      {keys ? (
-                        <kbd className="ohb-perm-kbd" aria-hidden="true">
-                          {keys}
-                        </kbd>
+              ))}
+              {primary ? (
+                <span
+                  className={`ohb-perm-split${extras.length > 0 ? " has-menu" : ""}`}
+                  ref={menu}
+                >
+                  <button
+                    className="ohb-perm-btn ohb-perm-allow"
+                    disabled={blocked}
+                    key={`${request.id}:${primary.id}`}
+                    onClick={(event) => {
+                      if (event.detail > 1) return;
+                      respond(primary);
+                    }}
+                    type="button"
+                  >
+                    {primary.label}
+                    <kbd className="ohb-perm-kbd" aria-hidden="true">
+                      {MOD_KEY}↵
+                    </kbd>
+                  </button>
+                  {extras.length > 0 ? (
+                    <>
+                      <button
+                        className="ohb-perm-btn ohb-perm-allow ohb-perm-more"
+                        disabled={blocked}
+                        aria-label="More approval options"
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen}
+                        onClick={() => {
+                          setMenuOpen((open) => !open);
+                        }}
+                        type="button"
+                      >
+                        <ChevronDown aria-hidden="true" size={13} />
+                      </button>
+                      {menuOpen ? (
+                        <span className="ohb-perm-menu" role="menu">
+                          {extras.map((choice) => (
+                            <button
+                              key={`${request.id}:${choice.id}`}
+                              role="menuitem"
+                              onClick={() => {
+                                respond(choice);
+                              }}
+                              type="button"
+                            >
+                              <span>{choice.label}</span>
+                              {choice.id === "allow_always" ? (
+                                <small>
+                                  Don&apos;t ask again for matching requests in{" "}
+                                  {fromRoot ? "this session" : "this subagent"}
+                                </small>
+                              ) : null}
+                            </button>
+                          ))}
+                        </span>
                       ) : null}
-                    </button>
-                  );
-                })}
-              </span>
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
             </footer>
           </>
         )}

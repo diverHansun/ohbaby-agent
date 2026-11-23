@@ -4,7 +4,7 @@
 
 ## 输入与显示
 
-props 为 `client`、`request`、`ready`、`context` 和 `onResync`。context 包含 permissionEpoch、rootSessionId 和可选 bindingGeneration。显示 title、简短来源（Main agent 或 sourceLabel）、description，以及 backend 提供的 choices。过滤 cancel/abort，不提供 Cancel run。
+props 为 `client`、`request`、`ready`、`context` 和 `onResync`。context 包含 permissionEpoch、rootSessionId 和可选 bindingGeneration。显示 title、简短来源（Main agent 或 sourceLabel）、description，以及 backend 提供的 choices。后端只提供允许和拒绝，审批框不提供停止运行。
 
 ## 操作
 

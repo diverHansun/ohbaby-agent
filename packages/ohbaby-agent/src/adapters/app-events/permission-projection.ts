@@ -34,6 +34,10 @@ export function toUiPermissionRequest(input: {
   // createInfo stores the tool's own params; the pattern may be a shortened rule.
   const params = info.metadata.params as Record<string, unknown> | undefined;
   const command = info.type === "bash" ? params?.command : undefined;
+  const commandDescription =
+    info.type === "bash" && typeof params?.description === "string"
+      ? params.description.trim()
+      : "";
   return Object.freeze({
     choices: Object.freeze([
       Object.freeze({
@@ -54,6 +58,9 @@ export function toUiPermissionRequest(input: {
     ]),
     description: info.pattern,
     ...(typeof command === "string" ? { command } : {}),
+    ...(typeof command === "string" && commandDescription !== ""
+      ? { commandDescription }
+      : {}),
     id: info.id,
     sessionId: info.sessionId,
     runId: info.runId,

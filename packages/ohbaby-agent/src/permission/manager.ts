@@ -550,9 +550,6 @@ export function createPermissionManager(
         reason,
       );
     },
-    cancelPending: (sessionId): void => {
-      revokeMatching((input) => input.sessionId === sessionId, "cancelled");
-    },
     clearSession(sessionId): void {
       state.clearSession(sessionId);
       revokeMatching(

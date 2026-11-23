@@ -361,9 +361,6 @@ export function SessionScreen({
             client.respondPermission(request.id, { choiceId: choice.id }),
           )
         }
-        onCancel={stopRequest.stop}
-        canCancel={view.composer.canStop}
-        cancelLabel={stopRequest.label}
         permissions={view.pendingPermissions}
       />
       <div className="ohb-banner-stack">

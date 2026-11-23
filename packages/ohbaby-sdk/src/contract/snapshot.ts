@@ -235,13 +235,15 @@ export interface UiPermissionRequest {
   readonly description: string;
   /** The shell command exactly as it will run, when the request is for bash. */
   readonly command?: string;
+  /** What the command does, in the agent's words (bash's description param). */
+  readonly commandDescription?: string;
   readonly choices: readonly UiPermissionChoice[];
 }
 
 export interface UiPermissionChoice {
   readonly id: string;
   readonly label: string;
-  readonly intent: "allow" | "deny" | "abort";
+  readonly intent: "allow" | "deny";
 }
 
 export interface UiPermissionResponse {

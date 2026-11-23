@@ -9,14 +9,14 @@ import {
 } from "react";
 import type { ViewModel } from "./selectors.js";
 
-/** The approval panel; its height reserves space at the bottom of the stream. */
+/** The approval card; its height reserves space at the bottom of the stream. */
 export const APPROVAL_PANEL_SELECTOR = ".ohb-approval-panel";
 
 /**
  * The execution records behind the chat's delegation entries, the approval
- * panel's visibility, and the focus and layout bookkeeping between the
- * conversation and the approval panel. Subagent conversations are read in the
- * right panel (improve-4), so nothing here hides the approval or locks input.
+ * card's visibility, and the focus and layout bookkeeping while the card takes
+ * the composer's place. Subagent conversations are read in the right panel
+ * (improve-4), so nothing here hides the approval.
  */
 export function useSessionInteractions(input: {
   readonly client: UiBackendClient;

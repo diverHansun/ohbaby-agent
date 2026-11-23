@@ -188,7 +188,6 @@ export interface PermissionManager {
   freezeRoot(rootSessionId: string, error: Error): void;
   freezeRuntime(error: Error): void;
   dispose(): void;
-  cancelPending(sessionId: string): void;
   clearSession(sessionId: string): void;
 }
 

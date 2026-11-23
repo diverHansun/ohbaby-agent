@@ -178,7 +178,7 @@ export function SideChatPage(props: {
   const offline = isConnectionAbnormal(view.header.connectionKind);
   const shownError = error ?? (offline ? null : view.error);
   return (
-    <div className={`ohb-side-chat${approving ? " has-approval" : ""}`}>
+    <div className="ohb-side-chat">
       {offline ? (
         <p className="ohb-side-notice" role="status">
           Reconnecting…
@@ -244,9 +244,6 @@ export function SideChatPage(props: {
             return false;
           }
         }}
-        onCancel={stopRequest.stop}
-        canCancel={view.composer.canStop}
-        cancelLabel={stopRequest.label}
         permissions={view.pendingPermissions}
       />
       <div

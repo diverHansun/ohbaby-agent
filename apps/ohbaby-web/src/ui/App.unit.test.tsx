@@ -3751,7 +3751,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const respond = vi.spyOn(fake.client, "respondPermission");
     const app = mountApp(fake.runtime);
-    expect(app.container.textContent).toContain("Researcher");
+    expect(app.container.textContent).toContain("1 / 2");
     expect(permissionAction(app.container, "Allow once").disabled).toBe(false);
     const next = app.container.querySelector<HTMLButtonElement>(
       'button[aria-label="Next approval"]',
@@ -3760,7 +3760,8 @@ describe("OhbabyWebApp slash command interactions", () => {
       next?.click();
       await Promise.resolve();
     });
-    expect(app.container.textContent).toContain("Editor");
+    expect(app.container.textContent).toContain("2 / 2");
+    expect(app.container.textContent).toContain("Edit file?");
     await act(async () => {
       permissionAction(app.container, "Allow once").click();
       await Promise.resolve();
@@ -3788,14 +3789,23 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     expect(permissionAction(app.container, "Allow once").className).toBe(
-      "ohb-perm-btn ohb-perm-allow-primary",
-    );
-    expect(permissionAction(app.container, "Always allow").className).toBe(
-      "ohb-perm-btn ohb-perm-allow-secondary",
+      "ohb-perm-btn ohb-perm-allow",
     );
     expect(permissionAction(app.container, "Reject").className).toBe(
       "ohb-perm-btn ohb-perm-deny",
     );
+    // Always allow is a quiet menu item above Allow once, not a third button.
+    act(() => {
+      app.container
+        .querySelector<HTMLButtonElement>(
+          '[aria-label="More approval options"]',
+        )
+        ?.click();
+    });
+    expect(
+      app.container.querySelector('.ohb-perm-menu [role="menuitem"] span')
+        ?.textContent,
+    ).toBe("Always allow");
     expect(app.container.textContent).not.toContain("Cancel run");
   });
 
@@ -5468,7 +5478,6 @@ function permissionRequest(): UiPermissionRequest {
       { id: "allow_once", intent: "allow", label: "Allow once" },
       { id: "allow_always", intent: "allow", label: "Always allow" },
       { id: "reject", intent: "deny", label: "Reject" },
-      { id: "cancel", intent: "abort", label: "Cancel run" },
     ],
     description: "Run shell command",
     id: "permission_1",
@@ -7289,7 +7298,7 @@ describe("queued edit identity isolation", () => {
   });
 });
 
-it("temporarily hides the mounted composer and todo during root approval, retains Stop, then restores the draft and focus", async () => {
+it("temporarily hides the mounted composer and todo during root approval without a Stop on the card, then restores the draft and focus", async () => {
   const fake = createFakeRuntime({
     snapshot: {
       ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
@@ -7333,15 +7342,9 @@ it("temporarily hides the mounted composer and todo during root approval, retain
   expect(document.activeElement).toBe(
     app.container.querySelector(".ohb-approval-panel h2"),
   );
-  const stop = app.container.querySelector<HTMLButtonElement>(
-    '.ohb-approval-panel [aria-label="Stop run"]',
-  );
-  expect(stop).not.toBeNull();
-  await act(async () => {
-    stop?.click();
-    await Promise.resolve();
-  });
-  expect(fake.abortSession).toHaveBeenCalledWith("session_1", "run_1");
+  expect(
+    app.container.querySelector(".ohb-approval-panel")?.textContent,
+  ).not.toContain("Stop");
   act(() => {
     fake.store.setPermissionSync({
       ...sync,
@@ -7374,6 +7377,46 @@ it("keeps the composer visible for an approval sync error without an actual requ
       .display,
   ).toBe("contents");
   expect(app.container.textContent).toContain("Retry approvals");
+});
+
+it("gives the composer and its Stop back when approval sync fails with a request still pending", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+  });
+  const app = mountApp(fake.runtime);
+  const sync = fake.store.getSnapshot().permissionSync;
+  act(() => {
+    fake.store.setPermissionSync({
+      ...sync,
+      requests: [permissionRequest()],
+      permissionRevision: 1,
+    });
+  });
+  expect(app.container.querySelector(".ohb-approval-panel")).not.toBeNull();
+  act(() => {
+    fake.store.setPermissionSync({
+      ...sync,
+      status: "error",
+      error: "Retry approval sync",
+      requests: [permissionRequest()],
+      permissionRevision: 1,
+    });
+  });
+  expect(app.container.querySelector(".ohb-approval-panel")).toBeNull();
+  expect(
+    app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
+      .display,
+  ).toBe("contents");
+  expect(app.container.textContent).toContain("Retry approvals");
+  const stop = app.container.querySelector<HTMLButtonElement>(
+    '.ohb-root-composer [aria-label="Stop run"]',
+  );
+  expect(stop).not.toBeNull();
+  await act(async () => {
+    stop?.click();
+    await Promise.resolve();
+  });
+  expect(fake.abortSession).toHaveBeenCalledWith("session_1", "run_1");
 });
 
 it("does not restore input focus after the user moved to another control before approval", () => {

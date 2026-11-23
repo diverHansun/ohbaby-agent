@@ -55,6 +55,11 @@
   --progress: #2a78d6;
   --progress-track: rgba(42, 120, 214, 0.22);
 
+  /* Shell syntax, for the command in the approval card */
+  --syntax-command: #2459b8;
+  --syntax-string: #2e7d3c;
+  --syntax-variable: #8b3fae;
+
   /* Brand: the wordmark (D5), the Lychee mark (D26) and the waiting marks */
   --brand-oh: #c9a23f;
   --brand-ba: #c97e92;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UiPermissionEvent } from "ohbaby-sdk";
+import type { UiPermissionEvent, UiPermissionRequest } from "ohbaby-sdk";
 import { createBus } from "../../bus/index.js";
 import {
   createPermissionManager,
@@ -99,6 +99,24 @@ describe("approval projection", () => {
         info: info({ metadata: { params: { command } } }),
       }),
     ).not.toHaveProperty("command");
+  });
+
+  it("passes a bash call's own description through, trimmed, when it has one", () => {
+    const bash = (params: Record<string, unknown>): UiPermissionRequest =>
+      toUiPermissionRequest({
+        info: info({
+          type: "bash",
+          pattern: "bash(git status)",
+          metadata: { params: { command: "git status", ...params } },
+        }),
+      });
+    expect(
+      bash({ description: "  Show working tree status " }).commandDescription,
+    ).toBe("Show working tree status");
+    expect(bash({ description: "   " })).not.toHaveProperty(
+      "commandDescription",
+    );
+    expect(bash({})).not.toHaveProperty("commandDescription");
   });
 
   it("captures immutable per-root baselines synchronously and delivers only after commit", () => {

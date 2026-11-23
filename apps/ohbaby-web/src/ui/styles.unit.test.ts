@@ -188,12 +188,14 @@ describe("web layout styles", () => {
     );
   });
 
-  it("floats the approval panel in the message area and reserves its height", () => {
+  it("draws the approval as one card in the composer's place", () => {
     expectCssRule(".ohb-approval-layer", [
       "pointer-events: none",
       "position: absolute",
     ]);
     expectCssRule(".ohb-approval-panel", [
+      "border: 1px solid var(--border)",
+      "border-radius: var(--radius-xl)",
       "pointer-events: auto",
       "width: min(var(--content-width), 100%)",
     ]);
@@ -201,6 +203,8 @@ describe("web layout styles", () => {
       ".ohb-main-body.has-approval .ohb-root-conversation > .ohb-stream",
       ["padding-bottom: var(--approval-space, 176px)"],
     );
+    expectCssRule(".ohb-perm-allow", ["background: var(--accent)"]);
+    expectCssRule(".ohb-perm-menu", ["bottom: calc(100% + 6px)"]);
   });
 
   it("keeps modal layers fixed above the page", () => {

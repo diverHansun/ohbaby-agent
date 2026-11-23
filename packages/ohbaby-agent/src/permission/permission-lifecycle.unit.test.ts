@@ -206,12 +206,6 @@ describe("permission lifecycle", () => {
       },
     ],
     [
-      "cancel",
-      (manager: PermissionManager): void => {
-        manager.cancelPending("child");
-      },
-    ],
-    [
       "clear",
       (manager: PermissionManager): void => {
         manager.clearSession("child");
