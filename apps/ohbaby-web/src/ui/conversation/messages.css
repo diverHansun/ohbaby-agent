@@ -100,12 +100,6 @@
   margin: -10px 24px 0;
 }
 
-/* Streaming text keeps its own wrap rule until it renders as Markdown. */
-.ohb-streaming-text {
-  overflow-wrap: anywhere;
-}
-
-.ohb-streaming-text,
 .ohb-tool-panel pre {
   font-family: var(--font-mono);
   font-size: 13px;
@@ -121,7 +115,6 @@
   margin: 0;
 }
 
-.ohb-streaming-text,
 .ohb-tool-panel pre {
   overflow-x: auto;
   white-space: pre-wrap;

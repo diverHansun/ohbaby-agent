@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import DOMPurify from "dompurify";
 import { Marked } from "marked";
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MarkdownBlock } from "./MarkdownBlock.js";
+import { MarkdownBlock, StreamingMarkdown } from "./MarkdownBlock.js";
 import { renderMarkdown } from "./markdown-renderer.js";
 
 (
@@ -195,15 +195,26 @@ describe("CJK bold (typography C-1 to C-3)", () => {
       "\n\n",
     );
     for (const text of [dense, spread]) {
-      const time = (run: () => void): number => {
-        run();
+      // The fastest of interleaved runs, so a busy parallel suite does not
+      // decide the result.
+      const once = (run: () => void): number => {
         const start = performance.now();
-        for (let i = 0; i < 3; i++) run();
+        run();
         return performance.now() - start;
       };
-      const ours = time(() => renderMarkdown(text));
-      const base = time(() => plainHtml(text));
-      expect(ours).toBeLessThan(base * 1.2 + 15);
+      let ours = Infinity;
+      let base = Infinity;
+      for (let i = 0; i < 5; i++) {
+        ours = Math.min(
+          ours,
+          once(() => renderMarkdown(text)),
+        );
+        base = Math.min(
+          base,
+          once(() => plainHtml(text)),
+        );
+      }
+      expect(ours).toBeLessThan(base * 1.2 + 5);
     }
   });
 });
@@ -263,5 +274,74 @@ describe("tables (tables U-1 to U-6)", () => {
     const holder = render("<table><tr><td>raw</td></tr></table>");
     expect(holder.querySelector(".ohb-table-scroll")).toBeNull();
     expect(holder.querySelector("td")?.textContent).toBe("raw");
+  });
+});
+
+describe("StreamingMarkdown", () => {
+  const PARAGRAPHS = ["# 标题", "第一段。", "第二段。", "第三段。"];
+
+  function streaming(): {
+    container: HTMLDivElement;
+    show: (text: string) => void;
+  } {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const show = (text: string): void => {
+      act(() => {
+        root.render(
+          <StrictMode>
+            <StreamingMarkdown text={text} />
+          </StrictMode>,
+        );
+      });
+    };
+    return { container, show };
+  }
+
+  it("ends equal to MarkdownBlock and keeps frozen nodes in place", () => {
+    const { container, show } = streaming();
+    const text = PARAGRAPHS.join("\n\n");
+    show(text.slice(0, 20));
+    const heading = container.querySelector("h1");
+    for (let end = 21; end <= text.length; end += 3) show(text.slice(0, end));
+    show(text);
+    // Settled blocks are the same nodes, so a selection in them survives.
+    expect(container.querySelector("h1")).toBe(heading);
+    expect(container.querySelector(".ohb-markdown")?.innerHTML).toBe(
+      renderMarkdown(text),
+    );
+  });
+
+  it("does not append twice under StrictMode or for the same text", () => {
+    const { container, show } = streaming();
+    const text = PARAGRAPHS.join("\n\n");
+    show(text);
+    show(text);
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    expect(container.querySelectorAll("p")).toHaveLength(3);
+  });
+
+  it("starts over when the text is replaced", () => {
+    const { container, show } = streaming();
+    show(PARAGRAPHS.join("\n\n"));
+    show("全新的内容");
+    expect(container.querySelector(".ohb-markdown")?.innerHTML).toBe(
+      renderMarkdown("全新的内容"),
+    );
+  });
+
+  it("copies a finished code block while the text is still growing", async () => {
+    const { container, show } = streaming();
+    show(`${SOURCE}\n\n后面还在输出`);
+    const button = container.querySelector<HTMLButtonElement>(
+      "button[data-code-copy]",
+    );
+    expect(button).not.toBeNull();
+    if (!button) return;
+    await click(button);
+    expect(writeText).toHaveBeenCalledWith(
+      'if (a < b && c > 0) {\n  return "<tag>";\n}',
+    );
   });
 });

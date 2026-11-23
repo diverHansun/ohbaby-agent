@@ -206,7 +206,9 @@ it("retains each logical child's tool expansion and updates the existing streami
   };
   render(next);
   expect(element.querySelector('[data-message-id="stream"]')).toBe(row);
-  expect(row?.textContent).toBe("hello world");
+  expect(row?.querySelector(".ohb-markdown")?.textContent.trim()).toBe(
+    "hello world",
+  );
 });
 
 it("only loads later history after user scrolling", () => {

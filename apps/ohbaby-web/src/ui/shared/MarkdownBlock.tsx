@@ -1,6 +1,8 @@
+import { useLayoutEffect, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { writeClipboard } from "./clipboard.js";
 import { COPY_LABEL, COPY_TOKEN, renderMarkdown } from "./markdown-renderer.js";
+import { createMarkdownStream } from "./markdown-stream.js";
 
 const RESET_MS = 1500;
 
@@ -54,4 +56,41 @@ export function MarkdownBlock(props: { readonly text: string }): ReactElement {
       dangerouslySetInnerHTML={{ __html: renderMarkdown(props.text) }}
     />
   );
+}
+
+/**
+ * Markdown for text still being written. Settled blocks are appended once and
+ * left alone, so a selection in them survives; only the tail is replaced.
+ * The children stay flat under `.ohb-markdown`, as in `MarkdownBlock`, which
+ * takes over once the message completes.
+ */
+export function StreamingMarkdown(props: {
+  readonly text: string;
+}): ReactElement {
+  const container = useRef<HTMLDivElement>(null);
+  const state = useRef({
+    stream: createMarkdownStream(),
+    shown: undefined as string | undefined,
+    frozen: 0,
+  });
+
+  // Layout effect: the conversation's auto-scroll runs right after this and
+  // must see the new height in the same frame.
+  useLayoutEffect(() => {
+    const node = container.current;
+    const current = state.current;
+    // StrictMode runs the effect twice with the same text.
+    if (!node || current.shown === props.text) return;
+    current.shown = props.text;
+    const update = current.stream.update(props.text);
+    if (update.reset) current.frozen = 0;
+    while (node.childNodes.length > current.frozen) node.lastChild?.remove();
+    if (update.frozenHtml) {
+      node.insertAdjacentHTML("beforeend", update.frozenHtml);
+      current.frozen = node.childNodes.length;
+    }
+    node.insertAdjacentHTML("beforeend", update.tailHtml);
+  }, [props.text]);
+
+  return <div ref={container} className="ohb-markdown" onClick={onCodeCopy} />;
 }

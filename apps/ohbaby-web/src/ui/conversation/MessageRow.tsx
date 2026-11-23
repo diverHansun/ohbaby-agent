@@ -3,7 +3,7 @@ import { Fragment, useContext, type ReactElement, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { ConversationPresentation } from "./ConversationPresentation.js";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
-import { MarkdownBlock } from "../shared/MarkdownBlock.js";
+import { MarkdownBlock, StreamingMarkdown } from "../shared/MarkdownBlock.js";
 import { isCompactionMessage } from "./message-text.js";
 import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 import { BackgroundTaskEntry, backgroundJobId } from "./BackgroundTaskEntry.js";
@@ -236,7 +236,7 @@ function MessagePart(props: {
   switch (props.part.type) {
     case "text":
       return props.isStreaming ? (
-        <pre className="ohb-streaming-text">{props.part.text}</pre>
+        <StreamingMarkdown text={props.part.text} />
       ) : (
         <MarkdownBlock text={props.part.text} />
       );
