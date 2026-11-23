@@ -111,12 +111,27 @@ export function startMarkdownReplay(
   const params = new URLSearchParams(location.search);
   const chunk = Math.max(1, Number(params.get("chunk") ?? 12));
   const interval = Math.max(1, Number(params.get("ms") ?? 30));
+  // Reopening the session reinstalls this snapshot; keep it up to date, as
+  // the daemon's would be, so the answer does not start over.
+  const session = snapshot.sessions.find((entry) => entry.id === sessionId) as
+    | { messages: readonly UiMessage[] }
+    | undefined;
+  const sync = (message: UiMessage): void => {
+    if (!session) return;
+    session.messages = session.messages.map((entry) =>
+      entry.id === message.id ? message : entry,
+    );
+  };
   let offset = 0;
   let seq = 2;
   const timer = window.setInterval(() => {
     const delta = MARKDOWN_SAMPLE.slice(offset, offset + chunk);
     offset += chunk;
     if (delta) {
+      sync({
+        ...replay[1],
+        parts: [{ type: "text", text: MARKDOWN_SAMPLE.slice(0, offset) }],
+      });
       store.applyEvent(
         { type: "message.part.delta", sessionId, messageId: "md_a2", delta },
         seq++,
@@ -124,17 +139,12 @@ export function startMarkdownReplay(
       return;
     }
     window.clearInterval(timer);
-    store.applyEvent(
-      {
-        type: "message.updated",
-        sessionId,
-        message: {
-          ...replay[1],
-          status: "completed",
-          parts: [{ type: "text", text: MARKDOWN_SAMPLE }],
-        },
-      },
-      seq++,
-    );
+    const message: UiMessage = {
+      ...replay[1],
+      status: "completed",
+      parts: [{ type: "text", text: MARKDOWN_SAMPLE }],
+    };
+    sync(message);
+    store.applyEvent({ type: "message.updated", sessionId, message }, seq++);
   }, interval);
 }
