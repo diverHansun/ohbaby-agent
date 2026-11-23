@@ -1,9 +1,9 @@
 /**
- * Motion for the conversation's waiting marks. Poses are plain functions of
- * loop progress, sampled into CSS keyframes, so the browser runs the animation
- * on transform and opacity alone. All units live in a 16-unit box.
+ * Motion for the waiting marks. Poses are plain functions of loop progress,
+ * sampled into CSS keyframes, so the browser runs the animation on transform
+ * and opacity alone. All units live in a 16-unit box.
  */
-export type ActivityMotion = "thinking" | "compacting";
+export type ActivityMotion = "thinking" | "compacting" | "running";
 
 export interface ActivityPose {
   readonly x: number;
@@ -26,6 +26,19 @@ const BOX = 16;
 const TAU = Math.PI * 2;
 const TRIANGLE_RADIUS = 4.6;
 const ROW_RADIUS = 5.2;
+const GRID_PITCH = 5.4;
+
+/**
+ * Cells (0-8, left to right, top to bottom) of each running dot, one per beat.
+ * Every hop goes to a neighbouring cell that is free on both beats, and the
+ * routes close into a loop, so the dots wander without ever colliding.
+ */
+const RUNNING_ROUTES: readonly (readonly number[])[] = [
+  [8, 4, 4, 1, 0, 0, 0, 0, 0, 0, 3, 1, 1, 1, 1, 5, 5, 5, 8, 8],
+  [3, 3, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 3, 3, 3, 4, 1, 1, 1],
+  [6, 7, 8, 8, 5, 5, 1, 4, 4, 5, 5, 2, 2, 2, 2, 2, 2, 2, 4, 4],
+  [5, 5, 5, 7, 7, 4, 8, 8, 8, 8, 8, 8, 5, 5, 4, 6, 7, 7, 7, 5],
+];
 
 const clamp = (value: number): number => Math.min(1, Math.max(0, value));
 const span = (value: number, from: number, to: number): number =>
@@ -108,6 +121,28 @@ function compactingPose(progress: number, dot: number): ActivityPose {
   );
 }
 
+const cellX = (cell: number): number => ((cell % 3) - 1) * GRID_PITCH;
+const cellY = (cell: number): number =>
+  (Math.floor(cell / 3) - 1) * GRID_PITCH;
+
+/** Four dots hop around a 3x3 grid, nearly invisible until they land. */
+function runningPose(progress: number, dot: number): ActivityPose {
+  const route = RUNNING_ROUTES[dot] ?? RUNNING_ROUTES[0];
+  const at = frac(progress) * route.length;
+  const beat = Math.floor(at);
+  const from = route[beat];
+  const to = route[(beat + 1) % route.length];
+  const t = span(at - beat, 0.15, 0.85);
+  const flight = from === to ? 0 : Math.sin(Math.PI * t);
+  const travelled = smooth(t);
+  return pose(
+    lerp(cellX(from), cellX(to), travelled),
+    lerp(cellY(from), cellY(to), travelled),
+    1 - 0.55 * flight,
+    1 - 0.9 * flight,
+  );
+}
+
 const MOTIONS: Readonly<Record<ActivityMotion, MotionSpec>> = {
   thinking: {
     loopMs: 5200,
@@ -124,6 +159,14 @@ const MOTIONS: Readonly<Record<ActivityMotion, MotionSpec>> = {
     steps: 48,
     restAt: 0.35,
     pose: compactingPose,
+  },
+  running: {
+    loopMs: 5200,
+    dots: 4,
+    dotSize: 2.8,
+    steps: 120,
+    restAt: 0,
+    pose: runningPose,
   },
 };
 

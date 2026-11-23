@@ -8,7 +8,7 @@ import {
 
 const STYLE_ID = "ohb-activity-keyframes";
 
-/** The animated mark beside Thinking and Compacting. */
+/** The animated mark beside Thinking and Compacting, and on running chats. */
 export function ActivityMark({
   motion,
 }: {
