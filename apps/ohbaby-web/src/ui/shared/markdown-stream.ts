@@ -1,6 +1,11 @@
 import DOMPurify from "dompurify";
 import type { Token } from "marked";
-import { firstChar, lastChar, markdown } from "./markdown-renderer.js";
+import {
+  firstChar,
+  lastChar,
+  markdown,
+  mathMarkdown,
+} from "./markdown-renderer.js";
 
 /**
  * One streamed update: `frozenHtml` is appended once and never touched again,
@@ -20,11 +25,16 @@ const TAIL_BLOCKS = 2;
  * Renders a growing Markdown text without re-parsing what is settled. All but
  * the last two top-level blocks are frozen; the tail is parsed again on every
  * update with half-typed `**` and backticks closed on its last line. Both
- * parts are sanitized on their own before they reach the DOM.
+ * parts are sanitized on their own before they reach the DOM. With `math`,
+ * formulas are read too, and a single `$` at the very end waits for the next
+ * character: only then is it clear whether `$5-$` becomes `$5-$10`.
  */
-export function createMarkdownStream(): {
+export function createMarkdownStream({
+  math = false,
+}: { readonly math?: boolean } = {}): {
   update(text: string): MarkdownStreamUpdate;
 } {
+  const parser = math ? mathMarkdown : markdown;
   let previous = "";
   let frozenEnd = 0;
   return {
@@ -34,7 +44,7 @@ export function createMarkdownStream(): {
       previous = text;
 
       const source = text.slice(frozenEnd);
-      const tokens: Token[] = markdown.lexer(source);
+      const tokens: Token[] = parser.lexer(source);
       const blocks = tokens.flatMap((token, index) =>
         token.type === "space" ? [] : [index],
       );
@@ -51,17 +61,17 @@ export function createMarkdownStream(): {
         // `raw`; freezing would then cut at the wrong place. Keep it all in
         // the tail instead.
         if (source.startsWith(raw)) {
-          frozenHtml = DOMPurify.sanitize(markdown.parser(frozen));
+          frozenHtml = DOMPurify.sanitize(parser.parser(frozen));
           frozenEnd += raw.length;
           tailTokens = tokens.slice(keepFrom);
           tailSource = source.slice(raw.length);
         }
       }
-      const healed = closeOpenMarkers(tailSource, tailTokens);
+      const healed = closeOpenMarkers(tailSource, tailTokens, math);
       const tailHtml = DOMPurify.sanitize(
         healed === tailSource
-          ? markdown.parser(tailTokens)
-          : markdown.parse(healed, { async: false }),
+          ? parser.parser(tailTokens)
+          : parser.parse(healed, { async: false }),
       );
       return { reset, frozenHtml, tailHtml };
     },
@@ -85,19 +95,23 @@ function insideFence(raw: string): boolean {
 
 /**
  * Closes a half-typed `**` or code span on the last line, so the reader sees
- * bold or code instead of stars and backticks. Code and HTML stay exactly as
- * written.
+ * bold or code instead of stars and backticks; `holdDollar` also holds back a
+ * lone `$` at the end. Code and HTML stay exactly as written.
  */
 export function closeOpenMarkers(
   source: string,
   tokens: readonly Token[],
+  holdDollar = false,
 ): string {
   const last = tokens.filter((token) => token.type !== "space").at(-1);
   if (!last || last.type === "code" || last.type === "html") return source;
   if (insideFence(last.raw)) return source;
   const start = source.lastIndexOf("\n") + 1;
   const line = source.slice(start);
-  const closed = closeLine(line);
+  // `$$` and an escaped `\$` are settled; only a lone `$` is undecided.
+  const held =
+    holdDollar && /(?:^|[^$\\])\$$/u.test(line) ? line.slice(0, -1) : line;
+  const closed = closeLine(held);
   return closed === line ? source : source.slice(0, start) + closed;
 }
 

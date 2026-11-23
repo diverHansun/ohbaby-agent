@@ -1,7 +1,13 @@
 import DOMPurify from "dompurify";
 import { Marked, Renderer, Tokenizer } from "marked";
-import type { Tokens } from "marked";
+import type { MarkedExtension, Tokens } from "marked";
 import { isMermaidLang } from "./markdown-mermaid.js";
+import {
+  createMathExtension,
+  isClosedFence,
+  isMathLang,
+  mathAttrs,
+} from "./markdown-math-syntax.js";
 
 /**
  * Markdown renders to one sanitized HTML string, so a code block's copy
@@ -85,18 +91,22 @@ function cjkStrong(
 }
 
 const defaults = new Renderer();
-// A module instance, so the code renderer touches no other `marked` user.
-export const markdown = new Marked({
+/**
+ * The wrapper holds the button still while the code scrolls sideways. The
+ * default output keeps escaping and the language class as they were.
+ */
+const codeBlock = (token: Tokens.Code, attrs = ""): string =>
+  `<div class="ohb-code-block"${attrs}>${COPY_BUTTON}${defaults.code(token)}</div>`;
+
+const options: MarkedExtension = {
   tokenizer: { emStrong: cjkStrong },
   renderer: {
     code(token): string {
-      // The default output keeps escaping and the language class as they were;
-      // the wrapper holds the button still while the code scrolls sideways.
       // A Mermaid block carries the page token, which forged HTML cannot.
-      const mermaid = isMermaidLang(token.lang)
-        ? ` data-mermaid="${COPY_TOKEN}"`
-        : "";
-      return `<div class="ohb-code-block"${mermaid}>${COPY_BUTTON}${defaults.code(token)}</div>`;
+      return codeBlock(
+        token,
+        isMermaidLang(token.lang) ? ` data-mermaid="${COPY_TOKEN}"` : "",
+      );
     },
     /**
      * The wrapper scrolls so the table keeps table layout: three columns or
@@ -112,8 +122,30 @@ export const markdown = new Marked({
       return `<div${attrs}>${Renderer.prototype.table.call(this, token)}</div>`;
     },
   },
+};
+
+// Module instances, so no other `marked` user sees these renderers.
+export const markdown = new Marked(options);
+/**
+ * Assistant text also reads LaTeX. A second instance, so every other caller
+ * parses exactly as before.
+ */
+export const mathMarkdown = new Marked(options, {
+  extensions: createMathExtension(COPY_TOKEN),
+  renderer: {
+    code(token): string | false {
+      // An unclosed or empty block is still being written: plain code.
+      if (!isMathLang(token.lang) || !isClosedFence(token.raw)) return false;
+      if (!token.text.trim()) return false;
+      return codeBlock(token, mathAttrs(COPY_TOKEN, token.text, true));
+    },
+  },
 });
 
-export function renderMarkdown(text: string): string {
-  return DOMPurify.sanitize(markdown.parse(text, { async: false }));
+export function renderMarkdown(
+  text: string,
+  { math = false }: { readonly math?: boolean } = {},
+): string {
+  const parser = math ? mathMarkdown : markdown;
+  return DOMPurify.sanitize(parser.parse(text, { async: false }));
 }

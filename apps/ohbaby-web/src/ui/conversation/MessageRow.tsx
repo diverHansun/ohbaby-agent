@@ -124,7 +124,7 @@ export function MessageRow(props: {
               {index === firstText ? props.beforeText : null}
               <MessagePart
                 isStreaming={props.message.status === "streaming"}
-                diagrams={props.message.role === "assistant" && !isCompaction}
+                rich={props.message.role === "assistant" && !isCompaction}
                 part={entry.part}
                 hidden={
                   entry.part.type === "reasoning" && props.reasoningHidden
@@ -230,8 +230,8 @@ export function filterTodoToolMessages(
 
 function MessagePart(props: {
   readonly isStreaming: boolean;
-  /** Finished assistant text draws its Mermaid blocks. */
-  readonly diagrams: boolean;
+  /** Assistant answers show formulas, and Mermaid diagrams once finished. */
+  readonly rich: boolean;
   readonly part: UiMessagePart;
   readonly hidden?: boolean;
   readonly id?: string;
@@ -239,9 +239,13 @@ function MessagePart(props: {
   switch (props.part.type) {
     case "text":
       return props.isStreaming ? (
-        <StreamingMarkdown text={props.part.text} />
+        <StreamingMarkdown text={props.part.text} math={props.rich} />
       ) : (
-        <MarkdownBlock text={props.part.text} diagrams={props.diagrams} />
+        <MarkdownBlock
+          text={props.part.text}
+          diagrams={props.rich}
+          math={props.rich}
+        />
       );
     case "reasoning":
       return (

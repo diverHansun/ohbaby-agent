@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import type { MouseEvent, ReactElement } from "react";
+import type { ClipboardEvent, MouseEvent, ReactElement } from "react";
 import { writeClipboard } from "./clipboard.js";
 import { COPY_LABEL, COPY_TOKEN, renderMarkdown } from "./markdown-renderer.js";
 import { enhanceMermaidBlocks } from "./markdown-mermaid.js";
+import { copyMathAsTex, enhanceMath } from "./markdown-math.js";
 import { createMarkdownStream } from "./markdown-stream.js";
 
 const RESET_MS = 1500;
@@ -47,18 +48,35 @@ function onCodeCopy(event: MouseEvent<HTMLDivElement>): void {
   });
 }
 
+function onMathCopy(event: ClipboardEvent<HTMLDivElement>): void {
+  copyMathAsTex(event.nativeEvent, event.currentTarget, COPY_TOKEN);
+}
+
 /**
- * `diagrams` draws the Mermaid blocks once the HTML is on the page. The same
- * HTML string keeps React from rewriting the DOM, so drawn diagrams and the
- * code/diagram choice survive re-renders; new text cancels the old drawing.
+ * `diagrams` draws the Mermaid blocks and `math` the LaTeX formulas once the
+ * HTML is on the page. The same HTML string keeps React from rewriting the
+ * DOM, so drawn diagrams, formulas and the code/diagram choice survive
+ * re-renders; new text cancels the old work.
  */
 export function MarkdownBlock(props: {
   readonly text: string;
   readonly diagrams?: boolean;
+  readonly math?: boolean;
 }): ReactElement {
   const container = useRef<HTMLDivElement>(null);
-  const html = useMemo(() => renderMarkdown(props.text), [props.text]);
+  const math = props.math === true;
+  const html = useMemo(
+    () => renderMarkdown(props.text, { math }),
+    [props.text, math],
+  );
   const diagrams = props.diagrams === true;
+  // Layout effect: with KaTeX loaded the formulas replace their placeholders
+  // before the first paint.
+  useLayoutEffect(() => {
+    const node = container.current;
+    if (!math || !node) return;
+    return enhanceMath(node, COPY_TOKEN, { trackOverflow: true }).cancel;
+  }, [html, math]);
   useEffect(() => {
     const node = container.current;
     if (!diagrams || !node) return;
@@ -71,6 +89,7 @@ export function MarkdownBlock(props: {
       ref={container}
       className="ohb-markdown"
       onClick={onCodeCopy}
+      onCopy={math ? onMathCopy : undefined}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -80,14 +99,18 @@ export function MarkdownBlock(props: {
  * Markdown for text still being written. Settled blocks are appended once and
  * left alone, so a selection in them survives; only the tail is replaced.
  * The children stay flat under `.ohb-markdown`, as in `MarkdownBlock`, which
- * takes over once the message completes.
+ * takes over once the message completes. With `math`, a formula shows as soon
+ * as it is closed; enhancing only fills placeholders, so the flat children
+ * the stream counts stay the same.
  */
 export function StreamingMarkdown(props: {
   readonly text: string;
+  readonly math?: boolean;
 }): ReactElement {
+  const math = props.math === true;
   const container = useRef<HTMLDivElement>(null);
   const state = useRef({
-    stream: createMarkdownStream(),
+    stream: createMarkdownStream({ math }),
     shown: undefined as string | undefined,
     frozen: 0,
   });
@@ -97,18 +120,29 @@ export function StreamingMarkdown(props: {
   useLayoutEffect(() => {
     const node = container.current;
     const current = state.current;
+    if (!node) return;
     // StrictMode runs the effect twice with the same text.
-    if (!node || current.shown === props.text) return;
-    current.shown = props.text;
-    const update = current.stream.update(props.text);
-    if (update.reset) current.frozen = 0;
-    while (node.childNodes.length > current.frozen) node.lastChild?.remove();
-    if (update.frozenHtml) {
-      node.insertAdjacentHTML("beforeend", update.frozenHtml);
-      current.frozen = node.childNodes.length;
+    if (current.shown !== props.text) {
+      current.shown = props.text;
+      const update = current.stream.update(props.text);
+      if (update.reset) current.frozen = 0;
+      while (node.childNodes.length > current.frozen) node.lastChild?.remove();
+      if (update.frozenHtml) {
+        node.insertAdjacentHTML("beforeend", update.frozenHtml);
+        current.frozen = node.childNodes.length;
+      }
+      node.insertAdjacentHTML("beforeend", update.tailHtml);
     }
-    node.insertAdjacentHTML("beforeend", update.tailHtml);
-  }, [props.text]);
+    if (!math) return;
+    return enhanceMath(node, COPY_TOKEN).cancel;
+  }, [props.text, math]);
 
-  return <div ref={container} className="ohb-markdown" onClick={onCodeCopy} />;
+  return (
+    <div
+      ref={container}
+      className="ohb-markdown"
+      onClick={onCodeCopy}
+      onCopy={math ? onMathCopy : undefined}
+    />
+  );
 }

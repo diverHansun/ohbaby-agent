@@ -1,6 +1,6 @@
 import type { UiCommandRecord } from "ohbaby-agent";
 import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type {
@@ -4903,6 +4903,27 @@ describe("createDaemonServerApp", () => {
       expect(html).toContain("window.__OHBABY__=");
       expect(html).toContain('"token":"token_1"');
       expect(html).toContain('"startupSessionMode":{"type":"fresh"}');
+    } finally {
+      await handle.dispose();
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("serves KaTeX fonts as WOFF2", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-web-assets-"));
+    await mkdir(join(tempDir, "assets"));
+    await writeFile(join(tempDir, "assets", "KaTeX_Main-Regular.woff2"), "x");
+    const handle = createApp(new FakeBackend(), {
+      webAssets: { directory: tempDir },
+    });
+    await handle.start();
+    try {
+      const response = await handle.app.request(
+        "/assets/KaTeX_Main-Regular.woff2",
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("font/woff2");
     } finally {
       await handle.dispose();
       await rm(tempDir, { force: true, recursive: true });

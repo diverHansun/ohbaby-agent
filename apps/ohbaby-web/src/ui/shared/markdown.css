@@ -318,6 +318,48 @@
   z-index: 1;
 }
 
+/* LaTeX formulas. Inline ones sit a little above body size, which matches
+   Chinese text best; KaTeX's own 1.21em looks large. */
+.ohb-markdown .katex {
+  font-size: 1.1em;
+}
+
+/* A formula too wide to wrap scrolls with its paragraph, not the page. The
+   2px keeps fraction and brace bottoms from being clipped. */
+.ohb-markdown :is(p, h1, h2, h3, h4, h5, h6, ul, ol):has(.ohb-math) {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+/* Until KaTeX draws it, or when it cannot, a display formula reads as its
+   source, line breaks kept. */
+div.ohb-math:not([data-math-state="ready"]) {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+}
+
+.ohb-math-display {
+  margin: 0 0 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 0;
+}
+
+.ohb-code-block > .ohb-math-display {
+  margin: 0;
+}
+
+.ohb-math-display .katex-display {
+  margin: 0;
+}
+
+.ohb-math-display:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
 @media (hover: none), (pointer: coarse) {
   .ohb-code-copy,
   .ohb-mermaid-toggle {
@@ -326,7 +368,8 @@
 
   /* The always-visible buttons get their own strip instead of covering code. */
   .ohb-code-block pre,
-  .ohb-mermaid-diagram {
+  .ohb-mermaid-diagram,
+  .ohb-code-block > .ohb-math-display {
     padding-top: 34px;
   }
 

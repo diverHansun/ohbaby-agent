@@ -33,6 +33,8 @@ function contentTypeForPath(path: string): string {
       return "image/svg+xml";
     case ".wasm":
       return "application/wasm";
+    case ".woff2":
+      return "font/woff2";
     default:
       return "application/octet-stream";
   }
