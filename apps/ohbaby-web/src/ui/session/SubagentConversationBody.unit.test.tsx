@@ -516,6 +516,69 @@ function scrollTo(element: HTMLElement, top: number): void {
   });
 }
 
+it("keeps settled Markdown blocks while the child's active run appends text without a message status", () => {
+  const { element, render } = mountReading();
+  const base = state();
+  const conversation = base.conversation;
+  if (!conversation) throw new Error("Missing fixture conversation");
+  const run = {
+    id: "child-run",
+    sessionId: conversation.view.session.id,
+    startedAt: "2026-01-03",
+    updatedAt: "2026-01-03",
+    status: { kind: "running" as const, runId: "child-run" },
+  };
+  const append = (tail: string): void => {
+    const messages = [
+      {
+        id: "reply",
+        role: "assistant" as const,
+        runId: run.id,
+        createdAt: run.startedAt,
+        parts: [
+          { type: "text" as const, text: "## Report\n\nOne\n\nTwo\n\n" + tail },
+        ],
+      },
+    ];
+    render({
+      ...base,
+      conversation: {
+        ...conversation,
+        messages,
+        view: { ...conversation.view, runs: [run] },
+      },
+    });
+  };
+  append("Three");
+  const heading = element.querySelector("h2");
+  expect(heading?.textContent).toBe("Report");
+  append("Three more");
+  expect(element.querySelector("h2")).toBe(heading);
+  expect(element.textContent).toContain("Three more");
+});
+
+it("renders a stored child answer with headings, formulas and a diagram when the original messages are missing", async () => {
+  const { element, render } = mountReading();
+  const base = state();
+  if (!base.conversation) throw new Error("Missing fixture conversation");
+  render({
+    ...base,
+    conversation: {
+      ...base.conversation,
+      messages: [],
+      storedResult:
+        "## Saved report\n\n$x^2$\n\n```mermaid\nflowchart LR\nA --> B\n```",
+    },
+  });
+  expect(element.querySelector("h2")?.textContent).toBe("Saved report");
+  await vi.waitFor(() => {
+    expect(element.querySelector(".katex")).not.toBeNull();
+    expect(
+      element.querySelector('button[aria-label="Show code"]'),
+    ).not.toBeNull();
+  });
+});
+
 it.each([400, 429, undefined])(
   "shows a child's failure once with its actual HTTP status (%s)",
   (statusCode) => {

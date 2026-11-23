@@ -8,6 +8,7 @@ import {
   type ConversationReadingPosition,
 } from "../conversation/ConversationStream.js";
 import { ConversationPresentation } from "../conversation/ConversationPresentation.js";
+import { MarkdownBlock } from "../shared/MarkdownBlock.js";
 
 type Reader = ReturnType<typeof createSubagentConversationReader>;
 export interface ReadingMemory {
@@ -57,6 +58,11 @@ export function SubagentConversationBody({
 }): ReactElement {
   const conversation = state.conversation;
   const selected = state.selected;
+  const activeRun = conversation?.view.runs.find(
+    (run) =>
+      run.status.kind === "running" ||
+      run.status.kind === "waiting-for-permission",
+  );
   return (
     <>
       {state.error ? (
@@ -128,17 +134,21 @@ export function SubagentConversationBody({
           sessionId={conversation?.view.session.id ?? null}
           prompts={[]}
           runs={conversation?.view.runs}
-          activeRun={conversation?.view.runs.find(
-            (run) => run.status.kind === "running",
-          )}
-          isRunning={false}
+          activeRun={activeRun}
+          isRunning={activeRun !== undefined}
           reasoningByMessageId={{}}
           commandNotices={
             conversation?.messages.length === 0 &&
             conversation.storedResult !== undefined ? (
               <section className="ohb-child-stored-result">
                 <h3>Stored result</h3>
-                <pre>{conversation.storedResult}</pre>
+                <div className="ohb-message-body ohb-message-assistant-bare">
+                  <MarkdownBlock
+                    text={conversation.storedResult}
+                    math
+                    diagrams
+                  />
+                </div>
               </section>
             ) : conversation?.history.hasLater ? (
               <div className="ohb-child-gap" role="status">
