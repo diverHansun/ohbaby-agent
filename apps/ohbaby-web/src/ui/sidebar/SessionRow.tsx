@@ -1,15 +1,16 @@
 import { MoreHorizontal, Pin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
+import { ActivityMark } from "../conversation/ActivityMark.js";
 import { Spinner } from "../shared/Spinner.js";
 import { relativeTime } from "./relative-time.js";
 import type { SessionMenuAnchor } from "./SessionMenu.js";
 
 /**
- * One sidebar session (05 SessionRow): the open button, then a trailing
- * spinner (running), amber dot (awaiting approval) or relative time. On hover
- * the time gives way to the menu button; a pinned row also shows a filled pin
- * there, which unpins it.
+ * One sidebar session (05 SessionRow): the open button with a dot matrix left
+ * of the title while running, then a trailing amber dot (awaiting approval) or
+ * relative time. On hover the time gives way to the menu button; a pinned row
+ * also shows a filled pin there, which unpins it.
  */
 export function SessionRow(props: {
   readonly session: SidebarSessionItem;
@@ -111,10 +112,17 @@ export function SessionRow(props: {
       trigger,
     );
   };
+  const lead = props.moving ? (
+    <span className="ohb-session-lead">
+      <Spinner size={11} label="Moving chat" />
+    </span>
+  ) : props.session.activity === "running" ? (
+    <span className="ohb-session-lead" role="status" aria-label="Running">
+      <ActivityMark motion="running" />
+    </span>
+  ) : null;
   const meta =
-    props.session.activity === "running" ? (
-      <Spinner size={11} label="Running" />
-    ) : props.session.activity === "awaiting" ? (
+    props.session.activity === "awaiting" ? (
       <span
         className="ohb-session-awaiting"
         role="status"
@@ -166,8 +174,8 @@ export function SessionRow(props: {
         onClick={props.onSelect}
         type="button"
       >
+        {lead}
         <span className="ohb-session-copy">
-          {props.moving ? <Spinner size={11} label="Moving chat" /> : null}
           <strong ref={titleRef} className="ohb-session-title">
             <span ref={textRef}>{title}</span>
           </strong>
