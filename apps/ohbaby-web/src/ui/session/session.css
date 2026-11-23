@@ -185,7 +185,7 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   }
 }
 
-/* Thinking: three neutral dots breathing in turn, then the label and timer. */
+/* Thinking and Compacting: a brand-coloured mark, a shimmering label, a timer. */
 .ohb-thinking {
   align-items: center;
   color: var(--text-muted);
@@ -194,30 +194,49 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   gap: 10px;
 }
 
-.ohb-thinking > span:first-child {
-  display: flex;
-  gap: 4px;
+.ohb-activity-mark {
+  display: block;
+  flex: none;
+  height: 18px;
+  position: relative;
+  width: 18px;
 }
 
-.ohb-thinking > span:first-child span {
-  animation: ohb-breathe 1.2s ease-in-out infinite;
-  background: var(--text-dim);
+.ohb-activity-mark i {
+  background: var(--brand-oh);
   border-radius: 50%;
-  height: 5px;
-  width: 5px;
+  display: block;
+  left: 50%;
+  position: absolute;
+  top: 50%;
 }
 
-.ohb-thinking > span:first-child span:nth-child(2) {
-  animation-delay: 0.2s;
+.ohb-activity-mark i:nth-child(3n + 2) {
+  background: var(--brand-ba);
 }
 
-.ohb-thinking > span:first-child span:nth-child(3) {
-  animation-delay: 0.4s;
+.ohb-activity-mark i:nth-child(3n) {
+  background: var(--brand-by);
 }
 
-.ohb-compacting > span:first-child {
-  flex-direction: column;
-  gap: 2px;
+.ohb-activity-label {
+  animation: ohb-tool-shimmer 1.8s linear infinite;
+  background: linear-gradient(
+    100deg,
+    var(--text-dim) 35%,
+    var(--text) 50%,
+    var(--text-dim) 65%
+  );
+  background-clip: text;
+  background-size: 250% 100%;
+  -webkit-text-fill-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ohb-activity-label {
+    background: none;
+    -webkit-text-fill-color: currentcolor;
+  }
 }
 
 .ohb-thinking > span:nth-child(3) {

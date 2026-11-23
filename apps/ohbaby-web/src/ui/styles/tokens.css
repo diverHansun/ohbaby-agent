@@ -1,7 +1,8 @@
 /* Design tokens (03 §3). Components reference these variables only; this is the
    one file allowed to contain literal colors. Neutral white and grays, no warm
    tint (D30): a white canvas, a flat light-gray sidebar, light glass only on
-   floating elements (D21). Colour is kept for the wordmark, Lychee and status. */
+   floating elements (D21). Colour is kept for the wordmark, Lychee, the
+   Thinking and Compacting marks, and status. */
 :root {
   /* Surfaces */
   --bg: #ffffff;
@@ -51,7 +52,7 @@
   --success-ink: #166534;
   --success-soft: rgba(16, 185, 129, 0.09);
 
-  /* Brand: the wordmark (D5) and the Lychee mark (D26) only */
+  /* Brand: the wordmark (D5), the Lychee mark (D26) and the waiting marks */
   --brand-oh: #c9a23f;
   --brand-ba: #c97e92;
   --brand-by: #5f86c4;

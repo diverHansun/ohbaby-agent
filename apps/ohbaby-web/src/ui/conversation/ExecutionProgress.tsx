@@ -7,6 +7,7 @@ import type {
 } from "ohbaby-sdk";
 import { type ReactElement, useState } from "react";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
+import { ActivityMark } from "./ActivityMark.js";
 import type { TurnTiming } from "./run-process.js";
 import { useExecutionDuration } from "./use-execution-duration.js";
 
@@ -51,14 +52,12 @@ export function ModelWaiting({
   // Screen readers hear the label when it changes, never the ticking timer.
   return (
     <div className="ohb-thinking" role="status" aria-label={label}>
-      <span aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
+      <ActivityMark motion="thinking" />
       {retry === undefined ? (
         <>
-          <span aria-hidden="true">Thinking</span>
+          <span aria-hidden="true" className="ohb-activity-label">
+            Thinking
+          </span>
           {duration === undefined ? null : (
             <span aria-hidden="true">{duration}</span>
           )}
@@ -138,20 +137,12 @@ function FlipNumber({ value }: { readonly value: number }): ReactElement {
   );
 }
 
-/** Same three dots as Thinking, squeezed together vertically while history compacts. */
+/** Dots spiral into a core while history compacts. */
 export function Compacting(): ReactElement {
   return (
-    <div
-      className="ohb-thinking ohb-compacting"
-      role="status"
-      aria-label="Compacting"
-    >
-      <span aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
-      <span>Compacting</span>
+    <div className="ohb-thinking" role="status" aria-label="Compacting">
+      <ActivityMark motion="compacting" />
+      <span className="ohb-activity-label">Compacting</span>
     </div>
   );
 }

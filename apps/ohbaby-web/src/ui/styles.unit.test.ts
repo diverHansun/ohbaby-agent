@@ -59,12 +59,22 @@ describe("web stylesheet structure", () => {
     }
   });
 
-  it("uses the brand colors only for the wordmark and the Lychee mark", () => {
+  it("uses the brand colors only for the wordmark, Lychee and waiting marks", () => {
     const users = files
       .filter((file) => fileName(file) !== "styles/tokens.css")
       .filter((file) => readFileSync(file, "utf8").includes("--brand-"))
       .map(fileName);
-    expect(users).toEqual(["shared/shared.css"]);
+    expect(users).toEqual(["shared/shared.css", "session/session.css"]);
+    const session = readFileSync(
+      new URL("./session/session.css", import.meta.url),
+      "utf8",
+    );
+    const brandRules = [
+      ...session.matchAll(/([^{}]+)\{[^}]*--brand-[^}]*\}/gu),
+    ].map((match) => match[1].replace(/\/\*[\s\S]*?\*\//gu, "").trim());
+    expect(
+      brandRules.every((rule) => rule.startsWith(".ohb-activity-mark")),
+    ).toBe(true);
   });
 
   it("falls back to solid surfaces without backdrop-filter", () => {
