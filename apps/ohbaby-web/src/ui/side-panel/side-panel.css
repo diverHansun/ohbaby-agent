@@ -133,7 +133,9 @@
   white-space: nowrap;
 }
 
-/* Close shows on hover and on the selected tab, like Codex and Cursor. */
+/* Close shows only while the pointer is over its tab, the selected tab
+   included, so the strip stays quiet. Touch screens cannot hover, so there it
+   always shows, like the sidebar's hover actions. */
 .ohb-side-panel-tab-close {
   align-items: center;
   background: none;
@@ -151,9 +153,14 @@
   width: 20px;
 }
 
-.ohb-side-panel-tab:hover .ohb-side-panel-tab-close,
-.ohb-side-panel-tab.is-active .ohb-side-panel-tab-close {
+.ohb-side-panel-tab:hover .ohb-side-panel-tab-close {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .ohb-side-panel-tab-close {
+    opacity: 1;
+  }
 }
 
 .ohb-side-panel-tab-close:hover {
