@@ -129,22 +129,75 @@
   white-space: pre;
 }
 
+/* Raw HTML tables skip the renderer's wrapper, so a table still scrolls on
+   its own as a fallback; rendered tables hand scrolling to the wrapper. */
 .ohb-markdown table {
   border-collapse: collapse;
   display: block;
   font-size: calc(1em - 1px);
+  font-variant-numeric: tabular-nums;
   overflow-wrap: normal;
 }
 
-.ohb-markdown th,
-.ohb-markdown td {
-  border-bottom: 1px solid var(--border);
-  padding: 6px 12px 6px 0;
-  text-align: left;
+.ohb-table-scroll {
+  margin: 0 0 12px;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: none;
 }
 
+.ohb-table-scroll table {
+  display: table;
+  margin: 0;
+  max-width: none;
+  width: 100%;
+}
+
+.ohb-table-scroll.is-wide table {
+  width: max-content;
+}
+
+.ohb-table-scroll.is-wide :is(th, td) {
+  max-width: 320px;
+  min-width: 100px;
+  overflow-wrap: break-word;
+}
+
+.ohb-table-scroll:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.ohb-markdown :is(th, td) {
+  padding: 8px 12px;
+}
+
+/* First and last columns line up with the text around the table. */
+.ohb-markdown :is(th, td):first-child {
+  padding-left: 0;
+}
+
+.ohb-markdown :is(th, td):last-child {
+  padding-right: 0;
+}
+
+/* `align` from the Markdown syntax wins; unaligned headers are not centred. */
 .ohb-markdown th {
+  border-bottom: 1px solid var(--border-strong);
   font-weight: 600;
+}
+
+.ohb-markdown th:not([align]) {
+  text-align: start;
+}
+
+.ohb-markdown td {
+  border-bottom: 1px solid var(--border);
+}
+
+.ohb-markdown tr:last-child > td {
+  border-bottom: 0;
 }
 
 .ohb-markdown img {

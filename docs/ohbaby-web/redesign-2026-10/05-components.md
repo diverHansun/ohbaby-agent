@@ -168,6 +168,7 @@
 - 全站唯一的 Markdown 入口：聊天消息、文件预览、命令结果都用它。`marked` 解析，`DOMPurify` 清洗，输出放进 `<div class="ohb-markdown">`。
 - 通用排版在 `ui/shared/markdown.css`，规则都挂在 `.ohb-markdown` 上。场景只定基准字号和外层留白（聊天和文件预览 14px，压缩摘要 13px），标题用"基准 + 差值"（H1 +6px、H2 +3px、H3 +1px、H4 到 H6 等于基准），代码块和表格用"基准 - 1px"，行内代码 0.93em，所以小字号场景整体跟着缩小。
 - 助手消息最后一个元素保留 12px 下边距，它是文字和后面工具行、操作按钮之间的间距；用户气泡里最后一个元素的下边距清零。
+- 表格：渲染器给每张表包一层 `<div class="ohb-table-scroll">`，滚动交给它，`<table>` 只负责表格布局。列数从 `marked` 的 token 里读：3 列及以下铺满正文宽度；4 列及以上加 `is-wide`，按内容自然撑开，单元格 100 到 320px，放不下就在容器内横向滚动，容器带 `tabindex="0"`、`role="region"` 和 `aria-label`，键盘能聚焦和滚动。表格 13px、等宽数字、只有细横线，首末列不留外侧内边距。模型直接写的 HTML 表格不经过渲染器，靠 `.ohb-markdown table` 的 `display: block` 兜底，不会撑破消息。
 - 中文加粗兜底：CommonMark 的规则让 `**注意：**内容` 这类写法保留星号。`Marked` 实例的 `emStrong` 分词在标准规则失败后再试一次，只接受内部没有 `*` 和换行、且内部或紧邻一侧有中日韩文字的 `**...**`，判断规则取自 deepseek-harness。`2 ** 3`、`src/**/*.ts` 这类文本不受影响。
 
 ### SidePanel

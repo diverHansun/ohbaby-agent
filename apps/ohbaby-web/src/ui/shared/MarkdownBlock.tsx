@@ -96,6 +96,19 @@ const markdown = new Marked({
       // the wrapper holds the button still while the code scrolls sideways.
       return `<div class="ohb-code-block">${COPY_BUTTON}${defaults.code(token)}</div>`;
     },
+    /**
+     * The wrapper scrolls so the table keeps table layout: three columns or
+     * fewer fill the text width, four or more take their natural width and
+     * scroll inside the wrapper, which keyboards can then focus.
+     */
+    table(token): string {
+      const wide = token.header.length >= 4;
+      const attrs = wide
+        ? ' class="ohb-table-scroll is-wide" tabindex="0" role="region" aria-label="Scrollable table"'
+        : ' class="ohb-table-scroll"';
+      // The cells need this render's parser, which `defaults` does not have.
+      return `<div${attrs}>${Renderer.prototype.table.call(this, token)}</div>`;
+    },
   },
 });
 

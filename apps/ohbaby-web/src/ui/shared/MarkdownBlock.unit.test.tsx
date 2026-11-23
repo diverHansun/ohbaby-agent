@@ -206,3 +206,61 @@ describe("CJK bold (typography C-1 to C-3)", () => {
     }
   });
 });
+
+describe("tables (tables U-1 to U-6)", () => {
+  const render = (text: string): HTMLDivElement => {
+    const holder = document.createElement("div");
+    holder.innerHTML = renderMarkdown(text);
+    return holder;
+  };
+  const table = (columns: number): string =>
+    [
+      `| ${Array.from({ length: columns }, (_, i) => `h${String(i)}`).join(" | ")} |`,
+      `|${" --- |".repeat(columns)}`,
+      `| ${Array.from({ length: columns }, (_, i) => `c${String(i)}`).join(" | ")} |`,
+    ].join("\n");
+
+  it("wraps a three-column table without making it focusable", () => {
+    const wrapper = render(table(3)).querySelector(".ohb-table-scroll");
+    expect(wrapper?.querySelector("table")).not.toBeNull();
+    expect(wrapper?.classList.contains("is-wide")).toBe(false);
+    expect(wrapper?.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("marks a four-column table wide and keyboard-scrollable", () => {
+    const wrapper = render(table(4)).querySelector(".ohb-table-scroll");
+    expect(wrapper?.classList.contains("is-wide")).toBe(true);
+    expect(wrapper?.getAttribute("tabindex")).toBe("0");
+    expect(wrapper?.getAttribute("role")).toBe("region");
+    expect(wrapper?.getAttribute("aria-label")).toBe("Scrollable table");
+  });
+
+  it("renders inline Markdown inside cells", () => {
+    const holder = render(
+      "| a | b |\n| --- | --- |\n| **bold** | `code` [link](https://example.com) |",
+    );
+    expect(holder.querySelector("td strong")?.textContent).toBe("bold");
+    expect(holder.querySelector("td code")?.textContent).toBe("code");
+    expect(holder.querySelector("td a")?.getAttribute("href")).toBe(
+      "https://example.com",
+    );
+  });
+
+  it("keeps the alignment syntax", () => {
+    const holder = render("| l | r | c |\n| :-- | --: | :-: |\n| 1 | 2 | 3 |");
+    expect(
+      [...holder.querySelectorAll("th")].map((th) => th.getAttribute("align")),
+    ).toEqual(["left", "right", "center"]);
+  });
+
+  it("sanitizes cell content", () => {
+    const holder = render("| a |\n| --- |\n| <img src=x onerror=alert(1)> |");
+    expect(holder.querySelector("img")?.hasAttribute("onerror")).toBe(false);
+  });
+
+  it("leaves raw HTML tables unwrapped", () => {
+    const holder = render("<table><tr><td>raw</td></tr></table>");
+    expect(holder.querySelector(".ohb-table-scroll")).toBeNull();
+    expect(holder.querySelector("td")?.textContent).toBe("raw");
+  });
+});
