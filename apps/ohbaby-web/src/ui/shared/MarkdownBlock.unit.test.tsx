@@ -4,7 +4,8 @@ import { Marked } from "marked";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MarkdownBlock, renderMarkdown } from "./MarkdownBlock.js";
+import { MarkdownBlock } from "./MarkdownBlock.js";
+import { renderMarkdown } from "./markdown-renderer.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
