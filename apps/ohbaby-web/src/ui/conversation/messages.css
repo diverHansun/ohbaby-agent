@@ -2,7 +2,9 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 32px 0 calc(144px + var(--steer-recovery-space, 0px));
+  /* The composer floats over the stream; reserve its measured height plus a
+     gap. 128px is the plain composer, used before the first measure. */
+  padding: 32px 0 calc(var(--composer-space, 128px) + 16px);
 }
 
 .ohb-stream::-webkit-scrollbar {
@@ -472,10 +474,6 @@
 }
 
 @media (max-width: 720px) {
-  .ohb-stream {
-    padding-bottom: calc(176px + var(--steer-recovery-space, 0px));
-  }
-
   .ohb-message-user-bubble {
     max-width: 92%;
   }

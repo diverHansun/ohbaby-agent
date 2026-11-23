@@ -116,7 +116,7 @@ export function Composer(props: {
     selectedReasoning.current = undefined;
   }, [props.activeSession?.id, props.client]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const recoveryRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLElement | null>(null);
   const composerInputRef = useRef<HTMLDivElement | null>(null);
   const lastEscapeAt = useRef(0);
   const resetSlashRef = useRef<() => void>(() => undefined);
@@ -190,14 +190,16 @@ export function Composer(props: {
     if (textarea) fitComposerTextarea(textarea, TEXTAREA_FIT);
   }, [draft, props.model.disabled, slash.slashOpen]);
 
+  // The chat composer floats over the stream, and the dock, queue, Goal strip
+  // and steer recovery all grow it, so the stream reserves its measured height.
   useLayoutEffect(() => {
-    const recovery = recoveryRef.current;
-    const content = recovery?.closest(".ohb-root-composer")?.parentElement;
-    if (!recovery || !content) return;
+    const composer = composerRef.current;
+    const content = composer?.closest(".ohb-root-composer")?.parentElement;
+    if (props.compact || !composer || !content) return;
     const measure = (): void => {
       content.style.setProperty(
-        "--steer-recovery-space",
-        `${String(recovery.getBoundingClientRect().height)}px`,
+        "--composer-space",
+        `${String(composer.getBoundingClientRect().height)}px`,
       );
     };
     measure();
@@ -205,12 +207,12 @@ export function Composer(props: {
       typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver(measure);
-    observer?.observe(recovery);
+    observer?.observe(composer);
     return (): void => {
       observer?.disconnect();
-      content.style.removeProperty("--steer-recovery-space");
+      content.style.removeProperty("--composer-space");
     };
-  }, []);
+  }, [props.compact]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -330,13 +332,14 @@ export function Composer(props: {
 
   return (
     <section
+      ref={composerRef}
       className={
         props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"
       }
     >
       <div className="ohb-composer-content">
         {props.topContent}
-        <div className="ohb-steer-recovery" ref={recoveryRef}>
+        <div className="ohb-steer-recovery">
           <UnconsumedSteers
             inputs={props.unconsumedSteers ?? []}
             disabled={props.model.disabled || tokenBudgetIssue !== undefined}

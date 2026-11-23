@@ -443,10 +443,6 @@ button.ohb-workspace-slot:hover:not(:disabled) {
   font-weight: 400;
 }
 
-.ohb-main-body.has-todos .ohb-stream {
-  padding-bottom: calc(380px + var(--steer-recovery-space, 0px));
-}
-
 @media (max-width: 720px) {
   .ohb-composer {
     padding: 16px 12px 12px;
@@ -454,9 +450,5 @@ button.ohb-workspace-slot:hover:not(:disabled) {
 
   .ohb-composer-hero {
     padding: 0;
-  }
-
-  .ohb-main-body.has-todos .ohb-stream {
-    padding-bottom: calc(400px + var(--steer-recovery-space, 0px));
   }
 }
