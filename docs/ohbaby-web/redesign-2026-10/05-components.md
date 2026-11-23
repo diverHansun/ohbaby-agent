@@ -163,6 +163,13 @@
 - `writeClipboard`（`ui/shared/clipboard.ts`）先用 `navigator.clipboard`，不可用或被拒绝时用隐藏的 `textarea` 加 `execCommand("copy")`，返回是否成功。
 - 代码块的复制按钮是 `MarkdownBlock` 的渲染器写进 HTML 的（`<div class="ohb-code-block">` 包住按钮和 `<pre>`），点击由 `MarkdownBlock` 的容器统一处理，复制同一块里 `<pre>` 的文字，去掉末尾换行。渲染器用模块内的 `Marked` 实例，不改全局 `marked`。
 
+### MarkdownBlock
+
+- 全站唯一的 Markdown 入口：聊天消息、文件预览、命令结果都用它。`marked` 解析，`DOMPurify` 清洗，输出放进 `<div class="ohb-markdown">`。
+- 通用排版在 `ui/shared/markdown.css`，规则都挂在 `.ohb-markdown` 上。场景只定基准字号和外层留白（聊天和文件预览 14px，压缩摘要 13px），标题用"基准 + 差值"（H1 +6px、H2 +3px、H3 +1px、H4 到 H6 等于基准），代码块和表格用"基准 - 1px"，行内代码 0.93em，所以小字号场景整体跟着缩小。
+- 助手消息最后一个元素保留 12px 下边距，它是文字和后面工具行、操作按钮之间的间距；用户气泡里最后一个元素的下边距清零。
+- 中文加粗兜底：CommonMark 的规则让 `**注意：**内容` 这类写法保留星号。`Marked` 实例的 `emStrong` 分词在标准规则失败后再试一次，只接受内部没有 `*` 和换行、且内部或紧邻一侧有中日韩文字的 `**...**`，判断规则取自 deepseek-harness。`2 ** 3`、`src/**/*.ts` 这类文本不受影响。
+
 ### SidePanel
 
 - 输入：`useSidePanel` 给出的状态（`open`、`width`、`expanded`、`tabs`、`activeTabId`）和操作（打开、关闭、展开、改宽、开页面、切换、关闭 Tab、改页面状态）；每个 Tab 怎么渲染由调用方传入。

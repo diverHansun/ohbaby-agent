@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import DOMPurify from "dompurify";
+import { Marked } from "marked";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -135,5 +137,72 @@ describe("code block copy (T7)", () => {
     expect(button.getAttribute("aria-label")).toBe("Copy code");
     await click(button);
     expect(button.getAttribute("aria-label")).toBe("Copied");
+  });
+});
+
+describe("CJK bold (typography C-1 to C-3)", () => {
+  const plain = new Marked();
+  const plainHtml = (text: string): string =>
+    DOMPurify.sanitize(plain.parse(text, { async: false }));
+
+  it.each([
+    "**注意：**内容",
+    "**Notice:**内容",
+    "**事件中间件（waterfall）**实现",
+    "**事件中间件(waterfall)**实现",
+    "**句号。**后续",
+    "**Period.**后续",
+    "**提醒！**继续",
+    "**Warning!**继续",
+    "这是**重点。**后面的文字",
+    "**“引号内容”**后面的文字",
+    "结论：**可以（但有条件）**继续",
+    "注意**「这里」**不要改",
+    "使用**`pnpm`**安装",
+    "**结论：**3 个问题",
+    "**注意：**content",
+  ])("renders %s as bold without stray stars", (text) => {
+    const holder = document.createElement("div");
+    holder.innerHTML = renderMarkdown(text);
+    expect(holder.querySelector("strong")).not.toBeNull();
+    expect(holder.textContent).not.toContain("*");
+  });
+
+  it.each([
+    "普通**加粗**文字",
+    "2 ** 3 ** 4",
+    "a ** b",
+    "`**不是粗体。**后面`",
+    "路径 src/**/*.ts 和 lib/**/*.js",
+    "中文 ** 空格 **后面",
+    "\\*\\*转义。\\*\\*后面",
+    "***三星。***后面",
+    "foo**bar.**baz",
+    "**foo.**bar",
+    "*单星。*后面",
+    "__下划线。__后面",
+    "a**“b”**c",
+    "**Period.**bar",
+  ])("leaves %s as standard marked renders it", (text) => {
+    expect(renderMarkdown(text)).toBe(plainHtml(text));
+  });
+
+  it("stays within 1.2x of plain marked on long unclosed runs", () => {
+    const line = "这是**未闭合的重点，后面很长 ".repeat(40);
+    const dense = Array.from({ length: 8 }, () => line).join("");
+    const spread = Array.from({ length: 200 }, () => line.slice(0, 400)).join(
+      "\n\n",
+    );
+    for (const text of [dense, spread]) {
+      const time = (run: () => void): number => {
+        run();
+        const start = performance.now();
+        for (let i = 0; i < 3; i++) run();
+        return performance.now() - start;
+      };
+      const ours = time(() => renderMarkdown(text));
+      const base = time(() => plainHtml(text));
+      expect(ours).toBeLessThan(base * 1.2 + 15);
+    }
   });
 });

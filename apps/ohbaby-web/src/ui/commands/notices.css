@@ -72,7 +72,7 @@
   margin: 4px 6px 0 0;
 }
 
-.ohb-command-notice pre {
+.ohb-command-notice > pre {
   color: var(--text-muted);
   font-family: var(--font-ui);
   font-size: 13.5px;
@@ -82,7 +82,7 @@
   white-space: pre-wrap;
 }
 
-.ohb-command-notice.ohb-command-error pre {
+.ohb-command-notice.ohb-command-error > pre {
   color: var(--danger-ink);
 }
 

@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
-import { Marked, Renderer } from "marked";
+import { Marked, Renderer, Tokenizer } from "marked";
+import type { Tokens } from "marked";
 import type { MouseEvent, ReactElement } from "react";
 import { writeClipboard } from "./clipboard.js";
 
@@ -23,9 +24,72 @@ const COPY_TOKEN = Array.from(
 ).join("");
 const COPY_BUTTON = `<button type="button" class="ohb-code-copy" data-code-copy="${COPY_TOKEN}" aria-label="Copy code">${COPY_LABEL}</button>`;
 
+/**
+ * CommonMark only lets `**` open or close beside punctuation when a space or
+ * more punctuation sits on the other side, which Chinese text never has:
+ * `**注意：**内容` keeps its stars. When the standard rule finds nothing, this
+ * retries one narrow case: a `**...**` pair without stars or line breaks
+ * inside, with CJK text inside or right beside it. The open and close checks
+ * follow deepseek-harness, so `2 ** 3` and glob paths stay as they are.
+ */
+const CJK =
+  /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}\p{scx=Bopomofo}]/u;
+const PUNCT = /[\p{P}\p{S}]/u;
+const SPACE = /^\s?$/u;
+const CANDIDATE = /^\*\*(?!\*)((?:[^*\n`]|`[^`\n]*`)+?)\*\*(?!\*)/u;
+
+/** The last character of `text`; it reads only the end, so long lines stay cheap. */
+export const lastChar = (text: string): string =>
+  Array.from(text.slice(-2)).at(-1) ?? "";
+/** The first character of `text`, reading only the start. */
+export const firstChar = (text: string): string =>
+  Array.from(text.slice(0, 2))[0] ?? "";
+
+const canOpen = (prev: string, next: string): boolean =>
+  !SPACE.test(next) &&
+  (!PUNCT.test(next) || SPACE.test(prev) || PUNCT.test(prev) || CJK.test(prev));
+const canClose = (prev: string, next: string, inner: string): boolean =>
+  !SPACE.test(prev) &&
+  (!PUNCT.test(prev) ||
+    SPACE.test(next) ||
+    PUNCT.test(next) ||
+    CJK.test(next) ||
+    CJK.test(inner));
+
+function cjkStrong(
+  this: Tokenizer,
+  src: string,
+  masked: string,
+  prevChar = "",
+): Tokens.Em | Tokens.Strong | undefined {
+  const standard = Tokenizer.prototype.emStrong.call(
+    this,
+    src,
+    masked,
+    prevChar,
+  );
+  if (standard) return standard;
+  const match = CANDIDATE.exec(src);
+  if (!match) return undefined;
+  const inner = match[1];
+  const before = lastChar(prevChar);
+  const next = firstChar(src.slice(match[0].length));
+  if (!canOpen(before, firstChar(inner))) return undefined;
+  if (!canClose(lastChar(inner), next, inner)) return undefined;
+  if (!(CJK.test(before) || CJK.test(next) || CJK.test(inner)))
+    return undefined;
+  return {
+    type: "strong",
+    raw: match[0],
+    text: inner,
+    tokens: this.lexer.inlineTokens(inner),
+  };
+}
+
 const defaults = new Renderer();
 // A module instance, so the code renderer touches no other `marked` user.
 const markdown = new Marked({
+  tokenizer: { emStrong: cjkStrong },
   renderer: {
     code(token): string {
       // The default output keeps escaping and the language class as they were;

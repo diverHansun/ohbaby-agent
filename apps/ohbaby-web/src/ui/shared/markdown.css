@@ -1,0 +1,226 @@
+/* Markdown typography shared by chat, file preview and command results. The
+   surrounding scene sets the base font size; headings, code and tables are
+   derived from it, so a 13px compaction summary scales down with it. */
+.ohb-markdown {
+  overflow-wrap: anywhere;
+}
+
+.ohb-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ohb-markdown p {
+  margin: 0 0 12px;
+}
+
+.ohb-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 20px 0 8px;
+}
+
+.ohb-markdown :is(h1, h2) {
+  margin-top: 24px;
+}
+
+.ohb-markdown :is(h1, h2, h3) {
+  letter-spacing: -0.01em;
+}
+
+.ohb-markdown h1 {
+  font-size: calc(1em + 6px);
+}
+
+.ohb-markdown h2 {
+  font-size: calc(1em + 3px);
+}
+
+.ohb-markdown h3 {
+  font-size: calc(1em + 1px);
+}
+
+/* "# Title" straight into "## Section" is common in model output. */
+.ohb-markdown :is(h1, h2, h3, h4, h5, h6) + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 8px;
+}
+
+.ohb-markdown :is(strong, b) {
+  font-weight: 600;
+}
+
+.ohb-markdown :is(ul, ol) {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.ohb-markdown li + li,
+.ohb-markdown li > :is(ul, ol) {
+  margin-top: 4px;
+}
+
+.ohb-markdown li > :is(ul, ol) {
+  margin-bottom: 0;
+}
+
+.ohb-markdown blockquote {
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-muted);
+  margin: 0 0 12px;
+  padding-left: 12px;
+}
+
+.ohb-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.ohb-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 20px 0;
+}
+
+.ohb-markdown a,
+.ohb-markdown a:visited {
+  color: var(--text-muted);
+  text-decoration-color: var(--border);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.ohb-markdown a:hover,
+.ohb-markdown a:focus-visible {
+  color: var(--text-muted);
+  text-decoration-color: currentColor;
+}
+
+.ohb-markdown a:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.ohb-markdown code {
+  background: var(--bg-hover);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.93em;
+  padding: 1px 5px;
+}
+
+.ohb-markdown a code {
+  color: inherit;
+}
+
+/* Preserve formatted content without letting it widen the message. */
+.ohb-markdown pre,
+.ohb-markdown table {
+  margin: 0 0 12px;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: none;
+}
+
+.ohb-markdown pre {
+  font-size: calc(1em - 1px);
+  line-height: 1.6;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.ohb-markdown table {
+  border-collapse: collapse;
+  display: block;
+  font-size: calc(1em - 1px);
+  overflow-wrap: normal;
+}
+
+.ohb-markdown th,
+.ohb-markdown td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px 6px 0;
+  text-align: left;
+}
+
+.ohb-markdown th {
+  font-weight: 600;
+}
+
+.ohb-markdown img {
+  height: auto;
+  max-width: 100%;
+}
+
+/* Code blocks: a soft panel with a small Copy label in the corner, shown on
+   hover or focus (Claude, Cursor). The wrapper keeps the button in place
+   while long lines scroll sideways. */
+.ohb-code-block {
+  margin: 0 0 12px;
+  position: relative;
+}
+
+.ohb-code-block pre {
+  background: var(--bg-panel);
+  border-radius: var(--radius-md);
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.ohb-code-block pre code {
+  background: none;
+  font-size: inherit;
+  padding: 0;
+}
+
+/* Diagrams and formulas hide the source `<pre>` but keep it for Copy. */
+.ohb-code-block [hidden] {
+  display: none;
+}
+
+.ohb-code-copy {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  height: 22px;
+  opacity: 0;
+  padding: 0 8px;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  transition:
+    opacity var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+  /* Keeps the label out of a drag-selection across the block. */
+  user-select: none;
+}
+
+.ohb-code-block:hover .ohb-code-copy,
+.ohb-code-copy:focus-visible,
+.ohb-code-copy[data-copy-state] {
+  opacity: 1;
+}
+
+.ohb-code-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ohb-code-copy[data-copy-state="failed"] {
+  color: var(--danger-ink);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .ohb-code-copy {
+    opacity: 1;
+  }
+
+  /* The always-visible button gets its own strip instead of covering code. */
+  .ohb-code-block pre {
+    padding-top: 34px;
+  }
+}

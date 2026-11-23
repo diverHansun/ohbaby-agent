@@ -52,7 +52,7 @@
 
 .ohb-message-body {
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.7;
   min-width: 0;
 }
@@ -74,7 +74,8 @@
 }
 
 .ohb-message-body > :last-child,
-.ohb-message-user-bubble p:last-child {
+.ohb-message-user-bubble p:last-child,
+.ohb-message-user-bubble .ohb-markdown > :last-child {
   margin-bottom: 0;
 }
 
@@ -99,66 +100,9 @@
   margin: -10px 24px 0;
 }
 
-.ohb-markdown a,
-.ohb-markdown a:visited {
-  color: var(--text-muted);
-  text-decoration-color: var(--border);
-  text-decoration-line: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-}
-
-.ohb-markdown a:hover,
-.ohb-markdown a:focus-visible {
-  color: var(--text-muted);
-  text-decoration-color: currentColor;
-}
-
-.ohb-markdown a:focus-visible {
-  border-radius: 3px;
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
-}
-
-.ohb-markdown code {
-  background: var(--bg-hover);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 1px 5px;
-}
-
-.ohb-markdown a code {
-  color: inherit;
-}
-
-/* Shared by root messages and the child transcript, including parent prompts. */
-.ohb-markdown,
+/* Streaming text keeps its own wrap rule until it renders as Markdown. */
 .ohb-streaming-text {
   overflow-wrap: anywhere;
-}
-
-/* Preserve formatted content without letting it widen the message or stream. */
-.ohb-markdown pre,
-.ohb-markdown table {
-  max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: none;
-}
-
-.ohb-markdown pre {
-  white-space: pre;
-  overflow-wrap: normal;
-}
-
-.ohb-markdown table {
-  display: block;
-  overflow-wrap: normal;
-}
-
-.ohb-markdown img {
-  max-width: 100%;
-  height: auto;
 }
 
 .ohb-streaming-text,
@@ -539,79 +483,14 @@
   width: 24px;
 }
 
-/* Code blocks in Markdown: a soft panel with a small Copy label in the
-   corner, shown on hover or focus (Claude, Cursor). The wrapper keeps the
-   button in place while long lines scroll sideways. */
-.ohb-code-block {
-  margin: 0 0 12px;
-  position: relative;
-}
-
-.ohb-code-block pre {
-  background: var(--bg-panel);
-  border-radius: var(--radius-md);
-  font-size: 12.5px;
-  line-height: 1.6;
-  margin: 0;
-  padding: 10px 12px;
-}
-
 /* Inside the grey user bubble the panel would vanish; use the page colour. */
 .ohb-message-user-bubble .ohb-code-block pre {
   background: var(--bg);
 }
 
-.ohb-code-block pre code {
-  background: none;
-  font-size: inherit;
-  padding: 0;
-}
-
-.ohb-code-copy {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-family: var(--font-ui);
-  font-size: 11.5px;
-  height: 22px;
-  opacity: 0;
-  padding: 0 8px;
-  position: absolute;
-  right: 6px;
-  top: 6px;
-  transition:
-    opacity var(--duration-fast) var(--ease),
-    background var(--duration-fast) var(--ease),
-    color var(--duration-fast) var(--ease);
-  /* Keeps the label out of a drag-selection across the block. */
-  user-select: none;
-}
-
-.ohb-code-block:hover .ohb-code-copy,
-.ohb-code-copy:focus-visible,
-.ohb-code-copy[data-copy-state] {
-  opacity: 1;
-}
-
-.ohb-code-copy:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.ohb-code-copy[data-copy-state="failed"] {
-  color: var(--danger-ink);
-}
-
 @media (hover: none), (pointer: coarse) {
-  .ohb-message-actions,
-  .ohb-code-copy {
+  .ohb-message-actions {
     opacity: 1;
-  }
-
-  /* The always-visible button gets its own strip instead of covering code. */
-  .ohb-code-block pre {
-    padding-top: 34px;
   }
 }
 
@@ -642,7 +521,7 @@
   border: 0;
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 24px;
   outline: 0;
   padding: 0;

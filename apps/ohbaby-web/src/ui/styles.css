@@ -3,6 +3,7 @@
 @import "./styles/tokens.css";
 @import "./styles/base.css";
 @import "./shared/shared.css";
+@import "./shared/markdown.css";
 @import "./shared/context-usage.css";
 @import "./shell/shell.css";
 @import "./sidebar/sidebar.css";
