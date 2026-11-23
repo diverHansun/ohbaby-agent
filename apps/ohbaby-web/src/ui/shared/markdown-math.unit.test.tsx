@@ -113,6 +113,13 @@ describe("enhanceMath", () => {
     ]);
   });
 
+  it("U-12: MathML keeps no leftover TeX for screen readers", async () => {
+    const root = await enhanced("$x^2$");
+    const mathml = root.querySelector("math");
+    expect(mathml?.querySelector("msup")).not.toBeNull();
+    expect(mathml?.textContent).toBe("x2");
+  });
+
   it("U-13: errors keep their source; the other formulas render", async () => {
     const root = await enhanced(
       "$\\notacommand{x}$ 和 $y_1$\n\n$$\n\\frac{1}{\n$$",

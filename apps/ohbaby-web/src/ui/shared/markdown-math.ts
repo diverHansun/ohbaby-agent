@@ -56,6 +56,9 @@ function renderTex(lib: Katex, tex: string, display: boolean): string | null {
           maxSize: 10,
           maxExpand: 1000,
         }),
+        // DOMPurify drops `<annotation>`; without this its TeX would stay
+        // inside `<math>` as text and screen readers would read it twice.
+        { ADD_FORBID_CONTENTS: ["annotation"] },
       );
     } catch {
       // A syntax error or an unsupported command: the source stays.
