@@ -99,6 +99,8 @@
 ### CS11：Agent Prompt 与工具能力
 
 - primary base 对复杂任务、简单任务、创建时机、更新节奏、多 `in_progress`、完成验证和清空生命周期有确定性断言。
+- primary base 断言计划顺序不是严格队列、完成项留在原位、满 10 条时先移除最早完成的项、允许不相邻的 `in_progress`。
+- `todo_write` 写入第 2、4 项同时 `in_progress` 的列表后，`todo_read` 原样返回顺序和状态。
 - Plan Agent 同时注册 `todo_read` 与 `todo_write`。
 - 两个工具 description 只包含接口语义；状态和字段边界由 schema 断言。
 

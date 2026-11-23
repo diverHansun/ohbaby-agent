@@ -225,7 +225,7 @@ const TodoWriteParams = z.object({
 const TodoReadParams = z.object({}).strict()
 ```
 
-Todo 不定义 `id` 或 `priority`；数组顺序即执行顺序，允许多个 `in_progress`。Unicode 长度按 code point 计算，避免把一个常见 emoji 计成两个 UTF-16 code unit；组合字素归一化不属于当前版本。详见 [`todo-list/data-model.md`](./todo-list/data-model.md)。
+Todo 不定义 `id` 或 `priority`；数组顺序是计划顺序，不是严格队列，允许多个不相邻的 `in_progress`。Unicode 长度按 code point 计算，避免把一个常见 emoji 计成两个 UTF-16 code unit；组合字素归一化不属于当前版本。详见 [`todo-list/data-model.md`](./todo-list/data-model.md)。
 
 ---
 

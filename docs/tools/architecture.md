@@ -316,7 +316,7 @@ todo_read 输入: 空对象
 约束: 最多 10 项，单项 content 最多 100 个 Unicode 字符
 ```
 
-数组顺序表达执行顺序和隐式优先级；允许多个 `in_progress`。运行时按 session 隔离，消息历史中最后一次成功 `todo_write` 是恢复事实源，Web/TUI 只消费正式 snapshot/event。详见 [`todo-list/architecture.md`](./todo-list/architecture.md)。
+数组顺序是计划顺序，不是严格队列；允许多个 `in_progress`，它们可以不相邻。运行时按 session 隔离，消息历史中最后一次成功 `todo_write` 是恢复事实源，Web/TUI 只消费正式 snapshot/event。详见 [`todo-list/architecture.md`](./todo-list/architecture.md)。
 
 ---
 

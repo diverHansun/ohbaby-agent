@@ -32,7 +32,7 @@ export type TodoList = readonly TodoItem[];
 | `content` | trim 后非空，最多 100 个 Unicode 字符 |
 | `status` | 仅三种枚举值 |
 
-不定义 `id`、`priority`、`cancelled` 或其他元数据。数组位置表达执行顺序和隐式优先级。
+不定义 `id`、`priority`、`cancelled` 或其他元数据。数组位置是计划顺序，不是严格队列：前置条件满足的 `pending` 项都可以先开始。状态变化时条目留在原位。
 
 ### TodoList 约束
 
