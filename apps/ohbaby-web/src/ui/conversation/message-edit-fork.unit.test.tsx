@@ -138,6 +138,29 @@ describe("Edit and Fork buttons (rewind T18, fork T15)", () => {
     expect(buttons(container, "Fork from here")).toHaveLength(0);
   });
 
+  it("keeps the time at the row's outer end, with or without Edit and Fork (message time R-1, R-2)", () => {
+    const order = (container: HTMLElement, id: string): string[] =>
+      [
+        ...container.querySelectorAll<HTMLElement>(
+          `[data-message-id="${id}"] .ohb-message-action > *`,
+        ),
+      ].map((node) =>
+        node.tagName === "TIME"
+          ? "time"
+          : (node.getAttribute("aria-label") ?? ""),
+      );
+    const main = render(turn, [prompt("a")]);
+    expect(order(main, "user-a")).toEqual(["time", "Copy message", "Edit"]);
+    expect(order(main, "answer-a")).toEqual([
+      "Copy answer",
+      "Fork from here",
+      "time",
+    ]);
+    const side = render(turn, [prompt("a")], { variant: "side-chat" });
+    expect(order(side, "user-a")).toEqual(["time", "Copy message"]);
+    expect(order(side, "answer-a")).toEqual(["Copy answer", "time"]);
+  });
+
   it("dims Edit while the chat compacts", () => {
     const container = render(turn, [prompt("a")], {
       unavailable: "Compacting…",

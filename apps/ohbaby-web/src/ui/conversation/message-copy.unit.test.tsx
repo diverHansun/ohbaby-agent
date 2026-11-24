@@ -17,6 +17,7 @@ Object.defineProperty(navigator, "clipboard", {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   writeText.mockClear();
   document.body.innerHTML = "";
 });
@@ -365,5 +366,55 @@ describe("message copy buttons", () => {
       disclosure?.click();
     });
     expect([...copyButtonsIn(view).keys()]).toEqual(["user-run", "closing"]);
+  });
+});
+
+describe("message times (message time 04 R)", () => {
+  // Local times: the row shows them in the system time zone.
+  const asked = new Date(2026, 10, 6, 9, 15).toISOString();
+  const ended = new Date(2026, 10, 6, 9, 21).toISOString();
+  const started = new Date(2026, 10, 6, 9, 16).toISOString();
+
+  const rowItems = (view: HTMLElement, id: string): string[] =>
+    [
+      ...view.querySelectorAll<HTMLElement>(
+        `[data-message-id="${id}"] .ohb-message-actions > .ohb-message-action > *`,
+      ),
+    ].map((node) =>
+      node.tagName === "TIME"
+        ? `time:${node.textContent}`
+        : (node.getAttribute("aria-label") ?? ""),
+    );
+
+  it("puts the time first on user rows and last on answers, from the turn's end (R-1 to R-5)", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 6, 18, 0));
+    const view = render(
+      [
+        msg("user-run", "user", [text("Question")], { createdAt: asked }),
+        msg("answer", "assistant", [text("Answer")], { createdAt: started }),
+      ],
+      [prompt("run", { createdAt: asked, updatedAt: ended, endedAt: ended })],
+    );
+    expect(rowItems(view, "user-run")).toEqual(["time:09:15", "Copy message"]);
+    expect(rowItems(view, "answer")).toEqual(["Copy answer", "time:09:21"]);
+    const time = view.querySelector<HTMLTimeElement>(
+      '[data-message-id="answer"] time',
+    );
+    expect(time?.dateTime).toBe(ended);
+    expect(time?.title).toBe("2026-11-06 09:21");
+    // R-7: the latest answer keeps its row, time included, without hover.
+    expect(
+      view
+        .querySelector('[data-message-id="answer"] .ohb-message-actions')
+        ?.classList.contains("is-persistent"),
+    ).toBe(true);
+  });
+
+  it("shows no time where there is no action row (R-6)", () => {
+    const view = render([
+      msg("answer", "assistant", [text("")], { createdAt: started }),
+    ]);
+    expect(view.querySelector("time")).toBeNull();
   });
 });

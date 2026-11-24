@@ -38,6 +38,8 @@ import { CopyButton } from "../shared/CopyButton.js";
 import { SelectionAction } from "./SelectionAction.js";
 import { type MessageAction, MessageActions } from "./MessageActions.js";
 import { isCompactionMessage, messageBodyText } from "./message-text.js";
+import { formatFullMessageTime, formatMessageTime } from "./message-time.js";
+import { useDayClock } from "../shared/use-day-clock.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
 import {
   isExpectedInterruption,
@@ -216,6 +218,8 @@ export function ConversationStream(props: {
   const scheduledScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestPendingRef = useRef(false);
   const requestEndedAtRef = useRef(0);
+  // One clock for every message time in the stream; it moves at midnight.
+  const today = useDayClock();
   const localReading = useRef<{
     sessionId: string | null;
     position: ConversationReadingPosition;
@@ -356,7 +360,7 @@ export function ConversationStream(props: {
   // runs or when the newest turn ended without an answer.
   const answerRuns = new Map(
     processes.flatMap((process) =>
-      process.answerId ? [[process.answerId, process.runId] as const] : [],
+      process.answerId ? [[process.answerId, process] as const] : [],
     ),
   );
   const [forkingRunId, setForkingRunId] = useState<string | null>(null);
@@ -445,11 +449,39 @@ export function ConversationStream(props: {
       (message.role === "user" && !isCompactionMessage(message)) ||
       answerRuns.has(message.id);
     if (!copyable || messageBodyText(message) === "") return null;
-    const forkRunId = answerRuns.get(message.id);
+    const answerRun = answerRuns.get(message.id);
+    const forkRunId = answerRun?.runId;
+    // A user message shows when it was sent; an answer, when its turn ended.
+    // The turn's end is stored, so it reads the same after a reload; a
+    // recovered turn's end is only when recovery ran, so it keeps createdAt.
+    const at =
+      answerRun && !answerRun.timing.recovered
+        ? answerRun.timing.endedAt
+        : message.createdAt;
+    const time = formatMessageTime(at, today);
+    const timeAction: readonly MessageAction[] = time
+      ? [
+          {
+            key: "time",
+            node: (
+              <time
+                className="ohb-message-time"
+                dateTime={at}
+                title={formatFullMessageTime(at)}
+              >
+                {time}
+              </time>
+            ),
+          },
+        ]
+      : [];
     return (
       <MessageActions
         persistent={message.id === latestAnswerId}
         actions={[
+          // Users' rows sit at the right, answers' at the left: the time takes
+          // the outer end either way, with the buttons next to the message.
+          ...(message.role === "user" ? timeAction : []),
           {
             key: "copy",
             node: (
@@ -479,6 +511,7 @@ export function ConversationStream(props: {
                 },
               ]
             : []),
+          ...(message.role === "user" ? [] : timeAction),
         ]}
       />
     );
