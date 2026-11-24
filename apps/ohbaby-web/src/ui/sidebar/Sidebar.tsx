@@ -75,6 +75,11 @@ export interface SidebarProps {
   readonly onNewChat: (workspaceDirectory: string | null) => void;
   readonly onSelectSession: (session: SidebarSessionItem) => void;
   readonly onArchiveSession: (session: SidebarSessionItem) => Promise<boolean>;
+  /** `title` is already normalized and differs from the current one. */
+  readonly onRenameSession: (
+    session: SidebarSessionItem,
+    title: string,
+  ) => void;
   readonly onForkSession: (session: SidebarSessionItem) => void;
   readonly onExportSession: (
     session: SidebarSessionItem,
@@ -270,6 +275,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
         }}
         onSelectSession={props.onSelectSession}
         onArchiveSession={props.onArchiveSession}
+        onRenameSession={props.onRenameSession}
         onExportSession={props.onExportSession}
         onForkSession={props.onForkSession}
       />

@@ -416,6 +416,15 @@ export function AppController(props: {
                 runtime.archiveSession(session.id, session.requestDirectory),
               )
             }
+            onRenameSession={(session, title) => {
+              void runAction(() =>
+                runtime.renameSession(
+                  session.id,
+                  title,
+                  session.requestDirectory,
+                ),
+              );
+            }}
             onExportSession={exportSession}
             onForkSession={(session) => {
               void forkSession(session.id, {

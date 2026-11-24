@@ -24,6 +24,7 @@ let container: HTMLDivElement;
 let serverUrl = "";
 const select = vi.fn<(session: SidebarSessionItem) => void>();
 const archive = vi.fn<(session: SidebarSessionItem) => Promise<boolean>>();
+const rename = vi.fn<(session: SidebarSessionItem, title: string) => void>();
 const exportSession = vi.fn();
 const newChat = vi.fn<(directory: string | null) => void>();
 const loadMore =
@@ -92,6 +93,7 @@ function render(overrides: Partial<SidebarProps> = {}): void {
         onNewChat={newChat}
         onSelectSession={select}
         onArchiveSession={archive}
+        onRenameSession={rename}
         onForkSession={() => undefined}
         onExportSession={exportSession}
         onMoveSession={() => Promise.resolve(true)}
@@ -147,6 +149,7 @@ beforeEach(() => {
   });
   select.mockReset();
   archive.mockReset().mockResolvedValue(true);
+  rename.mockReset();
   exportSession.mockReset();
   newChat.mockReset();
   loadMore.mockReset().mockResolvedValue(undefined);
@@ -249,6 +252,8 @@ it("switches to the export list in place and goes back one level per Escape", ()
       );
     });
   };
+  press("ArrowDown");
+  expect(document.activeElement).toBe(button("Rename"));
   press("ArrowDown");
   expect(document.activeElement).toBe(button("Move to workspace…"));
   press("ArrowDown");
@@ -824,4 +829,202 @@ it("moves focus with a chat pinned from Recents and unpinned again", () => {
   expect(document.activeElement?.getAttribute("aria-label")).toBe(
     "Actions for Chat B",
   );
+});
+
+function renameInput(): HTMLInputElement | null {
+  return document.querySelector<HTMLInputElement>(".ohb-session-rename");
+}
+function keyInRename(init: KeyboardEventInit): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  });
+  act(() => {
+    renameInput()?.dispatchEvent(event);
+  });
+  return event;
+}
+function typeTitle(value: string): void {
+  const input = renameInput();
+  if (!input) throw new Error("Not renaming");
+  input.value = value;
+}
+function doubleClick(label: string): void {
+  act(() => {
+    button(label).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  });
+}
+async function nextFrame(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+}
+
+it("renames in place from the menu and with a double click; Enter saves and Escape cancels", () => {
+  click("Actions for Chat B");
+  const item = button("Rename");
+  expect(item.dataset.menuShortcut).toBe("r");
+  expect(item.previousElementSibling?.textContent).toBe("Pin");
+  act(() => {
+    item.click();
+  });
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  const input = renameInput();
+  expect(document.activeElement).toBe(input);
+  expect(input?.getAttribute("aria-label")).toBe("Rename chat");
+  expect([input?.selectionStart, input?.selectionEnd]).toEqual([0, 6]);
+  const row = input?.closest(".ohb-session-row");
+  expect(row?.querySelector(".ohb-session-hover-actions")).toBeNull();
+
+  typeTitle("  New \n  name ");
+  const enter = keyInRename({ key: "Enter" });
+  expect(enter.defaultPrevented).toBe(true);
+  expect(renameInput()).toBeNull();
+  expect(rename.mock.calls).toEqual([
+    [
+      expect.objectContaining({ id: "B", requestDirectory: "/repo" }),
+      "New name",
+    ],
+  ]);
+  expect(document.activeElement).toBe(row?.querySelector(".ohb-session-main"));
+
+  doubleClick("Select Chat C");
+  typeTitle("Something else");
+  keyInRename({ key: "Escape" });
+  expect(renameInput()).toBeNull();
+  expect(document.activeElement).toBe(button("Select Chat C"));
+
+  // Blank or unchanged titles end the edit without a request.
+  for (const value of ["   ", "Chat C", " Chat  C "]) {
+    doubleClick("Select Chat C");
+    typeTitle(value);
+    keyInRename({ key: "Enter" });
+    expect(renameInput()).toBeNull();
+  }
+  expect(rename).toHaveBeenCalledTimes(1);
+});
+
+it("keeps composing text, leaves the row menu to the browser and ends without a request when disabled", () => {
+  doubleClick("Select Chat B");
+  typeTitle("拼音");
+  keyInRename({ key: "Enter", isComposing: true });
+  expect(renameInput()).not.toBeNull();
+  keyInRename({ key: "Escape", isComposing: true });
+  expect(renameInput()).not.toBeNull();
+
+  keyInRename({ key: "F10", shiftKey: true });
+  const contextMenu = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    renameInput()?.dispatchEvent(contextMenu);
+  });
+  expect(contextMenu.defaultPrevented).toBe(false);
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+
+  render({ disabled: true });
+  expect(renameInput()).toBeNull();
+  render();
+  expect(renameInput()).toBeNull();
+  expect(rename).not.toHaveBeenCalled();
+});
+
+it("saves when the user goes elsewhere, not when the list reorders or the window loses focus", async () => {
+  // jsdom reports no focus once nothing is focused; a real window keeps it.
+  const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  doubleClick("Select Chat B");
+  typeTitle("Half typed");
+  // The server lists the newly updated C first; the edit stays open.
+  const [first, second, third] = entries;
+  render({
+    catalog: catalog([
+      { ...third, updatedAt: "2026-10-01T00:00:00Z" },
+      first,
+      second,
+    ]),
+  });
+  act(() => {
+    renameInput()?.blur();
+  });
+  await nextFrame();
+  expect(document.activeElement).toBe(renameInput());
+
+  hasFocus.mockReturnValue(false);
+  act(() => {
+    renameInput()?.blur();
+  });
+  await nextFrame();
+  expect(renameInput()).not.toBeNull();
+  hasFocus.mockReturnValue(true);
+  act(() => {
+    renameInput()?.focus();
+  });
+  expect(rename).not.toHaveBeenCalled();
+
+  const target = button("Select Chat A");
+  act(() => {
+    target.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    target.focus();
+  });
+  await nextFrame();
+  expect(renameInput()).toBeNull();
+  expect(rename.mock.calls).toEqual([
+    [expect.objectContaining({ id: "B" }), "Half typed"],
+  ]);
+  expect(document.activeElement).toBe(target);
+});
+
+it("forgets a press that did not leave the input and keeps an untouched title when the chat is renamed meanwhile", async () => {
+  const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  doubleClick("Select Chat B");
+  typeTitle("Half typed");
+  // A press on the sidebar scrollbar does not blur the input.
+  act(() => {
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  hasFocus.mockReturnValue(false);
+  act(() => {
+    renameInput()?.blur();
+  });
+  await nextFrame();
+  expect(renameInput()).not.toBeNull();
+  hasFocus.mockReturnValue(true);
+  act(() => {
+    renameInput()?.focus();
+  });
+  keyInRename({ key: "Escape" });
+
+  // AI naming lands while the input still shows the old title.
+  doubleClick("Select Chat C");
+  const [first, second, third] = entries;
+  render({
+    catalog: catalog([first, second, { ...third, title: "AI title" }]),
+  });
+  keyInRename({ key: "Enter" });
+  expect(renameInput()).toBeNull();
+  expect(rename).not.toHaveBeenCalled();
+});
+
+it("saves a completed tap outside the input and forgets edits on rows that leave the list", () => {
+  doubleClick("Select Chat B");
+  typeTitle("From touch");
+  // Touch can deliver its click well after pointerdown, with focus still in the input.
+  act(() => {
+    document.body.click();
+  });
+  expect(rename.mock.calls).toEqual([
+    [expect.objectContaining({ id: "B" }), "From touch"],
+  ]);
+  expect(renameInput()).toBeNull();
+
+  doubleClick("Select Chat C");
+  render({ catalog: catalog(entries.filter((row) => row.id !== "C")) });
+  render();
+  expect(renameInput()).toBeNull();
+  expect(rename).toHaveBeenCalledTimes(1);
 });

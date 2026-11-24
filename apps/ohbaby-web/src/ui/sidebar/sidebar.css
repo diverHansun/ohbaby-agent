@@ -479,3 +479,24 @@ button.ohb-group-more:hover {
   margin: 0;
   padding: 4px 0 8px 33px;
 }
+
+/* Renaming: the title becomes a frameless inline input in the same place and
+   type, relying on the row highlight and native caret. */
+.ohb-session-row.is-editing {
+  background: var(--bg-hover);
+}
+
+.ohb-session-rename {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--text);
+  flex: 1;
+  font: inherit;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.ohb-session-rename:focus {
+  outline: none;
+}

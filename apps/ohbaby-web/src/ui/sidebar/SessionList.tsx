@@ -6,6 +6,7 @@ import {
   useState,
   type ReactElement,
 } from "react";
+import { normalizeSessionTitle } from "ohbaby-sdk";
 import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
 import type { getSessionPinsStore } from "./session-pins.js";
 import {
@@ -29,6 +30,11 @@ export interface SessionListProps {
   readonly activeSessionId: string | null;
   readonly disabled: boolean;
   readonly onArchiveSession: (session: SidebarSessionItem) => Promise<boolean>;
+  /** Called only with a normalized title that differs from the current one. */
+  readonly onRenameSession: (
+    session: SidebarSessionItem,
+    title: string,
+  ) => void;
   readonly onExportSession: (
     session: SidebarSessionItem,
     format: SessionExportFormat,
@@ -48,12 +54,15 @@ interface OpenSessionMenu {
 }
 
 /**
- * The rows of one sidebar group with the row menu, pins and focus repair
- * after archiving: focus moves to the next row once the archived row leaves.
+ * The rows of one sidebar group with the row menu, pins, inline renaming
+ * (one row at a time) and focus repair after archiving: focus moves to the
+ * next row once the archived row leaves.
  */
 export function SessionList(props: SessionListProps): ReactElement {
   const { sessions, pins } = props;
   const [menu, setMenu] = useState<OpenSessionMenu | null>(null);
+  // A reorder keeps the edit open; the input gets its focus back.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
   const archivedFocus = useRef<{
@@ -105,7 +114,12 @@ export function SessionList(props: SessionListProps): ReactElement {
   }, []);
   useEffect(() => {
     if (props.disabled) setMenu(null);
-  }, [props.disabled]);
+    if (
+      editingId &&
+      (props.disabled || !sessions.some((row) => row.id === editingId))
+    )
+      setEditingId(null);
+  }, [props.disabled, editingId, sessions]);
   const closeMenu = useCallback(
     (restoreFocus: boolean): void => {
       if (restoreFocus && menu?.trigger.isConnected)
@@ -126,6 +140,13 @@ export function SessionList(props: SessionListProps): ReactElement {
     setMenu(null);
     props.onPinChange(session.id);
     pins.setPinned(session.id, pinned);
+  };
+  const endRename = (session: SidebarSessionItem, raw: string | null): void => {
+    setEditingId(null);
+    if (raw === null) return;
+    const title = normalizeSessionTitle(raw);
+    if (title === "" || title === session.title) return;
+    props.onRenameSession(session, title);
   };
   const archive = (
     session: SidebarSessionItem,
@@ -165,9 +186,17 @@ export function SessionList(props: SessionListProps): ReactElement {
             moving={props.moving.has(session.id)}
             menuOpen={menuSession?.id === session.id}
             reordering={reordering}
+            editing={!props.disabled && editingId === session.id}
             onSelect={() => {
               if (session.id !== props.activeSessionId)
                 props.onSelectSession(session);
+            }}
+            onRenameStart={() => {
+              setMenu(null);
+              setEditingId(session.id);
+            }}
+            onRenameEnd={(title) => {
+              endRename(session, title);
             }}
             onUnpin={(focus) => {
               setPin(session, false, focus);
@@ -196,6 +225,11 @@ export function SessionList(props: SessionListProps): ReactElement {
           onClose={closeMenu}
           onPin={() => {
             setPin(menuSession, !menuSession.pinned, menu.trigger);
+          }}
+          onRename={() => {
+            // The input takes focus, so the menu does not hand it back.
+            closeMenu(false);
+            setEditingId(menuSession.id);
           }}
           onArchive={() => {
             archive(menuSession, menu.trigger);

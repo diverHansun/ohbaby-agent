@@ -6,6 +6,7 @@ import {
   FolderInput,
   FolderMinus,
   Check,
+  Pencil,
   Pin,
   Split,
 } from "lucide-react";
@@ -32,6 +33,8 @@ export function SessionMenu(props: {
   readonly onMove: (directory: string | null) => void;
   readonly onClose: (restoreFocus: boolean) => void;
   readonly onPin: () => void;
+  /** Turns the row title into an input. */
+  readonly onRename: () => void;
   readonly onArchive: () => void;
   /** Starts a new chat from this one's latest answer. */
   readonly onFork: () => void;
@@ -174,6 +177,15 @@ export function SessionMenu(props: {
           strokeWidth={1.75}
         />
         <span>{props.pinned ? "Unpin" : "Pin"}</span>
+      </button>
+      <button
+        role="menuitem"
+        type="button"
+        data-menu-shortcut="r"
+        onClick={props.onRename}
+      >
+        <Pencil aria-hidden="true" size={13} strokeWidth={1.75} />
+        <span>Rename</span>
       </button>
       <button
         role="menuitem"

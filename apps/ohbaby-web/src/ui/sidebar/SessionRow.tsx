@@ -1,6 +1,15 @@
 import { MoreHorizontal, Pin } from "lucide-react";
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from "ohbaby-sdk";
+import {
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
 import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
+import { isImeComposing } from "../composer/ime.js";
 import { ActivityMark } from "../conversation/ActivityMark.js";
 import { Spinner } from "../shared/Spinner.js";
 import type { SessionMenuAnchor } from "./SessionMenu.js";
@@ -11,6 +20,8 @@ import type { SessionMenuAnchor } from "./SessionMenu.js";
  * awaiting approval, a blue dot for a reply not yet seen). The row end holds
  * room for the menu button that shows on hover; a pinned row also shows a
  * filled pin there, which unpins it.
+ * While renaming, the title is an input in place and the row-end buttons
+ * and row menu shortcuts step aside.
  * Sessions keep their recency order but show no time; messages carry it.
  */
 export function SessionRow(props: {
@@ -21,7 +32,12 @@ export function SessionRow(props: {
   readonly menuOpen: boolean;
   readonly moving: boolean;
   readonly reordering: boolean;
+  readonly editing: boolean;
   readonly onSelect: () => void;
+  /** Double-click on the title; the menu's Rename goes through the list. */
+  readonly onRenameStart: () => void;
+  /** `title` is the raw input; `null` cancels. */
+  readonly onRenameEnd: (title: string | null) => void;
   readonly onUnpin: (focusTarget: HTMLElement | null) => void;
   readonly onMenu: (
     anchor: SessionMenuAnchor,
@@ -35,6 +51,13 @@ export function SessionRow(props: {
   const textRef = useRef<HTMLSpanElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
+  // Enter and Escape hand focus back to the row; a click elsewhere keeps it there.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (props.editing || !refocus.current) return;
+    refocus.current = false;
+    mainRef.current?.focus({ preventScroll: true });
+  }, [props.editing]);
   useEffect(() => {
     const titleElement = titleRef.current;
     const text = textRef.current;
@@ -44,7 +67,8 @@ export function SessionRow(props: {
       !hovered ||
       props.menuOpen ||
       props.reordering ||
-      props.disabled
+      props.disabled ||
+      props.editing
     )
       return;
     const reduced =
@@ -95,7 +119,14 @@ export function SessionRow(props: {
       observer?.disconnect();
       reduced?.removeEventListener("change", schedule);
     };
-  }, [hovered, props.menuOpen, props.reordering, props.disabled, title]);
+  }, [
+    hovered,
+    props.menuOpen,
+    props.reordering,
+    props.disabled,
+    props.editing,
+    title,
+  ]);
 
   const openAtButton = (): void => {
     const trigger = actionsRef.current;
@@ -136,7 +167,7 @@ export function SessionRow(props: {
     <div
       ref={rowRef}
       data-session-id={props.session.id}
-      className={`ohb-session-row${props.active ? " ohb-session-active" : ""}${props.menuOpen ? " is-menu-open" : ""}${props.pinned ? " is-pinned" : ""}`}
+      className={`ohb-session-row${props.active ? " ohb-session-active" : ""}${props.menuOpen ? " is-menu-open" : ""}${props.pinned ? " is-pinned" : ""}${props.editing ? " is-editing" : ""}`}
       onPointerEnter={() => {
         setHovered(true);
       }}
@@ -144,7 +175,13 @@ export function SessionRow(props: {
         setHovered(false);
       }}
       onContextMenu={(event) => {
-        if (props.disabled || props.moving || !actionsRef.current) return;
+        if (
+          props.editing ||
+          props.disabled ||
+          props.moving ||
+          !actionsRef.current
+        )
+          return;
         event.preventDefault();
         props.onMenu(
           {
@@ -157,6 +194,7 @@ export function SessionRow(props: {
         );
       }}
       onKeyDown={(event) => {
+        if (props.editing) return;
         if (
           event.key === "ContextMenu" ||
           (event.key === "F10" && event.shiftKey)
@@ -166,56 +204,151 @@ export function SessionRow(props: {
         }
       }}
     >
-      <button
-        ref={mainRef}
-        className="ohb-session-main"
-        disabled={props.disabled || props.moving}
-        aria-current={props.active ? "page" : undefined}
-        aria-label={`Select ${title}`}
-        onClick={props.onSelect}
-        type="button"
-      >
-        {lead}
-        <span className="ohb-session-copy">
-          <strong ref={titleRef} className="ohb-session-title">
-            <span ref={textRef}>{title}</span>
-          </strong>
-          <span className="ohb-session-meta" aria-hidden="true" />
-        </span>
-      </button>
-      <span className="ohb-session-hover-actions">
-        {props.pinned ? (
-          <button
-            className="ohb-session-pin"
-            type="button"
-            aria-label={`Unpin ${title}`}
-            title="Unpin"
-            disabled={props.disabled || props.moving}
-            onClick={() => {
-              props.onUnpin(mainRef.current);
-            }}
-          >
-            <Pin
-              aria-hidden="true"
-              className="ohb-pin-icon"
-              size={13}
-              fill="currentColor"
+      {props.editing ? (
+        <div className="ohb-session-main">
+          {lead}
+          <span className="ohb-session-copy">
+            <SessionRenameInput
+              initial={props.session.title}
+              onDone={(value, viaKey) => {
+                refocus.current = viaKey;
+                props.onRenameEnd(value);
+              }}
             />
+          </span>
+        </div>
+      ) : (
+        <>
+          <button
+            ref={mainRef}
+            className="ohb-session-main"
+            disabled={props.disabled || props.moving}
+            aria-current={props.active ? "page" : undefined}
+            aria-label={`Select ${title}`}
+            onClick={props.onSelect}
+            onDoubleClick={() => {
+              if (!props.disabled && !props.moving) props.onRenameStart();
+            }}
+            type="button"
+          >
+            {lead}
+            <span className="ohb-session-copy">
+              <strong ref={titleRef} className="ohb-session-title">
+                <span ref={textRef}>{title}</span>
+              </strong>
+              <span className="ohb-session-meta" aria-hidden="true" />
+            </span>
           </button>
-        ) : null}
-        <button
-          ref={actionsRef}
-          className="ohb-session-actions"
-          aria-label={`Actions for ${title}`}
-          aria-haspopup="menu"
-          aria-expanded={props.menuOpen}
-          disabled={props.disabled || props.moving}
-          onClick={openAtButton}
-          type="button"
-        >
-          <MoreHorizontal aria-hidden="true" size={16} />
-        </button>
-      </span>
+          <span className="ohb-session-hover-actions">
+            {props.pinned ? (
+              <button
+                className="ohb-session-pin"
+                type="button"
+                aria-label={`Unpin ${title}`}
+                title="Unpin"
+                disabled={props.disabled || props.moving}
+                onClick={() => {
+                  props.onUnpin(mainRef.current);
+                }}
+              >
+                <Pin
+                  aria-hidden="true"
+                  className="ohb-pin-icon"
+                  size={13}
+                  fill="currentColor"
+                />
+              </button>
+            ) : null}
+            <button
+              ref={actionsRef}
+              className="ohb-session-actions"
+              aria-label={`Actions for ${title}`}
+              aria-haspopup="menu"
+              aria-expanded={props.menuOpen}
+              disabled={props.disabled || props.moving}
+              onClick={openAtButton}
+              type="button"
+            >
+              <MoreHorizontal aria-hidden="true" size={16} />
+            </button>
+          </span>
+        </>
+      )}
     </div>
+  );
+}
+
+/**
+ * The title as an input (F3–F4b). Enter saves and Escape cancels, unless an
+ * input method is composing. Leaving saves only when the user went somewhere
+ * else: a list reorder that drops focus gets it back, and another window
+ * leaves the edit open.
+ */
+function SessionRenameInput(props: {
+  readonly initial: string;
+  readonly onDone: (title: string | null, viaKey: boolean) => void;
+}): ReactElement {
+  const ref = useRef<HTMLInputElement>(null);
+  // What the input started with; the row's title may change while editing.
+  const [initial] = useState(props.initial);
+  const done = useRef(false);
+  useLayoutEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+    ref.current?.select();
+  }, []);
+  const finish = (title: string | null, viaKey: boolean): void => {
+    if (done.current) return;
+    done.current = true;
+    // An untouched title is a cancel, even if the chat was renamed meanwhile.
+    const changed =
+      title !== null &&
+      normalizeSessionTitle(title) !== normalizeSessionTitle(initial);
+    props.onDone(changed ? title : null, viaKey);
+  };
+  const saveOnOutsideClick = useEffectEvent((event: MouseEvent) => {
+    const input = ref.current;
+    if (input && event.target instanceof Node && !input.contains(event.target))
+      finish(input.value, false);
+  });
+  useEffect(() => {
+    // Capture a completed click/tap before its target can close the sidebar.
+    document.addEventListener("click", saveOnOutsideClick, true);
+    return (): void => {
+      document.removeEventListener("click", saveOnOutsideClick, true);
+    };
+  }, []);
+  return (
+    <input
+      ref={ref}
+      className="ohb-session-rename"
+      aria-label="Rename chat"
+      autoComplete="off"
+      spellCheck={false}
+      maxLength={SESSION_TITLE_MAX_LENGTH}
+      defaultValue={initial}
+      onKeyDown={(event) => {
+        if (isImeComposing(event)) return;
+        if (event.key !== "Enter" && event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        finish(event.key === "Enter" ? event.currentTarget.value : null, true);
+      }}
+      onBlur={() => {
+        requestAnimationFrame(() => {
+          const input = ref.current;
+          if (done.current || !input || document.activeElement === input)
+            return;
+          // Another window took focus: keep editing until the user is back.
+          if (!document.hasFocus()) return;
+          const active = document.activeElement;
+          if (active === null || active === document.body) {
+            // A list reorder moved the input and dropped its focus.
+            input.focus({ preventScroll: true });
+            return;
+          }
+          finish(input.value, false);
+        });
+      }}
+    />
   );
 }
