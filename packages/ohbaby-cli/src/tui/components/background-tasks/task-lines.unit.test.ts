@@ -29,7 +29,7 @@ describe("background task lines", () => {
         );
         expect(visibleWidth(line)).toBeLessThanOrEqual(width);
         expect(line.slice(-TRAILING_WIDTH).trim()).toMatch(
-          /^(\d+[smh]( \d+m)?|Failed|Timed out|Unknown)$/u,
+          /^(\d+[smh]( \d+m)?|Failed|Timed out|Cancelled|Unknown)$/u,
         );
       }
     },

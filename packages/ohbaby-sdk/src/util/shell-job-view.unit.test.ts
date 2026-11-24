@@ -62,7 +62,7 @@ describe("background task view", () => {
     expect(taskTitle(row())).toBe("pnpm dev");
   });
 
-  it("keeps list rows quiet: time, or a word only for failures and unknowns", () => {
+  it("keeps list rows quiet: time, or a word for failures, cancels and unknowns", () => {
     expect(taskTrailing(row(), NOW)).toEqual({ kind: "time", text: "2m" });
     expect(
       taskTrailing(
@@ -73,7 +73,7 @@ describe("background task view", () => {
         }),
         NOW,
       ),
-    ).toEqual({ kind: "time", text: "5s" });
+    ).toEqual({ kind: "cancelled", text: "Cancelled" });
     expect(taskTrailing(row({ status: "failed" }), NOW).text).toBe("Failed");
     expect(taskTrailing(row({ status: "timed_out" }), NOW).kind).toBe("failed");
     expect(taskTrailing(row({ status: "lost" }), NOW)).toEqual({

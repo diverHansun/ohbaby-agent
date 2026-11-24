@@ -253,8 +253,13 @@ describe("Background tasks page", () => {
     const list = element.querySelector(".ohb-bgtask-list")?.textContent ?? "";
     expect(list).not.toContain("git status --short");
     expect(list).toContain("sleep 600");
-    // Only the failed and the unconfirmed rows carry a word; others show a quiet time.
+    // Failed and unconfirmed rows carry a red word, a cancelled one a grey
+    // word (improve-2 B3); others show a quiet time.
     expect(rowFor(element, "Build").textContent).toContain("Failed");
+    expect(
+      rowFor(element, "Type check").querySelector(".ohb-bgtask-row-trailing")
+        ?.textContent,
+    ).toBe("Cancelled");
     expect(rowFor(element, "sleep 600").textContent).toContain("Unconfirmed");
     expect(
       element.querySelectorAll(".ohb-bgtask-row-trailing.is-failed"),
