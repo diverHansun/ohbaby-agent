@@ -82,13 +82,13 @@
 - **Purpose**：在侧栏表示一个会话，并作为打开和菜单的入口。
 - **Use when**：侧栏会话树、Pinned 区。
 - **Do not use when**：搜索结果（结构不同，由 `SidebarSearch` 自己渲染）。
-- **Anatomy**：选中竖条 / 状态位（running 点阵、awaiting 圆点或 moving 转圈）/ 标题 / 行尾区域（不显示时间，固定留位；hover 时出现菜单按钮）。
-- **States**：default、hover、selected、running、awaiting、menu-open、moving。
+- **Anatomy**：选中竖条 / 状态位（running 点阵、awaiting 圆点、unread 蓝点或 moving 转圈）/ 标题 / 行尾区域（不显示时间，固定留位；hover 时出现菜单按钮）。
+- **States**：default、hover、selected、running、awaiting、unread、menu-open、moving。
 - **API**：
   - `session: SidebarSessionItem`（06 §2 的 ViewModel）
   - `selected: boolean`
   - `onOpen()`、`onArchive()`、`onOpenMenu(anchor)`
-- **Accessibility**：行容器内，打开会话的主按钮与行尾操作按钮并列，禁止 button 嵌套 button；主按钮撑满剩余区域，名称是会话标题。行尾按钮各有名称（`Archive chat`、`More actions`）；running 和 awaiting 有 `aria-label` 文字，不只靠图形。
+- **Accessibility**：行容器内，打开会话的主按钮与行尾操作按钮并列，禁止 button 嵌套 button；主按钮撑满剩余区域，名称是会话标题。行尾按钮各有名称（`Archive chat`、`More actions`）；running、awaiting 和 unread（`New reply`）有 `aria-label` 文字，不只靠图形。
 
 ### SessionMenu
 

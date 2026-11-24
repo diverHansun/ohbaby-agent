@@ -11,7 +11,7 @@
 | `GET /v1/scopes` | Sidebar（工作区分组）、WorkspacePicker、SessionMenu 的工作区列表 | 服务端已返回 `defaultDirectory.directory` 和可见工作区列表（隐藏工作区已过滤，默认目录不在其中），按服务端顺序显示。Web 的 `WorkspaceScopesResponse` 类型还没有 `defaultDirectory`，要补上 |
 | `POST /v1/scopes/open` | 打开文件夹 | 成功后刷新工作区列表；从草稿打开时，草稿选中新工作区 |
 | `POST /v1/scopes/hide` | 工作区菜单 › Hide workspace | 成功后刷新工作区和会话列表，清除该工作区已缓存的侧栏行；主区正在看的会话保持打开 |
-| `GET /v1/sessions?limit&cursor` | Sidebar 会话树 | 一页 100 条，跨所有工作区，按更新时间倒序；前端按 `workspaceDirectory` 分组 |
+| `GET /v1/sessions?limit&cursor` | Sidebar 会话树 | 一页 100 条，跨所有工作区，按更新时间倒序；前端按 `workspaceDirectory` 分组。每条可带 `lastTurnEndedAt`（最近一次成功或失败的主对话轮次的结束时间，ISO 字符串；用户停止的轮次不算），侧栏蓝点用它判断有没有新回复（§3.4） |
 | `GET /v1/sessions/search?q&limit&cursor` | SidebarSearch | 直接渲染结果；分页用 `nextCursor` |
 | `GET /v1/sessions?status=archived&limit&cursor` | ArchivedSection | 一页 50 条，按归档时间（`updatedAt`）倒序，包括隐藏工作区里的会话；列表只存在分区组件里 |
 | `POST /v1/sessions/:id/unarchive` | ArchivedSection › Restore | 用返回的会话信息写入全局列表并刷新，被隐藏的工作区随之重新出现；`404` 或 `SESSION_NOT_ARCHIVED` 时直接移除这一行 |
@@ -85,7 +85,7 @@ interface SidebarSessionItem {
   requestDirectory: string;          // 重新打开和下一轮请求用：待生效目录优先
   updatedAt: string;                 // 用于排序，不显示
   pinned: boolean;                   // 来自本地 session-pins
-  activity: "idle" | "running" | "awaiting";  // 见 §3.4
+  activity: "idle" | "running" | "awaiting" | "unread";  // 见 §3.4
 }
 
 interface SidebarGroups {
@@ -180,6 +180,7 @@ interface McpServerRow {
 |---|---|
 | 创建会话、改归属、归档、隐藏工作区 | 用接口返回值或已知结果原地更新，再重新校验已加载范围 |
 | 当前实例 SSE 报告会话标题或状态变化 | 原地更新这一项 |
+| 页面可见时每 15 秒（unread-dot 议题） | 和“窗口重新激活”走同一个刷新（工作区列表加已加载范围的会话页），带回别的会话的回复结束时间；页面隐藏时不拉 |
 | 窗口重新激活、SSE 重连 | 重新拉工作区列表，从首页串行重取至少先前已加载的条数；使用本轮返回的新游标。完整成功后按 ID 去重并替换已加载范围，保留分组展开数量与滚动位置 |
 | 打开搜索 | 不预加载；输入后防抖 250ms 再请求 |
 
@@ -199,9 +200,13 @@ interface McpServerRow {
 全局列表只有 `active` / `archived`，没有“运行中”“等待审批”。所以：
 
 - 当前已连接实例里的会话，从该实例的会话索引和审批状态得到 `running` / `awaiting`。
-- 其他目录里的会话一律显示为 `idle`（显示时间）。
+- 其他会话不知道是否在运行，显示为 `idle`；但能知道“有没有没看过的新回复”，显示为 `unread`（unread-dot 议题）：
+  - 全局列表每条带 `lastTurnEndedAt`，页面可见时每 15 秒重拉一次列表（§3.2）。
+  - 浏览器 localStorage 按服务端地址记一份 `{ since, seen }`：`since` 是第一次使用的时间，`seen` 是每个会话已看过的回复结束时间。
+  - `lastTurnEndedAt` 晚于 `seen[id]`（没有记录时晚于 `since`），并且不是当前打开的会话，就是 `unread`。
+  - 当前打开的会话在页面可见时把回复结束时间记为已看，取列表值和该会话自己 runs 里最近一次成功或失败结束时间的较大者；后台标签页不记，免得替另一个标签页清掉蓝点。
 
-这是一个已知限制。在多个目录同时有会话运行的情况下，侧栏只能看到当前目录的运行状态。如果需要，后续给全局列表加一个运行状态字段（需要后端配合，不在本轮）。
+已知限制：别的会话是否“正在运行”或“等待审批”仍然看不到，这要等服务端提供跨实例的事件流（跨会话等待态议题）。
 
 ### 3.5 草稿
 

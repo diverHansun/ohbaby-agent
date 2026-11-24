@@ -66,6 +66,7 @@
 
 - [ ] 现有测试全部通过（流式、工具卡、插话、排队、停止、斜杠命令、子代理、上下文用量）。改了 DOM 结构的测试同步修改，不删除场景。
 - [ ] 审批出现在消息区内，不盖住整页；可以折叠；侧栏对应行标题左侧显示橙黄点。
+- [ ] 别的会话回复结束后，侧栏那一行在 15 秒内出现蓝点；打开它蓝点消失，切走后不再亮；当前打开的会话不出现蓝点（unread-dot 议题）。
 - [ ] 模型、思考强度、权限模式都能在输入框卡片底部的控制行里找到并操作。
 - [ ] 第二批：模型菜单按 provider 列出配置完整的模型，最后一项 `Manage models…` 打开设置 › Models；Web 输入 `/connect`、`/connect-search` 不再有对应命令。2026-10-26 起：选中只改当前会话（草稿则随第一条消息保存），全局默认不变；默认模型旁有 `default` 标记；模型多时列表滚动（会话级模型 04 T18–T19c）。
 - [ ] 上下文用量在顶栏右侧，超过 70% 和 90% 时颜色变化。
@@ -113,7 +114,7 @@
 
 | 层 | 工具 | 覆盖 | 不覆盖 |
 |---|---|---|---|
-| unit | Vitest + Testing Library | `Menu` 的键盘和定位翻转；`SessionRow` 的状态位优先级；侧栏分组选择器（06 §2 的规则）；草稿工作区选择的本地读写；搜索防抖和中止 | 真实网络 |
+| unit | Vitest + Testing Library | `Menu` 的键盘和定位翻转；`SessionRow` 的状态位优先级（moving > running > awaiting > unread）；已看记录的读写与合并；侧栏分组选择器（06 §2 的规则）；草稿工作区选择的本地读写；搜索防抖和中止 | 真实网络 |
 | integration | UI 用假 runtime；运行时用真实 runtime + 假 HTTP/SSE，关键链路再接真实 daemon | 草稿首发、目录切换、`SESSION_MOVED`、分页与刷新；不能用假 runtime 自证 runtime 行为 | 视觉 |
 | contract | Web HTTP 适配器与 SDK 类型的合同测试 | Web 新增全局列表、搜索、改归属、设置请求与服务端一致，错误保留 targetDirectory / fields | UI |
 | smoke | 现有起站冒烟 | 新外壳能起、能发一条消息 | 细节 |
@@ -166,11 +167,11 @@
 | 会话态 | `running` | 1440、900 | 线框结构；两条顶栏连成一条；用户消息、助手文字、过程折叠行的层次；控制行是无边框文字按钮；Stop 和发送一样是黑色圆钮（D32） |
 | 会话态 | `running`（切到等待审批） | 1440 | 审批浮层位置、不遮挡、橙黄点、多请求翻页 |
 | 会话态 | `pending-move` | 1440 | 没有待生效提示；顶栏仍是当前目录 |
-| 侧栏 | `typical` | 1440 | 行高、选中竖条、分组标题样式、hover 出现的按钮、Show more |
+| 侧栏 | `typical` | 1440 | 行高、选中竖条、分组标题样式、hover 出现的按钮、Show more；未读蓝点和文件夹图标同列、上下居中，hover 时不移动 |
 | 侧栏菜单 | `typical` | 1440、390 | 两级菜单视图；手机端底部弹出 |
 | 侧栏搜索 | `search` | 1440 | 结果行结构、高亮、无结果文案 |
 | 整体 | `typical` | 900、390 | 03 §5 响应式行为：窄桌面侧栏覆盖、手机抽屉 |
-| 整体 | 全部 | 1440 | 与 Claude、Codex、Cursor 参考截图并排对比：中性偏暖白、侧栏深一档、玻璃只在浮起元素上、留白和密度接近；界面上除字标外没有金粉蓝 |
+| 整体 | 全部 | 1440 | 与 Claude、Codex、Cursor 参考截图并排对比：中性偏暖白、侧栏深一档、玻璃只在浮起元素上、留白和密度接近；界面上除字标外没有金粉蓝（侧栏状态点除外，见 03 §1） |
 | 设置页 · Models | `settings` | 1440、390 | 居中弹窗（390 下铺满全屏）；按 provider 分组的行；Default、Needs setup 的层次；弹窗内不再套卡片 |
 | 设置页 · 模型编辑 | `settings` | 1440 | 字段顺序与线框一致；More options 折叠；只有 Save 是实心按钮；Delete 是危险色文字 |
 | 设置页 · Web search | `settings` | 1440 | 单页表单；标题下一行注明 Tavily 并有 Get an API key 外链；API key 显示 Configured / Not set，不回显值；Search depth、Max results、Topic 平铺；More options（Timeout、Base URL、Key variable）折叠；字段错误在输入框下 |
