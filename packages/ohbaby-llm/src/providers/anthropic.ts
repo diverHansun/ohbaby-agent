@@ -13,6 +13,7 @@ import type {
   ToolResultBlockParam,
   ToolUseBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
+import { isReasoningEffort } from "../config/validation.js";
 import {
   nativeOutputForMessage,
   type NativeAnthropicBlock,
@@ -441,16 +442,14 @@ function buildRequestParams(
   if (reasoningWire.thinking) params.thinking = reasoningWire.thinking;
   if (reasoningWire.output_config) {
     const effort = reasoningWire.output_config.effort;
-    if (
-      effort !== "low" &&
-      effort !== "medium" &&
-      effort !== "high" &&
-      effort !== "xhigh" &&
-      effort !== "max"
-    ) {
+    if (!isReasoningEffort(effort) || effort === "minimal") {
       throw new Error("Unsupported Anthropic output effort.");
     }
-    params.output_config = { effort };
+    params.output_config = {
+      effort: effort as NonNullable<
+        MessageCreateParams["output_config"]
+      >["effort"],
+    };
   }
 
   if (convertedMessages.system?.length) {
@@ -619,6 +618,7 @@ class AnthropicNativeAccumulator {
     )
       return;
     const items: NativeAnthropicBlock[] = [];
+    let skippedUnsignedThinking = false;
     const toolCallDeltas: NonNullable<
       InterfaceProviderStreamEvent["toolCallDeltas"]
     > = [];
@@ -626,8 +626,11 @@ class AnthropicNativeAccumulator {
       if (!entry.stopped)
         throw new Error("Incomplete Anthropic content block.");
       const block = entry.block;
-      if (block.type === "thinking" && !block.signature)
-        throw new Error("Anthropic thinking signature is missing.");
+      // Compatible endpoints can stream thinking without a replay signature.
+      if (block.type === "thinking" && !block.signature) {
+        skippedUnsignedThinking = true;
+        continue;
+      }
       if (block.type === "redacted_thinking" && !block.data)
         throw new Error("Anthropic redacted thinking data is missing.");
       if (block.type === "tool_use") {
@@ -651,6 +654,15 @@ class AnthropicNativeAccumulator {
       }
       items.push(block);
     }
+    if (
+      skippedUnsignedThinking &&
+      (items.length === 0 ||
+        items.some(
+          (block) =>
+            block.type === "thinking" || block.type === "redacted_thinking",
+        ))
+    )
+      throw new Error("Anthropic thinking signature is missing.");
     const needsNative =
       items.length > 1 || items.some((block) => block.type !== "text");
     if (!needsNative && toolCallDeltas.length === 0) return;

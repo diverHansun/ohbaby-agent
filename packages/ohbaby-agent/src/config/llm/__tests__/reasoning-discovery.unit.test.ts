@@ -61,6 +61,111 @@ describe("shared exact metadata discovery", () => {
     expect(urls).toHaveLength(2);
     expect(urls[1]).toContain("after=other");
   });
+  const full = { mode: "binary", wire: "thinking", supportsDisabled: true };
+  it.each([
+    [
+      {
+        reasoning_levels: [" OFF ", null, {}, " Flash ", "Flash", "high"],
+        supported_reasoning_levels: [{ effort: "other" }],
+      },
+      ["Flash", "high"],
+    ],
+    [
+      {
+        reasoning_levels: ["none", "DISABLED"],
+        supported_reasoning_levels: [
+          "wrong",
+          {},
+          { effort: " ULTra " },
+          { effort: "off" },
+        ],
+      },
+      ["ULTra"],
+    ],
+    [
+      {
+        reasoning_levels: ["minimal"],
+        supported_reasoning_levels: [{ effort: "high" }],
+      },
+      ["minimal"],
+    ],
+  ] as const)(
+    "reads the first usable catalog list in upstream order",
+    async (fields, efforts) => {
+      vi.stubGlobal("fetch", async () =>
+        Response.json({ data: [{ id: "exact", ...fields }] }),
+      );
+      expect(
+        (await probeContextWindow({ ...input, interfaceProvider: "anthropic" }))
+          .reasoningCapabilities,
+      ).toEqual({
+        mode: "effort",
+        wire: "anthropic-adaptive",
+        supportsDisabled: false,
+        efforts,
+        effortOrder: efforts,
+      });
+    },
+  );
+  it.each([
+    [
+      {
+        reasoningCapabilities: full,
+        reasoning: false,
+        reasoning_levels: ["high"],
+      },
+      full,
+    ],
+    [
+      {
+        reasoningCapabilities: {},
+        reasoning_capabilities: full,
+        reasoning: false,
+      },
+      full,
+    ],
+    [
+      {
+        reasoningCapabilities: {},
+        reasoning: false,
+        reasoning_levels: ["high"],
+      },
+      { mode: "none", wire: "none", supportsDisabled: true },
+    ],
+    [
+      {
+        reasoning_levels: ["off", " "],
+        supported_reasoning_levels: [null, "high"],
+      },
+      undefined,
+    ],
+  ] as const)(
+    "respects explicit capabilities and absence of usable evidence",
+    async (fields, expected) => {
+      vi.stubGlobal("fetch", async () =>
+        Response.json({ data: [{ id: "exact", ...fields }] }),
+      );
+      expect((await probeContextWindow(input)).reasoningCapabilities).toEqual(
+        expected,
+      );
+    },
+  );
+  it.each([
+    ["openai", true],
+    ["thinking", false],
+  ] as const)(
+    "keeps confirmed Off only for the same wire (%s)",
+    async (wire, expected) => {
+      vi.stubGlobal("fetch", async () =>
+        Response.json({ data: [{ id: "exact", reasoning_levels: ["high"] }] }),
+      );
+      const result = await probeContextWindow({
+        ...input,
+        previousReasoning: { mode: "binary", wire, supportsDisabled: true },
+      });
+      expect(result.reasoningCapabilities?.supportsDisabled).toBe(expected);
+    },
+  );
   it.each([
     [401, "authentication"],
     [429, "rate-limit"],

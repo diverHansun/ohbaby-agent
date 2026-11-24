@@ -616,7 +616,10 @@ export async function startModelEntryDiscovery(
         signal: state.controller.signal,
       };
       try {
-        const metadata = await probeContextWindow(input);
+        const metadata = await probeContextWindow({
+          ...input,
+          previousReasoning: previousReasoning.capability,
+        });
         if (!current()) return { reasoningReason: "cancelled" };
         const write = async (
           data: Parameters<typeof writeModelEntryMetadata>[2],

@@ -1,5 +1,5 @@
 import type { ReasoningProbeReason } from "./reasoning-active-probe.js";
-import { validateReasoningCapabilities } from "ohbaby-llm";
+import { isReasoningEffort, validateReasoningCapabilities } from "ohbaby-llm";
 import type { InterfaceProviderKind, ReasoningCapabilities } from "ohbaby-llm";
 
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -21,6 +21,8 @@ export interface ProbeContextWindowInput {
   readonly baseUrl: string;
   readonly interfaceProvider: InterfaceProviderKind;
   readonly model: string;
+  /** Already confirmed for this exact route. A list of strengths provides no new Off evidence. */
+  readonly previousReasoning?: ReasoningCapabilities;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }
@@ -98,23 +100,7 @@ export async function probeContextWindow(
       );
       if (isRecord(exact)) {
         const contextWindowTokens = extractContextWindowTokens(exact);
-        const candidate =
-          exact.reasoningCapabilities ?? exact.reasoning_capabilities;
-        let reasoningCapabilities: ReasoningCapabilities | undefined;
-        if (candidate !== undefined) {
-          try {
-            validateReasoningCapabilities(candidate);
-            reasoningCapabilities = candidate;
-          } catch {
-            /* incomplete metadata */
-          }
-        } else if (exact.reasoning === false) {
-          reasoningCapabilities = {
-            mode: "none",
-            wire: "none",
-            supportsDisabled: true,
-          };
-        }
+        const reasoningCapabilities = catalogReasoning(exact, input);
         return {
           ...(contextWindowTokens === undefined
             ? { warning: detectionWarning() }
@@ -152,6 +138,56 @@ export async function probeContextWindow(
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", cancel);
   }
+}
+
+function catalogReasoning(
+  entry: Record<string, unknown>,
+  input: ProbeContextWindowInput,
+): ReasoningCapabilities | undefined {
+  for (const candidate of [
+    entry.reasoningCapabilities,
+    entry.reasoning_capabilities,
+  ]) {
+    if (candidate === undefined) continue;
+    try {
+      validateReasoningCapabilities(candidate);
+      return candidate;
+    } catch {
+      // A partial declaration can still have a usable short-form list.
+    }
+  }
+  if (entry.reasoning === false)
+    return { mode: "none", wire: "none", supportsDisabled: true };
+
+  const flat = catalogEfforts(entry.reasoning_levels, false);
+  const efforts = flat.length
+    ? flat
+    : catalogEfforts(entry.supported_reasoning_levels, true);
+  if (!efforts.length) return undefined;
+  const wire =
+    input.interfaceProvider === "anthropic" ? "anthropic-adaptive" : "openai";
+  const previous = input.previousReasoning;
+  return {
+    mode: "effort",
+    wire,
+    efforts,
+    effortOrder: efforts,
+    supportsDisabled: previous?.wire === wire && previous.supportsDisabled,
+  };
+}
+
+function catalogEfforts(raw: unknown, objects: boolean): string[] {
+  if (!Array.isArray(raw)) return [];
+  const efforts = new Set<string>();
+  for (let value of raw as unknown[]) {
+    if (objects) {
+      if (!isRecord(value)) continue;
+      value = value.effort;
+    }
+    const label = typeof value === "string" ? value.trim() : undefined;
+    if (isReasoningEffort(label)) efforts.add(label);
+  }
+  return [...efforts];
 }
 
 async function abortable<T>(

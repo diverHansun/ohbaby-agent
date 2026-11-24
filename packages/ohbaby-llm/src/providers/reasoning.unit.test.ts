@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { createInterfaceProvider } from "./index.js";
 import {
   capabilitiesFor,
+  compatibleReasoningPreference,
   hasUnsupportedAnthropicEffortPreference,
   mergeReasoningIntent,
+  orderedReasoningEfforts,
   resolveRequestReasoning,
   toAnthropicReasoningWire,
   toChatReasoningWire,
@@ -682,3 +684,207 @@ it.each(["openai", "reasoning", "anthropic-adaptive"] as const)(
     }
   },
 );
+
+describe("extension efforts and own-property map lookups", () => {
+  it("preserves extension efforts and order on Anthropic adaptive while keeping minimal migration", () => {
+    const target: ResolveRequestReasoningOptions = {
+      ...custom({
+        ...effort,
+        wire: "anthropic-adaptive",
+        efforts: ["minimal", "low", "ultra", "turbo-3", "HIGH"],
+        effortOrder: ["minimal", "turbo-3", "low", "HIGH", "ultra"],
+        effortMap: { minimal: "low", legacy: "minimal" },
+      }),
+      interfaceProvider: "anthropic",
+    };
+    const { capability } = capabilitiesFor(target);
+    expect(capability).toMatchObject({
+      efforts: ["low", "ultra", "turbo-3", "HIGH"],
+      effortOrder: ["turbo-3", "low", "HIGH", "ultra"],
+      effortMap: { minimal: "low" },
+    });
+    expect(capability ? orderedReasoningEfforts(capability) : []).toEqual([
+      "turbo-3",
+      "low",
+      "HIGH",
+      "ultra",
+    ]);
+    expect(
+      toAnthropicReasoningWire(
+        resolveRequestReasoning({
+          ...target,
+          reasoning: { effort: "turbo-3" },
+        }),
+      ),
+    ).toEqual({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "turbo-3" },
+    });
+    expect(
+      hasUnsupportedAnthropicEffortPreference({
+        ...target,
+        reasoning: { effort: "minimal" },
+      }),
+    ).toBe(false);
+    expect(
+      hasUnsupportedAnthropicEffortPreference({
+        ...target,
+        reasoning: { effort: "legacy" },
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores Object.prototype keys during effortMap and budgets lookup", () => {
+    const capability: ReasoningCapabilities = {
+      ...effort,
+      wire: "anthropic-adaptive",
+      efforts: ["low", "toString", "constructor"],
+      effortOrder: ["low", "toString", "constructor"],
+      effortMap: { medium: "low" },
+    };
+    const target: ResolveRequestReasoningOptions = {
+      ...custom(capability),
+      interfaceProvider: "anthropic",
+    };
+    for (const label of ["toString", "constructor"]) {
+      expect(compatibleReasoningPreference({ effort: label }, capability)).toBe(
+        true,
+      );
+      expect(
+        hasUnsupportedAnthropicEffortPreference({
+          ...target,
+          reasoning: { effort: label },
+        }),
+      ).toBe(false);
+      expect(
+        resolveRequestReasoning({ ...target, reasoning: { effort: label } })
+          .effort,
+      ).toBe(label);
+    }
+    expect(() =>
+      resolveRequestReasoning({
+        ...custom({
+          ...effort,
+          wire: "anthropic-budget",
+          efforts: ["toString", "low"],
+          budgets: { low: 2048 },
+        }),
+        interfaceProvider: "anthropic",
+        reasoning: { effort: "toString" },
+      }),
+    ).toThrow(/budget/i);
+  });
+
+  it.each([
+    ["openai-compatible", "openai", { reasoning_effort: "turbo-3" }],
+    [
+      "openai-responses",
+      "openai",
+      {
+        reasoning: { effort: "turbo-3" },
+        include: ["reasoning.encrypted_content"],
+      },
+    ],
+    [
+      "anthropic",
+      "anthropic-adaptive",
+      { thinking: { type: "adaptive" }, output_config: { effort: "turbo-3" } },
+    ],
+  ] as const)(
+    "sends approved extension effort verbatim over %s SDK without retry or downgrade on 400",
+    async (interfaceProvider, wire, expectedWire) => {
+      const bodies: Record<string, unknown>[] = [];
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (_url, init) => {
+          bodies.push(
+            JSON.parse(init?.body as string) as Record<string, unknown>,
+          );
+          return await Promise.resolve(
+            Response.json(
+              { error: { message: "rejected effort" } },
+              { status: 400 },
+            ),
+          );
+        });
+      try {
+        const provider = createInterfaceProvider({
+          id: "fixture",
+          apiKey: "fixture",
+          baseUrl: "https://fixture.invalid",
+          interfaceProvider,
+        });
+        const reasoning = resolveRequestReasoning({
+          ...custom({
+            ...effort,
+            wire,
+            supportsDisabled: false,
+            efforts: ["low", "turbo-3"],
+            effortOrder: ["low", "turbo-3"],
+          }),
+          interfaceProvider,
+          reasoning: { effort: "turbo-3" },
+        });
+        await expect(
+          provider.streamResponse({
+            model: "fixture-model",
+            messages: [{ role: "user", content: "hello" }],
+            maxTokens: 32768,
+            promptCache: { strategy: "observe-only", reason: "fixture" },
+            reasoning,
+          }),
+        ).rejects.toThrow(/rejected effort|400/i);
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]).toMatchObject(expectedWire);
+      } finally {
+        fetch.mockRestore();
+      }
+    },
+  );
+
+  it("still blocks minimal and disabled sentinels at provider serializers", async () => {
+    const req = (
+      wire: ReasoningCapabilities["wire"],
+      bad: string,
+    ): Parameters<
+      ReturnType<typeof createInterfaceProvider>["streamResponse"]
+    >[0] => ({
+      model: "fixture-model",
+      messages: [{ role: "user", content: "hello" }],
+      maxTokens: 128,
+      promptCache: { strategy: "observe-only", reason: "fixture" },
+      reasoning: {
+        intent: {
+          enabled: true,
+          effort: bad,
+          explicit: { enabled: true, effort: true },
+        },
+        mode: "effort",
+        wire,
+        effort: bad,
+        capabilitySource: "fixture",
+      },
+    });
+    const responses = createInterfaceProvider({
+      id: "fixture",
+      apiKey: "fixture",
+      baseUrl: "https://fixture.invalid",
+      interfaceProvider: "openai-responses",
+    });
+    await expect(
+      responses.streamResponse(req("openai", "off")),
+    ).rejects.toThrow(/unsupported Responses reasoning effort/i);
+
+    const anthropic = createInterfaceProvider({
+      id: "fixture",
+      apiKey: "fixture",
+      baseUrl: "https://fixture.invalid",
+      interfaceProvider: "anthropic",
+    });
+    for (const bad of ["minimal", "off"]) {
+      expect(() =>
+        anthropic.streamResponse(req("anthropic-adaptive", bad)),
+      ).toThrow(/Unsupported Anthropic output effort/);
+    }
+  });
+});

@@ -295,12 +295,10 @@ export function validateModelJson(
 }
 
 const DISABLED_EFFORTS = new Set(["none", "off", "disabled"]);
-function validEffort(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.trim() !== "" &&
-    !DISABLED_EFFORTS.has(value.toLowerCase())
-  );
+export function isReasoningEffort(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return trimmed !== "" && !DISABLED_EFFORTS.has(trimmed.toLowerCase());
 }
 export function validateReasoningConfig(
   value: unknown,
@@ -315,7 +313,7 @@ export function validateReasoningConfig(
   const record = value as Record<string, unknown>;
   if (
     (record.enabled !== undefined && typeof record.enabled !== "boolean") ||
-    (record.effort !== undefined && !validEffort(record.effort))
+    (record.effort !== undefined && !isReasoningEffort(record.effort))
   ) {
     throw new ConfigError(
       "Invalid reasoning: enabled must be boolean; effort must be a nonempty strength (use enabled=false to disable)",
@@ -372,7 +370,7 @@ export function validateReasoningCapabilities(
     record.efforts !== undefined &&
     (!Array.isArray(record.efforts) ||
       record.efforts.length === 0 ||
-      !record.efforts.every(validEffort))
+      !record.efforts.every(isReasoningEffort))
   )
     return invalid();
   if (
@@ -390,7 +388,7 @@ export function validateReasoningCapabilities(
     return invalid();
   if (
     record.defaultEffort !== undefined &&
-    (!validEffort(record.defaultEffort) ||
+    (!isReasoningEffort(record.defaultEffort) ||
       !Array.isArray(record.efforts) ||
       !record.efforts.includes(record.defaultEffort))
   )
@@ -403,7 +401,8 @@ export function validateReasoningCapabilities(
       new Set(record.effortOrder).size !== record.effortOrder.length ||
       !record.effortOrder.every(
         (value) =>
-          validEffort(value) && (record.efforts as unknown[]).includes(value),
+          isReasoningEffort(value) &&
+          (record.efforts as unknown[]).includes(value),
       ))
   )
     return invalid();
@@ -413,10 +412,10 @@ export function validateReasoningCapabilities(
     if (!mapping || typeof mapping !== "object" || Array.isArray(mapping))
       return invalid();
     for (const [key, mapped] of Object.entries(mapping)) {
-      if (!validEffort(key)) return invalid();
+      if (!isReasoningEffort(key)) return invalid();
       if (
         field === "effortMap"
-          ? !validEffort(mapped) ||
+          ? !isReasoningEffort(mapped) ||
             !(Array.isArray(record.efforts) && record.efforts.includes(mapped))
           : !isPositiveInteger(mapped)
       )

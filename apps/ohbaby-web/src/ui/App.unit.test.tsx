@@ -6088,7 +6088,10 @@ it("unknown capability keeps send available and labels the control unknown witho
   await waitFor(() =>
     Boolean(app.container.querySelector(".ohb-model-button")),
   );
-  openModelMenu(app.container);
+  await act(async () => {
+    openModelMenu(app.container);
+    await Promise.resolve();
+  });
   await waitFor(() =>
     Boolean(document.querySelector(".ohb-model-effort-row.is-unknown")),
   );
@@ -6123,7 +6126,10 @@ it("shows a disabled Detecting Effort row while reasoning capability is detectin
   await waitFor(() =>
     Boolean(app.container.querySelector(".ohb-model-button")),
   );
-  openModelMenu(app.container);
+  await act(async () => {
+    openModelMenu(app.container);
+    await Promise.resolve();
+  });
   await waitFor(() =>
     Boolean(document.querySelector(".ohb-model-effort-row.is-detecting")),
   );

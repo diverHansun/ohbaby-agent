@@ -246,6 +246,22 @@ export function rawCapabilitiesFor(options: ResolveRequestReasoningOptions): {
   }
   return automatic ?? { source: "unknown" };
 }
+function ownMappedValue<T>(
+  record: Readonly<Record<string, T>> | undefined,
+  key: string,
+): T | undefined {
+  return record !== undefined && Object.hasOwn(record, key)
+    ? record[key]
+    : undefined;
+}
+
+function mappedEffort(
+  capability: ReasoningCapabilities,
+  effort: string,
+): string {
+  return ownMappedValue(capability.effortMap, effort) ?? effort;
+}
+
 /** Select the original winning source before applying serializer compatibility. */
 export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
   capability?: ReasoningCapabilities;
@@ -256,9 +272,7 @@ export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
   if (capability?.wire !== "anthropic-adaptive" || capability.mode !== "effort")
     return selected;
   const efforts =
-    capability.efforts?.filter((value) =>
-      ["low", "medium", "high", "xhigh", "max"].includes(value),
-    ) ?? [];
+    capability.efforts?.filter((value) => value !== "minimal") ?? [];
   if (efforts.length === 0) return { source: "unknown" };
   const effective = { ...capability, efforts };
   if (effective.defaultEffort && !efforts.includes(effective.defaultEffort))
@@ -288,7 +302,7 @@ export function hasUnsupportedAnthropicEffortPreference(
     capability.mode === "effort" &&
     intent.enabled &&
     intent.explicit.effort &&
-    (capability.effortMap?.[intent.effort] ?? intent.effort) === "minimal"
+    mappedEffort(capability, intent.effort) === "minimal"
   );
 }
 
@@ -377,7 +391,7 @@ export function resolveRequestReasoning(
     return Object.freeze({ ...base, mode: "binary" });
   }
   const effort = intent.explicit.effort
-    ? (capability.effortMap?.[intent.effort] ?? intent.effort)
+    ? mappedEffort(capability, intent.effort)
     : defaultReasoningEffort(capability);
   if (effort === undefined)
     return Object.freeze({ ...base, mode: "service-default" });
@@ -386,7 +400,7 @@ export function resolveRequestReasoning(
       `Unsupported reasoning effort ${intent.effort}; supported: ${capability.efforts?.join(", ") ?? "none"}. Configure an explicit effortMap to map strengths`,
     );
   if (capability.wire === "anthropic-budget") {
-    const budgetTokens = capability.budgets?.[effort];
+    const budgetTokens = ownMappedValue(capability.budgets, effort);
     if (
       budgetTokens === undefined ||
       !Number.isInteger(budgetTokens) ||
@@ -534,8 +548,6 @@ export function compatibleReasoningPreference(
   if (preference.effort === undefined) return true;
   return (
     capability.mode === "effort" &&
-    !!capability.efforts?.includes(
-      capability.effortMap?.[preference.effort] ?? preference.effort,
-    )
+    !!capability.efforts?.includes(mappedEffort(capability, preference.effort))
   );
 }

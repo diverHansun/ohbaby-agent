@@ -350,6 +350,17 @@ describe("Responses request projection", () => {
 });
 
 describe("Responses state machine and terminal equality", () => {
+  it("accepts plain output_text with omitted annotations throughout the stream", async () => {
+    const events = JSON.parse(
+      JSON.stringify(
+        [...textEvents(), terminal([message()])],
+        (key, value: unknown) => (key === "annotations" ? undefined : value),
+      ),
+    ) as unknown[];
+    expect(
+      (await collect(events)).map((event) => event.textDelta).join(""),
+    ).toBe("hello");
+  });
   const text = (): Record<string, unknown>[] => textEvents();
   const fn = (): Record<string, unknown>[] => functionEvents();
   const cases: [string, () => unknown[]][] = [
@@ -1158,7 +1169,18 @@ describe("Responses rejected and unknown capabilities", () => {
       );
     },
   );
-  it.each([{ previous_response_id: "old" }, { store: true }])(
+  it("consumes a stateless response when the gateway reports an upstream previous id", async () => {
+    const events = await collect([
+      ...textEvents(),
+      terminal([message()], "completed", { previous_response_id: "resp_old" }),
+    ]);
+    expect(events.at(-1)?.finishReason).toBe("stop");
+  });
+  it.each([
+    { previous_response_id: 3 },
+    { previous_response_id: "old", store: undefined },
+    { store: true },
+  ])(
     "rejects stateful response hints on lifecycle and terminal: %j",
     async (fields) => {
       await expect(
