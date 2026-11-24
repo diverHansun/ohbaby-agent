@@ -40,6 +40,11 @@ import {
 
 /** A prompt is resent at most twice after `SESSION_MOVED` (three tries in all). */
 const MAX_MOVED_RESENDS = 2;
+/**
+ * Other chats' turns end on other instances, which send this page no events,
+ * so the list is re-read while the page is visible (unread dot 02 B2).
+ */
+export const CATALOG_POLL_INTERVAL_MS = 15_000;
 
 export interface OhbabyWebRuntime {
   readonly serverUrl?: string;
@@ -862,8 +867,9 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   /**
-   * Keeps the global list current without polling: a newly created session,
-   * titles from the live index, SSE reconnects and the window regaining focus.
+   * Keeps the global list current: a newly created session, titles from the
+   * live index, SSE reconnects, the window regaining focus, and a slow poll
+   * while visible that brings other chats' turn end times.
    */
   private watchCatalogTriggers(): void {
     let index = this.store.getSnapshot().sessionIndex;
@@ -897,9 +903,13 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     };
     window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
+    const poll = setInterval(() => {
+      if (document.visibilityState === "visible") void this.global.refresh();
+    }, CATALOG_POLL_INTERVAL_MS);
     this.cleanups.push(() => {
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(poll);
     });
   }
 

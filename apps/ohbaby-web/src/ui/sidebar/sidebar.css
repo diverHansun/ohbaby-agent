@@ -358,12 +358,17 @@ button.ohb-group-more:hover {
 }
 
 /* Waiting for approval: a yellow-orange dot in the status column. */
-.ohb-session-awaiting {
+.ohb-session-awaiting,
+.ohb-session-unread {
   background: var(--attention);
   border-radius: 50%;
   display: inline-block;
   height: 7px;
   width: 7px;
+}
+
+.ohb-session-unread {
+  background: var(--unread);
 }
 
 /* A pinned row shows two buttons on hover (pin, menu): keep the title clear of both. */

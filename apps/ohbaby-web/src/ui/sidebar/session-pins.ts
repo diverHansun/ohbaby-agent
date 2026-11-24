@@ -15,7 +15,7 @@ const stores = new Map<string, SessionPinsStore>();
 
 const LEGACY_PREFIX = "ohbaby.web.session-pins.v1:";
 
-function serverOrigin(serverUrl: string | undefined): string {
+export function serverOrigin(serverUrl: string | undefined): string {
   const fallback = window.location.origin;
   try {
     return new URL(

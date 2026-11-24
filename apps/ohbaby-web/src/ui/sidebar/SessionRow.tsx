@@ -8,7 +8,7 @@ import type { SessionMenuAnchor } from "./SessionMenu.js";
 /**
  * One sidebar session (05 SessionRow): the open button with a status column
  * left of the title (a dot matrix while running, a yellow-orange dot while
- * awaiting approval). The row end holds room for the menu button that shows
+ * awaiting approval, a blue dot for a reply not yet seen). The row end holds room for the menu button that shows
  * on hover; a pinned row also shows a filled pin there, which unpins it.
  * Sessions keep their recency order but show no time; messages carry it.
  */
@@ -125,6 +125,10 @@ export function SessionRow(props: {
       aria-label="Waiting for approval"
     >
       <span className="ohb-session-awaiting" aria-hidden="true" />
+    </span>
+  ) : props.session.activity === "unread" ? (
+    <span className="ohb-session-lead" role="status" aria-label="New reply">
+      <span className="ohb-session-unread" aria-hidden="true" />
     </span>
   ) : null;
   return (

@@ -34,6 +34,7 @@ import { useSideChats } from "../side-chat/use-side-chats.js";
 import { useTerminalTabs } from "../side-panel/terminal/use-terminal-tabs.js";
 import { ConfirmDialog } from "../shared/ConfirmDialog.js";
 import { Sidebar } from "../sidebar/Sidebar.js";
+import { latestTurnEnd } from "../sidebar/session-seen.js";
 import type {
   SessionActivity,
   SidebarSessionItem,
@@ -227,6 +228,12 @@ export function AppController(props: {
         : new Map(),
     [activeId, awaiting, running],
   );
+  // The open chat's own runs say when its reply ended, before the list is
+  // re-read, so switching away right after does not light it (unread 02 F4).
+  const activeTurnEndedAt = useMemo(
+    () => latestTurnEnd(view.snapshot?.runs ?? [], activeId),
+    [view.snapshot?.runs, activeId],
+  );
 
   // A past chat has no usage until the daemon estimates it; ask once when the
   // chat opens so the ring shows real numbers without a click. The answer
@@ -382,6 +389,7 @@ export function AppController(props: {
             catalog={catalog}
             activeSessionId={view.activeSession?.id ?? null}
             activity={activity}
+            activeTurnEndedAt={activeTurnEndedAt}
             disabled={view.composer.disabled}
             onCollapse={close}
             onNewChat={(workspaceDirectory) => {

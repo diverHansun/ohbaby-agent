@@ -631,6 +631,7 @@ function globalRow(
     status: "active",
     createdAt: iso(minutesAgo + 30),
     updatedAt: iso(minutesAgo),
+    lastTurnEndedAt: iso(minutesAgo),
     messageCount: 4,
     workspaceDirectory,
     workingDirectory: workspaceDirectory ?? DEFAULT_WORKSPACE,

@@ -2,7 +2,7 @@
 import type { UiGlobalSession } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import type { WorkspaceScopeSummary } from "../../api/daemon/wire.js";
 import {
   createGlobalCatalogStore,
@@ -12,6 +12,7 @@ import type {
   SessionActivity,
   SidebarSessionItem,
 } from "../../store/sidebar-groups.js";
+import { globalSessionSeenKey } from "./session-seen.js";
 import { Sidebar, type SidebarProps } from "./Sidebar.js";
 
 (
@@ -489,6 +490,111 @@ it("marks running and awaiting rows left of the title and shows no time", () => 
     expect(lead.getAttribute("role")).toBe("status");
     expect(lead.querySelector(".ohb-session-awaiting")).not.toBeNull();
   }
+});
+
+it("shows a blue dot for a reply not yet seen, never on the open chat", () => {
+  serverUrl = "http://unread.test";
+  window.localStorage.setItem(
+    globalSessionSeenKey(serverUrl),
+    JSON.stringify({ since: 0, seen: {} }),
+  );
+  const ended = "2026-09-05T00:00:00.000Z";
+  const sessions = entries.map((entry) => ({
+    ...entry,
+    lastTurnEndedAt: ended,
+  }));
+  const leads = (id: string): Element[] =>
+    Array.from(
+      container.querySelectorAll(`[data-session-id="${id}"] .ohb-session-lead`),
+    );
+  render({
+    catalog: catalog(sessions),
+    activeSessionId: "B",
+    activity: new Map<string, SessionActivity>([["C", "awaiting"]]),
+  });
+  // A is listed under its workspace and again in Recents.
+  expect(leads("A")).toHaveLength(2);
+  for (const lead of leads("A")) {
+    expect(lead.getAttribute("role")).toBe("status");
+    expect(lead.getAttribute("aria-label")).toBe("New reply");
+    expect(lead.querySelector(".ohb-session-unread")).not.toBeNull();
+  }
+  // The open chat records its reply as seen; approval wins over unread.
+  expect(leads("B")).toHaveLength(0);
+  for (const lead of leads("C"))
+    expect(lead.getAttribute("aria-label")).toBe("Waiting for approval");
+  const stored = (): Record<string, number> =>
+    (
+      JSON.parse(
+        window.localStorage.getItem(globalSessionSeenKey(serverUrl)) ?? "",
+      ) as { seen: Record<string, number> }
+    ).seen;
+  expect(stored()).toEqual({ B: Date.parse(ended) });
+  // An unread chat can still be archived.
+  click("Actions for Chat A");
+  expect(button("Archive").disabled).toBe(false);
+  act(() => {
+    document
+      .querySelector(".ohb-session-menu")
+      ?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+  });
+  // Opening A clears its dot, and it stays clear after moving on.
+  render({ catalog: catalog(sessions), activeSessionId: "A" });
+  expect(leads("A")).toHaveLength(0);
+  render({ catalog: catalog(sessions), activeSessionId: "C" });
+  expect(leads("A")).toHaveLength(0);
+  expect(leads("B")).toHaveLength(0);
+  expect(stored()).toEqual({
+    A: Date.parse(ended),
+    B: Date.parse(ended),
+    C: Date.parse(ended),
+  });
+});
+
+it("records the open chat's own reply time, only while the page is visible", () => {
+  serverUrl = "http://unread-visible.test";
+  window.localStorage.setItem(
+    globalSessionSeenKey(serverUrl),
+    JSON.stringify({ since: 0, seen: {} }),
+  );
+  const stored = (): Record<string, number> =>
+    (
+      JSON.parse(
+        window.localStorage.getItem(globalSessionSeenKey(serverUrl)) ?? "",
+      ) as { seen: Record<string, number> }
+    ).seen;
+  const listed = Date.parse("2026-09-05T00:00:00.000Z");
+  const sessions = entries.map((entry) => ({
+    ...entry,
+    lastTurnEndedAt: new Date(listed).toISOString(),
+  }));
+  let visibility: DocumentVisibilityState = "hidden";
+  const spy = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockImplementation(() => visibility);
+  onTestFinished(() => {
+    spy.mockRestore();
+  });
+  // A background tab records nothing, so other tabs keep their dots.
+  render({
+    catalog: catalog(sessions),
+    activeSessionId: "B",
+    activeTurnEndedAt: listed + 5_000,
+  });
+  expect(stored()).toEqual({});
+  // Once shown, the later of the listed and the chat's own time is recorded,
+  // so a reply that ended before the list was re-read stays seen.
+  visibility = "visible";
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(stored()).toEqual({ B: listed + 5_000 });
+  render({ catalog: catalog(sessions), activeSessionId: "C" });
+  expect(
+    container.querySelectorAll('[data-session-id="B"] .ohb-session-unread'),
+  ).toHaveLength(0);
 });
 
 it("keeps Archive unavailable while a chat runs or awaits approval", () => {

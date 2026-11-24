@@ -16,6 +16,7 @@ import {
   type ReactElement,
   type ReactNode,
   useCallback,
+  useEffect,
   useMemo,
   useLayoutEffect,
   useRef,
@@ -44,6 +45,7 @@ import {
 import { GroupFooter } from "./GroupFooter.js";
 import { WorkspaceGroup } from "./WorkspaceGroup.js";
 import { getGlobalSessionPinsStore } from "./session-pins.js";
+import { getSessionSeenStore, isUnread } from "./session-seen.js";
 import type { SessionExportFormat } from "./SessionMenu.js";
 import { SessionList } from "./SessionList.js";
 
@@ -65,6 +67,8 @@ export interface SidebarProps {
   readonly activeSessionId: string | null;
   /** Running and awaiting state; known only for the connected instance (06 §3.4). */
   readonly activity: ReadonlyMap<string, SessionActivity>;
+  /** Epoch ms the open chat's latest reply ended, from its own runs. */
+  readonly activeTurnEndedAt?: number;
   readonly disabled: boolean;
   readonly onCollapse: () => void;
   /** `null` starts a draft in No workspace. */
@@ -116,13 +120,52 @@ export function Sidebar(props: SidebarProps): ReactElement {
     ),
     () => pinsStore.getSnapshot(),
   );
+  const seenStore = useMemo(
+    () => getSessionSeenStore(props.serverUrl),
+    [props.serverUrl],
+  );
+  const seen = useSyncExternalStore(
+    useCallback(
+      (listener: () => void) => seenStore.subscribe(listener),
+      [seenStore],
+    ),
+    () => seenStore.getSnapshot(),
+  );
+  const { catalog } = props;
+  const visible = useSyncExternalStore(subscribeVisibility, pageVisible);
+  // The open chat's replies are seen as they arrive, but only on a visible
+  // page: a background tab must not clear the dot in the others (02 F4).
+  const listedTurnEnd = catalog.sessions.find(
+    (session) => session.id === props.activeSessionId,
+  )?.lastTurnEndedAt;
+  const { activeSessionId, activeTurnEndedAt } = props;
+  useEffect(() => {
+    if (!activeSessionId || !visible) return;
+    const listed =
+      listedTurnEnd === undefined ? Number.NaN : Date.parse(listedTurnEnd);
+    const at = Math.max(
+      Number.isFinite(listed) ? listed : 0,
+      activeTurnEndedAt ?? 0,
+    );
+    if (at > 0) seenStore.markSeen(activeSessionId, at);
+  }, [seenStore, activeSessionId, visible, listedTurnEnd, activeTurnEndedAt]);
+  // Running and awaiting (open chat only) win over an unseen reply.
+  const activity = useMemo((): ReadonlyMap<string, SessionActivity> => {
+    const merged = new Map(props.activity);
+    for (const session of catalog.sessions)
+      if (
+        !merged.has(session.id) &&
+        isUnread(session, seen, props.activeSessionId)
+      )
+        merged.set(session.id, "unread");
+    return merged;
+  }, [props.activity, catalog.sessions, seen, props.activeSessionId]);
   const [collapsed, setCollapsed] = useState(readCollapsedGroups);
   const [extra, setExtra] = useState<
     Readonly<Partial<Record<SidebarGroupKey, number>>>
   >({});
   const [loadingKey, setLoadingKey] = useState<SidebarGroupKey | null>(null);
   const [moving, setMoving] = useState<ReadonlySet<string>>(new Set());
-  const { catalog } = props;
   useLayoutEffect(() => {
     if (movedFocus.current === null) return;
     const id = movedFocus.current;
@@ -143,7 +186,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
         workspaces: catalog.workspaces,
         sessions: catalog.sessions,
         pins: pins.pins,
-        activity: props.activity,
+        activity,
         extra,
         hasMore: catalog.nextCursor !== undefined,
       }),
@@ -152,7 +195,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
       catalog.sessions,
       catalog.nextCursor,
       pins.pins,
-      props.activity,
+      activity,
       extra,
     ],
   );
@@ -292,7 +335,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
               ...session,
               requestDirectory: globalSessionRequestDirectory(session),
               pinned: session.id in pins.pins,
-              activity: props.activity.get(session.id) ?? "idle",
+              activity: activity.get(session.id) ?? "idle",
             });
           }}
         >
@@ -444,4 +487,15 @@ function SidebarSection(props: {
       {props.expanded ? props.children : null}
     </section>
   );
+}
+
+function subscribeVisibility(listener: () => void): () => void {
+  document.addEventListener("visibilitychange", listener);
+  return () => {
+    document.removeEventListener("visibilitychange", listener);
+  };
+}
+
+function pageVisible(): boolean {
+  return document.visibilityState === "visible";
 }

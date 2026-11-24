@@ -11,7 +11,8 @@ export const PINNED_PAGE = 8;
 /** Rows each Show more adds. */
 export const SHOW_MORE_STEP = 20;
 
-export type SessionActivity = "idle" | "running" | "awaiting";
+/** Lead column state, highest first: running, awaiting, then an unseen reply. */
+export type SessionActivity = "idle" | "running" | "awaiting" | "unread";
 
 export interface SidebarWorkspace {
   readonly directory: string;
