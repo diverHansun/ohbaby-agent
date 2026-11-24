@@ -7,7 +7,7 @@ export type StatusTone = "working" | "approval" | "done" | "failed" | "stopped";
 
 /**
  * One small glyph per status, so every status line has the same shape: a
- * spinner while working, the sidebar's amber dot while waiting for approval,
+ * spinner while working, the sidebar's attention dot while waiting for approval,
  * a check when done, the danger ink for failures and a dim slash when stopped.
  */
 export function StatusGlyph(props: {

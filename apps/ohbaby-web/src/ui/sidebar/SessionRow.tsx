@@ -7,10 +7,10 @@ import { relativeTime } from "./relative-time.js";
 import type { SessionMenuAnchor } from "./SessionMenu.js";
 
 /**
- * One sidebar session (05 SessionRow): the open button with a dot matrix left
- * of the title while running, then a trailing amber dot (awaiting approval) or
- * relative time. On hover the time gives way to the menu button; a pinned row
- * also shows a filled pin there, which unpins it.
+ * One sidebar session (05 SessionRow): the open button with a status column
+ * left of the title (a dot matrix while running, a yellow-orange dot while
+ * awaiting approval), then the relative time. On hover the time gives way to
+ * the menu button; a pinned row also shows a filled pin there, which unpins it.
  */
 export function SessionRow(props: {
   readonly session: SidebarSessionItem;
@@ -120,17 +120,19 @@ export function SessionRow(props: {
     <span className="ohb-session-lead" role="status" aria-label="Running">
       <ActivityMark motion="running" />
     </span>
+  ) : props.session.activity === "awaiting" ? (
+    <span
+      className="ohb-session-lead"
+      role="status"
+      aria-label="Waiting for approval"
+      title="Waiting for approval"
+    >
+      <span className="ohb-session-awaiting" aria-hidden="true" />
+    </span>
   ) : null;
-  const meta =
-    props.session.activity === "awaiting" ? (
-      <span
-        className="ohb-session-awaiting"
-        role="status"
-        aria-label="Waiting for approval"
-      />
-    ) : (
-      <small>{relativeTime(props.session.updatedAt, props.now)}</small>
-    );
+  const meta = (
+    <small>{relativeTime(props.session.updatedAt, props.now)}</small>
+  );
   return (
     <div
       ref={rowRef}

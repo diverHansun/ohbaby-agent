@@ -454,7 +454,7 @@ it("remembers folded groups and shows no counts", () => {
   expect(order()).toEqual([]);
 });
 
-it("marks running rows left of the title and ends rows with a time or amber dot", () => {
+it("marks running and awaiting rows left of the title and ends rows with a time", () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-03T03:00:00Z"));
   act(() => {
@@ -470,21 +470,34 @@ it("marks running rows left of the title and ends rows with a time or amber dot"
   vi.useRealTimers();
   const meta = Array.from(container.querySelectorAll(".ohb-session-meta"));
   expect(meta[0]?.textContent).toBe("3h");
-  expect(meta[1]?.querySelector("small")).not.toBeNull();
-  expect(meta[1]?.querySelector('[aria-label="Running"]')).toBeNull();
-  expect(
-    meta[2]?.querySelector('[aria-label="Waiting for approval"]'),
-  ).not.toBeNull();
+  for (const end of meta) {
+    expect(end.querySelector("small")).not.toBeNull();
+    expect(end.querySelector(".ohb-session-awaiting")).toBeNull();
+  }
   // B is listed under its workspace and again in Recents.
-  const leads = Array.from(container.querySelectorAll(".ohb-session-lead"));
-  expect(leads).toHaveLength(2);
-  for (const lead of leads) {
-    expect(lead.getAttribute("aria-label")).toBe("Running");
+  const running = Array.from(
+    container.querySelectorAll('.ohb-session-lead[aria-label="Running"]'),
+  );
+  expect(running).toHaveLength(2);
+  for (const lead of running) {
+    expect(
+      lead.closest(".ohb-session-row")?.getAttribute("data-session-id"),
+    ).toBe("B");
     expect(lead.querySelectorAll(".ohb-activity-mark i")).toHaveLength(4);
   }
-  expect(leads[0]?.closest(".ohb-session-row")).toBe(
-    meta[1]?.closest(".ohb-session-row"),
+  const awaiting = Array.from(
+    container.querySelectorAll(
+      '.ohb-session-lead[aria-label="Waiting for approval"]',
+    ),
   );
+  expect(awaiting.length).toBeGreaterThan(0);
+  for (const lead of awaiting) {
+    expect(
+      lead.closest(".ohb-session-row")?.getAttribute("data-session-id"),
+    ).toBe("C");
+    expect(lead.getAttribute("role")).toBe("status");
+    expect(lead.querySelector(".ohb-session-awaiting")).not.toBeNull();
+  }
 });
 
 it("keeps Archive unavailable while a chat runs or awaits approval", () => {

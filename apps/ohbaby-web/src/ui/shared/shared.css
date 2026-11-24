@@ -660,7 +660,7 @@
 }
 
 /* Status glyphs (StatusGlyph): the same 12px slot for every status, so labels
-   line up. Colour stays rare: the sidebar's amber for approval, a muted green
+   line up. Colour stays rare: the sidebar's attention dot for approval, a muted green
    check, danger ink for failures; stopped stays dim. */
 .ohb-status-dot {
   align-items: center;
@@ -672,7 +672,7 @@
 }
 
 .ohb-status-dot::before {
-  background: var(--warning);
+  background: var(--attention);
   border-radius: 50%;
   content: "";
   height: 6px;

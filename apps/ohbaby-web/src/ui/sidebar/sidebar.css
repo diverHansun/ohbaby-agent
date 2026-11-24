@@ -367,9 +367,9 @@ button.ohb-group-more:hover {
   color: var(--text-muted);
 }
 
-/* Waiting for approval: an amber dot, labelled for assistive technology. */
+/* Waiting for approval: a yellow-orange dot in the status column. */
 .ohb-session-awaiting {
-  background: var(--warning);
+  background: var(--attention);
   border-radius: 50%;
   display: inline-block;
   height: 7px;

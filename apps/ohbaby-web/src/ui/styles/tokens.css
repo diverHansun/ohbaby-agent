@@ -48,6 +48,8 @@
   --warning-ink: #92400e;
   --warning-soft: rgba(217, 119, 6, 0.09);
   --warning-border: rgba(217, 119, 6, 0.3);
+  /* Waiting for the user: the sidebar and subagent approval dots. */
+  --attention: #f2c230;
   --success: #10b981;
   --success-ink: #166534;
   --success-soft: rgba(16, 185, 129, 0.09);

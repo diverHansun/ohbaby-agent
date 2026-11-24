@@ -6,7 +6,7 @@
 
 | 组件 | 状态 | 表现 | 行为约束 |
 |---|---|---|---|
-| 会话行 | default / hover / selected / running / awaiting / menu-open / moving | hover：`--bg-hover`，行尾时间换成归档和菜单按钮；selected：`--bg-selected` + 左侧 `--accent` 竖条；running：标题左侧点阵动画；awaiting：行尾 `--warning` 圆点；menu-open：保持 hover 样式直到菜单关闭；moving（改归属提交中）：标题左侧小转圈 | 标题左侧状态位固定占位，开始或结束运行时标题不移动；行尾只显示一项，优先级：awaiting > 时间。hover 出现的按钮不改变行高和标题宽度跳动 |
+| 会话行 | default / hover / selected / running / awaiting / menu-open / moving | hover：`--bg-hover`，行尾时间换成归档和菜单按钮；selected：`--bg-selected` + 左侧 `--accent` 竖条；running：标题左侧点阵动画；awaiting：标题左侧状态位显示 `--attention` 圆点；menu-open：保持 hover 样式直到菜单关闭；moving（改归属提交中）：标题左侧小转圈 | 标题左侧状态位固定占位，开始或结束运行、出现或消失等待审批时标题不移动；状态位优先级：moving > running > awaiting。hover 出现的按钮不改变行高和标题宽度跳动 |
 | 工作区分组标题 | expanded / collapsed / hover / empty | hover：右侧计数换成 `[+]` 和 `[..]`；empty（没有会话）：展开后显示一行灰色的 `No chats`（照 Codex） | 折叠状态写入本地，刷新后保持 |
 | 侧栏顶栏格子（New、Search） | default / hover / active | active（搜索展开）：顶部 2px `--accent` 线 + `--bg-selected` | 空间不够时 New 只剩图标，宽度不跳 |
 | 输入框卡片 | idle / focused / has-text / submitting / running / steerable / disabled | focused：描边加深；running 且可插话：描边变浅琥珀；disabled（daemon 断开、会话已归档、执行目录不可用）：输入可用，发送按钮不可用。模型未配置不算 disabled（§2.1） | 高度随内容增长，到上限后在框内滚动；IME 输入中按 Enter 不发送（沿用现有逻辑） |
@@ -44,7 +44,7 @@
 | 加载完成 | 消息流滚到底部；顶栏显示标题、工作目录、上下文用量 | 阅读、继续对话 |
 | 空会话（只有标题、无消息） | 和草稿态相同的居中布局，但没有工作区选择条 | 输入 |
 | 运行中 | 消息流增量追加；草稿为空时主操作位是 Stop，有草稿时按现有规则发送插话或排队 | 插话、排队、停止 |
-| 等待审批 | 审批浮层出现在消息区；侧栏该会话行显示琥珀点 | 允许、拒绝、折叠 |
+| 等待审批 | 审批浮层出现在消息区；侧栏该会话行标题左侧显示橙黄点 | 允许、拒绝、折叠 |
 | 换工作区待生效 | 不额外提示；顶栏仍显示当前目录，下一轮开始后更新 | 正常继续 |
 | 发送失败 | 文字放回输入框，输入框上方显示原因 + `Retry`（沿用现有发送失败恢复规则） | 重试 |
 | 执行目录不可用 | 消息区显示原因 + `Move to workspace…` 文字按钮（打开该会话的工作区列表）；输入框不可发送 | 换工作区 |
