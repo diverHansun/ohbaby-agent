@@ -28,7 +28,6 @@ export interface SessionListProps {
   readonly pins: ReturnType<typeof getSessionPinsStore>;
   readonly activeSessionId: string | null;
   readonly disabled: boolean;
-  readonly now: number;
   readonly onArchiveSession: (session: SidebarSessionItem) => Promise<boolean>;
   readonly onExportSession: (
     session: SidebarSessionItem,
@@ -160,7 +159,6 @@ export function SessionList(props: SessionListProps): ReactElement {
           <SessionRow
             key={session.id}
             session={session}
-            now={props.now}
             active={session.id === props.activeSessionId}
             disabled={props.disabled}
             pinned={session.pinned}

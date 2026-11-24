@@ -83,7 +83,7 @@ interface SidebarSessionItem {
   workspaceDirectory: string | null;   // 分组依据
   workingDirectory: string;          // 当前轮执行目录；顶栏、当前流与审批沿用它
   requestDirectory: string;          // 重新打开和下一轮请求用：待生效目录优先
-  updatedAt: string;                 // 显示为相对时间
+  updatedAt: string;                 // 用于排序，不显示
   pinned: boolean;                   // 来自本地 session-pins
   activity: "idle" | "running" | "awaiting";  // 见 §3.4
 }

@@ -255,7 +255,7 @@ button.ohb-group-more:hover {
   margin: 4px 10px;
 }
 
-/* Session row: single line, title and a faint relative time. */
+/* Session row: single line, a status column and the title. */
 .ohb-session-row {
   align-items: center;
   border-radius: var(--radius-md);
@@ -350,21 +350,11 @@ button.ohb-group-more:hover {
   vertical-align: bottom;
 }
 
+/* Empty room at the row end for the menu button, which sits over it on
+   hover. It keeps its width at all times so titles never shift on hover. */
 .ohb-session-meta {
-  align-items: center;
-  display: inline-flex;
   flex: none;
-  justify-content: flex-end;
   min-width: 18px;
-}
-
-.ohb-session-meta > small {
-  color: var(--text-dim);
-  font-size: 11.5px;
-}
-
-.ohb-session-row.ohb-session-active .ohb-session-meta > small {
-  color: var(--text-muted);
 }
 
 /* Waiting for approval: a yellow-orange dot in the status column. */
@@ -381,13 +371,6 @@ button.ohb-group-more:hover {
 .ohb-session-row.is-pinned.is-menu-open .ohb-session-meta,
 .ohb-session-row.is-pinned:focus-within .ohb-session-meta {
   min-width: 48px;
-}
-
-/* Time gives way to the menu button on hover; activity marks stay. */
-.ohb-session-row:hover .ohb-session-meta > small,
-.ohb-session-row.is-menu-open .ohb-session-meta > small,
-.ohb-session-row:focus-within .ohb-session-meta > small {
-  visibility: hidden;
 }
 
 .ohb-session-hover-actions {
@@ -470,10 +453,6 @@ button.ohb-group-more:hover {
   .ohb-session-actions {
     height: 44px;
     width: 44px;
-  }
-
-  .ohb-session-meta > small {
-    display: none;
   }
 }
 

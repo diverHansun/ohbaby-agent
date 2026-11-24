@@ -3,19 +3,17 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { SidebarSessionItem } from "../../store/sidebar-groups.js";
 import { ActivityMark } from "../conversation/ActivityMark.js";
 import { Spinner } from "../shared/Spinner.js";
-import { relativeTime } from "./relative-time.js";
 import type { SessionMenuAnchor } from "./SessionMenu.js";
 
 /**
  * One sidebar session (05 SessionRow): the open button with a status column
  * left of the title (a dot matrix while running, a yellow-orange dot while
- * awaiting approval), then the relative time. On hover the time gives way to
- * the menu button; a pinned row also shows a filled pin there, which unpins it.
+ * awaiting approval). The row end holds room for the menu button that shows
+ * on hover; a pinned row also shows a filled pin there, which unpins it.
+ * Sessions keep their recency order but show no time; messages carry it.
  */
 export function SessionRow(props: {
   readonly session: SidebarSessionItem;
-  /** Clock for the relative time; the list passes one value to all rows. */
-  readonly now: number;
   readonly active: boolean;
   readonly disabled: boolean;
   readonly pinned: boolean;
@@ -129,9 +127,6 @@ export function SessionRow(props: {
       <span className="ohb-session-awaiting" aria-hidden="true" />
     </span>
   ) : null;
-  const meta = (
-    <small>{relativeTime(props.session.updatedAt, props.now)}</small>
-  );
   return (
     <div
       ref={rowRef}
@@ -180,7 +175,7 @@ export function SessionRow(props: {
           <strong ref={titleRef} className="ohb-session-title">
             <span ref={textRef}>{title}</span>
           </strong>
-          <span className="ohb-session-meta">{meta}</span>
+          <span className="ohb-session-meta" aria-hidden="true" />
         </span>
       </button>
       <span className="ohb-session-hover-actions">

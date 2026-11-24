@@ -454,26 +454,17 @@ it("remembers folded groups and shows no counts", () => {
   expect(order()).toEqual([]);
 });
 
-it("marks running and awaiting rows left of the title and ends rows with a time", () => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date("2026-09-03T03:00:00Z"));
-  act(() => {
-    root.unmount();
-  });
-  root = createRoot(container);
+it("marks running and awaiting rows left of the title and shows no time", () => {
   render({
     activity: new Map<string, SessionActivity>([
       ["B", "running"],
       ["C", "awaiting"],
     ]),
   });
-  vi.useRealTimers();
+  // The row end is empty room for the hover buttons: no time, no dot.
   const meta = Array.from(container.querySelectorAll(".ohb-session-meta"));
-  expect(meta[0]?.textContent).toBe("3h");
-  for (const end of meta) {
-    expect(end.querySelector("small")).not.toBeNull();
-    expect(end.querySelector(".ohb-session-awaiting")).toBeNull();
-  }
+  expect(meta.length).toBeGreaterThan(0);
+  for (const end of meta) expect(end.childNodes).toHaveLength(0);
   // B is listed under its workspace and again in Recents.
   const running = Array.from(
     container.querySelectorAll('.ohb-session-lead[aria-label="Running"]'),

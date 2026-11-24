@@ -36,7 +36,6 @@ import {
 import { SidebarSearch } from "../search/SidebarSearch.js";
 import { IconButton } from "../shared/IconButton.js";
 import { useDelayed } from "../shared/use-delayed.js";
-import { useMinuteClock } from "../shared/use-minute-clock.js";
 import { Wordmark } from "../shared/Wordmark.js";
 import {
   readCollapsedGroups,
@@ -123,7 +122,6 @@ export function Sidebar(props: SidebarProps): ReactElement {
   >({});
   const [loadingKey, setLoadingKey] = useState<SidebarGroupKey | null>(null);
   const [moving, setMoving] = useState<ReadonlySet<string>>(new Set());
-  const now = useMinuteClock();
   const { catalog } = props;
   useLayoutEffect(() => {
     if (movedFocus.current === null) return;
@@ -223,7 +221,6 @@ export function Sidebar(props: SidebarProps): ReactElement {
         }}
         activeSessionId={props.activeSessionId}
         disabled={props.disabled}
-        now={now}
         fallbackFocus={() => newRef.current}
         onPinChange={(id) => {
           movedFocus.current = id;
