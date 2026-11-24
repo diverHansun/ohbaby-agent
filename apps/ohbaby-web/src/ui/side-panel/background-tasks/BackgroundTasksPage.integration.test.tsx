@@ -239,6 +239,17 @@ describe("Background tasks page", () => {
         element.querySelector(".ohb-bgtask-output-text")?.textContent ?? ""
       ).includes("VITE"),
     );
+    // The command heads the output block, coloured like the approval card
+    // and out of the header (improve-2 B4, B5).
+    const command = element.querySelector(".ohb-bgtask-command-text");
+    expect(command?.textContent).toBe(
+      "$ pnpm --filter ohbaby-web exec vite --port 5173",
+    );
+    expect(command?.querySelector(".ohb-sh-command")?.textContent).toBe("pnpm");
+    expect(
+      element.querySelector(".ohb-bgtask-detail-meta")?.textContent,
+    ).not.toContain("vite");
+    expect(button(element, "Copy command")).toBeDefined();
   });
 
   it("groups tasks and cancels one with a single request, settled by the backend", async () => {
@@ -253,8 +264,13 @@ describe("Background tasks page", () => {
     const list = element.querySelector(".ohb-bgtask-list")?.textContent ?? "";
     expect(list).not.toContain("git status --short");
     expect(list).toContain("sleep 600");
-    // Only the failed and the unconfirmed rows carry a word; others show a quiet time.
+    // Failed and unconfirmed rows carry a red word, a cancelled one a grey
+    // word (improve-2 B3); others show a quiet time.
     expect(rowFor(element, "Build").textContent).toContain("Failed");
+    expect(
+      rowFor(element, "Type check").querySelector(".ohb-bgtask-row-trailing")
+        ?.textContent,
+    ).toBe("Cancelled");
     expect(rowFor(element, "sleep 600").textContent).toContain("Unconfirmed");
     expect(
       element.querySelectorAll(".ohb-bgtask-row-trailing.is-failed"),
@@ -355,6 +371,15 @@ describe("Background tasks page", () => {
   it("lists unconfirmed foreground commands and releases only those an exited ohbaby left", async () => {
     const { element } = await mount("bg-unconfirmed");
     await openTasksPage(element);
+    // Nothing runs, so only Done shows; an empty group is left out (improve-2 B1).
+    expect(
+      [...element.querySelectorAll(".ohb-bgtask-group h3")].map(
+        (heading) => heading.textContent,
+      ),
+    ).toEqual(["Done2"]);
+    expect(
+      element.querySelector(".ohb-bgtask-list")?.textContent,
+    ).not.toContain("None");
     await click(
       rowFor(element, "npm run dev").querySelector<HTMLElement>(
         ".ohb-bgtask-row-open",

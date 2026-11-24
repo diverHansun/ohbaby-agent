@@ -835,6 +835,15 @@ describe("Subagents page", () => {
       ]),
     );
     const { element } = await mount(fake.client);
+    // Nothing is done, so that group is left out rather than saying None.
+    expect(
+      [...element.querySelectorAll("section")].map((group) =>
+        group.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Active"]);
+    expect(
+      element.querySelector(".ohb-subagent-list")?.textContent,
+    ).not.toContain("None");
     await click(find(element, "queued"));
     expect(element.textContent).toContain("Not started yet.");
     expect(

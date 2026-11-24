@@ -10,6 +10,7 @@ import {
 import { readableError } from "../../shared/error-text.js";
 import { IconButton } from "../../shared/IconButton.js";
 import { anchorBelow, Menu, type MenuAnchor } from "../../shared/Menu.js";
+import { ShellTokens } from "../../shared/ShellTokens.js";
 import { useDelayed } from "../../shared/use-delayed.js";
 import { TaskCancelButton } from "./TaskCancelButton.js";
 import {
@@ -57,7 +58,9 @@ function TaskRow(props: {
         }}
       >
         <span className="ohb-bgtask-row-title">{title}</span>
-        <span className="ohb-bgtask-row-command">{row.command}</span>
+        <span className="ohb-bgtask-row-command">
+          <ShellTokens command={row.command} />
+        </span>
         {props.showOwner && row.ownerKind === "subagent" ? (
           <span className="ohb-bgtask-row-owner">{row.ownerName}</span>
         ) : null}
@@ -89,9 +92,11 @@ function TaskGroupSection(props: {
   readonly count: number;
   readonly rows: readonly UiShellJobRow[];
   readonly render: (row: UiShellJobRow) => ReactElement;
-}): ReactElement {
+}): ReactElement | null {
   // Folding is a reading convenience only; a new chat starts unfolded (04 §1.3).
   const [open, setOpen] = useState(true);
+  // An empty group says nothing useful, so it is left out (improve-2 B1).
+  if (props.count === 0 && props.rows.length === 0) return null;
   const title = props.group === "running" ? "Running" : "Done";
   return (
     <section className="ohb-bgtask-group" aria-label={title}>
@@ -112,11 +117,9 @@ function TaskGroupSection(props: {
           <span className="ohb-bgtask-group-count">{props.count}</span>
         </button>
       </h3>
-      {!open ? null : props.rows.length === 0 ? (
-        <p className="ohb-bgtask-group-empty">None</p>
-      ) : (
+      {open && props.rows.length > 0 ? (
         <ul>{props.rows.map(props.render)}</ul>
-      )}
+      ) : null}
     </section>
   );
 }

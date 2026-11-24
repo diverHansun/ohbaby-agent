@@ -25,7 +25,7 @@ const PATTERNS: readonly (readonly [RegExp, ShellTokenKind | "space"])[] = [
 ];
 
 /**
- * Splits a shell command into display tokens for the approval card. This only
+ * Splits a shell command into display tokens (approval card, background tasks). This only
  * colours the text; it is not a parser, so anything it does not recognise
  * stays plain and the command reads exactly as it will run.
  */

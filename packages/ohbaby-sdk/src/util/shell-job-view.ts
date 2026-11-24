@@ -10,9 +10,13 @@ export const OUTPUT_TAIL_BYTES = 32_768;
 
 export type TaskGroup = "running" | "done";
 
-/** What a list row shows at its right edge (03 §5.2): time, or a failure word. */
+/**
+ * What a list row shows at its right edge (03 §5.2): time, a failure word, or
+ * a quiet `Cancelled` (Web background tasks improve-2 B3).
+ */
 export type TaskTrailing =
   | { readonly kind: "time"; readonly text: string }
+  | { readonly kind: "cancelled"; readonly text: string }
   | { readonly kind: "failed"; readonly text: string }
   | { readonly kind: "unknown"; readonly text: string };
 
@@ -91,6 +95,8 @@ export function taskTrailing(row: UiShellJobRow, now: number): TaskTrailing {
     return { kind: "failed", text: "Unconfirmed" };
   if (row.status === "failed") return { kind: "failed", text: "Failed" };
   if (row.status === "timed_out") return { kind: "failed", text: "Timed out" };
+  if (row.status === "cancelled")
+    return { kind: "cancelled", text: "Cancelled" };
   return { kind: "time", text: shortDuration(taskElapsed(row, now)) };
 }
 

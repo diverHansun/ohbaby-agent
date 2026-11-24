@@ -11,7 +11,7 @@ import {
   SquareTerminal,
 } from "lucide-react";
 import { IconButton } from "../shared/IconButton.js";
-import { tokenizeShell } from "./shell-tokens.js";
+import { ShellTokens } from "../shared/ShellTokens.js";
 
 const MOD_KEY =
   typeof navigator !== "undefined" &&
@@ -37,15 +37,7 @@ function ShellCommand(props: { readonly command: string }): ReactElement {
   return (
     <pre className="ohb-approval-command">
       <code>
-        {tokenizeShell(props.command).map((token, index) =>
-          token.kind === "text" ? (
-            token.text
-          ) : (
-            <span className={`ohb-sh-${token.kind}`} key={index}>
-              {token.text}
-            </span>
-          ),
-        )}
+        <ShellTokens command={props.command} />
       </code>
     </pre>
   );

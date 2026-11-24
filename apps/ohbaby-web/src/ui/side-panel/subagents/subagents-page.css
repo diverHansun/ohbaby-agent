@@ -58,12 +58,6 @@
   padding: 0;
 }
 
-.ohb-subagent-group-empty {
-  color: var(--text-dim);
-  font-size: 12px;
-  margin: 2px 10px 6px;
-}
-
 .ohb-subagent-instance {
   background: none;
   border: 0;
@@ -71,7 +65,7 @@
   color: inherit;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
   padding: 8px 10px;
   text-align: left;
   transition: background var(--duration-fast) var(--ease);

@@ -694,3 +694,24 @@
 .ohb-status-glyph.is-stopped {
   color: var(--text-dim);
 }
+
+/* Shell command colours, shared by the approval card and background tasks. */
+.ohb-sh-command {
+  color: var(--syntax-command);
+}
+
+.ohb-sh-string {
+  color: var(--syntax-string);
+}
+
+.ohb-sh-variable {
+  color: var(--syntax-variable);
+}
+
+.ohb-sh-flag {
+  color: var(--text-muted);
+}
+
+.ohb-sh-operator {
+  color: var(--text-dim);
+}
