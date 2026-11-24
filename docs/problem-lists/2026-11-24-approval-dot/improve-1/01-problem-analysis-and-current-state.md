@@ -18,7 +18,7 @@
 |---|---|---|
 | 前导列 `.ohb-session-lead` | `SessionRow.tsx:115-123`，`sidebar.css:299-309` | 移动中显示 spinner，运行中显示点阵，其他时候为空。绝对定位，`top: 0; bottom: 0` 加 `align-items: center`，在行内上下居中 |
 | 行尾 `.ohb-session-meta` | `SessionRow.tsx:124-133`，`sidebar.css:353-391` | 等待审批时显示圆点 `.ohb-session-awaiting`，否则显示相对时间 |
-| hover 按钮 `.ohb-session-hover-actions` | `SessionRow.tsx:185-219`，`sidebar.css:393-404` | 置顶行有 pin 按钮，所有行都有「…」。平时透明，hover、菜单打开或获得焦点时显示 |
+| hover 按钮 `.ohb-session-hover-actions` | `SessionRow.tsx:185-217`，`sidebar.css:393-404` | 置顶行有 pin 按钮，所有行都有「…」。平时透明，hover、菜单打开或获得焦点时显示 |
 
 圆点颜色来自 `styles/tokens.css:47` 的 `--warning: #d97706`。子代理列表的"等待审批"圆点（`shared/StatusGlyph.tsx`，样式在 `shared/shared.css:665-680`）也用 `--warning`，注释里写明要和侧边栏同色。
 
@@ -44,7 +44,7 @@ P2 是因为圆点借用了全局的 `--warning`，没有自己的颜色。
 | 状态互斥 | `activity` 只能是 `idle`、`running`、`awaiting` 之一（`store/sidebar-groups.ts:14`） | 一致 | 无差距，三种标记放同一列不会冲突 |
 | 交互 | `04-interaction-and-states.md`：hover 按钮不改变行高和标题宽度 | 一致 | 圆点挪走后，行尾 hover 规则不变 |
 | 颜色 | `--warning` 用于"等待审批的圆点、运行中可插话的描边"（`03` 色板表） | 一致 | 需要拆出专用 token，否则改色会连带改掉插话描边和警告横幅 |
-| 可访问性 | 状态要有文字名称（`05-components.md` SessionRow 一节） | 圆点有 `role="status"` 和 `aria-label` | 挪到前导列后保留，另加 `title` |
+| 可访问性 | 状态要有文字名称（`05-components.md` SessionRow 一节） | 圆点有 `role="status"` 和 `aria-label` | 挪到前导列后保留 |
 | 测试 | `Sidebar.unit.test.tsx:457-489` 断言圆点在 meta 里 | 一致 | 测试要改成断言圆点在前导列 |
 
 ## 1.5 改动时要注意的现有行为

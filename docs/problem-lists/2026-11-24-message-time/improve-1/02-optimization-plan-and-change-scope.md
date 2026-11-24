@@ -22,12 +22,12 @@
 | 决策项 | 选择 | 理由 | 放弃的选项 | 代价 |
 |---|---|---|---|---|
 | A1 时间放哪 | 作为 `MessageActions` 的一项，`key: "time"` | `MessageActions` 本来就只管排列和显隐，内容由调用方给；显隐自动和按钮一致 | 给 `MessageActions` 加 `time` 参数：要改组件接口，没有额外好处 | 时间不是按钮，却在"Message actions"分组里，可以接受 |
-| A2 用哪个时间 | 用户消息用 `createdAt`；回答用 `completedAt ?? createdAt` | 用户关心"什么时候发的""什么时候答完的"；kimi-code 也取回答的结束时间 | 回答也用 `createdAt`：长回答会显示开始生成的时间 | 无 |
+| A2 用哪个时间 | 用户消息用 `createdAt`；回答用这一轮的 `timing.endedAt`，恢复出来的轮次（`timing.recovered`）退回 `createdAt` | 用户关心"什么时候发的""什么时候答完的"；kimi-code 也取回答的结束时间；轮次结束时间存库，刷新前后一致 | `completedAt ?? createdAt`：`completedAt` 刷新后消失，时间会变；回答也用 `createdAt`：长回答会显示开始生成的时间 | 无 |
 | A3 格式 | 今天 `HH:mm`，今年 `MM-DD HH:mm`，往年 `YYYY-MM-DD HH:mm`，24 小时制，纯数字 | 用户选定（00 C4、C5）；今年的格式和 TUI 会话列表一致 | 始终写全：每条消息都很长 | 需要一个按天刷新的时钟 |
 | A4 时区 | 用 `Date` 的本地取值（`getFullYear` 等），不用 `getUTC*`，不传 `timeZone` | 浏览器按系统时区换算，符合用户要求（00 C7） | 新增 ohbaby 时区设置：没有需求，还要处理两边不一致 | 无 |
 | A5 跨零点刷新 | 新增 `shared/use-day-clock.ts`，在本地零点和页面重新可见时检查日期，日期变了才更新 | 页面开着跨天时，昨天的消息要从 `14:32` 变成 `11-23 14:32`；只在日期变化时重绘，不像分钟时钟那样频繁 | 复用 `useMinuteClock`：整个会话流每分钟重绘一次，没必要 | 多一个小 hook |
 | A6 时钟放哪 | `ConversationStream` 顶部调用一次，把 `now` 传给每个时间 | 一个会话流只有一个定时器 | 每个时间组件各调一次：消息多时有几百个定时器 | 零点时整个会话流重绘一次 |
-| A7 侧边栏行尾 | 删掉时间，`.ohb-session-meta` 保留为空的占位元素：平时宽度 0，hover 时最小 18px，置顶行 48px | hover 按钮是绝对定位的，标题靠它避开按钮，和现在的让位方式一致 | 删掉 meta 元素，改给标题加右内边距：要重写 hover 让位规则 | 多一个空元素 |
+| A7 侧边栏行尾 | 删掉时间，`.ohb-session-meta` 保留为空的占位元素，一直是 18px；置顶行 hover 时 48px，规则不变 | hover 按钮是绝对定位的，标题靠它避开按钮；宽度不变，hover 时标题不跳 | 平时 0、hover 时 18px：每次 hover 标题都会缩一下，违反"hover 不让标题宽度跳动"；删掉 meta 改给标题加右内边距：要重写让位规则 | 行尾平时空着 18px，和改动前一样 |
 
 ## 2.3 分阶段实施
 
@@ -62,20 +62,22 @@ export function formatFullMessageTime(iso: string): string;
 - 返回 `now: number`。
 - 用 `setTimeout` 定到下一个本地零点之后 1 秒。下一个零点用 `new Date(年, 月, 日 + 1)` 算，夏令时也不会算错。
 - 监听 `visibilitychange`。页面重新可见时，如果本地日期已经变了，就更新 `now`。电脑睡眠时定时器可能延后，这一步兜底。
-- 日期没变时不调用 `setNow`，避免无意义的重绘。
+- 每次触发后重新定下一个零点的定时器，页面开着跨过几个零点都能刷新。
+- 日期没变时 `now` 保持原值，避免无意义的重绘。
 
-**新建 `conversation/MessageTime.tsx`**：
+时间元素直接写在 `ConversationStream` 里，不单独建组件：
 
 ```tsx
-<time className="ohb-message-time" dateTime={iso} title={formatFullMessageTime(iso)}>
-  {formatMessageTime(iso, now)}
+<time className="ohb-message-time" dateTime={at} title={formatFullMessageTime(at)}>
+  {formatMessageTime(at, today)}
 </time>
 ```
 
 **改 `conversation/ConversationStream.tsx`**：
 
 - 组件顶部调用 `const now = useDayClock();`，放在其他 hook 旁边，不能放在条件分支里。
-- `messageActions` 里生成时间项：用户消息取 `createdAt`，回答取 `completedAt ?? createdAt`。格式化结果为空（时间无法解析）时不加这一项。
+- `answerRuns` 从"回答 id → runId"改成"回答 id → 这一轮"，Fork 取它的 `runId`，时间取它的 `timing`。
+- `messageActions` 里生成时间项：用户消息取 `createdAt`，回答取 A2 的时间。格式化结果为空（时间无法解析）时不加这一项。
 - 排列顺序：
   - 用户消息：`[时间, 复制, 编辑]`
   - 回答：`[复制, Fork, 时间]`
@@ -110,20 +112,10 @@ export function formatFullMessageTime(iso: string): string;
 
 **`sidebar/sidebar.css`**
 
-- `.ohb-session-meta` 的 `min-width` 从 `18px` 改成 `0`。
+- `.ohb-session-meta` 只留 `flex: none; min-width: 18px;`，一直占 18px。原来用来排时间的 `align-items`、`display`、`justify-content` 删掉。
 - 删掉 `.ohb-session-meta > small`、`.ohb-session-row.ohb-session-active .ohb-session-meta > small` 两条规则。
-- 把"hover 时隐藏时间"那条规则（选择器以 `> small` 结尾）改成"hover 时撑开占位"：
-
-```css
-/* Room for the hover buttons, which sit over the end of the row. */
-.ohb-session-row:hover .ohb-session-meta,
-.ohb-session-row.is-menu-open .ohb-session-meta,
-.ohb-session-row:focus-within .ohb-session-meta {
-  min-width: 18px;
-}
-```
-
-- 置顶行 48px 的规则保留不动。它的选择器多一个 `.is-pinned`，优先级更高，能覆盖 18px。
+- 删掉"hover 时隐藏时间"那条规则（选择器以 `> small` 结尾），不加新的 hover 规则。
+- 置顶行 48px 的规则保留不动。
 - 删掉手机媒体查询里的 `.ohb-session-meta > small { display: none; }`。
 - 文件里"Session row: single line, title and a faint relative time."的注释改成"Session row: single line, a status column and the title."。
 
@@ -138,6 +130,7 @@ export function formatFullMessageTime(iso: string): string;
 | 文件 | 位置 | 改成 |
 |---|---|---|
 | `03-ui-layout-and-style.md` | 会话行一节，行尾的描述 | 行尾不显示时间，只在 hover 时出现操作按钮 |
+| `03-ui-layout-and-style.md` | 侧栏线框：置顶行的 `2d`，以及 "hover：时间换成 归档[a] 和 菜单[..]" | 去掉时间；改成"hover：行尾出现菜单[..]" |
 | `03-ui-layout-and-style.md` | 消息操作栏一节："现在只有复制，以后撤销和 fork 的按钮也放这里" | 操作栏有复制、Fork、编辑和一个精确到分钟的时间；写明格式和时区规则 |
 | `04-interaction-and-states.md` | 会话行状态表："hover：……行尾时间换成归档和菜单按钮" | "hover：行尾出现菜单按钮"，删掉"行尾只显示一项"的优先级 |
 | `05-components.md` | SessionRow 的 Anatomy | 行尾区域只有 hover 按钮 |

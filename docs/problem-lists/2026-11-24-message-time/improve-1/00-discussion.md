@@ -12,7 +12,7 @@
 - 侧边栏的顺序由服务端按 `updatedAt` 给出，和时间的显示无关。
 - `relative-time.ts` 还被设置页归档列表、子代理列表、文件列表和文件预览使用。
 - 消息下方的操作行是 `MessageActions`：只在可复制的用户消息和回答上出现。平时 hover 才显示，最新一条回答常显。
-- 消息数据 `UiMessage` 自带 `createdAt`，回答另有可选的 `completedAt`。
+- 消息数据 `UiMessage` 自带 `createdAt`。回答另有可选的 `completedAt`，但只在实时流里有，刷新页面后就没了；每一轮的结束时间 `timing.endedAt` 会存库，刷新后不变。
 - 时区：
   - 数据库（SQLite）里的时间列都是 `INTEGER`，存的是毫秒时间戳。时间戳表示的是一个绝对时刻，本身不带时区。
   - 服务端用 `toISOString()` 转成带 `Z` 的 UTC 字符串，再发给 Web。
@@ -35,7 +35,7 @@
 ## 0.4 按默认处理（讨论中未提异议）
 
 - 时间的显隐跟着操作行走：最新一条回答常显，其他消息 hover 才显示，触屏设备常显。
-- 用户消息用 `createdAt`（发送时间）；回答用 `completedAt ?? createdAt`（答完的时间）。
+- 用户消息用 `createdAt`（发送时间）；回答用这一轮的结束时间 `timing.endedAt`（答完的时间），恢复出来的轮次退回 `createdAt`。审查发现 `completedAt` 刷新后会消失，所以改用存库的轮次结束时间。
 - 鼠标悬停在时间上，用 `title` 显示完整的日期时间。
 - 样式用 11.5px 小字、`--text-dim` 颜色，不做胶囊。
 - 子代理页和 side chat 也用 `ConversationStream`，会一起显示时间。

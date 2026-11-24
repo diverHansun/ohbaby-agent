@@ -28,8 +28,8 @@
 
 | 编号 | 场景 | 通过标准 |
 |---|---|---|
-| D-1 | 假时间设在 2026-11-24 23:59:30，推进到 2026-11-25 00:00:01 之后 | `useDayClock` 返回的 `now` 更新到新的一天 |
-| D-2 | 同一天内推进 1 小时 | `now` 不变，组件不重绘 |
+| D-1 | 假时间设在 2026-11-24 23:59:30，推进过零点，再推进 24 小时 | `now` 先更新到 25 日，再更新到 26 日 |
+| D-2 | 同一天内再检查一次 | `now` 不变 |
 | D-3 | 跨天后触发 `visibilitychange`（页面变为可见），且定时器没有触发 | `now` 更新到新的一天 |
 | D-4 | 组件卸载 | 定时器和事件监听都被清掉 |
 
@@ -38,9 +38,9 @@
 | 编号 | 场景 | 通过标准 |
 |---|---|---|
 | R-1 | 用户消息的操作行 | 顺序是时间、复制、编辑（能编辑时），时间是 `<time>` 元素，`dateTime` 是原始 ISO 字符串 |
-| R-2 | 回答的操作行 | 顺序是复制、Fork、时间；side chat 里是复制、时间 |
-| R-3 | 回答带 `completedAt` | 显示 `completedAt` 的时间，不是 `createdAt` |
-| R-4 | 回答没有 `completedAt` | 显示 `createdAt` 的时间 |
+| R-2 | 回答的操作行 | 顺序是复制、Fork、时间；side chat 和子代理页里没有 Fork 和编辑，回答是复制、时间，用户消息是时间、复制 |
+| R-3 | 回答所在轮次已结束 | 显示轮次的 `timing.endedAt`，不是回答的 `createdAt` |
+| R-4 | 轮次是恢复出来的 | 显示回答的 `createdAt` |
 | R-5 | 时间的 `title` | 是完整格式 `YYYY-MM-DD HH:mm` |
 | R-6 | 压缩摘要、正文为空的消息 | 没有操作行，也没有时间 |
 | R-7 | 最新一条回答 | 操作行带 `is-persistent`，时间常显 |
@@ -63,9 +63,9 @@ B-1 到 B-6 在桌面宽度和 375px 手机宽度下各看一遍。ohbaby 现在
 
 - 有没有地方用了 `getUTCHours`、`toISOString().slice(...)` 这类 UTC 取值来显示时间？显示必须走本地取值。
 - `useDayClock` 是不是在 `ConversationStream` 顶部无条件调用？放进条件分支会违反 hook 规则。
-- `relative-time.ts` 和 `useMinuteClock` 还在吗？归档列表、子代理列表、文件列表、文件预览还在用它们。
+- `relative-time.ts` 和 `useMinuteClock` 还在吗？子代理列表、文件列表、文件预览还在用它们，归档列表还在用 `relativeTime`。
 - 侧边栏的 `.ohb-session-meta` 还在吗？删掉它会让 hover 按钮盖住标题。
-- 置顶行 hover 时，meta 的计算宽度是不是 48px？
+- 普通行 hover 前后，标题宽度是不是不变？置顶行 hover 时，meta 的计算宽度是不是 48px？
 
 ## 4.7 完成定义
 

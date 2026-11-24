@@ -23,7 +23,7 @@
 | A3 颜色 | 新增 `--attention: #f2c230` | 用户选定；只换圆点，不连带插话描边和警告横幅 | 改 `--warning`：影响面太大 | 多一个 token |
 | A4 子代理圆点 | `StatusGlyph` 的 `approval` 圆点也换成 `--attention` | 它的注释和设计文档都写明要和侧边栏同色 | 保持 `--warning`：两处"等待审批"颜色不同 | 无 |
 | A5 圆点大小 | 侧边栏保持 7px，`StatusGlyph` 保持 6px | 只换位置和颜色，不改尺寸 | 统一尺寸：不在本次范围 | 无 |
-| A6 提示文字 | 前导列容器保留 `role="status"`、`aria-label="Waiting for approval"`，另加 `title="Waiting for approval"` | 鼠标用户也能看到含义 | 不加 `title`：圆点颜色较浅，含义只能靠猜 | 无 |
+| A6 提示文字 | 前导列容器保留 `role="status"`、`aria-label="Waiting for approval"`，不加 `title` | 前导列是 `pointer-events: none`，点击要穿透到打开会话的按钮，`title` 永远显示不出来 | 加 `title`：没有效果；给前导列打开指针事件：会挡住点击 | 鼠标用户只能看颜色和审批卡片 |
 
 ## 2.3 具体改动
 
@@ -46,7 +46,6 @@
     className="ohb-session-lead"
     role="status"
     aria-label="Waiting for approval"
-    title="Waiting for approval"
   >
     <span className="ohb-session-awaiting" aria-hidden="true" />
   </span>
@@ -89,7 +88,8 @@
 | `04-interaction-and-states.md` | 会话行状态表 | awaiting：标题左侧状态位显示 `--attention` 圆点；"行尾只显示一项，优先级 awaiting > 时间"删掉 |
 | `04-interaction-and-states.md` | 等待审批一行："侧栏该会话行显示琥珀点" | 改成"橙黄点" |
 | `05-components.md` | SessionRow 的 Anatomy | 状态位：running 点阵、awaiting 圆点或 moving 转圈；行尾区域只有时间 |
-| `08-test-and-acceptance.md` | 两处"琥珀点" | 改成"橙黄点" |
+| `03-ui-layout-and-style.md` | 子代理页线框的 "<- 琥珀点" | 改成 "<- 橙黄点" |
+| `08-test-and-acceptance.md` | 两处"琥珀点"；单测一行的 "`SessionRow` 的行尾优先级" | 改成"橙黄点"；"`SessionRow` 的状态位优先级" |
 
 ## 2.5 兼容与迁移
 
@@ -108,7 +108,7 @@
 
 | 风险 | 应对 |
 |---|---|
-| `#f2c230` 在浅灰侧边栏上对比度约 1.6:1，低于 WCAG 对非文字元素建议的 3:1 | 用户选定的颜色。圆点有 `aria-label` 和 `title`，审批卡片本身也在消息区显示，圆点不是唯一的信息来源 |
+| `#f2c230` 在浅灰侧边栏上对比度约 1.6:1，低于 WCAG 对非文字元素建议的 3:1 | 用户选定的颜色。圆点有 `aria-label`，审批卡片本身也在消息区显示，圆点不是唯一的信息来源 |
 | 圆点和运行中点阵视觉重量不同，切换时行首有轻微变化 | 都在 15px 列里居中，标题位置不变，可以接受 |
 
 改动集中在一个 commit 里，出问题整体回退。

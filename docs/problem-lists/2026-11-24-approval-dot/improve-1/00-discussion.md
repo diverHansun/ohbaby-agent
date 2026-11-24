@@ -30,7 +30,7 @@
 ## 0.4 按默认处理（讨论中未提异议）
 
 - 圆点大小保持 7px。
-- 保留 `role="status"` 和 `aria-label`，另加 `title="Waiting for approval"`。
+- 保留 `role="status"` 和 `aria-label`。原计划另加 `title`，实施时发现前导列是 `pointer-events: none`，悬停提示出不来，所以去掉。
 - 移动会话时，前导列优先显示移动中的 spinner。
 - 子代理列表里"等待审批"的圆点（`StatusGlyph`）一起换成新 token。它的注释写明要和侧边栏同色。
 
