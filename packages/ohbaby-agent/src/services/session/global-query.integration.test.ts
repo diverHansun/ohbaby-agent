@@ -174,6 +174,72 @@ describe("listGlobalSessions", () => {
     expect(searchIds("needle")).toEqual(["hidden-session"]);
   });
 
+  it("carries when the latest main turn with a result ended", () => {
+    const run = (
+      sessionId: string,
+      runId: string,
+      status: string,
+      endedAt: number | null,
+      contextScopeId: string | null = null,
+    ): void => {
+      getDatabase()
+        .prepare(
+          `INSERT INTO run_ledger
+            (run_id, session_id, trigger, status, created_at, ended_at, context_scope_id)
+           VALUES (?, ?, 'user', ?, ?, ?, ?)`,
+        )
+        .run(runId, sessionId, status, endedAt ?? 1, endedAt, contextScopeId);
+    };
+    for (const [id, updatedAt] of [
+      ["succeeded", 60],
+      ["failed-last", 50],
+      ["stopped-last", 40],
+      ["subagent-only", 30],
+      ["running", 20],
+      ["none", 10],
+    ] as const)
+      addSession({ id, updatedAt });
+    run("succeeded", "r1", "succeeded", 1_000);
+    run("failed-last", "r2", "succeeded", 1_000);
+    run("failed-last", "r3", "failed", 2_000);
+    run("stopped-last", "r4", "succeeded", 1_000);
+    run("stopped-last", "r5", "interrupted", 3_000);
+    run("stopped-last", "r5b", "cancelled", 4_000);
+    run("subagent-only", "r6", "succeeded", 1_000, "scope-1");
+    run("running", "r7", "running", null);
+
+    const page = listGlobalSessions({ limit: 10 });
+
+    expect(page.sessions.map((session) => session.id)).toEqual([
+      "succeeded",
+      "failed-last",
+      "stopped-last",
+      "subagent-only",
+      "running",
+      "none",
+    ]);
+    expect(
+      page.sessions.map((session) => session.lastTurnEndedAt ?? null),
+    ).toEqual([1_000, 2_000, 1_000, null, null, null]);
+    expect(
+      page.sessions.filter((session) => "lastTurnEndedAt" in session),
+    ).toHaveLength(3);
+    // Later pages carry it too: the time is read for each page's rows.
+    const first = listGlobalSessions({ limit: 2 });
+    const second = listGlobalSessions({ limit: 2, cursor: first.nextCursor });
+    expect(
+      [...first.sessions, ...second.sessions].map((session) => [
+        session.id,
+        session.lastTurnEndedAt ?? null,
+      ]),
+    ).toEqual([
+      ["succeeded", 1_000],
+      ["failed-last", 2_000],
+      ["stopped-last", 1_000],
+      ["subagent-only", null],
+    ]);
+  });
+
   it("rejects malformed cursors", () => {
     expect(() => listGlobalSessions({ cursor: "not-a-cursor" })).toThrow(
       InvalidGlobalSessionCursorError,

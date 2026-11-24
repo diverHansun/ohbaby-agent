@@ -107,6 +107,11 @@ export interface UiGlobalSession {
   readonly workingDirectory: string;
   /** Directory of the next turn after a workspace change. */
   readonly pendingWorkingDirectory?: string;
+  /**
+   * When the latest main turn that produced a result (success or error)
+   * ended. A user stop does not count. Absent in search results.
+   */
+  readonly lastTurnEndedAt?: string;
 }
 
 export interface UiGlobalSessionPage {

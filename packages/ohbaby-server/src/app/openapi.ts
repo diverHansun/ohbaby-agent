@@ -1319,7 +1319,7 @@ export function createOpenApiDocument(
           responses: {
             "200": {
               description:
-                "Session page with optional nextCursor; archived pages include hidden workspaces",
+                "Session page with optional nextCursor; archived pages include hidden workspaces. A row carries lastTurnEndedAt once a main turn has succeeded or failed",
             },
             "400": { description: "INVALID_QUERY or INVALID_CURSOR" },
           },

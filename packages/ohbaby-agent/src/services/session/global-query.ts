@@ -30,8 +30,14 @@ export interface GlobalSessionPageInput {
   readonly status?: "active" | "archived";
 }
 
+/** A listed root session, with when its latest turn that produced a result ended. */
+export interface GlobalSession extends Session {
+  /** Epoch ms of the latest main turn that succeeded or failed; a stop does not count. */
+  readonly lastTurnEndedAt?: number;
+}
+
 export interface GlobalSessionPage {
-  readonly sessions: readonly Session[];
+  readonly sessions: readonly GlobalSession[];
   readonly nextCursor?: string;
 }
 
@@ -117,6 +123,26 @@ const NOT_IN_HIDDEN_WORKSPACE = `(workspace_directory IS NULL OR workspace_direc
 const VISIBLE_MESSAGE = `m.rewound_at IS NULL AND (json_extract(m.data, '$.runtimeInput.kind') IS NULL
   OR json_extract(m.data, '$.runtimeInput.kind') = 'user-steer')`;
 
+const runLedger = schema.runLedger.columns;
+
+/**
+ * Main turns only: subagent turns share the root session but carry a context
+ * scope. Correlated with the outer `page` alias, so it runs per listed row.
+ */
+const LAST_TURN_ENDED_AT = `(SELECT MAX(r.${runLedger.endedAt}) FROM ${schema.runLedger.tableName} r
+  WHERE r.${runLedger.sessionId} = page.id
+    AND r.${runLedger.contextScopeId} IS NULL
+    AND r.${runLedger.status} IN ('succeeded', 'failed'))`;
+
+function rowToGlobalSession(
+  row: SessionRow & { readonly last_turn_ended_at: number | null },
+): GlobalSession {
+  const session = rowToSession(row);
+  return typeof row.last_turn_ended_at === "number"
+    ? { ...session, lastTurnEndedAt: row.last_turn_ended_at }
+    : session;
+}
+
 /** Root sessions of the requested status, newest first. */
 export function listGlobalSessions(
   input: GlobalSessionPageInput = {},
@@ -126,13 +152,18 @@ export function listGlobalSessions(
   const cursor = decodeCursor(input.cursor);
   const status = input.status ?? "active";
   const rows = db
-    .prepare<SessionRow>(
-      `SELECT * FROM ${schema.session.tableName}
-       WHERE parent_id IS NULL AND json_extract(data, '$.sideChat') IS NULL AND status = ?
-         ${status === "active" ? `AND ${NOT_IN_HIDDEN_WORKSPACE}` : ""}
-         AND (? IS NULL OR updated_at < ? OR (updated_at = ? AND id < ?))
-       ORDER BY updated_at DESC, id DESC
-       LIMIT ?`,
+    .prepare<SessionRow & { readonly last_turn_ended_at: number | null }>(
+      // The page is cut first so the turn end time is read for its rows only.
+      `SELECT page.*, ${LAST_TURN_ENDED_AT} AS last_turn_ended_at
+       FROM (
+         SELECT * FROM ${schema.session.tableName}
+         WHERE parent_id IS NULL AND json_extract(data, '$.sideChat') IS NULL AND status = ?
+           ${status === "active" ? `AND ${NOT_IN_HIDDEN_WORKSPACE}` : ""}
+           AND (? IS NULL OR updated_at < ? OR (updated_at = ? AND id < ?))
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ?
+       ) AS page
+       ORDER BY page.updated_at DESC, page.id DESC`,
     )
     .all(
       status,
@@ -142,7 +173,7 @@ export function listGlobalSessions(
       cursor?.id ?? null,
       limit + 1,
     );
-  const page = rows.slice(0, limit).map(rowToSession);
+  const page = rows.slice(0, limit).map(rowToGlobalSession);
   const last = page.at(-1);
   return {
     sessions: page,

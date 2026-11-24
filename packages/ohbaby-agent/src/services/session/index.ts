@@ -34,6 +34,7 @@ export {
   listGlobalSessions,
   searchGlobalSessions,
   splitSearchKeywords,
+  type GlobalSession,
   type GlobalSessionPage,
   type GlobalSessionPageInput,
   type SessionSearchHit,

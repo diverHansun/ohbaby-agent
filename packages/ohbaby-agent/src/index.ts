@@ -194,6 +194,7 @@ export {
   planSessionWorkspaceMove,
   searchGlobalSessions,
   sessionTargetWorkingDirectory,
+  type GlobalSession,
   type GlobalSessionPage,
   type Session as CoreSession,
   type SessionWorkspaceMovePlan,

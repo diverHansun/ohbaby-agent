@@ -46,6 +46,13 @@ describe("global session wire format", () => {
     ).toMatchObject({ workspaceDirectory: null, workingDirectory: "/repo/a" });
   });
 
+  it("sends the latest turn end as an ISO time only when known", () => {
+    expect(toUiGlobalSession(session)).not.toHaveProperty("lastTurnEndedAt");
+    expect(
+      toUiGlobalSession({ ...session, lastTurnEndedAt: 5_000 }),
+    ).toMatchObject({ lastTurnEndedAt: new Date(5_000).toISOString() });
+  });
+
   it("parses page sizes", () => {
     expect(parseGlobalSessionLimit(undefined)).toBeUndefined();
     expect(parseGlobalSessionLimit("20")).toBe(20);

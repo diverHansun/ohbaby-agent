@@ -10,14 +10,15 @@ import type {
   UiSessionSearchPage,
 } from "ohbaby-sdk";
 import type {
-  CoreSession,
+  GlobalSession,
   GlobalSessionPage,
   SessionSearchPage,
 } from "ohbaby-agent";
 
 /** Wire format of the daemon's global session routes. */
 
-export function toUiGlobalSession(session: CoreSession): UiGlobalSession {
+/** Search hits are plain sessions, so they carry no turn end time. */
+export function toUiGlobalSession(session: GlobalSession): UiGlobalSession {
   return {
     id: session.id,
     ...(session.sideChat ? { isSideChat: true } : {}),
@@ -31,6 +32,9 @@ export function toUiGlobalSession(session: CoreSession): UiGlobalSession {
     ...(session.pendingWorkingDirectory === undefined
       ? {}
       : { pendingWorkingDirectory: session.pendingWorkingDirectory }),
+    ...(session.lastTurnEndedAt === undefined
+      ? {}
+      : { lastTurnEndedAt: new Date(session.lastTurnEndedAt).toISOString() }),
   };
 }
 
