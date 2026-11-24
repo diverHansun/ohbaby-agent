@@ -75,7 +75,7 @@
 }
 
 /* A row is one button that opens the detail; time and Cancel sit at its
-   right, on the title's line. The whole row takes the hover ground. */
+   right, on the title's line. Hovering the detail button highlights the row. */
 .ohb-bgtask-row {
   align-items: start;
   border-radius: var(--radius-lg);
@@ -84,7 +84,7 @@
   transition: background var(--duration-fast) var(--ease);
 }
 
-.ohb-bgtask-row:hover {
+.ohb-bgtask-row:has(> .ohb-bgtask-row-open:hover) {
   background: var(--bg-hover);
 }
 
@@ -150,7 +150,7 @@
   font-size: 11.5px;
 }
 
-/* Cancel is words only: no border, no pill; a soft ground on hover (D2, D3). */
+/* Keep the hit area generous while emphasizing only the text on hover. */
 .ohb-bgtask-cancel {
   background: none;
   border: 0;
@@ -160,13 +160,10 @@
   font-size: 12px;
   min-height: 24px;
   padding: 3px 8px;
-  transition:
-    background var(--duration-fast) var(--ease),
-    color var(--duration-fast) var(--ease);
+  transition: color var(--duration-fast) var(--ease);
 }
 
 .ohb-bgtask-cancel:hover:not(:disabled) {
-  background: var(--bg-selected);
   color: var(--text);
 }
 
