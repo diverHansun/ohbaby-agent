@@ -355,6 +355,15 @@ describe("Background tasks page", () => {
   it("lists unconfirmed foreground commands and releases only those an exited ohbaby left", async () => {
     const { element } = await mount("bg-unconfirmed");
     await openTasksPage(element);
+    // Nothing runs, so only Done shows; an empty group is left out (improve-2 B1).
+    expect(
+      [...element.querySelectorAll(".ohb-bgtask-group h3")].map(
+        (heading) => heading.textContent,
+      ),
+    ).toEqual(["Done2"]);
+    expect(
+      element.querySelector(".ohb-bgtask-list")?.textContent,
+    ).not.toContain("None");
     await click(
       rowFor(element, "npm run dev").querySelector<HTMLElement>(
         ".ohb-bgtask-row-open",

@@ -75,9 +75,12 @@ function InstanceGroup(props: {
   readonly instances: readonly UiSubagentInstance[];
   readonly now: number;
   readonly onSelect: (subagentId: string) => void;
-}): ReactElement {
+}): ReactElement | null {
   // Collapsing is a reading convenience only (like Claude's task groups).
   const [open, setOpen] = useState(true);
+  // An empty group says nothing useful, so it is left out (background tasks
+  // improve-2 B1).
+  if (props.instances.length === 0) return null;
   return (
     <section className="ohb-subagent-group" aria-label={props.title}>
       <h3>
@@ -99,9 +102,7 @@ function InstanceGroup(props: {
           </span>
         </button>
       </h3>
-      {!open ? null : props.instances.length === 0 ? (
-        <p className="ohb-subagent-group-empty">None</p>
-      ) : (
+      {open ? (
         <ul>
           {props.instances.map((instance) => (
             <InstanceRow
@@ -112,7 +113,7 @@ function InstanceGroup(props: {
             />
           ))}
         </ul>
-      )}
+      ) : null}
     </section>
   );
 }

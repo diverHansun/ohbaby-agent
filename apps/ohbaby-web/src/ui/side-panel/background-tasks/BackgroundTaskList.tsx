@@ -89,9 +89,11 @@ function TaskGroupSection(props: {
   readonly count: number;
   readonly rows: readonly UiShellJobRow[];
   readonly render: (row: UiShellJobRow) => ReactElement;
-}): ReactElement {
+}): ReactElement | null {
   // Folding is a reading convenience only; a new chat starts unfolded (04 §1.3).
   const [open, setOpen] = useState(true);
+  // An empty group says nothing useful, so it is left out (improve-2 B1).
+  if (props.count === 0 && props.rows.length === 0) return null;
   const title = props.group === "running" ? "Running" : "Done";
   return (
     <section className="ohb-bgtask-group" aria-label={title}>
@@ -112,11 +114,9 @@ function TaskGroupSection(props: {
           <span className="ohb-bgtask-group-count">{props.count}</span>
         </button>
       </h3>
-      {!open ? null : props.rows.length === 0 ? (
-        <p className="ohb-bgtask-group-empty">None</p>
-      ) : (
+      {open && props.rows.length > 0 ? (
         <ul>{props.rows.map(props.render)}</ul>
-      )}
+      ) : null}
     </section>
   );
 }

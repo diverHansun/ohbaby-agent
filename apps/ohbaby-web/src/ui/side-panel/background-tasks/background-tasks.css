@@ -74,12 +74,6 @@
   padding: 0;
 }
 
-.ohb-bgtask-group-empty {
-  color: var(--text-dim);
-  font-size: 12px;
-  margin: 2px 10px 6px;
-}
-
 /* A row is one button that opens the detail; time and Cancel sit at its
    right, on the title's line. The whole row takes the hover ground. */
 .ohb-bgtask-row {
@@ -101,7 +95,7 @@
   color: inherit;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
   min-width: 0;
   padding: 8px 8px 8px 10px;
   text-align: left;
