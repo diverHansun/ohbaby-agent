@@ -591,6 +591,13 @@ it("records the open chat's own reply time, only while the page is visible", () 
     document.dispatchEvent(new Event("visibilitychange"));
   });
   expect(stored()).toEqual({ B: listed + 5_000 });
+  // A later reply while the chat stays open is recorded too.
+  render({
+    catalog: catalog(sessions),
+    activeSessionId: "B",
+    activeTurnEndedAt: listed + 9_000,
+  });
+  expect(stored()).toEqual({ B: listed + 9_000 });
   render({ catalog: catalog(sessions), activeSessionId: "C" });
   expect(
     container.querySelectorAll('[data-session-id="B"] .ohb-session-unread'),

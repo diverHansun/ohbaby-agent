@@ -8,8 +8,9 @@ import type { SessionMenuAnchor } from "./SessionMenu.js";
 /**
  * One sidebar session (05 SessionRow): the open button with a status column
  * left of the title (a dot matrix while running, a yellow-orange dot while
- * awaiting approval, a blue dot for a reply not yet seen). The row end holds room for the menu button that shows
- * on hover; a pinned row also shows a filled pin there, which unpins it.
+ * awaiting approval, a blue dot for a reply not yet seen). The row end holds
+ * room for the menu button that shows on hover; a pinned row also shows a
+ * filled pin there, which unpins it.
  * Sessions keep their recency order but show no time; messages carry it.
  */
 export function SessionRow(props: {
