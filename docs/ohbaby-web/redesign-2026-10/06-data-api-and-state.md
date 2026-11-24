@@ -28,6 +28,7 @@ SDK 目前只有这些接口的类型，还没有 HTTP 客户端方法（无工�
 |---|---|---|
 | `/v1/sessions/:id/view`、`/history`、SSE `/v1/events` | SessionScreen | 不变。目录取 `globalSessionRequestDirectory(session)`（有待生效目录时用它） |
 | `POST /v1/prompts` | 草稿首发 | 草稿 client 连在草稿所选工作区，没有选就连 `defaultDirectory.directory`；不带会话 ID 发送，服务端接纳时创建会话（improve-2 调整，不再先调 `POST /v1/sessions`） |
+| `PATCH /v1/sessions/:id/title` | SessionRow 改名（菜单 Rename 或双击标题） | `{ title }`，返回会话。目录取该会话的执行目录；当前打开的会话走自己的连接，`session.updated` 让顶栏和其他窗口跟着变。先在列表里显示新名字，失败时恢复原行；不刷新 `updatedAt`，排序不变（2026-11-24 会话重命名议题） |
 | `/v1/sessions/:id/archive`、`/export` | SessionMenu | 目录取该会话的执行目录；操作其他目录的会话不能切换当前 SSE 或覆盖当前选择。归档运行中的会话返回 `409 SESSION_RUNNING`，通知显示 `Stop the chat before archiving.` |
 | `GET /v1/model` | 实例模型状态、ReasoningControl | improve-4 继续保留；`BrowserDaemonClient.refreshModel` 和 `model.invalidated` 仍依赖它 |
 | `POST /v1/model`、`/v1/settings/search-api-key` | 第一批的 `/connect` 浮层 | improve-4 移除 Web 写调用，改走全局设置接口；服务端旧接口保留给 TUI |

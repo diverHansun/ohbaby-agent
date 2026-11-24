@@ -28,11 +28,11 @@ SessionMenu › Rename / 双击标题
 | B6 自动标题 | 不改 | 现有的 `expectedTitle` 检查已经保证手动改名赢（01 §1.2） | 加"用户改过名"的标记：重复 | 把空会话改成 `New session`、`Untitled session` 这类默认名时，系统仍把它当默认名，发第一条消息后会自动起名（00 §0.4） |
 | F1 入口 | 菜单第一级在 Pin 下面加 `Rename`，图标 `Pencil`，快捷键 `r`；主按钮 `onDoubleClick` 也进入编辑 | 用户选定（00 C3）。单击已经用来打开会话 | 单击已选中的会话进入编辑：容易误触 | 双击时第一下会先打开会话，这是预期的；手机宽度下单击会关抽屉，只能用菜单 |
 | F2 编辑状态放哪 | `SessionList` 记 `editingId`，`SessionRow` 收 `editing` 和三个回调 | 和菜单的 `menu` 状态放在一起；同一时间只有一行在编辑 | 放在 `SessionRow` 自己里：菜单在 `SessionList`，要往下传"开始编辑"的信号 | 无 |
-| F3 输入框 | 编辑时用 `<input>` 换掉主按钮（按钮里不能放输入框），沿用行的字号和行高，不加卡片边框，只有一条细的焦点描边；自动聚焦并全选；`maxLength` 120；`aria-label="Rename chat"`。编辑时隐藏行尾的图钉和 `…`，停止标题滚动 | Web UI 不用卡片和胶囊样式（用户偏好） | 弹出对话框：多一步操作 | 无 |
+| F3 输入框 | 编辑时用 `<input>` 换掉主按钮（按钮里不能放输入框），沿用行的字号和行高，保留整行底色，光标直接出现在原标题处，输入框没有边线或阴影；自动聚焦并全选；`maxLength` 120；`aria-label="Rename chat"`。编辑时隐藏行尾的图钉和 `…`，停止标题滚动 | Web UI 不用卡片和胶囊样式（用户偏好） | 弹出对话框：多一步操作 | 无 |
 | F4 按键 | Enter 保存，Esc 取消（00 C4）。输入法正在组字时的 Enter 不算保存，用现有的 `isImeComposing`（`ui/composer/ime.ts`，兼顾 Safari 的 `keyCode 229`）。Enter、Esc 都 `stopPropagation`，不让行和抽屉上的按键处理再响应一次。编辑时行容器的 `onKeyDown`（ContextMenu、Shift+F10 打开菜单）和 `onContextMenu` 都不生效 | 中文输入法用回车上屏，不判断会把半截拼音存成标题 | 无 | 无 |
-| F4b 失焦 | 失焦后等一帧再判断：窗口本身没有焦点（`!document.hasFocus()`，比如切到别的程序）就继续编辑；输入框还在页面上但焦点落到了 `body`（列表重排移动了 DOM）就把焦点还给输入框，继续编辑；其他情况（点到了别处）才保存 | 00 C4 要失焦保存，但重排和切窗口不是用户"点别处"，不能把输入到一半的名字存下来（01 §1.6） | 重排时锁住列表顺序：要改排序逻辑，牵连更大 | 无 |
+| F4b 失焦 | 点击或轻点输入框外部时，在目标控件处理 click 前保存。失焦后等一帧再判断：窗口本身没有焦点（`!document.hasFocus()`，比如切到别的程序）就继续编辑；输入框还在页面上但焦点落到了 `body`（列表重排移动了 DOM）就把焦点还给输入框，继续编辑；其他情况（点到了别处）才保存 | 00 C4 要失焦保存，但重排和切窗口不是用户"点别处"，不能把输入到一半的名字存下来（01 §1.6） | 重排时锁住列表顺序：要改排序逻辑，牵连更大 | 无 |
 | F5 保存判断 | `normalizeSessionTitle` 之后为空，或和原标题相同，就直接退出编辑，不发请求 | 00 §0.4 | 空标题恢复成 `New session`：用户没要求 | 无 |
-| F6 乐观更新 | `runtime.renameSession(id, title, directory?)`：先 `catalog.upsertSession({ ...row, title })`，用 `global.beginWrite()` 包住请求；同时把 `id → title` 记进 `pendingRenames`，`syncFromInstanceIndex` 遇到这个 id 就跳过；请求结束（成功或失败）都删掉这条记录。失败时恢复原行并抛错，由 `AppController` 的 `runAction` 弹错误通知；成功后 `global.refresh()` | 照抄 `archiveSession` 的写法挡住全局刷新；实例索引同步是另一条路，`beginWrite` 管不到（01 §1.6），用一个按 id 的集合挡住，只影响正在改名的那一行 | 等服务器返回再显示：输入框关掉后会闪回旧名字；写操作进行中整个跳过索引同步：会把别的行的更新也挡掉 | 无 |
+| F6 乐观更新 | `runtime.renameSession(id, title, directory?)`：先 `catalog.upsertSession({ ...row, title })`，用 `global.beginWrite()` 包住请求；同一会话按提交顺序写入，实例索引更新时保留最新输入的标题。最后一次提交失败就恢复该会话最近确认的标题，由 `runAction` 提示错误。最后一笔请求结束后刷新列表 | 照抄 `archiveSession` 的写法挡住全局刷新；实例索引同步是另一条路，`beginWrite` 管不到（01 §1.6），用一个按 id 的集合挡住，只影响正在改名的那一行 | 等服务器返回再显示：输入框关掉后会闪回旧名字；写操作进行中整个跳过索引同步：会把别的行的更新也挡掉 | 无 |
 | F7 发往哪个实例 | 会话正打开且在当前实例时走 `instance.client.renameSession`，否则走 `global.scopedHttp(会话目录).renameSession`；目录取 `session.requestDirectory` | 和 `archiveSession` 一致 | 无 | 无 |
 | F8 焦点 | Enter、Esc 结束编辑后焦点回到这一行的主按钮；失焦结束时不抢焦点 | 键盘用户能接着操作；点到别处时焦点应该留在别处 | 无 | 无 |
 
@@ -117,7 +117,7 @@ SessionMenu › Rename / 双击标题
 - `editing` 为真时：前导列照常显示；主按钮换成 `<input className="ohb-session-rename">`，按 F3、F4、F4b、F8 处理；行尾按钮不渲染；标题滚动的 effect 不启动；行容器的 `onContextMenu`、`onKeyDown` 直接返回，让输入框用浏览器自己的右键菜单。
 - 更新组件注释。
 
-**`ui/sidebar/sidebar.css`**：`.ohb-session-rename`，宽度撑满主按钮的位置，字号、行高、内边距和 `.ohb-session-title` 对齐，背景透明，`:focus-visible` 用现有的焦点描边 token。
+**`ui/sidebar/sidebar.css`**：`.ohb-session-rename`，宽度撑满主按钮的位置，字号、行高、内边距和 `.ohb-session-title` 对齐，背景透明，获得焦点时也不画内框。
 
 完成定义：04 的 W、B 组通过。
 
