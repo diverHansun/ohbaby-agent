@@ -10,6 +10,7 @@ import {
 import { readableError } from "../../shared/error-text.js";
 import { IconButton } from "../../shared/IconButton.js";
 import { anchorBelow, Menu, type MenuAnchor } from "../../shared/Menu.js";
+import { ShellTokens } from "../../shared/ShellTokens.js";
 import { useDelayed } from "../../shared/use-delayed.js";
 import { TaskCancelButton } from "./TaskCancelButton.js";
 import {
@@ -57,7 +58,9 @@ function TaskRow(props: {
         }}
       >
         <span className="ohb-bgtask-row-title">{title}</span>
-        <span className="ohb-bgtask-row-command">{row.command}</span>
+        <span className="ohb-bgtask-row-command">
+          <ShellTokens command={row.command} />
+        </span>
         {props.showOwner && row.ownerKind === "subagent" ? (
           <span className="ohb-bgtask-row-owner">{row.ownerName}</span>
         ) : null}

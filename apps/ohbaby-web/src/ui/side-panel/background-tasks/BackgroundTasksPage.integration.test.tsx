@@ -239,6 +239,17 @@ describe("Background tasks page", () => {
         element.querySelector(".ohb-bgtask-output-text")?.textContent ?? ""
       ).includes("VITE"),
     );
+    // The command heads the output block, coloured like the approval card
+    // and out of the header (improve-2 B4, B5).
+    const command = element.querySelector(".ohb-bgtask-command-text");
+    expect(command?.textContent).toBe(
+      "$ pnpm --filter ohbaby-web exec vite --port 5173",
+    );
+    expect(command?.querySelector(".ohb-sh-command")?.textContent).toBe("pnpm");
+    expect(
+      element.querySelector(".ohb-bgtask-detail-meta")?.textContent,
+    ).not.toContain("vite");
+    expect(button(element, "Copy command")).toBeDefined();
   });
 
   it("groups tasks and cancels one with a single request, settled by the backend", async () => {

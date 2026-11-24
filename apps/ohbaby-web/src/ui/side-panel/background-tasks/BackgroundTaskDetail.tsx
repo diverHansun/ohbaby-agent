@@ -10,6 +10,7 @@ import {
 import { CopyButton } from "../../shared/CopyButton.js";
 import { readableError } from "../../shared/error-text.js";
 import { IconButton } from "../../shared/IconButton.js";
+import { ShellTokens } from "../../shared/ShellTokens.js";
 import { useDelayed } from "../../shared/use-delayed.js";
 import { TaskAbandonButton } from "./TaskAbandonButton.js";
 import { TaskCancelButton } from "./TaskCancelButton.js";
@@ -27,8 +28,9 @@ import { useTaskOutput } from "./use-task-output.js";
 const FOLLOW_SLACK_PX = 24;
 
 /**
- * One task (03 §4.2): a fixed header with its status, command and notes, and
- * the output tail below, which follows new output until scrolled up.
+ * One task (03 §4.2, improve-2 B4): a fixed header with its status and notes,
+ * then an inset block with the coloured command over the output tail, which
+ * follows new output until scrolled up.
  */
 export function BackgroundTaskDetail(props: {
   readonly client: UiBackendClient;
@@ -93,6 +95,8 @@ export function BackgroundTaskDetail(props: {
 
   const scroller = useRef<HTMLPreElement>(null);
   const [following, setFollowing] = useState(true);
+  // The top fades only once earlier lines sit above it (improve-2 B7).
+  const [scrolled, setScrolled] = useState(false);
   const text = output.output?.output;
   useLayoutEffect(() => {
     const element = scroller.current;
@@ -174,7 +178,6 @@ export function BackgroundTaskDetail(props: {
         >
           {taskStatusLine(job, props.now)}
         </p>
-        <p className="ohb-bgtask-detail-command">{job.command}</p>
         {job.ownerKind === "subagent" ? (
           <p className="ohb-bgtask-detail-note">Started by {job.ownerName}</p>
         ) : null}
@@ -198,50 +201,75 @@ export function BackgroundTaskDetail(props: {
         </p>
       ) : null}
       <div className="ohb-bgtask-output">
-        {view && (view.tailOnly || view.logIncomplete) ? (
-          <div className="ohb-bgtask-output-notes">
-            <div>
-              {view.tailOnly ? <p>Showing the last 32 KB.</p> : null}
-              {view.logIncomplete ? (
-                <p>
-                  The saved log is incomplete because the output was too large.
-                </p>
-              ) : null}
-            </div>
-            {view.logPath ? (
-              <CopyButton
-                text={view.logPath}
-                label="Copy log path"
-                copiedLabel="Log path copied"
-              />
+        <div className="ohb-bgtask-command">
+          <pre className="ohb-bgtask-command-text">
+            <code>
+              <span className="ohb-bgtask-command-prompt" aria-hidden="true">
+                ${" "}
+              </span>
+              <ShellTokens command={job.command} />
+            </code>
+          </pre>
+          <CopyButton
+            text={job.command}
+            label="Copy command"
+            copiedLabel="Command copied"
+            className="ohb-bgtask-command-copy"
+          />
+        </div>
+        {view ? (
+          <div className="ohb-bgtask-output-body">
+            {view.tailOnly || view.logIncomplete ? (
+              <div className="ohb-bgtask-output-notes">
+                <div>
+                  {view.tailOnly ? <p>Showing the last 32 KB.</p> : null}
+                  {view.logIncomplete ? (
+                    <p>
+                      The saved log is incomplete because the output was too
+                      large.
+                    </p>
+                  ) : null}
+                </div>
+                {view.logPath ? (
+                  <CopyButton
+                    text={view.logPath}
+                    label="Copy log path"
+                    copiedLabel="Log path copied"
+                  />
+                ) : null}
+              </div>
             ) : null}
+            {view.noSavedOutput && ended ? (
+              <p className="ohb-bgtask-output-empty">
+                No output was saved for this task.
+              </p>
+            ) : view.text === "" ? (
+              <p className="ohb-bgtask-output-empty">
+                {ended ? "No output." : "No output yet."}
+              </p>
+            ) : (
+              <pre
+                ref={scroller}
+                className={`ohb-bgtask-output-text${scrolled ? " is-scrolled" : ""}`}
+                tabIndex={0}
+                aria-label="Output"
+                onScroll={(event) => {
+                  const element = event.currentTarget;
+                  const atBottom =
+                    element.scrollHeight -
+                      element.scrollTop -
+                      element.clientHeight <
+                    FOLLOW_SLACK_PX;
+                  if (atBottom !== following) setFollowing(atBottom);
+                  const away = element.scrollTop > 0;
+                  if (away !== scrolled) setScrolled(away);
+                }}
+              >
+                {text}
+              </pre>
+            )}
           </div>
         ) : null}
-        {view?.noSavedOutput && ended ? (
-          <p className="ohb-bgtask-output-empty">
-            No output was saved for this task.
-          </p>
-        ) : view?.text === "" && ended ? (
-          <p className="ohb-bgtask-output-empty">No output.</p>
-        ) : (
-          <pre
-            ref={scroller}
-            className="ohb-bgtask-output-text"
-            tabIndex={0}
-            aria-label="Output"
-            onScroll={(event) => {
-              const element = event.currentTarget;
-              const atBottom =
-                element.scrollHeight -
-                  element.scrollTop -
-                  element.clientHeight <
-                FOLLOW_SLACK_PX;
-              if (atBottom !== following) setFollowing(atBottom);
-            }}
-          >
-            {text}
-          </pre>
-        )}
         {!following ? (
           <IconButton
             label="Scroll to latest output"
