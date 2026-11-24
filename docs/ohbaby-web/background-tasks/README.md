@@ -29,6 +29,8 @@ Subagents 页的停止按钮改成暂停/继续图标、输入框发送/停止�
 
 2026-11-14 在 `tmp/web-background-tasks` 完成实施与浏览器验收，并纳入本地 main。详见 [09 实施验收](09-implementation-acceptance.md)。实施时对文档做了三处小调整，已回写：列表读取器在详情页也保留（06 §3.1）；被唤醒轮次保留 `Background task update` 小标签（04 §2.5）；运行中的行把时长和 Cancel 放在标题那一行的右侧（03 §4.1 线框本来如此，实现照此对齐）。审查时按 D12 补了前台命令过滤，后端 `listShellJobs` 新增可选参数 `mode=background`。
 
+2026-11-24 起做样式改进：列表隐藏空组、已取消任务显示 `Cancelled`、详情页改成嵌入式命令块，见 [improve-2](improve-2/README.md)。
+
 ## 文档地图
 
 精简模式：写 00、01、03（简写）、04、06、08。省略的三份：
