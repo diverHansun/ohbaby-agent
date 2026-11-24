@@ -1142,6 +1142,14 @@ describe("composer controls", () => {
     expect(select).not.toHaveBeenCalled();
     expect(container.textContent).not.toMatch(/next turn|default model/iu);
 
+    expect(trigger().getAttribute("aria-expanded")).toBe("true");
+    expect(menu.querySelector('[aria-current="true"]')?.textContent).toContain(
+      "claude-sonnet-5-5",
+    );
+    await click(button(menu, "Effort, medium"));
+    await click(button(document.body, "high"));
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+
     // The first prompt carries the pick, so the new chat keeps it (T20).
     const submit = vi.spyOn(runtime, "submitPrompt");
     const composer = container.querySelector("textarea");
@@ -1149,7 +1157,10 @@ describe("composer controls", () => {
     await type(composer, "hello");
     await click(button(container, "Send message"));
     await until(() => submit.mock.calls.length === 1, "the first prompt");
-    expect(submit.mock.calls[0]?.[1]).toMatchObject({ modelEntryId: "m5" });
+    expect(submit.mock.calls[0]?.[1]).toMatchObject({
+      modelEntryId: "m5",
+      reasoning: { enabled: true, effort: "high" },
+    });
 
     // A pick deleted meanwhile falls back to the default and is not sent.
     await act(async () => {

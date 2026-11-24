@@ -73,6 +73,10 @@
   gap: 1px;
 }
 
+.ohb-model-menu-list .ohb-menu-check {
+  animation: ohb-fade var(--duration-fast) var(--ease);
+}
+
 /* A long list scrolls on its own; Manage models stays in reach (D19). The
    phone sheet already scrolls as a whole, so only the popup is capped. */
 .ohb-menu:not(.is-sheet) .ohb-model-menu-list {

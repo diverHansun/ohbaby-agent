@@ -155,7 +155,8 @@ it("does not start another model choice while the previous save is pending", asy
     release = resolve;
   });
   const settings = new SettingsLayer(api, () => "/test");
-  await render(menu(settings, { onSelect: () => held }));
+  const onSelect = vi.fn(() => held);
+  await render(menu(settings, { onSelect }));
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
@@ -168,10 +169,11 @@ it("does not start another model choice while the previous save is pending", asy
     choice.click();
   });
   act(() => {
-    trigger.click();
+    row("gpt-5.2").click();
   });
   try {
-    expect(document.querySelector("[role='menu']")).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(onSelect).toHaveBeenCalledTimes(1);
   } finally {
     await act(async () => {
       release();
@@ -207,8 +209,9 @@ it("keeps a chat's own model when the default changes, and tags the default", as
   expect(row("gpt-5.2").querySelector(".ohb-model-default-tag")).toBeNull();
   // Incomplete entries are not offered.
   expect(document.body.textContent).not.toContain("gpt-4.1");
-  act(() => {
+  await act(async () => {
     row("claude-sonnet-5-5").click();
+    await onSelect.mock.results[0]?.value;
   });
   expect(onSelect).toHaveBeenCalledWith("m5");
 });
@@ -225,8 +228,9 @@ it("pins a chat that follows the default when the default is picked", async () =
   const current = document.querySelector<HTMLButtonElement>(
     ".ohb-model-menu-list [aria-current='true']",
   );
-  act(() => {
+  await act(async () => {
     current?.click();
+    await onSelect.mock.results[0]?.value;
   });
   expect(onSelect).toHaveBeenCalledWith("m1");
 });
@@ -301,7 +305,7 @@ it("switches back to the chat's model while the first switch awaits its echo", a
   expect(document.querySelector(".ohb-model-button")?.textContent).toContain(
     "gpt-5.2",
   );
-  openMenu();
+  expect(row("gpt-5.2").getAttribute("aria-current")).toBe("true");
   await act(async () => {
     row("deepseek-v4.1-pro").click();
     await Promise.resolve();

@@ -101,7 +101,7 @@ export function ModelMenu(props: {
 
   const select = async (id: string): Promise<void> => {
     // Following the default and picking it still pins the chat (P14).
-    if (id === selectedId) return;
+    if (pending?.saving || id === selectedId) return;
     setPending({ id, saving: true });
     try {
       await props.onSelect(id);
@@ -171,6 +171,7 @@ export function ModelMenu(props: {
           level="effort"
           className="ohb-model-menu"
           focusSelector="[aria-current='true']"
+          triggerRef={triggerRef}
           onClose={close}
           onEscape={() => {
             setLevel("models");
@@ -220,6 +221,7 @@ export function ModelMenu(props: {
           className="ohb-model-menu"
           filterable={complete.length >= FILTER_FROM}
           focusSelector="[aria-current='true']"
+          triggerRef={triggerRef}
           onClose={close}
         >
           <div ref={listRef} className="ohb-model-menu-list">
@@ -240,8 +242,8 @@ export function ModelMenu(props: {
                       type="button"
                       role="menuitem"
                       aria-current={active ? "true" : undefined}
+                      aria-disabled={saving || undefined}
                       onClick={() => {
-                        close(true);
                         void select(model.id);
                       }}
                     >
@@ -271,6 +273,7 @@ export function ModelMenu(props: {
             <>
               <EffortRow
                 state={reasoning}
+                disabled={pending !== null && !echoed}
                 onOpen={(row) => {
                   // Keep the Effort level on the side the root opened on;
                   // being shorter, it would otherwise flip below the button.
@@ -316,6 +319,7 @@ export function ModelMenu(props: {
  */
 function EffortRow(props: {
   readonly state: Exclude<ReasoningState, { readonly kind: "hidden" }>;
+  readonly disabled: boolean;
   readonly onOpen: (row: HTMLElement) => void;
 }): ReactElement {
   const { state } = props;
@@ -328,6 +332,7 @@ function EffortRow(props: {
         role="menuitem"
         data-menu-filter="false"
         aria-label={`Effort, ${value}`}
+        disabled={props.disabled}
         aria-invalid={state.error ? true : undefined}
         onClick={(event) => {
           props.onOpen(event.currentTarget);

@@ -56,11 +56,20 @@ export function useReasoning(
   onChange: (reasoning: UiReasoningConfig | undefined) => void,
   entry?: UiSettingsModel,
 ): ReasoningState {
+  const sessionId = session?.id;
+  const entryId = entry?.id;
   const [modelView, setView] = useState<{
     client: ReasoningClient;
+    entryId: string | undefined;
+    sessionId: string | undefined;
     view: UiReasoningCapabilityView | undefined;
   }>();
-  const fetched = modelView?.client === client ? modelView.view : undefined;
+  const fetched =
+    modelView?.client === client &&
+    modelView.sessionId === sessionId &&
+    modelView.entryId === entryId
+      ? modelView.view
+      : undefined;
   // A draft has no session to ask about, so its choice speaks for itself.
   const view = session === null && entry ? entry.reasoning : fetched;
   const localPreference = useRef<
@@ -112,7 +121,6 @@ export function useReasoning(
     localPreference.current = undefined;
     setPreference(session?.reasoning);
   }, [client, session?.id, session?.reasoning]);
-  const sessionId = session?.id;
   // A chat rereads when it switches entry, or when the list reloads that
   // entry's capability (after Detect again, which sends no model event).
   const entryReasoning = session ? entry?.reasoning : undefined;
@@ -125,9 +133,7 @@ export function useReasoning(
         .getCurrentModel(sessionId === undefined ? undefined : { sessionId })
         .then((model) => {
           if (!closed && request === generation)
-            setView(
-              model?.reasoning ? { client, view: model.reasoning } : undefined,
-            );
+            setView({ client, sessionId, entryId, view: model?.reasoning });
         })
         .catch(() => undefined);
     };
@@ -149,7 +155,7 @@ export function useReasoning(
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [client, sessionId, entryReasoning]);
+  }, [client, sessionId, entryId, entryReasoning]);
   const update = (reasoning: UiReasoningConfig): void => {
     const local = { client, sessionId: session?.id, reasoning };
     localPreference.current = local;
