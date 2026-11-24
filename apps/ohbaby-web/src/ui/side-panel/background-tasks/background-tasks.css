@@ -233,7 +233,7 @@
   flex: none;
   flex-direction: column;
   gap: 3px;
-  padding: 0 16px 0 44px;
+  padding: 0 16px 0 40px;
 }
 
 .ohb-bgtask-detail-meta p {
@@ -286,13 +286,24 @@
   font-size: 12px;
   line-height: 1.6;
   margin: 0;
-  max-height: 9.6em;
+  /* Six lines plus the vertical padding (border-box). */
+  max-height: calc(9.6em + 8px);
   min-width: 0;
   overflow: auto;
   overflow-wrap: anywhere;
   padding: 4px 0;
   user-select: text;
   white-space: pre-wrap;
+}
+
+.ohb-bgtask-command-text::-webkit-scrollbar {
+  width: 6px;
+}
+
+/* Always visible when it overflows: the rest of a command must not look absent. */
+.ohb-bgtask-command-text::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
 }
 
 .ohb-bgtask-command-text code {
@@ -304,16 +315,23 @@
   user-select: none;
 }
 
-/* Copy stays faint until the block is hovered or it takes focus. */
-.ohb-bgtask-command-copy {
-  opacity: 0.55;
+/* Copy buttons in the block stay faint until it is hovered or they take
+   focus or report a result. Touch screens cannot hover, so there they show. */
+.ohb-bgtask-quiet-copy {
+  opacity: 0.7;
   transition: opacity var(--duration-fast) var(--ease);
 }
 
-.ohb-bgtask-output:hover .ohb-bgtask-command-copy,
-.ohb-bgtask-command-copy:focus-visible,
-.ohb-bgtask-command-copy[data-copy-state="copied"] {
+.ohb-bgtask-output:hover .ohb-bgtask-quiet-copy,
+.ohb-bgtask-quiet-copy:focus-visible,
+.ohb-bgtask-quiet-copy:not([data-copy-state="idle"]) {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .ohb-bgtask-quiet-copy {
+    opacity: 1;
+  }
 }
 
 .ohb-bgtask-output-body {
@@ -332,7 +350,8 @@
   font-size: 11.5px;
   gap: 8px;
   justify-content: space-between;
-  padding: 6px 6px 0 14px;
+  line-height: 1.5;
+  padding: 6px 6px 6px 14px;
 }
 
 .ohb-bgtask-output-notes p {
@@ -378,12 +397,18 @@
   background: var(--bg-glass);
   border: 1px solid var(--border);
   border-radius: 50%;
-  bottom: 10px;
+  bottom: 12px;
   height: 32px;
   width: 32px;
-  box-shadow: var(--shadow-menu);
+  /* A soft shadow: the block clips anything larger. */
+  box-shadow: var(--shadow-card);
   position: absolute;
-  right: 10px;
+  right: 14px;
+}
+
+/* Errors above the block keep their height when the output fills the panel. */
+.ohb-bgtask-detail > .ohb-side-notice {
+  flex: none;
 }
 
 /* In the grey row command, flags and operators stay as quiet as the rest;

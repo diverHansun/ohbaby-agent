@@ -100,7 +100,10 @@ export function BackgroundTaskDetail(props: {
   const text = output.output?.output;
   useLayoutEffect(() => {
     const element = scroller.current;
-    if (element && following) element.scrollTop = element.scrollHeight;
+    if (!element) return;
+    if (following) element.scrollTop = element.scrollHeight;
+    // Set before paint so a long log opens already faded at the top.
+    setScrolled(element.scrollTop > 0);
   }, [text, following]);
   const notFound = unavailable || output.notFound;
   const showLoading = useDelayed(!job && !notFound, 300);
@@ -214,7 +217,7 @@ export function BackgroundTaskDetail(props: {
             text={job.command}
             label="Copy command"
             copiedLabel="Command copied"
-            className="ohb-bgtask-command-copy"
+            className="ohb-bgtask-quiet-copy"
           />
         </div>
         {view ? (
@@ -235,6 +238,7 @@ export function BackgroundTaskDetail(props: {
                     text={view.logPath}
                     label="Copy log path"
                     copiedLabel="Log path copied"
+                    className="ohb-bgtask-quiet-copy"
                   />
                 ) : null}
               </div>
