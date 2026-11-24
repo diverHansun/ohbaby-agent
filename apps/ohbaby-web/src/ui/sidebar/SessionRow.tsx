@@ -125,7 +125,6 @@ export function SessionRow(props: {
       className="ohb-session-lead"
       role="status"
       aria-label="Waiting for approval"
-      title="Waiting for approval"
     >
       <span className="ohb-session-awaiting" aria-hidden="true" />
     </span>
