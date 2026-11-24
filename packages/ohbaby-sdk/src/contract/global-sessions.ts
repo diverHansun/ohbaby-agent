@@ -138,6 +138,14 @@ export interface UiSessionWorkspaceUpdate {
   readonly workspaceDirectory: string | null;
 }
 
+/** Longest title a user may give a session. */
+export const SESSION_TITLE_MAX_LENGTH = 120;
+
+/** Trims a typed title and joins runs of whitespace, newlines included, into one space. */
+export function normalizeSessionTitle(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim();
+}
+
 /** Directory a client should send the session's next request to. */
 export function globalSessionRequestDirectory(
   session: UiGlobalSession,

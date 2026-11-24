@@ -10,6 +10,7 @@ export type UiCommandMethod =
   | "releasePromptEditLease"
   | "compactSession"
   | "archiveSession"
+  | "renameSession"
   | "updateSessionReasoning"
   | "updateSessionModel"
   | "selectDefaultModel"
@@ -197,6 +198,7 @@ export function buildUiCommandDetails(
       });
     case "acquirePromptEditLease":
     case "archiveSession":
+    case "renameSession":
     case "updateSessionReasoning":
     case "updateSessionModel":
     case "selectDefaultModel":

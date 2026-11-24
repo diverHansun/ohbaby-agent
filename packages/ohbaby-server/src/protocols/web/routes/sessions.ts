@@ -332,6 +332,36 @@ export function registerSessionMutationRoutes(
     }
   });
 
+  app.patch("/v1/sessions/:id/title", async (context) => {
+    if (!ctx.isAuthorized(context.req.header("authorization")))
+      return context.json(webErrorBody("Unauthorized"), 401);
+    const clientId = ctx.clientIdFromRequest(context);
+    if (!clientId)
+      return context.json(webErrorBody("clientId is required"), 400);
+    if (!ctx.isRegisteredWebClient(clientId))
+      return context.json(webErrorBody("client is not registered"), 409);
+    const parsed = await readJsonWithLimit(context.req.raw);
+    if (!parsed.ok)
+      return context.json(
+        webErrorBody(parsed.message),
+        parsed.status as 400 | 413,
+      );
+    const body = isRecord(parsed.value) ? parsed.value : {};
+    if (typeof body.title !== "string")
+      return context.json(webErrorBody("title is required"), 400);
+    try {
+      const session = await ctx
+        .commandBackend("server-rest", { clientId })
+        .renameSession({
+          sessionId: context.req.param("id"),
+          title: body.title,
+        });
+      return context.json({ ok: true, session });
+    } catch (error) {
+      return sessionFailure(context, error, 400);
+    }
+  });
+
   app.post("/v1/sessions", async (context) => {
     if (!ctx.isAuthorized(context.req.header("authorization"))) {
       return context.json(webErrorBody("Unauthorized"), 401);

@@ -251,3 +251,129 @@ it("explains a refused archive of a running chat and puts the row back", async (
     "busy",
   ]);
 });
+
+it("renames a chat in place through its directory and puts the old title back on failure", async () => {
+  const daemon = fakeDaemon([
+    session("first", "/a", "/a", "2026-10-02T00:00:00.000Z"),
+    session("second", "/b", "/b"),
+  ]);
+  const runtime = start(daemon.fetch);
+  await runtime.ready;
+  const rows = (): [string, string][] =>
+    runtime.catalog.getSnapshot().sessions.map((row) => [row.id, row.title]);
+  const before = rows();
+
+  await runtime.renameSession("second", "Renamed", "/b");
+  expect(rows()).toEqual(
+    before.map(([id, title]) => [id, id === "second" ? "Renamed" : title]),
+  );
+  expect(daemon.sessions.get("second")?.title).toBe("Renamed");
+  expect(
+    daemon.requests.find((request) => request.path.endsWith("/title")),
+  ).toMatchObject({
+    method: "PATCH",
+    directory: "/b",
+    body: { title: "Renamed" },
+  });
+
+  daemon.failing.add("/v1/sessions/first/title");
+  await expect(runtime.renameSession("first", "Refused", "/a")).rejects.toThrow(
+    "unavailable",
+  );
+  expect(rows()).toEqual(
+    before.map(([id, title]) => [id, id === "second" ? "Renamed" : title]),
+  );
+});
+
+it("keeps the new title of the open chat while the live index still has the old one", async () => {
+  const daemon = fakeDaemon([session("open", "/a", "/a")]);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const runtime = start(async (input, init) => {
+    if (new URL(new Request(input, init).url).pathname.endsWith("/title"))
+      await hold;
+    return daemon.fetch(input, init);
+  });
+  await runtime.ready;
+  await runtime.openSession("open");
+  await vi.waitFor(() => {
+    expect(runtime.store.getSnapshot().sessionSync.status).toBe("ready");
+  });
+  const title = (): string | undefined =>
+    runtime.catalog.getSnapshot().sessions[0]?.title;
+  const indexReads = (): number =>
+    daemon.requests.filter((request) => request.path === "/v1/sessions/index")
+      .length;
+
+  const renaming = runtime.renameSession("open", "Renamed", "/a");
+  expect(title()).toBe("Renamed");
+  const reads = indexReads();
+  daemon.emit("/a", { type: "session.index.invalidated" });
+  await vi.waitFor(() => {
+    expect(indexReads()).toBeGreaterThan(reads);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(title()).toBe("Renamed");
+
+  release();
+  await renaming;
+  expect(title()).toBe("Renamed");
+  // The open chat goes through its own connection, not a scoped client.
+  expect(
+    daemon.requests.find((request) => request.path.endsWith("/title"))
+      ?.clientId,
+  ).toBe(
+    daemon.requests.find(
+      (request) => request.path === "/v1/events" && request.directory === "/a",
+    )?.clientId,
+  );
+});
+
+it.each([
+  [true, true, "Second"],
+  [false, true, "Second"],
+  [true, false, "First"],
+  [false, false, "chat"],
+] as const)(
+  "keeps rapid renames in edit order (first succeeds=%s, second succeeds=%s, final=%s)",
+  async (firstSucceeds, secondSucceeds, expected) => {
+    const daemon = fakeDaemon([session("chat", "/a", "/a")]);
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = vi.fn();
+    const runtime = start(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname.endsWith("/title")) {
+        const { title } = (await request.clone().json()) as { title: string };
+        if (title === "First") {
+          started();
+          await hold;
+          if (!firstSucceeds) throw new Error("First refused");
+        } else if (!secondSucceeds) throw new Error("Second refused");
+      }
+      return daemon.fetch(input, init);
+    });
+    await runtime.ready;
+    const first = runtime.renameSession("chat", "First");
+    await vi.waitFor(() => {
+      expect(started).toHaveBeenCalledOnce();
+    });
+    const second = runtime.renameSession("chat", "Second");
+    expect(runtime.catalog.getSnapshot().sessions[0]?.title).toBe("Second");
+    const settled = Promise.allSettled([first, second]);
+    // Let the newer request reach the daemon if the writes were sent in parallel.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    release();
+    const outcomes = await settled;
+    expect(outcomes.map((outcome) => outcome.status)).toEqual([
+      firstSucceeds ? "fulfilled" : "rejected",
+      secondSucceeds ? "fulfilled" : "rejected",
+    ]);
+    expect(daemon.sessions.get("chat")?.title).toBe(expected);
+    expect(runtime.catalog.getSnapshot().sessions[0]?.title).toBe(expected);
+  },
+);

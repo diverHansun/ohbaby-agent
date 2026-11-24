@@ -578,6 +578,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("updateSessionReasoning", [input]);
   }
 
+  renameSession(
+    input: Parameters<UiBackendClient["renameSession"]>[0],
+  ): ReturnType<UiBackendClient["renameSession"]> {
+    return this.rpc("renameSession", [input]);
+  }
+
   exportSession(
     input: Parameters<UiBackendClient["exportSession"]>[0],
   ): ReturnType<UiBackendClient["exportSession"]> {

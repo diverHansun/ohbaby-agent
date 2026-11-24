@@ -142,6 +142,11 @@ export interface UiArchiveSessionInput {
   readonly sessionId: string;
 }
 
+export interface UiRenameSessionInput {
+  readonly sessionId: string;
+  readonly title: string;
+}
+
 export interface UiExportSessionInput {
   readonly sessionId: string;
   readonly format: "html" | "jsonl";
@@ -293,6 +298,8 @@ export interface UiCommandClient
     readonly sessionId: string;
     readonly reasoning: UiReasoningConfig | null;
   }): Promise<UiSession>;
+  /** Renames a primary session without changing its place in the list. */
+  renameSession(input: UiRenameSessionInput): Promise<UiSession>;
   connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult>;
   setSearchApiKey(
     input: UiSetSearchApiKeyInput,

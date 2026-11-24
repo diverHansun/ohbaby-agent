@@ -653,6 +653,18 @@ class FakeBackend implements UiBackendClient {
     });
   }
 
+  renameSession(
+    input: Parameters<UiBackendClient["renameSession"]>[0],
+  ): ReturnType<UiBackendClient["renameSession"]> {
+    return Promise.resolve({
+      id: input.sessionId,
+      title: input.title,
+      messages: [],
+      createdAt: "2026-09-17T00:00:00Z",
+      updatedAt: "2026-09-17T00:00:00Z",
+    });
+  }
+
   forkSession(): Promise<never> {
     throw new Error("unused");
   }

@@ -690,6 +690,10 @@ export async function callDaemonBackend(input: {
           UiBackendClient["updateSessionReasoning"]
         >[0],
       );
+    case "renameSession":
+      return backend.renameSession(
+        request.params[0] as Parameters<UiBackendClient["renameSession"]>[0],
+      );
     case "archiveSession":
       return backend.archiveSession(
         request.params[0] as Parameters<UiBackendClient["archiveSession"]>[0],

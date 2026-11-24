@@ -324,6 +324,21 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     },
   ) as unknown as UiBackendClient;
 
+  let openId: string | null = null;
+  const openSession = (id: string): void => {
+    const row = sessions.find((entry) => entry.id === id);
+    if (!row) return;
+    openId = id;
+    const existing = scenario.snapshot.sessions.find(
+      (entry) => entry.id === id,
+    );
+    installSnapshot(store, {
+      ...scenario.snapshot,
+      activeSessionId: id,
+      status: { kind: "idle" },
+      sessions: [{ ...row, messages: existing?.messages ?? [] }],
+    });
+  };
   return {
     client,
     ready: Promise.resolve(),
@@ -346,6 +361,19 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
       );
       catalog.removeSession(id);
       return Promise.resolve();
+    },
+    renameSession: async (id, title): Promise<void> => {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      // Renaming keeps the chat's place, so updatedAt stays.
+      sessions = sessions.map((row) =>
+        row.id === id ? { ...row, title } : row,
+      );
+      const row = catalog
+        .getSnapshot()
+        .sessions.find((entry) => entry.id === id);
+      if (row) catalog.upsertSession({ ...row, title });
+      // Stands in for `session.updated`: the open chat's header follows.
+      if (openId === id) openSession(id);
     },
     listArchivedSessions: async (cursor): Promise<UiGlobalSessionPage> => {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -477,17 +505,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     openDraft: resolved,
     openFolder: (folder) => Promise.resolve(folder),
     openSession: (id): Promise<void> => {
-      const row = sessions.find((entry) => entry.id === id);
-      if (!row) return Promise.resolve();
-      const existing = scenario.snapshot.sessions.find(
-        (entry) => entry.id === id,
-      );
-      installSnapshot(store, {
-        ...scenario.snapshot,
-        activeSessionId: id,
-        status: { kind: "idle" },
-        sessions: [{ ...row, messages: existing?.messages ?? [] }],
-      });
+      openSession(id);
       return Promise.resolve();
     },
     refreshCatalog: resolved,

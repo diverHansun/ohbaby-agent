@@ -7079,6 +7079,137 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
+  it("renames a primary session in place and keeps it ahead of AI naming", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    let nextId = 0;
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => `session_${String(++nextId)}`,
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      projectResolver: {
+        fromDirectory(projectDirectory: string) {
+          return { id: "project:rename", rootPath: projectDirectory };
+        },
+      },
+      store: createInMemorySessionStore(),
+    });
+    const controlled = createControlledTitleLLMClient("AI should not win");
+    const beforeRun = vi.fn<() => Promise<void> | void>();
+    const client = createInProcessUiBackendClient({
+      beforePromptSubmit: beforeRun,
+      llmClient: controlled.client,
+      messageManager,
+      sessionManager,
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    // An empty chat renamed before its first message keeps the manual title.
+    const empty = await client.createSession();
+    const before = await sessionManager.get(empty.id);
+    const renamed = await client.renameSession({
+      sessionId: empty.id,
+      title: "  Plan the \n release  ",
+    });
+    expect(renamed.title).toBe("Plan the release");
+    expect(
+      events.findLast((event) => event.type === "session.updated"),
+    ).toMatchObject({ session: { title: "Plan the release" } });
+    expect(events.map((event) => event.type)).toContain(
+      "session.index.invalidated",
+    );
+    await expect(sessionManager.get(empty.id)).resolves.toMatchObject({
+      title: "Plan the release",
+      updatedAt: before?.updatedAt,
+    });
+    await client.submitPromptAndWait("First message", { sessionId: empty.id });
+    await expect(sessionManager.get(empty.id)).resolves.toMatchObject({
+      title: "Plan the release",
+    });
+
+    // The same title is a no-op; blank and overlong titles are refused.
+    events.length = 0;
+    await client.renameSession({
+      sessionId: empty.id,
+      title: "Plan the release",
+    });
+    expect(events).toEqual([]);
+    await expect(
+      client.renameSession({ sessionId: empty.id, title: " \n " }),
+    ).rejects.toThrow("Title is required");
+    await expect(
+      client.renameSession({ sessionId: empty.id, title: "x".repeat(121) }),
+    ).rejects.toThrow("longer than 120");
+    const child = await sessionManager.create(process.cwd(), {
+      parentId: empty.id,
+    });
+    await expect(
+      client.renameSession({ sessionId: child.id, title: "Child" }),
+    ).rejects.toThrow("subagent");
+    await expect(sessionManager.get(empty.id)).resolves.toMatchObject({
+      title: "Plan the release",
+    });
+
+    const foreign = await sessionManager.create(
+      join(process.cwd(), "other-workspace"),
+      {
+        title: "Other chat",
+      },
+    );
+    await expect(
+      client.renameSession({ sessionId: foreign.id, title: "Changed" }),
+    ).rejects.toThrow("another workspace");
+    expect((await sessionManager.get(foreign.id))?.title).toBe("Other chat");
+
+    // A rename while AI naming runs wins over the generated title.
+    const named = await client.submitPromptAndWait("Name me later");
+    await withTimeout(
+      controlled.titleStarted.promise,
+      250,
+      "Timed out waiting for title generation to start",
+    );
+    await client.renameSession({
+      sessionId: named.prompt.sessionId,
+      title: "Manual rename",
+    });
+    controlled.releaseTitle();
+    await controlled.titleCompleted.promise;
+    await expect(
+      sessionManager.get(named.prompt.sessionId),
+    ).resolves.toMatchObject({ title: "Manual rename" });
+    // The first prompt was admitted and its temporary title is already visible.
+    const gate = createDeferred<undefined>();
+    beforeRun.mockReturnValueOnce(gate.promise);
+    const receipt = await client.submitPromptAccepted("Pending work", {
+      sessionId: "queued-rename",
+    });
+    try {
+      expect((await sessionManager.get(receipt.sessionId))?.title).toBe(
+        "Pending work",
+      );
+      await client.renameSession({
+        sessionId: receipt.sessionId,
+        title: "Manual before run",
+      });
+    } finally {
+      gate.resolve(undefined);
+    }
+    await client.waitForPrompt(receipt.promptId);
+    expect((await sessionManager.get(receipt.sessionId))?.title).toBe(
+      "Manual before run",
+    );
+    await client.dispose();
+  });
+
   it("applies an async AI title to in-memory sessions without a session manager", async () => {
     const controlled = createControlledTitleLLMClient("In-memory AI title");
     const client = createInProcessUiBackendClient({

@@ -333,6 +333,21 @@ describe("SessionManager", () => {
     ]);
   });
 
+  it("renames without moving the session in recency order", async () => {
+    const { manager, updatedEvents } = createManager();
+    const session = await manager.create("D:/repo");
+
+    const renamed = await manager.rename(session.id, "Renamed");
+
+    expect(renamed).toMatchObject({ title: "Renamed", updatedAt: 1_000 });
+    await expect(manager.get(session.id)).resolves.toMatchObject({
+      title: "Renamed",
+      updatedAt: 1_000,
+    });
+    expect(updatedEvents).toEqual([renamed]);
+    await expect(manager.rename("missing", "Renamed")).rejects.toThrow();
+  });
+
   it("removes messages before deleting the session and keeps metadata when cleanup fails", async () => {
     const cleaned: string[] = [];
     const { manager, removedEvents } = createManager({

@@ -85,7 +85,11 @@ import {
   SourceSessionProjection,
 } from "./ui-state/source-session-projection.js";
 import { runToUiRun, messageToUiMessage } from "./ui-state/persistent-store.js";
-import { projectModelActivity } from "ohbaby-sdk";
+import {
+  normalizeSessionTitle,
+  projectModelActivity,
+  SESSION_TITLE_MAX_LENGTH,
+} from "ohbaby-sdk";
 import type {
   UiSessionRecoveryClient,
   UiSessionScope,
@@ -149,6 +153,7 @@ import type {
   UiRenewPromptEditLeaseInput,
   UiReleasePromptEditLeaseInput,
   UiArchiveSessionInput,
+  UiRenameSessionInput,
   UiCommandCatalog,
   UiCommandInvocation,
   UiCompactSessionOptions,
@@ -3442,6 +3447,40 @@ export function createInProcessUiBackendClient(
     return updated;
   }
 
+  async function renameSessionInternal(
+    input: UiRenameSessionInput,
+  ): Promise<UiSession> {
+    const session = await requireOwnedSession(input.sessionId);
+    if (session.isSideChat) throw new SideChatUnsupportedError();
+    const core = await options.sessionManager?.get(input.sessionId);
+    if (core && !isPrimarySession(core))
+      throw new Error(`Cannot rename subagent session: ${input.sessionId}`);
+    if (core?.status === "archived")
+      throw new SessionArchiveError("SESSION_ARCHIVED", input.sessionId);
+    const title = normalizeSessionTitle(input.title);
+    if (title === "") throw new Error("Title is required");
+    if (title.length > SESSION_TITLE_MAX_LENGTH)
+      throw new Error(
+        `Title is longer than ${String(SESSION_TITLE_MAX_LENGTH)} characters`,
+      );
+    if (title === session.title) return session;
+    if (!options.sessionManager?.rename)
+      throw new Error("Session rename is not available in this backend");
+    // Built from the renamed record, not the session read above, so a
+    // concurrent change is not published back as stale metadata.
+    const updated: UiSession = {
+      ...session,
+      ...sessionMetadataToUiSession(
+        await options.sessionManager.rename(input.sessionId, title),
+      ),
+      messages: session.messages,
+    };
+    await upsertSession(updated);
+    publish({ type: "session.updated", session: cloneSession(updated) });
+    await publishSessionIndexInvalidation();
+    return updated;
+  }
+
   async function updateSessionModelInternal(
     input: Parameters<UiBackendClient["updateSessionModel"]>[0],
   ): ReturnType<UiBackendClient["updateSessionModel"]> {
@@ -6263,6 +6302,7 @@ export function createInProcessUiBackendClient(
     },
 
     updateSessionReasoning: updateSessionReasoningInternal,
+    renameSession: renameSessionInternal,
     updateSessionModel: updateSessionModelInternal,
     async selectDefaultModel(entryId) {
       const result = await selectModelEntry(entryId, {

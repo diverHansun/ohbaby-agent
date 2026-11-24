@@ -73,6 +73,15 @@ export interface OhbabyWebRuntime {
   abortSession(sessionId: string, runId?: string): Promise<void>;
   /** `directory` defaults to the session's request directory. */
   archiveSession(sessionId: string, directory?: string): Promise<void>;
+  /**
+   * Shows the new title at once and keeps the row's place; the old row
+   * returns if the server refuses. `directory` as for archiving.
+   */
+  renameSession(
+    sessionId: string,
+    title: string,
+    directory?: string,
+  ): Promise<void>;
   moveSession(
     sessionId: string,
     workspaceDirectory: string | null,
@@ -180,6 +189,11 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   private readonly sideChatConnections = new Set<SideChatConnection>();
   /** A bound session missing from the list is refreshed for once, not on every index change. */
   private refreshedForSession: string | null = null;
+  /** Titles in flight; the instance index must not put the old one back. */
+  private readonly pendingRenames = new Map<
+    string,
+    { title: string; confirmedTitle: string | undefined; write: Promise<void> }
+  >();
 
   constructor(
     private readonly config: OhbabyBootstrapConfig,
@@ -348,7 +362,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       .sessions.find((session) => session.id === sessionId);
     const wasOpen = this.boundSessionId() === sessionId;
     const generation = this.instance.selection;
-    // The only optimistic sidebar change (04 §2.3): the row leaves at once
+    // The row leaves the sidebar at once
     // and returns if the server refuses.
     this.catalog.removeSession(sessionId);
     const settle = this.global.beginWrite();
@@ -373,6 +387,64 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     // The server may bind another session after archiving; the draft wins.
     if (wasOpen && this.instance.selection === generation)
       await this.openDraft(null).catch(() => undefined);
+  }
+
+  async renameSession(
+    sessionId: string,
+    title: string,
+    directory?: string,
+  ): Promise<void> {
+    const target = directory ?? this.sessionDirectory(sessionId);
+    const currentRow = (): UiGlobalSession | undefined =>
+      this.catalog.getSnapshot().sessions.find((row) => row.id === sessionId);
+    const row = currentRow();
+    const pending = this.pendingRenames.get(sessionId) ?? {
+      title,
+      confirmedTitle: row?.title,
+      write: Promise.resolve(),
+    };
+    const save = async (): Promise<void> => {
+      if (
+        this.boundSessionId() === sessionId &&
+        target === this.instance.directory &&
+        this.instance.client
+      )
+        await this.instance.client.renameSession({ sessionId, title });
+      else
+        await (
+          await this.global.scopedHttp(target)
+        ).renameSession({ sessionId, title });
+      pending.confirmedTitle = title;
+    };
+    // Show the latest edit immediately, but send this chat's writes in order.
+    // An earlier rejection still reaches its caller and allows the next edit.
+    const write = pending.write.then(save, save);
+    pending.write = write;
+    pending.title = title;
+    this.pendingRenames.set(sessionId, pending);
+    const settle = this.global.beginWrite();
+    if (row) this.catalog.upsertSession({ ...row, title });
+    try {
+      await write;
+    } catch (error) {
+      const current = currentRow();
+      if (
+        pending.write === write &&
+        current &&
+        pending.confirmedTitle !== undefined
+      )
+        this.catalog.upsertSession({
+          ...current,
+          title: pending.confirmedTitle,
+        });
+      throw error;
+    } finally {
+      settle();
+      if (pending.write === write) {
+        this.pendingRenames.delete(sessionId);
+        void this.global.refresh();
+      }
+    }
   }
 
   moveSession(
@@ -931,7 +1003,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
             )
             .map((entry) => ({
               id: entry.id,
-              title: entry.title,
+              title: this.pendingRenames.get(entry.id)?.title ?? entry.title,
               status: "active" as const,
               createdAt: entry.createdAt,
               updatedAt: entry.updatedAt,
@@ -948,13 +1020,11 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     );
     for (const entry of index) {
       const row = rows.get(entry.id);
-      if (
-        row &&
-        (row.title !== entry.title || row.updatedAt !== entry.updatedAt)
-      ) {
+      const title = this.pendingRenames.get(entry.id)?.title ?? entry.title;
+      if (row && (row.title !== title || row.updatedAt !== entry.updatedAt)) {
         this.catalog.upsertSession({
           ...row,
-          title: entry.title,
+          title,
           updatedAt: entry.updatedAt,
         });
         this.global.noteWrite();

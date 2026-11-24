@@ -239,6 +239,14 @@ export function createSessionManager(
       return session;
     },
 
+    async rename(sessionId: string, title: string): Promise<Session> {
+      await getExistingSession(sessionId, options);
+      // No updatedAt: renaming tidies the list, it is not new activity.
+      const session = await options.store.update(sessionId, { title });
+      options.bus.publish(SessionEvent.Updated, { session });
+      return session;
+    },
+
     async incrementStats(
       sessionId: string,
       delta: SessionStatsDelta,

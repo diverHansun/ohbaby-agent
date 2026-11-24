@@ -679,6 +679,18 @@ class FakeBackend implements UiBackendClient {
     });
   }
 
+  renameSession(
+    input: Parameters<UiBackendClient["renameSession"]>[0],
+  ): ReturnType<UiBackendClient["renameSession"]> {
+    return Promise.resolve({
+      id: input.sessionId,
+      title: input.title,
+      messages: [],
+      createdAt: "2026-09-17T00:00:00Z",
+      updatedAt: "2026-09-17T00:00:00Z",
+    });
+  }
+
   forkSession(): Promise<never> {
     throw new Error("unused");
   }
@@ -5011,6 +5023,71 @@ it("validates session reasoning and forwards raw choices through REST", async ()
     expect(update.mock.calls).toEqual([
       [{ sessionId: "s", reasoning: { effort: "medium" } }],
       [{ sessionId: "s", reasoning: null }],
+    ]);
+  } finally {
+    await handle.dispose();
+  }
+});
+
+it("forwards session renames through REST and maps refusals to 400", async () => {
+  const rename = vi.fn(
+    (input: Parameters<UiBackendClient["renameSession"]>[0]) =>
+      input.title === "bad"
+        ? Promise.reject(new Error("Title is required"))
+        : Promise.resolve({
+            id: input.sessionId,
+            title: input.title,
+            messages: [],
+            createdAt: "now",
+            updatedAt: "now",
+          }),
+  );
+  const backend = Object.assign(new FakeBackend(), { renameSession: rename });
+  const handle = createApp(backend);
+  await handle.start();
+  try {
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "rename-client",
+    };
+    const patch = (
+      body: unknown,
+      requestHeaders: Record<string, string> = headers,
+    ): Promise<Response> =>
+      Promise.resolve(
+        handle.app.request("/v1/sessions/s/title", {
+          method: "PATCH",
+          headers: requestHeaders,
+          body: JSON.stringify(body),
+        }),
+      );
+    expect((await patch({ title: "Renamed" })).status).toBe(409);
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ clientId: "rename-client" }),
+    });
+    const ok = await patch({ title: "Renamed" });
+    expect(ok.status).toBe(200);
+    await expect(ok.json()).resolves.toMatchObject({
+      ok: true,
+      session: { id: "s", title: "Renamed" },
+    });
+    expect((await patch({})).status).toBe(400);
+    expect((await patch({ title: 3 })).status).toBe(400);
+    expect((await patch({ title: "bad" })).status).toBe(400);
+    expect(
+      (
+        await patch(
+          { title: "Renamed" },
+          { ...headers, authorization: "Bearer wrong" },
+        )
+      ).status,
+    ).toBe(401);
+    expect(rename.mock.calls).toEqual([
+      [{ sessionId: "s", title: "Renamed" }],
+      [{ sessionId: "s", title: "bad" }],
     ]);
   } finally {
     await handle.dispose();

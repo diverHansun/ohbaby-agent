@@ -501,6 +501,18 @@ export class DaemonHttpClient {
     );
   }
 
+  renameSession(
+    input: Parameters<UiBackendClient["renameSession"]>[0],
+  ): Promise<{
+    ok: true;
+    session: Awaited<ReturnType<UiBackendClient["renameSession"]>>;
+  }> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/title`,
+      { method: "PATCH", body: { title: input.title } },
+    );
+  }
+
   exportSession(
     input: Parameters<UiBackendClient["exportSession"]>[0],
   ): Promise<{

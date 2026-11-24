@@ -5185,6 +5185,9 @@ function createFakeRuntime(input: {
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
+    renameSession: vi.fn(() =>
+      Promise.reject(new Error("Unused rename test stub")),
+    ),
     exportSession: vi.fn(() => Promise.reject(new Error("Not implemented"))),
     forkSession: vi.fn(() => Promise.reject(new Error("unused"))),
     rewindSession: vi.fn(() => Promise.reject(new Error("unused"))),
@@ -5307,6 +5310,7 @@ function createFakeRuntime(input: {
       forgetUnknownPrompt: vi.fn(),
       abortSession,
       archiveSession,
+      renameSession: () => Promise.resolve(),
       moveSession: () => Promise.resolve(),
       forkSession: () => Promise.resolve(),
       openSideChat: () => Promise.reject(new Error("no side chat")),

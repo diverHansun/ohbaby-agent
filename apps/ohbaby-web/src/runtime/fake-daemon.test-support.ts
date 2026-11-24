@@ -375,6 +375,27 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
           createdAt: "2026-10-24T00:00:00.000Z",
         });
       }
+      const rename = /^\/v1\/sessions\/([^/]+)\/title$/.exec(path);
+      if (rename?.[1] && request.method === "PATCH") {
+        const session = sessions.get(rename[1]);
+        if (!client || !session)
+          return Response.json(
+            { ok: false, error: { message: "unknown session" } },
+            { status: 400 },
+          );
+        // Renaming keeps the session's place: updatedAt stays.
+        session.title = (body as { title: string }).title;
+        return Response.json({
+          ok: true,
+          session: {
+            id: session.id,
+            title: session.title,
+            messages: [],
+            createdAt: session.updatedAt,
+            updatedAt: session.updatedAt,
+          },
+        });
+      }
       const archive = /^\/v1\/sessions\/([^/]+)\/archive$/.exec(path);
       if (archive?.[1] && request.method === "PATCH") {
         if (!client)

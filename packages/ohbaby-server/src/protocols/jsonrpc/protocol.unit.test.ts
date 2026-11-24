@@ -193,6 +193,7 @@ describe("daemon protocol", () => {
       "listSideChats",
       "closeSideChat",
       "updateSessionReasoning",
+      "renameSession",
       "updateSessionModel",
       "selectDefaultModel",
       "selectSubagentModel",

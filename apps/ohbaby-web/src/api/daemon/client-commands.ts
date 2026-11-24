@@ -234,6 +234,12 @@ export class ClientCommands {
     return (await this.sync.http.updateSessionReasoning(input)).session;
   }
 
+  async renameSession(
+    input: Parameters<UiBackendClient["renameSession"]>[0],
+  ): ReturnType<UiBackendClient["renameSession"]> {
+    return (await this.sync.http.renameSession(input)).session;
+  }
+
   async exportSession(
     input: Parameters<UiBackendClient["exportSession"]>[0],
   ): ReturnType<UiBackendClient["exportSession"]> {

@@ -141,6 +141,36 @@ describe("createUiCommandGateway", () => {
     ]);
   });
 
+  it("records a rename with its session but not the title", async () => {
+    const records: UiCommandRecord[] = [];
+    const raw = {
+      renameSession: vi.fn(() =>
+        Promise.resolve({
+          id: "session_1",
+          title: "private title",
+          messages: [],
+          createdAt: "2026-08-14T00:00:00.000Z",
+          updatedAt: "2026-08-14T00:00:00.000Z",
+        }),
+      ),
+    };
+    const gateway = createGateway(raw, records);
+
+    await gateway.renameSession({
+      sessionId: "session_1",
+      title: "private title",
+    });
+
+    expect(records.map((record) => [record.method, record.phase])).toEqual([
+      ["renameSession", "started"],
+      ["renameSession", "completed"],
+    ]);
+    expect(records[0]).toMatchObject({
+      correlation: { sessionId: "session_1" },
+    });
+    expect(JSON.stringify(records)).not.toContain("private title");
+  });
+
   it("keeps the command result when the injected recorder fails", async () => {
     const recorder: UiCommandRecorder = {
       record(): void {

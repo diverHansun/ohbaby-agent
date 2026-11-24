@@ -1303,6 +1303,7 @@ function createCore(): {
   readonly selectDefaultModel: ReturnType<typeof vi.fn>;
   readonly selectSubagentModel: ReturnType<typeof vi.fn>;
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
+  readonly renameSession: ReturnType<typeof vi.fn>;
   readonly exportSession: ReturnType<typeof vi.fn>;
   readonly forkSession: ReturnType<typeof vi.fn>;
   readonly rewindSession: ReturnType<typeof vi.fn>;
@@ -1369,6 +1370,9 @@ function createCore(): {
     ),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
+    ),
+    renameSession: vi.fn(() =>
+      Promise.reject(new Error("Unused rename test stub")),
     ),
     exportSession: vi.fn(() => Promise.reject(new Error("Not implemented"))),
     forkSession: vi.fn(() => Promise.reject(new Error("unused"))),

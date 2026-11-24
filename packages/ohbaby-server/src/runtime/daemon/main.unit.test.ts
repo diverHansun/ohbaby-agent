@@ -70,6 +70,9 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
+    renameSession: vi.fn(() =>
+      Promise.reject(new Error("Unused rename test stub")),
+    ),
     forkSession: vi.fn(() => Promise.reject(new Error("unused"))),
     rewindSession: vi.fn(() => Promise.reject(new Error("unused"))),
     openSideChat: vi.fn(() => Promise.reject(new Error("unused"))),

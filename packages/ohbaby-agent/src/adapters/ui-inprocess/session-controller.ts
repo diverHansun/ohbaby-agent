@@ -18,7 +18,10 @@ export type InProcessSessionManager = Pick<
   Partial<
     Pick<
       SessionManager,
-      "findReusableEmptyPrimary" | "incrementStats" | "recordWorkingDirectory"
+      | "findReusableEmptyPrimary"
+      | "incrementStats"
+      | "recordWorkingDirectory"
+      | "rename"
     >
   >;
 

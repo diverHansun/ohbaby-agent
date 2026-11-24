@@ -503,6 +503,12 @@ export class BrowserDaemonClient implements UiBackendClient {
     return this.commands.updateSessionReasoning(input);
   }
 
+  renameSession(
+    input: Parameters<UiBackendClient["renameSession"]>[0],
+  ): ReturnType<UiBackendClient["renameSession"]> {
+    return this.commands.renameSession(input);
+  }
+
   exportSession(
     input: Parameters<UiBackendClient["exportSession"]>[0],
   ): ReturnType<UiBackendClient["exportSession"]> {

@@ -143,6 +143,8 @@ export interface SessionManager {
       readonly expectedModelEntryId?: string;
     },
   ): Promise<Session>;
+  /** Changes only the title; the session keeps its place in recency order. */
+  rename(sessionId: string, title: string): Promise<Session>;
   incrementStats(sessionId: string, delta: SessionStatsDelta): Promise<Session>;
   /**
    * Records the directory a starting turn runs in. A pending change to that

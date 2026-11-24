@@ -45,6 +45,7 @@ export const DAEMON_RPC_METHODS = [
   "listSideChats",
   "closeSideChat",
   "updateSessionReasoning",
+  "renameSession",
   "updateSessionModel",
   "selectDefaultModel",
   "selectSubagentModel",

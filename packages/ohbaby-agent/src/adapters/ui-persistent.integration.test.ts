@@ -4230,6 +4230,47 @@ describe("persistent conversation rewind", () => {
     await client.rewindSession({ sessionId, promptId: second.prompt.promptId });
   });
 
+  it("renames a session without moving it and keeps the title across later turns", async () => {
+    client = open();
+    if (!client.getSessionView)
+      throw new Error("Expected persistent session recovery support");
+    const { sessionId } = (await client.submitPromptAndWait("rename me later"))
+      .prompt;
+    const db = getDatabase();
+    const updatedAt = (): unknown =>
+      db.prepare("SELECT updated_at FROM session WHERE id=?").get(sessionId);
+    const before = updatedAt();
+
+    await client.renameSession({ sessionId, title: "Release checklist" });
+
+    expect(updatedAt()).toEqual(before);
+    expect((await client.getSessionView({ sessionId })).session.title).toBe(
+      "Release checklist",
+    );
+    expect(
+      searchGlobalSessions({ query: "Release checklist" }).hits.map(
+        (hit) => hit.session.id,
+      ),
+    ).toContain(sessionId);
+
+    await client.submitPromptAndWait("another turn", { sessionId });
+
+    expect((await client.getSessionView({ sessionId })).session.title).toBe(
+      "Release checklist",
+    );
+    expect(
+      db.prepare("SELECT title FROM session WHERE id=?").get(sessionId),
+    ).toEqual({ title: "Release checklist" });
+
+    await client.archiveSession({ sessionId });
+    await expect(
+      client.renameSession({ sessionId, title: "Too late" }),
+    ).rejects.toMatchObject({ code: "SESSION_ARCHIVED" });
+    expect(
+      db.prepare("SELECT title FROM session WHERE id=?").get(sessionId),
+    ).toEqual({ title: "Release checklist" });
+  });
+
   it("rejects inaccessible sessions, foreign prompts and cuts before compaction without marking any history", async () => {
     client = open();
     const { prompt } = await client.submitPromptAndWait("an old user question");

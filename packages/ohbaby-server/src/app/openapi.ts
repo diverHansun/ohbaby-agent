@@ -1,4 +1,4 @@
-import { UI_REASONING_STATUSES } from "ohbaby-sdk";
+import { SESSION_TITLE_MAX_LENGTH, UI_REASONING_STATUSES } from "ohbaby-sdk";
 
 export function createOpenApiDocument(
   packageVersion: string | undefined,
@@ -1072,6 +1072,37 @@ export function createOpenApiDocument(
           responses: {
             "200": { description: "Session preference saved" },
             "400": { description: "Invalid preference" },
+          },
+        },
+      },
+      "/v1/sessions/{id}/title": {
+        patch: {
+          summary:
+            "Rename a primary session; the title is trimmed, whitespace runs become one space, and the session keeps its place in the list",
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: {
+                      type: "string",
+                      description: `After whitespace normalization, the title must contain 1 to ${String(SESSION_TITLE_MAX_LENGTH)} UTF-16 code units.`,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Session renamed" },
+            "400": {
+              description:
+                "Empty or too long title, side chat or subagent session",
+            },
+            "401": { description: "Unauthorized" },
+            "409": { description: "Client is not registered or session is archived" },
           },
         },
       },

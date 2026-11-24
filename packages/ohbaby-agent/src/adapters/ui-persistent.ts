@@ -600,6 +600,10 @@ function withStartupRecovery(
       await ready();
       return client.updateSessionReasoning(input);
     },
+    async renameSession(input): ReturnType<UiBackendClient["renameSession"]> {
+      await ready();
+      return client.renameSession(input);
+    },
     async updateSessionModel(
       input,
     ): ReturnType<UiBackendClient["updateSessionModel"]> {

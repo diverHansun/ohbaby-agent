@@ -38,6 +38,7 @@ const RECORDED_METHODS = new Set<UiCommandMethod>([
   "releasePromptEditLease",
   "compactSession",
   "archiveSession",
+  "renameSession",
   "updateSessionReasoning",
   "updateSessionModel",
   "selectDefaultModel",
@@ -114,6 +115,7 @@ function inputCorrelation(
       };
     case "compactSession":
     case "archiveSession":
+    case "renameSession":
     case "updateSessionReasoning":
     case "updateSessionModel":
       return {

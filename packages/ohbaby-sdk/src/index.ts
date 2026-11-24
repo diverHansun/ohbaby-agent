@@ -15,6 +15,7 @@ export type {
   UiSubmitPromptAndWaitOptions,
   UiWaitForPromptOptions,
   UiArchiveSessionInput,
+  UiRenameSessionInput,
   UiExportSessionInput,
   UiSessionExport,
   UiBackendClient,
@@ -35,6 +36,8 @@ export {
   SIDE_CHAT_UNSUPPORTED_ERROR_CODE,
   SESSION_NOT_ARCHIVED_ERROR_CODE,
   globalSessionRequestDirectory,
+  normalizeSessionTitle,
+  SESSION_TITLE_MAX_LENGTH,
 } from "./contract/global-sessions.js";
 export type {
   UiDefaultDirectory,

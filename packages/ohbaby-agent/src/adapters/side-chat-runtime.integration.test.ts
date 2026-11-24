@@ -1013,6 +1013,9 @@ describe("conversation copies through the persistent backend", () => {
       unsupported,
     );
     await expect(
+      client.renameSession({ sessionId, title: "Side" }),
+    ).rejects.toMatchObject(unsupported);
+    await expect(
       client.openSideChat({ mainSessionId: sessionId }),
     ).rejects.toMatchObject(unsupported);
     await expect(
