@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { validateModelJson } from "../validation.js";
+import { isReasoningEffort, validateModelJson } from "../../index.js";
 import { ConfigError } from "../types.js";
 
 describe("validateModelJson", () => {
@@ -398,5 +398,41 @@ describe("validateModelJson", () => {
     expect(() => {
       validateModelJson(config);
     }).not.toThrow();
+  });
+});
+
+describe("isReasoningEffort", () => {
+  it("accepts nonempty positive effort labels including extensions and prototype names", () => {
+    for (const effort of [
+      "minimal",
+      "low",
+      "ultra",
+      "turbo-3",
+      "HIGH",
+      "toString",
+      "constructor",
+    ]) {
+      expect(isReasoningEffort(effort)).toBe(true);
+    }
+  });
+
+  it("rejects empty values, non-strings, and disabled sentinels case-insensitively", () => {
+    for (const value of [
+      "",
+      "   ",
+      "none",
+      "NONE",
+      "off",
+      " OFF ",
+      "disabled",
+      " Disabled ",
+      null,
+      undefined,
+      42,
+      {},
+      [],
+    ]) {
+      expect(isReasoningEffort(value)).toBe(false);
+    }
   });
 });

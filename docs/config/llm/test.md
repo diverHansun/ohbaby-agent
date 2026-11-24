@@ -55,3 +55,5 @@
 真实验收覆盖三种协议的产品流式请求、工具闭环、主动 reasoning 发现及 metadata 无 context 的路由。页面流程为：仅连接 Save → 发现终态 → 手动覆盖 → 重探不覆盖 → 清空 → 关闭重开 → 实际运行并核对参数。临时模型和会话使用独立标识，结束恢复默认并清理。
 
 完整矩阵和真实请求范围见 [improve-1 测试与验收](2026-11-12-model-settings-automation/improve-1/04-test-and-acceptance.md)。本页定义测试责任，不替代执行记录；短请求接受 32768 不等于长上下文、流式工具或 length 自动接续验收。
+
+目录扩展档、三种请求体、Web 选档和实机流式输出见[目录档位验收](2026-11-12-model-settings-automation/improve-2/05-implementation-acceptance.md)。

@@ -213,11 +213,15 @@ function unknownMember(_value: never, type: string): never {
   throw new Error(`Responses ${type}: unknown protocol member`);
 }
 
-function emptyLogprobs(value: unknown, type: string): void {
+function checkEmptyList(
+  value: unknown,
+  type: string,
+  field: "annotations" | "logprobs",
+): void {
   check(
     value === undefined || (Array.isArray(value) && value.length === 0),
     type,
-    "nonempty or invalid logprobs are unsupported",
+    `nonempty or invalid ${field} are unsupported`,
   );
 }
 
@@ -236,12 +240,8 @@ function outputText(
     type,
     "output_text text must be a string",
   );
-  check(
-    Array.isArray(part.annotations) && part.annotations.length === 0,
-    type,
-    "annotations are unsupported",
-  );
-  emptyLogprobs(part.logprobs, type);
+  checkEmptyList(part.annotations, type, "annotations");
+  checkEmptyList(part.logprobs, type, "logprobs");
   return part;
 }
 
@@ -292,11 +292,15 @@ class ResponsesStreamState {
         "incomplete_details conflicts with non-incomplete response status",
       );
     }
+    // A gateway may report its own continuation id even for our stateless request.
     check(
-      response.previous_response_id === null ||
-        response.previous_response_id === undefined,
+      isNullish(response.previous_response_id) ||
+        ("store" in response &&
+          response.store === false &&
+          typeof response.previous_response_id === "string" &&
+          response.previous_response_id.length > 0),
       type,
-      "previous_response_id is unsupported",
+      "invalid previous_response_id",
     );
     check(
       !("store" in response) || response.store !== true,
@@ -479,7 +483,7 @@ class ResponsesStreamState {
   textDelta(
     event: Extract<ResponseStreamEvent, { type: "response.output_text.delta" }>,
   ): InterfaceProviderStreamEvent {
-    emptyLogprobs(event.logprobs, event.type);
+    checkEmptyList(event.logprobs, event.type, "logprobs");
     const part = this.activePart(event);
     check(!part.textDone, event.type, "delta occurs after output_text.done");
     check(
@@ -494,7 +498,7 @@ class ResponsesStreamState {
   textDone(
     event: Extract<ResponseStreamEvent, { type: "response.output_text.done" }>,
   ): void {
-    emptyLogprobs(event.logprobs, event.type);
+    checkEmptyList(event.logprobs, event.type, "logprobs");
     const part = this.activePart(event);
     check(
       !part.textDone && event.text === part.text,

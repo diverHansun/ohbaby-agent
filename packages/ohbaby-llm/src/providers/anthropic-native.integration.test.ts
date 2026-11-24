@@ -611,14 +611,41 @@ describe("Anthropic native continuation through SDK SSE", () => {
     });
   });
 
-  it("rejects a final thinking block without signature", async () => {
+  it("keeps a tool call replayable when the preceding thinking block is unsigned", async () => {
+    const tool = { type: "tool_use", id: "tool-1", name: "read", input: {} };
     const { provider } = fixture([
       start(),
-      ...block(0, { type: "thinking", thinking: "private", signature: "" }),
-      ...terminal("end_turn"),
+      ...block(0, { type: "thinking", thinking: "", signature: "" }, [
+        { type: "thinking_delta", thinking: "visible" },
+      ]),
+      ...block(1, tool),
+      ...terminal("tool_use"),
     ]);
-    await expect(collect(provider)).rejects.toThrow();
+    const frames = await collect(provider);
+    expect(
+      frames.flatMap((event) => event.toolCallDeltas ?? []),
+    ).toContainEqual({ index: 1, id: "tool-1", name: "read" });
+    expect(nativeOutput(frames)).toEqual({
+      protocol: "anthropic",
+      items: [tool],
+    });
   });
+  it.each([
+    [],
+    [{ type: "thinking", thinking: "other", signature: "signed" }],
+    [{ type: "redacted_thinking", data: "opaque" }],
+  ])(
+    "rejects unsigned-only output or incomplete signed history",
+    async (...extra) => {
+      const { provider } = fixture([
+        start(),
+        ...block(0, { type: "thinking", thinking: "private", signature: "" }),
+        ...extra.flatMap((value, n) => block(n + 1, value)),
+        ...terminal("end_turn"),
+      ]);
+      await expect(collect(provider)).rejects.toThrow();
+    },
+  );
 
   it("does not accept native state from a stream without message_stop", async () => {
     const { provider } = fixture([

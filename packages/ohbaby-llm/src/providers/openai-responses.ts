@@ -11,6 +11,7 @@ import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
 } from "./types.js";
+import { isReasoningEffort } from "../config/validation.js";
 import { nativeOutputForMessage, type ModelOrigin } from "./native-state.js";
 import { toResponsesReasoningWire } from "./reasoning.js";
 import { mapResponsesStream } from "./openai-responses-stream.js";
@@ -145,20 +146,19 @@ function buildRequestParams(
   });
   const reasoningWire = toResponsesReasoningWire(request.reasoning);
   const effort = reasoningWire.reasoning?.effort;
-  if (
-    effort !== undefined &&
-    effort !== "none" &&
-    effort !== "minimal" &&
-    effort !== "low" &&
-    effort !== "medium" &&
-    effort !== "high" &&
-    effort !== "xhigh" &&
-    effort !== "max"
-  )
-    rejectRequest(`unsupported Responses reasoning effort ${effort}`);
+  if (effort !== undefined && effort !== "none" && !isReasoningEffort(effort))
+    rejectRequest(`unsupported Responses reasoning effort ${String(effort)}`);
   return {
     model: request.model,
-    ...(effort === undefined ? {} : { reasoning: { effort } }),
+    ...(effort === undefined
+      ? {}
+      : {
+          reasoning: {
+            effort: effort as NonNullable<
+              ResponseCreateParamsStreaming["reasoning"]
+            >["effort"],
+          },
+        }),
     ...(reasoningWire.include === undefined
       ? {}
       : { include: reasoningWire.include }),

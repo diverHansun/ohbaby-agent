@@ -206,6 +206,55 @@ it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
     expect(config.apiKey).toBe("target-key");
   },
 );
+it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
+  "%s uses catalog labels on save and re-detection without generation requests",
+  async (protocol) => {
+    metadata = {
+      supported_reasoning_levels: [{ effort: "high" }, { effort: "future" }],
+    };
+    const target = await add(protocol);
+    expect(await settings.probeModelEntry(target.id, options())).toMatchObject({
+      source: "model-metadata",
+      efforts: ["high", "future"],
+      supportsDisabled: false,
+    });
+    expect(calls).toHaveLength(0);
+  },
+);
+it("probes when the chosen list has no effective effort for this protocol", async () => {
+  metadata = {
+    reasoning_levels: ["minimal"],
+    supported_reasoning_levels: [{ effort: "other" }],
+  };
+  accepted = ["high"];
+  const entry = await add("anthropic");
+  expect(await settings.probeModelEntry(entry.id, options())).toMatchObject({
+    source: "active-probe",
+    efforts: ["high"],
+  });
+  expect(calls.length).toBeGreaterThan(0);
+});
+it("keeps confirmed Off when a list refreshes the same route, and forgets it on a route change", async () => {
+  const target = await add();
+  await settings.updateModelEntry(target.id, { reasoning: { enabled: false } });
+  metadata = { reasoning_levels: ["medium", "high"] };
+  calls = [];
+  expect(await settings.probeModelEntry(target.id, options())).toMatchObject({
+    supportsDisabled: true,
+  });
+  expect((await readModelDocument()).models[0].reasoning).toEqual({
+    enabled: false,
+  });
+  await settings.updateModelEntry(
+    target.id,
+    { interfaceProvider: "openai-responses" },
+    options(),
+  );
+  expect(await settings.probeModelEntry(target.id, options())).toMatchObject({
+    supportsDisabled: false,
+  });
+  expect(calls).toHaveLength(0);
+});
 it("fresh fallback replaces old automatic data, then fresh metadata stops probing and explicit overrides survive", async () => {
   const target = await add();
   await settings.probeModelEntry(target.id, options());

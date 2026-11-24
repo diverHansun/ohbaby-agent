@@ -27,7 +27,7 @@ const responseMessage = object({
     object({
       type: z.literal("output_text"),
       text: z.string(),
-      annotations: z.array(z.never()),
+      annotations: z.array(z.never()).default([]),
       logprobs: z.array(z.never()).optional(),
     }),
   ),

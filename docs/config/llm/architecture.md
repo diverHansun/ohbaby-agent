@@ -17,6 +17,8 @@ Settings / connect
 
 Save 不等待网络，网络不占配置发布锁；写入失败不启动有效探测，探测失败不撤销已保存意图。context 与 reasoning 独立记录阶段状态，开始、阶段变化和所有终态都通知消费者重新读取。
 
+目录按精确模型 ID 匹配。完整能力声明优先，其次读取明确的 reasoning=false，再读取 reasoning_levels 字符串列表或 supported_reasoning_levels 对象中的 effort。简写保留服务声明的名称和顺序，按当前协议选择发送字段。目录没有有效能力时沿用既有主动探针。
+
 ## 设计模式与理由
 
 **存储与运行投影分离**
