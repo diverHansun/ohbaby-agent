@@ -24,7 +24,7 @@ describe("permission classifier", () => {
       classifyPermissionCall(call("todo_write", { todos: [] }, "write")),
     ).toEqual({
       category: "write",
-      kind: "memory-write",
+      kind: "internal-state",
     });
   });
 
@@ -41,21 +41,6 @@ describe("permission classifier", () => {
     expect(classifyPermissionCall(call("web_search"))).toMatchObject({
       category: "network",
     });
-  });
-
-  it("does not preserve ghost memory tool classifications", () => {
-    for (const toolName of [
-      "memory_read",
-      "memory_list",
-      "memory_add",
-      "memory_update",
-      "memory_remove",
-    ]) {
-      expect(classifyPermissionCall(call(toolName))).toMatchObject({
-        category: "write",
-        kind: "write",
-      });
-    }
   });
 
   it("classifies subagent and skill tools", () => {

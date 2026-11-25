@@ -1,5 +1,6 @@
 import { analyzeShellCommand } from "../shell/analysis/index.js";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
+import { createBuiltinTools } from "../tools/builtin.js";
 import { evaluatePermission } from "./evaluator.js";
 import type {
   Level,
@@ -54,6 +55,53 @@ function rule(input: {
 }
 
 describe("permission evaluator", () => {
+  const registeredTools = createBuiltinTools({
+    goalBackend: {
+      createGoal: vi.fn(),
+      getSnapshot: vi.fn(),
+      setBudget: vi.fn(),
+      updateGoalFromModel: vi.fn(),
+    },
+  });
+
+  it.each([
+    ["CreateGoal", "internal-state"],
+    ["UpdateGoal", "internal-state"],
+    ["GetGoal", "internal-state"],
+    ["SetGoalBudget", "internal-state"],
+    ["todo_write", "write"],
+  ] as const)(
+    "allows registered %s by default and honors a session deny",
+    (name, category) => {
+      const tool = registeredTools.find((candidate) => candidate.name === name);
+      assert(tool?.category === category);
+      const request = { ...call(tool.name), category: tool.category };
+      const defaults = { level: "default", mode: "auto" } as const;
+      expect(evaluatePermission(request, state(defaults)).type).toBe("allow");
+      expect(
+        evaluatePermission(
+          request,
+          state({
+            ...defaults,
+            rules: [rule({ tool: name, decision: "deny" })],
+          }),
+        ).type,
+      ).toBe("deny");
+    },
+  );
+
+  it("requires approval for an unknown tool at the default level", () => {
+    expect(
+      evaluatePermission(
+        call("custom_tool"),
+        state({ level: "default", mode: "auto" }),
+      ),
+    ).toMatchObject({
+      type: "ask",
+      reason: "Write tool requires confirmation: custom_tool",
+    });
+  });
+
   it.each(["task_list", "task_output", "task_kill"])(
     "does not use a legacy %s allow to authorize task",
     (legacyName) => {

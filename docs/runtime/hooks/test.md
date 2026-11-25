@@ -14,7 +14,7 @@
 - 三个 hook point（pre-run / post-run / on-wake）的独立性
 
 **不覆盖**：
-- 各内置 hook 工厂函数的业务逻辑（如 createMemoryInjectHook，属于 memory 模块的依赖行为）
+- 各内置 hook 工厂函数的业务逻辑（如 摘要 hook 调用 session 模块生成摘要）
 - daemon/bootstrap 中的 hook 注册顺序（bootstrap 层的职责）
 
 ---

@@ -14,6 +14,7 @@
 | 生命周期     | signal abort、run 终态、来源链失效、clearSession 和 dispose 都结束正确范围的等待     |
 | 故障隔离     | 关键提交失败冻结可信 root；普通通知失败不改变合法决议                                |
 | 近期终态     | 有界保存最小身份，安全重复/撤销可区分；淘汰后返回 not-pending                        |
+| 内部状态 | 四个 goal 工具与 `todo_write` 在 default 级别默认允许，匹配会话 deny 时拒绝。未声明类别的未知工具按写入请求审批 |
 | 求值与模式   | deny 优先，default 敏感请求不可记忆，Full Access 不发新人工审批且不写 always 规则    |
 
 UI 渲染、server 认证和独立恢复属于对应 adapter/SDK/server/client 测试，不通过 mock manager 冒充跨层验收。审批不新增墙钟超时，执行期限由运行生命周期验证。

@@ -13,7 +13,7 @@ hooks 模块是 runtime 的横切关注点执行容器，在 Run 生命周期的
 | 被调用（执行）| `runtime/run-manager` RunWorker | `hookExecutor.execute('pre-run', ctx)` / `execute('post-run', ctx)` |
 | 被调用（执行）| `runtime/heartbeat` HeartbeatMachine | `hookExecutor.execute('on-wake', ctx)` |
 | 被调用（注册）| `runtime/daemon/bootstrap` | `hookExecutor.register(point, fn)` 注册内置 hook |
-| 依赖（内置 hook）| memory 模块 / session 模块 / token 计数模块 等 | 各内置 hook 工厂函数的依赖，在注册时通过闭包注入 |
+| 依赖（内置 hook）| session 模块、token 计数模块等 | 各内置 hook 工厂函数的依赖，在注册时通过闭包注入 |
 
 **特点**：hooks 模块本身不依赖任何业务模块；内置 hook 通过工厂函数（factory function）接收依赖，注册逻辑在 daemon/bootstrap 完成。
 
@@ -25,7 +25,6 @@ hooks 模块是 runtime 的横切关注点执行容器，在 Run 生命周期的
 
 ```
 daemon/bootstrap 初始化阶段
-  → hookExecutor.register('pre-run', createMemoryInjectHook(memoryModule))
   → hookExecutor.register('pre-run', createLoopDetectionHook(sessionModule))
   → hookExecutor.register('post-run', createSessionSummaryHook(sessionModule))
   → hookExecutor.register('post-run', createTokenUsageHook(tokenCountModule))
@@ -40,8 +39,7 @@ RunWorker.start() 开始
   → hookExecutor.execute('pre-run', { runId, sessionId, triggerSource, ... })
   ↓
 串行执行 'pre-run' hook 链：
-  1. createMemoryInjectHook: 读取相关记忆 → 注入到 session context
-  2. createLoopDetectionHook: 检测是否存在循环触发 → 若检测到则标记
+  createLoopDetectionHook: 检测是否存在循环触发 → 若检测到则标记
   ↓
 每个 hook 若抛出异常：
   ├── 非 critical hook → 记录日志，继续执行下一个 hook
@@ -106,5 +104,5 @@ hook 链执行完毕 → RunWorker 继续结束流程
 |---|---|---|
 | hook 注册表（HookPoint → HookFn[]）| HookExecutor（内部）| 外部不直接访问；只通过 register/execute 操作 |
 | HookContext | RunWorker 构造，传入 execute | hooks 模块只读，不修改 context 对象 |
-| hook 副作用（记忆注入、摘要写入等）| 各内置 hook 通过依赖模块完成 | hooks 模块不知道副作用细节；每个 hook 自行管理其副作用 |
+| hook 副作用（摘要写入等）| 各内置 hook 通过依赖模块完成 | hooks 模块不知道副作用细节；每个 hook 自行管理其副作用 |
 | hook 异常 | HookExecutor 捕获并记录 | 不向 RunWorker 传播（除非 critical 标记，当前 MVP 未实现）|

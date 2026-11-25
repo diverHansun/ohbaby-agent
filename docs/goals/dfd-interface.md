@@ -14,7 +14,7 @@ goals 处在"命令/模型触发"与"运行执行/上下文/存储"之间，是�
 
 **输入来源：**
 - `commands`：`/goal` 系列命令（创建/状态/暂停/恢复/取消/替换，可带预算参数）。
-- `core/tool-scheduler`：模型调用 goal 工具（CreateGoal / UpdateGoal / GetGoal / SetGoalBudget）。
+- `core/tool-scheduler`：模型通过 `internal-state` 类别的四个工具操作当前会话的 goal（CreateGoal / UpdateGoal / GetGoal / SetGoalBudget）。
 - `runtime/run-manager`：续跑 Run 的完成信号（`RunCompletion`）。
 - 宿主启动流程：进程重启 / `--resume` 时的重建触发。
 

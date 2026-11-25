@@ -1367,9 +1367,9 @@ describe("TUI store event reducer", () => {
       notice: {
         createdAt: "2026-05-19T00:00:00.000Z",
         id: "notice_security",
-        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        key: "prompt-security:AGENTS.md:ignore_previous_instructions",
         level: "warning",
-        message: "OHBABY.md was skipped.",
+        message: "AGENTS.md was skipped.",
         title: "Custom instructions skipped",
       },
       timestamp: 1,
@@ -2109,10 +2109,10 @@ describe("TUI store event reducer", () => {
       notice: {
         createdAt: "2026-05-19T00:00:00.000Z",
         id: "notice_1",
-        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        key: "prompt-security:AGENTS.md:ignore_previous_instructions",
         level: "warning",
-        message: "OHBABY.md was skipped.",
-        source: "OHBABY.md",
+        message: "AGENTS.md was skipped.",
+        source: "AGENTS.md",
         title: "Custom instructions skipped",
       },
       timestamp: 1,
@@ -2122,10 +2122,10 @@ describe("TUI store event reducer", () => {
       notice: {
         createdAt: "2026-05-19T00:00:01.000Z",
         id: "notice_2",
-        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        key: "prompt-security:AGENTS.md:ignore_previous_instructions",
         level: "warning",
         message: "Duplicate warning.",
-        source: "OHBABY.md",
+        source: "AGENTS.md",
         title: "Custom instructions skipped",
       },
       timestamp: 2,
@@ -2154,7 +2154,7 @@ describe("TUI store event reducer", () => {
       state.notices.some(
         (notice) =>
           notice.key ===
-          "prompt-security:OHBABY.md:ignore_previous_instructions",
+          "prompt-security:AGENTS.md:ignore_previous_instructions",
       ),
     ).toBe(false);
     expect(new Set(state.notices.map((notice) => notice.id)).size).toBe(10);
@@ -2167,9 +2167,9 @@ describe("TUI store event reducer", () => {
       notice: {
         createdAt: "2026-05-19T00:00:00.000Z",
         id: "notice_security",
-        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        key: "prompt-security:AGENTS.md:ignore_previous_instructions",
         level: "warning",
-        message: "OHBABY.md was skipped.",
+        message: "AGENTS.md was skipped.",
         title: "Custom instructions skipped",
       },
       timestamp: 1,
@@ -2205,9 +2205,9 @@ describe("TUI store event reducer", () => {
       notice: {
         createdAt: "2026-05-19T00:00:00.000Z",
         id: "notice_security",
-        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        key: "prompt-security:AGENTS.md:ignore_previous_instructions",
         level: "warning",
-        message: "OHBABY.md was skipped.",
+        message: "AGENTS.md was skipped.",
         title: "Custom instructions skipped",
       },
       timestamp: 1,

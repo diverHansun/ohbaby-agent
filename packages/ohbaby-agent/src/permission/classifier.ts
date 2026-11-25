@@ -6,7 +6,7 @@ export type PermissionCallKind =
   | "write"
   | "dangerous"
   | "network"
-  | "memory-write"
+  | "internal-state"
   | "sensitive"
   | "skill"
   | "subagent"
@@ -66,7 +66,7 @@ export function classifyPermissionCall(
   }
 
   if (toolName === "todo_write") {
-    return { category: "write", kind: "memory-write" };
+    return { category: "write", kind: "internal-state" };
   }
   if (toolName === "agent") {
     return call.params.action === "list" || call.params.action === "monitor"
@@ -92,8 +92,5 @@ export function classifyPermissionCall(
   }
 
   const category = call.category ?? BUILTIN_CATEGORIES[toolName] ?? "write";
-  return {
-    category,
-    kind: category === "memory" ? "memory-write" : category,
-  };
+  return { category, kind: category };
 }

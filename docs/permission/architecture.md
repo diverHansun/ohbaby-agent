@@ -19,7 +19,7 @@ flowchart LR
 
 manager 内的 `pending` 是审批权威，按独立 permissionId 索引；每个条目持有请求、原始调用上下文、Promise 回调和 abort listener。没有 RequestQueue、current、processNext，也不以 UI 当前卡片决定哪个请求可以回答。近期终态 Map 保存最小身份与原因，默认限制 1024 条。root/runtime 健康状态独立保存，不从投影集合反推。
 
-`PermissionStateStore` 保存 mode、level 和按真实 session 分组的规则；classifier/evaluator/matcher/rule 是分类、求值和规则处理函数。manager 不导入 server 或 session 数据库。
+`PermissionStateStore` 保存 mode、level 和按真实 session 分组的规则；classifier/evaluator/matcher/rule 是分类、求值和规则处理函数。其中 `internal-state` 表示会话内部状态操作，默认允许，仍受会话显式 deny 规则约束。manager 不导入 server 或 session 数据库。
 
 ## 二、请求登记与一次结算
 

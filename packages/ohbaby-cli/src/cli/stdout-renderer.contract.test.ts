@@ -45,11 +45,11 @@ describe("createStdoutRenderer", () => {
         notice: {
           createdAt: "2026-05-19T00:00:00.000Z",
           id: "notice_1",
-          key: "prompt-security:/repo/OHBABY.md",
+          key: "prompt-security:/repo/AGENTS.md",
           level: "warning",
           message:
-            "OHBABY.md was skipped because it tried to override instructions.",
-          source: "/repo/OHBABY.md",
+            "AGENTS.md was skipped because it tried to override instructions.",
+          source: "/repo/AGENTS.md",
           title: "Custom instructions skipped",
         },
         timestamp: 3,
@@ -64,7 +64,7 @@ describe("createStdoutRenderer", () => {
     expect(stderr).toEqual([
       "[INVALID_ARGS] Bad args\n",
       "[PROVIDER_OFFLINE] Provider is unavailable\n",
-      "warning: Custom instructions skipped: OHBABY.md was skipped because it tried to override instructions. (/repo/OHBABY.md)\n",
+      "warning: Custom instructions skipped: AGENTS.md was skipped because it tried to override instructions. (/repo/AGENTS.md)\n",
     ]);
   });
 

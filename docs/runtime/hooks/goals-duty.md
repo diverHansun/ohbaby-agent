@@ -8,7 +8,7 @@
 
 ### 1. 提供 runtime 层的能力组合机制，避免 lifecycle 成为所有逻辑的汇聚点
 
-随着 ohbaby-agent 功能扩展，memory 注入、session 摘要、todo 同步、loop 检测、token 用量记录等横切关注点都需要在 Run 的执行前后插入逻辑。如果全部堆入 `core/lifecycle`，会导致 lifecycle 不断膨胀，难以测试和维护。hooks 模块提供一套轻量的 hook point 机制，使这些关注点以可独立测试的 hook 函数组合，而不是强行内嵌。
+随着 ohbaby-agent 功能扩展，session 摘要、todo 同步、loop 检测、token 用量记录等横切关注点都需要在 Run 的执行前后插入逻辑。如果全部堆入 `core/lifecycle`，会导致 lifecycle 不断膨胀，难以测试和维护。hooks 模块提供一套轻量的 hook point 机制，使这些关注点以可独立测试的 hook 函数组合，而不是强行内嵌。
 
 ### 2. 只在 runtime 层插入，不侵入 core/lifecycle 的执行逻辑
 
@@ -45,7 +45,6 @@ HookPoint 枚举定义在 `runtime/hooks` 内部，不进入 `ohbaby-sdk`。只�
 
 负责：
 - 提供标准 hook 的工厂函数，供 daemon 初始化时注册：
-  - `createMemoryInjectHook()`：pre-run 时将 short-term memory 注入 context
   - `createSessionSummaryHook()`：post-run 时触发 session 摘要生成
   - `createTokenUsageHook()`：post-run 时记录 token 用量到 RunRecord
   - `createLoopDetectionHook()`：pre-run 时检查是否存在无限循环风险
@@ -68,7 +67,7 @@ hook 注册在进程启动时完成，不支持运行时动态添加或卸载 ho
 
 ### 2. 不负责 hook 函数的具体业务实现
 
-HookExecutor 只是执行容器。memory 注入的具体逻辑在 `core/memory`，session 摘要逻辑在 `services/session`，hook 函数只是这些模块能力的薄包装。
+HookExecutor 只是执行容器。session 摘要逻辑在 `services/session`，hook 函数只是这些模块能力的薄包装。
 
 ### 3. 不负责 UI 层的钩子
 
@@ -103,7 +102,6 @@ claude-code 支持用户在 `.claude/settings.json` 中配置 shell hooks（工�
 | `runtime/run-manager` | 被调用 | run worker 在 lifecycle.run() 前后调用 executor.execute(pre-run / post-run) |
 | `runtime/heartbeat` | 被调用 | heartbeat 接受 WakeSignal 前调用 executor.execute(on-wake) 做轻量横切处理 |
 | `core/lifecycle` | 无直接依赖 | lifecycle 不知道 hooks 存在；hooks 在 run worker 层插入 |
-| `core/memory` | 依赖（hook 内部） | pre-run hook 调用 memory 模块注入上下文 |
 | `services/session` | 依赖（hook 内部） | post-run hook 触发 session 摘要 |
 | `runtime/daemon` | 被持有 | daemon 初始化时创建 HookExecutor 并注册内置 hook |
 | `docs/ohbaby-sdk` / `ohbaby-sdk` | 暂无依赖 | 当前 hooks 是 runtime 内部切面，不作为外部 SDK 契约暴露 |
@@ -125,7 +123,6 @@ await hookExecutor.execute('post-run', { runId, sessionId, triggerSource, runRec
 正确：daemon 初始化时注册 hook
 ```typescript
 // daemon/supervisor.ts 中
-executor.register('pre-run', createMemoryInjectHook(memoryModule))
 executor.register('post-run', createSessionSummaryHook(sessionService))
 executor.register('post-run', createTokenUsageHook(runManager))
 ```
@@ -156,7 +153,7 @@ executor.register('post-run', async (ctx) => {
 
 ## 六、文档自检
 
-- 可以用一句话说明该模块的存在意义：runtime/hooks 提供 Run 级 hook point（pre-run / post-run / on-wake），使 memory 注入、session 摘要、token 记录等横切关注点以可测试的 hook 函数组合，而不是堆入 lifecycle
+- 可以用一句话说明该模块的存在意义：runtime/hooks 提供 Run 级 hook point（pre-run / post-run / on-wake），使 session 摘要、token 记录等横切关注点以可测试的 hook 函数组合，而不是堆入 lifecycle
 - 能清楚回答"这个模块不该做什么"：不做动态加载、不实现业务逻辑、不处理 UI 钩子、不支持用户自定义 shell hooks、不做并行执行、不提供工具级拦截（pre-tool / post-tool 不是 MVP 职责）
 - 职责与其他模块无明显重叠：core/lifecycle（agent loop 引擎）、core/tool-scheduler（工具执行，工具级拦截接口归它定义）、runtime/run-manager（Run 管理）边界清晰
 - pre-tool / post-tool 的缺失是有意为之，文档中已明确未来扩展路径（core 定义抽象，runtime 注入实现）

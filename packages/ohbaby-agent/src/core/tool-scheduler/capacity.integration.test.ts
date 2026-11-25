@@ -100,7 +100,7 @@ describe("real scheduler session capacity", () => {
       "write",
       "dangerous",
       "network",
-      "memory",
+      "internal-state",
       "skill",
       "subagent-control",
     ];

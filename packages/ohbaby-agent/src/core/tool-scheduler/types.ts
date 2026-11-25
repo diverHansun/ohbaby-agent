@@ -18,7 +18,7 @@ export type ToolCategory =
   | "write"
   | "dangerous"
   | "network"
-  | "memory"
+  | "internal-state"
   | "skill"
   | "subagent"
   | "subagent-control";
