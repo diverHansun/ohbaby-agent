@@ -114,6 +114,7 @@ flowchart LR
 - **目标**：消除文档与实现漂移，规范本仓库自身的根目录指南文件。
 - **改动文件清单**：
   - 删除 `docs/core/memory/` 整个目录（含其中的 `improve-1/`：模块已不存在，历史记录留在 git 里；历史专题如 `2026-10-18-subagent-system-prompt/05-implementation-acceptance.md:109` 对它的链接会失效，属于预期，不改历史专题）
+  - memory-cleanup 实施时同步清理了 `docs/runtime/hooks/` 四份设计文档中的旧记忆注入示例，并校正了两份权限历史文档的头注。
   - 删除根目录 `OHBABY.md`
   - 根目录 `AGENT.md` 与 `CLAUDE.md` 是被 `.gitignore` 忽略的本地个人文件，不进仓库。`.gitignore` 的 `/AGENT.md` 改为 `/AGENTS.md`；本地把 `AGENT.md` 改名为 `AGENTS.md`（这一步只在开发者本机做，不提交）
   - 更新 `README.md:156`、`README.zh.md:156` 与 `packages/ohbaby-cli/README.md`（更新自定义指令章节：说明读取 `~/.ohbaby/` 与项目根下的 `AGENTS.md` / `CLAUDE.md`，经由低优先级 reminder 注入；不写 `OHBABY.md` 已废弃之类的提示，否则会被 04 §4.5 的 `rg` 门禁误报）
