@@ -34,6 +34,18 @@ describe("instruction reminder rendering", () => {
     expect(text).toContain("<system-reminder-example>");
   });
 
+  it.each(["<system-reminder", "</SYSTEM-REMINDER"])(
+    "escapes an incomplete boundary at the end of visible content: %s",
+    (fragment) => {
+      const draft = renderInstructionsReminder([
+        source(`Markdown: ${fragment}`),
+      ]);
+      expect(renderReminderText(draft.text)).toContain(
+        `Markdown: &lt;${fragment.slice(1)}\n</system-reminder>`,
+      );
+    },
+  );
+
   it("renders scope labels and precedence with a stable, path-independent fingerprint", () => {
     const a = source("Global defaults.", "global");
     const b = source("Project overrides.");

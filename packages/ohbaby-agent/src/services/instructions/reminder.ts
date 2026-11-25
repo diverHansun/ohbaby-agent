@@ -43,7 +43,8 @@ export function createInstructionsReminderProvider({
             "security-finding",
             finding.patternId,
           ]);
-          reports.set(key, () => onSecurityFinding?.(finding));
+          if (!reports.has(key))
+            reports.set(key, () => onSecurityFinding?.(finding));
         },
       });
       // Compare and replace together after I/O so concurrent sessions share one report.

@@ -31,10 +31,10 @@
 | I-01 | 项目根同时存在内容不同的 `AGENTS.md` 和 `CLAUDE.md` | 两者均加载，顺序为 `AGENTS.md` 在前、`CLAUDE.md` 在后，各自标注固定来源标签 `project/AGENTS.md`、`project/CLAUDE.md` |
 | I-02 | 项目根 `CLAUDE.md` 是 `AGENTS.md` 的符号链接，或 `trim()` 后内容完全一致 | 只加载并注入 `AGENTS.md` 一份，不重复消耗 token |
 | I-03 | 全局 `~/.ohbaby/AGENTS.md` 与项目 `<root>/AGENTS.md` 内容不同 | 两者均加载，顺序为全局在前、项目在后，正文声明项目优先于全局 |
-| I-04 | 项目根恰好等于 `~/.ohbaby` 或项目文件内容与全局文件完全一致 | 不重复注入同一份文本，仅保留项目作用域条目（若该文件是软链，项目作用域按规则拒读，由全局作用域加载一份） |
+| I-04 | 项目根恰好等于 `~/.ohbaby` 或项目文件内容与全局文件完全一致 | 不重复注入同一份文本，仅保留项目作用域条目（若该文件是软链，项目作用域按规则拒读，由全局作用域加载一份）。项目随后读错时仍只出现全局来源，项目拒读也不影响全局下次读错时的回退 |
 | I-05 | 目录中仅存在 `OHBABY.md`、单数 `AGENT.md` 或 `<project>/.ohbaby/AGENTS.md` | 全部忽略，不加载、不产生任何 reminder（零 token） |
 | I-06 | 文件包含 `</system-reminder>`、`</SYSTEM-REMINDER >`、`<system-reminder attr="x">` 以及正常 TypeScript 泛型（`Array<string>`、`a && b`） | 经 `renderReminderText()` 最终包装后，正文中的标签变体均被安全转义，仅最外层保留一对宿主 `<system-reminder>...</system-reminder>`；`Array<string>` 与 `a && b` 保持原样 |
-| I-07 | 文件命中高危 prompt-injection（如 `ignore previous instructions`） | 该文件被省略，仅触发一次 `onSecurityFinding`（不额外触发同源 `onWarning`）；同目录另一份合法文件仍正常加载 |
+| I-07 | 文件命中高危 prompt-injection（如 `ignore previous instructions`） | 该文件被省略，仅触发一次 `onSecurityFinding`（单文件超限时也不发 `FILE_LIMIT`，独立的 I/O 读错仍正常上报）；同目录另一份合法文件仍正常加载 |
 | I-08 | 多步工具循环（连续 5 次 `collect()`，含同一步压缩二次收集）期间文件未变；随后文件恢复正常再再次异常；另用同一 `projectRoot`、不同 `sessionId`（模拟子代理的子会话）和另一个 `projectRoot` 各收集一次 | 仅第 1 步返回 reminder；第 2–5 步由 collector 去重不追加；告警在未恢复前仅上报一次，恢复后再次异常时重新上报；同一 `projectRoot` 的另一个 `sessionId` 历史里没有快照，照常返回 reminder，但不再上报同一告警；另一个 `projectRoot` 各自上报一次 |
 | I-09 | 会话中途用户修改了 `CLAUDE.md` | 产生新的 `key`，在当前步尾部追加使用统一固定头注的新快照 reminder；历史旧消息字节完全不变；再下一步未改则静默 |
 | I-10 | 会话中途用户删除所有指令文件（或全部读错、被拒、触发安全省略） | 发出一次 `key = "cleared"` 的通知，正文说明“当前没有已验证可用的指令，之前的指令快照不再适用”，不推测原因；再下一步静默不再重复发 |

@@ -23,7 +23,7 @@ export function renderInstructionsReminder(
   );
   const sections = sources.map(({ displayPath, content, truncated }) => {
     const body = content.replace(
-      /<\s*\/?\s*system-reminder(?=[\s/>])[^<>]*>?/gi,
+      /<\s*\/?\s*system-reminder(?=[\s/>]|$)[^<>]*>?/gi,
       escapeReminderValue,
     );
     const suffix = truncated

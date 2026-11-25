@@ -127,15 +127,17 @@ async function loadCandidate(
   options: LoadInstructionsOptions,
 ): Promise<InstructionSource | undefined> {
   const file = path.resolve(directory, fileName);
+  // The same path may follow a symlink globally and reject it in project scope.
+  const cacheKey = `${scope}:${file}`;
   let read: LastGoodRead | undefined;
   try {
     read = await readCandidate(scope, fileName, file, options);
-    if (read) options.lastGoodReads?.set(file, read);
-    else options.lastGoodReads?.delete(file);
+    if (read) options.lastGoodReads?.set(cacheKey, read);
+    else options.lastGoodReads?.delete(cacheKey);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? "READ_ERROR";
     if (code === "ENOENT" || code === "ENOTDIR") {
-      options.lastGoodReads?.delete(file);
+      options.lastGoodReads?.delete(cacheKey);
       return undefined;
     }
     options.onWarning?.({
@@ -144,17 +146,10 @@ async function loadCandidate(
       code,
       message: `Unable to read instructions: ${code}.`,
     });
-    read = options.lastGoodReads?.get(file);
+    read = options.lastGoodReads?.get(cacheKey);
   }
 
   if (!read) return undefined;
-  if (read.truncated)
-    options.onWarning?.({
-      sourcePath: file,
-      kind: "truncated",
-      code: "FILE_LIMIT",
-      message: "Instructions exceed the per-file size limit.",
-    });
   const scan = (options.securityScanner ?? scanPromptLikeContent)(
     read.content,
     {
@@ -165,6 +160,13 @@ async function loadCandidate(
   );
   for (const finding of scan.findings) options.onSecurityFinding?.(finding);
   if (!shouldLoadPromptLikeContent(scan)) return undefined;
+  if (read.truncated)
+    options.onWarning?.({
+      sourcePath: file,
+      kind: "truncated",
+      code: "FILE_LIMIT",
+      message: "Instructions exceed the per-file size limit.",
+    });
   return {
     ...read,
     fileName,

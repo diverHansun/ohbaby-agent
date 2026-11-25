@@ -3446,9 +3446,7 @@ describe("createInProcessUiBackendClient", () => {
   );
 
   it("reports context_overflow before sending instructions that cannot fit a small model window", async () => {
-    const directory = await mkdtemp(
-      join(tmpdir(), "ohbaby-ui-instruction-limit-"),
-    );
+    const directory = await emptyInstructionWorkspace();
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       workdir: directory,
@@ -3474,7 +3472,6 @@ describe("createInProcessUiBackendClient", () => {
       expect(requests).toHaveLength(1);
     } finally {
       await client.dispose();
-      await rm(directory, { force: true, recursive: true });
     }
   });
 

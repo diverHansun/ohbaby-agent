@@ -37,10 +37,11 @@
      - Windows：使用 `O_RDONLY`（Windows 无 POSIX FIFO 与 `O_NONBLOCK` 常量）。
      读第一个字节前，对句柄调用 `fileHandle.stat()`，确认它仍是普通文件；不是就跳过并告警（`NOT_REGULAR_FILE`）。不比对 `dev` / `ino`：POSIX 上 `O_NOFOLLOW`、`O_NONBLOCK` 加句柄 `isFile()` 已挡住检查之后被换成软链或 FIFO 的情况；换成另一个普通文件需要本地进程在极短窗口内配合，不在静态仓库的威胁模型内，Windows 上同样作为残余风险接受。无论走哪个分支都要关闭句柄。随后使用短读循环反复调用 `handle.read()`，直到遇到 EOF 或累计读满 `2 * maxFileBytes + 8` 个原始字节为止（不假设单次 `read()` 即返回全部字节），不用无界 `readFile`。原始读取上限放宽到约两倍，是因为同样的英文内容 UTF-16 要占两倍字节；在支持的编码里，原始字节最多是解码后 UTF-8 字节的 2 倍（UTF-16 里的 ASCII、GB18030 用 4 字节表示的少数拉丁字符都是这个比例），`+ 8` 留给 BOM 和解码器暂存的半个字符。所以读满上限时解码结果一定超过单文件上限，“是否超限”统一看解码后的长度。
    - **非缺失读错**：`lstat` / `stat` / `open` / `read` 抛出 `ENOENT`、`ENOTDIR` 以外的错误（如 `EACCES`、`EPERM`、`EBUSY`），只影响出错的那一份文件，其他候选照常处理。上报 `onWarning`（由 Reminder Adapter 去重，见第 6 步）。读错表示“这次没读到”，不表示“文件没了或变了”，所以按下面的“上次成功读取”规则处理，不从快照里拿掉它。不存在“任一读错就整体保留旧快照”的规则。
-   - **上次成功读取（`lastGoodReads`）**：Reminder Adapter 持有一个 `Map<候选文件绝对路径, { content, truncated }>`，作为参数传给 Loader（见 §3.1）。借鉴 dsh `state.ts` 的“回退到上次读成功的内容”和 ZCode `context-refresh.ts` 的“读不到不算删除”，但只按文件生效，不整体冻结：
+   - **上次成功读取（`lastGoodReads`）**：Reminder Adapter 持有一个 `Map<作用域与绝对路径, { content, truncated }>`，作为参数传给 Loader（见 §3.1）。借鉴 dsh `state.ts` 的“回退到上次读成功的内容”和 ZCode `context-refresh.ts` 的“读不到不算删除”，但只按文件生效，不整体冻结：
+     - **键**：同一绝对路径在项目和全局作用域各有一条记录。即使项目根等于全局根，项目读错也只能复用项目曾接纳读取的正文，项目拒读软链不会清除全局记录。
      - **写入**：本步解码、单文件裁剪、`trim()` 后得到非空正文，就用它覆盖该路径的条目（`truncated` 记录是否触发了 `FILE_LIMIT`）。
      - **删除**：本步对该路径得出确定结论时删除条目：不存在（`ENOENT` / `ENOTDIR`）、被拒（软链、不是普通文件、`INVALID_ENCODING`）、或 `trim()` 后为空。这些情况说明文件确实没了或变坏了，不能拿旧内容顶上。
-     - **替代**：只有非缺失读错时才查条目。查到就把缓存正文当作本步读到的正文，照常进入第 4 步安全扫描和第 5 步去重与总预算（`truncated` 为真时重新上报 `FILE_LIMIT`，签名不变，不会重复打扰用户）；读错 warning 照常上报。查不到（比如进程刚重启）就跳过这份文件。
+     - **替代**：只有非缺失读错时才查条目。查到就把缓存正文当作本步读到的正文，照常进入第 4 步安全扫描和第 5 步去重与总预算（安全扫描接纳且 `truncated` 为真时重新上报 `FILE_LIMIT`，签名不变，不会重复打扰用户）；读错 warning 照常上报。查不到（比如进程刚重启）就跳过这份文件。
      - 被安全扫描 `omit` 的正文也会写入缓存，但替代时会再走一遍扫描，结果仍是 `omit`，所以不会因此漏网；不为此单独加清理规则。
      - 全局目录解析失败（`HOME_UNRESOLVED`）没有文件路径，不查缓存。
      - 文件在读错期间被改过时，模型看到的仍是改之前的版本，直到下一次读成功。这与 dsh、ZCode 一致，可以接受。
@@ -52,7 +53,7 @@
      2. 没有 BOM：先按严格 `utf-8` 解码；抛错再按 `gb18030` 解码（兼容 GBK，覆盖 2019 年以前中文版 Windows 记事本默认的 “ANSI” 保存）。顺序不能反：合法 UTF-8 字节按 GB18030 解码也不报错，只会变成乱码。GB18030 兜底成功时不告警，用户没做错什么。
      3. 都抛错：按 `kind: "rejected"`、`code: "INVALID_ENCODING"` 跳过该文件，并上报去重后的 `onWarning`。
      - 读取边界：没读到 EOF（读满原始上限）时用 `decode(bytes, { stream: true })`，被截成半个的末尾字符留在解码器里，不当作非法编码；读到 EOF 时用普通 `decode(bytes)`，文件本身以半个字符结尾仍按非法编码处理。这样不必在解码前手动回退到字符边界。
-     - 长度裁剪：解码后的正文超过单文件上限（默认 `32 * 1024` UTF-8 字节）时，截到上限并往回退到最近一个完整字符的边界（不切开多字节字符，也不切开 UTF-16 代理对），标记 `truncated = true`，上报 `kind: "truncated"`、`code: "FILE_LIMIT"`。
+     - 长度裁剪：解码后的正文超过单文件上限（默认 `32 * 1024` UTF-8 字节）时，截到上限并往回退到最近一个完整字符的边界（不切开多字节字符，也不切开 UTF-16 代理对），标记 `truncated = true`。第 4 步安全扫描接纳后再上报 `kind: "truncated"`、`code: "FILE_LIMIT"`。
      - 最后执行 `trim()`，结果为空则静默跳过。去重哈希基于解码后的正文，所以内容相同、编码不同的 `AGENTS.md` 与 `CLAUDE.md` 也会去重。
      - 不做的事：没有 BOM 的 UTF-16 不猜（常见 Windows 工具写 UTF-16 都带 BOM）；不识别 Shift-JIS、Latin-1 等其他旧编码，它们可能被 GB18030 解成乱码而不报错，作为已知代价接受。
 4. **安全扫描**：对每个非空文件内容调用 `scanPromptLikeContent(content, { kind: "custom-instructions", label: fileName, path })`：

@@ -9,7 +9,7 @@
 - **InstructionScope（指令作用域）**：标识指令文件的归属层级，只有两个取值：`global`（用户全局 `~/.ohbaby/`）与 `project`（当前会话项目根）。
 - **InstructionSource（单份指令源）**：成功读取、通过安全扫描且去重保留后的一份指令文件记录，携带来源作用域、展示路径、规范化正文、内容指纹与截断标记。
 - **加载结果**：一次文件系统探测的输出就是按生效顺序排列的 `readonly InstructionSource[]`，只含本步验证通过的文件（读错时可能来自上次成功读取），不另设包装类型或读错标记。
-- **上次成功读取（`lastGoodReads`）**：按候选文件绝对路径记住最近一次成功解码的正文，只在该文件本步读错时顶替，见 dfd 第 3 步。
+- **上次成功读取（`lastGoodReads`）**：用作用域与候选文件绝对路径共同标识最近一次成功解码的正文，只在该文件本步读错时顶替，见 dfd 第 3 步。
 - **InstructionSnapshotState（历史已公告状态）**：从 `ReminderContext.history` 中派生的只读投影，表示当前活跃上下文窗口内最近一次已发给模型的指令状态（`absent` 未公告 / `active` 有有效指令 / `cleared` 已显式声明失效）。
 - **InstructionReminderPayload（提醒输出载荷）**：交给 `services/reminder` 持久化的最终快照，由确定性 `key`（内容哈希或清空哨兵值）和渲染好的正文文本组成。
 
@@ -40,7 +40,7 @@
 
 ### LastGoodRead（`lastGoodReads` 的值）
 - **content**：解码、单文件裁剪、`trim()` 后的非空正文（还没经过安全扫描和总预算分配）。
-- **truncated**：这份正文是否触发了单文件上限 `FILE_LIMIT`。替代时据此重新上报 `FILE_LIMIT`，签名不变，不会重复打扰用户。
+- **truncated**：这份正文是否触发了单文件上限 `FILE_LIMIT`。替代正文通过本步安全扫描时据此重新上报 `FILE_LIMIT`，签名不变，不会重复打扰用户。
 
 ### InstructionReminderPayload（映射为 `ReminderBody`）
 - **key**：
@@ -74,4 +74,4 @@
 | 加载结果（`InstructionSource[]`） | `loader.ts` | 单次 `collect()` 调用期间 | 调用结束即释放 |
 | 已持久化的 `system-reminder` 消息 | `ContextManager`（经由 `ReminderCollector`） | 会话历史内（直至 compaction 压缩或会话归档） | 永不原地改写；变更时仅在尾部追加新消息 |
 | 项目诊断集合（`Map<projectRoot, Set<签名>>`） | `reminder.ts`（provider 实例内） | provider 实例生命周期（长驻 daemon 中为单工作区 `composition` 生命周期） | 每步用本步诊断整体替换该项目根的集合；集合为空即删掉该条目。条目数以项目根个数为上限，不设 FIFO 上限；不依赖外部生命周期钩子、无定时器、不持久化 |
-| 上次成功读取（`Map<绝对路径, { content, truncated }>`） | `reminder.ts`（provider 实例内），由 `loader.ts` 按规则读写 | 同上 | 读成功即覆盖；不存在、被拒或为空即删除；只在非缺失读错时读取。每个项目根最多 2 条，全局共 2 条，单条不超过 `maxFileBytes`；总条目随访问过的项目根数线性增长，文件正常时不回收（和项目诊断集合一样，作为可接受的代价）；不设 FIFO 上限、无定时器、不持久化 |
+| 上次成功读取（`Map<作用域与绝对路径, { content, truncated }>`） | `reminder.ts`（provider 实例内），由 `loader.ts` 按规则读写 | 同上 | 读成功即覆盖；不存在、被拒或为空即删除；只在非缺失读错时读取。每个项目根最多 2 条，全局共 2 条，单条不超过 `maxFileBytes`；总条目随访问过的项目根数线性增长，文件正常时不回收（和项目诊断集合一样，作为可接受的代价）；不设 FIFO 上限、无定时器、不持久化 |
