@@ -50,7 +50,7 @@ subagent roles 仅由主代理输出。environment 与 MCP 菜单经 `buildRunti
 
 ### G4: 安全加载用户自定义指令
 
-主、子代理共用加载器，按会话项目根读取可选项目说明，同时保留可选全局说明。每个范围依次选择首个可用的 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md`，不合并别名。保留配置子目录、旧路径回退、prompt-like 安全扫描和大小限制；缺失不新增警告。
+主、子代理共用加载器，按会话项目根读取可选项目说明，同时保留可选全局说明。每个范围依次选择首个可用的 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md`，不合并别名。保留配置子目录、prompt-like 安全扫描和大小限制；缺失不新增警告。
 
 ### G5: 适配 ContextManager
 

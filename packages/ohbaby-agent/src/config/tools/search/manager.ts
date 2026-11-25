@@ -1,6 +1,6 @@
 import { coordinateModelConfig } from "../../llm/config-coordination.js";
 import { SearchConfigError } from "./types.js";
-import { resolveSearchJsonPath, loadSearchJson } from "./loaders.js";
+import { getSearchJsonPath, loadSearchJson } from "./loaders.js";
 import { validateApiKey, validateSearchJson } from "./validation.js";
 import type { SearchConfig, SearchConfigLoadOptions } from "./types.js";
 import { loadEnvFile } from "../../llm/loaders.js";
@@ -32,7 +32,7 @@ export class SearchConfigManager {
 
   async load(options: SearchConfigLoadOptions = {}): Promise<SearchConfig> {
     const env = options.env ?? process.env;
-    const searchJsonPath = await resolveSearchJsonPath(options.searchJsonPath);
+    const searchJsonPath = options.searchJsonPath ?? getSearchJsonPath();
     if (
       this.cachedConfig?.searchJsonPath === searchJsonPath &&
       this.cachedConfig.env === env
@@ -47,10 +47,10 @@ export class SearchConfigManager {
 
   async reload(options: SearchConfigLoadOptions = {}): Promise<SearchConfig> {
     this.cachedConfig = null;
-    return coordinateModelConfig(undefined, async () =>
+    return coordinateModelConfig(undefined, () =>
       this.performLoad(
         options.env ?? process.env,
-        await resolveSearchJsonPath(options.searchJsonPath),
+        options.searchJsonPath ?? getSearchJsonPath(),
       ),
     );
   }

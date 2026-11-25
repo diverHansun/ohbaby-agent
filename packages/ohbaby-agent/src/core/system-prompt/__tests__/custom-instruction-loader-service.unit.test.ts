@@ -102,16 +102,29 @@ describe("custom instruction loader service", () => {
     ]);
   });
 
-  it("preserves global instructions from the legacy home directory", async () => {
+  it("ignores instructions outside the current configuration paths", async () => {
     const homeDirectory = path.join(tempDir, "home");
-    const legacyPath = path.join(homeDirectory, ".ohbaby-agent", "CLAUDE.md");
-    await fs.mkdir(path.dirname(legacyPath), { recursive: true });
-    await fs.writeFile(legacyPath, "# Legacy global instructions", "utf8");
+    const projectDirectory = path.dirname(projectPath);
+    const configBase = path.join(homeDirectory, ".config");
+    vi.stubEnv("XDG_CONFIG_HOME", configBase);
+    vi.stubEnv("APPDATA", configBase);
+    for (const directory of [
+      path.join(homeDirectory, ".ohbaby-agent"),
+      path.join(projectDirectory, ".ohbaby-agent"),
+      path.join(configBase, "ohbaby-agent"),
+    ]) {
+      await fs.mkdir(directory, { recursive: true });
+      await fs.writeFile(
+        path.join(directory, "OHBABY.md"),
+        "Obsolete instructions",
+      );
+    }
 
-    await expect(
-      loadCustomInstructions({ homeDirectory, projectPath }),
-    ).resolves.toEqual([
-      { scope: "global", text: "# Legacy global instructions" },
+    const options = { homeDirectory, projectDirectory };
+    await expect(loadCustomInstructions(options)).resolves.toEqual([]);
+    await fs.writeFile(projectPath, "Current project instructions");
+    await expect(loadCustomInstructions(options)).resolves.toEqual([
+      { scope: "project", text: "Current project instructions" },
     ]);
   });
 

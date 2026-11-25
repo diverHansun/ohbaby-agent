@@ -79,7 +79,7 @@ afterEach(async () => {
 async function tempHome(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   cleanupDirectories.push(directory);
-  await mkdir(join(directory, ".ohbaby-agent"), { recursive: true });
+  await mkdir(join(directory, ".ohbaby"), { recursive: true });
   return directory;
 }
 
@@ -89,7 +89,7 @@ async function writeModelConfig(input: {
   readonly home: string;
 }): Promise<void> {
   await writeFile(
-    join(input.home, ".ohbaby-agent", "model.json"),
+    join(input.home, ".ohbaby", "model.json"),
     JSON.stringify(
       {
         apiConfig: {

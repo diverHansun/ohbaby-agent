@@ -95,7 +95,7 @@ Settings 只写全局文件；项目 MCP、Agents、Skills 配置是读取时的
 | agents | 全局与该项目的 `agents/settings.json` | 按实例目录重新组装 agent 注册表 |
 | skills | 全局与该项目的 `skills/settings.json` | 用配置目录刷新该实例共享 Skill 注册表 |
 
-版本检查与各加载器使用相同的目录和旧路径回退规则。当前轮、子代理或后台工具仍使用已获取的 runtime；空闲后才应用新的配置，等待提示为 “Waiting to apply settings”。只改模型或搜索不会重连 MCP。注入 `llmClient` 或 `createLLMClient` 的宿主仍检查其它分区，保留原有客户端优先级，不因 model/env 变化改用默认 LLM 加载器。
+版本检查与各加载器使用相同的目录规则。当前轮、子代理或后台工具仍使用已获取的 runtime；空闲后才应用新的配置，等待提示为 “Waiting to apply settings”。只改模型或搜索不会重连 MCP。注入 `llmClient` 或 `createLLMClient` 的宿主仍检查其它分区，保留原有客户端优先级，不因 model/env 变化改用默认 LLM 加载器。
 
 全局协调锁内只取版本快照并重读需要一致的模型/搜索配置；运行时组装和 MCP 连接在锁外进行。首次状态读取在等待连接前认领版本，连接期间保存的新配置仍能在下一轮被识别。
 

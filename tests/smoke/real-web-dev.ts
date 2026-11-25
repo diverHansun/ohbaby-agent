@@ -62,7 +62,6 @@ await Promise.all([
   mkdir(workspacePath, { recursive: true }),
 ]);
 const workdir = await realpath(workspacePath);
-await writeFile(join(home, ".skip-auto-migrate"), "");
 await writeFile(
   join(workdir, "note.md"),
   "Project: Cedar\nRelease: 17\nOwner: Lin\n",

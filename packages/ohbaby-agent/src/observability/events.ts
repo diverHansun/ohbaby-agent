@@ -95,27 +95,6 @@ export const tokenUsageNormalization = defineDiagnosticEvent({
   level: "debug",
 });
 
-const migrationFields = {
-  conflicts: diagnosticField.integer(),
-  copied: diagnosticField.integer(),
-  merged: diagnosticField.integer(),
-  skipped: diagnosticField.integer(),
-};
-
-export const configMigrationCompleted = defineDiagnosticEvent({
-  component: "migration",
-  event: "migration.config.completed",
-  fields: migrationFields,
-  level: "info",
-});
-
-export const dataMigrationCompleted = defineDiagnosticEvent({
-  component: "migration",
-  event: "migration.data.completed",
-  fields: migrationFields,
-  level: "info",
-});
-
 export const serverStarted = defineDiagnosticEvent({
   component: "server",
   event: "server.started",

@@ -1,6 +1,6 @@
 /** Real HTTP daemon + SQLite + lifecycle. Paid provider cases are opt-in. */
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -64,7 +64,6 @@ async function withDaemon(
   const workdir = join(root, "workspace");
   await mkdir(home);
   await mkdir(workdir);
-  await writeFile(join(home, ".skip-auto-migrate"), "");
   vi.stubEnv("OHBABY_HOME", home);
   vi.spyOn(os, "homedir").mockReturnValue(root);
   const backend = createPersistentUiBackendClient({

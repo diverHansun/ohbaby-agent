@@ -69,7 +69,7 @@ SystemPrompt.loadCustomInstructions(options): Promise<readonly CustomInstruction
 
 职责：
 
-- 每个范围只读取首个可用文件，返回 `{ scope, text }`。项目以会话项目根为边界；全局保留 `OHBABY_HOME` 和既有旧路径回退。
+- 每个范围只读取首个可用文件，返回 `{ scope, text }`。项目以会话项目根为边界；全局使用 `OHBABY_HOME` 或默认配置目录。
 - 支持 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md` fallback。
 - 保留每文件 50 × 1024 个 UTF-16 编码单元限制。无文件、空文件或普通读取失败时继续回退，无可用内容就跳过。
 - 扫描 prompt-like 内容并上报 finding。

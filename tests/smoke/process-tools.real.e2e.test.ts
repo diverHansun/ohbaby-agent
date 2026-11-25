@@ -106,7 +106,6 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
     try {
       await mkdir(profile);
       await mkdir(workspace);
-      await writeFile(join(profile, ".skip-auto-migrate"), "");
       const environment = await loadEnvFile(resolve(".env"));
       const key = process.env.ZENMUX_API_KEY ?? environment.ZENMUX_API_KEY;
       if (!key) throw new Error("MISSING_REAL_MODEL_KEY");

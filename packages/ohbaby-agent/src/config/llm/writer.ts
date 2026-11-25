@@ -38,11 +38,7 @@ import {
   markModelConfigInconsistent,
   readOptionalConfigFile,
 } from "./config-coordination.js";
-import {
-  getModelJsonPath,
-  loadEnvFile,
-  resolveModelJsonReadPath,
-} from "./loaders.js";
+import { getModelJsonPath, loadEnvFile } from "./loaders.js";
 import { writeFileAtomically } from "../secrets/atomic-file.js";
 import { writeEnvSecret } from "../secrets/env-secrets.js";
 import { collectCredentialReferences } from "../secrets/references.js";
@@ -348,13 +344,7 @@ async function persistDocument(
   const originalEnv = secret
     ? await readOptionalConfigFile(envPath)
     : undefined;
-  await backupLegacyModelDocument(
-    modelJsonPath,
-    originalModel ??
-      (options.modelJsonPath === undefined
-        ? await readOptionalConfigFile(await resolveModelJsonReadPath(options))
-        : undefined),
-  );
+  await backupLegacyModelDocument(modelJsonPath, originalModel);
   try {
     await writeFileAtomically(
       modelJsonPath,

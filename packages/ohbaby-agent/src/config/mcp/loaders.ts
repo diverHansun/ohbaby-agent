@@ -2,11 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   OHBABY_DIR_NAME,
-  resolveLegacyOhbabyHome,
-  resolveLegacyProjectOhbabyRoot,
   resolveOhbabyHome,
   resolveProjectOhbabyRoot,
-  resolveReadPathWithLegacy,
 } from "../../paths/index.js";
 import {
   McpConfigAccessError,
@@ -43,24 +40,6 @@ export function getProjectMcpConfigPath(
 ): string {
   return path.join(
     resolveProjectOhbabyRoot(projectDirectory),
-    MCP_CONFIG_DIR_NAME,
-    MCP_CONFIG_FILE_NAME,
-  );
-}
-
-export function getLegacyGlobalMcpConfigPath(homeDirectory?: string): string {
-  return path.join(
-    resolveLegacyOhbabyHome({ homeDirectory }),
-    MCP_CONFIG_DIR_NAME,
-    MCP_CONFIG_FILE_NAME,
-  );
-}
-
-export function getLegacyProjectMcpConfigPath(
-  projectDirectory = process.cwd(),
-): string {
-  return path.join(
-    resolveLegacyProjectOhbabyRoot(projectDirectory),
     MCP_CONFIG_DIR_NAME,
     MCP_CONFIG_FILE_NAME,
   );
@@ -131,17 +110,9 @@ export async function loadMcpConfigWithOrigins(
   options: LoadMcpConfigOptions = {},
 ): Promise<McpConfigWithOrigins> {
   const globalPath =
-    options.globalPath ??
-    (await resolveReadPathWithLegacy(
-      getGlobalMcpConfigPath(options.homeDirectory),
-      [getLegacyGlobalMcpConfigPath(options.homeDirectory)],
-    ));
+    options.globalPath ?? getGlobalMcpConfigPath(options.homeDirectory);
   const projectPath =
-    options.projectPath ??
-    (await resolveReadPathWithLegacy(
-      getProjectMcpConfigPath(options.projectDirectory),
-      [getLegacyProjectMcpConfigPath(options.projectDirectory)],
-    ));
+    options.projectPath ?? getProjectMcpConfigPath(options.projectDirectory);
   const [globalConfig, projectConfig] = await Promise.all([
     loadMcpConfigFromPath(globalPath),
     loadMcpConfigFromPath(projectPath),

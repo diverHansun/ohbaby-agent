@@ -364,22 +364,3 @@ it("only assigns automatic default when the selected entry is absent", async () 
   );
   expect(repaired.active?.id).toBe("repair");
 });
-it("backs up bytes read from the legacy home when publishing to the current home", async () => {
-  const { mkdir } = await import("node:fs/promises");
-  vi.stubEnv("HOME", dir);
-  vi.stubEnv("USERPROFILE", dir);
-  const legacyHome = join(dir, ".ohbaby-agent");
-  await mkdir(legacyHome);
-  const original = JSON.stringify({
-    provider: "old",
-    defaultModel: "shared",
-    apiConfig: { baseUrl: route.baseUrl },
-    llmParams: { maxTokens: 3000 },
-  });
-  await writeFile(join(legacyHome, "model.json"), original);
-  await createModelEntry(route);
-  const backups = await readdir(join(dir, "backups"));
-  expect(
-    await readFile(join(dir, "backups", backups[0], "model.json"), "utf8"),
-  ).toBe(original);
-});

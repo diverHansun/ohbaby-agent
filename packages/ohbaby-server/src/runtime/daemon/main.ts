@@ -26,7 +26,6 @@ import {
   serverStartFailed,
   serverStarted,
   type Logger,
-  type OhbabyMigrationReport,
   type ProcessLoggerHandle,
   type PersistentUiBackendClient,
   type PersistentUiBackendOptions,
@@ -104,7 +103,6 @@ export interface StartDaemonServerOptions {
   readonly healthCheck?: DaemonHealthCheck;
   readonly homeDirectory?: string;
   readonly llmClient?: PersistentUiBackendOptions["llmClient"];
-  readonly onDataMigrationReport?: (report: OhbabyMigrationReport) => void;
   readonly pidFilePath?: string;
   readonly stateFilePath?: string;
   readonly scopeRoot?: string;
@@ -733,20 +731,6 @@ export async function startDaemonServer(
   const logger: Logger = diagnosticsHandle?.logger ?? NOOP_LOGGER;
 
   try {
-    if ("migrateOhbabyData" in AgentRuntime) {
-      const report = await AgentRuntime.migrateOhbabyData({
-        ...(options.homeDirectory === undefined
-          ? {}
-          : { homeDirectory: options.homeDirectory }),
-        projectDirectory: scope.scopeRoot,
-      });
-      try {
-        options.onDataMigrationReport?.(report);
-      } catch {
-        // Optional observation cannot change migration semantics.
-      }
-    }
-
     const firstPort =
       explicitPort || (await isPortAvailable(requestedHost, requestedPort))
         ? requestedPort

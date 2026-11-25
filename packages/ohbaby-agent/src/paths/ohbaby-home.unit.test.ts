@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  resolveLegacyGlobalMemoryPath,
-  resolveLegacyOhbabyDataRoot,
-  resolveLegacyOhbabyHome,
   resolveOhbabyDataRoot,
   resolveOhbabyHome,
   resolveProjectOhbabyRoot,
@@ -57,12 +54,12 @@ describe("ohbaby path resolution", () => {
       }),
     ).toBe("/data/ohbaby");
     expect(
-      resolveLegacyOhbabyDataRoot({
-        environment: { XDG_DATA_HOME: "/data" },
+      resolveOhbabyDataRoot({
+        environment: {},
         homeDirectory: "/home/tester",
         platform: "linux",
       }),
-    ).toBe("/data/ohbaby-agent");
+    ).toBe("/home/tester/.local/share/ohbaby");
   });
 
   it("uses Application Support on macOS", () => {
@@ -75,28 +72,23 @@ describe("ohbaby path resolution", () => {
     ).toBe("/Users/tester/Library/Application Support/ohbaby");
   });
 
-  it("uses LocalAppData for new Windows data and Roaming for legacy data", () => {
+  it("uses LocalAppData for Windows data", () => {
     const options = {
       environment: {
         APPDATA: "C:\\Users\\tester\\AppData\\Roaming",
-        LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local",
+        LOCALAPPDATA: "D:\\user-data",
         XDG_DATA_HOME: "Z:\\xdg-data",
       },
       homeDirectory: "C:\\Users\\tester",
       platform: "win32" as const,
     };
 
-    expect(resolveOhbabyDataRoot(options)).toBe(
-      "C:\\Users\\tester\\AppData\\Local\\ohbaby",
-    );
-    expect(resolveLegacyOhbabyDataRoot(options)).toBe(
-      "C:\\Users\\tester\\AppData\\Roaming\\ohbaby-agent",
-    );
-    expect(resolveLegacyGlobalMemoryPath(options)).toBe(
-      "C:\\Users\\tester\\AppData\\Roaming\\ohbaby-agent\\OHBABY.md",
-    );
-    expect(resolveLegacyOhbabyHome(options)).toBe(
-      "C:\\Users\\tester\\.ohbaby-agent",
-    );
+    expect(resolveOhbabyDataRoot(options)).toBe("D:\\user-data\\ohbaby");
+    expect(
+      resolveOhbabyDataRoot({
+        ...options,
+        environment: { ...options.environment, LOCALAPPDATA: "" },
+      }),
+    ).toBe("C:\\Users\\tester\\AppData\\Local\\ohbaby");
   });
 });

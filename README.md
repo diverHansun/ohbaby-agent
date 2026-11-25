@@ -170,8 +170,6 @@ Runtime data (such as sessions and SQLite storage) lives in the platform data di
 - macOS: `~/Library/Application Support/ohbaby`
 - Windows: `%LOCALAPPDATA%\ohbaby`
 
-On first run, ohbaby copies legacy `.ohbaby-agent` config and `ohbaby-agent` data to the new paths while leaving the original files intact. New paths take precedence on conflicts, and legacy paths remain readable for one minor release. If a running daemon holds the SQLite file during migration, run `ohbaby serve stop` and start again.
-
 </details>
 
 ## Development

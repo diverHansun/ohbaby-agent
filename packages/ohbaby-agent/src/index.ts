@@ -169,7 +169,6 @@ export type {
 export { APIUserAbortError } from "ohbaby-llm";
 
 export * from "./mcp/index.js";
-export * from "./migration/index.js";
 export * from "./observability/index.js";
 export * from "./project/index.js";
 export * from "./paths/index.js";

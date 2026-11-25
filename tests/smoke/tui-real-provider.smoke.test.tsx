@@ -61,9 +61,9 @@ async function tempDirectory(prefix: string): Promise<string> {
 }
 
 async function writeZhipuModelConfig(home: string): Promise<void> {
-  await mkdir(join(home, ".ohbaby-agent"), { recursive: true });
+  await mkdir(join(home, ".ohbaby"), { recursive: true });
   await writeFile(
-    join(home, ".ohbaby-agent", "model.json"),
+    join(home, ".ohbaby", "model.json"),
     JSON.stringify(
       {
         apiConfig: {
