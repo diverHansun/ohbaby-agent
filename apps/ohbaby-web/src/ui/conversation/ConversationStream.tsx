@@ -846,6 +846,7 @@ export function ConversationStream(props: {
     // Leaving the bottom must win at once: waiting for the scroll event lets a
     // streaming update snap back first and cancel the user's smooth scroll.
     const leaveBottom = (): void => {
+      if (element.scrollHeight <= element.clientHeight) return;
       userScroll = true;
       if (!stickToBottomRef.current) return;
       stickToBottomRef.current = false;
@@ -891,6 +892,16 @@ export function ConversationStream(props: {
     };
     const onScroll = (): void => {
       const movedUp = element.scrollTop < lastTop;
+      const maxTop = element.scrollHeight - element.clientHeight;
+      // Folding can move the viewport up even after a click or wheel at the
+      // bottom. The old position no longer fits the shortened stream.
+      if (
+        stickToBottomRef.current &&
+        lastTop > maxTop + 1 &&
+        isNearBottom(element)
+      ) {
+        userScroll = false;
+      }
       lastTop = element.scrollTop;
       // Only a user scroll heading down can re-arm following.
       if (userScroll && !movedUp) {

@@ -199,6 +199,53 @@ const reading = (
   patch: Partial<ConversationReadingPosition> = {},
 ): ConversationReadingPosition => ({ top, sticky: false, ...patch });
 
+describe("following a changing stream", () => {
+  it("keeps following after an upward wheel on a single screen", async () => {
+    const h = harness({ messages: rows("m", 2), historyHasMore: false });
+    await settle();
+    wheelUp(h.stream());
+    h.render({ messages: rows("m", 10) });
+    await settle();
+    expect(h.stream().scrollTop).toBe(700);
+  });
+
+  it("respects a scroll away from the bottom while content shrinks", async () => {
+    const h = harness({ historyHasMore: false });
+    await settle();
+    const stream = h.stream();
+    scrollTo(stream, 700);
+    stream.dispatchEvent(new Event("pointerdown"));
+    h.render({ messages: rows("m", 6) });
+    scrollTo(stream, 180);
+    h.render({ messages: rows("m", 8) });
+    await settle();
+    expect(stream.scrollTop).toBe(180);
+  });
+
+  it.each(["click", "wheel"] as const)(
+    "keeps following after a %s at the bottom and a layout contraction",
+    async (input) => {
+      const onNearEnd = vi.fn();
+      const h = harness({ historyHasMore: false, onNearEnd });
+      await settle();
+      const stream = h.stream();
+      scrollTo(stream, 700);
+      stream.dispatchEvent(
+        input === "click"
+          ? new Event("pointerdown")
+          : new WheelEvent("wheel", { deltaY: 40 }),
+      );
+      h.render({ messages: rows("m", 6) });
+      // Chrome can anchor the clicked text slightly above the new bottom.
+      scrollTo(stream, input === "click" ? 270 : 300);
+      h.render({ messages: rows("m", 8) });
+      await settle();
+      expect(stream.scrollTop).toBe(500);
+      expect(onNearEnd).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("earlier history autoload (improve-1 Stage 2)", () => {
   it("keeps one quiet slot with only a spinner while loading (T7)", () => {
     const h = harness({ readingPosition: reading(2000) });
