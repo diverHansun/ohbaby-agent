@@ -87,6 +87,8 @@
 
 ## 五、Lifecycle & Ownership（生命周期与归属）
 
+四个模型工具操作当前会话的 goal，调度类别均为 `internal-state`。
+
 - **创建**：两条入口写同一个 store——用户 `/goal <objective>`（命令直写）或模型 `CreateGoal` 工具。创建即置 `active` 并启动续跑。
 - **更新**：所有迁移经 **GoalStore 唯一入口**。用量由 GoalDriver 在每轮推进时累计（turn 计数、token 消耗、wall-clock 锚点）；预算只由 main 通过 `SetGoalBudget` 翻译明确限制；`tokensUsed` 按**累计消耗单调增长**，不因 compact 缩小上下文而回退。
 - **失效/清除**：`complete` 宣告后即清记录；`cancel` 直接丢弃。

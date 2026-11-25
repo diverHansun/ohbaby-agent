@@ -80,7 +80,7 @@ function evaluateLevelFallback(
   switch (classification.kind) {
     case "readonly":
     case "network":
-    case "memory-write":
+    case "internal-state":
     case "subagent":
       return allow();
     case "sensitive":
@@ -101,8 +101,10 @@ function evaluateLevelFallback(
       return ask("Shell commands need your approval unless Full access is on.");
     case "write":
       return ask(`Write tool requires confirmation: ${call.toolName}`);
-    default:
-      return deny("Unhandled permission category.");
+    default: {
+      const unhandled: never = classification.kind;
+      return deny(`Unhandled permission category: ${String(unhandled)}`);
+    }
   }
 }
 

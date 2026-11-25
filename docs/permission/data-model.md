@@ -38,6 +38,8 @@ interface PermissionIdentity extends PermissionSource {
 
 `PermissionAskInput` 必需字段为 `runId`、`source`、`signal`、`sessionId`、`messageId`、`callId`、`toolName`、`category`、`params`；可选字段为 `contextScopeId`、`metadata`、`reason`、`rememberable`。`reason` 用于标题，`rememberable: false` 禁止 always。
 
+`category` 记录调度器提供的工具类别，分类器据此给出权限调用类型 `kind`。四个 goal 工具的两项均为 `internal-state`。`todo_write` 的类别为 `write`，调用类型为 `internal-state`。
+
 `PermissionInfo` 在 `PermissionIdentity` 上增加：
 
 | 字段           | 含义                                                      |

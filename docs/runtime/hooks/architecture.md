@@ -36,7 +36,7 @@ hooks 模块是一个**执行容器**，内部结构扁平：HookExecutor 持有
 |---|---|
 | **HookExecutor** | 唯一公共类，持有注册表，执行 hook 链 |
 | **Hook Registry** | HookExecutor 内部的 Map，不对外暴露 |
-| **内置 Hook 工厂函数** | `createMemoryInjectHook` 等，由 daemon 调用注册，不是 HookExecutor 的一部分 |
+| **内置 Hook 工厂函数** | `createLoopDetectionHook` 等，由 daemon 调用注册，不是 HookExecutor 的一部分 |
 
 ---
 
@@ -47,16 +47,16 @@ hooks 模块是一个**执行容器**，内部结构扁平：HookExecutor 持有
 每个 hook point 对应一条 hook 函数链，按注册顺序串行执行。
 
 **使用理由**：
-- 横切关注点（memory 注入、session 摘要、token 记录）天然适合责任链：每个 hook 独立处理自己的关切，不需要知道其他 hook 的存在
+- 横切关注点（session 摘要、token 记录）天然适合责任链：每个 hook 独立处理自己的关切，不需要知道其他 hook 的存在
 - 串行执行保证顺序可预期，避免并行执行的错误隔离复杂度
 
 **不使用并行执行的理由**：
-- pre-run hook 可能有顺序依赖（memory 注入应在 loop 检测之前）
+- pre-run hook 可能有顺序依赖
 - 并行执行的错误隔离和取消语义更复杂，当前阶段 YAGNI
 
 ### 2. Factory Function 模式（内置 hook）
 
-内置 hook 以工厂函数形式提供（`createMemoryInjectHook(memoryModule)`），而不是类或单例。
+内置 hook 以工厂函数形式提供（`createLoopDetectionHook(sessionModule)`），而不是类或单例。
 
 **使用理由**：
 - 工厂函数接收依赖作为参数，返回闭包，天然支持依赖注入
@@ -67,7 +67,7 @@ hooks 模块是一个**执行容器**，内部结构扁平：HookExecutor 持有
 
 hook 注册在代码中完成，不支持配置文件注册或动态加载。
 
-**理由**：当前 hook 数量少（4 个内置），动态加载机制的复杂度远超收益。YAGNI。
+**理由**：当前 hook 数量少，动态加载机制的复杂度远超收益。YAGNI。
 
 ---
 
@@ -78,7 +78,6 @@ src/runtime/hooks/
 ├── index.ts              # 公共接口：导出 HookExecutor、HookPoint、HookContext 类型
 ├── executor.ts           # HookExecutor 类实现
 ├── built-in/
-│   ├── memory-inject.ts  # createMemoryInjectHook 工厂函数
 │   ├── session-summary.ts # createSessionSummaryHook 工厂函数
 │   ├── token-usage.ts    # createTokenUsageHook 工厂函数
 │   └── loop-detection.ts # createLoopDetectionHook 工厂函数
@@ -111,7 +110,7 @@ src/runtime/hooks/
 
 单个 hook 抛出异常时，HookExecutor 记录日志并继续执行后续 hook，不向调用方（run-manager/worker）抛出。
 
-**代价**：hook 失败可能被忽略，调用方无法感知单个 hook 的失败状态。这是有意的取舍：hook 是横切关注点，不应因为 memory 注入失败就阻止整个 Run 启动。当前 MVP 不提供阻断型 hook；如果未来出现必须阻止 Run 的场景，应显式引入 `critical: true` 或独立的 preflight 机制，而不是让普通 hook 的异常语义变得暧昧。
+**代价**：hook 失败可能被忽略，调用方无法感知单个 hook 的失败状态。这是有意的取舍：hook 是横切关注点，单个 hook 失败时仍继续执行后续 hook。当前 MVP 不提供阻断型 hook；如果未来出现必须阻止 Run 的场景，应显式引入 `critical: true` 或独立的 preflight 机制，而不是让普通 hook 的异常语义变得暧昧。
 
 ### 2. 内置 hook 与 HookExecutor 解耦
 

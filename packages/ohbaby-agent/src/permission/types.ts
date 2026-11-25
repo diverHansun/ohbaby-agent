@@ -58,7 +58,7 @@ export type PermissionToolCategory =
   | "write"
   | "dangerous"
   | "network"
-  | "memory"
+  | "internal-state"
   | "skill"
   | "subagent";
 

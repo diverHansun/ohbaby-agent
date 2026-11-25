@@ -2,7 +2,7 @@
 
 ## 2026-10 子代理准入与清理边界
 
-内置 `agent` 使用按 action 解析的可信准入规则。`list/monitor` 是只读操作，`spawn/send/stop/close` 是子代理控制操作；它们不再通过 scheduler 的旧 subagent 容量队列限制实际执行。六个实际执行名额由 `SessionSubagentHost` 按主会话统一管理，前后台共用，满额直接拒绝。下文旧 subagent=3 并发矩阵只描述通用类别配置，不适用于内置 `agent`。
+内置 `agent` 使用按 action 解析的可信准入规则。`list/monitor` 是只读操作，`spawn/send/stop/close` 是子代理控制操作；它们不再通过 scheduler 的旧 subagent 容量队列限制实际执行。六个实际执行名额由 `SessionSubagentHost` 按主会话统一管理，前后台共用，满额直接拒绝。
 
 工具向调用方返回 cancelled 不代表底层操作已退出。`getRunCleanup(runId)` 汇总真实操作、资源释放和可信 cleanup 报告；组合层用该证据决定子执行名额和关闭清理是否完成。`getRunCleanup()` 汇总整个 scheduler，服务退出不能忽略仍未确认的操作。`bash(run_in_background=true)` 的自然遗留进程由 ShellJobRegistry 独立管理，不继续占子执行名额；显式 stop/close 仍按实际 child run 或实例 scope 取消它。
 
@@ -176,136 +176,13 @@ checking_permission
                         └── cancel ───────────────────────→ cancelled
 ```
 
-### 2.3 ConcurrencyController
+### 2.3 容量与资源租约
 
-**职责**：控制工具执行的并发，维护三个独立计数器
+调度器按 session 限制普通调用的并发数，默认上限为 10。工具通过准入计划声明需要访问的资源。四个 goal 工具显式声明 `internal-state` 类别，使用普通容量，资源计划为空。
 
-**并发策略**：
+### 2.4 批量调用
 
-- `readonly`/`network`：读写互斥锁，最多 5 个并行
-- `write`/`dangerous`：排他锁，无任何读/写操作时才能执行
-- `memory`：独立于读写锁，始终允许并行（不受 readingCount/writeInProgress 影响）
-- `subagent`：独立计数器，最多 3 个并行，不参与读写互斥，但受自身上限约束
-
-> **注意**：memory 和 subagent 不参与 wave 分组（见 §2.4），它们在 `executeBatch()` 中被分离并立即启动。但 subagent 仍经过 CC 层的 `canExecute()` 准入检查以维持 maxSubagent=3 的硬限制。
-
-**核心逻辑**：
-
-```typescript
-class ConcurrencyController {
-  private readingCount = 0; // readonly/network 计数
-  private writeInProgress = false; // write/dangerous 标志
-  private subagentCount = 0; // subagent 独立计数
-  private readonly maxRead = 5;
-  private readonly maxSubagent = 3;
-  private pendingQueue: QueuedCall[] = [];
-
-  canExecute(category: ToolCategory): boolean {
-    switch (category) {
-      case "memory":
-        return true; // 始终允许，不受读写锁影响
-
-      case "subagent":
-        return this.subagentCount < this.maxSubagent; // 独立上限，不阻塞读写
-
-      case "readonly":
-      case "network":
-        return !this.writeInProgress && this.readingCount < this.maxRead;
-
-      case "write":
-      case "dangerous":
-        return !this.writeInProgress && this.readingCount === 0;
-    }
-  }
-
-  acquire(category: ToolCategory): void {
-    switch (category) {
-      case "memory":
-        break; // 无需计数
-      case "subagent":
-        this.subagentCount++;
-        break;
-      case "readonly":
-      case "network":
-        this.readingCount++;
-        break;
-      case "write":
-      case "dangerous":
-        this.writeInProgress = true;
-        break;
-    }
-  }
-
-  release(category: ToolCategory): void {
-    switch (category) {
-      case "memory":
-        break;
-      case "subagent":
-        this.subagentCount--;
-        break;
-      case "readonly":
-      case "network":
-        this.readingCount--;
-        break;
-      case "write":
-      case "dangerous":
-        this.writeInProgress = false;
-        break;
-    }
-    this.processQueue();
-  }
-}
-```
-
-**并发矩阵**：
-
-| 当前状态   | readonly/network | write/dangerous | memory   | subagent†  |
-| ---------- | ---------------- | --------------- | -------- | ---------- |
-| 空闲       | 允许（≤5）       | 允许            | 始终允许 | 允许（≤3） |
-| 有读操作   | 允许（≤5）       | 排队等待        | 始终允许 | 允许（≤3） |
-| 有写操作   | 排队等待         | 排队等待        | 始终允许 | 允许（≤3） |
-| subagent=3 | 允许（≤5）       | 允许            | 始终允许 | 排队等待   |
-
-> † subagent 和 memory 不参与 wave 分组，在 `executeBatch()` 中被提前分离并立即启动。此矩阵描述的是 CC 层对单个调用的准入判断，与 wave 分组无关。
-
-### 2.4 两层并发机制
-
-`executeBatch()` 采用两层并发控制，各层职责不同：
-
-| 层级    | 组件                    | 职责                                 | 粒度         |
-| ------- | ----------------------- | ------------------------------------ | ------------ |
-| Wave 层 | `executeBatch` 内部     | 按类别将调用分为 wave → 逐 wave 执行 | 批次内分组   |
-| CC 层   | `ConcurrencyController` | 读写互斥、subagent 计数上限          | 单个调用准入 |
-
-**两层如何协作**：
-
-```
-executeBatch(calls)
-  │
-  ├── 1. Policy 检查 + Permission 确认（ASK 独立登记并回答）
-  │
-  ├── 2. 分离 memory/subagent → 立即启动（不进波次）
-  │
-  ├── 3. splitIntoWaves(remaining)
-  │     Wave1: [readonly_A, readonly_B, network_C]   ← 可并行类别
-  │     Wave2: [write_D]                              ← 串行类别
-  │     Wave3: [readonly_E, dangerous_F]              ← 独占波次
-  │
-  └── 4. 逐 wave 执行
-        for wave in waves:
-          await Promise.all(wave.map(call =>
-            CC.waitForSlot(call.category)    ← CC 层准入
-            CC.acquire(call.category)
-            execute(call)
-            CC.release(call.category)
-          ))
-```
-
-**设计取舍**：
-
-- Wave 层保证语义安全：写/危险操作不与其他操作混入同一 wave
-- CC 层保证资源安全：即使同一 wave 内调用过多，仍受 maxRead/maxSubagent 限制
-- memory/subagent 跳过 wave：memory 无副作用无需排队；subagent 可能长时间运行，阻塞后续 wave 不合理
+`executeBatch()` 按请求顺序检查批内资源冲突。有冲突的后续调用等待前面的调用结束，独立调用可以并发。调度器按请求的原始顺序返回结果。容量细节见[调度数据模型](./data-model.md)。
 
 ### 2.5 ExecutionEngine
 

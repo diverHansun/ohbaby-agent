@@ -55,7 +55,6 @@ ToolScheduler 负责管理四种来源的工具：
 │     └── source: 'builtin'                                   │
 │                                                             │
 │  2. Module-Owned Tools（模块注册）                           │
-│     └── 无 memory_* LLM 工具注册；MemoryLoader 只供 Context 使用 │
 │     └── source: 'module'                                    │
 │                                                             │
 │  3. Skill Tools（技能系统注册）                              │
@@ -93,16 +92,13 @@ type ToolSource = 'builtin' | 'module' | 'skill' | 'mcp'
 - write：写入操作（write, edit, todo_write）
 - dangerous：危险操作（bash）
 - network：网络操作（web_search, web_fetch）—— 内置工具入口，后端走 `services/search-providers/` 路由到具体厂商
-- memory：记忆操作（memory_*，默认 ALLOW）
+- internal-state：会话内部状态操作（四个 goal 工具，默认允许）
 - skill：技能加载操作（skill，只读级别权限）
 - subagent：子代理调用（task，子代理禁用）
 
 ### D3: 提供模式感知的工具列表
 
-根据当前工作模式和 Agent 配置返回可用工具：
-- Ask/Plan 模式：只返回 readonly、network、memory 类别的工具
-- Agent 模式：返回所有类别的工具
-- 同时根据当前 Agent 的 tools 配置过滤
+根据 Agent 工具配置及子代理可见性限制过滤工具列表。
 
 ### D4: 执行工具调用
 
@@ -116,11 +112,7 @@ type ToolSource = 'builtin' | 'module' | 'skill' | 'mcp'
 
 ### D5: 管理并发执行
 
-实现并发控制策略：
-- 读操作（readonly/network/skill）：最多 5 个并行
-- 写操作（write/dangerous）：必须串行，且无其他操作时才能执行
-- 记忆操作（memory）：始终可并行，不受读写锁限制，不参与 wave 分组
-- 子代理操作（subagent）：最多 3 个并行（独立计数器），不参与 wave 分组（避免长时间运行阻塞后续 wave）
+按 session 管理执行容量，按工具声明的资源计划处理冲突。goal 工具使用普通容量，详见[调度数据模型](./data-model.md)。
 
 ### D6: 管理执行状态
 
@@ -160,7 +152,7 @@ interface ToolExecutionContext {
 **中断时的行为**：
 - 收到中断信号后，阻止启动新的工具调用
 - 对正在执行的工具：
-  - readonly/write/memory/skill：软中断，等待完成
+  - readonly/write/internal-state/skill：软中断，等待完成
   - dangerous (bash)：硬中断，终止进程
 - 已完成的工具调用不受影响
 
@@ -204,7 +196,6 @@ interface ToolExecutionContext {
 | Permission | `src/permission/` | 依赖 | 请求用户确认 |
 | Built-in Tools | `src/tools/` | 依赖 | 调用所有内置工具实现（含 web_search / web_fetch） |
 | search-providers | `src/services/search-providers/` | 间接依赖 | `web_search` / `web_fetch` 工具内部使用，调度器不直接接触 |
-| Memory | `src/core/memory/` | 依赖 | 提供 MemoryLoader 给 Context，不向 Scheduler 注册工具 |
 | Skill | `src/skill/` | 依赖 | 注册 SkillTool，加载用户定义的技能 |
 | MCP | `src/mcp/` | 依赖 | 注册 MCP 工具 |
 | Bus | `src/bus/` | 依赖 | 发布状态变化事件 |
