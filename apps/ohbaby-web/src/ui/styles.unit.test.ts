@@ -215,6 +215,30 @@ describe("web layout styles", () => {
     ]);
     expectCssRule(".ohb-directory-picker-body", ["overflow-y: auto"]);
   });
+
+  it("folds sidebar sections and workspace groups with distinct pacing and settled overflow", () => {
+    expectCssRule(".ohb-collapse", [
+      "--collapse-open-ms: 200ms",
+      "--collapse-close-ms: 150ms",
+      "--collapse-shift: 0px",
+      "display: grid",
+      "grid-template-rows: 0fr",
+      "opacity: 0",
+    ]);
+    expectCssRule(".ohb-collapse-group", [
+      "--collapse-open-ms: 160ms",
+      "--collapse-close-ms: 120ms",
+      "--collapse-shift: -4px",
+    ]);
+    expectCssRule(".ohb-collapse.is-open", [
+      "grid-template-rows: 1fr",
+      "opacity: 1",
+    ]);
+    expectCssRule(
+      ".ohb-collapse.is-open:not(.is-animating) > .ohb-collapse-inner",
+      ["overflow: visible", "transform: none"],
+    );
+  });
 });
 
 it.each([

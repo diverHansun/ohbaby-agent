@@ -43,6 +43,7 @@ import {
   writeCollapsedGroups,
 } from "./collapsed-groups.js";
 import { GroupFooter } from "./GroupFooter.js";
+import { SidebarCollapse } from "./SidebarCollapse.js";
 import { WorkspaceGroup } from "./WorkspaceGroup.js";
 import { getGlobalSessionPinsStore } from "./session-pins.js";
 import { getSessionSeenStore, isUnread } from "./session-seen.js";
@@ -490,7 +491,9 @@ function SidebarSection(props: {
           <span className="ohb-sidebar-section-actions">{props.actions}</span>
         ) : null}
       </div>
-      {props.expanded ? props.children : null}
+      <SidebarCollapse open={props.expanded} variant="section">
+        {props.children}
+      </SidebarCollapse>
     </section>
   );
 }

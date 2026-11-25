@@ -1028,3 +1028,21 @@ it("saves a completed tap outside the input and forgets edits on rows that leave
   expect(renameInput()).toBeNull();
   expect(rename).toHaveBeenCalledTimes(1);
 });
+
+it("wraps sidebar sections and workspace groups in distinct collapse variants", () => {
+  expect(
+    container.querySelector(
+      'section[aria-label="Workspaces"] > .ohb-collapse.ohb-collapse-section.is-open',
+    ),
+  ).not.toBeNull();
+  expect(
+    container.querySelector(
+      ".ohb-workspace-group > .ohb-collapse.ohb-collapse-group.is-open",
+    ),
+  ).not.toBeNull();
+  expect(
+    container.querySelector(
+      'section[aria-label="Recents"] > .ohb-collapse.ohb-collapse-section.is-open',
+    ),
+  ).not.toBeNull();
+});

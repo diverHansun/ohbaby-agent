@@ -3,6 +3,7 @@ import { type ReactElement, type ReactNode, useState } from "react";
 import { IconButton } from "../shared/IconButton.js";
 import { anchorBelow, type MenuAnchor } from "../shared/Menu.js";
 import { WorkspaceMenu } from "./WorkspaceMenu.js";
+import { SidebarCollapse } from "./SidebarCollapse.js";
 import { workspaceLabel } from "../workspace/workspace-labels.js";
 
 /**
@@ -75,7 +76,9 @@ export function WorkspaceGroup(props: {
           </IconButton>
         </span>
       </div>
-      {props.expanded ? props.children : null}
+      <SidebarCollapse open={props.expanded} variant="group">
+        {props.children}
+      </SidebarCollapse>
       {menu ? (
         <WorkspaceMenu
           anchor={menu.anchor}

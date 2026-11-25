@@ -119,7 +119,7 @@
 .ohb-workspace-chevron {
   color: var(--text-dim);
   flex: none;
-  transition: transform var(--duration-fast) var(--ease);
+  transition: transform 160ms var(--ease);
 }
 
 .ohb-workspace-folder {
@@ -129,6 +129,55 @@
 
 .ohb-workspace-chevron.is-open {
   transform: rotate(90deg);
+}
+
+/* Foldable sidebar regions: sections open steadily with height + opacity,
+   while workspace groups move faster with a subtle vertical lift so the two
+   hierarchy levels feel distinct. */
+.ohb-collapse {
+  --collapse-open-ms: 200ms;
+  --collapse-close-ms: 150ms;
+  --collapse-shift: 0px;
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--collapse-close-ms) var(--ease),
+    opacity var(--collapse-close-ms) var(--ease);
+}
+
+.ohb-collapse-group {
+  --collapse-open-ms: 160ms;
+  --collapse-close-ms: 120ms;
+  --collapse-shift: -4px;
+}
+
+.ohb-collapse.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows var(--collapse-open-ms) var(--ease),
+    opacity var(--collapse-open-ms) var(--ease);
+}
+
+.ohb-collapse-inner {
+  display: flow-root;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  transform: translateY(var(--collapse-shift));
+  transition: transform var(--collapse-close-ms) var(--ease);
+}
+
+.ohb-collapse.is-open > .ohb-collapse-inner {
+  transform: translateY(0);
+  transition: transform var(--collapse-open-ms) var(--ease);
+}
+
+/* Once settled open, let focus outlines breathe and drop the transform layer. */
+.ohb-collapse.is-open:not(.is-animating) > .ohb-collapse-inner {
+  overflow: visible;
+  transform: none;
 }
 
 .ohb-workspace-name {
