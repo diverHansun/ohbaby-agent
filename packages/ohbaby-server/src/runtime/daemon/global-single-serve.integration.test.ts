@@ -159,6 +159,7 @@ function spawnServe(input: {
       : { OHBABY_HOME: input.ohbabyHome }),
   };
   if (input.dataHome !== undefined) {
+    delete childEnvironment.OHBABY_DB_PATH;
     if (process.platform === "win32") {
       childEnvironment.APPDATA = input.dataHome;
       childEnvironment.LOCALAPPDATA = input.dataHome;
@@ -644,9 +645,9 @@ describe("global single serve across real processes", () => {
   );
 
   it(
-    "migrates legacy platform data before a direct server start opens SQLite",
+    "opens an empty current database and leaves the legacy database untouched",
     async () => {
-      const root = await mkdtemp(join(tmpdir(), "ohbaby-real-data-migrate-"));
+      const root = await mkdtemp(join(tmpdir(), "ohbaby-real-data-root-"));
       cleanupDirectories.push(root);
       const repo = join(root, "repo");
       const dataHome = join(root, "data");
@@ -660,6 +661,7 @@ describe("global single serve across real processes", () => {
         "INSERT INTO migration_probe (value) VALUES ('preserved')",
       );
       legacyDatabase.close();
+      const originalBytes = await readFile(legacyDatabasePath);
 
       const child = spawnServe({
         dataHome,
@@ -668,22 +670,25 @@ describe("global single serve across real processes", () => {
       });
       await waitForReady(child);
 
-      const migratedDatabase = new NodeSqliteConnection(
+      const database = new NodeSqliteConnection(
         join(dataHome, "ohbaby", "ohbaby.db"),
       );
       try {
         expect(
-          migratedDatabase
-            .prepare<{
-              readonly value: string;
-            }>("SELECT value FROM migration_probe")
-            .get()?.value,
-        ).toBe("preserved");
+          database.prepare("SELECT id FROM session LIMIT 1").get(),
+        ).toBeUndefined();
+        expect(
+          database
+            .prepare(
+              "SELECT name FROM sqlite_schema WHERE name = 'migration_probe'",
+            )
+            .get(),
+        ).toBeUndefined();
       } finally {
-        migratedDatabase.close();
+        database.close();
       }
-      await expect(readFile(legacyDatabasePath)).resolves.toBeInstanceOf(
-        Buffer,
+      await expect(readFile(legacyDatabasePath)).resolves.toEqual(
+        originalBytes,
       );
       child.kill("SIGTERM");
       await waitForExit(child);

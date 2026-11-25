@@ -2,11 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   OHBABY_DIR_NAME,
-  resolveLegacyOhbabyHome,
-  resolveLegacyProjectOhbabyRoot,
   resolveOhbabyHome,
   resolveProjectOhbabyRoot,
-  resolveReadPathWithLegacy,
 } from "../../paths/index.js";
 import {
   AgentConfigAccessError,
@@ -42,24 +39,6 @@ export function getProjectAgentsConfigPath(
 ): string {
   return path.join(
     resolveProjectOhbabyRoot(projectDirectory),
-    AGENTS_CONFIG_DIR_NAME,
-    AGENTS_CONFIG_FILE_NAME,
-  );
-}
-
-function getLegacyGlobalAgentsConfigPath(homeDirectory?: string): string {
-  return path.join(
-    resolveLegacyOhbabyHome({ homeDirectory }),
-    AGENTS_CONFIG_DIR_NAME,
-    AGENTS_CONFIG_FILE_NAME,
-  );
-}
-
-function getLegacyProjectAgentsConfigPath(
-  projectDirectory = process.cwd(),
-): string {
-  return path.join(
-    resolveLegacyProjectOhbabyRoot(projectDirectory),
     AGENTS_CONFIG_DIR_NAME,
     AGENTS_CONFIG_FILE_NAME,
   );
@@ -126,17 +105,9 @@ export async function loadAgentConfigWithOrigins(
   options: LoadAgentConfigOptions = {},
 ): Promise<AgentConfigWithOrigins> {
   const globalPath =
-    options.globalPath ??
-    (await resolveReadPathWithLegacy(
-      getGlobalAgentsConfigPath(options.homeDirectory),
-      [getLegacyGlobalAgentsConfigPath(options.homeDirectory)],
-    ));
+    options.globalPath ?? getGlobalAgentsConfigPath(options.homeDirectory);
   const projectPath =
-    options.projectPath ??
-    (await resolveReadPathWithLegacy(
-      getProjectAgentsConfigPath(options.projectDirectory),
-      [getLegacyProjectAgentsConfigPath(options.projectDirectory)],
-    ));
+    options.projectPath ?? getProjectAgentsConfigPath(options.projectDirectory);
   const [globalConfig, projectConfig] = await Promise.all([
     loadAgentsConfigFromPath(globalPath),
     loadAgentsConfigFromPath(projectPath),

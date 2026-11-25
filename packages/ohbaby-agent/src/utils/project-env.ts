@@ -1,25 +1,25 @@
 import { rememberManagedRuntimeEnv } from "./managed-runtime-env.js";
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
-import {
-  migrateOhbabyConfig,
-  type OhbabyMigrationReport,
-} from "../migration/index.js";
 import { OHBABY_DIR_NAME, resolveOhbabyHome } from "../paths/index.js";
 import { Project } from "../project/index.js";
 
 export const OHBABY_CONFIG_DIR_NAME = OHBABY_DIR_NAME;
 export const ENV_FILE_NAME = ".env";
 
+const RESERVED_PROJECT_ENV_KEYS = new Set([
+  "OHBABY_HOME",
+  "HOME",
+  "USERPROFILE",
+]);
+
 export interface LoadRuntimeEnvOptions {
   readonly homeDirectory?: string;
-  readonly onWarning?: (message: string) => void;
   readonly projectDirectory?: string;
 }
 
 export interface LoadRuntimeEnvResult {
   readonly globalEnvPath: string;
-  readonly configMigrationReport: OhbabyMigrationReport;
   readonly projectEnvPath: string;
   readonly projectRoot: string;
 }
@@ -41,16 +41,16 @@ export async function loadRuntimeEnvIntoProcessEnv(
     path.resolve(projectDirectory);
   const projectEnvPath = getProjectEnvPath(projectRoot);
 
-  loadDotenv({ path: projectEnvPath, override: false });
-  const configMigrationReport = await migrateOhbabyConfig({
-    ...(options.homeDirectory === undefined
-      ? {}
-      : { homeDirectory: options.homeDirectory }),
-    projectDirectory: projectRoot,
-    ...(options.onWarning === undefined
-      ? {}
-      : { onWarning: options.onWarning }),
-  });
+  // Only the host environment may select the global configuration directory.
+  const projectEnv = loadDotenv({ path: projectEnvPath, processEnv: {} });
+  for (const [name, value] of Object.entries(projectEnv.parsed ?? {})) {
+    if (
+      !RESERVED_PROJECT_ENV_KEYS.has(name.toUpperCase()) &&
+      !Object.hasOwn(process.env, name)
+    ) {
+      process.env[name] = value;
+    }
+  }
   const globalEnvPath = getGlobalEnvPath(options.homeDirectory);
   const beforeGlobal = { ...process.env };
   const loadedGlobal = loadDotenv({ path: globalEnvPath, override: false });
@@ -61,7 +61,6 @@ export async function loadRuntimeEnvIntoProcessEnv(
   }
 
   return {
-    configMigrationReport,
     globalEnvPath,
     projectEnvPath,
     projectRoot,

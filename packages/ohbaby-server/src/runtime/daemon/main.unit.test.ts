@@ -285,7 +285,6 @@ describe("startDaemonServer", () => {
         createPersistentUiBackendClient: vi.fn(() =>
           createFakeBackend(vi.fn(() => Promise.resolve())),
         ),
-        migrateOhbabyData: vi.fn(() => Promise.resolve(undefined)),
         McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
       };
     });

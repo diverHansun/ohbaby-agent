@@ -252,44 +252,6 @@ describe("settings propagation through the shared production backend", () => {
       });
     },
   );
-  it("preserves effective legacy search fields when the production key saver creates the current file", async () => {
-    const workdir = join(root, "legacy-save-project");
-    await mkdir(workdir);
-    const legacyPath = join(
-      root,
-      "home",
-      ".ohbaby-agent",
-      "tools",
-      "search.json",
-    );
-    const legacy = {
-      baseUrl: "https://legacy-save.search.example",
-      defaults: { maxResults: 8, topic: "finance" },
-      apiKeyEnv: "TAVILY_API_KEY",
-      provider: "tavily",
-    };
-    await json(legacyPath, legacy);
-    const client = backend(workdir, []);
-    expect(await getSearchConfig()).toMatchObject({
-      baseUrl: legacy.baseUrl,
-      defaults: legacy.defaults,
-    });
-    const result = await client.setSearchApiKey({
-      apiKey: "legacy-save-local-key",
-    });
-    expect(result.searchJsonPath).toBe(
-      join(globalRoot, "tools", "search.json"),
-    );
-    expect(JSON.parse(await readFile(result.searchJsonPath, "utf8"))).toEqual(
-      legacy,
-    );
-    expect(JSON.parse(await readFile(legacyPath, "utf8"))).toEqual(legacy);
-    expect(await getSearchConfig()).toMatchObject({
-      apiKey: "legacy-save-local-key",
-      baseUrl: legacy.baseUrl,
-      defaults: legacy.defaults,
-    });
-  });
   it("loads configured Skill directories into the model tool and refreshes real files before each round or explicit use", async () => {
     const workdir = join(root, "project");
     const extra = join(root, "extra-skills");
@@ -422,56 +384,6 @@ describe("settings propagation through the shared production backend", () => {
     expect(captured).toHaveLength(3);
     expect(captured[2].agentManager.get("project-agent")?.description).toBe(
       "Agent A changed",
-    );
-  });
-  it("applies a legacy-only search file through the same effective path used by settings versions", async () => {
-    const workdir = join(root, "legacy-search-project");
-    await mkdir(workdir);
-    const legacyPath = join(
-      root,
-      "home",
-      ".ohbaby-agent",
-      "tools",
-      "search.json",
-    );
-    await json(legacyPath, {
-      baseUrl: "https://legacy-first.search.example",
-      defaults: { maxResults: 3 },
-    });
-    const client = backend(workdir, []);
-    expect(
-      (await client.submitPromptAndWait("First", { sessionId: "legacy" }))
-        .prompt.status,
-    ).toBe("succeeded");
-    expect(await getSearchConfig()).toMatchObject({
-      baseUrl: "https://legacy-first.search.example",
-      defaults: { maxResults: 3 },
-    });
-    await json(legacyPath, {
-      baseUrl: "https://legacy-updated.search.example",
-      defaults: { maxResults: 8 },
-    });
-    expect(
-      (await client.submitPromptAndWait("Next", { sessionId: "legacy" })).prompt
-        .status,
-    ).toBe("succeeded");
-    expect(await getSearchConfig()).toMatchObject({
-      baseUrl: "https://legacy-updated.search.example",
-      defaults: { maxResults: 8 },
-    });
-    // A current file takes precedence; later changes to the legacy file are ignored by both sides.
-    await json(join(globalRoot, "tools", "search.json"), {
-      baseUrl: "https://current.search.example",
-    });
-    expect(
-      (
-        await client.submitPromptAndWait("Current path", {
-          sessionId: "legacy",
-        })
-      ).prompt.status,
-    ).toBe("succeeded");
-    expect((await getSearchConfig()).baseUrl).toBe(
-      "https://current.search.example",
     );
   });
   it("preserves search settings when saving a key and applies a later global env edit with an injected client", async () => {

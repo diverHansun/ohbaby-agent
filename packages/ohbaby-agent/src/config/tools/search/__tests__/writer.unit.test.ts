@@ -99,51 +99,22 @@ describe("setSearchApiKey", () => {
     expect(process.env.CUSTOM_TAVILY_KEY).toBe("custom-secret");
   });
 
-  it("merges effective legacy settings for an explicit home while writing the current path", async () => {
-    const legacyPath = path.join(
-      tempHome,
-      ".ohbaby-agent",
-      "tools",
-      "search.json",
-    );
-    const legacy = {
-      baseUrl: "https://legacy-home.example",
-      defaults: { maxResults: 8 },
-    };
-    await writeJson(legacyPath, legacy);
-    const result = await setSearchApiKey({
-      homeDirectory: tempHome,
-      apiKeyEnv: "CUSTOM_TAVILY_KEY",
-    });
-    expect(result.searchJsonPath).toBe(searchJsonPath);
-    expect(JSON.parse(await fs.readFile(searchJsonPath, "utf8"))).toEqual({
-      ...legacy,
-      provider: "tavily",
-      apiKeyEnv: "CUSTOM_TAVILY_KEY",
-    });
-    expect(JSON.parse(await fs.readFile(legacyPath, "utf8"))).toEqual(legacy);
-  });
-
-  it("keeps explicit destination paths isolated from legacy fallback", async () => {
-    const legacyPath = path.join(
-      tempHome,
-      ".ohbaby-agent",
-      "tools",
-      "search.json",
-    );
-    await writeJson(legacyPath, {
-      baseUrl: "https://legacy.example",
-      defaults: { maxResults: 8 },
-    });
+  it("only reads and writes the explicit destination when default settings exist", async () => {
+    const defaults = { baseUrl: "https://default.example" };
+    await writeJson(searchJsonPath, defaults);
+    const explicitPath = path.join(tempHome, "separate-search.json");
     await setSearchApiKey({
       homeDirectory: tempHome,
-      searchJsonPath,
+      searchJsonPath: explicitPath,
       apiKeyEnv: "CUSTOM_TAVILY_KEY",
     });
-    expect(JSON.parse(await fs.readFile(searchJsonPath, "utf8"))).toEqual({
+    expect(JSON.parse(await fs.readFile(explicitPath, "utf8"))).toEqual({
       provider: "tavily",
       apiKeyEnv: "CUSTOM_TAVILY_KEY",
     });
+    expect(JSON.parse(await fs.readFile(searchJsonPath, "utf8"))).toEqual(
+      defaults,
+    );
   });
 
   it("rejects invalid apiKeyEnv values before writing secrets or search config", async () => {

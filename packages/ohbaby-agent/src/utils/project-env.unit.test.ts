@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveOhbabyHome } from "../paths/index.js";
 import {
   getGlobalEnvPath,
   getProjectEnvPath,
@@ -18,6 +19,7 @@ describe("project env loading", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     process.env = originalEnv;
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
@@ -66,12 +68,6 @@ describe("project env loading", () => {
     });
 
     expect(result).toEqual({
-      configMigrationReport: {
-        conflicts: [],
-        copied: [],
-        merged: [],
-        skipped: [],
-      },
       globalEnvPath: path.join(homeDirectory, ".ohbaby", ".env"),
       projectEnvPath: path.join(repoRoot, ".env"),
       projectRoot: repoRoot,
@@ -82,39 +78,98 @@ describe("project env loading", () => {
     expect(process.env.SHELL_KEY).toBe("from-shell");
   });
 
-  it("migrates legacy global and project configuration before loading global env", async () => {
-    const homeDirectory = path.join(tempRoot, "migration-home");
-    const repoRoot = path.join(tempRoot, "migration-repo");
-    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
-    await fs.mkdir(path.join(homeDirectory, ".ohbaby-agent"), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      path.join(homeDirectory, ".ohbaby-agent", ".env"),
-      "MIGRATED_GLOBAL_ENV=yes\n",
-      "utf8",
-    );
-    await fs.mkdir(path.join(repoRoot, ".ohbaby-agent", "mcp"), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      path.join(repoRoot, ".ohbaby-agent", "mcp", "settings.json"),
-      '{"mcpServers":{}}\n',
-      "utf8",
-    );
-    delete process.env.MIGRATED_GLOBAL_ENV;
+  it("leaves earlier profiles untouched when there is no current profile", async () => {
+    const homeDirectory = path.join(tempRoot, "home");
+    const projectDirectory = path.join(tempRoot, "repo");
+    const oldProfile = path.join(homeDirectory, ".ohbaby-agent");
+    await fs.mkdir(projectDirectory);
+    await fs.mkdir(oldProfile, { recursive: true });
+    await fs.writeFile(path.join(oldProfile, ".env"), "OLD_PROFILE_MARK=old");
+    await fs.writeFile(path.join(oldProfile, "model.json"), "{}");
+    delete process.env.OLD_PROFILE_MARK;
 
-    await loadRuntimeEnvIntoProcessEnv({
-      homeDirectory,
-      projectDirectory: repoRoot,
-    });
+    await loadRuntimeEnvIntoProcessEnv({ homeDirectory, projectDirectory });
 
-    expect(process.env.MIGRATED_GLOBAL_ENV).toBe("yes");
+    expect(process.env.OLD_PROFILE_MARK).toBeUndefined();
     await expect(
-      fs.access(path.join(homeDirectory, ".ohbaby", ".env")),
-    ).resolves.toBeUndefined();
-    await expect(
-      fs.access(path.join(repoRoot, ".ohbaby", "mcp", "settings.json")),
-    ).resolves.toBeUndefined();
+      fs.stat(path.join(homeDirectory, ".ohbaby")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await fs.readdir(oldProfile)).sort()).toEqual([
+      ".env",
+      "model.json",
+    ]);
+    expect(await fs.readFile(path.join(oldProfile, ".env"), "utf8")).toBe(
+      "OLD_PROFILE_MARK=old",
+    );
+    expect(await fs.readFile(path.join(oldProfile, "model.json"), "utf8")).toBe(
+      "{}",
+    );
+  });
+
+  it.each([
+    ["OHBABY_HOME", "HOME", "USERPROFILE"],
+    ["ohbaby_home", "home", "userprofile"],
+    ["Ohbaby_Home", "Home", "UserProfile"],
+  ])(
+    "reserves host directory names in project .env (%s, %s, %s)",
+    async (...keys) => {
+      const projectDirectory = path.join(tempRoot, "repo");
+      const globalDirectory = path.join(tempRoot, ".ohbaby");
+      const otherDirectory = path.join(tempRoot, "other");
+      vi.spyOn(os, "homedir").mockReturnValue(tempRoot);
+      for (const key of [
+        ...keys,
+        "OHBABY_HOME",
+        "HOME",
+        "USERPROFILE",
+        "TrustedMark",
+        "OtherMark",
+        "OrdinaryKey",
+      ]) {
+        Reflect.deleteProperty(process.env, key);
+      }
+      await fs.mkdir(globalDirectory);
+      await fs.mkdir(projectDirectory);
+      await fs.mkdir(otherDirectory);
+      await fs.writeFile(
+        path.join(globalDirectory, ".env"),
+        "TrustedMark=present",
+      );
+      await fs.writeFile(
+        path.join(otherDirectory, ".env"),
+        "OtherMark=present",
+      );
+      await fs.writeFile(
+        path.join(projectDirectory, ".env"),
+        [
+          ...keys.map((key) => key + "=" + otherDirectory),
+          "OrdinaryKey=value",
+        ].join("\n"),
+      );
+
+      const result = await loadRuntimeEnvIntoProcessEnv({ projectDirectory });
+      expect(result.globalEnvPath).toBe(path.join(globalDirectory, ".env"));
+      expect(resolveOhbabyHome()).toBe(globalDirectory);
+      for (const key of keys) expect(process.env[key]).toBeUndefined();
+      expect(process.env.TrustedMark).toBe("present");
+      expect(process.env.OtherMark).toBeUndefined();
+      expect(process.env.OrdinaryKey).toBe("value");
+    },
+  );
+
+  it("uses the configuration root supplied by the host", async () => {
+    const projectDirectory = path.join(tempRoot, "repo");
+    const hostRoot = path.join(tempRoot, "profile");
+    process.env.OHBABY_HOME = hostRoot;
+    await fs.mkdir(projectDirectory);
+    await fs.mkdir(hostRoot);
+    await fs.writeFile(
+      path.join(projectDirectory, ".env"),
+      "OHBABY_HOME=ignored",
+    );
+
+    const result = await loadRuntimeEnvIntoProcessEnv({ projectDirectory });
+    expect(result.globalEnvPath).toBe(path.join(hostRoot, ".env"));
+    expect(process.env.OHBABY_HOME).toBe(hostRoot);
   });
 });

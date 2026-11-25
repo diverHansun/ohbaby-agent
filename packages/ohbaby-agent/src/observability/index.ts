@@ -11,8 +11,6 @@ export type {
   Logger,
 } from "./logger.js";
 export {
-  configMigrationCompleted,
-  dataMigrationCompleted,
   diagnosticsStarted,
   durationClockAnomaly,
   interactionCleanupFailure,

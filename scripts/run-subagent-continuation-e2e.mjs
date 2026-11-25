@@ -426,7 +426,6 @@ try {
       (p) => mkdir(p, { recursive: true }),
     ),
   );
-  await writeFile(join(profile, ".skip-auto-migrate"), "");
   await writeFile(join(profile, ".env"), "T5_FIXTURE_KEY=fixture-only\n", {
     mode: 0o600,
   });

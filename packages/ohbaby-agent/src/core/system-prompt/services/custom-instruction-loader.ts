@@ -2,9 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   OHBABY_DIR_NAME,
-  resolveLegacyGlobalMemoryPath,
-  resolveLegacyOhbabyHome,
-  resolveLegacyProjectOhbabyRoot,
   resolveOhbabyHome,
   resolveProjectOhbabyRoot,
 } from "../../../paths/index.js";
@@ -159,12 +156,7 @@ async function loadProjectInstructions(
   }
 
   return readFirstInstructionFile(
-    [
-      ...getCandidatePaths(
-        path.join(projectDirectory, PROJECT_CUSTOM_CONFIG_DIR),
-      ),
-      ...getCandidatePaths(resolveLegacyProjectOhbabyRoot(projectDirectory)),
-    ],
+    getCandidatePaths(path.join(projectDirectory, PROJECT_CUSTOM_CONFIG_DIR)),
     options,
   );
 }
@@ -173,31 +165,12 @@ async function loadProjectInstructions(
 export async function loadCustomInstructions(
   options: CustomInstructionLoadOptions = {},
 ): Promise<CustomInstruction[]> {
-  const globalPath =
-    options.globalPath ??
-    getGlobalCustomInstructionsPath(options.homeDirectory);
   const globalPaths =
     options.globalPath !== undefined
-      ? [globalPath]
-      : [
-          ...getCandidatePaths(
-            path.dirname(
-              getGlobalCustomInstructionsPath(options.homeDirectory),
-            ),
-          ),
-          ...getCandidatePaths(
-            resolveLegacyOhbabyHome({
-              ...(options.homeDirectory === undefined
-                ? {}
-                : { homeDirectory: options.homeDirectory }),
-            }),
-          ),
-          resolveLegacyGlobalMemoryPath({
-            ...(options.homeDirectory === undefined
-              ? {}
-              : { homeDirectory: options.homeDirectory }),
-          }),
-        ];
+      ? [options.globalPath]
+      : getCandidatePaths(
+          resolveOhbabyHome({ homeDirectory: options.homeDirectory }),
+        );
   const [global, project] = await Promise.all([
     readFirstInstructionFile(globalPaths, options),
     loadProjectInstructions(options),

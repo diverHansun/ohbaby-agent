@@ -502,7 +502,6 @@ try {
       (p) => mkdir(p, { recursive: true }),
     ),
   );
-  await writeFile(join(profile, ".skip-auto-migrate"), "");
   await new Promise((r) => provider.listen(0, "127.0.0.1", r));
   await writeFile(
     join(profile, "model.json"),

@@ -1,5 +1,7 @@
 # 2026-07-14 · ohbaby home 路径统一
 
+> 2026-11 已结束旧目录兼容，见[旧目录退役记录](../2026-11-24-legacy-home-removal/README.md)。
+
 > 将用户可见配置根从分散的 `.ohbaby-agent/` / `.ohbaby/` / XDG `ohbaby-agent` 统一为：
 > **`.ohbaby/` = 唯一用户可见根**；运行时重数据走平台数据目录下的 **`ohbaby/`**。
 

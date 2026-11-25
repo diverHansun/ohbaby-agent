@@ -327,36 +327,19 @@ it("does not let cached manager loads reuse a deleted model and selects a new fi
   await add();
   expect((await manager.load(opts)).model).toBe(route.model);
 });
-it("default first write migrates the effective legacy file, explicit missing paths remain isolated", async () => {
-  const { mkdir } = await import("node:fs/promises");
-  vi.stubEnv("HOME", dir);
-  vi.stubEnv("USERPROFILE", dir);
-  const legacy = join(dir, ".ohbaby-agent", "model.json");
-  await mkdir(join(dir, ".ohbaby-agent"));
-  await writeFile(
-    legacy,
-    JSON.stringify({
-      provider: "legacy",
-      defaultModel: "old",
-      apiConfig: { baseUrl: route.baseUrl },
-      llmParams: { maxTokens: 4321, temperature: 0.5 },
-    }),
-  );
-  const before = await readModelSettings();
-  expect(before.active?.model).toBe("old");
-  await createModelEntry(route);
-  const after = await readModelSettings();
-  expect(after.active).toEqual(before.active);
-  expect(after.models.map((e) => e.model)).toEqual(["old", route.model]);
-  expect(after.models[0].maxOutputTokens).toBe(4321);
+it("writes an explicit missing model configuration independently of the default", async () => {
+  const shared = await add({ model: "current" });
   const explicit = {
     modelJsonPath: join(dir, "isolated", "model.json"),
     envPath: join(dir, "isolated", ".env"),
   };
   await createModelEntry(route, explicit);
   const isolated = await readModelSettings(explicit);
+  expect(isolated.models.map((entry) => entry.model)).toEqual([route.model]);
   expect(isolated.active?.id).toBe(isolated.models[0].id);
-  expect(isolated.models).toHaveLength(1);
+  expect((await readModelSettings()).models.map((entry) => entry.id)).toEqual([
+    shared.id,
+  ]);
 });
 it("deleting the active model skips incomplete history, wraps and preserves global preferences", async () => {
   const a = await add();

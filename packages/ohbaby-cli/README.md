@@ -170,8 +170,6 @@ Runtime data lives in the platform data directory:
 - macOS: `~/Library/Application Support/ohbaby`
 - Windows: `%LOCALAPPDATA%\ohbaby`
 
-On first start, ohbaby copies legacy `.ohbaby-agent` configuration and `ohbaby-agent` data to the new locations and leaves the originals in place. New paths win on conflicts, and legacy paths are still read for one minor release. If a running daemon blocks the SQLite migration, run `ohbaby serve stop` and start again.
-
 </details>
 
 ## Development

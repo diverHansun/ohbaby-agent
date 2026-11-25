@@ -6,10 +6,6 @@ export const OHBABY_HOME_ENV = "OHBABY_HOME";
 export const OHBABY_DATA_APP_NAME = "ohbaby";
 export const OHBABY_DATABASE_FILE_NAME = "ohbaby.db";
 
-export const OHBABY_LEGACY_DIR_NAME = ".ohbaby-agent";
-export const OHBABY_LEGACY_DATA_APP_NAME = "ohbaby-agent";
-export const OHBABY_LEGACY_DATABASE_FILE_NAME = "ohbaby-agent.db";
-
 export interface OhbabyPathOptions {
   readonly environment?: Readonly<NodeJS.ProcessEnv>;
   readonly homeDirectory?: string;
@@ -70,14 +66,6 @@ export function resolveOhbabyHome(options: OhbabyPathOptions = {}): string {
   );
 }
 
-/** Resolve the legacy user-visible configuration root for migration only. */
-export function resolveLegacyOhbabyHome(
-  options: OhbabyPathOptions = {},
-): string {
-  const input = context(options);
-  return input.path.join(input.homeDirectory, OHBABY_LEGACY_DIR_NAME);
-}
-
 export function resolveProjectOhbabyRoot(
   projectDirectory: string,
   platform: NodeJS.Platform = os.platform(),
@@ -85,24 +73,8 @@ export function resolveProjectOhbabyRoot(
   return pathApi(platform).join(projectDirectory, OHBABY_DIR_NAME);
 }
 
-export function resolveLegacyProjectOhbabyRoot(
-  projectDirectory: string,
-  platform: NodeJS.Platform = os.platform(),
-): string {
-  return pathApi(platform).join(projectDirectory, OHBABY_LEGACY_DIR_NAME);
-}
-
-function platformDataBase(
-  input: ReturnType<typeof context>,
-  legacy: boolean,
-): string {
+function platformDataBase(input: ReturnType<typeof context>): string {
   if (input.platform === "win32") {
-    if (legacy) {
-      return nonEmptyOr(
-        input.environment.APPDATA,
-        input.path.join(input.homeDirectory, "AppData", "Roaming"),
-      );
-    }
     return nonEmptyOr(
       input.environment.LOCALAPPDATA,
       input.path.join(input.homeDirectory, "AppData", "Local"),
@@ -124,29 +96,5 @@ function platformDataBase(
 
 export function resolveOhbabyDataRoot(options: OhbabyPathOptions = {}): string {
   const input = context(options);
-  return input.path.join(platformDataBase(input, false), OHBABY_DATA_APP_NAME);
-}
-
-export function resolveLegacyOhbabyDataRoot(
-  options: OhbabyPathOptions = {},
-): string {
-  const input = context(options);
-  return input.path.join(
-    platformDataBase(input, true),
-    OHBABY_LEGACY_DATA_APP_NAME,
-  );
-}
-
-export function resolveLegacyGlobalMemoryPath(
-  options: OhbabyPathOptions = {},
-): string {
-  const input = context(options);
-  const configBase =
-    input.platform === "win32"
-      ? nonEmptyOr(input.environment.APPDATA, input.homeDirectory)
-      : nonEmptyOr(
-          input.environment.XDG_CONFIG_HOME,
-          input.path.join(input.homeDirectory, ".config"),
-        );
-  return input.path.join(configBase, OHBABY_LEGACY_DATA_APP_NAME, "OHBABY.md");
+  return input.path.join(platformDataBase(input), OHBABY_DATA_APP_NAME);
 }

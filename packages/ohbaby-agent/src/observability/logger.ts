@@ -11,12 +11,7 @@ import path from "node:path";
 
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
 
-export type DiagnosticsComponent =
-  | "diagnostics"
-  | "llm"
-  | "migration"
-  | "server"
-  | "session";
+export type DiagnosticsComponent = "diagnostics" | "llm" | "server" | "session";
 
 export interface DiagnosticRoots {
   readonly home?: string;
@@ -86,7 +81,6 @@ const EVENT_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+$/;
 const DIAGNOSTIC_COMPONENTS = new Set<DiagnosticsComponent>([
   "diagnostics",
   "llm",
-  "migration",
   "server",
   "session",
 ]);

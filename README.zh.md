@@ -170,8 +170,6 @@ ohbaby 会从全局 `~/.ohbaby/` 和项目根目录（未找到时回退到 `<pr
 - macOS：`~/Library/Application Support/ohbaby`
 - Windows：`%LOCALAPPDATA%\ohbaby`
 
-首次启动时，ohbaby 会自动把旧版 `.ohbaby-agent` 配置和 `ohbaby-agent` 数据复制到新目录，原文件保持不动。出现冲突时以新路径为准，旧路径在一个 minor 版本内仍兼容读取。如果运行中的 daemon 占用了 SQLite 导致迁移受阻，先执行 `ohbaby serve stop` 再重新启动即可。
-
 </details>
 
 ## 开发
