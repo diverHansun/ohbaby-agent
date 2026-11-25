@@ -6,6 +6,8 @@
 
 ## 1. Architecture Overview（总体架构）
 
+[Context](../../core/context/architecture.md) 负责将提醒追加到模型可见历史。[System Prompt](../../core/system-prompt/architecture.md) 负责组装稳定的系统消息。
+
 `services/instructions` 位于 `packages/ohbaby-agent/src/services/instructions/`，作为应用服务层的独立子模块，直接挂接在现有 `services/reminder` 管道之下，与 `core/system-prompt` 彻底解耦。
 
 模块内部只保留三个职责单一的子组件，没有后台状态机或独立持久化层：
@@ -49,7 +51,7 @@ flowchart TD
 
 ```text
 packages/ohbaby-agent/src/services/instructions/
-  index.ts                 # 对外稳定入口：导出工厂函数、常量与公开类型
+  index.ts                 # 模块入口：导出提醒工厂和告警类型
   types.ts                 # 领域概念与配置类型定义
   loader.ts                # 候选路径解析、文件读取、截断、安全扫描与去重
   renderer.ts              # 正文渲染、边界标签转义与快照 key 计算
@@ -61,7 +63,7 @@ packages/ohbaby-agent/src/services/instructions/
 ```
 
 对外边界：
-- 仅 `index.ts` 作为外部依赖入口，只被 `adapters/ui-runtime/composition.ts` 引用；包根 `src/index.ts` 不导出本模块，与其他 reminder provider 一致。
+- 仅 `index.ts` 作为外部依赖入口，由 `adapters/ui-runtime/composition.ts` 注册工厂，`prompt-context.ts` 使用告警类型；包根 `src/index.ts` 不导出本模块，与其他 reminder provider 一致。
 - `services/reminder/index.ts` 只在 `REMINDER_ORDER` 中登记 `"instructions"` 类型，并在 `ReminderContext` 中补充 `directory` / `projectRoot` 字段，不直接依赖 `services/instructions/`，保持依赖方向单向指向 `services/reminder` 抽象契约。
 - `loader.ts` 复用 `core/system-prompt/security` 的纯扫描函数，不引入反向依赖。
 

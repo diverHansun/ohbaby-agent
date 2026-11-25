@@ -3,8 +3,8 @@ import { scanPromptLikeContent } from "./index.js";
 
 const source = {
   kind: "custom-instructions",
-  label: "OHBABY.md",
-  path: "/repo/OHBABY.md",
+  label: "AGENTS.md",
+  path: "/repo/AGENTS.md",
 } as const;
 
 describe("scanPromptLikeContent", () => {
@@ -33,7 +33,7 @@ describe("scanPromptLikeContent", () => {
       line: 2,
       patternId: "ignore_previous_instructions",
       severity: "critical",
-      sourcePath: "/repo/OHBABY.md",
+      sourcePath: "/repo/AGENTS.md",
     });
   });
 
@@ -53,6 +53,17 @@ describe("scanPromptLikeContent", () => {
           severity: "critical",
         }),
       ]),
+    );
+  });
+
+  it("reports one finding per rule and line for repeated matches", () => {
+    const lines = 4000;
+    const result = scanPromptLikeContent(
+      "x\u200bx\u200b\n".repeat(lines),
+      source,
+    );
+    expect(result.findings.map((finding) => finding.line)).toEqual(
+      Array.from({ length: lines }, (_, i) => i + 1),
     );
   });
 

@@ -40,7 +40,6 @@ Project 模块是底层基础设施模块，被多个业务模块依赖：
 | 模块 | 代码位置 | 关系 | 调用接口 |
 |------|----------|------|----------|
 | Session | `src/services/session/` | 调用方 | `Project.fromDirectory()` |
-| Memory | `src/core/memory/` | 调用方 | `Project.fromDirectory()` |
 | Config | `src/config/` | 调用方 | `Project.fromDirectory()` |
 | Git CLI | 外部依赖 | 被调用 | `git rev-list` 命令 |
 
@@ -116,17 +115,9 @@ User.startSession(directory)
                      })
 ```
 
-#### 场景 2：Memory 模块定位项目级 OHBABY.md
+#### 场景 2：主代理与子代理读取项目指令
 
-```
-Memory.load(directory)
-    │
-    ├──► Project.fromDirectory(directory)
-    │        │
-    │        └──► return { id: 'abc123...', rootPath: '/path/to/project', vcs: 'git' }
-    │
-    └──► 读取 '/path/to/project/.ohbaby/OHBABY.md'
-```
+运行时将会话项目根传给提醒收集器。[指令服务](../services/instructions/dfd-interface.md)在每次模型请求前读取该根目录下的指令文件。
 
 ---
 
@@ -331,9 +322,6 @@ async function createSession(
   const project = await Project.fromDirectory(directory)
   
   // 创建会话，关联到项目
-  // 6. [Memory 模块] 调用
-  //    ├── Memory.load() 调用 fromDirectory()
-  //    └── 此时需要 rootPath 定位 OHBABY.md
   //
   // 7. [Session 模块] 调用
   //    ├── Session.create() 调用 fromDirectory()
@@ -352,26 +340,9 @@ async function createSession(
 }
 ```
 
-### 7.2 Memory 模块集成
+### 7.2 文件指令
 
-```typescript
-// src/core/memory/memory-manager.ts
-
-import { Project } from '@/project'
-
-async function loadProjectMemory(directory: string): Promise<string | null> {
-  const project = await Project.fromDirectory(directory)
-  
-  // 构建 OHBABY.md 路径
-  const memoryPath = path.join(project.rootPath, '.ohbaby', 'OHBABY.md')
-  
-  try {
-    return await fs.readFile(memoryPath, 'utf-8')
-  } catch {
-    return null
-  }
-}
-```
+指令文件随会话项目根定位，详见[指令服务](../services/instructions/dfd-interface.md)。
 
 ---
 

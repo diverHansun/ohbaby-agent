@@ -153,7 +153,7 @@ MCP server 配置文件放在全局的 `~/.ohbaby/mcp/settings.json` 或项目�
 
 <br>
 
-ohbaby 会从全局 `~/.ohbaby/` 和项目根目录（未找到时回退到 `<project>/.ohbaby/`）各读取一份说明文件，按 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md` 的顺序取第一个存在的文件。主 Agent 和子 Agent 都会加载这两份文件，冲突时以项目级为准。这里放的是固定指令，不会当作长期记忆自动改写。
+ohbaby 会读取 `~/.ohbaby/` 和项目根目录下的 `AGENTS.md` 与 `CLAUDE.md`。主代理和子代理通过低优先级提醒收到文件指令，项目规则优先于全局规则。修改会在下一次模型请求时生效。
 
 </details>
 

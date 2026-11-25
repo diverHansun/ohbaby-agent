@@ -76,7 +76,7 @@ function customToolNames(tools: MessageCreateParams["tools"]): string[] {
 }
 
 describe("prompt-cache wire contract", () => {
-  it("appends changing goal reminders without rewriting any provider's cached prefix", async () => {
+  it("appends changed instructions and goal reminders without rewriting cached prefixes", async () => {
     const chat = createOpenAICompatibleProvider({
       id: "openai",
       apiKey: "test-key",
@@ -139,6 +139,13 @@ describe("prompt-cache wire contract", () => {
     const firstMessages: ModelMessage[] = [
       { role: "system", content: PRIMARY_BASE_PROMPT },
       { role: "user", content: firstReminder },
+      { role: "assistant", content: "Checking the release process." },
+      {
+        role: "user",
+        content: renderReminderText(
+          "project/AGENTS.md\nUse the release branch.",
+        ),
+      },
     ];
     const nextMessages: ModelMessage[] = [
       ...firstMessages,
@@ -147,6 +154,11 @@ describe("prompt-cache wire contract", () => {
         content: "Validation fixed; integration tests remain.",
       },
       { role: "user", content: nextReminder },
+      { role: "assistant", content: "Checking updated release instructions." },
+      {
+        role: "user",
+        content: renderReminderText("project/AGENTS.md\nUse main."),
+      },
     ];
     const tools = createGoalTools({
       createGoal: vi.fn(),

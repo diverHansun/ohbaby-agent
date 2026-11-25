@@ -38,6 +38,7 @@ import { createExecutionMessageChannel } from "../../agents/subagents/execution-
 import { createSubagentMonitor } from "../../agents/subagents/monitor.js";
 import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js";
 import { createStorage } from "../../services/storage/index.js";
+import { createInstructionsReminderProvider } from "../../services/instructions/index.js";
 import { createEnvironmentReminderProvider } from "../../services/reminder/environment.js";
 import { createMcpCatalogReminderProvider } from "../../services/reminder/mcp-catalog.js";
 import { createReminderCollector } from "../../services/reminder/index.js";
@@ -172,6 +173,7 @@ import {
 } from "./host-local-environment.js";
 import {
   noticeFromCompactResult,
+  noticeFromInstructionWarning,
   noticeFromPromptSecurityFinding,
 } from "./prompt-context.js";
 import { formatUnknown } from "./runtime-format.js";
@@ -818,14 +820,17 @@ export async function createUiRuntimeComposition(
       }
       return resolveSubagentTaskKind(agentName);
     },
-    onSecurityFinding(finding) {
-      options.onNotice?.(noticeFromPromptSecurityFinding(finding));
-    },
   });
   const contextManager =
     options.contextManager ??
     createContextManager({
       collectReminders: createReminderCollector([
+        createInstructionsReminderProvider({
+          onSecurityFinding: (finding) =>
+            options.onNotice?.(noticeFromPromptSecurityFinding(finding)),
+          onWarning: (warning) =>
+            options.onNotice?.(noticeFromInstructionWarning(warning)),
+        }),
         createEnvironmentReminderProvider(),
         createModeReminderProvider(options.permissionState),
         createMcpCatalogReminderProvider(resolveMcpToolNames),

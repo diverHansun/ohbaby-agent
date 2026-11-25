@@ -9,16 +9,16 @@
 ```mermaid
 flowchart TD
   runtime["Runtime / ContextManager"] --> provider["createSystemPromptProvider().build(input)"]
-  provider --> resolvers["agent/task/roles/custom resolvers"]
-  provider --> runtimeText["buildRuntimeContext: environment + runtimePrompts"]
-  runtimeText --> part["initiating user model-context part"]
+  provider --> resolvers["agent/task/roles resolvers"]
+  runtime --> environment["detectEnvironment: execution directory"]
+  runtime --> reminders["instructions, environment, mode, MCP, todo, skill usage"]
+  reminders --> history["user 侧 system-reminder"]
   resolvers --> assemble["SystemPrompt.assemble(options)"]
   staticTemplates[".md static templates"] --> generatedTemplates["templates.generated.ts"]
   generatedTemplates --> assemble
   assemble --> runtimeLayers["runtime layer renderers"]
-  resolvers --> security["custom loader: scan before rendering"]
   assemble --> layers["ordered string[]"]
-  layers --> context["ContextManager joins system prompt"]
+  layers --> context["provider joins system prompt for ContextManager"]
 ```
 
 ---
@@ -38,7 +38,6 @@ SystemPrompt.assemble(options: AssembleOptions): string[]
 - `taskKind`: 可选任务类型。
 - `agentPromptAddon`: 可选代理附加提示。
 - `availableSubagentRoles`: 可选子代理角色列表，仅 primary 使用。
-- `customInstructions`: 带 scope 的全局／项目说明，primary 与 subagent 共用。
 
 输出：
 
@@ -53,28 +52,15 @@ createSystemPromptProvider(options?: SystemPromptProviderOptions): SystemPromptP
 数据流：
 
 1. 解析 agent name。
-2. 并发获取 taskKind 和主代理可用 subagent roles。
-3. 获取 agent prompt addon。
-4. 两类代理共用 loader，按 `projectRoot ?? directory` 加载说明。
-5. 调用 `SystemPrompt.assemble()`。
-6. 使用空行 join 为最终 system prompt 字符串。
+2. 并发获取 task kind、代理 addon 和主代理可用的 subagent roles。
+3. 调用 `SystemPrompt.assemble()`。
+4. 使用空行 join 为最终 system prompt 字符串。
 
-`buildRuntimeContext()` 另行按执行 `directory` 检测环境，并合入 `runtimePromptsProvider`。Context 只在新 run 提供 initiating user message 时把它幂等附着为 model-context part；有 snapshot 的后续步骤不会重建这段内容。
+`detectEnvironment()` 另行按执行 `directory` 检测环境。Context 在创建 run 快照时保存成功检测的环境，供 environment reminder 使用。
 
-### 2.3 loadCustomInstructions()
+### 2.3 文件指令的接入点
 
-```ts
-SystemPrompt.loadCustomInstructions(options): Promise<readonly CustomInstruction[]>
-```
-
-职责：
-
-- 每个范围只读取首个可用文件，返回 `{ scope, text }`。项目以会话项目根为边界；全局使用 `OHBABY_HOME` 或默认配置目录。
-- 支持 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md` fallback。
-- 保留每文件 50 × 1024 个 UTF-16 编码单元限制。无文件、空文件或普通读取失败时继续回退，无可用内容就跳过。
-- 扫描 prompt-like 内容并上报 finding。
-
-实现位于 `services/custom-instruction-loader.ts`。`layers/custom.ts` 只负责把已加载内容渲染为 `<custom_instructions>` prompt 片段。
+每次 `ContextManager.prepareTurn()` 通过 reminder collector 收集文件指令。主、子代理使用 `projectRoot ?? directory` 查找项目指令，同时加载全局配置目录中的指令。最新有效文件集合的 key 与当前活跃历史一致时，本步零追加。变化时追加新快照，所有来源失效时可追加一次清空声明。加载、渲染和诊断接口见[指令数据流](../../services/instructions/dfd-interface.md)。
 
 ---
 
@@ -82,12 +68,11 @@ SystemPrompt.loadCustomInstructions(options): Promise<readonly CustomInstruction
 
 ```text
 input
-  -> resolve primary task kind (default: agent)
+  -> use the stable primary agent task
   -> render base from prompts/primary/base.md
-  -> render primary task from prompts/primary/tasks/*.md
+  -> render prompts/primary/tasks/agent.md
   -> wrap agent addon
   -> render subagent roles when roles exist
-  -> render custom instructions
   -> compact empty layers
 ```
 
@@ -101,11 +86,10 @@ input
   -> render subagent base from prompts/subagents/base.md
   -> render subagent task from prompts/subagents/tasks/*.md
   -> wrap agent addon
-  -> render custom instructions (Global -> Project)
   -> compact empty layers
 ```
 
-subagent 读取相同项目／全局说明，保留自己的 base、task 与委派边界；不因此获得 primary 身份、角色目录或额外权限。
+subagent 保留自己的 base、task 与委派边界。文件指令快照追加到它自己的会话历史。
 
 ---
 
@@ -113,9 +97,9 @@ subagent 读取相同项目／全局说明，保留自己的 base、task 与委�
 
 custom instructions 与 MCP metadata 都可能来自外部来源：
 
-- custom instructions 在 loader 中扫描、截断并上报 warning/finding。
+- `services/instructions` 在渲染前调用本模块的 prompt-security 扫描器，并将 finding 交给通知管道。
 - MCP 工具在注册前检查名称、description、schema 的 JSON 结构、深度、大小和 prompt-like 内容；失败即拒绝。
-- runtime MCP 菜单仅接收已准入的精确本地名和固定说明，description/schema 只在显式 `select_tools` 后作为原生工具定义下发。
+- MCP catalog reminder 仅接收已准入的精确本地名和固定说明，description/schema 只在显式 `select_tools` 后作为原生工具定义下发。
 
 ---
 
@@ -124,12 +108,11 @@ custom instructions 与 MCP metadata 都可能来自外部来源：
 | 输入来源 | 进入点 | 说明 |
 | --- | --- | --- |
 | agents | `agentNameResolver`, `agentPromptResolver`, `availableSubagentRolesProvider` | 提供 agent 名称、addon 和 primary 可委派角色 |
-| ui-runtime | `taskKindResolver`, `runtimePromptsProvider` | 提供 task kind 与 scoped runtime 文本 |
-| filesystem | `loadCustomInstructions()` | 读取 custom instruction 文件 |
+| ui-runtime | `taskKindResolver` | 提供当前任务类型 |
 | environment | `detectEnvironment()` | 读取 cwd、platform、date、git 状态 |
 
 | 输出去向 | 输出 | 说明 |
 | --- | --- | --- |
 | context manager | `build()` 的 system prompt | 固定 run system 快照 |
-| context manager | `buildRuntimeContext()` 的文本 | 新 run initiating user 的 model-context part |
+| context manager | `detectEnvironment()` 的结果 | run 快照中的可选 environment 字段 |
 | tests/debug | `string[]` layer array | 便于断言层顺序 |

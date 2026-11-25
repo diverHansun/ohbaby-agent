@@ -1,10 +1,4 @@
-export type LayerType =
-  | "agent"
-  | "base"
-  | "custom"
-  | "environment"
-  | "runtime"
-  | "task";
+export type LayerType = "agent" | "base" | "environment" | "runtime" | "task";
 
 export type AgentKind = "primary" | "subagent";
 export type PrimaryTaskKind = "plan" | "agent";
@@ -25,19 +19,11 @@ export interface EnvironmentInfo {
   readonly osVersion?: string;
 }
 
-export type CustomInstructionScope = "global" | "project";
-
-export interface CustomInstruction {
-  readonly scope: CustomInstructionScope;
-  readonly text: string;
-}
-
 export interface AssembleOptions {
   readonly agentName: string;
   readonly agentPrompt?: string;
   readonly agentPromptAddon?: string;
   readonly isSubagent: boolean;
   readonly availableSubagentRoles?: readonly SubagentRolePromptInfo[];
-  readonly customInstructions?: readonly CustomInstruction[];
   readonly taskKind?: PromptTaskKind;
 }
