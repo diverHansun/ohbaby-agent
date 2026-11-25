@@ -49,7 +49,6 @@ function fixture(
   options: {
     failDetection?: boolean;
     changeClockDuringSummary?: boolean;
-    rule?: string;
   } = {},
 ): EnvironmentFixture {
   const bus = createBus();
@@ -69,12 +68,6 @@ function fixture(
     messageManager,
     now: () => clock.value,
     systemPromptProvider: createSystemPromptProvider({
-      customInstructionLoader: (input) => [
-        {
-          scope: "project",
-          text: `Rules for ${input.projectRoot ?? input.directory}: ${options.rule ?? "initial"}`,
-        },
-      ],
       environmentDetector: (directory) => {
         detections.push(directory);
         if (options.failDetection) throw new Error("environment unavailable");
@@ -219,23 +212,6 @@ describe("environment reminders", () => {
     expect(f.detections).toEqual(["/first", "/second"]);
   });
 
-  it("keeps system text frozen within the run and refreshes it on the next run", async () => {
-    const options = { rule: "first rule" };
-    const f = fixture(options);
-    const snapshot = await f.snapshot();
-    options.rule = "second rule";
-    const first = await f.prepare("first", snapshot);
-    await f.complete("first");
-    const reused = await f.prepare("reused", snapshot);
-    expect(first.request.messages[0]).toEqual(reused.request.messages[0]);
-    expect(JSON.stringify(reused.request.messages[0])).toContain("first rule");
-    expect(JSON.stringify(reused.request.messages[0])).not.toContain(
-      "second rule",
-    );
-    const next = await f.prepare("next", await f.snapshot());
-    expect(JSON.stringify(next.request.messages[0])).toContain("second rule");
-  });
-
   it.each([undefined, "child-legacy"])(
     "recovers scope %s without an initiating user and keeps old runtime bytes",
     async (scope) => {
@@ -294,7 +270,6 @@ describe("environment reminders", () => {
         `Current working directory: /${scope}`,
       );
       expect(f.drafts.at(-1)?.[0]?.text).not.toContain("OS version");
-      expect(JSON.stringify(request.request)).toContain("Rules for /project");
       expect(JSON.stringify(request.request)).not.toContain(
         "Current working directory: /execution/child",
       );

@@ -3,6 +3,7 @@ import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
 import {
   isContextSummaryPart,
   isModelContextPart,
+  isSystemReminderPart,
 } from "../../core/message/origin.js";
 import { readTokenUsageMetadata } from "../../core/message/token-usage-metadata.js";
 import type { MessageWithParts, Part } from "../../core/message/types.js";
@@ -71,7 +72,7 @@ function messageUsage(message: MessageWithParts): {
 }
 
 function exportPart(part: Part): ExportPart | undefined {
-  if (isModelContextPart(part)) return undefined;
+  if (isModelContextPart(part) || isSystemReminderPart(part)) return undefined;
   const compacted =
     part.time?.compacted === undefined ? {} : { compacted: true as const };
   switch (part.type) {

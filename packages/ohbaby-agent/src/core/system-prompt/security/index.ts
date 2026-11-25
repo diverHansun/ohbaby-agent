@@ -157,13 +157,17 @@ function findRuleMatches(
       ? rule.pattern.flags
       : `${rule.pattern.flags}g`,
   );
-  const seenLines = new Set<number>();
+  let cursor = 0;
+  let line = 1;
+  let lastReportedLine = 0;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(content)) !== null) {
-    const line = lineForIndex(content, match.index);
-    if (!seenLines.has(line)) {
-      seenLines.add(line);
+    for (; cursor < match.index; cursor += 1) {
+      if (content[cursor] === "\n") line += 1;
+    }
+    if (line !== lastReportedLine) {
+      lastReportedLine = line;
       matches.push({
         action: actionForSeverity(rule.severity),
         category: rule.category,
@@ -199,14 +203,4 @@ function summarizeAction(
     return "warn";
   }
   return "allow";
-}
-
-function lineForIndex(content: string, index: number): number {
-  let line = 1;
-  for (let cursor = 0; cursor < index; cursor += 1) {
-    if (content[cursor] === "\n") {
-      line += 1;
-    }
-  }
-  return line;
 }

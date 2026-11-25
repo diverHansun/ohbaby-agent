@@ -6,7 +6,7 @@
 
 ## 一、模块定位
 
-`system-prompt` 是系统提示词模板与分层组装中心，负责把静态模板、任务契约、代理附加提示和可选说明组装为稳定 system prompt，并单独提供运行环境及调用方的 runtime 文本。
+`system-prompt` 是系统提示词模板与分层组装中心，负责把静态模板、任务契约、代理附加提示和可委派角色组装为稳定 system prompt，并向 Context 提供运行环境。
 
 如果没有该模块：
 
@@ -33,28 +33,26 @@ primary prompt 的层顺序是：
 2. task
 3. agent addon
 4. subagent roles
-5. custom
 
 subagent prompt 的层顺序是：
 
 1. subagent base
 2. subagent task
 3. agent addon
-4. custom
 
-subagent roles 仅由主代理输出。environment 与 MCP 菜单经 `buildRuntimeContext()` 进入 initiating user model-context，独立于以上稳定层；MCP 菜单只含当前 scope 内已准入而未加载的精确本地名及固定说明。
+subagent roles 仅由主代理输出。environment 与 MCP 菜单由各自的 reminder provider 追加到 user 历史；MCP 菜单只含当前 scope 内已准入而未加载的精确本地名及固定说明。
 
 ### G3: 运行时上下文延迟注入
 
-静态模板不保存 cwd、date、git 状态、工具列表、MCP description/schema 或 custom instructions。运行时上下文由 layer renderer 在组装时注入。
+静态模板不保存 cwd、date、git 状态、工具列表、MCP description/schema 或 custom instructions。当前会话可用的文件指令、环境和工具目录由 reminder collector 按步收集。
 
-### G4: 安全加载用户自定义指令
+### G4: 保持文件指令的动态性
 
-主、子代理共用加载器，按会话项目根读取可选项目说明，同时保留可选全局说明。每个范围依次选择首个可用的 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md`，不合并别名。保留配置子目录、prompt-like 安全扫描和大小限制；缺失不新增警告。
+文件指令放在 user 侧的快照 reminder 中。同一 run 中，用户修改指令后，下一次模型请求可使用新内容，已发送的 system 前缀保持稳定。主、子代理各自在自己的活跃历史里判断是否需要追加快照。[文件指令职责](../../services/instructions/goals-duty.md)
 
 ### G5: 适配 ContextManager
 
-`createSystemPromptProvider()` 是面向 context manager 的适配器。`build()` 解析 agent name、task kind、roles、addon 和 custom instructions，再调用 `SystemPrompt.assemble()`；`buildRuntimeContext()` 独立生成环境和调用方 runtime 文本。
+`createSystemPromptProvider()` 是面向 context manager 的适配器。`build()` 解析 agent name、task kind、roles 和 addon，再调用 `SystemPrompt.assemble()`；`detectEnvironment()` 提供当前执行目录的环境信息。
 
 ### G6: 分离稳定行为策略与工具接口契约
 
@@ -74,11 +72,11 @@ subagent roles 仅由主代理输出。environment 与 MCP 菜单经 `buildRunti
 
 ### D3: 渲染运行时层
 
-渲染 subagent roles、custom instructions、agent addon 等稳定层；environment 与调用方 runtime 文本经独立方法输出，不在同一 run 内反复改写 system。
+渲染 subagent roles 和 agent addon。Context 在同一 run 中复用组装后的 system 快照。
 
-### D4: 安全加载 custom instructions
+### D4: 提供 prompt-security 扫描器
 
-读取 custom instruction 文件，处理不存在、读取失败、超长和可疑 prompt-like 内容。
+文件指令与 MCP 工具描述等调用方可使用扫描器识别可疑内容。文件读取、大小限制和告警去重由各调用方负责。
 
 ### D5: 提供 provider adapter
 
@@ -106,7 +104,7 @@ LLM provider、model 和 API 调用由服务层负责。本轮不实现 provider
 
 ### N5: 不提供长期记忆
 
-说明文件属于项目／全局约定。独立 MemoryLoader 和自动 `<memory>` 注入已移除；本模块不增加长期记忆存储或主动记忆工具。消息历史仍由 Context 投影。
+文件指令属于全局或项目约定，由 `services/instructions` 读取。Context 负责消息历史投影。
 
 ---
 

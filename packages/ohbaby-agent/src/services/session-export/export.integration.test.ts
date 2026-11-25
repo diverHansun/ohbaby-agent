@@ -1,7 +1,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { createRPC, type UiBackendClient } from "ohbaby-sdk";
 import { createBus } from "../../bus/index.js";
 import {
@@ -21,7 +29,8 @@ import {
 import { createDatabaseSessionStore } from "../session/database-store.js";
 import { getAgentPackageVersion } from "../../package-version.js";
 import type { Session } from "../session/types.js";
-import type { ExportHeader, ExportMessage } from "./types.js";
+import { SYSTEM_REMINDER_KIND } from "../../core/message/origin.js";
+import type { ExportDocument, ExportHeader, ExportMessage } from "./types.js";
 
 let directory: string;
 let dbPath: string;
@@ -178,6 +187,78 @@ describe("persistent session export", () => {
     expect(event).not.toHaveBeenCalled();
     unsubscribe();
   });
+  it("exports the visible conversation and omits hidden reminders in HTML and JSONL", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    });
+    const visible = "<system-reminder>Quoted in conversation</system-reminder>";
+    const user = await manager.createMessage({
+      sessionId: session.id,
+      role: "user",
+      agent: "build",
+    });
+    await manager.appendPart(user.id, { type: "text", text: visible });
+    const assistant = await manager.createMessage({
+      sessionId: session.id,
+      role: "assistant",
+      agent: "build",
+    });
+    await manager.appendPart(assistant.id, { type: "text", text: visible });
+    const hidden = await manager.createMessage({
+      sessionId: session.id,
+      role: "user",
+      agent: "build",
+    });
+    for (const reminderType of ["instructions", "environment"]) {
+      await manager.appendPart(hidden.id, {
+        type: "text",
+        text: `<system-reminder>Hidden ${reminderType}</system-reminder>`,
+        synthetic: true,
+        metadata: {
+          kind: SYSTEM_REMINDER_KIND,
+          reminderType,
+          key: reminderType,
+          anchorAssistantId: assistant.id,
+        },
+      });
+    }
+    const { direct } = await client();
+    const jsonl = await direct.exportSession({
+      sessionId: session.id,
+      format: "jsonl",
+    });
+    const [header, ...messages] = jsonl.content
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line) as ExportHeader | ExportMessage) as [
+      ExportHeader,
+      ...ExportMessage[],
+    ];
+    const html = await direct.exportSession({
+      sessionId: session.id,
+      format: "html",
+    });
+    const embedded =
+      /<script id="session-data" type="application\/json">\s*([A-Za-z0-9+/=]+)\s*<\/script>/.exec(
+        html.content,
+      );
+    assert(embedded?.[1], "HTML export must include the session payload");
+    const document = JSON.parse(
+      Buffer.from(embedded[1], "base64").toString("utf8"),
+    ) as ExportDocument;
+    expect(document).toEqual({ header, messages });
+    expect([
+      jsonl.messageCount,
+      html.messageCount,
+      header.stats.messageCount,
+    ]).toEqual([2, 2, 2]);
+    expect(messages.map(({ role, parts }) => ({ role, parts }))).toEqual([
+      { role: "user", parts: [{ type: "text", text: visible }] },
+      { role: "assistant", parts: [{ type: "text", text: visible }] },
+    ]);
+  });
+
   it("keeps stable failures across the in-process RPC boundary", async () => {
     await createDatabaseSessionStore().insert({
       ...session,

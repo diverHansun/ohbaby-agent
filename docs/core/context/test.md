@@ -86,8 +86,8 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 ### 4.5 说明文件与 prefix/cache
 
-- global/project `OHBABY.md` 路径边界、失败降级、run 内稳定；
-- 主、子共用说明，选中文件只注入一次，历史字面 `<memory>` 不改写；
+- [全局与项目指令](../../services/instructions/test.md)的根目录边界、读错回退、run 内追加与系统提示词字节稳定；
+- 主、子代理各自在自己的活跃历史中接收完整指令快照；有效内容相同则跳过，压缩移除快照后可在当步重建。用户或助手正文中的字面标签照常保留；
 - runtime metadata 不进入 UI/title/export；摘要请求继承普通 prepared 中模型可见的 runtime context，不额外复制或重建；
 - 同 tool epoch wire order 稳定，有意 epoch 变化只失效一次后重新稳定；
 - cache key 基于 session + scope，tool epoch 不写入 key；

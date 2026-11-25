@@ -5,6 +5,7 @@ import { arrangeReminderHistory } from "../../core/context/reminder-history.js";
 
 export type ReminderAudience = "primary" | "subagent" | "both";
 export const REMINDER_ORDER = [
+  "instructions",
   "environment",
   "mode",
   "mcp-catalog",
@@ -14,6 +15,8 @@ export const REMINDER_ORDER = [
 export type ReminderType = (typeof REMINDER_ORDER)[number];
 
 export interface ReminderContext {
+  readonly directory?: string;
+  readonly projectRoot?: string;
   readonly sessionScratchDirectory?: string;
   readonly environment?: EnvironmentInfo;
   readonly sessionId: string;
@@ -39,6 +42,7 @@ export interface ReminderProvider {
   readonly audience: ReminderAudience;
   collect(
     context: ReminderContext,
+    previousKey?: string,
   ): Promise<ReminderBody | undefined> | ReminderBody | undefined;
 }
 
@@ -111,7 +115,7 @@ export function createReminderCollector(
     const bodies = await Promise.all(
       eligible.map(async (provider) => {
         try {
-          return await provider.collect(context);
+          return await provider.collect(context, latest.get(provider.type));
         } catch {
           return undefined;
         }

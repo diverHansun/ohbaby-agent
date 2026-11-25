@@ -27,10 +27,11 @@ interface ContextIdentity {
 ```typescript
 interface AgentRunPromptSnapshot {
   readonly systemPrompt: string
+  readonly environment?: EnvironmentInfo
 }
 ```
 
-值对象，run-local immutable，不持久化。primary 与 subagent 在 initiating turn 读取包含可选全局／项目说明的 systemPrompt。文件变化只影响下一 run。
+该快照由 primary 或 subagent 在 run 开始时创建，包含稳定的 system prompt 和可选的环境信息，仅保存在该 run 的内存中。文件指令由 [instructions 服务](../../services/instructions/dfd-interface.md)在每次 `prepareTurn()` 时读取。有效内容变化时，Context 将新的完整指令快照追加到本会话的 user 侧历史，同一 run 的下一次模型请求即可收到。
 
 ### 2.2 `AssembledContext`
 

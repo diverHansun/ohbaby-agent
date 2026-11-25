@@ -153,7 +153,7 @@ Configure MCP servers globally or per project under `.ohbaby/mcp/`. Skills are f
 
 <br>
 
-ohbaby reads one global file from `~/.ohbaby/` and one project file from the project root (or `<project>/.ohbaby/`). In each place it takes the first it finds: `OHBABY.md`, then `AGENTS.md`, then `CLAUDE.md`. The main agent and subagents both read them, and the project file takes precedence. These files are instructions, not long-term memory.
+ohbaby reads both `AGENTS.md` and `CLAUDE.md` from `~/.ohbaby/` and the project root. The main agent and subagents receive the same file instructions in a low-priority reminder. Project rules take precedence over global rules. Edits take effect on the next model request.
 
 </details>
 

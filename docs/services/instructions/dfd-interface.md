@@ -115,7 +115,7 @@ flowchart TD
 ### 3.3 `createInstructionsReminderProvider(options)`（Reminder 适配器工厂）
 - **语义**：创建可注册进 `createReminderCollector([...])` 的 `ReminderProvider`。
 - **静态契约**：`type: "instructions"`、`kind: "snapshot"`、`audience: "both"`。
-- **输入**：`homeDirectory?`、`maxFileBytes?`、`maxTotalBytes?`、`securityScanner?`、`onSecurityFinding?`、`onWarning?`（签名同 §3.1）、`loader?`（测试替换用）。
+- **输入**：`homeDirectory?`、`maxFileBytes?`、`maxTotalBytes?`、`securityScanner?`、`onSecurityFinding?`、`onWarning?`（签名同 §3.1）。
 - **输出**：`ReminderProvider` 实例（内部按项目根记一份当前诊断集合用于去重，另持有一份 `lastGoodReads` 传给 Loader；都不要求调用方接入额外销毁钩子）。
 
 ### 3.4 上游扩展契约（对 `services/reminder`、`core/context` 与 `core/lifecycle` 的最小依赖）

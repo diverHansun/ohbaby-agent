@@ -26,8 +26,7 @@
 │   ├── Session 2
 │   └── ...
 │
-└── 关联一个 OHBABY.md（由 Memory 模块管理）
-    └── {rootPath}/.ohbaby/OHBABY.md
+└── 项目根可包含 AGENTS.md 和 CLAUDE.md
 ```
 
 ### 概念 2: Global Project（全局项目）
@@ -51,7 +50,7 @@
 **特点**：
 - 不持久化，每次调用动态生成
 - 结构简单，仅包含必要字段
-- 供调用方（Session、Memory、Config）使用
+- 供调用方（Session、Config）使用
 
 ---
 
@@ -157,8 +156,8 @@ export const GLOBAL_PROJECT_ID = 'global'
 
 | 数据 | 创建者 | 使用者 | 说明 |
 |------|--------|--------|------|
-| ProjectInfo.id | Project 模块 | Session、Memory、Config | 用于关联和分类 |
-| ProjectInfo.rootPath | Project 模块 | Memory、Config | 用于定位项目级文件 |
+| ProjectInfo.id | Project 模块 | Session、Config | 用于关联和分类 |
+| ProjectInfo.rootPath | Project 模块 | Config、instructions | 用于定位项目级文件 |
 | ProjectInfo.vcs | Project 模块 | 调用方（可选） | 用于判断项目类型 |
 
 ---
@@ -259,20 +258,9 @@ const session = await SessionManager.create({
 })
 ```
 
-### 与 Memory 模块
+### 项目根与文件指令
 
-```typescript
-// Memory 使用 Project 返回的 rootPath
-async function loadProjectMemory(directory: string): Promise<string | null> {
-  const project = await Project.fromDirectory(directory)
-  
-  // 构建 OHBABY.md 路径
-  const memoryPath = path.join(project.rootPath, '.ohbaby', 'OHBABY.md')
-  
-  // 读取文件
-  return await fs.readFile(memoryPath, 'utf-8').catch(() => null)
-}
-```
+[指令服务](../services/instructions/dfd-interface.md)通过 reminder 的项目根读取项目指令，子代理使用所属会话的项目根。
 
 ### 与 Config 模块
 

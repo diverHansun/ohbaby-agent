@@ -30,6 +30,7 @@ Rules:
 - Preserve exact file paths, function names, command names, errors, model names, and numbers.
 - Preserve all user intent, but summarize long pasted logs or code instead of copying them wholesale.
 - Keep bullets terse and factual; prefer short references over restating code the next agent can reread.
+- Do not copy or restate external instruction files in the checkpoint. The host supplies the current instructions separately.
 - Never include credentials, tokens, passwords, secret values, or private keys.
 - Do not mention summarization, compression, compacting, or that this is a summary.
 - Do not invent completed work or test results.`;

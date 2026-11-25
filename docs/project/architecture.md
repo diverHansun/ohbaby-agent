@@ -11,7 +11,7 @@
 Project 模块采用**简单函数式架构**，无状态、无持久化：
 
 ```
-                    调用方（Session、Memory、Config）
+                    调用方（Session、Config）
                                 │
                                 ▼
                     ┌───────────────────┐
@@ -305,29 +305,25 @@ debugLog('project', `Project ID: ${projectId}`)
 ├── {projectRoot}/.ohbaby/
 └── 用于存储：项目级设置
 
-项目级记忆文件：
-├── {projectRoot}/OHBABY.md
-└── 用于存储：项目级 AI 记忆（放在项目根目录，便于发现和版本控制）
+项目根指令文件：
+├── {projectRoot}/AGENTS.md
+└── {projectRoot}/CLAUDE.md
 ```
 
 ### 8.2 Project 模块的角色
 
-Project 模块只负责返回 `projectRoot`，配置目录的具体路径由调用者（Config、Memory 模块）自行拼接：
+Project 模块只负责返回 `projectRoot`，配置目录的具体路径由调用者（如 Config 模块）自行拼接：
 
 ```typescript
 // Config 模块使用
 const projectRoot = (await Project.fromDirectory(cwd)).rootPath
 const projectConfigPath = path.join(projectRoot, '.ohbaby', 'settings.json')
 
-// Memory 模块使用（OHBABY.md 在项目根目录，不在 .ohbaby/ 内）
-const projectRoot = (await Project.fromDirectory(cwd)).rootPath
-const memoryFilePath = path.join(projectRoot, 'OHBABY.md')
 ```
 
 **说明**：
 - 项目配置（settings.json、agents/*.json）存放在 `.ohbaby/` 目录
-- 项目记忆（OHBABY.md）存放在项目根目录，与 `.gitignore` 同级
-- 这样设计使 OHBABY.md 更易被用户发现和编辑，也便于加入版本控制与团队共享
+- [指令服务](../services/instructions/dfd-interface.md)在会话项目根读取文件，为主代理和子代理提供项目规则。
 
 ---
 

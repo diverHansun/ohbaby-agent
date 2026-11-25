@@ -14,7 +14,7 @@
 
 **如果没有这个模块**：
 - Session 模块需要自己实现项目识别逻辑，职责不清
-- Memory 模块无法确定项目级 OHBABY.md 文件的位置
+- 子代理在子目录执行时仍需要所属会话的项目根来定位指令文件
 - 项目 ID 生成逻辑分散在多处，难以保持一致性
 - 非 Git 目录的处理缺乏统一策略
 
@@ -133,7 +133,7 @@ Project 模块不知道项目下有哪些会话。如需查询，调用者应直
 | 模块 | 关系 | 说明 |
 |------|------|------|
 | Session | 被依赖 | Session.create 调用 Project.fromDirectory 获取 projectId |
-| Memory | 被依赖 | Memory 使用 projectRoot 定位项目级 OHBABY.md |
+| instructions | 间接使用 | [指令服务](../services/instructions/dfd-interface.md)通过提醒上下文取得会话项目根 |
 | Config | 并行 | Config 使用 projectRoot 定位项目级配置文件 |
 | Storage | 无依赖 | Project 模块不持久化数据 |
 | lifecycle | 间接 | lifecycle 通过 Session 间接使用 projectId |

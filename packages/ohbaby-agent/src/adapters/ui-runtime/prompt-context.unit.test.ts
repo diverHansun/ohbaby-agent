@@ -30,6 +30,7 @@ vi.mock("ohbaby-llm", () => ({
 import {
   createContextSummaryClient,
   noticeFromCompactResult,
+  noticeFromInstructionWarning,
 } from "./prompt-context.js";
 
 function streamWithContent(
@@ -161,6 +162,34 @@ describe("createContextSummaryClient", () => {
     expect(result.text).not.toContain("summary-secret-canary");
     expect(result.text).toContain("[redacted]");
   });
+});
+
+describe("noticeFromInstructionWarning", () => {
+  it.each([
+    ["global", "read-error", "HOME_UNRESOLVED", "global instructions skipped"],
+    ["/repo/AGENTS.md", "read-error", "EBUSY", "AGENTS.md skipped"],
+    ["/repo/CLAUDE.md", "rejected", "NOT_REGULAR_FILE", "CLAUDE.md skipped"],
+    ["/repo/AGENTS.md", "truncated", "FILE_LIMIT", "AGENTS.md truncated"],
+    ["/repo/CLAUDE.md", "budget-omitted", "TOTAL_LIMIT", "CLAUDE.md skipped"],
+  ] as const)(
+    "maps %s %s to a workspace warning",
+    (sourcePath, kind, code, title) => {
+      expect(
+        noticeFromInstructionWarning({
+          sourcePath,
+          kind,
+          code,
+          message: "File warning.",
+        }),
+      ).toEqual({
+        key: `instructions:${sourcePath}:${kind}`,
+        level: "warning",
+        source: sourcePath,
+        message: "File warning.",
+        title,
+      });
+    },
+  );
 });
 
 describe("noticeFromCompactResult", () => {

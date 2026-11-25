@@ -32,14 +32,14 @@ Context 不访问 MCP registry、UI state 或 Provider transport；这些 adapte
 1. UI/CLI 接纳 prompt，创建 initiating user message
 2. Lifecycle 解析 agent identity、ordered tools、permission/MCP epoch
 3. Context.createRunPromptSnapshot()
-   3a. SystemPromptProvider.build(projectRoot, directory)；主、子共用说明加载
-   3b. dynamic runtime context append-if-absent 到 initiating message
+   3a. SystemPromptProvider.build(input) 组装稳定的 system prompt
+   3b. detectEnvironment(input) 成功时一并保存环境信息
 4. Context.prepareTurn()
-   4a. assemble scoped active history
+   4a. assemble scoped active history，并以 projectRoot ?? directory 收集本步文件指令 reminder
    4b. serialize messages + tools；固定 resolved request settings 与 inputIds
    4c. measure ContextUsage
    4d. decideCompactionRung()
-   4e. 普通与摘要共用完整历史投影；如需要，从 prepared 分叉 summary，模式 A/B 校验后原子提交，再重新 assemble/measure
+   4e. 普通与摘要共用完整历史投影；如需要，从 prepared 分叉 summary，模式 A/B 校验后原子提交，再按压缩后的活跃历史重新收集 reminder 并计量
    4f. freeze PreparedModelRequest
 5. onRequestMeasured(request)
 6. Lifecycle 在压缩失败／无收益时终止本次运行，否则把同一 request 交给 Provider adapter
@@ -166,7 +166,7 @@ createRunPromptSnapshot(input: CreateRunPromptSnapshotInput):
   Promise<AgentRunPromptSnapshot>
 ```
 
-`initiatingUserMessageId` 只允许在新 run 附着一次 runtime context。
+返回稳定的 system prompt 与可选的环境信息。文件指令由 `prepareTurn()` 的 reminder collector 独立收集。
 
 ### 7.2 Assembly
 
@@ -178,7 +178,7 @@ assemble(
 ): Promise<AssembledContext>
 ```
 
-调用方必须显式提供 `isSubagent`、`toolNames` 和可选 scope/snapshot。`projectRoot` 取自已有会话；无快照的 assemble、prepareTurn、compact 同样透传。`directory` 保留执行环境语义，旧调用未提供项目根时才回退该目录。
+调用方必须显式提供 `isSubagent`、`toolNames` 和可选 scope/snapshot。`directory` 表示执行目录。准备模型请求时，`prepareTurn()` 将已有会话的 `projectRoot` 传给 reminder collector；省略项目根时，文件指令从 `directory` 读取。
 
 ### 7.3 Measurement
 

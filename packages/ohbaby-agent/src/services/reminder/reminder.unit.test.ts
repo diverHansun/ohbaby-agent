@@ -112,8 +112,15 @@ describe("reminder collector", () => {
         audience: "both",
         collect: (): ReminderBody => ({ key: "env", text: "env" }),
       },
+      {
+        type: "instructions",
+        kind: "snapshot",
+        audience: "both",
+        collect: (): ReminderBody => ({ key: "files", text: "files" }),
+      },
     ]);
     expect((await collect(context)).map((draft) => draft.type)).toEqual([
+      "instructions",
       "environment",
       "todo",
       "skill-usage",
@@ -122,7 +129,7 @@ describe("reminder collector", () => {
       (
         await collect({ ...context, contextScopeId: "child", isSubagent: true })
       ).map((draft) => draft.type),
-    ).toEqual(["environment", "mode", "skill-usage"]);
+    ).toEqual(["instructions", "environment", "mode", "skill-usage"]);
     expect(seen).toEqual(["primary", "child"]);
   });
   it("keeps applied event facts across compaction but ignores orphaned and invisible failure owners", async () => {
@@ -177,12 +184,16 @@ describe("reminder collector", () => {
     ).toHaveLength(1);
   });
   it("compares snapshots to the latest effective key and can reissue retired snapshots", async () => {
+    const keys: (string | undefined)[] = [];
     const collect = createReminderCollector([
       {
         type: "skill-usage",
         kind: "snapshot",
         audience: "both",
-        collect: (): ReminderBody => ({ key: "a", text: "skill" }),
+        collect: (_, previousKey): ReminderBody => {
+          keys.push(previousKey);
+          return { key: "a", text: "skill" };
+        },
       },
     ]);
     expect(
@@ -197,6 +208,7 @@ describe("reminder collector", () => {
     expect(
       await collect({ ...context, fullHistory: [reminder("a"), owner] }),
     ).toHaveLength(1);
+    expect(keys).toEqual(["a", "b", undefined]);
   });
 });
 
