@@ -93,7 +93,7 @@ packages/ohbaby-agent/src/core/context/
 
 ### 4.1 Run snapshot
 
-`AgentRunPromptSnapshot { systemPrompt }` 在 initiating turn 创建，在同一 run 内保持稳定。目录、custom instruction 或 `OHBABY.md` 的变化只进入下一 run。
+`AgentRunPromptSnapshot { systemPrompt, environment? }` 在 initiating turn 创建，在同一 run 内保持稳定。每一步由[指令服务](../../services/instructions/dfd-interface.md)读取当前文件。内容变化时在用户侧追加完整快照，同一 run 内的下一次请求即可生效。
 
 ### 4.2 Prepared request
 
@@ -190,7 +190,7 @@ capacityPressure = ordinaryInput >= ordinaryInputBudget
 | Context 存储范式 | 继续使用 MessageStore + 窄端口 | 不获得全量 event sourcing 的统一 replay，但避免高迁移复杂度 |
 | Compaction 修复 | `commitCompaction()` atomic port | 不增加 durable marker；当前 SQLite/in-memory 都能提供原子边界 |
 | 并发控制 | per-scope lane + atomic message/part snapshot precondition | 底层 Context mutation 按 scope 串行，手动请求在外层遇忙拒绝；跨 manager 冲突失败，不增加全局锁或持久化 revision |
-| 项目／全局说明 | 经 SystemPromptProvider 加载并进入 run snapshot | 移除重复 memory 路线，不增加长期记忆或 RAG |
+| 项目／全局说明 | 每步收集 user 侧 instructions reminder，与本会话活跃历史中的 key 比较 | 变更随当前请求追加，既有 system 和历史前缀保持稳定 |
 | Provider window | 声明 budget + calibration + bounded recovery | 不持久化 observed adaptive ceiling |
 
 这些决策优先正确性、可靠性和隔离性；复杂度必须由可复现失败证据挣得。

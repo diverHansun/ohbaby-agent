@@ -1616,6 +1616,8 @@ function bindModel(
     )
       return [];
     return options.collectReminders({
+      directory: input.directory,
+      projectRoot: input.projectRoot,
       sessionScratchDirectory: input.sessionScratchDirectory,
       environment:
         input.promptSnapshot?.environment === undefined

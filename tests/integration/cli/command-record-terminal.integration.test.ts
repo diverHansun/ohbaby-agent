@@ -319,12 +319,23 @@ try {
       const records = log
         .trim()
         .split("\n")
-        .map((line) => JSON.parse(line) as { readonly event?: string });
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              readonly event?: string;
+              readonly component?: string;
+            },
+        );
+      expect(
+        records.some(
+          (record) =>
+            record.event?.startsWith("migration.") ||
+            record.component === "migration",
+        ),
+      ).toBe(false);
       expect(records.map((record) => record.event)).toEqual(
         expect.arrayContaining([
           "diagnostics.started",
-          "migration.config.completed",
-          "migration.data.completed",
           "server.started",
           "server.stopped",
         ]),

@@ -6,22 +6,20 @@
 
 ## 一、架构概览
 
-`system-prompt` 采用分层组装架构。静态模板保存在 `.md` 文件中，运行时上下文由 layer renderer 注入，最终由 `SystemPrompt.assemble()` 组合为有序 `string[]`。
+`system-prompt` 采用分层组装架构。静态模板保存在 `.md` 文件中，代理角色与附加提示按当前配置渲染，最终由 `SystemPrompt.assemble()` 组合为有序 `string[]`。
 
 ```mermaid
 flowchart TD
   caller["ContextManager / Agents / UI Runtime"] --> provider["createSystemPromptProvider()"]
-  provider --> loader["services/custom-instruction-loader"]
-  loader --> files["OHBABY.md / AGENTS.md / CLAUDE.md"]
-  loader --> customData["loaded custom instructions"]
   provider --> assembler["SystemPrompt.assemble()"]
-  customData --> assembler
   prompts["prompts/*.md"] --> generated["templates.generated.ts"]
   generated --> assembler
-  assembler --> layers["layers/* renderers"]
-  provider --> runtime["buildRuntimeContext: environment + runtimePrompts"]
-  runtime --> initiating["initiating user model-context part"]
-  layers --> custom["custom instructions"]
+  assembler --> layers["base、task、addon、roles"]
+  caller --> reminders["createReminderCollector()"]
+  instructions["services/instructions"] --> reminders
+  provider --> environment["detectEnvironment()"]
+  environment --> reminders
+  reminders --> history["user 侧 system-reminder"]
   assembler --> output["string[] prompt layers"]
 ```
 
@@ -36,11 +34,8 @@ packages/ohbaby-agent/src/core/system-prompt/
   types.ts
   layers/
     base.ts
-    custom.ts
     environment.ts
     index.ts
-  services/
-    custom-instruction-loader.ts
   prompts/
     templates.generated.ts
     primary/
@@ -76,24 +71,20 @@ packages/ohbaby-agent/src/core/system-prompt/
 `layers/` 只放运行时层 renderer：
 
 - `base.ts`: 返回 primary base prompt（`generateBasePrompt`）。
-- `environment.ts`: 检测并渲染 cwd、platform、date、git 状态；完整环境还含 OS version，子代理使用 minimal 形式。输出由 `buildRuntimeContext()` 进入 initiating user 的 model-context part，不拼入稳定 system。
-- `custom.ts`: 按 scope 固定渲染 Global → Project，附上优先规则，不做路径解析、文件 I/O 或安全扫描。
+- `environment.ts`: 检测并渲染 cwd、platform、date、git 状态；完整环境还含 OS version，子代理使用 minimal 形式。Context 为 run 保存环境快照，environment reminder 在 user 侧使用该快照。
 
-### 2.3 services
+### 2.3 文件指令
 
-`services/` 放跨层运行时能力：
-
-- `custom-instruction-loader.ts`: 读取项目/全局 custom instruction 文件，处理 fallback、截断、安全扫描和 warning/finding 上报。
+`services/instructions` 在每次准备模型请求时读取全局与项目指令。首份快照、内容变更和清空声明由 reminder collector 持久化到 user 历史；相同快照不重复追加。详见[指令数据流](../../services/instructions/dfd-interface.md)。
 
 ### 2.4 assembler
 
 `assembler.ts` 是组装入口。它负责：
 
 - 校验 `agentName` 与 `isSubagent`。
-- 解析 primary/subagent task kind。
+- 主代理使用固定 agent 任务契约，子代理按 task kind 或 agent name 选择任务模板。
 - 包装 `agentPromptAddon` 为 `<agent_prompt_addon>`。
 - 用运行时 role 列表替换 `subagent-roles.md` 中的 `{{ROLES}}` 占位符（函数式替换，避免 `$` 序列被解释）。
-- `buildRuntimeContext()` 组合环境和调用方提供的 runtime 文本；UI composition 当前在这里提供 scoped MCP 精确名称菜单。
 - 按固定层顺序返回 `string[]`。
 
 ---
@@ -103,16 +94,16 @@ packages/ohbaby-agent/src/core/system-prompt/
 primary prompt：
 
 ```text
-base -> primary task -> agent addon -> subagent roles -> custom
+base -> primary task -> agent addon -> subagent roles
 ```
 
 subagent prompt：
 
 ```text
-subagent base -> subagent task -> agent addon -> custom
+subagent base -> subagent task -> agent addon
 ```
 
-subagent roles 只在主代理有可用 role 时出现。环境和 scoped MCP 菜单属于独立 runtime 文本，由 Context 在新 run 有 initiating user message 时幂等附着；恢复 run 缺少 initiating message 时不重复附着。MCP 菜单只含精确本地名和固定说明，description/schema 仅在 `select_tools` 成功后通过原生 tools 发送。本批保持该现有行为，尚未接入 system-reminder。
+subagent roles 只在主代理有可用 role 时出现。动态文件指令、环境和 scoped MCP 菜单由各自的 reminder provider 提供。MCP 菜单只含精确本地名和固定说明，description/schema 在 `select_tools` 成功后随原生 tools 发送。
 
 ---
 
@@ -120,11 +111,11 @@ subagent roles 只在主代理有可用 role 时出现。环境和 scoped MCP �
 
 ### Facade
 
-`SystemPrompt` 是模块 facade，暴露 `assemble()`、`getAgentPrompt()`、`getSubagentBase()`、`getEnvironment()`、`getPrimaryBase()`、`loadCustomInstructions()`。
+`SystemPrompt` 是模块 facade，暴露 `assemble()`、`getAgentPrompt()`、`getSubagentBase()`、`getEnvironment()`、`getPrimaryBase()`。
 
 ### Adapter
 
-`createSystemPromptProvider()` 将 context manager 的 `SystemPromptProviderInput` 适配为 `AssembleOptions`。主、子代理共用说明加载器，说明目录使用 `projectRoot ?? directory`；环境检测仍使用执行 `directory`。
+`createSystemPromptProvider()` 将 context manager 的 `SystemPromptProviderInput` 适配为 `AssembleOptions`。provider 还提供 `detectEnvironment()`，使用执行 `directory` 检测环境。
 
 ### Layered Composition
 
@@ -137,8 +128,8 @@ subagent roles 只在主代理有可用 role 时出现。环境和 scoped MCP �
 | 模块 | 关系 | 边界 |
 | --- | --- | --- |
 | agents | 调用/提供 addon | agent runtime prompt 只能作为 addon，不替换默认 identity/task |
-| context | 消费 provider | 固定 run 的 systemPrompt 快照并投影消息历史；无独立 memory 注入 |
-| ui-runtime | 提供 task/tool/environment resolver | permission mode 与工具注册不属于 system-prompt |
+| context | 消费 provider | 固定 run 的 systemPrompt 和可选 environment 快照，并投影消息历史 |
+| ui-runtime | 提供代理与任务 resolver | permission mode 与工具注册不属于 system-prompt |
 | mcp integration | 对外部 MCP metadata 做准入并维护 loaded 集 | 失败、不可解析或不安全 metadata 不得进入公告或工具 schema |
 | tool-scheduler | 提供工具名/工具描述 | system-prompt 不执行工具、不审批权限 |
 | config/llm | 无直接依赖 | model/provider 选择不属于本模块 |

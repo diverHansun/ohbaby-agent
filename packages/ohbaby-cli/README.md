@@ -153,7 +153,7 @@ Configure MCP servers globally or per project under `.ohbaby/mcp/`. Skills are f
 
 <br>
 
-ohbaby reads one global file from `~/.ohbaby/` and one project file from the project root (or `<project>/.ohbaby/`). In each place it takes the first it finds: `OHBABY.md`, then `AGENTS.md`, then `CLAUDE.md`. The main agent and subagents both read them, and the project file takes precedence. These files are instructions, not long-term memory.
+ohbaby reads both `AGENTS.md` and `CLAUDE.md` from `~/.ohbaby/` and the project root. The main agent and subagents receive the same file instructions in a low-priority reminder. Project rules take precedence over global rules. Edits take effect on the next model request.
 
 </details>
 
@@ -169,8 +169,6 @@ Runtime data lives in the platform data directory:
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/ohbaby`
 - macOS: `~/Library/Application Support/ohbaby`
 - Windows: `%LOCALAPPDATA%\ohbaby`
-
-On first start, ohbaby copies legacy `.ohbaby-agent` configuration and `ohbaby-agent` data to the new locations and leaves the originals in place. New paths win on conflicts, and legacy paths are still read for one minor release. If a running daemon blocks the SQLite migration, run `ohbaby serve stop` and start again.
 
 </details>
 

@@ -1,7 +1,6 @@
 import type { UiSettingsSearch, UiSettingsSearchUpdate } from "ohbaby-sdk";
 import { redactSettingsUrl } from "../../secrets/redaction.js";
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
 import { z } from "zod";
 import { getGlobalEnvPath } from "../../../utils/project-env.js";
 import {
@@ -9,11 +8,7 @@ import {
   runtimeEnvValue,
   setManagedRuntimeEnv,
 } from "../../../utils/managed-runtime-env.js";
-import {
-  resolveLegacyOhbabyHome,
-  resolveOhbabyHome,
-  resolveReadPathWithLegacy,
-} from "../../../paths/index.js";
+import { getModelJsonPath } from "../../llm/loaders.js";
 import {
   coordinateModelConfig,
   readOptionalConfigFile,
@@ -25,11 +20,7 @@ import {
 } from "../../llm/env-file.js";
 import { collectCredentialReferences } from "../../secrets/references.js";
 import { writeFileAtomically } from "../../secrets/atomic-file.js";
-import {
-  getSearchJsonPath,
-  loadSearchJson,
-  resolveSearchJsonPath,
-} from "./loaders.js";
+import { getSearchJsonPath, loadSearchJson } from "./loaders.js";
 import { SearchConfigManager } from "./manager.js";
 import { validateSearchJson } from "./validation.js";
 import {
@@ -66,10 +57,8 @@ export function readSearchSettings(
   options: SearchSettingsWriteOptions = {},
 ): Promise<UiSettingsSearch> {
   return coordinateModelConfig(undefined, async () => {
-    const path = await resolveSearchJsonPath(
-      options.searchJsonPath,
-      options.homeDirectory,
-    );
+    const path =
+      options.searchJsonPath ?? getSearchJsonPath(options.homeDirectory);
     const config = validateSearchJson((await loadSearchJson(path)) ?? {}, path);
     const values = parseEnvFile(
       (await readOptionalConfigFile(getGlobalEnvPath(options.homeDirectory))) ??
@@ -102,12 +91,8 @@ export function updateSearchSettings(
     const patch = SearchSettingsPatchSchema.parse(input);
     const destination =
       options.searchJsonPath ?? getSearchJsonPath(options.homeDirectory);
-    const readPath = await resolveSearchJsonPath(
-      options.searchJsonPath,
-      options.homeDirectory,
-    );
-    const raw = (await loadSearchJson(readPath)) ?? {};
-    const existing = validateSearchJson(raw, readPath);
+    const raw = (await loadSearchJson(destination)) ?? {};
+    const existing = validateSearchJson(raw, destination);
     const { apiKey, defaults, baseUrl, ...fields } = patch;
     const next: Record<string, unknown> & {
       provider: "tavily";
@@ -122,10 +107,7 @@ export function updateSearchSettings(
       next.defaults = { ...(raw as SearchJsonConfig).defaults, ...defaults };
     if (baseUrl === null) delete next.baseUrl;
     else if (baseUrl !== undefined) next.baseUrl = baseUrl;
-    const modelPath = await resolveReadPathWithLegacy(
-      join(resolveOhbabyHome(options), "model.json"),
-      [join(resolveLegacyOhbabyHome(options), "model.json")],
-    );
+    const modelPath = getModelJsonPath(options.homeDirectory);
     const modelContent = await readOptionalConfigFile(modelPath);
     const modelReferences = collectCredentialReferences(
       modelContent === undefined ? {} : JSON.parse(modelContent),

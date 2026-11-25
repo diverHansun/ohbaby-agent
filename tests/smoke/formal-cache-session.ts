@@ -251,7 +251,6 @@ export async function createFormalCacheSession(
     const readFilePath = join(workdir, "cache-note.md");
     await mkdir(home);
     await mkdir(workdir);
-    await writeFile(join(home, ".skip-auto-migrate"), "");
     await writeFile(
       readFilePath,
       "Project: Cedar\nRelease: 17\nOwner: Lin\nConstraint: read only; no files may be changed.\n",

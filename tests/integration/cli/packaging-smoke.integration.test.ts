@@ -678,7 +678,6 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   await mkdir(ohbabyHome, { recursive: true });
   await mkdir(xdgDataHome, { recursive: true });
   await mkdir(cliCwd, { recursive: true });
-  await writeFile(join(ohbabyHome, ".skip-auto-migrate"), "", "utf8");
 
   if (process.env.OHBABY_TEST_SKIP_PACKAGE_BUILD !== "1") {
     const buildResult = await runCommand({

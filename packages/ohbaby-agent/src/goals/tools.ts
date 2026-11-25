@@ -103,7 +103,7 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
       type: "object",
     },
     source: "builtin",
-    category: "memory",
+    category: "internal-state",
     async execute(params, context): Promise<ToolExecutionResult> {
       const objective = requireString(params.objective, "objective");
       const completionCriterion = optionalString(
@@ -167,7 +167,7 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
       type: "object",
     },
     source: "builtin",
-    category: "memory",
+    category: "internal-state",
     async execute(params, context): Promise<ToolExecutionResult> {
       const status = params.status;
       if (status !== "complete" && status !== "blocked") {
@@ -202,7 +202,7 @@ function createGetGoalTool(backend: GoalToolBackend): Tool {
       type: "object",
     },
     source: "builtin",
-    category: "memory",
+    category: "internal-state",
     annotations: { readOnlyHint: true },
     async execute(_params, context): Promise<ToolExecutionResult> {
       const snapshot = await backend.getSnapshot(context.sessionId);
@@ -242,7 +242,7 @@ function createSetGoalBudgetTool(backend: GoalToolBackend): Tool {
       type: "object",
     },
     source: "builtin",
-    category: "memory",
+    category: "internal-state",
     async execute(params, context): Promise<ToolExecutionResult> {
       const limits = budgetLimitsFromInput(params.value, params.unit);
       const snapshot = await backend.setBudget(

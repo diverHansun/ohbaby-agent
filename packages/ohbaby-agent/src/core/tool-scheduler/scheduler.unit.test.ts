@@ -566,7 +566,7 @@ describe("ToolScheduler", () => {
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
       { name: "agent", category: "subagent" },
-      { name: "todo_read", category: "memory" },
+      { name: "todo_read", category: "readonly" },
     ] as const) {
       scheduler.register(createTool(tool));
     }
@@ -593,7 +593,7 @@ describe("ToolScheduler", () => {
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
       { name: "web_search", category: "network" },
-      { name: "goal_update", category: "memory" },
+      { name: "UpdateGoal", category: "internal-state" },
     ] as const) {
       scheduler.register(createTool(tool));
     }
@@ -2191,7 +2191,7 @@ describe("ToolScheduler", () => {
     const { scheduler } = createScheduler({
       config: { concurrency: { maxConcurrency: 1 } },
     });
-    for (const toolName of ["read", "edit", "goal_update"]) {
+    for (const toolName of ["read", "edit", "UpdateGoal"]) {
       scheduler.register(
         createTool({
           execute: (_params, context) => {
@@ -2224,20 +2224,20 @@ describe("ToolScheduler", () => {
           },
           {
             runId: "test_run",
-            callId: "memory_1",
+            callId: "goal_1",
             messageId: "message_1",
             params: {},
             sessionId: "session_1",
-            toolName: "goal_update",
+            toolName: "UpdateGoal",
           },
         ],
       }),
     ).resolves.toMatchObject([
       { callId: "read_1", status: "success" },
       { callId: "write_1", status: "success" },
-      { callId: "memory_1", status: "success" },
+      { callId: "goal_1", status: "success" },
     ]);
-    expect(started).toContain("memory_1");
+    expect(started).toContain("goal_1");
     expect(started.indexOf("read_1")).toBeLessThan(started.indexOf("write_1"));
   });
 
@@ -2248,7 +2248,7 @@ describe("ToolScheduler", () => {
     for (const tool of [
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
-      { name: "goal_update", category: "memory" },
+      { name: "UpdateGoal", category: "internal-state" },
       { name: "subagent_run", category: "subagent" },
     ] as const) {
       scheduler.register(
@@ -2302,12 +2302,12 @@ describe("ToolScheduler", () => {
           },
           {
             runId: "test_run",
-            callId: "memory_1",
-            environment: makeEnvironment("D:/workspace/memory"),
+            callId: "goal_1",
+            environment: makeEnvironment("D:/workspace/goal"),
             messageId: "message_1",
             params: {},
             sessionId: "session_1",
-            toolName: "goal_update",
+            toolName: "UpdateGoal",
           },
           {
             runId: "test_run",
@@ -2323,7 +2323,7 @@ describe("ToolScheduler", () => {
     ).resolves.toMatchObject([
       { output: "read_1:D:/workspace/read", status: "success" },
       { output: "write_1:D:/workspace/write", status: "success" },
-      { output: "memory_1:D:/workspace/memory", status: "success" },
+      { output: "goal_1:D:/workspace/goal", status: "success" },
       { output: "subagent_1:D:/workspace/subagent", status: "success" },
     ]);
   });

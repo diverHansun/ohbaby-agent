@@ -98,9 +98,9 @@ Agent 的系统提示词由 system-prompt 模块管理，本模块不处理任�
 
 本模块不监听配置文件变化。如需重新加载配置，需要调用方主动调用加载函数。
 
-### N6: 不负责 OHBABY.md 加载
+### N6: 文件指令的归属
 
-用户自定义指令文件（OHBABY.md）由 system-prompt 模块负责加载，不在本模块范围内。
+[指令服务](../../services/instructions/goals-duty.md)读取全局与项目指令文件，通过 reminder 提供给主代理和子代理。
 
 ---
 

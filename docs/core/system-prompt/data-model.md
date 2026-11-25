@@ -16,7 +16,7 @@ prompt layer 是一个独立的 system prompt 片段。`SystemPrompt.assemble()`
 
 ### Runtime Layer
 
-runtime layer 由代码根据当前输入渲染，例如 custom instructions 和 agent addon。environment 与调用方提供的 MCP 菜单由独立 `buildRuntimeContext()` 返回，Context 把它附着为 user model-context part。
+agent addon 与当前可委派的 subagent roles 由代码渲染。文件指令、环境及 MCP 菜单的快照由 reminder collector 追加到 user 历史。
 
 ---
 
@@ -28,7 +28,6 @@ runtime layer 由代码根据当前输入渲染，例如 custom instructions 和
 export type LayerType =
   | "agent"
   | "base"
-  | "custom"
   | "environment"
   | "runtime"
   | "task";
@@ -62,17 +61,6 @@ export interface EnvironmentInfo {
 }
 ```
 
-### CustomInstruction
-
-```ts
-export interface CustomInstruction {
-  readonly scope: "project" | "global";
-  readonly text: string;
-}
-```
-
-范围由 loader 的读取分支确定，不从正文或数组位置推断。renderer 固定 Global → Project；项目约定优先，全局作为默认，均不得覆盖当前用户要求、宿主权限或委派边界。
-
 ### AssembleOptions
 
 ```ts
@@ -82,7 +70,6 @@ export interface AssembleOptions {
   readonly agentPromptAddon?: string;
   readonly isSubagent: boolean;
   readonly availableSubagentRoles?: readonly SubagentRolePromptInfo[];
-  readonly customInstructions?: readonly CustomInstruction[];
   readonly taskKind?: PromptTaskKind;
 }
 ```
@@ -103,17 +90,13 @@ export interface SystemPromptProviderInput {
 
 ### SystemPromptProviderOptions
 
-`SystemPromptProviderOptions` 注入 resolver/loader/detector，用于把 runtime 信息适配到 `AssembleOptions`：
+`SystemPromptProviderOptions` 注入 resolver 和 environment detector，用于把 runtime 信息适配到 `AssembleOptions`：
 
 - `agentNameResolver`
 - `agentPromptResolver`
-- `customInstructionLoader`：主、子代理共用，返回 `readonly CustomInstruction[]` 或其 Promise
 - `environmentDetector`
-- `runtimePromptsProvider`：提供 scoped runtime 文本，如当前 MCP 菜单
 - `taskKindResolver`
 - `availableSubagentRolesProvider`
-- `onWarning`
-- `onSecurityFinding`
 
 ---
 
@@ -125,7 +108,7 @@ export interface SystemPromptProviderInput {
 string[]
 ```
 
-provider 的 `build()` 把非空稳定层用空行拼成 `string`；`buildRuntimeContext()` 独立返回环境与 runtime 文本。Context 的 `AgentRunPromptSnapshot` 只保存 `systemPrompt`，不引入来源去重或新的返回信封。
+provider 的 `build()` 把非空稳定层用空行拼成 `string`。Context 的 `AgentRunPromptSnapshot` 保存 `systemPrompt` 和 `detectEnvironment()` 成功返回的可选 `environment`。文件指令的内容和快照 key 归属 [services/instructions](../../services/instructions/data-model.md)。
 
 ---
 

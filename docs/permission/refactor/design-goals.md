@@ -1,6 +1,6 @@
 # Permission 重构设计目标（已决策版）
 
-> 历史设计记录：`memory-read` / `memory-write` 与 `memory_*` 映射已不属于当前运行契约；当前请以 `docs/core/memory/` 与 `MemoryLoader` 为准。
+> 历史设计记录。表格中的记忆工具仅反映当时的权限设计。
 
 本文档定义最终模型、判定矩阵、模块责任和关键 ADR。本文使用 UTF-8 编码。
 

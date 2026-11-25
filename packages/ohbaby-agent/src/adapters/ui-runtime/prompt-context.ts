@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+import type { InstructionWarning } from "../../services/instructions/index.js";
 import type { UiNotice } from "ohbaby-sdk";
 import type {
   CompactResult,
@@ -9,6 +11,22 @@ import type { LLMClientInstance } from "ohbaby-llm";
 import { streamResponse } from "ohbaby-llm";
 import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
 import { redactPromptSecrets } from "../../services/session/prompt-sanitizer.js";
+
+export function noticeFromInstructionWarning(
+  warning: InstructionWarning,
+): Omit<UiNotice, "id" | "createdAt"> {
+  const name =
+    warning.sourcePath === "global"
+      ? "global instructions"
+      : basename(warning.sourcePath);
+  return {
+    key: `instructions:${warning.sourcePath}:${warning.kind}`,
+    level: "warning",
+    source: warning.sourcePath,
+    message: warning.message,
+    title: `${name} ${warning.kind === "truncated" ? "truncated" : "skipped"}`,
+  };
+}
 
 export function noticeFromPromptSecurityFinding(
   finding: PromptSecurityFinding,

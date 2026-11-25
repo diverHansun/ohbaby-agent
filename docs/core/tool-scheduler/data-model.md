@@ -10,15 +10,17 @@
 
 工具根据其操作特性分为七类：
 
-| 类别      | 说明                   | 并发特性                      | 示例工具                                                   |
-| --------- | ---------------------- | ----------------------------- | ---------------------------------------------------------- |
-| readonly  | 只读操作               | 可并行（最多5个）             | read, glob, grep, list；MCP工具（readOnlyHint=true）       |
-| write     | 写入操作               | 串行执行                      | write, edit；MCP工具（readOnlyHint=false/未设置）          |
-| dangerous | 危险操作               | 串行执行                      | bash                                                       |
-| network   | 网络操作               | 可并行（最多5个）             | web_fetch, web_search（内置工具，背后走 search-providers） |
-| memory    | 目标/内部状态操作      | 可并行（不受读写锁限制）      | goals 工具（显式声明 `category: "memory"`）                |
-| skill     | 技能加载与技能资源读取 | 可并行（最多5个）             | skill, skill_resource                                      |
-| subagent  | 子代理操作             | 由可信工具声明准入能力       | agent                                                      |
+| 类别 | 说明 | 示例工具 |
+| --- | --- | --- |
+| readonly | 只读操作 | read, glob, grep, list |
+| write | 写入操作 | write, edit, todo_write |
+| dangerous | 危险操作 | bash |
+| network | 网络操作 | web_fetch, web_search |
+| internal-state | 会话内部状态操作 | CreateGoal, UpdateGoal, GetGoal, SetGoalBudget |
+| skill | 技能加载与资源读取 | skill, skill_resource |
+| subagent | 子代理操作 | agent |
+
+并发控制依据工具的准入计划和 session 容量，见 §5.1。
 
 **MCP工具分类规则**：通过 `annotations.readOnlyHint` 在工具注册时推断，`true` → `readonly`，其余 → `write`。
 
@@ -28,8 +30,8 @@
 
 | 来源    | 代码位置     | 说明                                      | 注册时机                                               |
 | ------- | ------------ | ----------------------------------------- | ------------------------------------------------------ |
-| builtin | `src/tools/` | 内置工具（含 web_search / web_fetch）     | 启动时静态注册                                         |
-| module  | 各模块内部   | 模块自带工具（当前无 memory LLM adapter） | 模块初始化时注册                                       |
+| builtin | `src/tools/`、`src/goals/` 等 | 内置工具（含 web_search / web_fetch）     | 启动时静态注册                                         |
+| module  | 各模块内部   | 模块自带工具 | 模块初始化时注册                                       |
 | skill   | `src/skill/` | 技能系统工具（skill / skill_resource）    | runtime composition 注册并在 skill registry 变化时刷新 |
 | mcp     | 运行时动态   | MCP 服务器提供的工具                      | 运行时发现注册                                         |
 
@@ -76,7 +78,7 @@ type ToolCategory =
   | "write"
   | "dangerous"
   | "network"
-  | "memory"
+  | "internal-state"
   | "skill"
   | "subagent";
 
@@ -282,14 +284,9 @@ const CORE_TOOL_CATEGORIES: Record<string, ToolCategory> = {
 };
 ```
 
-### 3.2 Module-Owned Tools 类别映射
+### 3.2 Goal 工具
 
-模块内置工具在模块初始化时注册：
-
-```typescript
-// memory 是通用调度类别；由 goals 等真实工具显式声明，
-// 不再通过 ghost memory_* 名称推断。
-```
+四个 goal 工具在 `src/goals/tools.ts` 中定义，注册来源为 `builtin`，类别为 `internal-state`。Todo 的 `todo_write` 保留 `write` 类别，权限分类器将该调用归为 `internal-state`。
 
 ### 3.3 Network Tools 类别映射（内置工具的子集）
 
@@ -305,16 +302,9 @@ const NETWORK_TOOL_CATEGORIES: Record<string, ToolCategory> = {
 
 **注意**：`web_search` / `web_fetch` 工具需要 `services/search-providers/` 后端配置（如 `TAVILY_API_KEY`）才能正常执行。配置由 `config/tools/{provider}` 负责，调度器对此透明。
 
-### 3.4 模式与类别的映射
+### 3.4 工具可见性
 
-```typescript
-// 各模式允许的工具类别
-const MODE_ALLOWED_CATEGORIES: Record<Mode, ToolCategory[]> = {
-  ask: ["readonly", "network", "memory"],
-  plan: ["readonly", "network", "memory"],
-  agent: ["readonly", "write", "dangerous", "network", "memory"],
-};
-```
+调度器根据 Agent 的工具配置与子代理限制过滤可见工具。
 
 ---
 

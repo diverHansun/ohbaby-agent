@@ -17,9 +17,6 @@ describe("createSystemPromptProvider", () => {
   it("keeps primary system stable and exposes detected environment separately", async () => {
     const provider = createSystemPromptProvider({
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
-      customInstructionLoader: vi
-        .fn()
-        .mockResolvedValue([{ scope: "project", text: "Project-only rule" }]),
     });
 
     const prompt = await provider.build({
@@ -36,7 +33,6 @@ describe("createSystemPromptProvider", () => {
     });
 
     expect(prompt).toContain("Lychee");
-    expect(prompt).toContain("Project-only rule");
     expect(prompt).not.toContain("D:/repo");
     expect(prompt).not.toContain("Available tools");
     expect(environment).toEqual(ENVIRONMENT);
@@ -46,9 +42,6 @@ describe("createSystemPromptProvider", () => {
     const provider = createSystemPromptProvider({
       agentNameResolver: vi.fn().mockResolvedValue("build"),
       agentPromptResolver: vi.fn().mockResolvedValue("Primary runtime prompt"),
-      customInstructionLoader: vi
-        .fn()
-        .mockResolvedValue([{ scope: "project", text: "Project rule" }]),
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
     });
 
@@ -61,73 +54,34 @@ describe("createSystemPromptProvider", () => {
 
     expect(prompt).toContain("Lychee");
     expect(prompt).toContain("Primary runtime prompt");
-    expect(prompt).toContain("Project rule");
   });
 
-  it("loads custom instructions for subagents from the session project root", async () => {
-    const customInstructionLoader = vi
-      .fn()
-      .mockResolvedValue([{ scope: "project", text: "Subagent project rule" }]);
-    const provider = createSystemPromptProvider({
-      agentNameResolver: vi.fn().mockResolvedValue("explore"),
-      environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
-      customInstructionLoader,
-    });
-    const input = {
-      sessionId: "session_2",
-      directory: "D:/repo/packages/worktree",
-      projectRoot: "D:/repo",
-      isSubagent: true,
-      toolNames: ["read"] as readonly string[],
-    };
-
-    const prompt = await provider.build(input);
-
-    expect(prompt).toContain("exploration");
-    expect(prompt).toContain("Subagent project rule");
-    expect(prompt.indexOf("<agent_prompt_addon>")).toBeLessThan(
-      prompt.indexOf("Subagent project rule"),
-    );
-    expect(prompt).toContain("Core Capabilities");
-    expect(prompt).not.toContain("You are Lychee, an AI coding assistant");
-    expect(customInstructionLoader).toHaveBeenCalledWith(input);
-  });
-
-  it("reads default instruction files from projectRoot instead of the subagent workdir", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-provider-"));
-    try {
-      const workdir = path.join(root, "nested", "workdir");
-      await fs.mkdir(workdir, { recursive: true });
-      await fs.writeFile(path.join(root, "AGENTS.md"), "ROOT_RULE", "utf8");
-      await fs.writeFile(
-        path.join(workdir, "AGENTS.md"),
-        "WORKDIR_RULE",
-        "utf8",
+  it.each([false, true])(
+    "keeps system bytes stable across file changes (isSubagent=%s)",
+    async (isSubagent) => {
+      const directory = await fs.mkdtemp(
+        path.join(os.tmpdir(), "ohbaby-provider-"),
       );
-      const previousHome = process.env.OHBABY_HOME;
-      process.env.OHBABY_HOME = path.join(root, "empty-home");
       try {
-        const provider = createSystemPromptProvider({
-          agentNameResolver: vi.fn().mockResolvedValue("generic"),
-        });
-        const prompt = await provider.build({
-          sessionId: "session_child",
-          directory: workdir,
-          projectRoot: root,
-          isSubagent: true,
+        const input = {
+          sessionId: "session",
+          directory,
+          isSubagent,
           toolNames: [],
-        });
-
-        expect(prompt).toContain("## Project Instructions\nROOT_RULE");
-        expect(prompt).not.toContain("WORKDIR_RULE");
+        };
+        const provider = createSystemPromptProvider();
+        const original = await provider.build(input);
+        await fs.writeFile(
+          path.join(directory, "AGENTS.md"),
+          "Project rule marker.",
+        );
+        expect(await provider.build(input)).toBe(original);
+        expect(original).not.toContain("Project rule marker.");
       } finally {
-        if (previousHome === undefined) delete process.env.OHBABY_HOME;
-        else process.env.OHBABY_HOME = previousHome;
+        await fs.rm(directory, { recursive: true, force: true });
       }
-    } finally {
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   it("uses stable primary mode definitions even when a resolver returns plan", async () => {
     const provider = createSystemPromptProvider({
@@ -159,7 +113,6 @@ describe("createSystemPromptProvider", () => {
     ]);
     const provider = createSystemPromptProvider({
       availableSubagentRolesProvider,
-      customInstructionLoader: vi.fn().mockResolvedValue([]),
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
     });
 
@@ -182,14 +135,8 @@ describe("createSystemPromptProvider", () => {
     expect(availableSubagentRolesProvider).toHaveBeenCalledTimes(1);
   });
 
-  it("detects the execution directory while instructions retain the project root", async () => {
+  it("detects the execution directory for a subagent running below the project root", async () => {
     const provider = createSystemPromptProvider({
-      customInstructionLoader: (input) => [
-        {
-          scope: "project",
-          text: `Rules for ${input.projectRoot ?? input.directory}`,
-        },
-      ],
       environmentDetector: (directory) => ({ ...ENVIRONMENT, cwd: directory }),
     });
     const input = {
@@ -199,7 +146,6 @@ describe("createSystemPromptProvider", () => {
       isSubagent: true,
       toolNames: [],
     };
-    expect(await provider.build(input)).toContain("Rules for /project");
     expect(await provider.detectEnvironment?.(input)).toMatchObject({
       cwd: "/execution/child",
     });

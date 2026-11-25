@@ -16,7 +16,7 @@ coverage/
 .claude/
 .codex/
 .agent/
-/AGENT.md
+/AGENTS.md
 /CLAUDE.md
 .ohbaby/
 .local-npm-cache/

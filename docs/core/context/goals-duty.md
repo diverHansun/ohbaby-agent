@@ -54,11 +54,11 @@ primary 与 subagent 都通过同一 `ContextManager`/Lifecycle 链路。隔离�
 
 - primary 的 `contextScopeId` 缺省，语义上是 primary scope，不表示“所有 scope”；
 - child/sibling scope 的 history、calibration、compaction floor、tool epoch 与 cache identity 互不污染；
-- 主、子代理共用可选说明文件，读取目录由 session projectRoot 决定；角色提示词与历史 scope 仍隔离。
+- 主、子代理按所属会话的项目根读取项目指令，另读全局配置目录的文件。两者各自在自己的活跃历史中判断是否已有相同快照。
 
 ### G5：稳定前缀与正确权限
 
-同一 run 的 systemPrompt snapshot 稳定；runtime model context 只附着 initiating user message；同 tool epoch 的工具顺序稳定。缓存优化不能保留已失效的权限、工具或历史。
+同一 run 的 systemPrompt snapshot 稳定。文件指令变更通过新的 user 侧 reminder 发给模型，同一 tool epoch 内保持工具顺序稳定。缓存优化不能保留已失效的权限、工具或历史。
 
 ### G6：故障可解释、状态可恢复
 
@@ -72,7 +72,7 @@ durable store 是事实源。摘要正文、成功请求 records、遗漏 metada
 
 ### D1：创建 run-local prompt snapshot
 
-`createRunPromptSnapshot()` 在 initiating turn 捕获包含可选说明的 systemPrompt，并可向 initiating user message 幂等附着动态、仅模型可见的 runtime context。
+`createRunPromptSnapshot()` 在 run 开始时组装 systemPrompt，并在环境检测成功时保存 environment。后续步骤复用这份 run 快照。
 
 ### D2：组装 scoped durable history
 
@@ -80,7 +80,7 @@ durable store 是事实源。摘要正文、成功请求 records、遗漏 metada
 
 - 按 session/scope 读取 Message history；
 - 使用调用方提供或新建的 `AgentRunPromptSnapshot`；
-- 无快照时经同一个 SystemPromptProvider 加载说明，透传 projectRoot；
+- 无快照时经 SystemPromptProvider 组装稳定的 system prompt；每次 `prepareTurn()` 都向 reminder collector 传入 `projectRoot` 和 `directory`，收集本步适用的文件指令；
 - 返回 `AssembledContext`，但不把工具 schema 固化为会话状态。
 
 ### D3：投影并测量一次请求

@@ -275,7 +275,7 @@ afterEach(() => {
 describe.each(protocols)(
   "custom instructions in %s final HTTP requests",
   (protocol) => {
-    it("loads session-root instructions for primary and child runs and refreshes only on a new run", async () => {
+    it("appends edited root instructions within a run and loads them independently for children", async () => {
       const root = await realpath(
         await mkdtemp(path.join(tmpdir(), "ohbaby-instructions-wire-")),
       );
@@ -299,14 +299,16 @@ describe.each(protocols)(
           ),
           writeFile(
             path.join(globalDirectory, "CLAUDE.md"),
-            `GLOBAL_RULE_V${String(version)}`,
-            "utf8",
+            Buffer.from(
+              `\uFEFF全局规则 GLOBAL_RULE_V${String(version)}`,
+              "utf16le",
+            ),
           ),
         ]);
       };
       await updateInstructions(1);
       await writeFile(
-        path.join(workdir, "OHBABY.md"),
+        path.join(workdir, "AGENTS.md"),
         "WRONG_WORKDIR_RULE",
         "utf8",
       );
@@ -320,7 +322,7 @@ describe.each(protocols)(
           );
           requests.push((await request.json()) as WireRequest);
           const delegate = requests.length === 1;
-          // The parent snapshot already exists. Its child and later runs must read V2.
+          // The first wire request contains V1. Every later step sees the edit.
           if (delegate) await updateInstructions(2);
           return reply(protocol, delegate);
         }),
@@ -397,28 +399,40 @@ describe.each(protocols)(
         const childIndex = systems.findIndex((system) =>
           system.includes("<subagent_base>"),
         );
-        const parents = systems.filter((_, index) => index !== childIndex);
-        for (const [index, system] of systems.entries()) {
-          // The first run keeps its V1 snapshot; the child and later runs read V2.
-          const version =
-            index !== childIndex && parents.indexOf(system) < 2 ? 1 : 2;
-          expect(system.split(`PROJECT_RULE_V${String(version)}`)).toHaveLength(
-            2,
-          );
-          expect(system.split(`GLOBAL_RULE_V${String(version)}`)).toHaveLength(
-            2,
-          );
-          expect(system).not.toContain(`PROJECT_RULE_V${String(3 - version)}`);
-          expect(system).not.toContain(`GLOBAL_RULE_V${String(3 - version)}`);
-          expect(system.indexOf("## Global Instructions")).toBeLessThan(
-            system.indexOf("## Project Instructions"),
-          );
-          expect(system).not.toContain("WRONG_WORKDIR_RULE");
-          expect(system).not.toContain("<memory>");
-        }
+        expect(childIndex).toBeGreaterThan(0);
+        const childRequest = requests[childIndex];
+        const parents = requests.filter((_, index) => index !== childIndex);
         expect(parents).toHaveLength(3);
-        expect(parents[1]).toBe(parents[0]);
-        expect(parents[2]).not.toBe(parents[0]);
+        for (const system of systems)
+          expect(system).not.toMatch(/(?:GLOBAL|PROJECT)_RULE_V/);
+        expect(JSON.stringify(requests)).not.toContain("WRONG_WORKDIR_RULE");
+        const messages = (body: WireRequest): unknown[] =>
+          body[
+            protocol === "openai-responses" ? "input" : "messages"
+          ] as unknown[];
+        const bodies = parents.map(messages);
+        for (const [index, history] of bodies.entries()) {
+          const previous = bodies[index - 1] ?? [];
+          expect(JSON.stringify(history.slice(0, previous.length))).toBe(
+            JSON.stringify(previous),
+          );
+          expect(systemText(protocol, parents[index])).toBe(systems[0]);
+          const tail = JSON.stringify(history.slice(previous.length));
+          if (index === 2) {
+            expect(tail).not.toMatch(/(?:GLOBAL|PROJECT)_RULE_V/);
+          } else {
+            const version = String(index + 1);
+            expect(tail.split("GLOBAL_RULE_V" + version)).toHaveLength(2);
+            expect(tail.split("PROJECT_RULE_V" + version)).toHaveLength(2);
+            expect(tail.indexOf("GLOBAL_RULE_V")).toBeLessThan(
+              tail.indexOf("PROJECT_RULE_V"),
+            );
+          }
+        }
+        const childHistory = JSON.stringify(messages(childRequest));
+        expect(childHistory).not.toContain("RULE_V1");
+        expect(childHistory.split("PROJECT_RULE_V2")).toHaveLength(2);
+        expect(childHistory.split("GLOBAL_RULE_V2")).toHaveLength(2);
         const child = systems[childIndex] ?? "";
         expect(child).toContain("Task: explore");
         expect(child).not.toContain("You are Lychee");

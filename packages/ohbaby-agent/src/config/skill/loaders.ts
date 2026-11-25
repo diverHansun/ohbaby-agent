@@ -3,11 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import {
   OHBABY_DIR_NAME,
-  resolveLegacyOhbabyHome,
-  resolveLegacyProjectOhbabyRoot,
   resolveOhbabyHome,
   resolveProjectOhbabyRoot,
-  resolveReadPathWithLegacy,
 } from "../../paths/index.js";
 import {
   SkillConfigAccessError,
@@ -74,24 +71,6 @@ export function getProjectSkillConfigPath(
 ): string {
   return path.join(
     resolveProjectOhbabyRoot(projectDirectory),
-    SKILL_CONFIG_DIR_NAME,
-    SKILL_CONFIG_FILE_NAME,
-  );
-}
-
-function getLegacyGlobalSkillConfigPath(homeDirectory?: string): string {
-  return path.join(
-    resolveLegacyOhbabyHome({ homeDirectory }),
-    SKILL_CONFIG_DIR_NAME,
-    SKILL_CONFIG_FILE_NAME,
-  );
-}
-
-function getLegacyProjectSkillConfigPath(
-  projectDirectory = process.cwd(),
-): string {
-  return path.join(
-    resolveLegacyProjectOhbabyRoot(projectDirectory),
     SKILL_CONFIG_DIR_NAME,
     SKILL_CONFIG_FILE_NAME,
   );
@@ -298,17 +277,9 @@ export async function loadSkillConfig(
   options: LoadSkillConfigOptions = {},
 ): Promise<SkillConfig> {
   const globalPath =
-    options.globalPath ??
-    (await resolveReadPathWithLegacy(
-      getGlobalSkillConfigPath(options.homeDirectory),
-      [getLegacyGlobalSkillConfigPath(options.homeDirectory)],
-    ));
+    options.globalPath ?? getGlobalSkillConfigPath(options.homeDirectory);
   const projectPath =
-    options.projectPath ??
-    (await resolveReadPathWithLegacy(
-      getProjectSkillConfigPath(options.projectDirectory),
-      [getLegacyProjectSkillConfigPath(options.projectDirectory)],
-    ));
+    options.projectPath ?? getProjectSkillConfigPath(options.projectDirectory);
   const [globalConfig, projectConfig] = await Promise.all([
     loadSkillConfigFromPath(globalPath, {
       defaultDirectoryPriority: GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY,
@@ -346,17 +317,9 @@ export async function loadSkillConfigLenient(
   options: LoadSkillConfigLenientOptions = {},
 ): Promise<SkillConfig> {
   const globalPath =
-    options.globalPath ??
-    (await resolveReadPathWithLegacy(
-      getGlobalSkillConfigPath(options.homeDirectory),
-      [getLegacyGlobalSkillConfigPath(options.homeDirectory)],
-    ));
+    options.globalPath ?? getGlobalSkillConfigPath(options.homeDirectory);
   const projectPath =
-    options.projectPath ??
-    (await resolveReadPathWithLegacy(
-      getProjectSkillConfigPath(options.projectDirectory),
-      [getLegacyProjectSkillConfigPath(options.projectDirectory)],
-    ));
+    options.projectPath ?? getProjectSkillConfigPath(options.projectDirectory);
   const [globalConfig, projectConfig] = await Promise.all([
     loadSkillConfigFromPathLenient(globalPath, {
       defaultDirectoryPriority: GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY,

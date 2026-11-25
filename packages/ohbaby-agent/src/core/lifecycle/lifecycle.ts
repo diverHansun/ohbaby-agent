@@ -188,7 +188,11 @@ function contextPreparationFailure(
       message:
         compaction.error ??
         "Context compaction failed to free space. Retry or continue in a new run.",
-      terminalReason: "context_compaction_failed",
+      // With no older history to compact, the oversized request itself is the failure.
+      terminalReason:
+        compaction.compression?.status === "skipped"
+          ? "context_overflow"
+          : "context_compaction_failed",
     };
   }
   if (
@@ -667,6 +671,7 @@ export class Lifecycle {
           ? [buildMaxStepsFinalizationMessage()]
           : undefined;
         stepInput = {
+          projectRoot: params.projectRoot,
           promptCacheSessionId: params.promptCacheSessionId,
           runModel: params.runModel,
           reminderAnchorId: assistantMessageId,

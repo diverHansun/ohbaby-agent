@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -307,7 +307,6 @@ async function createFixture(): Promise<ProcessFixture> {
   const workdir = join(root, "work");
   await mkdir(home);
   await mkdir(workdir);
-  await writeFile(join(home, ".skip-auto-migrate"), "");
   const fixture = {
     root,
     dbPath: join(root, "state.db"),

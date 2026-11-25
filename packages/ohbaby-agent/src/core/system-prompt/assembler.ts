@@ -5,7 +5,6 @@ import type {
 import {
   detectEnvironment,
   generateBasePrompt,
-  generateCustomInstructionsPrompt,
   generateEnvironmentPrompt,
 } from "./layers/index.js";
 import { getBuiltinAgentPrompt } from "./prompts/agents/index.js";
@@ -13,11 +12,8 @@ import { getPrimaryTaskPrompt } from "./prompts/primary/tasks.js";
 import { SUBAGENT_ROLES_GUIDANCE_PROMPT } from "./prompts/primary/subagent-roles.js";
 import { SUBAGENT_BASE_PROMPT } from "./prompts/subagents/base.js";
 import { getSubagentTaskPrompt } from "./prompts/subagents/tasks.js";
-import { loadCustomInstructions } from "./services/custom-instruction-loader.js";
-import type { PromptSecurityFinding } from "./security/index.js";
 import type {
   AssembleOptions,
-  CustomInstruction,
   EnvironmentInfo,
   PromptTaskKind,
   SubagentRolePromptInfo,
@@ -32,15 +28,10 @@ export interface SystemPromptProviderOptions {
     agentName: string,
     input: SystemPromptProviderInput,
   ) => Promise<string | undefined> | string | undefined;
-  readonly customInstructionLoader?: (
-    input: SystemPromptProviderInput,
-  ) => Promise<readonly CustomInstruction[]> | readonly CustomInstruction[];
   readonly environmentDetector?: (
     directory: string,
     input: SystemPromptProviderInput,
   ) => Promise<EnvironmentInfo> | EnvironmentInfo;
-  readonly onWarning?: (message: string, error?: unknown) => void;
-  readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
   readonly taskKindResolver?: (
     input: SystemPromptProviderInput,
     agentName: string,
@@ -119,7 +110,6 @@ export const SystemPrompt = {
           resolveSubagentTaskKind(options.agentName, options.taskKind),
         ),
         generateAgentAddonPrompt(agentPromptAddon),
-        generateCustomInstructionsPrompt(options.customInstructions ?? []),
       ]);
     }
 
@@ -128,7 +118,6 @@ export const SystemPrompt = {
       getPrimaryTaskPrompt("agent"),
       generateAgentAddonPrompt(agentPromptAddon),
       generateSubagentRolesPrompt(options.availableSubagentRoles),
-      generateCustomInstructionsPrompt(options.customInstructions ?? []),
     ]);
   },
 
@@ -147,8 +136,6 @@ export const SystemPrompt = {
   getPrimaryBase(): string {
     return generateBasePrompt();
   },
-
-  loadCustomInstructions,
 };
 
 async function resolveAgentName(
@@ -162,43 +149,25 @@ async function resolveAgentName(
   return input.isSubagent ? "subagent" : "build";
 }
 
-async function resolveAgentPromptAddon(
-  agentName: string,
-  input: SystemPromptProviderInput,
-  options: SystemPromptProviderOptions,
-): Promise<string | undefined> {
-  return await options.agentPromptResolver?.(agentName, input);
-}
-
 export function createSystemPromptProvider(
   options: SystemPromptProviderOptions = {},
 ): SystemPromptProvider {
   return {
     async build(input: SystemPromptProviderInput): Promise<string> {
       const agentName = await resolveAgentName(input, options);
-      const [availableSubagentRoles, taskKind] = await Promise.all([
-        input.isSubagent
-          ? []
-          : (options.availableSubagentRolesProvider?.(input) ?? []),
-        options.taskKindResolver?.(input, agentName),
-      ]);
-      const [agentPromptAddon, customInstructions] = await Promise.all([
-        resolveAgentPromptAddon(agentName, input, options),
-        options.customInstructionLoader
-          ? options.customInstructionLoader(input)
-          : loadCustomInstructions({
-              onSecurityFinding: options.onSecurityFinding,
-              onWarning: options.onWarning,
-              // Subagents may run in a workdir; instructions follow the session project.
-              projectDirectory: input.projectRoot ?? input.directory,
-            }),
-      ]);
+      const [availableSubagentRoles, taskKind, agentPromptAddon] =
+        await Promise.all([
+          input.isSubagent
+            ? []
+            : (options.availableSubagentRolesProvider?.(input) ?? []),
+          options.taskKindResolver?.(input, agentName),
+          options.agentPromptResolver?.(agentName, input),
+        ]);
 
       return SystemPrompt.assemble({
         agentName,
         agentPromptAddon,
         availableSubagentRoles,
-        customInstructions,
         isSubagent: input.isSubagent,
         taskKind,
       }).join("\n\n");

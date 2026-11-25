@@ -3,15 +3,12 @@ import type {
   UiSettingsMcpServerUpdate,
 } from "ohbaby-sdk";
 import { z } from "zod";
-import { resolveReadPathWithLegacy } from "../../paths/index.js";
 import { coordinateModelConfig } from "../llm/config-coordination.js";
 import { writeFileAtomically } from "../secrets/atomic-file.js";
 import { redactSettingsArgs, redactSettingsUrl } from "../secrets/redaction.js";
 import {
   getGlobalMcpConfigPath,
-  getLegacyGlobalMcpConfigPath,
   getProjectMcpConfigPath,
-  getLegacyProjectMcpConfigPath,
   loadMcpConfigFromPath,
   validateMcpConfig,
 } from "./loaders.js";
@@ -47,12 +44,8 @@ export class McpServerNotFoundError extends Error {
   }
 }
 
-async function readGlobal(): Promise<McpServersConfig> {
-  return loadMcpConfigFromPath(
-    await resolveReadPathWithLegacy(getGlobalMcpConfigPath(), [
-      getLegacyGlobalMcpConfigPath(),
-    ]),
-  );
+function readGlobal(): Promise<McpServersConfig> {
+  return loadMcpConfigFromPath(getGlobalMcpConfigPath());
 }
 function projectServer(
   name: string,
@@ -166,11 +159,9 @@ export async function globalMcpOverriddenIn(
 ): Promise<string[]> {
   const overridden = await Promise.allSettled(
     directories.map(async (directory) => {
-      const path = await resolveReadPathWithLegacy(
+      const project = await loadMcpConfigFromPath(
         getProjectMcpConfigPath(directory),
-        [getLegacyProjectMcpConfigPath(directory)],
       );
-      const project = await loadMcpConfigFromPath(path);
       return Object.hasOwn(project.mcpServers, name) ? directory : undefined;
     }),
   );

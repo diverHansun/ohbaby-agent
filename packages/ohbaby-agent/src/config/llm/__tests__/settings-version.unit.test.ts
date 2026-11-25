@@ -8,6 +8,30 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 describe("partitioned settings versions", () => {
+  it("ignores changes in old global and project configuration directories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-settings-version-"));
+    const project = join(root, "project");
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("USERPROFILE", root);
+    vi.stubEnv("OHBABY_HOME", join(root, ".ohbaby"));
+    try {
+      const empty = await settingsConfigVersion(project);
+      for (const version of ["first", "updated"]) {
+        for (const file of [
+          join(root, ".ohbaby-agent", "model.json"),
+          join(root, ".ohbaby-agent", "tools", "search.json"),
+          join(project, ".ohbaby-agent", "mcp", "settings.json"),
+        ]) {
+          await mkdir(dirname(file), { recursive: true });
+          await writeFile(file, version);
+        }
+        expect(await settingsConfigVersion(project)).toEqual(empty);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("hashes all six partitions independently and isolates project files by instance directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-settings-version-"));
     vi.stubEnv("OHBABY_HOME", join(root, "global"));

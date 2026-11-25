@@ -729,7 +729,6 @@ try {
       env.LOCALAPPDATA,
     ].map((path) => mkdir(path, { recursive: true })),
   );
-  await writeFile(join(profile, ".skip-auto-migrate"), "");
   await writeFile(
     join(profile, ".env"),
     "PANEL_FIXTURE_KEY=panel-fixture-only\n",

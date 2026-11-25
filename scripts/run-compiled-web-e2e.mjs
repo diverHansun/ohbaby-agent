@@ -581,11 +581,12 @@ async function verifyDiagnostics(logFilePath, output, forbiddenValues = []) {
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
+  if (records.some((record) => record.event?.startsWith("migration.") || record.component === "migration")) {
+    throw new Error("compiled serve emitted retired migration diagnostics");
+  }
   const events = records.map((record) => record.event);
   for (const expected of [
     "diagnostics.started",
-    "migration.config.completed",
-    "migration.data.completed",
     "server.started",
     "server.stopped",
   ]) {
@@ -792,7 +793,6 @@ try {
     mkdir(join(root, "appdata"), { recursive: true }),
     mkdir(join(root, "localappdata"), { recursive: true }),
   ]);
-  await writeFile(join(profile, ".skip-auto-migrate"), "\n", "utf8");
   await writeFile(
     join(profile, ".env"),
     "OHBABY_E2E_FAKE_API_KEY=compiled-web-e2e-key\n",

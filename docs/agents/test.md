@@ -241,6 +241,8 @@ describe('session creation', () => {
 
 #### 2.3.1 系统提示词组装
 
+以下 `AgentManager` 代码保留早期接口示例。当前主、子代理均通过 user 侧 reminder 接收文件指令；同一 run 中的编辑和子代理项目根隔离由[指令集成测试](../services/instructions/test.md)覆盖。
+
 ```typescript
 describe('AgentManager', () => {
   describe('getSystemPrompt', () => {

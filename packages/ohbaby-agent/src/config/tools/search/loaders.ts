@@ -1,11 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {
-  OHBABY_DIR_NAME,
-  resolveLegacyOhbabyHome,
-  resolveOhbabyHome,
-  resolveReadPathWithLegacy,
-} from "../../../paths/index.js";
+import { OHBABY_DIR_NAME, resolveOhbabyHome } from "../../../paths/index.js";
 import { SearchConfigError } from "./types.js";
 
 export const OHBABY_CONFIG_DIR_NAME = OHBABY_DIR_NAME;
@@ -20,30 +15,9 @@ export function getSearchJsonPath(homeDirectory?: string): string {
   );
 }
 
-function getLegacySearchJsonPath(homeDirectory?: string): string {
-  return path.join(
-    resolveLegacyOhbabyHome({ homeDirectory }),
-    TOOLS_CONFIG_DIR_NAME,
-    SEARCH_CONFIG_FILE_NAME,
-  );
-}
-
-export async function resolveSearchJsonPath(
-  searchJsonPath?: string,
-  homeDirectory?: string,
-): Promise<string> {
-  return (
-    searchJsonPath ??
-    (await resolveReadPathWithLegacy(getSearchJsonPath(homeDirectory), [
-      getLegacySearchJsonPath(homeDirectory),
-    ]))
-  );
-}
-
 export async function loadSearchJson(
-  searchJsonPath?: string,
+  resolvedPath = getSearchJsonPath(),
 ): Promise<unknown> {
-  const resolvedPath = await resolveSearchJsonPath(searchJsonPath);
   let content: string;
   try {
     content = await fs.readFile(resolvedPath, "utf8");

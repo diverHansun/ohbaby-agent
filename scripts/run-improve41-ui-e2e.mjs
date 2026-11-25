@@ -450,7 +450,6 @@ try {
     "---\nname: i41-review\ndescription: Review a supplied task in this isolated acceptance fixture.\n---\n\n" +
       "Fixture guidance. Preserve the user request.\n".repeat(100),
   );
-  await writeFile(join(profile, ".skip-auto-migrate"), "");
   await new Promise((done) => provider.listen(0, "127.0.0.1", done));
   await new Promise((done) => proxy.listen(0, "127.0.0.1", done));
   await writeFile(

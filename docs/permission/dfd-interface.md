@@ -4,6 +4,8 @@
 
 ## 一、主数据流
 
+调度器先对调用求值。goal 工具和 `todo_write` 的权限调用类型为 `internal-state`，default 级别正常放行，匹配会话 deny 时直接拒绝。需要审批的调用才进入下图。
+
 ```mermaid
 sequenceDiagram
   participant L as lifecycle / scheduler

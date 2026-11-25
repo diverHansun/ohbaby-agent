@@ -6,11 +6,7 @@ import { coordinateModelConfig } from "./config-coordination.js";
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import {
-  resolveLegacyOhbabyHome,
-  resolveOhbabyHome,
-  resolveReadPathWithLegacy,
-} from "../../paths/index.js";
+import { resolveOhbabyHome } from "../../paths/index.js";
 import { ConfigError } from "ohbaby-llm";
 import { parseEnvFile } from "./env-file.js";
 
@@ -30,10 +26,6 @@ export function getModelJsonPath(homeDirectory?: string): string {
   return path.join(resolveOhbabyHome({ homeDirectory }), MODEL_JSON_NAME);
 }
 
-function getLegacyModelJsonPath(homeDirectory?: string): string {
-  return path.join(resolveLegacyOhbabyHome({ homeDirectory }), MODEL_JSON_NAME);
-}
-
 /**
  * Load and parse the model.json configuration file.
  * Throws ConfigError if file does not exist or contains invalid JSON.
@@ -42,7 +34,7 @@ export async function loadModelJson(
   options: LoadModelJsonOptions = {},
 ): Promise<unknown> {
   return coordinateModelConfig(options.modelJsonPath, async () => {
-    const configPath = await resolveModelJsonReadPath(options);
+    const configPath = options.modelJsonPath ?? getModelJsonPath();
 
     let content: string;
     try {
@@ -72,15 +64,6 @@ export async function loadModelJson(
       );
     }
   });
-}
-
-/** The effective source path can differ from the publication target during home migration. */
-export function resolveModelJsonReadPath(
-  options: LoadModelJsonOptions = {},
-): Promise<string> {
-  return options.modelJsonPath === undefined
-    ? resolveReadPathWithLegacy(getModelJsonPath(), [getLegacyModelJsonPath()])
-    : Promise.resolve(options.modelJsonPath);
 }
 
 /**
