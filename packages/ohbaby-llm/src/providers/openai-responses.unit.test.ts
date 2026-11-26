@@ -249,6 +249,51 @@ describe("Responses request projection", () => {
     });
   });
 
+  it.each([
+    ["gpt-6.2-astra", true],
+    ["auto/gpt-6.2-sol", true],
+    ["gpt-6.2-sol-preview", false],
+    ["gpt-6.2-astra/other", false],
+  ])("places the base instructions for %s", async (model, cacheableBase) => {
+    const { provider, create } = setup();
+    await provider.streamResponse({
+      ...request,
+      model,
+      messages: [
+        { role: "system", content: "base" },
+        { role: "system", content: "current task" },
+        ...request.messages,
+        { role: "system", content: "final directive" },
+      ],
+    });
+    const body = create.mock.calls[0]?.[0];
+    expect(body?.input).toEqual([
+      ...(cacheableBase ? [{ role: "developer", content: "base" }] : []),
+      ...request.messages,
+    ]);
+    expect(body?.instructions).toBe(
+      cacheableBase
+        ? "current task\n\nfinal directive"
+        : "base\n\ncurrent task\n\nfinal directive",
+    );
+  });
+
+  it("keeps a system directive after the first user message at request scope", async () => {
+    const { provider, create } = setup();
+    await provider.streamResponse({
+      ...request,
+      model: "gpt-6.2-sol",
+      messages: [
+        ...request.messages,
+        { role: "system", content: "final directive" },
+      ],
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      input: request.messages,
+      instructions: "final directive",
+    });
+  });
+
   it("omits absent instructions and tools and projects no cache or continuation controls", async () => {
     const { provider, create } = setup();
     await provider.streamResponse(request);
@@ -1441,10 +1486,16 @@ describe("Responses native continuation through installed SDK SSE", () => {
   });
   it("retains terminal-only encrypted reasoning and replays the ordered assistant exactly once", async () => {
     const fixture = nativeFixture();
+    const model = "gpt-6.2-sol";
+    const base = { role: "system", content: "base" } as const;
     await sdkFixture(
       [fixture.events, [...textEvents(), terminal([message()])]],
       async (provider, bodies) => {
-        const events = await sdkCollect(provider);
+        const events = await sdkCollect(provider, {
+          ...request,
+          model,
+          messages: [base, ...request.messages],
+        });
         expect(
           events.slice(0, -1).every((event) => !("nativeOutput" in event)),
         ).toBe(true);
@@ -1459,7 +1510,9 @@ describe("Responses native continuation through installed SDK SSE", () => {
         });
         await sdkCollect(provider, {
           ...request,
+          model,
           messages: [
+            base,
             { role: "user", content: "hello" },
             {
               role: "assistant",
@@ -1475,7 +1528,7 @@ describe("Responses native continuation through installed SDK SSE", () => {
                 version: 1,
                 origin: {
                   provider: "responses",
-                  model: "responses-model",
+                  model,
                   protocol: "openai-responses",
                   endpoint: "https://fixture.invalid/v1",
                 },
@@ -1487,8 +1540,8 @@ describe("Responses native continuation through installed SDK SSE", () => {
           ],
         } as unknown as InterfaceProviderRequest);
         const second = bodies[1]?.input as unknown[];
-        expect(second).toHaveLength(5);
         expect(second).toEqual([
+          { role: "developer", content: "base" },
           { role: "user", content: "hello" },
           ...fixture.output,
           { type: "function_call_output", call_id: "call-1", output: "found" },
