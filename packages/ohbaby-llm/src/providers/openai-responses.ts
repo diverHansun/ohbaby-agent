@@ -52,13 +52,21 @@ function buildRequestParams(
 ): ResponseCreateParamsStreaming {
   const instructions: string[] = [];
   const input: ResponseInput = [];
-  for (const rawMessage of request.messages) {
+  const modelName = request.model.split("/").at(-1);
+  const usesDeveloperPrefix =
+    modelName === "gpt-6.2-sol" || modelName === "gpt-6.2-astra";
+  for (const [index, rawMessage] of request.messages.entries()) {
     const message = object(rawMessage, "message");
     switch (message.role) {
-      case "system":
+      case "system": {
         allowedKeys(message, ["role", "content"], "system message");
-        instructions.push(string(message.content, "system content"));
+        const content = string(message.content, "system content");
+        // GPT-6.2 renders top-level instructions after the cacheable input.
+        if (index === 0 && usesDeveloperPrefix)
+          input.push({ role: "developer", content });
+        else instructions.push(content);
         break;
+      }
       case "user":
         allowedKeys(message, ["role", "content"], "user message");
         input.push({
