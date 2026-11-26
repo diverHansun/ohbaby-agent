@@ -267,11 +267,11 @@ describe("Responses request projection", () => {
       ],
     });
     const body = create.mock.calls[0]?.[0];
-    expect(body?.input).toEqual([
+    expect(body.input).toEqual([
       ...(cacheableBase ? [{ role: "developer", content: "base" }] : []),
       ...request.messages,
     ]);
-    expect(body?.instructions).toBe(
+    expect(body.instructions).toBe(
       cacheableBase
         ? "current task\n\nfinal directive"
         : "base\n\ncurrent task\n\nfinal directive",
@@ -1539,6 +1539,7 @@ describe("Responses native continuation through installed SDK SSE", () => {
             { role: "tool", callId: "call-1", content: "found" },
           ],
         } as unknown as InterfaceProviderRequest);
+        expect(bodies[1]).not.toHaveProperty("instructions");
         const second = bodies[1]?.input as unknown[];
         expect(second).toEqual([
           { role: "developer", content: "base" },
