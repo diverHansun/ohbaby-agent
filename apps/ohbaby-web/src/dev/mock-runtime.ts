@@ -429,6 +429,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     },
     searchSessions: ({
       query,
+      order = "desc",
       cursor,
       signal,
     }): Promise<UiSessionSearchPage> => {
@@ -436,20 +437,32 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
         return Promise.reject(new DOMException("Aborted", "AbortError"));
       if (query === "error")
         return Promise.reject(new Error("Search is temporarily unavailable."));
-      const needle = query.trim().toLowerCase();
+      const keywords = query.trim().toLowerCase().split(/\s+/u);
+      const snippet = `A previous message about sidebar layout. <img src=x onerror=alert(1)> stays plain text.`;
       const found: UiSessionSearchResult[] = [];
-      for (const session of sessions) {
-        if (session.status === "archived") continue;
-        const snippet = `A previous message about sidebar layout. <img src=x onerror=alert(1)> stays plain text.`;
-        if (session.title.toLowerCase().includes(needle))
+      const ranked = sessions
+        .filter((session) => session.status !== "archived")
+        .sort((a, b) =>
+          order === "asc"
+            ? a.updatedAt.localeCompare(b.updatedAt)
+            : b.updatedAt.localeCompare(a.updatedAt),
+        );
+      for (const session of ranked) {
+        const title = session.title.toLowerCase();
+        const inTitle = keywords.every((keyword) => title.includes(keyword));
+        const inBody = keywords.every((keyword) =>
+          snippet.toLowerCase().includes(keyword),
+        );
+        if (inBody)
+          found.push({
+            session,
+            matchType: "message",
+            messageId: `${session.id}-message`,
+            snippet,
+          });
+        else if (inTitle)
           found.push({ session, matchType: "title", snippet: session.title });
-        else if (snippet.toLowerCase().includes(needle))
-          found.push({ session, matchType: "message", snippet });
       }
-      found.sort(
-        (a, b) =>
-          Number(a.matchType === "message") - Number(b.matchType === "message"),
-      );
       const start = Number(cursor ?? 0);
       return Promise.resolve({
         results: found.slice(start, start + 20),

@@ -36,12 +36,14 @@ export class GlobalSessionsClient {
 
   async searchSessions(input: {
     readonly query: string;
+    readonly order?: "desc" | "asc";
     readonly cursor?: string;
     readonly limit?: number;
     readonly signal?: AbortSignal;
   }): Promise<UiSessionSearchPage> {
     const query = pageQuery(input);
     query.set("q", input.query);
+    if (input.order) query.set("order", input.order);
     const { ok: _ok, ...page } = await this.http.request<
       UiSessionSearchPage & { readonly ok: true }
     >(`/v1/sessions/search?${query}`, {

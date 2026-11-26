@@ -1,7 +1,6 @@
 import {
   globalSessionRequestDirectory,
   type UiGlobalSession,
-  type UiSessionSearchPage,
 } from "ohbaby-sdk";
 import {
   AlertCircle,
@@ -34,7 +33,8 @@ import {
   type SidebarGroupKey,
   type SidebarSessionItem,
 } from "../../store/sidebar-groups.js";
-import { SidebarSearch } from "../search/SidebarSearch.js";
+import { SearchDialog } from "../search/SearchDialog.js";
+import type { SessionSearch } from "../search/useSessionSearch.js";
 import { IconButton } from "../shared/IconButton.js";
 import { useDelayed } from "../shared/use-delayed.js";
 import { Wordmark } from "../shared/Wordmark.js";
@@ -56,14 +56,8 @@ const LOADING_DELAY_MS = 300;
 export interface SidebarProps {
   readonly serverUrl?: string;
   readonly searchOpen: boolean;
-  readonly searchFocusRequest?: number;
   readonly onSearchOpenChange: (open: boolean) => void;
-  readonly searchSessions: (input: {
-    query: string;
-    cursor?: string;
-    limit?: number;
-    signal?: AbortSignal;
-  }) => Promise<UiSessionSearchPage>;
+  readonly searchSessions: SessionSearch;
   readonly catalog: GlobalCatalogSnapshot;
   readonly activeSessionId: string | null;
   /** Running and awaiting state; known only for the connected instance (06 §3.4). */
@@ -109,11 +103,10 @@ const WORKSPACES_KEY = "workspaces";
  */
 export function Sidebar(props: SidebarProps): ReactElement {
   const newRef = useRef<HTMLButtonElement>(null);
-  const searchRef = useRef<HTMLButtonElement>(null);
   const movedFocus = useRef<string | null>(null);
+  // The dialog hands focus back to where it was opened from on close.
   const closeSearch = (): void => {
     props.onSearchOpenChange(false);
-    searchRef.current?.focus({ preventScroll: true });
   };
   const pinsStore = useMemo(
     () => getGlobalSessionPinsStore(props.serverUrl),
@@ -314,15 +307,13 @@ export function Sidebar(props: SidebarProps): ReactElement {
           <span>New chat</span>
         </button>
         <button
-          ref={searchRef}
           type="button"
           className="ohb-sidebar-nav-item"
-          aria-expanded={props.searchOpen}
+          aria-haspopup="dialog"
           aria-label="Search chats"
           aria-keyshortcuts="Meta+K Control+K"
           onClick={() => {
-            if (props.searchOpen) closeSearch();
-            else props.onSearchOpenChange(true);
+            props.onSearchOpenChange(true);
           }}
         >
           <Search aria-hidden="true" size={15} />
@@ -330,13 +321,103 @@ export function Sidebar(props: SidebarProps): ReactElement {
         </button>
       </nav>
       <div className="ohb-sidebar-scroll">
-        <SidebarSearch
-          open={props.searchOpen}
-          focusRequest={props.searchFocusRequest}
+        {pins.error ? (
+          <p className="ohb-session-pin-error" role="status">
+            Pins could not be saved. Changes last until refresh.
+          </p>
+        ) : null}
+        {groups.pinned ? (
+          <SidebarSection
+            title="Pinned"
+            className="ohb-sidebar-pinned"
+            expanded={!collapsed.has("pinned")}
+            onToggle={() => {
+              toggle("pinned");
+            }}
+          >
+            {list(groups.pinned)}
+          </SidebarSection>
+        ) : null}
+        <SidebarSection
+          title="Workspaces"
+          expanded={!collapsed.has(WORKSPACES_KEY)}
+          onToggle={() => {
+            toggle(WORKSPACES_KEY);
+          }}
+          actions={
+            <>
+              {catalog.workspacesStatus === "error" ? (
+                <IconButton
+                  label="Workspaces could not be loaded. Retry"
+                  onClick={props.onRetry}
+                >
+                  <AlertCircle aria-hidden="true" size={13} />
+                </IconButton>
+              ) : null}
+              <IconButton
+                label="Open folder…"
+                className="ohb-sidebar-open-folder"
+                onClick={props.onOpenFolder}
+              >
+                <FolderPlus aria-hidden="true" size={13} />
+              </IconButton>
+            </>
+          }
+        >
+          {groups.workspaces.map((group) => (
+            <WorkspaceGroup
+              key={group.key}
+              directory={group.workspace.directory}
+              current={group.workspace.directory === activeWorkspace}
+              available={group.workspace.available}
+              expanded={!collapsed.has(group.key)}
+              onToggle={() => {
+                toggle(group.key);
+              }}
+              {...(group.workspace.available
+                ? {
+                    onNewChat: (): void => {
+                      props.onNewChat(group.workspace.directory);
+                    },
+                  }
+                : {})}
+              onHide={() => {
+                props.onHideWorkspace(group.workspace.directory);
+              }}
+            >
+              {list(group)}
+            </WorkspaceGroup>
+          ))}
+        </SidebarSection>
+        {groups.recents ? (
+          <SidebarSection
+            title="Recents"
+            className="ohb-sidebar-recents"
+            expanded={!collapsed.has("recents")}
+            onToggle={() => {
+              toggle("recents");
+            }}
+          >
+            {list(groups.recents)}
+          </SidebarSection>
+        ) : null}
+        {showLoading ? <p className="ohb-sidebar-status">Loading…</p> : null}
+        {catalog.sessionsStatus === "error" && catalog.sessions.length === 0 ? (
+          <p className="ohb-sidebar-status" role="alert">
+            <span>Chats could not be loaded.</span>
+            <button type="button" onClick={props.onRetry}>
+              Retry
+            </button>
+          </p>
+        ) : null}
+      </div>
+      {props.searchOpen ? (
+        <SearchDialog
           search={props.searchSessions}
+          recent={catalog.sessions}
           activeSessionId={props.activeSessionId}
           onClose={closeSearch}
-          onSelect={(session) => {
+          onSelect={({ session }) => {
             closeSearch();
             props.onSelectSession({
               ...session,
@@ -345,99 +426,8 @@ export function Sidebar(props: SidebarProps): ReactElement {
               activity: activity.get(session.id) ?? "idle",
             });
           }}
-        >
-          {pins.error ? (
-            <p className="ohb-session-pin-error" role="status">
-              Pins could not be saved. Changes last until refresh.
-            </p>
-          ) : null}
-          {groups.pinned ? (
-            <SidebarSection
-              title="Pinned"
-              className="ohb-sidebar-pinned"
-              expanded={!collapsed.has("pinned")}
-              onToggle={() => {
-                toggle("pinned");
-              }}
-            >
-              {list(groups.pinned)}
-            </SidebarSection>
-          ) : null}
-          <SidebarSection
-            title="Workspaces"
-            expanded={!collapsed.has(WORKSPACES_KEY)}
-            onToggle={() => {
-              toggle(WORKSPACES_KEY);
-            }}
-            actions={
-              <>
-                {catalog.workspacesStatus === "error" ? (
-                  <IconButton
-                    label="Workspaces could not be loaded. Retry"
-                    onClick={props.onRetry}
-                  >
-                    <AlertCircle aria-hidden="true" size={13} />
-                  </IconButton>
-                ) : null}
-                <IconButton
-                  label="Open folder…"
-                  className="ohb-sidebar-open-folder"
-                  onClick={props.onOpenFolder}
-                >
-                  <FolderPlus aria-hidden="true" size={13} />
-                </IconButton>
-              </>
-            }
-          >
-            {groups.workspaces.map((group) => (
-              <WorkspaceGroup
-                key={group.key}
-                directory={group.workspace.directory}
-                current={group.workspace.directory === activeWorkspace}
-                available={group.workspace.available}
-                expanded={!collapsed.has(group.key)}
-                onToggle={() => {
-                  toggle(group.key);
-                }}
-                {...(group.workspace.available
-                  ? {
-                      onNewChat: (): void => {
-                        props.onNewChat(group.workspace.directory);
-                      },
-                    }
-                  : {})}
-                onHide={() => {
-                  props.onHideWorkspace(group.workspace.directory);
-                }}
-              >
-                {list(group)}
-              </WorkspaceGroup>
-            ))}
-          </SidebarSection>
-          {groups.recents ? (
-            <SidebarSection
-              title="Recents"
-              className="ohb-sidebar-recents"
-              expanded={!collapsed.has("recents")}
-              onToggle={() => {
-                toggle("recents");
-              }}
-            >
-              {list(groups.recents)}
-            </SidebarSection>
-          ) : null}
-          {showLoading ? <p className="ohb-sidebar-status">Loading…</p> : null}
-          {catalog.sessionsStatus === "error" &&
-          catalog.sessions.length === 0 ? (
-            <p className="ohb-sidebar-status" role="alert">
-              <span>Chats could not be loaded.</span>
-              <button type="button" onClick={props.onRetry}>
-                Retry
-              </button>
-            </p>
-          ) : null}
-        </SidebarSearch>
-      </div>
+        />
+      ) : null}
       <div className="ohb-sidebar-footer">
         <button
           type="button"

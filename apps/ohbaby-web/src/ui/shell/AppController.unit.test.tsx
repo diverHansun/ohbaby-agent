@@ -293,62 +293,65 @@ describe("dev mock runtime", () => {
 });
 
 describe("improve-3 sidebar actions", () => {
-  it("opens a collapsed sidebar with Cmd/Ctrl+K and returns focus after search Escape", () => {
+  it("opens the search card with Cmd/Ctrl+K without opening a collapsed sidebar", () => {
     const container = mount(createMockRuntime("typical"));
     act(() => {
       button(container, "Collapse sidebar").click();
     });
     act(() => {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "k",
-          ctrlKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+      textarea(container).focus();
     });
+    const shortcut = (modifier: "ctrlKey" | "metaKey"): void => {
+      act(() => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "k",
+            [modifier]: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+    };
+    shortcut("ctrlKey");
     expect(
       container
         .querySelector(".ohb-shell")
         ?.classList.contains("is-sidebar-open"),
-    ).toBe(true);
-    const search = container.querySelector<HTMLInputElement>(
-      'input[aria-label="Search chats"]',
+    ).toBe(false);
+    const search = (): HTMLInputElement | null =>
+      document.querySelector<HTMLInputElement>('[role="combobox"]');
+    const input = search();
+    if (!input) throw new Error("Missing search input");
+    expect(input.closest('[role="dialog"]')?.getAttribute("aria-modal")).toBe(
+      "true",
     );
-    if (!search) throw new Error("Missing search input");
-    expect(document.activeElement).toBe(search);
+    expect(document.activeElement).toBe(input);
+    // A second shortcut while the card is open opens nothing new.
+    shortcut("metaKey");
+    expect(document.querySelectorAll('[role="combobox"]')).toHaveLength(1);
     act(() => {
-      search.dispatchEvent(
+      input.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
       );
     });
-    expect(
-      container.querySelector('input[aria-label="Search chats"]'),
-    ).toBeNull();
+    expect(search()).toBeNull();
+    expect(document.activeElement).toBe(textarea(container));
+  });
+
+  it("returns focus to the Search button after the card closes", () => {
+    const container = mount(createMockRuntime("typical"));
+    act(() => {
+      button(container, "Search chats").focus();
+      button(container, "Search chats").click();
+    });
+    const layer = document.querySelector(".ohb-search-layer");
+    if (!layer) throw new Error("Missing search layer");
+    act(() => {
+      layer.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(document.querySelector('[role="combobox"]')).toBeNull();
     expect(document.activeElement).toBe(button(container, "Search chats"));
-    act(() => {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "k",
-          metaKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    });
-    expect(
-      container.querySelector('input[aria-label="Search chats"]'),
-    ).not.toBeNull();
-    act(() => {
-      textarea(container).focus();
-      textarea(container).dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-      );
-    });
-    expect(
-      container.querySelector('input[aria-label="Search chats"]'),
-    ).not.toBeNull();
   });
 
   it("keeps the row and reports the backend reason when moving fails", async () => {
@@ -382,30 +385,6 @@ describe("improve-3 sidebar actions", () => {
     ).toContain("ohbaby-agent");
     expect(container.querySelector('[aria-label="Moving chat"]')).toBeNull();
   });
-});
-
-it("refocuses an already open search with the global shortcut", () => {
-  const container = mount(createMockRuntime("typical"));
-  const shortcut = (): void => {
-    act(() => {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "k",
-          ctrlKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    });
-  };
-  shortcut();
-  act(() => {
-    textarea(container).focus();
-  });
-  shortcut();
-  expect(document.activeElement).toBe(
-    container.querySelector('input[aria-label="Search chats"]'),
-  );
 });
 
 it("shows one actionable notice for repeated failures to open a chat and animates it out", async () => {

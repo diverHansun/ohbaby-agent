@@ -77,10 +77,8 @@ export function AppController(props: {
   const view = useMemo(() => selectViewModel(storeSnapshot), [storeSnapshot]);
   const client = runtime.client;
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const openSearch = useCallback(() => {
     setSearchOpen(true);
-    setSearchFocusRequest((request) => request + 1);
   }, []);
   const searchSessions = useCallback<OhbabyWebRuntime["searchSessions"]>(
     (input) => runtime.searchSessions(input),
@@ -383,7 +381,6 @@ export function AppController(props: {
           <Sidebar
             serverUrl={runtime.serverUrl}
             searchOpen={searchOpen}
-            searchFocusRequest={searchFocusRequest}
             onSearchOpenChange={setSearchOpen}
             searchSessions={searchSessions}
             catalog={catalog}
