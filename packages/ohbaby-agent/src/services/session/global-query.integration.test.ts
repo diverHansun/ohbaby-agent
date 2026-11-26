@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { listRetriedAttemptIds } from "ohbaby-sdk";
+import { isSearchableMessage } from "./search-visibility.js";
 import { closeDatabase, getDatabase, initDatabase } from "../database/index.js";
 import {
   buildSearchSnippet,
@@ -66,10 +68,12 @@ function addMessage(input: {
         readonly type: string;
         readonly text: string;
         readonly synthetic?: boolean;
+        readonly metadata?: Readonly<Record<string, unknown>>;
       }
   )[];
   readonly contextScopeId?: string;
   readonly runtimeInputKind?: string;
+  readonly data?: Readonly<Record<string, unknown>>;
 }): void {
   const db = getDatabase();
   order += 1;
@@ -84,9 +88,10 @@ function addMessage(input: {
     order,
     order,
     JSON.stringify(
-      input.runtimeInputKind === undefined
-        ? {}
-        : { runtimeInput: { kind: input.runtimeInputKind } },
+      input.data ??
+        (input.runtimeInputKind === undefined
+          ? {}
+          : { runtimeInput: { kind: input.runtimeInputKind } }),
     ),
   );
   input.parts.forEach((part, index) => {
@@ -348,21 +353,139 @@ describe("searchGlobalSessions", () => {
     expect(searchIds("steer-marker")).toEqual(["steer"]);
   });
 
-  it("sorts title hits first, returns each session once with a snippet", () => {
-    addSession({ id: "body-new", updatedAt: 100 });
+  it("sorts by session age and includes the latest body hit even when the title matches", () => {
+    addSession({ id: "body-new", updatedAt: 100, title: "Deploy failed" });
     addMessage({ sessionId: "body-new", id: "m1", parts: ["deploy failed"] });
     addMessage({ sessionId: "body-new", id: "m2", parts: ["deploy again"] });
     addSession({ id: "title-old", updatedAt: 1, title: "Deploy notes" });
 
     const page = searchGlobalSessions({ query: "deploy" });
-    expect(page.hits.map((hit) => [hit.session.id, hit.matchType])).toEqual([
-      ["title-old", "title"],
-      ["body-new", "message"],
+    expect(
+      page.hits.map(({ session, ...hit }) => ({ ...hit, id: session.id })),
+    ).toEqual([
+      {
+        id: "body-new",
+        messageId: "m2",
+        snippet: "deploy again",
+      },
+      { id: "title-old" },
     ]);
-    expect(page.hits[1]).toMatchObject({
-      messageId: "m2",
-      snippet: "deploy again",
+  });
+
+  it("searches and quotes only display text, including legacy and empty display values", () => {
+    addSession({ id: "display", updatedAt: 1 });
+    addMessage({
+      sessionId: "display",
+      id: "m",
+      parts: [
+        {
+          type: "text",
+          text: "private goal",
+          metadata: { displayText: "超时" },
+        },
+        { type: "text", text: "private empty", metadata: { displayText: "" } },
+        {
+          type: "text",
+          text: "private summary",
+          metadata: { kind: "context-summary" },
+        },
+        {
+          type: "text",
+          text: "private summary",
+          metadata: { kind: "context-compaction" },
+        },
+        {
+          type: "text",
+          text: "private terminal",
+          metadata: { kind: "lifecycle-interruption" },
+        },
+        { type: "text", text: "path C:\\repo", metadata: { displayText: 42 } },
+        { type: "tool", text: "private error" },
+        { type: "reasoning", text: "private thought" },
+      ],
     });
+    expect(searchIds("private")).toEqual([]);
+    expect(
+      searchGlobalSessions({ query: "repo 超时 \\" }).hits[0],
+    ).toMatchObject({
+      messageId: "m",
+      snippet: "超时 path C:\\repo",
+    });
+    getDatabase()
+      .prepare("UPDATE message SET rewound_at='now' WHERE id='m'")
+      .run();
+    expect(searchIds("repo")).toEqual([]);
+    expect(isSearchableMessage("display", "m")).toBe(false);
+  });
+
+  it("excludes replaced attempts before ranking, in agreement with the SDK", () => {
+    addSession({ id: "s", updatedAt: 1 });
+    const request = {
+      purpose: "agent-step",
+      requestId: "req",
+      runId: "r",
+      messageId: "old",
+      step: 2,
+      attempt: 1,
+      outcome: "error",
+      retryScheduled: true,
+      startedAt: 1,
+    } as const;
+    const failed = {
+      id: "old",
+      runId: "r",
+      role: "assistant",
+      status: "error",
+      parts: [],
+      createdAt: "now",
+      modelRequests: [request],
+    } as const;
+    addMessage({ sessionId: "s", id: "visible", parts: ["needle first"] });
+    addMessage({
+      sessionId: "s",
+      id: "old",
+      role: "assistant",
+      parts: ["needle obsolete"],
+      data: {
+        modelRequests: failed.modelRequests,
+        runId: "r",
+        error: { name: "error" },
+        time: { completed: 2 },
+      },
+    });
+    function check(replaced: boolean): void {
+      expect(isSearchableMessage("s", "old")).toBe(!replaced);
+      expect(searchGlobalSessions({ query: "needle" }).hits[0]?.messageId).toBe(
+        replaced ? "visible" : "old",
+      );
+    }
+    check(listRetriedAttemptIds([failed]).has("old"));
+    const next = {
+      ...failed,
+      id: "new",
+      modelRequests: [
+        { ...request, messageId: "new", attempt: 2, startedAt: 3 },
+      ],
+    };
+    addMessage({
+      sessionId: "s",
+      id: "new",
+      role: "assistant",
+      parts: ["different"],
+      data: {
+        runId: "r",
+        modelRequests: next.modelRequests,
+      },
+    });
+    check(listRetriedAttemptIds([failed, next]).has("old"));
+    expect(searchIds("obsolete")).toEqual([]);
+    // The last owned request wins, even if the earlier failure scheduled a retry.
+    getDatabase()
+      .prepare(
+        `UPDATE message SET data=json_set(data,'$.modelRequests',json(?)) WHERE id='old'`,
+      )
+      .run(JSON.stringify([request, { ...request, outcome: "success" }]));
+    check(false);
   });
 
   it("searches the whole history beyond the list page size", () => {
@@ -389,30 +512,98 @@ describe("searchGlobalSessions", () => {
         parts: ["match"],
       });
     }
-    const seen: string[] = [];
-    let cursor: string | undefined;
-    do {
-      const page = searchGlobalSessions({ query: "match", limit: 3, cursor });
-      seen.push(...page.hits.map((hit) => hit.session.id));
-      cursor = page.nextCursor;
-    } while (cursor !== undefined);
-    expect(seen).toEqual([
-      "t4",
-      "t3",
-      "t2",
-      "t1",
-      "t0",
+    addSession({ id: "b4-tie", updatedAt: 14, title: "match" });
+    const expected = [
+      "b4-tie",
       "b4",
       "b3",
       "b2",
       "b1",
       "b0",
-    ]);
+      "t4",
+      "t3",
+      "t2",
+      "t1",
+      "t0",
+    ];
+    for (const order of ["asc", "desc"] as const) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = searchGlobalSessions({
+          query: "match",
+          limit: 3,
+          cursor,
+          order,
+        });
+        seen.push(...page.hits.map((hit) => hit.session.id));
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(seen).toEqual(order === "desc" ? expected : expected.toReversed());
+    }
+    const { nextCursor } = searchGlobalSessions({ query: "match", limit: 1 });
+    expect(() =>
+      searchGlobalSessions({
+        query: "match",
+        order: "asc",
+        cursor: nextCursor,
+      }),
+    ).toThrow(InvalidGlobalSessionCursorError);
+    expect(() => listGlobalSessions({ cursor: nextCursor })).toThrow(
+      InvalidGlobalSessionCursorError,
+    );
   });
 
   it("treats blank queries as no search", () => {
     expect(splitSearchKeywords("   ")).toEqual([]);
     expect(searchGlobalSessions({ query: " " }).hits).toEqual([]);
+  });
+
+  it("keeps about 15 Unicode characters before a match and includes distant hits", () => {
+    const text =
+      "🐈".repeat(200) +
+      "FIRST" +
+      "中".repeat(500) +
+      "SECOND" +
+      "🐕".repeat(300) +
+      "THIRD" +
+      "末".repeat(100);
+    const snippet = buildSearchSnippet(text, ["third", "second", "first"]);
+    expect(snippet.startsWith("…" + "🐈".repeat(15) + "FIRST")).toBe(true);
+    expect(snippet).toMatch(/FIRST.*….*SECOND.*….*THIRD/u);
+    expect(Array.from(snippet)).toHaveLength(120);
+  });
+
+  it("preserves a long keyword in full whenever it fits, before adding context", () => {
+    for (const size of [105, 115, 119, 120]) {
+      const keyword = "🐈".repeat(size);
+      const snippet = buildSearchSnippet(
+        "头".repeat(500) + keyword + "尾".repeat(500),
+        [keyword],
+      );
+      expect(snippet).toContain(keyword);
+      expect(Array.from(snippet).length).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it("merges overlapping keyword excerpts and keeps their source spelling", () => {
+    const text = "头".repeat(100) + "TimeoutError" + "尾".repeat(300);
+    const snippet = buildSearchSnippet(text, ["error", "TIMEOUT", "outerror"]);
+    expect(snippet.startsWith("…" + "头".repeat(15) + "TimeoutError")).toBe(
+      true,
+    );
+    expect(Array.from(snippet)).toHaveLength(120);
+  });
+
+  it("limits excerpts to complete hits in document order when space runs out", () => {
+    const words = Array.from({ length: 16 }, (_, i) => `[kw${String(i)}]`);
+    const text = words.join("哦".repeat(200));
+    const snippet = buildSearchSnippet(text, words.toReversed());
+    const found = words.filter((word) => snippet.includes(word));
+    expect(found.length).toBeGreaterThan(1);
+    expect(found.length).toBeLessThan(words.length);
+    expect(found).toEqual(words.slice(0, found.length));
+    expect(Array.from(snippet).length).toBeLessThanOrEqual(120);
   });
 
   it("centers the snippet on the first keyword", () => {

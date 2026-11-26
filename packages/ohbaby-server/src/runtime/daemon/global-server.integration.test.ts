@@ -786,7 +786,6 @@ describe("global daemon session routes", () => {
       hits: [
         {
           session: coreSession(),
-          matchType: "message" as const,
           snippet: "hit",
           messageId: "m1",
         },
@@ -868,13 +867,28 @@ describe("global daemon session routes", () => {
         headers,
       });
       await expect(searched.json()).resolves.toMatchObject({
-        results: [{ matchType: "message", snippet: "hit", messageId: "m1" }],
+        results: [{ snippet: "hit", messageId: "m1" }],
       });
       expect(search).toHaveBeenCalledWith({
         query: "a b",
+        order: "desc",
         limit: undefined,
         cursor: undefined,
       });
+
+      await fetch(`${server.url}/v1/sessions/search?q=x&order=asc`, {
+        headers,
+      });
+      expect(search).toHaveBeenLastCalledWith(
+        expect.objectContaining({ order: "asc" }),
+      );
+      expect(
+        (
+          await fetch(`${server.url}/v1/sessions/search?q=x&order=other`, {
+            headers,
+          })
+        ).status,
+      ).toBe(400);
 
       const post = (body: unknown): Promise<Response> =>
         fetch(`${server.url}/v1/sessions/s1/workspace`, {

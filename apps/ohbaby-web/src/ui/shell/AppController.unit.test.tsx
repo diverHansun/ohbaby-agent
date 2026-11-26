@@ -7,6 +7,7 @@ import type { WorkspaceSnapshot } from "../../api/daemon/wire.js";
 import { createMockRuntime } from "../../dev/mock-runtime.js";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { OhbabyWebApp } from "../App.js";
+import { SessionScreen } from "../session/SessionScreen.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -293,62 +294,159 @@ describe("dev mock runtime", () => {
 });
 
 describe("improve-3 sidebar actions", () => {
-  it("opens a collapsed sidebar with Cmd/Ctrl+K and returns focus after search Escape", () => {
+  it("opens the search card with Cmd/Ctrl+K without opening a collapsed sidebar", () => {
     const container = mount(createMockRuntime("typical"));
     act(() => {
       button(container, "Collapse sidebar").click();
     });
     act(() => {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "k",
-          ctrlKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+      textarea(container).focus();
     });
+    const shortcut = (modifier: "ctrlKey" | "metaKey"): void => {
+      act(() => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "k",
+            [modifier]: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+    };
+    shortcut("ctrlKey");
     expect(
       container
         .querySelector(".ohb-shell")
         ?.classList.contains("is-sidebar-open"),
-    ).toBe(true);
-    const search = container.querySelector<HTMLInputElement>(
-      'input[aria-label="Search chats"]',
+    ).toBe(false);
+    const search = (): HTMLInputElement | null =>
+      document.querySelector<HTMLInputElement>('[role="combobox"]');
+    const input = search();
+    if (!input) throw new Error("Missing search input");
+    expect(input.closest('[role="dialog"]')?.getAttribute("aria-modal")).toBe(
+      "true",
     );
-    if (!search) throw new Error("Missing search input");
-    expect(document.activeElement).toBe(search);
+    expect(document.activeElement).toBe(input);
+    // A second shortcut while the card is open opens nothing new.
+    shortcut("metaKey");
+    expect(document.querySelectorAll('[role="combobox"]')).toHaveLength(1);
     act(() => {
-      search.dispatchEvent(
+      input.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
       );
     });
-    expect(
-      container.querySelector('input[aria-label="Search chats"]'),
-    ).toBeNull();
-    expect(document.activeElement).toBe(button(container, "Search chats"));
-    act(() => {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "k",
-          metaKey: true,
-          bubbles: true,
-          cancelable: true,
+    expect(search()).toBeNull();
+    expect(document.activeElement).toBe(textarea(container));
+  });
+
+  it("releases a search anchor in live messages as soon as a new prompt is sent", async () => {
+    const runtime = createMockRuntime("running");
+    const client = runtime.client;
+    const session = runtime.store.getSnapshot().sessionSync.view?.session;
+    const anchor = session?.messages[0];
+    if (!client || !session || !anchor)
+      throw new Error("Missing running chat fixture");
+    const submit = vi.spyOn(runtime, "submitPrompt").mockImplementation(
+      () =>
+        new Promise(() => {
+          // Keep the daemon receipt pending until after the follow assertion.
         }),
-      );
-    });
-    expect(
-      container.querySelector('input[aria-label="Search chats"]'),
-    ).not.toBeNull();
+    );
+    const clearLocation = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
     act(() => {
-      textarea(container).focus();
-      textarea(container).dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      root.render(
+        <SessionScreen
+          runtime={runtime}
+          client={client}
+          location={{
+            sessionId: session.id,
+            messageId: anchor.id,
+            ticket: 1,
+            selection: runtime.getSelectionGeneration(),
+          }}
+          clearLocation={clearLocation}
+          onOpenModelSettings={vi.fn()}
+          onError={vi.fn()}
+        />,
       );
     });
     expect(
-      container.querySelector('input[aria-label="Search chats"]'),
-    ).not.toBeNull();
+      container.querySelector(`[data-message-id="${anchor.id}"]`),
+    ).toBeTruthy();
+    expect(clearLocation).not.toHaveBeenCalled();
+    typeText(container, "Follow this new prompt");
+    act(() => {
+      button(container, "Send message").click();
+    });
+    await settle();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(clearLocation).toHaveBeenCalledOnce();
+  });
+
+  it("opens a search result in another chat, displays its old message, and returns to the live conversation", async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = createMockRuntime("typical");
+      const container = mount(runtime);
+      act(() => {
+        button(container, "Search chats").click();
+      });
+      const input =
+        document.querySelector<HTMLInputElement>('[role="combobox"]');
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      );
+      if (!input) throw new Error("Missing search input");
+      act(() => {
+        descriptor?.set?.call(input, "sidebar layout");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      const result = document.querySelector<HTMLElement>(".ohb-search-row");
+      if (!result) throw new Error("Missing search result");
+      act(() => {
+        result.click();
+      });
+      await settle();
+      const id = runtime.store.getSnapshot().sessionSync.scope?.sessionId;
+      expect(id).toBeTruthy();
+      const row = container.querySelector(
+        `[data-message-id="${id ?? ""}-message"]`,
+      );
+      expect(row?.textContent).toContain(
+        "A previous message about sidebar layout.",
+      );
+      act(() => {
+        button(container, "Back to latest").click();
+      });
+      expect(container.contains(row)).toBe(false);
+      expect(runtime.store.getSnapshot().sessionSync.scope?.sessionId).toBe(id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns focus to the Search button after the card closes", () => {
+    const container = mount(createMockRuntime("typical"));
+    act(() => {
+      button(container, "Search chats").focus();
+      button(container, "Search chats").click();
+    });
+    const layer = document.querySelector(".ohb-search-layer");
+    if (!layer) throw new Error("Missing search layer");
+    act(() => {
+      layer.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(document.querySelector('[role="combobox"]')).toBeNull();
+    expect(document.activeElement).toBe(button(container, "Search chats"));
   });
 
   it("keeps the row and reports the backend reason when moving fails", async () => {
@@ -382,30 +480,6 @@ describe("improve-3 sidebar actions", () => {
     ).toContain("ohbaby-agent");
     expect(container.querySelector('[aria-label="Moving chat"]')).toBeNull();
   });
-});
-
-it("refocuses an already open search with the global shortcut", () => {
-  const container = mount(createMockRuntime("typical"));
-  const shortcut = (): void => {
-    act(() => {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "k",
-          ctrlKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    });
-  };
-  shortcut();
-  act(() => {
-    textarea(container).focus();
-  });
-  shortcut();
-  expect(document.activeElement).toBe(
-    container.querySelector('input[aria-label="Search chats"]'),
-  );
 });
 
 it("shows one actionable notice for repeated failures to open a chat and animates it out", async () => {

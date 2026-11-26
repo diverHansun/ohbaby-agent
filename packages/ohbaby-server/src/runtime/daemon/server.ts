@@ -69,6 +69,7 @@ import {
   globalSessionErrorStatus,
   parseGlobalSessionLimit,
   parseGlobalSessionStatus,
+  parseSessionSearchOrder,
   parseSessionWorkspaceUpdate,
   toUiGlobalSession,
   toUiGlobalSessionPage,
@@ -830,6 +831,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     try {
       const page = catalog.search({
         query: context.req.query("q") ?? "",
+        order: parseSessionSearchOrder(context.req.query("order")),
         limit: parseGlobalSessionLimit(context.req.query("limit")),
         cursor: context.req.query("cursor"),
       });

@@ -212,6 +212,8 @@ export class GlobalLayer {
 
   searchSessions(input: {
     query: string;
+    /** By update time; newest first unless asked otherwise. */
+    order?: "desc" | "asc";
     cursor?: string;
     limit?: number;
     signal?: AbortSignal;

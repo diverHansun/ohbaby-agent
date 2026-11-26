@@ -119,12 +119,9 @@ export interface UiGlobalSessionPage {
   readonly nextCursor?: string;
 }
 
-export type UiSessionSearchMatchType = "title" | "message";
-
 export interface UiSessionSearchResult {
   readonly session: UiGlobalSession;
-  readonly matchType: UiSessionSearchMatchType;
-  readonly snippet: string;
+  readonly snippet?: string;
   readonly messageId?: string;
 }
 

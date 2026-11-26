@@ -36,6 +36,8 @@ export function usePromptSubmission(input: {
   readonly setActionError: (message: string | null) => void;
   /** Called when sending a prompt or accepting a run-starting command; not for a panel open. */
   readonly onSend: () => void;
+  /** Keep the old message in view if the daemon rejects the new prompt. */
+  readonly followOnReceipt: boolean;
 }): {
   readonly promptProjection: {
     readonly rows: readonly PromptProjectionModel[];
@@ -61,6 +63,7 @@ export function usePromptSubmission(input: {
     clearActionError,
     setActionError,
     onSend,
+    followOnReceipt,
   } = input;
   const [localPromptAttempts, setLocalPromptAttempts] = useState<
     readonly ScopedPromptAttempt[]
@@ -131,8 +134,9 @@ export function usePromptSubmission(input: {
           generation === commandScopeGeneration.current &&
           (completion.promptReceipt !== undefined ||
             (resumeWithArguments && completion.status === "completed"))
-        )
+        ) {
           onSend();
+        }
         if (
           resumeWithArguments &&
           completion.status === "failed" &&
@@ -185,7 +189,7 @@ export function usePromptSubmission(input: {
       if (text.startsWith("/")) {
         return submitSlashCommand(text, clientRequestId);
       }
-      onSend();
+      if (!followOnReceipt) onSend();
       const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
       const submittedSessionId = view.composer.activeSessionId;
       const submittingClient = runtime.client;
@@ -239,6 +243,7 @@ export function usePromptSubmission(input: {
         if (receipt.clientRequestId !== requestId) {
           throw new Error("Prompt receipt did not match this submission");
         }
+        if (followOnReceipt && isCurrentSubmission()) onSend();
         let receiptSelection = submittingSelection;
         // A first prompt opens its new session, unless the user moved to
         // another draft or session meanwhile: that choice wins (B15).
@@ -292,6 +297,7 @@ export function usePromptSubmission(input: {
       clearActionError,
       currentPromptAttempts,
       onSend,
+      followOnReceipt,
       runtime,
       selectedDirectory,
       setActionError,

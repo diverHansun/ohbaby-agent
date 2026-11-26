@@ -23,6 +23,7 @@ import type {
   UiSessionScope,
   UiSessionView,
   UiSessionHistory,
+  UiSessionHistoryQuery,
   UiSessionControl,
   UiPromptReceiptQuery,
   UiPromptReceiptResult,
@@ -342,13 +343,12 @@ export class DaemonHttpClient {
     );
   }
   getSessionHistory(
-    input: UiSessionScope & {
-      readonly before?: string;
-      readonly limit?: number;
-    },
+    input: UiSessionHistoryQuery,
   ): Promise<{ ok: true; history: UiSessionHistory }> {
     const query = scopeQuery(input);
     if (input.before !== undefined) query.set("before", input.before);
+    if (input.anchorMessageId !== undefined)
+      query.set("anchorMessageId", input.anchorMessageId);
     if (input.limit !== undefined) query.set("limit", String(input.limit));
     return this.request(
       `/v1/sessions/${encodeURIComponent(input.sessionId)}/history?${query}`,

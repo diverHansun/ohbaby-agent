@@ -247,9 +247,7 @@ describe("settings dialog", () => {
         );
         await Promise.resolve();
       });
-      const search = container.querySelector(
-        'input[aria-label="Search chats"]',
-      );
+      const search = document.querySelector('[role="combobox"]');
       expect(search).not.toBeNull();
       expect(document.activeElement).toBe(search);
     },

@@ -94,6 +94,8 @@ export interface OhbabyWebRuntime {
   deleteSession(sessionId: string): Promise<void>;
   searchSessions(input: {
     query: string;
+    /** By update time; newest first unless asked otherwise. */
+    order?: "desc" | "asc";
     cursor?: string;
     limit?: number;
     signal?: AbortSignal;
@@ -468,6 +470,8 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   searchSessions(input: {
     query: string;
+    /** By update time; newest first unless asked otherwise. */
+    order?: "desc" | "asc";
     cursor?: string;
     limit?: number;
     signal?: AbortSignal;

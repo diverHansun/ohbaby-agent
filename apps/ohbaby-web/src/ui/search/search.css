@@ -1,84 +1,237 @@
-.ohb-session-search {
-  padding: 8px;
+/* The search card (session-search 02 §3): a centered glass panel over a
+   light scrim. Rows are plain lines; only the selected one is shaded. */
+.ohb-search-layer {
+  align-items: flex-start;
+  animation: ohb-fade var(--duration-fast) var(--ease);
+  background: var(--bg-scrim);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 14vh 16px 16px;
+  position: fixed;
+  z-index: 120;
+}
+
+.ohb-search-dialog {
+  animation: ohb-pop var(--duration) var(--ease);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  max-height: min(560px, 72vh);
+  overflow: hidden;
+  width: min(640px, 100%);
+}
+
+.ohb-search-head {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex: none;
+  gap: 10px;
+  height: 54px;
+  padding: 0 14px 0 18px;
+}
+
+.ohb-search-glyph {
+  color: var(--text-dim);
+  flex: none;
+}
+
+.ohb-search-head input {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  flex: 1;
+  font: inherit;
+  font-size: 15px;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+}
+
+.ohb-search-head input::placeholder {
+  color: var(--text-dim);
+}
+
+/* A quiet word, not a control chip: it names the current order. */
+.ohb-search-order {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 6px;
+  transition: color var(--duration-fast) var(--ease);
+}
+
+.ohb-search-order:hover,
+.ohb-search-order:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.ohb-search-body {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
 }
-.ohb-session-search input {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
+
+.ohb-search-label {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 500;
+  margin: 0;
+  padding: 8px 12px 6px;
+}
+
+.ohb-search-body [role="listbox"] {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ohb-search-row {
+  align-items: center;
   border-radius: var(--radius-md);
-  background: var(--bg-panel);
-  color: var(--text);
-  padding: 8px;
-  font: inherit;
-}
-.ohb-session-search-results {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 8px;
-}
-.ohb-session-search-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  font: inherit;
+  column-gap: 10px;
   cursor: pointer;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  padding: 9px 12px;
+  row-gap: 3px;
 }
-.ohb-session-search-row:hover,
-.ohb-session-search-row[data-selected],
-.ohb-session-search-row[aria-current] {
-  background: var(--bg-hover);
+
+.ohb-search-row[aria-selected="true"] {
+  background: var(--bg-selected);
 }
-.ohb-session-search-title {
+
+.ohb-search-row-icon {
+  color: var(--text-dim);
+}
+
+.ohb-search-row-title {
+  color: var(--text);
+  font-size: 13.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100%;
 }
-.ohb-session-search-snippet {
-  color: var(--text-muted);
+
+.ohb-search-row-meta {
+  color: var(--text-dim);
+  display: flex;
   font-size: 12px;
-  overflow-wrap: anywhere;
+  gap: 10px;
+  white-space: nowrap;
 }
-.ohb-session-search mark {
-  color: inherit;
-  background: var(--bg-hover);
+
+.ohb-search-row-workspace {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ohb-search-row-snippet {
+  color: var(--text-muted);
+  display: -webkit-box;
+  font-size: 12.5px;
+  grid-column: 2 / -1;
+  line-height: 1.45;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Matches read as ink, not as a highlighter stroke. */
+.ohb-search-dialog mark {
+  background: transparent;
+  color: var(--text);
   font-weight: 600;
 }
 
-.ohb-session-search-snippet {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
+.ohb-search-status {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  justify-content: center;
+  margin: 0;
+  padding: 18px 12px;
 }
-.ohb-session-search-results button:not(.ohb-session-search-row) {
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-md);
+
+.ohb-search-sentinel {
+  height: 1px;
+}
+
+.ohb-search-foot {
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  display: flex;
+  flex: none;
+  font-size: 11.5px;
+  gap: 16px;
+  padding: 9px 18px;
+}
+
+.ohb-search-foot span {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+/* Bare glyphs, a shade darker than their label; no keycap outline. */
+.ohb-search-foot kbd {
   color: var(--text-muted);
-  cursor: pointer;
-  font: inherit;
-  padding: 8px;
-  text-align: left;
+  font-family: inherit;
+  font-size: 11.5px;
 }
-.ohb-session-search-results button:not(.ohb-session-search-row):hover {
-  background: var(--bg-hover);
+
+.ohb-search-foot kbd + kbd {
+  margin-left: -2px;
 }
-.ohb-session-search input::-webkit-search-cancel-button {
-  -webkit-appearance: none;
+
+/* The return arrow sits high in most fonts; drop it onto the baseline. */
+.ohb-search-foot .ohb-search-enter {
+  position: relative;
+  top: 2px;
 }
+
+/* Phone (< 640px): the card hangs from the top edge at full width. */
 @media (max-width: 639px) {
-  .ohb-session-search input,
-  .ohb-session-search-results button {
+  .ohb-search-layer {
+    padding: 0;
+  }
+
+  .ohb-search-dialog {
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    border-top: 0;
+    max-height: 86dvh;
+    width: 100%;
+  }
+
+  /* Below 16px, iOS zooms the page when the input takes focus. */
+  .ohb-search-head input {
+    font-size: 16px;
+  }
+
+  .ohb-search-row,
+  .ohb-search-order {
     min-height: 44px;
+  }
+
+  .ohb-search-foot {
+    display: none;
   }
 }

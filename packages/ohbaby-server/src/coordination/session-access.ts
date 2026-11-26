@@ -18,6 +18,7 @@ import type {
   UiPromptReceiptResult,
   UiSessionControl,
   UiSessionHistory,
+  UiSessionHistoryQuery,
   UiSessionRecoveryClient,
   UiSessionScope,
   UiSessionView,
@@ -59,8 +60,7 @@ function requiredSource(backend: UiBackendClient): UiSessionRecoveryClient {
 export function parseSessionQuery(
   value: unknown,
   receipt = false,
-): UiSessionScope &
-  UiPromptReceiptQuery & { readonly before?: string; readonly limit?: number } {
+): UiSessionHistoryQuery & UiPromptReceiptQuery {
   const input =
     value && typeof value === "object"
       ? (value as Record<string, unknown>)
@@ -77,17 +77,20 @@ export function parseSessionQuery(
       (typeof input.clientRequestId !== "string" || !input.clientRequestId)) ||
     (input.before !== undefined &&
       (typeof input.before !== "string" || input.before.length > 4096)) ||
+    (input.anchorMessageId !== undefined &&
+      (typeof input.anchorMessageId !== "string" ||
+        !input.anchorMessageId ||
+        input.before !== undefined)) ||
     (input.limit !== undefined &&
       (!Number.isInteger(input.limit) ||
-        (input.limit as number) < 1 ||
-        (input.limit as number) > 200))
+        (input.anchorMessageId === undefined &&
+          ((input.limit as number) < 1 || (input.limit as number) > 200))))
   )
     throw Object.assign(
       new Error("Invalid session recovery query or missing binding"),
       { code: "INVALID_SESSION_QUERY" },
     );
-  return input as unknown as UiSessionScope &
-    UiPromptReceiptQuery & { before?: string; limit?: number };
+  return input as unknown as UiSessionHistoryQuery & UiPromptReceiptQuery;
 }
 interface Access {
   readonly backend: UiBackendClient;
@@ -143,10 +146,7 @@ export async function sessionFileReadForClient<T>(
 }
 export async function sessionReadForClient(
   input: Access & {
-    readonly query: UiSessionScope & {
-      readonly before?: string;
-      readonly limit?: number;
-    };
+    readonly query: UiSessionHistoryQuery;
     readonly kind: "getSessionView" | "getSessionHistory" | "getSessionControl";
   },
 ): Promise<UiSessionView | UiSessionHistory | UiSessionControl> {

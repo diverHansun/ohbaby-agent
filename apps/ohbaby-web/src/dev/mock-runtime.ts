@@ -4,6 +4,7 @@ import type {
   UiGlobalSessionPage,
   UiSnapshot,
   UiSessionSearchPage,
+  UiSessionHistory,
   UiSessionSearchResult,
   UiSettingsModel,
   UiWebCommandCatalog,
@@ -20,6 +21,9 @@ import { createMockShellJobs, isTaskScenario } from "./mock-shell-jobs.js";
 import { createMockSettingsApi } from "./mock-settings.js";
 import { mockSessionFiles } from "./mock-files.js";
 import { startMarkdownReplay } from "./mock-markdown.js";
+
+const SEARCH_BODY =
+  "A previous message about sidebar layout. <img src=x onerror=alert(1)> stays plain text.";
 
 /** A few real-shaped commands so the slash palette can be previewed. */
 const MOCK_COMMANDS: UiWebCommandCatalog = {
@@ -222,6 +226,37 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     {
       get(_target, key): unknown {
         if (key === "then") return undefined;
+        if (key === "getSessionHistory")
+          return ({
+            sessionId,
+            anchorMessageId,
+          }: {
+            sessionId: string;
+            anchorMessageId?: string;
+          }): Promise<UiSessionHistory> => {
+            const view = store.getSnapshot().sessionSync.view;
+            if (view?.version.sessionId !== sessionId)
+              return Promise.reject(new Error("Session changed."));
+            return Promise.resolve({
+              version: view.version,
+              bindingGeneration: view.bindingGeneration,
+              messages:
+                anchorMessageId === `${sessionId}-message`
+                  ? [
+                      {
+                        id: anchorMessageId,
+                        role: "assistant",
+                        createdAt: view.session.createdAt,
+                        parts: [{ type: "text", text: SEARCH_BODY }],
+                      },
+                    ]
+                  : [],
+              runs: [],
+              prompts: [],
+              hasMore: false,
+              reasoningMissing: false,
+            });
+          };
         if (key === "selectDefaultModel")
           return async (
             entryId: string,
@@ -429,6 +464,7 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
     },
     searchSessions: ({
       query,
+      order = "desc",
       cursor,
       signal,
     }): Promise<UiSessionSearchPage> => {
@@ -436,20 +472,30 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
         return Promise.reject(new DOMException("Aborted", "AbortError"));
       if (query === "error")
         return Promise.reject(new Error("Search is temporarily unavailable."));
-      const needle = query.trim().toLowerCase();
+      const keywords = query.trim().toLowerCase().split(/\s+/u);
+      const snippet = SEARCH_BODY;
       const found: UiSessionSearchResult[] = [];
-      for (const session of sessions) {
-        if (session.status === "archived") continue;
-        const snippet = `A previous message about sidebar layout. <img src=x onerror=alert(1)> stays plain text.`;
-        if (session.title.toLowerCase().includes(needle))
-          found.push({ session, matchType: "title", snippet: session.title });
-        else if (snippet.toLowerCase().includes(needle))
-          found.push({ session, matchType: "message", snippet });
+      const ranked = sessions
+        .filter((session) => session.status !== "archived")
+        .sort((a, b) =>
+          order === "asc"
+            ? a.updatedAt.localeCompare(b.updatedAt)
+            : b.updatedAt.localeCompare(a.updatedAt),
+        );
+      for (const session of ranked) {
+        const title = session.title.toLowerCase();
+        const inTitle = keywords.every((keyword) => title.includes(keyword));
+        const inBody = keywords.every((keyword) =>
+          snippet.toLowerCase().includes(keyword),
+        );
+        if (inBody)
+          found.push({
+            session,
+            messageId: `${session.id}-message`,
+            snippet,
+          });
+        else if (inTitle) found.push({ session });
       }
-      found.sort(
-        (a, b) =>
-          Number(a.matchType === "message") - Number(b.matchType === "message"),
-      );
       const start = Number(cursor ?? 0);
       return Promise.resolve({
         results: found.slice(start, start + 20),
@@ -526,7 +572,30 @@ function installSnapshot(
   store.setSessionIndex(
     snapshot.sessions.map(({ messages: _messages, ...entry }) => entry),
   );
+  const session = snapshot.sessions.find((entry) => entry.id === sessionId);
   store.setSessionSync({
+    ...(session
+      ? {
+          view: {
+            version: {
+              sessionId: session.id,
+              runtimeEpoch: "mock",
+              viewGeneration: "mock",
+              sessionRevision: 1,
+            },
+            session,
+            runs: snapshot.runs.filter((run) => run.sessionId === sessionId),
+            prompts: (snapshot.prompts ?? []).filter(
+              (prompt) => prompt.sessionId === sessionId,
+            ),
+            history: { hasMore: false },
+            reasoningMissing: false,
+            todo: { status: "ready" as const, value: null },
+            goal: { status: "ready" as const, value: null },
+            context: { status: "ready" as const, value: null },
+          },
+        }
+      : {}),
     status: sessionId ? "ready" : "idle",
     scope: sessionId ? { sessionId, runtimeEpoch: "mock" } : null,
     attempts: 1,

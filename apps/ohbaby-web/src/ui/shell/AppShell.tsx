@@ -65,14 +65,14 @@ export function AppShell(props: {
         return;
       if (document.querySelector('[aria-modal="true"]')) return;
       event.preventDefault();
-      open();
+      // The search card is centered over the page; the sidebar stays as is.
       props.onSearch?.();
     };
     document.addEventListener("keydown", shortcut);
     return (): void => {
       document.removeEventListener("keydown", shortcut);
     };
-  }, [open, props.onSearch]);
+  }, [props.onSearch]);
   const blocked = props.blocking !== undefined && props.blocking !== null;
   return (
     <div

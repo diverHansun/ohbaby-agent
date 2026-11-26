@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
-import { projectModelActivity } from "ohbaby-sdk";
+import {
+  getScheduledStepRetry,
+  listRetriedAttemptIds,
+  projectModelActivity,
+} from "ohbaby-sdk";
 import type {
   UiEvent,
   UiMessage,
@@ -12,6 +16,7 @@ import type {
 } from "ohbaby-sdk";
 import type {
   MessageManager,
+  MessagePage,
   MessageCommittedChange,
   MessageWithParts,
 } from "../../core/message/index.js";
@@ -25,6 +30,8 @@ import {
   messageToUiMessage,
 } from "./persistent-store.js";
 import { SessionViewOwner } from "./session-view.js";
+import { SEARCH_EXCLUDED_PART_KINDS } from "../../services/session/search-visibility.js";
+import { transcriptText } from "../../core/message/origin.js";
 import { messageCursor } from "../../core/message/pagination.js";
 
 export type SourceSessionChange =
@@ -50,6 +57,10 @@ export class SourceSessionProjection {
     private readonly options: {
       readonly runtimeEpoch: string;
       readonly messageManager: MessageManager;
+      readonly isSearchableMessage?: (
+        sessionId: string,
+        messageId: string,
+      ) => boolean;
       readonly metadata: (
         sessionId: string,
       ) => Promise<Omit<UiSession, "messages">>;
@@ -610,17 +621,110 @@ export class SourceSessionProjection {
     });
   }
 
+  private async isSearchableAnchor(record: MessageWithParts): Promise<boolean> {
+    const { sessionId, id, runId } = record.info;
+    if (this.options.isSearchableMessage)
+      return this.options.isSearchableMessage(sessionId, id);
+
+    // The in-memory backend has no SQL search index. Use the same transcript
+    // and SDK retry facts, scanning the run only for a scheduled retry.
+    const target = this.project(record);
+    if (
+      !target ||
+      target.role === "system" ||
+      !record.parts.some(
+        (part) =>
+          part.type === "text" &&
+          !part.synthetic &&
+          !SEARCH_EXCLUDED_PART_KINDS.includes(String(part.metadata?.kind)) &&
+          transcriptText(part).trim().length > 0,
+      )
+    )
+      return false;
+    if (!getScheduledStepRetry(target) || !runId) return true;
+    let before: string | undefined;
+    do {
+      const page = await this.options.messageManager.listPageByRun(
+        sessionId,
+        runId,
+        {
+          before,
+          limit: 200,
+          scope: { contextScopeId: undefined },
+        },
+      );
+      const candidates = page.messages.flatMap(
+        (entry) => this.project(entry) ?? [],
+      );
+      if (listRetriedAttemptIds([target, ...candidates]).has(id)) return false;
+      before = page.nextCursor;
+    } while (before);
+    return true;
+  }
+
+  private async anchoredPage(
+    sessionId: string,
+    anchor: string,
+    limit = 50,
+  ): Promise<MessagePage> {
+    const manager = this.options.messageManager;
+    const target = (await manager.listByIds(sessionId, [anchor])).at(0);
+    if (
+      !target ||
+      target.info.contextScopeId !== undefined ||
+      !(await this.isSearchableAnchor(target))
+    )
+      return { messages: [], hasMore: false };
+
+    const scope = { contextScopeId: undefined };
+    const cursor = messageCursor(sessionId, target.info, { scope });
+    const neighbors = Math.max(3, Math.min(limit, 200)) - 1;
+    const preceding = Math.floor(neighbors / 2);
+    const [left, right] = await Promise.all([
+      manager.listPageBySession(sessionId, {
+        scope,
+        before: cursor,
+        limit: preceding,
+      }),
+      manager.listPageBySession(sessionId, {
+        scope,
+        after: cursor,
+        limit: neighbors - preceding,
+      }),
+    ]);
+    return {
+      messages: [...left.messages, target, ...right.messages],
+      hasMore: left.hasMore,
+      nextCursor: left.nextCursor,
+    };
+  }
+
   history(
     sessionId: string,
     before?: string,
     limit?: number,
+    anchorMessageId?: string,
   ): Promise<UiSessionHistory> {
     return this.owner.run(sessionId, async () => {
       const view = this.owner.read(sessionId);
-      const page = await this.options.messageManager.listPageBySession(
-        sessionId,
-        { before, limit, scope: { contextScopeId: undefined } },
-      );
+      if (
+        anchorMessageId !== undefined &&
+        (typeof anchorMessageId !== "string" ||
+          !anchorMessageId ||
+          before !== undefined ||
+          (limit !== undefined && !Number.isInteger(limit)))
+      )
+        throw Object.assign(new Error("Invalid anchored history query"), {
+          code: "INVALID_SESSION_QUERY",
+        });
+      const page =
+        anchorMessageId === undefined
+          ? await this.options.messageManager.listPageBySession(sessionId, {
+              before,
+              limit,
+              scope: { contextScopeId: undefined },
+            })
+          : await this.anchoredPage(sessionId, anchorMessageId, limit);
       const messages = page.messages
         .map((record) => this.project(record))
         .filter((message): message is UiMessage => message !== undefined);
@@ -629,7 +733,16 @@ export class SourceSessionProjection {
           ...messageRunIds(messages),
         ])),
       ].sort(compareRunsNewestFirst);
-      const prompts = await this.options.prompts(sessionId, messages, runs);
+      let prompts = await this.options.prompts(sessionId, messages, runs);
+      if (anchorMessageId !== undefined) {
+        const ids = new Set(messages.map((message) => message.id));
+        const runIds = messageRunIds(messages);
+        prompts = prompts.filter(
+          (prompt) =>
+            ids.has(prompt.userMessageId) ||
+            (prompt.runId !== undefined && runIds.has(prompt.runId)),
+        );
+      }
       return {
         version: view.version,
         serverNow: Date.now(),

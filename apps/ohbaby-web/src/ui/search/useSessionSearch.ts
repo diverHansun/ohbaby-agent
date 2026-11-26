@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UiSessionSearchPage, UiSessionSearchResult } from "ohbaby-sdk";
 
+export type SearchOrder = "desc" | "asc";
+
 export type SessionSearch = (input: {
   query: string;
+  order?: SearchOrder;
   cursor?: string;
   limit?: number;
   signal?: AbortSignal;
@@ -11,19 +14,29 @@ export type SessionSearch = (input: {
 interface SearchState {
   query: string;
   setQuery: (query: string) => void;
+  order: SearchOrder;
+  toggleOrder: () => void;
   results: readonly UiSessionSearchResult[];
   nextCursor: string | undefined;
   loading: boolean;
   error: string | undefined;
+  /** The current query has answered at least once. */
   ready: boolean;
   loadMore: () => void;
   retry: () => void;
 }
-export function useSessionSearch(
-  open: boolean,
-  search: SessionSearch,
-): SearchState {
+
+const DEBOUNCE_MS = 250;
+
+/**
+ * Server search for the open search dialog. The hook lives as long as the
+ * dialog, so reopening starts from an empty query and newest first. A new
+ * query or order drops the previous results at once, so Enter never opens a
+ * row from an earlier answer.
+ */
+export function useSessionSearch(search: SessionSearch): SearchState {
   const [query, setQuery] = useState("");
+  const [order, setOrder] = useState<SearchOrder>("desc");
   const [results, setResults] = useState<readonly UiSessionSearchResult[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
   const [loading, setLoading] = useState(false);
@@ -38,13 +51,6 @@ export function useSessionSearch(
     request.current?.abort();
     clearTimeout(timer.current);
   }, []);
-  const changeQuery = useCallback(
-    (value: string) => {
-      cancel();
-      setQuery(value);
-    },
-    [cancel],
-  );
   const run = useCallback(
     async (cursor?: string) => {
       request.current?.abort();
@@ -57,6 +63,7 @@ export function useSessionSearch(
       try {
         const page = await search({
           query: query.trim(),
+          order,
           ...(cursor ? { cursor } : {}),
           signal: controller.signal,
         });
@@ -83,35 +90,38 @@ export function useSessionSearch(
         if (current === generation.current) setLoading(false);
       }
     },
-    [query, search],
+    [query, order, search],
   );
   useEffect(() => {
     cancel();
     setError(undefined);
     setReady(false);
     setNextCursor(undefined);
-    if (!open || !query.trim()) {
-      setResults([]);
+    setResults([]);
+    if (!query.trim()) {
       setLoading(false);
-      if (!open) setQuery("");
       return;
     }
     setLoading(true);
     timer.current = setTimeout(() => {
       void run();
-    }, 250);
+    }, DEBOUNCE_MS);
     return cancel;
-  }, [open, query, run, cancel]);
+  }, [query, order, run, cancel]);
   return {
     query,
-    setQuery: changeQuery,
+    setQuery,
+    order,
+    toggleOrder: (): void => {
+      setOrder((current) => (current === "desc" ? "asc" : "desc"));
+    },
     results,
     nextCursor,
     loading,
     error,
     ready,
     loadMore: (): void => {
-      if (!loading && nextCursor) void run(nextCursor);
+      if (!loading && !error && nextCursor) void run(nextCursor);
     },
     retry: (): void => {
       void run(failedCursor.current);

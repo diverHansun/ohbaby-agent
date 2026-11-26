@@ -8,6 +8,12 @@ import {
   rowToSession,
   type SessionRow,
 } from "./database-store.js";
+import {
+  NOT_RETRIED,
+  SEARCH_MESSAGE,
+  SEARCH_PART,
+  SEARCH_TEXT,
+} from "./search-visibility.js";
 import type { Session } from "./types.js";
 
 /** Cross-project reads of root sessions. Callers own authorization. */
@@ -41,12 +47,11 @@ export interface GlobalSessionPage {
   readonly nextCursor?: string;
 }
 
-export type SessionSearchMatchType = "title" | "message";
+type SearchOrder = "desc" | "asc";
 
 export interface SessionSearchHit {
   readonly session: Session;
-  readonly matchType: SessionSearchMatchType;
-  readonly snippet: string;
+  readonly snippet?: string;
   readonly messageId?: string;
 }
 
@@ -56,12 +61,11 @@ export interface SessionSearchPage {
 }
 
 interface Cursor {
-  readonly group: number;
   readonly updatedAt: number;
   readonly id: string;
 }
 
-const SNIPPET_RADIUS = 60;
+const SNIPPET_LIMIT = 120;
 
 export function normalizeGlobalSessionLimit(limit: number | undefined): number {
   if (limit === undefined) return GLOBAL_SESSION_PAGE_DEFAULT_LIMIT;
@@ -71,11 +75,16 @@ export function normalizeGlobalSessionLimit(limit: number | undefined): number {
   return Math.min(limit, GLOBAL_SESSION_PAGE_MAX_LIMIT);
 }
 
-function encodeCursor(cursor: Cursor): string {
+function encodeCursor(
+  cursor: Cursor & ({ group: number } | { order: SearchOrder }),
+): string {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-function decodeCursor(value: string | undefined): Cursor | undefined {
+function decodeCursor(
+  value: string | undefined,
+  order?: SearchOrder,
+): Cursor | undefined {
   if (value === undefined || value === "") return undefined;
   try {
     const parsed: unknown = JSON.parse(
@@ -84,15 +93,15 @@ function decodeCursor(value: string | undefined): Cursor | undefined {
     if (
       typeof parsed === "object" &&
       parsed !== null &&
-      "group" in parsed &&
+      (order === undefined
+        ? "group" in parsed && Number.isInteger(parsed.group)
+        : "order" in parsed && parsed.order === order) &&
       "updatedAt" in parsed &&
       "id" in parsed &&
-      Number.isInteger(parsed.group) &&
       Number.isInteger(parsed.updatedAt) &&
       typeof parsed.id === "string"
     ) {
       return {
-        group: parsed.group as number,
         updatedAt: parsed.updatedAt as number,
         id: parsed.id,
       };
@@ -118,10 +127,6 @@ export function getGlobalSession(
 const NOT_IN_HIDDEN_WORKSPACE = `(workspace_directory IS NULL OR workspace_directory NOT IN (
   SELECT scope_key FROM ${schema.workspaceRegistry.tableName} WHERE visibility = 'hidden'
 ))`;
-
-/** Runtime inputs (subagent notices, etc.) render as system text; only steering is user-visible. */
-const VISIBLE_MESSAGE = `m.rewound_at IS NULL AND (json_extract(m.data, '$.runtimeInput.kind') IS NULL
-  OR json_extract(m.data, '$.runtimeInput.kind') = 'user-steer')`;
 
 const runLedger = schema.runLedger.columns;
 
@@ -208,20 +213,6 @@ function allKeywordsLike(column: string, count: number): string {
   ).join(" AND ");
 }
 
-function messageText(db: DatabaseConnection, messageId: string): string {
-  return db
-    .prepare<{ readonly text: string | null }>(
-      `SELECT json_extract(data, '$.text') AS text
-       FROM ${schema.part.tableName}
-       WHERE message_id = ? AND type = 'text'
-         AND COALESCE(json_extract(data, '$.synthetic'), 0) = 0
-       ORDER BY order_index ASC`,
-    )
-    .all(messageId)
-    .map((row) => row.text ?? "")
-    .join("\n");
-}
-
 /** Matches SQLite's ASCII-only case folding used by LIKE. */
 function foldAscii(value: string): string {
   return value.replace(/[A-Z]/gu, (char) => char.toLowerCase());
@@ -231,120 +222,149 @@ export function buildSearchSnippet(
   text: string,
   keywords: readonly string[],
 ): string {
-  const folded = foldAscii(text);
-  const positions = keywords
-    .map((keyword) => folded.indexOf(foldAscii(keyword)))
-    .filter((index) => index >= 0);
-  const first = positions.length === 0 ? 0 : Math.min(...positions);
-  const start = Math.max(0, first - SNIPPET_RADIUS);
-  const end = Math.min(text.length, first + SNIPPET_RADIUS * 2);
-  const body = text.slice(start, end).replace(/\s+/gu, " ").trim();
-  return `${start > 0 ? "…" : ""}${body}${end < text.length ? "…" : ""}`;
+  const body = text.replace(/\s+/gu, " ").trim();
+  const chars = Array.from(body);
+  if (chars.length <= SNIPPET_LIMIT) return body;
+  const folded = foldAscii(body);
+  const matches = keywords
+    .map((word) => ({
+      offset: folded.indexOf(foldAscii(word)),
+      length: Array.from(word).length,
+    }))
+    .filter(({ offset }) => offset >= 0)
+    .sort((a, b) => a.offset - b.offset);
+
+  // Reserve the hits in reading order before spending remaining space on
+  // context. Positions and the budget below are in Unicode code points.
+  const windows: { start: number; end: number }[] = [];
+  let used = 0;
+  let offset = 0;
+  let pos = 0;
+  for (const match of matches) {
+    pos += Array.from(body.slice(offset, match.offset)).length;
+    offset = match.offset;
+    const start = Math.max(0, pos - 15);
+    const end = pos + match.length;
+    const last = windows.at(-1);
+    const overlaps = last !== undefined && last.end >= start;
+    const extra = overlaps
+      ? Math.max(0, end - last.end)
+      : end - start + Number(start > 0);
+    if (used + extra + Number(end < chars.length) > SNIPPET_LIMIT) {
+      // A single long keyword takes precedence over surrounding context.
+      if (!last) {
+        const length = Math.min(match.length, SNIPPET_LIMIT);
+        const prefix = pos > 0 && length < SNIPPET_LIMIT ? "…" : "";
+        const suffix =
+          end < chars.length && length + prefix.length < SNIPPET_LIMIT
+            ? "…"
+            : "";
+        return prefix + chars.slice(pos, pos + length).join("") + suffix;
+      }
+      break;
+    }
+    if (overlaps) last.end = Math.max(last.end, end);
+    else windows.push({ start, end });
+    used += extra;
+  }
+  if (!windows.length) return chars.slice(0, SNIPPET_LIMIT - 1).join("") + "…";
+
+  // Share the remaining context between excerpts. Filling a gap also frees
+  // the character reserved for its ellipsis.
+  let remaining =
+    SNIPPET_LIMIT -
+    used -
+    Number(windows[windows.length - 1].end < chars.length);
+  let snippet = "";
+  for (const [i, window] of windows.entries()) {
+    const boundary = windows[i + 1]?.start ?? chars.length;
+    const extension = Math.min(
+      boundary - window.end,
+      Math.ceil(remaining / (windows.length - i)),
+    );
+    if (i === 0 && window.start > 0) snippet += "…";
+    const end = window.end + extension;
+    snippet += chars.slice(window.start, end).join("");
+    if (end < boundary) snippet += "…";
+    remaining -= extension;
+    if (end === boundary && window.end < boundary) remaining++;
+  }
+  return snippet;
 }
 
 interface SearchRow extends SessionRow {
-  readonly match_group: number;
   readonly hit_message_id: string | null;
+  readonly hit_text: string | null;
 }
 
-/**
- * Searches titles and visible user/assistant text of every active root
- * session. A hit needs every keyword inside one title or one message;
- * title hits sort first, then each group by update time.
- */
 export function searchGlobalSessions(
-  input: GlobalSessionPageInput & { readonly query: string },
+  input: Pick<GlobalSessionPageInput, "cursor" | "limit"> & {
+    readonly query: string;
+    readonly order?: SearchOrder;
+  },
   db: DatabaseConnection = getDatabase(),
 ): SessionSearchPage {
+  const order = input.order ?? "desc";
+  if (!(["asc", "desc"] as const).includes(order))
+    throw new RangeError("order must be asc or desc");
+  const cursor = decodeCursor(input.cursor, order);
   const keywords = splitSearchKeywords(input.query);
   if (keywords.length === 0) return { hits: [] };
   const limit = normalizeGlobalSessionLimit(input.limit);
-  const cursor = decodeCursor(input.cursor);
   const patterns = keywords.map(likePattern);
-  const partText = `COALESCE(json_extract(p.data, '$.text'), '')`;
-  const titleMatch = allKeywordsLike("s.title", keywords.length);
   const rows = db
     .prepare<SearchRow>(
-      `WITH hit_messages AS (
-         SELECT m.session_id AS session_id, p.message_id AS message_id,
-                MAX(m.created_at) AS created_at
-         FROM ${schema.part.tableName} p
-         JOIN ${schema.message.tableName} m ON m.id = p.message_id
-         WHERE p.type = 'text'
-           AND m.role IN ('user', 'assistant')
-           AND m.context_scope_id IS NULL
-           AND ${VISIBLE_MESSAGE}
-           AND COALESCE(json_extract(p.data, '$.synthetic'), 0) = 0
-         GROUP BY p.message_id
-         HAVING ${keywords
-           .map(() => `SUM(${partText} LIKE ? ESCAPE '\\') > 0`)
-           .join(" AND ")}
-       ),
-       latest_hit AS (
-         SELECT session_id, message_id FROM (
-           SELECT session_id, message_id,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY session_id
-                    ORDER BY created_at DESC, message_id DESC
-                  ) AS rank
-           FROM hit_messages
-         ) WHERE rank = 1
-       ),
-       candidates AS (
-         SELECT s.*,
-                CASE WHEN ${titleMatch} THEN 0 ELSE 1 END AS match_group,
-                h.message_id AS hit_message_id
-         FROM ${schema.session.tableName} s
-         LEFT JOIN latest_hit h ON h.session_id = s.id
-         WHERE s.parent_id IS NULL AND json_extract(s.data, '$.sideChat') IS NULL AND s.status = 'active'
-           AND ((${titleMatch}) OR h.session_id IS NOT NULL)
-       )
-       SELECT * FROM candidates
-       WHERE ? IS NULL
-          OR match_group > ?
-          OR (match_group = ? AND (updated_at < ?
-              OR (updated_at = ? AND id < ?)))
-       ORDER BY match_group ASC, updated_at DESC, id DESC
-       LIMIT ?`,
+      `WITH text_hits AS (
+       SELECT p.message_id
+       FROM ${schema.part.tableName} p
+       WHERE ${SEARCH_PART}
+       GROUP BY p.message_id
+       HAVING ${keywords.map(() => `MAX(${SEARCH_TEXT} LIKE ? ESCAPE '\\')`).join(" AND ")}
+     ), latest_hit AS (
+       SELECT m.session_id, m.id,
+              ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at DESC, m.id DESC) AS rank
+       FROM text_hits h JOIN ${schema.message.tableName} m ON m.id = h.message_id
+       WHERE ${SEARCH_MESSAGE} AND ${NOT_RETRIED}
+     )
+     SELECT s.*, h.id AS hit_message_id, (
+       SELECT group_concat(${SEARCH_TEXT}, char(10) ORDER BY
+         COALESCE(json_extract(p.data, '$.metadata.sourceOrder'), p.order_index), p.order_index)
+       FROM ${schema.part.tableName} p WHERE p.message_id = h.id AND ${SEARCH_PART}
+     ) AS hit_text
+     FROM ${schema.session.tableName} s
+     LEFT JOIN latest_hit h ON h.session_id = s.id AND h.rank = 1
+     WHERE s.parent_id IS NULL AND json_extract(s.data, '$.sideChat') IS NULL AND s.status = 'active'
+       AND ((${allKeywordsLike("s.title", keywords.length)}) OR h.id IS NOT NULL)
+       AND (? IS NULL OR (s.updated_at, s.id) ${order === "asc" ? ">" : "<"} (?, ?))
+     ORDER BY s.updated_at ${order}, s.id ${order}
+     LIMIT ?`,
     )
     .all(
       ...patterns,
       ...patterns,
-      ...patterns,
-      cursor?.group ?? null,
-      cursor?.group ?? null,
-      cursor?.group ?? null,
-      cursor?.updatedAt ?? null,
+      cursor?.id ?? null,
       cursor?.updatedAt ?? null,
       cursor?.id ?? null,
       limit + 1,
     );
-  const hits = rows.slice(0, limit).map((row): SessionSearchHit => {
-    const session = rowToSession(row);
-    if (row.match_group === 0 || row.hit_message_id === null) {
-      return {
-        session,
-        matchType: "title",
-        snippet: buildSearchSnippet(session.title, keywords),
-      };
-    }
-    return {
-      session,
-      matchType: "message",
-      messageId: row.hit_message_id,
-      snippet: buildSearchSnippet(
-        messageText(db, row.hit_message_id),
-        keywords,
-      ),
-    };
-  });
+  const hits = rows.slice(0, limit).map(
+    (row): SessionSearchHit => ({
+      session: rowToSession(row),
+      ...(row.hit_message_id === null
+        ? {}
+        : {
+            messageId: row.hit_message_id,
+            snippet: buildSearchSnippet(row.hit_text ?? "", keywords),
+          }),
+    }),
+  );
   const last = rows.length > limit ? rows[limit - 1] : undefined;
   return {
     hits,
     ...(last
       ? {
           nextCursor: encodeCursor({
-            group: last.match_group,
+            order,
             updatedAt: last.updated_at,
             id: last.id,
           }),

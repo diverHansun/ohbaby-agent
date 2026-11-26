@@ -214,8 +214,6 @@ export function fakeDaemon(initial: readonly WorldSession[] = []): {
             .filter((value) => value.title.includes(query))
             .map((value) => ({
               session: global(value),
-              matchType: "title",
-              snippet: value.title,
             })),
         });
       }

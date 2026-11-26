@@ -38,7 +38,6 @@ export {
   type GlobalSessionPage,
   type GlobalSessionPageInput,
   type SessionSearchHit,
-  type SessionSearchMatchType,
   type SessionSearchPage,
 } from "./global-query.js";
 export { createInMemorySessionStore } from "./store.js";

@@ -70,6 +70,7 @@ import {
   SnapshotStore,
 } from "../snapshot/index.js";
 import type { SnapshotHookExecutorOptions } from "../snapshot/index.js";
+import { isSearchableMessage } from "../services/session/search-visibility.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import type {
   InProcessUiBackendClient,
@@ -969,6 +970,8 @@ export function createPersistentUiBackendClient(
 
   const goalPersistence = createSqliteGoalPersistence(db, now, backendOwnerId);
   const inProcessClient = createInProcessUiBackendClient({
+    isSearchableMessage: (sessionId, messageId) =>
+      isSearchableMessage(sessionId, messageId, db),
     sideChatStorage: { db, deletedSessionFiles },
     closeSideChatInWorkspace: options.closeSideChatInWorkspace,
     preflightSideChatInWorkspace: options.preflightSideChatInWorkspace,

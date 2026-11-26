@@ -28,6 +28,8 @@ import {
   isDelegationCall,
 } from "./DelegationRow.js";
 import { isConnectionAbnormal, type ViewModel } from "./selectors.js";
+import { selectPromptProjection } from "./prompt-projection.js";
+import type { SearchReading } from "./use-search-location.js";
 import type { useSessionInteractions } from "./useSessionInteractions.js";
 
 /** The message stream of the active conversation, with command results. */
@@ -46,6 +48,8 @@ export function SessionConversation(props: {
   readonly onInsertSkill: (text: string) => void;
   /** Changes when the user sends, so the stream follows the new prompt. */
   readonly followToken?: number;
+  readonly reading: SearchReading;
+  readonly onLatest: () => void;
   /** The session's instance snapshot, shared with the right panel. */
   readonly subagentInstances?: UiSubagentInstanceReaderState;
   readonly onOpenSubagent?: (input: {
@@ -58,6 +62,24 @@ export function SessionConversation(props: {
 }): ReactElement {
   const { runtime, view, storeSnapshot, interactions } = props;
   const sessionId = view.activeSession?.id ?? null;
+  const reading = props.reading.current;
+  const page = reading?.page;
+  const locating = !page && reading?.status === "loading";
+  const promptRows =
+    page && view.activeSession && view.snapshot
+      ? selectPromptProjection({
+          attempts: [],
+          view: {
+            ...view,
+            activeSession: { ...view.activeSession, messages: page.messages },
+            snapshot: {
+              ...view.snapshot,
+              prompts: page.prompts,
+              runs: page.runs,
+            },
+          },
+        }).rows
+      : props.promptProjection.rows;
   const commandModalNotice = useMemo(
     () =>
       [...view.commandNotices]
@@ -108,6 +130,13 @@ export function SessionConversation(props: {
           }}
         >
           <ConversationStream
+            key={page ? "history" : "live"}
+            anchorMessageId={
+              reading && (page || reading.status === "ready")
+                ? reading.location.messageId
+                : undefined
+            }
+            anchorToken={String(reading?.location.ticket)}
             resultSources={(
               interactions.subagentState.list?.executions ?? []
             ).flatMap((execution) => {
@@ -135,24 +164,48 @@ export function SessionConversation(props: {
                 },
               ];
             })}
-            unconsumedSteers={getUnconsumedSteers(view.activeSession)}
-            historyState={storeSnapshot.historyState}
-            historyHasMore={storeSnapshot.historyHasMore}
-            historyStale={storeSnapshot.historyStale}
-            onLoadHistory={() => runtime.loadEarlierHistory()}
-            promptRows={props.promptProjection.rows}
-            startupThinkingAt={props.promptProjection.startupThinkingAt}
-            messages={view.activeSession?.messages ?? []}
+            unconsumedSteers={
+              page ? undefined : getUnconsumedSteers(view.activeSession)
+            }
+            historyState={
+              page
+                ? reading.status === "error"
+                  ? "error"
+                  : reading.status === "loading"
+                    ? "loading"
+                    : "ready"
+                : storeSnapshot.historyState
+            }
+            historyHasMore={
+              !locating && (page?.hasMore ?? storeSnapshot.historyHasMore)
+            }
+            historyStale={!locating && !page && storeSnapshot.historyStale}
+            onLoadHistory={
+              page
+                ? props.reading.loadEarlier
+                : (): Promise<boolean> => runtime.loadEarlierHistory()
+            }
+            promptRows={promptRows}
+            startupThinkingAt={
+              page ? undefined : props.promptProjection.startupThinkingAt
+            }
+            messages={page?.messages ?? view.activeSession?.messages ?? []}
             sessionId={sessionId}
-            prompts={(view.snapshot?.prompts ?? []).filter(
-              (prompt) => prompt.sessionId === sessionId,
-            )}
-            runs={(view.snapshot?.runs ?? []).filter(
-              (run) => run.sessionId === sessionId,
-            )}
+            prompts={
+              page?.prompts ??
+              (view.snapshot?.prompts ?? []).filter(
+                (prompt) => prompt.sessionId === sessionId,
+              )
+            }
+            runs={
+              page?.runs ??
+              (view.snapshot?.runs ?? []).filter(
+                (run) => run.sessionId === sessionId,
+              )
+            }
             // A cached run is not live progress while the transport is down.
             activeRun={
-              isConnectionAbnormal(view.header.connectionKind)
+              page || isConnectionAbnormal(view.header.connectionKind)
                 ? undefined
                 : view.snapshot?.runs.find(
                     (run) =>
@@ -161,25 +214,36 @@ export function SessionConversation(props: {
                   )
             }
             isRunning={
+              !page &&
               view.composer.isRunning &&
               !interactions.subagentState.list?.waiting
             }
-            reasoningByMessageId={view.reasoningByMessageId}
-            compacting={props.compacting}
-            compactNotice={props.compactNotice}
+            reasoningByMessageId={page ? {} : view.reasoningByMessageId}
+            compacting={!page && props.compacting}
+            compactNotice={page ? undefined : props.compactNotice}
             followToken={props.followToken}
             onAskInSideChat={props.onAskInSideChat}
             onFork={props.onFork}
             edit={props.edit}
             commandNotices={
-              <CommandNoticeList
-                notices={view.commandNotices.filter(
-                  (notice) => notice.kind === "success",
-                )}
-                onClose={(id) => {
-                  runtime.store.consumeCommand(id);
-                }}
-              />
+              page ? (
+                <button
+                  type="button"
+                  className="ohb-banner-action"
+                  onClick={props.onLatest}
+                >
+                  Back to latest
+                </button>
+              ) : (
+                <CommandNoticeList
+                  notices={view.commandNotices.filter(
+                    (notice) => notice.kind === "success",
+                  )}
+                  onClose={(id) => {
+                    runtime.store.consumeCommand(id);
+                  }}
+                />
+              )
             }
           />
         </ConversationPresentation.Provider>

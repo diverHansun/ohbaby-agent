@@ -34,6 +34,10 @@ import { useCommandOverlays } from "./useCommandOverlays.js";
 import { useCompactRequest } from "./use-compact-request.js";
 import { usePromptSubmission } from "./usePromptSubmission.js";
 import { useSessionInteractions } from "./useSessionInteractions.js";
+import {
+  useSearchLocation,
+  type SearchLocation,
+} from "./use-search-location.js";
 import { useSessionLoad } from "./useSessionLoad.js";
 import { useStopRequest } from "./use-stop-request.js";
 
@@ -46,6 +50,8 @@ export function SessionScreen({
   client,
   runtime,
   draftPicker,
+  location,
+  clearLocation,
   onOpenModelSettings,
   onError,
   subagentInstances,
@@ -54,6 +60,8 @@ export function SessionScreen({
   onFork,
 }: {
   readonly runtime: OhbabyWebRuntime;
+  readonly location?: SearchLocation;
+  readonly clearLocation?: () => void;
   readonly client: UiBackendClient;
   /** Workspace picker for a new-chat draft; hidden once a session is bound. */
   readonly draftPicker?: ReactNode;
@@ -86,8 +94,17 @@ export function SessionScreen({
   // ConversationStream). Opening a panel from a slash command is not a send.
   const [followToken, setFollowToken] = useState(0);
   const follow = useCallback(() => {
+    clearLocation?.();
     setFollowToken((token) => token + 1);
-  }, []);
+  }, [clearLocation]);
+  const reading = useSearchLocation(
+    runtime,
+    location,
+    storeSnapshot,
+    view.activeSession?.id,
+    follow,
+    clearLocation,
+  );
   const overlays = useCommandOverlays({
     runtime,
     client,
@@ -147,6 +164,7 @@ export function SessionScreen({
       clearActionError,
       setActionError,
       onSend: follow,
+      followOnReceipt: !!reading.current?.page,
     });
   // Without a configured model, sending opens Settings › Models instead of
   // failing (D16). A failed read of the model is not "missing".
@@ -297,6 +315,7 @@ export function SessionScreen({
   const { approvalDialogVisible } = interactions;
 
   const showMain =
+    !!reading.current?.page ||
     !view.isEmpty ||
     view.commandNotices.length > 0 ||
     promptProjection.rows.length > 0 ||
@@ -379,6 +398,24 @@ export function SessionScreen({
               : null
           }
         />
+        <Banner
+          tone={reading.current?.status === "error" ? "error" : "info"}
+          message={
+            reading.current?.status === "missing"
+              ? "This message is no longer available."
+              : reading.current?.status === "error"
+                ? (reading.current.error ?? "Could not load message history.")
+                : reading.current?.status === "loading" && !reading.current.page
+                  ? "Loading message…"
+                  : null
+          }
+          actions={
+            reading.current?.status === "error"
+              ? [{ label: "Retry", onClick: reading.retry }]
+              : undefined
+          }
+          onDismiss={reading.dismiss}
+        />
         <SessionBanners
           runtime={runtime}
           promptRecoveryReminders={promptRecoveryReminders}
@@ -408,6 +445,8 @@ export function SessionScreen({
               : undefined
           }
           onInsertSkill={prefillComposer}
+          reading={reading}
+          onLatest={follow}
           followToken={followToken}
           subagentInstances={subagentInstances}
           onOpenSubagent={onOpenSubagent}

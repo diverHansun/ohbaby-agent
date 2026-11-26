@@ -53,9 +53,9 @@ export function toUiSessionSearchPage(
   return {
     results: page.hits.map((hit) => ({
       session: toUiGlobalSession(hit.session),
-      matchType: hit.matchType,
-      snippet: hit.snippet,
-      ...(hit.messageId === undefined ? {} : { messageId: hit.messageId }),
+      ...(hit.messageId === undefined
+        ? {}
+        : { messageId: hit.messageId, snippet: hit.snippet }),
     })),
     ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
   };
@@ -75,6 +75,14 @@ export function parseGlobalSessionLimit(
     throw invalid("INVALID_QUERY", "limit must be a positive integer");
   }
   return parsed;
+}
+
+export function parseSessionSearchOrder(
+  value: string | undefined,
+): "desc" | "asc" {
+  if (value === undefined || value === "desc") return "desc";
+  if (value === "asc") return value;
+  throw invalid("INVALID_QUERY", "order must be desc or asc");
 }
 
 export function parseGlobalSessionStatus(

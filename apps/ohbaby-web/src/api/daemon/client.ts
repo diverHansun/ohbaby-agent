@@ -10,6 +10,7 @@ import {
   type UiPromptReceiptResult,
   type UiSessionControl,
   type UiSessionHistory,
+  type UiSessionHistoryQuery,
   type UiSessionScope,
   type UiSessionView,
   type UiSubagentConversationQuery,
@@ -306,10 +307,7 @@ export class BrowserDaemonClient implements UiBackendClient {
     return (await this.http.getSessionView(input)).view;
   }
   async getSessionHistory(
-    input: UiSessionScope & {
-      readonly before?: string;
-      readonly limit?: number;
-    },
+    input: UiSessionHistoryQuery,
   ): Promise<UiSessionHistory> {
     return (await this.http.getSessionHistory(input)).history;
   }

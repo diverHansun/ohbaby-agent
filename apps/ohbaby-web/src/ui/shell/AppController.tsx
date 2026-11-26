@@ -12,6 +12,7 @@ import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { WorkspacePicker } from "../composer/WorkspacePicker.js";
 import { DraftFallback } from "../session/DraftFallback.js";
 import { selectViewModel } from "../session/selectors.js";
+import type { SearchLocation } from "../session/use-search-location.js";
 import { SessionScreen } from "../session/SessionScreen.js";
 import { downloadTextFile } from "../shared/download-file.js";
 import { readableError, sessionOpenError } from "../shared/error-text.js";
@@ -77,10 +78,14 @@ export function AppController(props: {
   const view = useMemo(() => selectViewModel(storeSnapshot), [storeSnapshot]);
   const client = runtime.client;
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
+  const [location, setLocation] = useState<SearchLocation>();
+  const searchTicket = useRef(0);
+  const openingSession = useRef<number>(undefined);
+  const clearLocation = useCallback(() => {
+    setLocation(undefined);
+  }, []);
   const openSearch = useCallback(() => {
     setSearchOpen(true);
-    setSearchFocusRequest((request) => request + 1);
   }, []);
   const searchSessions = useCallback<OhbabyWebRuntime["searchSessions"]>(
     (input) => runtime.searchSessions(input),
@@ -383,7 +388,6 @@ export function AppController(props: {
           <Sidebar
             serverUrl={runtime.serverUrl}
             searchOpen={searchOpen}
-            searchFocusRequest={searchFocusRequest}
             onSearchOpenChange={setSearchOpen}
             searchSessions={searchSessions}
             catalog={catalog}
@@ -398,18 +402,44 @@ export function AppController(props: {
                 runtime.openDraft(workspaceDirectory),
               );
             }}
-            onSelectSession={(session) => {
+            onSelectSession={(session, search) => {
               dismissDrawer();
-              const opening = runtime.openSession(
-                session.id,
-                session.requestDirectory,
-              );
+              const ticket = ++searchTicket.current;
+              const alreadyOpen =
+                search &&
+                openingSession.current === undefined &&
+                session.id === activeId &&
+                storeSnapshot.sessionSync.status === "ready";
+              const opening = alreadyOpen
+                ? undefined
+                : runtime.openSession(session.id, session.requestDirectory);
               const generation = runtime.getSelectionGeneration();
-              void opening.catch((error: unknown) => {
-                if (generation === runtime.getSelectionGeneration()) {
-                  pushError(sessionOpenError(error));
-                }
-              });
+              setLocation(
+                search
+                  ? {
+                      sessionId: session.id,
+                      messageId: search.messageId,
+                      ticket,
+                      selection: generation,
+                    }
+                  : undefined,
+              );
+              if (!opening) return;
+              openingSession.current = ticket;
+              void opening
+                .catch((error: unknown) => {
+                  if (
+                    ticket === searchTicket.current &&
+                    generation === runtime.getSelectionGeneration()
+                  ) {
+                    clearLocation();
+                    pushError(sessionOpenError(error));
+                  }
+                })
+                .finally(() => {
+                  if (openingSession.current === ticket)
+                    openingSession.current = undefined;
+                });
             }}
             onArchiveSession={(session) =>
               runAction(() =>
@@ -467,6 +497,8 @@ export function AppController(props: {
         main={
           client ? (
             <SessionScreen
+              location={location}
+              clearLocation={clearLocation}
               client={client}
               runtime={runtime}
               draftPicker={draftPicker}
