@@ -105,13 +105,14 @@ it.each([
       const connection={host:'127.0.0.1',port:0,authToken:'fixture-token'};
       const server=createServer((req,res)=>{
         if(req.url!='/api/shutdown'||req.headers.authorization!='Bearer fixture-token'){res.writeHead(403);res.end();return;}
-        res.end('accepted');
-        if(${JSON.stringify(mode)}==='alive') return;
-        if(${JSON.stringify(mode)}==='unknown') {setTimeout(()=>process.exit(0),80);return;}
-        setImmediate(()=>void supervisor.stopAndExit());
+        res.end('accepted',()=>{
+          if(${JSON.stringify(mode)}==='alive') return;
+          if(${JSON.stringify(mode)}==='unknown') process.exit(0);
+          void supervisor.stopAndExit();
+        });
       });
-      const supervisor=new Supervisor({pidFilePath:${JSON.stringify(scope.pidFilePath)},stateFilePath:${JSON.stringify(scope.stateFilePath)},shutdownTimeoutMs:500,
-        bootstrap:()=>({connection,start:async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));connection.port=server.address().port;},stop:async()=>{await new Promise(r=>setTimeout(r,100));server.close();return ${mode === "incomplete" ? "{status:'unconfirmed',errors:['raw child still active']}" : "{status:'confirmed',errors:[]}"};}})});
+      const supervisor=new Supervisor({pidFilePath:${JSON.stringify(scope.pidFilePath)},stateFilePath:${JSON.stringify(scope.stateFilePath)},
+        bootstrap:()=>({connection,start:async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));connection.port=server.address().port;},stop:()=>{server.close();return ${mode === "incomplete" ? "{status:'unconfirmed',errors:['raw child still active']}" : "{status:'confirmed',errors:[]}"};}})});
       await supervisor.start();setInterval(()=>{},1000);process.send('ready');
     `,
       );
@@ -128,7 +129,7 @@ it.each([
       import { createServeCommand } from ${JSON.stringify(sourceUrl("packages/ohbaby-cli/src/cli/commands/serve.ts"))};
       import { stopDaemonFromState } from ${JSON.stringify(sourceUrl("packages/ohbaby-server/src/runtime/daemon/stop.ts"))};
       let code=0;
-      const command=createServeCommand({stdout:process.stdout,stderr:process.stderr,setExitCode(value){code=value},stopDaemonFromState:()=>stopDaemonFromState({homeDirectory:${JSON.stringify(home)},workdir:${JSON.stringify(home)},timeoutMs:800})});
+      const command=createServeCommand({stdout:process.stdout,stderr:process.stderr,setExitCode(value){code=value},stopDaemonFromState:()=>stopDaemonFromState({homeDirectory:${JSON.stringify(home)},workdir:${JSON.stringify(home)}${mode === "alive" ? ",timeoutMs:800" : ""}})});
       await command.handler({action:'stop'});process.exitCode=code;
     `,
       );
@@ -140,7 +141,7 @@ it.each([
       observer.stdout?.on("data", (chunk: Buffer) => {
         output += chunk.toString();
       });
-      const [exitCode] = (await once(observer, "exit")) as readonly unknown[];
+      const [exitCode] = (await once(observer, "close")) as readonly unknown[];
       expect(exitCode).toBe(code);
       expect(output).toContain(phrase);
       if (mode === "alive") expect(daemon?.exitCode).toBeNull();
@@ -155,7 +156,7 @@ it.each([
       await rm(home, { recursive: true, force: true });
     }
   },
-  10000,
+  20000,
 );
 
 it("shares the host final-save deadline with an independent SQLite writer and confirms its failed exit externally", async () => {

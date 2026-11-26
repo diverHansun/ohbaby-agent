@@ -6520,8 +6520,6 @@ describe("createInProcessUiBackendClient", () => {
       const directory = await mkdtemp(join(tmpdir(), "ohbaby-cancel-title-"));
       const dbPath = join(directory, "test.db");
       initDatabase({ dbPath });
-      const gate = createDeferred<undefined>();
-      let waiting = 0;
       const requests: InterfaceProviderRequest[] = [];
       const base = createFakeLLMClient([
         { textDelta: "Done", finishReason: "stop" },
@@ -6539,7 +6537,7 @@ describe("createInProcessUiBackendClient", () => {
         },
       };
       const create = (
-        block: boolean,
+        promptSubmissionStore = new DatabasePromptSubmissionStore(),
       ): ReturnType<typeof createInProcessUiBackendClient> => {
         const sessionManager = createSessionManager({
           bus: createBus(),
@@ -6559,11 +6557,8 @@ describe("createInProcessUiBackendClient", () => {
           sessionManager,
           messageManager,
           runLedger,
-          promptSubmissionStore: new DatabasePromptSubmissionStore(),
+          promptSubmissionStore,
           workdir: directory,
-          beforePromptSubmit: async () => {
-            if (block && waiting++ < 10) await gate.promise;
-          },
           stateStore: createPersistentUiStateStore({
             sessionManager,
             messageManager,
@@ -6572,15 +6567,11 @@ describe("createInProcessUiBackendClient", () => {
           }),
         });
       };
-      let client = create(true);
+      const store = new DatabasePromptSubmissionStore();
+      // Keep real admissions and cancellation in SQLite while pausing dispatch.
+      const pausedQueue = vi.spyOn(store, "listQueued").mockResolvedValue([]);
+      let client = create(store);
       try {
-        for (let i = 0; i < 10; i++)
-          await client.submitPromptAccepted("Blocking turn", {
-            sessionId: `block-${String(i)}`,
-          });
-        await vi.waitFor(() => {
-          expect(waiting).toBe(10);
-        });
         const first = await client.submitPromptAccepted("Cancelled task", {
           sessionId: "target",
         });
@@ -6590,13 +6581,12 @@ describe("createInProcessUiBackendClient", () => {
         expect(first.status).toBe("queued");
         expect(second.status).toBe("queued");
         await client.cancelQueuedPrompt({ promptId: first.promptId });
+        expect((await store.get(first.promptId))?.status).toBe("cancelled");
         if (restart) {
-          const closing = client.dispose();
-          gate.resolve(undefined);
-          await closing;
+          expect(await client.dispose()).toMatchObject({ status: "confirmed" });
           closeDatabase();
           initDatabase({ dbPath });
-          client = create(false);
+          client = create();
           await client.getSnapshot();
           const lease = await client.acquirePromptEditLease({
             promptId: second.promptId,
@@ -6607,7 +6597,10 @@ describe("createInProcessUiBackendClient", () => {
             editLeaseId: lease.editLeaseId,
             text: "Real task",
           });
-        } else gate.resolve(undefined);
+        } else {
+          pausedQueue.mockRestore();
+          client.wakePromptQueue();
+        }
         await client.waitForPrompt(second.promptId);
         await vi.waitFor(() => {
           expect(
@@ -6621,8 +6614,8 @@ describe("createInProcessUiBackendClient", () => {
             ?.title,
         ).toBe("Real task");
       } finally {
-        gate.resolve(undefined);
         await client.dispose();
+        pausedQueue.mockRestore();
         closeDatabase();
         await rm(directory, { recursive: true, force: true });
       }
@@ -10959,6 +10952,7 @@ describe("createInProcessUiBackendClient", () => {
   it("uses collision-resistant default run ids with an injected persistent state store", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-run-id-db-"));
     const projectRoot = join(directory, "repo");
+    let client: ReturnType<typeof createInProcessUiBackendClient> | undefined;
     try {
       await mkdir(projectRoot, { recursive: true });
       initDatabase({ dbPath: join(directory, "agent.db") });
@@ -10993,11 +10987,9 @@ describe("createInProcessUiBackendClient", () => {
       const existingSession = await sessionManager.create(projectRoot, {
         title: "Existing",
       });
-      for (let index = 2; index <= 51; index += 1) {
-        await sessionManager.create(projectRoot, {
-          title: `Recent ${String(index)}`,
-        });
-      }
+      const recentSession = await sessionManager.create(projectRoot, {
+        title: "Recent",
+      });
       const runLedger = createDatabaseRunLedger({
         now: createNumericClock(10_000),
       });
@@ -11009,7 +11001,7 @@ describe("createInProcessUiBackendClient", () => {
       await runLedger.markRunning("run_1");
       await runLedger.markSucceeded("run_1");
 
-      const client = createInProcessUiBackendClient({
+      client = createInProcessUiBackendClient({
         llmClient: createFakeLLMClient([
           { textDelta: "Persisted", finishReason: "stop" },
         ]),
@@ -11020,12 +11012,16 @@ describe("createInProcessUiBackendClient", () => {
           messageManager,
           projectRoot,
           runLedger,
+          sessionLimit: 1,
           sessionManager,
         }),
       });
       const events: UiEvent[] = [];
       client.subscribeEvents((event) => events.push(event));
 
+      expect((await client.getSnapshot()).sessions.map((s) => s.id)).toEqual([
+        recentSession.id,
+      ]);
       await client.submitPromptAndWait("Create another run");
 
       await expect(runLedger.get("run_1")).resolves.toMatchObject({
@@ -11034,13 +11030,13 @@ describe("createInProcessUiBackendClient", () => {
       });
       const snapshot = await client.getSnapshot();
       const createdRun = snapshot.runs.find(
-        (run) => run.sessionId === "session_52",
+        (run) => run.sessionId === "session_3",
       );
       expect(createdRun?.id).toMatch(/^run_/u);
       expect(createdRun?.id).not.toBe("run_2");
       await expect(runLedger.get(createdRun?.id ?? "")).resolves.toMatchObject({
         runId: createdRun?.id,
-        sessionId: "session_52",
+        sessionId: "session_3",
         status: "succeeded",
       });
       const lastMessageIndex = events.findLastIndex(
@@ -11048,14 +11044,15 @@ describe("createInProcessUiBackendClient", () => {
       );
       const finalSessionIndex = events.findLastIndex(
         (event) =>
-          event.type === "session.updated" && event.session.id === "session_52",
+          event.type === "session.updated" && event.session.id === "session_3",
       );
       expect(finalSessionIndex).toBeGreaterThan(lastMessageIndex);
       expect(events[finalSessionIndex]).toMatchObject({
         type: "session.updated",
-        session: snapshot.sessions.find((item) => item.id === "session_52"),
+        session: snapshot.sessions.find((item) => item.id === "session_3"),
       });
     } finally {
+      await client?.dispose();
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
