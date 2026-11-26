@@ -68,7 +68,10 @@ export interface SidebarProps {
   readonly onCollapse: () => void;
   /** `null` starts a draft in No workspace. */
   readonly onNewChat: (workspaceDirectory: string | null) => void;
-  readonly onSelectSession: (session: SidebarSessionItem) => void;
+  readonly onSelectSession: (
+    session: SidebarSessionItem,
+    search?: { messageId?: string },
+  ) => void;
   readonly onArchiveSession: (session: SidebarSessionItem) => Promise<boolean>;
   /** `title` is already normalized and differs from the current one. */
   readonly onRenameSession: (
@@ -417,14 +420,17 @@ export function Sidebar(props: SidebarProps): ReactElement {
           recent={catalog.sessions}
           activeSessionId={props.activeSessionId}
           onClose={closeSearch}
-          onSelect={({ session }) => {
+          onSelect={({ session, messageId }) => {
             closeSearch();
-            props.onSelectSession({
-              ...session,
-              requestDirectory: globalSessionRequestDirectory(session),
-              pinned: session.id in pins.pins,
-              activity: activity.get(session.id) ?? "idle",
-            });
+            props.onSelectSession(
+              {
+                ...session,
+                requestDirectory: globalSessionRequestDirectory(session),
+                pinned: session.id in pins.pins,
+                activity: activity.get(session.id) ?? "idle",
+              },
+              { messageId },
+            );
           }}
         />
       ) : null}

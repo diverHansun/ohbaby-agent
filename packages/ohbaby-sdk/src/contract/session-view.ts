@@ -21,6 +21,12 @@ export interface UiSessionScope {
   readonly bindingGeneration?: number;
   readonly signal?: AbortSignal;
 }
+export interface UiSessionHistoryQuery extends UiSessionScope {
+  readonly before?: string;
+  /** Center the window on a visible main-chat message. Mutually exclusive with before. */
+  readonly anchorMessageId?: string;
+  readonly limit?: number;
+}
 export type UiOptionalRead<T> =
   | { readonly status: "ready"; readonly value: T }
   | { readonly status: "unavailable"; readonly reason: string };
@@ -129,12 +135,7 @@ export type UiSessionRecoveryEvent =
   | UiSessionUnavailableEvent;
 export interface UiSessionRecoveryClient {
   getSessionView(input: UiSessionScope): Promise<UiSessionView>;
-  getSessionHistory(
-    input: UiSessionScope & {
-      readonly before?: string;
-      readonly limit?: number;
-    },
-  ): Promise<UiSessionHistory>;
+  getSessionHistory(input: UiSessionHistoryQuery): Promise<UiSessionHistory>;
   getSessionControl(input: UiSessionScope): Promise<UiSessionControl>;
   getPromptReceipt(input: UiPromptReceiptQuery): Promise<UiPromptReceiptResult>;
 }

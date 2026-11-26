@@ -7,6 +7,7 @@ import type { WorkspaceSnapshot } from "../../api/daemon/wire.js";
 import { createMockRuntime } from "../../dev/mock-runtime.js";
 import type { OhbabyWebRuntime } from "../../runtime/index.js";
 import { OhbabyWebApp } from "../App.js";
+import { SessionScreen } from "../session/SessionScreen.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -337,6 +338,100 @@ describe("improve-3 sidebar actions", () => {
     });
     expect(search()).toBeNull();
     expect(document.activeElement).toBe(textarea(container));
+  });
+
+  it("releases a search anchor in live messages as soon as a new prompt is sent", async () => {
+    const runtime = createMockRuntime("running");
+    const client = runtime.client;
+    const session = runtime.store.getSnapshot().sessionSync.view?.session;
+    const anchor = session?.messages[0];
+    if (!client || !session || !anchor)
+      throw new Error("Missing running chat fixture");
+    const submit = vi.spyOn(runtime, "submitPrompt").mockImplementation(
+      () =>
+        new Promise(() => {
+          // Keep the daemon receipt pending until after the follow assertion.
+        }),
+    );
+    const clearLocation = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(
+        <SessionScreen
+          runtime={runtime}
+          client={client}
+          location={{
+            sessionId: session.id,
+            messageId: anchor.id,
+            ticket: 1,
+            selection: runtime.getSelectionGeneration(),
+          }}
+          clearLocation={clearLocation}
+          onOpenModelSettings={vi.fn()}
+          onError={vi.fn()}
+        />,
+      );
+    });
+    expect(
+      container.querySelector(`[data-message-id="${anchor.id}"]`),
+    ).toBeTruthy();
+    expect(clearLocation).not.toHaveBeenCalled();
+    typeText(container, "Follow this new prompt");
+    act(() => {
+      button(container, "Send message").click();
+    });
+    await settle();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(clearLocation).toHaveBeenCalledOnce();
+  });
+
+  it("opens a search result in another chat, displays its old message, and returns to the live conversation", async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = createMockRuntime("typical");
+      const container = mount(runtime);
+      act(() => {
+        button(container, "Search chats").click();
+      });
+      const input =
+        document.querySelector<HTMLInputElement>('[role="combobox"]');
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      );
+      if (!input) throw new Error("Missing search input");
+      act(() => {
+        descriptor?.set?.call(input, "sidebar layout");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      const result = document.querySelector<HTMLElement>(".ohb-search-row");
+      if (!result) throw new Error("Missing search result");
+      act(() => {
+        result.click();
+      });
+      await settle();
+      const id = runtime.store.getSnapshot().sessionSync.scope?.sessionId;
+      expect(id).toBeTruthy();
+      const row = container.querySelector(
+        `[data-message-id="${id ?? ""}-message"]`,
+      );
+      expect(row?.textContent).toContain(
+        "A previous message about sidebar layout.",
+      );
+      act(() => {
+        button(container, "Back to latest").click();
+      });
+      expect(container.contains(row)).toBe(false);
+      expect(runtime.store.getSnapshot().sessionSync.scope?.sessionId).toBe(id);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns focus to the Search button after the card closes", () => {

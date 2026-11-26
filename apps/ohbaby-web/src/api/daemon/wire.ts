@@ -139,6 +139,8 @@ export interface StoreSnapshot {
   readonly historyBefore?: string;
   readonly historyHasMore: boolean;
   readonly historyStale: boolean;
+  /** Changes when detached pages from the previous history can no longer be displayed. */
+  readonly historyGeneration: number;
   readonly unknownPromptRequests: readonly UnknownPromptRequest[];
   readonly permissionSync: PermissionSyncState;
   /** Instance permission policy also exists before a draft has a session. */

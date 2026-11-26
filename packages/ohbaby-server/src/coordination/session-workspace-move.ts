@@ -17,6 +17,7 @@ export interface GlobalSessionCatalog {
   }): GlobalSessionPage;
   search(input: {
     readonly query: string;
+    readonly order?: "desc" | "asc";
     readonly limit?: number;
     readonly cursor?: string;
   }): SessionSearchPage;

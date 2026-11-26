@@ -40,9 +40,12 @@ function page(
   return {
     results: ids.map((id) => ({
       session: session(id),
-      matchType: options.body === false ? "title" : "message",
-      snippet: "<img src=x onerror=alert(1)> hello body",
-      ...(options.body === false ? {} : { messageId: `${id}-m` }),
+      ...(options.body === false
+        ? {}
+        : {
+            messageId: `${id}-m`,
+            snippet: "<img src=x onerror=alert(1)> hello body",
+          }),
     })),
     ...(options.nextCursor ? { nextCursor: options.nextCursor } : {}),
   };

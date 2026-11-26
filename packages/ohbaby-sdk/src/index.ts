@@ -46,7 +46,6 @@ export type {
   UiGlobalSessionStatus,
   UiSessionDeleteResult,
   UiSessionWorkspaceUpdate,
-  UiSessionSearchMatchType,
   UiSessionSearchPage,
   UiSessionSearchResult,
 } from "./contract/global-sessions.js";

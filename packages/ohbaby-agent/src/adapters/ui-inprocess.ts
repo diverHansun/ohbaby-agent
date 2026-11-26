@@ -413,6 +413,10 @@ export interface InProcessUiBackendOptions {
   readonly diagnosticsFilePath?: string;
   readonly createLLMClient?: (config: LLMConfig) => Promise<LLMClientInstance>;
   readonly messageManager?: MessageManager;
+  readonly isSearchableMessage?: (
+    sessionId: string,
+    messageId: string,
+  ) => boolean;
   readonly sessionManager?: InProcessSessionManager;
   readonly stateStore?: UiStateStore;
   readonly projectDirectory?: string;
@@ -861,6 +865,7 @@ export function createInProcessUiBackendClient(
     {
       runtimeEpoch: permissionProjection.permissionEpoch,
       messageManager,
+      isSearchableMessage: options.isSearchableMessage,
       metadata: async (sessionId): Promise<Omit<UiSession, "messages">> => {
         const core = await options.sessionManager?.get(sessionId);
         const session = core
@@ -5854,6 +5859,7 @@ export function createInProcessUiBackendClient(
         input.sessionId,
         input.before,
         input.limit,
+        input.anchorMessageId,
       );
       return {
         ...history,

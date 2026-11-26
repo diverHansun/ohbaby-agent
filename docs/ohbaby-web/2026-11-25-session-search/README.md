@@ -9,4 +9,4 @@
 | [技术方案](improve-1/02-optimization-plan-and-change-scope.md) | 查询、历史读取和前后端交互约定 |
 | [验收标准](improve-1/04-test-and-acceptance.md) | 按真实输入、接口调用和页面操作验收 |
 
-Pi 与 OpenCode 的本地实现对照已收在讨论记录。原侧栏内展开输入框的设计见[此前的 Web 改版方案](../redesign-2026-10/improve-3/02-plan-and-change-scope.md)。本轮以居中弹窗取代该交互。后端由用户实现，前端由 Claude 实现，分工见技术方案第 4 节。
+Pi 与 OpenCode 的本地实现对照已收在讨论记录。原侧栏内展开输入框的设计见[此前的 Web 改版方案](../redesign-2026-10/improve-3/02-plan-and-change-scope.md)。本轮点击 Search 直接打开卡片。跨项目搜索、正文定位与返回最新的验证结果见[实测记录](improve-1/04-test-and-acceptance.md#2026-11-26-实测记录)。

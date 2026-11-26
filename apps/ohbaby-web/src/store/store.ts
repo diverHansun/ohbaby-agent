@@ -73,6 +73,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     sessionControl: null,
     historyState: "ready",
     historyHasMore: false,
+    historyGeneration: 0,
     historyStale: false,
     unknownPromptRequests: [],
     permission: null,
@@ -448,6 +449,13 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       publish({
         ...snapshot,
         sessionSync,
+        historyGeneration:
+          snapshot.historyGeneration +
+          Number(
+            changedScope ||
+              newGeneration ||
+              (previous.status === "ready" && sessionSync.status !== "ready"),
+          ),
         ...(changedScope
           ? {
               sessionControl: null,
@@ -578,15 +586,19 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       // with evicted ids carries no edit to older pages and keeps them. If
       // eviction is ever merged with a real edit, revisit this branch.
       if ((event.evictedMessageIds?.length ?? 0) > 0) return;
-      if (event.historyInvalidated)
-        invalidatedAt = event.version.sessionRevision;
-      if (event.historyInvalidated && historyLoaded)
-        publish({
-          ...snapshot,
-          historyStale: true,
-          historyBefore: view.history.before,
-          historyHasMore: view.history.hasMore,
-        });
+      if (!event.historyInvalidated) return;
+      invalidatedAt = event.version.sessionRevision;
+      publish({
+        ...snapshot,
+        historyGeneration: snapshot.historyGeneration + 1,
+        ...(historyLoaded
+          ? {
+              historyStale: true,
+              historyBefore: view.history.before,
+              historyHasMore: view.history.hasMore,
+            }
+          : {}),
+      });
     },
     setPermissionSync(permissionSync): void {
       publish({ ...snapshot, permissionSync });
@@ -712,7 +724,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       deleted.clear();
       invalidatedAt = -1;
       historyLoaded = false;
-      publish(initial());
+      publish({
+        ...initial(),
+        historyGeneration: snapshot.historyGeneration + 1,
+      });
     },
     setConnectionState(state): void {
       if (snapshot.connectionState === state) {

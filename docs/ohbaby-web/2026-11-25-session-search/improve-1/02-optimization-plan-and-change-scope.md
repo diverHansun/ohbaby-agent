@@ -53,6 +53,4 @@
 
 ## 4. 分工与开发顺序
 
-后端由用户实现：`global-query.ts` 的查询、排序、摘要和返回结构，SDK 中搜索与 `getSessionHistory` 的类型及其导出（`ohbaby-sdk/src/index.ts`、`ohbaby-agent/src/services/session/index.ts`），server 的搜索链路（`ohbaby-server/src/runtime/daemon/server.ts` 解析 `order`，`ohbaby-server/src/protocols/global-sessions.ts` 的结果映射去掉 `matchType`）和 history 的 HTTP 与 RPC 入口，以及会话投影层的定点读取。前端由 Claude 实现，只改 `apps/ohbaby-web`：daemon 客户端的请求参数、mock 运行时、搜索弹窗和主聊天定位。
-
-用户先提交 SDK 类型（`anchorMessageId`、`order` 和新的搜索返回结构），前端据此在 mock 运行时上完成开发，后端完成后再联调。双方在本地分支 `feat/session-search-card` 上工作，各自只提交自己负责的文件。
+在 `feat/session-search-card` 上分两笔提交。第一笔收录前端已完成的搜索卡片、侧栏入口、排序交互和设计文档。第二笔由 Codex 接入 SQLite 查询、SDK、服务端 HTTP 与 RPC 接口，以及 Web 主聊天的消息定位。联调使用编译后的 CLI 和独立测试数据库。
