@@ -92,7 +92,9 @@ export function SlashPalette(props: {
         ))}
       </div>
       <footer className="ohb-slash-hint">
-        ↑↓ select · ↵ run · ⇥ complete · esc dismiss
+        {props.items[selectedIndex]?.executionKind === "skill"
+          ? "↑↓ select · ↵ insert · esc dismiss"
+          : "↑↓ select · ↵ run · ⇥ complete · esc dismiss"}
       </footer>
     </div>
   );

@@ -15,6 +15,8 @@ import {
   useSettingsModels,
 } from "../composer/model-choice.js";
 import { ModelMenu } from "../composer/ModelMenu.js";
+import { composeSkillText } from "../composer/skill-compose.js";
+import type { EditedPrompt } from "../conversation/UserMessageEditor.js";
 import { TodoDock } from "../conversation/TodoDock.js";
 import { ApprovalPanel } from "../permissions/ApprovalPanel.js";
 import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
@@ -268,22 +270,29 @@ export function SessionScreen({
   // sends the new text in one call (undo 02 §2.1).
   const editSessionId = view.activeSession?.id;
   const sendEdit = useCallback(
-    async (promptId: string, text: string): Promise<string | null> => {
+    async (promptId: string, input: EditedPrompt): Promise<string | null> => {
       if (editSessionId === undefined) return null;
       try {
         const result = await client.rewindSession({
           sessionId: editSessionId,
           promptId,
-          text,
+          text: composeSkillText(input.skill, input.text),
         });
         if (result.sendError) {
-          // The rewind stands but the send did not: the text goes to the
-          // main input, after any draft already there, never over it.
+          // The rewind stands but the send did not: the edited request goes
+          // to the main input with its token, and any draft already there
+          // follows after a blank line, a token of its own as plain text.
           const stored = readSessionValue(
             composerDraftKey(draftScopeKey),
           ) as StoredComposerDraft | null;
-          const draft = stored?.text.trimEnd() ?? "";
-          prefillComposer(draft === "" ? text : `${draft}\n\n${text}`);
+          const draft = composeSkillText(
+            stored?.skill ?? null,
+            stored?.text ?? "",
+          ).trimEnd();
+          prefillComposer(
+            [input.text, draft].filter((part) => part !== "").join("\n\n"),
+            input.skill ?? undefined,
+          );
           setActionError(
             `The message was not sent: ${result.sendError.message}`,
           );
@@ -444,7 +453,9 @@ export function SessionScreen({
               ? compactRequest.notice.text
               : undefined
           }
-          onInsertSkill={prefillComposer}
+          onInsertSkill={(name) => {
+            prefillComposer("", name);
+          }}
           reading={reading}
           onLatest={follow}
           followToken={followToken}
@@ -458,6 +469,8 @@ export function SessionScreen({
               : undefined,
             stateHints: editStateHints,
             send: sendEdit,
+            listCommands,
+            commandCatalogVersion: view.commandCatalogVersion,
           }}
         />
       ) : loading ? (

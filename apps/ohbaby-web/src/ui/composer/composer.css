@@ -258,6 +258,11 @@
   z-index: 1;
 }
 
+.ohb-composer .ohb-skill-field-token {
+  font-size: 15px;
+  line-height: 24px;
+}
+
 .ohb-composer textarea::placeholder {
   color: var(--text-dim);
 }
@@ -402,11 +407,16 @@
   width: 30px;
 }
 
-.ohb-send-button,
 .ohb-button-primary {
   background: var(--accent);
   border: 0;
   color: var(--accent-contrast);
+}
+
+.ohb-send-button {
+  background: var(--signal);
+  border: 0;
+  color: var(--signal-contrast);
 }
 
 /* Enabling fades in rather than snapping; a press shrinks it slightly. */
@@ -421,9 +431,12 @@
   transform: scale(0.92);
 }
 
-.ohb-send-button:not(:disabled):hover,
 .ohb-button-primary:not(:disabled):hover {
   background: var(--accent-hover);
+}
+
+.ohb-send-button:not(:disabled):hover {
+  background: var(--signal-hover);
 }
 
 .ohb-send-button:disabled {
@@ -437,15 +450,15 @@
   animation: ohb-spin 1s linear infinite;
 }
 
-/* Stop matches Send (Claude, Cursor): a black circle with a white square. */
+/* Stop matches Send (Claude, Cursor): a blue circle with a solid white square. */
 .ohb-stop-button {
-  background: var(--accent);
+  background: var(--signal);
   border: 0;
-  color: var(--accent-contrast);
+  color: var(--signal-contrast);
 }
 
 .ohb-stop-button:not(:disabled):hover {
-  background: var(--accent-hover);
+  background: var(--signal-hover);
 }
 
 .ohb-button {

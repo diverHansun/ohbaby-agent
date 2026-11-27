@@ -46,6 +46,8 @@ export function useSteerQueue(input: {
     queuedEditRef,
     setQueuedEdit,
     setDraft,
+    setSkillName,
+    skillNameRef,
     setPendingRequestId,
     setPendingText,
     pendingRequestId,
@@ -80,12 +82,14 @@ export function useSteerQueue(input: {
     (edit: QueuedEditState): void => {
       setQueuedEdit(null);
       setDraft(edit.originalDraft);
+      setSkillName(edit.originalSkill ?? null);
       setPendingRequestId(edit.originalPendingRequestId ?? null);
       setPendingText(edit.originalPendingText ?? null);
       persistDraft(
         edit.originalDraft,
         edit.originalPendingRequestId,
         edit.originalPendingText,
+        edit.originalSkill,
       );
       removeSessionValue(composerLeaseKey(draftScopeKey));
     },
@@ -93,6 +97,7 @@ export function useSteerQueue(input: {
       draftScopeKey,
       persistDraft,
       setDraft,
+      setSkillName,
       setPendingRequestId,
       setPendingText,
       setQueuedEdit,
@@ -256,6 +261,9 @@ export function useSteerQueue(input: {
             status: lease.prompt.status === "retained" ? "retained" : "queued",
             operationId: globalThis.crypto.randomUUID(),
             originalDraft: draftRef.current,
+            ...(skillNameRef.current === null
+              ? {}
+              : { originalSkill: skillNameRef.current }),
             ...(pendingRequestId === null
               ? {}
               : { originalPendingRequestId: pendingRequestId }),
@@ -267,6 +275,8 @@ export function useSteerQueue(input: {
           lastLeaseRenewalAt.current = Date.now();
           setLeaseActivityVersion(0);
           setQueuedEdit(next);
+          // The queued text is plain: no token over it.
+          setSkillName(null);
           setDraft(lease.prompt.text);
           setPendingRequestId(null);
           setPendingText(null);
@@ -302,6 +312,8 @@ export function useSteerQueue(input: {
       queueAcquirePendingRef,
       queuedEdit,
       setDraft,
+      setSkillName,
+      skillNameRef,
       setLeaseActivityVersion,
       setPendingRequestId,
       setPendingText,

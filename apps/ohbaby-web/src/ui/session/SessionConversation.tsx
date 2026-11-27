@@ -45,7 +45,7 @@ export function SessionConversation(props: {
   readonly interactions: ReturnType<typeof useSessionInteractions>;
   readonly compacting: boolean;
   readonly compactNotice?: string;
-  readonly onInsertSkill: (text: string) => void;
+  readonly onInsertSkill: (name: string) => void;
   /** Changes when the user sends, so the stream follows the new prompt. */
   readonly followToken?: number;
   readonly reading: SearchReading;
@@ -255,8 +255,8 @@ export function SessionConversation(props: {
           onClose={() => {
             runtime.store.consumeCommand(commandModalNotice.id);
           }}
-          onInsertSkill={(text) => {
-            props.onInsertSkill(text);
+          onInsertSkill={(name) => {
+            props.onInsertSkill(name);
             runtime.store.consumeCommand(commandModalNotice.id);
           }}
           view={{

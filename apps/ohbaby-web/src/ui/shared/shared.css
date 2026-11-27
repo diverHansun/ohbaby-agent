@@ -715,3 +715,53 @@
 .ohb-sh-operator {
   color: var(--text-dim);
 }
+
+/* A slash-called skill shown as part of the text (skill UX frontend 03 §3):
+   ink and a wand, no fill, border or shadow. Same in the bubble, the composer
+   and the message editor. */
+/* One line, never broken; a name wider than the room ends in an ellipsis
+   (its full name stays in the label and in copied text). */
+.ohb-skill-token {
+  color: var(--skill-ink);
+  display: inline-block;
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-user-select: none;
+  user-select: none;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.ohb-skill-token-icon {
+  height: 1em;
+  margin-right: 4px;
+  vertical-align: -0.125em;
+  width: 1em;
+}
+
+/* The token sits over the textarea's first line, which starts after it; later
+   lines start at the left edge. The token scrolls with that line. */
+.ohb-skill-field {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.ohb-skill-field.has-skill textarea {
+  text-indent: var(--ohb-skill-indent, 0);
+}
+
+/* The request keeps room on the first line beside a long name. */
+.ohb-skill-field-token {
+  display: flex;
+  left: 0;
+  max-width: 60%;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  z-index: 2;
+}

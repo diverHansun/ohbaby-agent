@@ -4,6 +4,7 @@ import type { CommandNotice } from "../../api/daemon/wire.js";
 import {
   createCommandResultModel,
   createSlashPaletteItems,
+  dropSlashQuery,
   safeHelpCommands,
   selectedSlashItem,
   statusContextWindowUsage,
@@ -100,25 +101,23 @@ function statusModels(): {
 }
 
 describe("ohbaby-web slash commands UI helpers", () => {
-  it("builds palette rows from web-safe passthrough and overlay commands", () => {
+  it("builds palette rows from web-safe passthrough, overlay and skill commands", () => {
     const items = createSlashPaletteItems(commandCatalog(), "/");
 
     expect(items.map((item) => item.label)).toEqual([
       "/compact",
+      "/hansun-db",
       "/skills",
       "/status",
     ]);
-    expect(items.map((item) => item.label)).not.toContain("/hansun-db");
     expect(items.map((item) => item.label)).not.toContain("/new");
     expect(items[0]).toMatchObject({
       categoryLabel: "Session",
       executionKind: "overlay",
       showCategory: true,
     });
-    expect(items[1]).toMatchObject({
-      categoryLabel: "Tools",
-      showCategory: true,
-    });
+    expect(items[1]).toMatchObject({ executionKind: "skill", showCategory: true });
+    expect(items[2]).toMatchObject({ categoryLabel: "Tools" });
   });
 
   it("clamps the selection to the matching commands", () => {
@@ -126,6 +125,29 @@ describe("ohbaby-web slash commands UI helpers", () => {
     const selected = selectedSlashItem(items, 10);
 
     expect(selected?.label).toBe("/status");
+  });
+
+  it("lists only skills in skills-only mode and matches the name before the request", () => {
+    const options = { skillsOnly: true };
+
+    expect(
+      createSlashPaletteItems(commandCatalog(), "/", options).map((item) => item.label),
+    ).toEqual(["/hansun-db"]);
+    expect(
+      createSlashPaletteItems(commandCatalog(), "/hans重点看这里", options).map(
+        (item) => item.label,
+      ),
+    ).toEqual(["/hansun-db"]);
+    expect(
+      createSlashPaletteItems(commandCatalog(), "/sta", options),
+    ).toEqual([]);
+  });
+
+  it("drops the typed slash query and one separating space", () => {
+    expect(dropSlashQuery("/hans")).toBe("");
+    expect(dropSlashQuery("/hans 原话")).toBe("原话");
+    expect(dropSlashQuery("/hans重点看这里")).toBe("重点看这里");
+    expect(dropSlashQuery("/hans\n第二行")).toBe("第二行");
   });
 
   it("keeps the /skill input alias canonical in palette labels", () => {

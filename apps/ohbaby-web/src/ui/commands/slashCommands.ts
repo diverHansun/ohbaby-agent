@@ -51,17 +51,28 @@ const CATEGORY_ORDER: Record<string, number> = {
 export function createSlashPaletteItems(
   catalog: UiWebCommandCatalog,
   draft: string,
+  options: {
+    /** After a skill token, and in the message editor: skills only. */
+    readonly skillsOnly?: boolean;
+  } = {},
 ): readonly SlashPaletteItem[] {
   if (!draft.startsWith("/")) {
     return [];
   }
-  const paletteCommands = catalog.commands.filter(isWebPaletteCommand);
+  // Only skills can follow: match the `/name` just typed, not the request
+  // it was typed in front of (`/co重点…` looks for `co`).
+  const query = options.skillsOnly ? skillQuery(draft) : draft;
+  const paletteCommands = catalog.commands.filter(
+    (command) =>
+      isWebPaletteCommand(command) &&
+      (!options.skillsOnly || command.executionKind === "skill"),
+  );
   const paletteCatalog: UiWebCommandCatalog = {
     ...catalog,
     commands: paletteCommands,
   };
   const matchedIds = new Set(
-    filterSlashCommandCatalog(paletteCatalog, draft, {
+    filterSlashCommandCatalog(paletteCatalog, query, {
       surface: "tui",
     }).map((command) => command.id),
   );
@@ -86,10 +97,33 @@ export function createSlashPaletteItems(
   });
 }
 
+/** Overlays, web-safe passthroughs and skills; never other TUI commands. */
 function isWebPaletteCommand(command: UiWebCommandSpec): boolean {
   return (
-    command.action !== "executeCommand" || isWebPassthroughCommandId(command.id)
+    command.action !== "executeCommand" ||
+    command.executionKind === "skill" ||
+    isWebPassthroughCommandId(command.id)
   );
+}
+
+/** The skill a palette row calls, or undefined for any other command. */
+export function paletteSkillName(
+  item: SlashPaletteItem | undefined,
+): string | undefined {
+  return item?.executionKind === "skill" ? item.command.path[0] : undefined;
+}
+
+// Skill names are lowercase words joined by hyphens; uppercase is allowed
+// because the catalog matches names case-insensitively.
+const SKILL_QUERY = /^\/[A-Za-z0-9-]*/u;
+
+function skillQuery(draft: string): string {
+  return SKILL_QUERY.exec(draft)?.[0] ?? draft;
+}
+
+/** The request left once the `/query` typed to find a skill is replaced. */
+export function dropSlashQuery(draft: string): string {
+  return draft.slice(skillQuery(draft).length).replace(/^\s/u, "");
 }
 
 export function selectedSlashItem(

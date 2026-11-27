@@ -83,6 +83,52 @@
   position: relative;
 }
 
+/* The user's words as typed (skill UX frontend 03 §3): plain text, breaks and
+   indents kept, long links and paths wrap inside the bubble. */
+.ohb-user-text {
+  overflow-wrap: anywhere;
+}
+
+.ohb-user-text-body {
+  white-space: pre-wrap;
+}
+
+/* The gap sits after the token, so a request that starts on the next line
+   is not indented. */
+.ohb-user-text .ohb-skill-token:not(:last-child) {
+  margin-right: 6px;
+  max-width: calc(100% - 6px);
+}
+
+/* Over about 12 lines a message folds to 8, ending in an ellipsis. */
+.ohb-user-text.is-folded {
+  -webkit-box-orient: vertical;
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  overflow: hidden;
+}
+
+/* From parent is markdown, which cannot be cut by line: fold by height. */
+.ohb-user-text.is-rich.is-folded {
+  display: block;
+  max-height: calc(8 * 1.7em);
+}
+
+/* A quiet line of small text: no hover change, no motion. */
+.ohb-user-text-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  /* --text-muted: --text-dim on --user-bg is just under 4.5:1. */
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 2px;
+  line-height: 18px;
+  min-height: 24px;
+  padding: 6px 0 0;
+}
+
 .ohb-message-pending-label {
   color: var(--text-dim);
   font-family: var(--font-mono);
@@ -507,6 +553,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px 10px 16px;
+  position: relative;
   transition:
     border-color var(--duration-fast) var(--ease),
     box-shadow var(--duration-fast) var(--ease);
@@ -516,6 +563,11 @@
 .ohb-message-editor:focus-within {
   border-color: var(--border-focus);
   box-shadow: var(--ring-soft);
+}
+
+.ohb-message-editor .ohb-skill-field-token {
+  font-size: 14px;
+  line-height: 24px;
 }
 
 .ohb-message-editor textarea {
@@ -551,10 +603,10 @@
 
 .ohb-message-editor-send {
   align-items: center;
-  background: var(--accent);
+  background: var(--signal-hover);
   border: 0;
   border-radius: var(--radius-pill);
-  color: var(--accent-contrast);
+  color: var(--signal-contrast);
   display: inline-flex;
   font-size: 13px;
   font-weight: 500;
@@ -565,7 +617,7 @@
 }
 
 .ohb-message-editor-send:not(:disabled):hover {
-  background: var(--accent-hover);
+  background: var(--signal-strong);
 }
 
 .ohb-message-editor-send:disabled {

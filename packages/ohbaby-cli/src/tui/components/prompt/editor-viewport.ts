@@ -4,6 +4,9 @@ import type { EditorState } from "./editor-reducer.js";
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 export interface EditorDisplayRow {
   readonly text: string;
+  /** The logical line this row shows, and where in that line it starts. */
+  readonly line: number;
+  readonly offset: number;
   readonly hiddenBefore?: boolean;
   readonly resizeRequired?: boolean;
   readonly visibleRange?: { start: number; end: number; total: number };
@@ -18,14 +21,15 @@ export function editorViewport(
   maxRows: number,
 ): readonly EditorDisplayRow[] {
   const columns = Math.max(0, Math.floor(width));
-  if (columns === 0) return [{ text: "", resizeRequired: true }];
+  if (columns === 0)
+    return [{ text: "", line: 0, offset: 0, resizeRequired: true }];
   const limit = Math.max(1, Math.floor(maxRows));
   const rows: EditorDisplayRow[] = [];
   for (const [lineIndex, line] of editor.lines.entries()) {
     const active = lineIndex === editor.cursor.row;
     const source =
       active && editor.cursor.col >= line.length ? `${line} ` : line;
-    let current: EditorDisplayRow = { text: "" };
+    let current: EditorDisplayRow = { text: "", line: lineIndex, offset: 0 };
     let used = 0;
     let logicalColumn = 0;
     for (const { segment, index } of graphemes.segment(source)) {
@@ -35,14 +39,14 @@ export function editorViewport(
       logicalColumn += size;
       if (segment !== "\t" && used > 0 && used + size > columns) {
         rows.push(current);
-        current = { text: "" };
+        current = { text: "", line: lineIndex, offset: index };
         used = 0;
       }
       if (segment === "\t") {
         for (let cell = 0; cell < size; cell += 1) {
           if (used === columns) {
             rows.push(current);
-            current = { text: "" };
+            current = { text: "", line: lineIndex, offset: index };
             used = 0;
           }
           const ownsCursor =

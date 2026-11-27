@@ -3,6 +3,8 @@ import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createSlashPaletteItems,
+  dropSlashQuery,
+  paletteSkillName,
   selectedSlashItem,
   type SlashPaletteItem,
 } from "../commands/slashCommands.js";
@@ -21,6 +23,8 @@ export function useSlashPalette(input: {
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
   readonly onStructuredCommand: (request: StructuredCommandRequest) => void;
   readonly onSubmit: (text: string) => Promise<boolean>;
+  /** A skill became the token; the caller puts the caret after it. */
+  readonly onSkillSelected?: () => void;
 }): {
   readonly slashOpen: boolean;
   readonly slashItems: readonly SlashPaletteItem[];
@@ -45,9 +49,11 @@ export function useSlashPalette(input: {
     onListCommands,
     onStructuredCommand,
     onSubmit,
+    onSkillSelected,
   } = input;
   const {
     draft,
+    skillName,
     updateDraft,
     setIsSubmitting,
     draftScopeGeneration,
@@ -64,9 +70,11 @@ export function useSlashPalette(input: {
   const slashItems = useMemo(
     () =>
       canUseSlash && slashCatalog && draft.startsWith("/")
-        ? createSlashPaletteItems(slashCatalog, draft)
+        ? createSlashPaletteItems(slashCatalog, draft, {
+            skillsOnly: skillName !== null,
+          })
         : [],
-    [canUseSlash, draft, slashCatalog],
+    [canUseSlash, draft, skillName, slashCatalog],
   );
   const selectedCommand = selectedSlashItem(slashItems, slashIndex);
   const slashOpen =
@@ -101,9 +109,26 @@ export function useSlashPalette(input: {
     };
   }, [canUseSlash, draft, onListCommands, commandCatalogVersion, disabled]);
 
+  // Choosing a skill makes a token in front of the request; it does not send
+  // (skill UX frontend 04 §3). A second Enter sends.
+  const selectSkill = useCallback(
+    (name: string): void => {
+      updateDraft(dropSlashQuery(draft), name);
+      setSlashDismissedDraft(null);
+      setSlashIndex(0);
+      onSkillSelected?.();
+    },
+    [draft, onSkillSelected, updateDraft],
+  );
+
   const runSlashCommand = useCallback(
     (item: SlashPaletteItem | undefined) => {
       if (!canUseSlash) {
+        return;
+      }
+      const skill = paletteSkillName(item);
+      if (skill !== undefined) {
+        selectSkill(skill);
         return;
       }
       const commandText = item?.label ?? draft.trim();
@@ -143,6 +168,7 @@ export function useSlashPalette(input: {
       editRevision,
       onStructuredCommand,
       onSubmit,
+      selectSkill,
       setIsSubmitting,
       updateDraft,
     ],
@@ -167,7 +193,9 @@ export function useSlashPalette(input: {
           break;
         case "Tab":
           if (event.shiftKey) return false;
-          if (selectedCommand) {
+          if (paletteSkillName(selectedCommand) !== undefined) {
+            runSlashCommand(selectedCommand);
+          } else if (selectedCommand) {
             updateDraft(selectedCommand.label);
             setSlashDismissedDraft(null);
           }

@@ -412,6 +412,14 @@ describe("OhbabyWebApp slash command interactions", () => {
       };
       await readEarlier();
       await setTextareaValue(app.container, text);
+      // A skill picked from the palette becomes a token; the next Enter sends.
+      if (command.startsWith("skill.")) {
+        await waitFor(
+          () => app.container.querySelector(".ohb-slash-palette") !== null,
+        );
+        await pressTextareaKey(app.container, "Enter");
+        await flushTimers();
+      }
       await pressTextareaKey(app.container, "Enter");
       await waitFor(() => fake.executeSlashCommand.mock.calls.length === 1);
       await flushTimers();
@@ -3172,7 +3180,63 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(selectedSlashText(app.container)).toContain("/status");
   });
 
-  it("keeps skill commands out of the top-level slash palette", async () => {
+  it("sends a skill token alone, or with the request after one space", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["skill.hansun-db"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/hans");
+    await waitFor(() => selectedSlashText(app.container).includes("/hansun-db"));
+    await pressTextareaKey(app.container, "Enter");
+    expect(composerSkill(app.container)).toBe("hansun-db");
+    expect(
+      app.container.querySelector<HTMLButtonElement>(".ohb-send-button")
+        ?.disabled,
+    ).toBe(false);
+
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.executeSlashCommand.mock.calls.length === 1);
+    expect(fake.executeSlashCommand.mock.calls[0]?.[0]).toMatchObject({
+      text: "/hansun-db",
+    });
+    expect(composerSkill(app.container)).toBeNull();
+
+    await setTextareaValue(app.container, "/hans");
+    await waitFor(() => selectedSlashText(app.container).includes("/hansun-db"));
+    await pressTextareaKey(app.container, "Enter");
+    await setTextareaValue(app.container, "  看这里\n  第二行  ");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.executeSlashCommand.mock.calls.length === 2);
+    expect(fake.executeSlashCommand.mock.calls[1]?.[0]).toMatchObject({
+      text: "/hansun-db 看这里\n  第二行",
+    });
+  });
+
+  it("removes the whole skill token with Backspace at the start", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["skill.hansun-db"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/hans");
+    await waitFor(() => selectedSlashText(app.container).includes("/hansun-db"));
+    await pressTextareaKey(app.container, "Enter");
+    await setTextareaValue(app.container, "原话");
+    const textarea = app.container.querySelector("textarea");
+    textarea?.setSelectionRange(1, 1);
+    await pressTextareaKey(app.container, "Backspace");
+    expect(composerSkill(app.container)).toBe("hansun-db");
+
+    textarea?.setSelectionRange(0, 0);
+    await pressTextareaKey(app.container, "Backspace");
+    expect(composerSkill(app.container)).toBeNull();
+    expect(textareaValue(app.container)).toBe("原话");
+  });
+
+  it("lists skills in the slash palette and turns a picked one into a token", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
@@ -3181,9 +3245,16 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     await setTextareaValue(app.container, "/");
     await waitFor(() => slashPaletteText(app.container).includes("/skills"));
+    expect(slashPaletteText(app.container)).toContain("/hansun-db");
 
-    expect(slashPaletteText(app.container)).toContain("/skills");
-    expect(slashPaletteText(app.container)).not.toContain("/hansun-db");
+    await setTextareaValue(app.container, "/hans");
+    await waitFor(() => selectedSlashText(app.container).includes("/hansun-db"));
+    await pressTextareaKey(app.container, "Enter");
+
+    expect(composerSkill(app.container)).toBe("hansun-db");
+    expect(textareaValue(app.container)).toBe("");
+    expect(app.container.querySelector(".ohb-slash-palette")).toBeNull();
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
   it("inserts the selected skill from the skills modal with PageDown and Tab", async () => {
@@ -3207,7 +3278,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     if (!(textarea instanceof HTMLTextAreaElement)) {
       throw new Error("textarea not found");
     }
-    expect(textarea.value).toBe("/hansun-db ");
+    expect(textarea.value).toBe("");
+    expect(composerSkill(app.container)).toBe("hansun-db");
     expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
     expect(document.activeElement).toBe(textarea);
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
@@ -3234,7 +3306,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(rows[1]?.getAttribute("aria-selected")).toBe("true");
 
     await pressWindowKey("Tab");
-    expect(textareaValue(app.container)).toBe("/hansun-db ");
+    expect(textareaValue(app.container)).toBe("");
+    expect(composerSkill(app.container)).toBe("hansun-db");
     expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
     expect(document.activeElement).toBe(
       app.container.querySelector("textarea"),
@@ -3363,7 +3436,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     await pressWindowKey("ArrowDown");
     await pressWindowKey("Enter");
 
-    expect(textareaValue(app.container)).toBe("/skill-2 ");
+    expect(textareaValue(app.container)).toBe("");
+    expect(composerSkill(app.container)).toBe("skill-2");
     expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
     expect(document.activeElement).toBe(
       app.container.querySelector("textarea"),
@@ -3437,7 +3511,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     if (!(textarea instanceof HTMLTextAreaElement)) {
       throw new Error("textarea not found");
     }
-    expect(textarea.value).toBe("/hansun-db ");
+    expect(textarea.value).toBe("");
+    expect(composerSkill(app.container)).toBe("hansun-db");
     expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
     expect(document.activeElement).toBe(textarea);
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
@@ -5861,6 +5936,14 @@ function closeMenu(): void {
   });
 }
 
+/** The skill token's name in the main composer, or null without one. */
+function composerSkill(container: ParentNode): string | null {
+  const label = container
+    .querySelector(".ohb-composer .ohb-skill-token")
+    ?.getAttribute("aria-label");
+  return label?.replace(/^Skill: /u, "") ?? null;
+}
+
 function slashPaletteText(container: ParentNode): string {
   return container.querySelector(".ohb-slash-palette")?.textContent ?? "";
 }
@@ -7075,17 +7158,20 @@ describe("feature boundary late-result isolation", () => {
     const app = mountApp(fake.runtime);
     await showSkillsModal(fake, ["review"]);
     await pressWindowKey("Tab");
-    expect(textareaValue(app.container)).toBe("/review ");
+    expect(textareaValue(app.container)).toBe("");
+    expect(composerSkill(app.container)).toBe("review");
     await setTextareaValue(app.container, "A changed after insertion");
     act(() => {
       fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
     });
     expect(textareaValue(app.container)).toBe("");
+    expect(composerSkill(app.container)).toBeNull();
     await setTextareaValue(app.container, "B draft");
     act(() => {
       fake.store.replaceSnapshot(initial, 5);
     });
     expect(textareaValue(app.container)).toBe("A changed after insertion");
+    expect(composerSkill(app.container)).toBe("review");
   });
   it("closes the old compact form when switching scope and ignores its late result", async () => {
     const fake = createFakeRuntime({

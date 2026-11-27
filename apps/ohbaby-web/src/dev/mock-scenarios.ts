@@ -8,6 +8,7 @@ import type {
 } from "ohbaby-sdk";
 import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
 import { markdownMessages } from "./mock-markdown.js";
+import { skillMessages, skillPrompts } from "./mock-skill-messages.js";
 
 /**
  * Dev-only scenarios for `vite dev` with `?mock=<name>` (06 §5). improve-1 ships
@@ -1008,6 +1009,23 @@ export const mockScenarios: Readonly<Record<string, () => MockScenario>> = {
     sessions: typicalSessions(),
   }),
   /** Every Markdown element; `&stream=1` replays a second answer (mock-markdown). */
+  "skill-messages": () => ({
+    snapshot: {
+      ...base,
+      activeSessionId: "skill_session",
+      sessions: [
+        session("skill_session", "Skill 消息", 1, skillMessages()),
+        ...history,
+      ],
+      prompts: skillPrompts("skill_session"),
+    },
+    workspace,
+    model,
+    sessions: byRecency([
+      globalRow("skill_session", "Skill 消息", 1, agentWorkspace),
+      ...typicalSessions(),
+    ]),
+  }),
   markdown: () => ({
     snapshot: {
       ...base,

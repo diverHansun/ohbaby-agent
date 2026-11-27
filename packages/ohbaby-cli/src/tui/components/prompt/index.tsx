@@ -29,6 +29,7 @@ import { useTheme } from "../../theme/index.js";
 import { Completion } from "./completion.js";
 import { createInputStream } from "./input-stream.js";
 import { editorViewport } from "./editor-viewport.js";
+import { rowPieces, skillNameEnd } from "./skill-highlight.js";
 import { editorNavigation } from "./editor-navigation.js";
 import { formatFooterRows, sameFooterModel } from "./footer.js";
 import {
@@ -1118,6 +1119,8 @@ export function Prompt({
               editor,
               disabled,
               theme.cursor,
+              theme.status.accent,
+              skillNameEnd(editor.lines[0] ?? "", catalog),
               Math.max(0, layout.contentWidth - 4),
               Math.max(
                 1,
@@ -1165,6 +1168,8 @@ function renderEditorLines(
   editor: EditorState,
   disabled: boolean,
   cursorColor: string,
+  skillColor: string,
+  skillEnd: number,
   width: number,
   maxRows: number,
 ): readonly ReactElement[] {
@@ -1183,16 +1188,18 @@ function renderEditorLines(
       <Text dimColor={disabled || row.hiddenBefore}>
         {index === 0 ? (row.hiddenBefore ? "↑ " : "> ") : "  "}
       </Text>
-      {disabled || row.cursorStart === undefined ? (
-        row.text
-      ) : (
-        <>
-          {row.text.slice(0, row.cursorStart)}
-          <Text color={cursorColor} inverse>
-            {row.text.slice(row.cursorStart, row.cursorEnd)}
+      {rowPieces(row, skillEnd, !disabled).map((piece, pieceIndex) =>
+        piece.cursor ? (
+          <Text key={pieceIndex} color={cursorColor} inverse>
+            {piece.text}
           </Text>
-          {row.text.slice(row.cursorEnd)}
-        </>
+        ) : piece.skill ? (
+          <Text key={pieceIndex} color={skillColor}>
+            {piece.text}
+          </Text>
+        ) : (
+          piece.text
+        ),
       )}
     </Text>
   ));

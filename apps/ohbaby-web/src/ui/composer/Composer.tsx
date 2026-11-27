@@ -30,6 +30,11 @@ import {
   writeSessionValue,
 } from "./draft-storage.js";
 import { isImeComposing } from "./ime.js";
+import { composeSkillText } from "./skill-compose.js";
+import {
+  placeCaretAtStart,
+  shouldRemoveSkillToken,
+} from "../shared/SkillTokenField.js";
 import { PromptQueue } from "./PromptQueue.js";
 import { UnconsumedSteers } from "./UnconsumedSteers.js";
 import { useComposerDraft } from "./useComposerDraft.js";
@@ -134,6 +139,9 @@ export function Composer(props: {
   const {
     draft,
     draftRef,
+    skillName,
+    skillNameRef,
+    setSkillName,
     queuedEdit,
     isSubmitting,
     pendingRequestId,
@@ -154,20 +162,21 @@ export function Composer(props: {
   });
 
   const tokenBudgetIssue = props.modelEntry?.tokenBudgetIssue;
+  // A skill token alone is something to send (skill UX frontend 06 §3.1).
+  const hasContent = skillName !== null || draft.trim().length > 0;
   const canSend =
     props.model.canSend &&
     !tokenBudgetIssue &&
     (!queuedEdit?.leaseLost || queuedEdit.retainedSendText !== undefined) &&
-    draft.trim().length > 0 &&
+    hasContent &&
     !isSubmitting &&
     !props.isPromptAdmitting;
   const showStop =
     props.stopLabel !== undefined ||
     (tokenBudgetIssue !== undefined && props.model.canStop) ||
     (!queuedEdit &&
-      ((props.model.isRunning && draft.trim().length === 0) ||
-        (props.model.canStop &&
-          (!props.model.canSend || draft.trim().length === 0))));
+      ((props.model.isRunning && !hasContent) ||
+        (props.model.canStop && (!props.model.canSend || !hasContent))));
   const canUseSlash =
     props.model.canSend &&
     !tokenBudgetIssue &&
@@ -182,13 +191,16 @@ export function Composer(props: {
     onListCommands: props.onListCommands,
     onStructuredCommand: props.onStructuredCommand,
     onSubmit: (text) => props.onSubmit(text),
+    onSkillSelected: () => {
+      placeCaretAtStart(textareaRef.current);
+    },
   });
   resetSlashRef.current = slash.reset;
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) fitComposerTextarea(textarea, TEXTAREA_FIT);
-  }, [draft, props.model.disabled, slash.slashOpen]);
+  }, [draft, skillName, props.model.disabled, slash.slashOpen]);
 
   // The chat composer floats over the stream, and the dock, queue, Goal strip
   // and steer recovery all grow it, so the stream reserves its measured height.
@@ -230,7 +242,10 @@ export function Composer(props: {
   }, []);
 
   const send = useCallback(() => {
-    const text = draft.trim();
+    // State keeps the token and the request apart; they join only here.
+    const skill = skillName;
+    const request = draft.trim();
+    const text = composeSkillText(skill, request);
     if (!text || !canSend) {
       return;
     }
@@ -245,6 +260,7 @@ export function Composer(props: {
     setPendingText(text);
     draftRef.current = "";
     setDraft("");
+    setSkillName(null);
     persistDraft("", clientRequestId, text);
     void props
       .onSubmit(text, clientRequestId, selectedReasoning.current)
@@ -253,31 +269,49 @@ export function Composer(props: {
           const key = composerDraftKey(props.draftScopeKey);
           const stored = readSessionValue(key) as StoredComposerDraft | null;
           if (stored?.clientRequestId === clientRequestId) {
-            if (sent && !stored.text) removeSessionValue(key);
+            const storedEmpty = !stored.text && stored.skill === undefined;
+            if (sent && storedEmpty) removeSessionValue(key);
             else
-              writeSessionValue(key, {
-                text: stored.text || (sent ? "" : text),
-              } satisfies StoredComposerDraft);
+              writeSessionValue(
+                key,
+                (storedEmpty
+                  ? { text: request, ...(skill === null ? {} : { skill }) }
+                  : {
+                      text: stored.text,
+                      ...(stored.skill === undefined
+                        ? {}
+                        : { skill: stored.skill }),
+                    }) satisfies StoredComposerDraft,
+              );
           }
           return;
         }
         setPendingRequestId(null);
         setPendingText(null);
+        const empty =
+          draftRef.current.length === 0 && skillNameRef.current === null;
         if (sent) {
-          if (draftRef.current.length === 0) {
+          if (empty) {
             removeSessionValue(composerDraftKey(props.draftScopeKey));
           } else {
-            persistDraft(draftRef.current);
+            persistDraft(
+              draftRef.current,
+              undefined,
+              undefined,
+              skillNameRef.current,
+            );
           }
           return;
         }
-        const restored =
-          editRevision.current === revision && draftRef.current.length === 0
-            ? text
-            : draftRef.current;
+        // A failed send comes back, token and all, unless the user has
+        // started the next message.
+        const restore = editRevision.current === revision && empty;
+        const restored = restore ? request : draftRef.current;
+        const restoredSkill = restore ? skill : skillNameRef.current;
         draftRef.current = restored;
         setDraft(restored);
-        persistDraft(restored);
+        setSkillName(restoredSkill);
+        persistDraft(restored, undefined, undefined, restoredSkill);
       });
   }, [
     canSend,
@@ -294,12 +328,23 @@ export function Composer(props: {
     setDraft,
     setPendingRequestId,
     setPendingText,
+    setSkillName,
+    skillName,
+    skillNameRef,
   ]);
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (isImeComposing(event)) return;
       if (slash.handlePaletteKey(event)) return;
+      if (
+        skillName !== null &&
+        shouldRemoveSkillToken(event, event.currentTarget)
+      ) {
+        event.preventDefault();
+        updateDraft(draft, null);
+        return;
+      }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         send();
@@ -327,7 +372,7 @@ export function Composer(props: {
         }
       }
     },
-    [props, queue, queuedEdit, send, slash],
+    [draft, props, queue, queuedEdit, send, skillName, slash, updateDraft],
   );
 
   return (
@@ -423,6 +468,7 @@ export function Composer(props: {
           planMode={props.model.mode === "plan"}
           compact={props.compact === true}
           draft={draft}
+          skillName={skillName}
           ariaLabel={`Message, ${props.model.mode} mode, ${props.model.permissionLevel} permission`}
           placeholder={composerPlaceholder(
             props.connectionKind,

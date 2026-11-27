@@ -83,7 +83,8 @@ export function CommandResultModal(props: {
   readonly header: CommandStatusHeader;
   readonly notice: CommandNotice;
   readonly onClose: () => void;
-  readonly onInsertSkill: (text: string) => void;
+  /** Makes the skill the composer's token, with an empty request. */
+  readonly onInsertSkill: (name: string) => void;
   readonly view: CommandStatusContext;
 }): ReactElement | null {
   const model = createCommandResultModel(props.notice);
@@ -167,7 +168,8 @@ export function CommandResultModal(props: {
 function CommandResultBody(props: {
   readonly header: CommandStatusHeader;
   readonly notice: CommandNotice;
-  readonly onInsertSkill: (text: string) => void;
+  /** Makes the skill the composer's token, with an empty request. */
+  readonly onInsertSkill: (name: string) => void;
   readonly variant: CommandResultModel["variant"];
   readonly view: CommandStatusContext;
 }): ReactElement {
@@ -294,7 +296,8 @@ function McpCommandResult(props: {
 function SkillsCommandResult(props: {
   readonly data: Record<string, unknown> | null;
   readonly notice: CommandNotice;
-  readonly onInsertSkill: (text: string) => void;
+  /** Makes the skill the composer's token, with an empty request. */
+  readonly onInsertSkill: (name: string) => void;
 }): ReactElement {
   const skills = useMemo(
     () =>
@@ -311,7 +314,7 @@ function SkillsCommandResult(props: {
     if (!name) {
       return;
     }
-    props.onInsertSkill(`/${name} `);
+    props.onInsertSkill(name);
   };
   useEffect(() => {
     if (skills.length === 0) {

@@ -7,6 +7,9 @@ import { MarkdownBlock, StreamingMarkdown } from "../shared/MarkdownBlock.js";
 import { isCompactionMessage } from "./message-text.js";
 import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 import { BackgroundTaskEntry, backgroundJobId } from "./BackgroundTaskEntry.js";
+import { CollapsibleUserText } from "./CollapsibleUserText.js";
+import { SkillToken } from "../shared/SkillToken.js";
+import { skillMarkerName, splitSkillText } from "./skill-text.js";
 
 export function MessageRow(props: {
   readonly steerState?: "unconsumed" | "unconfirmed";
@@ -20,6 +23,8 @@ export function MessageRow(props: {
   readonly reasoningIdPrefix?: string;
   /** The action row under the body (copy, and later Edit and fork). */
   readonly actions?: ReactNode;
+  /** A search jump's token for this message: a folded user message opens. */
+  readonly expandSignal?: string;
 }): ReactElement | null {
   const presentation = useContext(ConversationPresentation);
   const delegation = presentation.executions?.find(
@@ -27,6 +32,8 @@ export function MessageRow(props: {
   );
   const isUser = props.message.role === "user";
   const isCompaction = isCompactionMessage(props.message);
+  // A user's own words show as typed; a compaction summary stays markdown.
+  const plainUser = isUser && !isCompaction;
   // The daemon can publish partial text before attaching a completion status.
   const isStreaming =
     props.message.status === "streaming" ||
@@ -85,7 +92,26 @@ export function MessageRow(props: {
             text={props.reasoning.content}
           />
         ) : null}
-        {pairedParts.map((entry, index) => {
+        {plainUser ? (
+          <CollapsibleUserText
+            expandSignal={props.expandSignal}
+            rich={presentation.fromParent === true}
+          >
+            {presentation.fromParent ? (
+              visibleParts.map((part, index) =>
+                part.type === "text" ? (
+                  <MarkdownBlock
+                    key={`${props.message.id}-${messagePartKey(visibleParts, index)}`}
+                    text={part.text}
+                  />
+                ) : null,
+              )
+            ) : (
+              <UserText parts={visibleParts} />
+            )}
+          </CollapsibleUserText>
+        ) : null}
+        {(plainUser ? [] : pairedParts).map((entry, index) => {
           if (entry.kind === "tool") {
             const custom = presentation.renderTool?.(
               props.message,
@@ -284,6 +310,28 @@ function MessagePart(props: {
     case "tool-result":
       return <OrphanToolResultCard result={props.part.result} />;
   }
+}
+
+/**
+ * The user's words exactly as typed: plain text, no markdown (frontend 05
+ * §2.7). A marked skill call shows its token first, then the request.
+ */
+function UserText(props: {
+  readonly parts: readonly UiMessagePart[];
+}): ReactElement {
+  const texts = props.parts.flatMap((part) =>
+    part.type === "text" ? [part] : [],
+  );
+  const { skill, text } = splitSkillText(
+    texts.map((part) => part.text).join("\n\n"),
+    skillMarkerName(texts[0]?.metadata),
+  );
+  return (
+    <>
+      {skill === null ? null : <SkillToken name={skill} />}
+      {text === "" ? null : <span className="ohb-user-text-body">{text}</span>}
+    </>
+  );
 }
 
 export function visibleMessageText(message: UiMessage): string {

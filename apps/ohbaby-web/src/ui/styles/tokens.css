@@ -39,6 +39,17 @@
   --accent-contrast: #ffffff;
   --focus-ring: rgba(24, 24, 27, 0.5);
 
+  /* Signal: bright blue for the send-type buttons only (Send, Stop, the
+     editor's Send). White on --signal is about 3.7:1, enough for icons; the
+     editor's text button starts at --signal-hover (about 5.2:1). */
+  --signal: #3b82f6;
+  --signal-hover: #2563eb;
+  --signal-strong: #1d4ed8;
+  --signal-contrast: #ffffff;
+  /* Skill token ink: darker than --signal so the name reads at 4.5:1 or more
+     on --user-bg and --bg. Same blue as --syntax-command. */
+  --skill-ink: #2459b8;
+
   /* Status */
   --danger: #ef4444;
   --danger-ink: #b42318;

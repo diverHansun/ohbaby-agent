@@ -48,7 +48,7 @@ describe("complete grapheme editing", () => {
       editorViewport(createEditorState({ text: "a\tb" }), 10, 4)[0]?.text,
     ).toBe("a   b ");
     expect(editorViewport(createEditorState({ text: "中文" }), 0, 4)).toEqual([
-      { text: "", resizeRequired: true },
+      { text: "", line: 0, offset: 0, resizeRequired: true },
     ]);
     expect(
       editorViewport(createEditorState({ text: "中" }), 1, 4)[0],

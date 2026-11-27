@@ -1,6 +1,6 @@
 # ohbaby-web · Skill Invocation
 
-> 当前权威规格。Layer 1/2 已由 `b5e00f4` 落地：CLI 在顶层 `/` 浮层可选单个 skill；Web 刻意不 flood，改由 `/skills` 结果弹窗统一发现，再把 `/<skill-name> ` 落入 composer 执行。`improve-1` 在此基础上落地 input-only alias `/skill`、真实 hover/keyboard 选中、`scope · source` metadata、shared command eligibility projection 与 no-args palette 布局。
+> 当前权威规格。**更新**：2026-11-27 起被 skill UX（[improve-1/frontend](../../../problem-lists/2026-11-26-skill-ux/improve-1/frontend/00-goal-duty.md)）取代：顶层 `/` 浮层也列 skill，选中后在输入框里变成技能标记，不再落入 `/<skill-name> ` 文本；本文下面凡是写“顶层浮层不含 skill”“落入 `/<skill-name> `”的段落，以该目录为准。 Layer 1/2 已由 `b5e00f4` 落地：CLI 在顶层 `/` 浮层可选单个 skill；Web 刻意不 flood，改由 `/skills` 结果弹窗统一发现，再把 `/<skill-name> ` 落入 composer 执行。`improve-1` 在此基础上落地 input-only alias `/skill`、真实 hover/keyboard 选中、`scope · source` metadata、shared command eligibility projection 与 no-args palette 布局。
 
 ---
 

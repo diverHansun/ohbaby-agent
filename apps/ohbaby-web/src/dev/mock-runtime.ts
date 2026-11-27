@@ -76,6 +76,42 @@ const MOCK_COMMANDS: UiWebCommandCatalog = {
       source: "builtin",
       surfaces: ["tui"],
     },
+    {
+      acceptsArguments: true,
+      action: "executeCommand",
+      argumentMode: "raw",
+      category: "skills",
+      description: "Review the current diff against the repo's standards",
+      executionKind: "skill",
+      id: "skill.code-review",
+      path: ["code-review"],
+      source: "skill",
+      surfaces: ["tui"],
+    },
+    {
+      acceptsArguments: true,
+      action: "executeCommand",
+      argumentMode: "raw",
+      category: "skills",
+      description: "Draft release notes from merged pull requests since the last tag",
+      executionKind: "skill",
+      id: "skill.release-notes-from-merged-pull-requests-since-last-tag",
+      path: ["release-notes-from-merged-pull-requests-since-last-tag"],
+      source: "skill",
+      surfaces: ["tui"],
+    },
+    {
+      acceptsArguments: true,
+      action: "executeCommand",
+      argumentMode: "raw",
+      category: "skills",
+      description: "Write a short status report for this week",
+      executionKind: "skill",
+      id: "skill.status-report",
+      path: ["status-report"],
+      source: "skill",
+      surfaces: ["tui"],
+    },
   ],
 };
 
@@ -345,6 +381,21 @@ export function createMockRuntime(name: string): OhbabyWebRuntime {
             key === "abandonShellJob")
         )
           return shellJobs[key];
+        // `&skillError=rewind` makes every edit fail the way the backend
+        // reports a skill that is gone, so the editor's hint line shows it.
+        if (
+          key === "rewindSession" &&
+          new URLSearchParams(location.search).get("skillError") === "rewind"
+        )
+          return (): Promise<never> =>
+            Promise.reject(
+              Object.assign(
+                new Error(
+                  "Skill \"code-review\" is not available",
+                ),
+                { code: "REWIND_SKILL_UNAVAILABLE" },
+              ),
+            );
         if (key === "listCommands")
           return (): Promise<unknown> => Promise.resolve(MOCK_COMMANDS);
         if (key === "respondPermission" || key === "abortRun") return resolved;

@@ -1,6 +1,8 @@
 export interface StoredComposerDraft {
   readonly clientRequestId?: string;
   readonly pendingText?: string;
+  /** A skill token before the request; `text` is then the request alone. */
+  readonly skill?: string;
   readonly text: string;
 }
 
@@ -15,6 +17,7 @@ export interface QueuedEditState {
   readonly originalDraft: string;
   readonly originalPendingRequestId?: string;
   readonly originalPendingText?: string;
+  readonly originalSkill?: string;
   readonly promptId: string;
 }
 

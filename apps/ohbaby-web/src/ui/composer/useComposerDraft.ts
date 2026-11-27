@@ -16,12 +16,15 @@ import {
   type StoredQueuedEdit,
   writeSessionValue,
 } from "./draft-storage.js";
+import { composeSkillText } from "./skill-compose.js";
 
 export interface ComposerPrefill {
   readonly scopeKey: string;
   readonly editRevision: number;
   readonly nonce: number;
   readonly text: string;
+  /** Fills a skill token before `text`; absent, the token is cleared. */
+  readonly skill?: string;
 }
 
 /** Draft state shared by the composer's send path and the queued-edit lease hook. */
@@ -29,6 +32,11 @@ export interface ComposerDraftState {
   readonly draft: string;
   readonly setDraft: Dispatch<SetStateAction<string>>;
   readonly draftRef: RefObject<string>;
+  /** The skill token before the draft; `draft` is the request after it. */
+  readonly skillName: string | null;
+  /** Sets the token without counting as an edit (sends and restores). */
+  readonly setSkillName: (skill: string | null) => void;
+  readonly skillNameRef: RefObject<string | null>;
   readonly pendingRequestId: string | null;
   readonly setPendingRequestId: Dispatch<SetStateAction<string | null>>;
   readonly pendingText: string | null;
@@ -59,8 +67,10 @@ export interface ComposerDraftState {
     text: string,
     requestId?: string,
     requestText?: string,
+    skill?: string | null,
   ) => void;
-  readonly updateDraft: (nextDraft: string) => void;
+  /** A user edit; `nextSkill` defaults to the current token. */
+  readonly updateDraft: (nextDraft: string, nextSkill?: string | null) => void;
 }
 
 /**
@@ -76,6 +86,12 @@ export function useComposerDraft(input: {
 }): ComposerDraftState {
   const { client, draftScopeKey } = input;
   const [draft, setDraft] = useState("");
+  const [skillName, setSkillNameState] = useState<string | null>(null);
+  const skillNameRef = useRef<string | null>(null);
+  const setSkillName = useCallback((skill: string | null): void => {
+    skillNameRef.current = skill;
+    setSkillNameState(skill);
+  }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
   const [pendingText, setPendingText] = useState<string | null>(null);
@@ -123,6 +139,7 @@ export function useComposerDraft(input: {
     ) as StoredComposerDraft | null;
     draftRef.current = stored?.text ?? "";
     setDraft(draftRef.current);
+    setSkillName(stored?.skill ?? null);
     setPendingRequestId(stored?.clientRequestId ?? null);
     setPendingText(stored?.pendingText ?? null);
     setQueueExpanded(false);
@@ -142,6 +159,7 @@ export function useComposerDraft(input: {
     }
     draftRef.current = storedLease.editText;
     setDraft(storedLease.editText);
+    setSkillName(null);
     setQueuedEdit({ ...storedLease, leaseLost: true });
     if (storedLease.retainedSendText !== undefined) {
       setQueueError(
@@ -191,13 +209,19 @@ export function useComposerDraft(input: {
           "Edit lease expired. Your edited text is preserved. Esc restores your draft.",
         );
       });
-  }, [client, draftScopeKey, advanceEditRevision]);
+  }, [client, draftScopeKey, advanceEditRevision, setSkillName]);
 
   const persistDraft = useCallback(
-    (text: string, requestId?: string, requestText?: string): void => {
+    (
+      text: string,
+      requestId?: string,
+      requestText?: string,
+      skill?: string | null,
+    ): void => {
       writeSessionValue(composerDraftKey(draftScopeKey), {
         ...(requestId === undefined ? {} : { clientRequestId: requestId }),
         ...(requestText === undefined ? {} : { pendingText: requestText }),
+        ...(skill === undefined || skill === null ? {} : { skill }),
         text,
       } satisfies StoredComposerDraft);
     },
@@ -205,13 +229,16 @@ export function useComposerDraft(input: {
   );
 
   const updateDraft = useCallback(
-    (nextDraft: string): void => {
+    (nextDraft: string, nextSkill = skillNameRef.current): void => {
       if (queuedEdit?.retainedSendText !== undefined) return;
       advanceEditRevision();
       draftRef.current = nextDraft;
       setDraft(nextDraft);
+      setSkillName(nextSkill);
+      // Same text under another skill is another request: a new request id.
       const keepPending =
-        pendingRequestId !== null && pendingText === nextDraft.trim();
+        pendingRequestId !== null &&
+        pendingText === composeSkillText(nextSkill, nextDraft.trim());
       if (!keepPending) {
         setPendingRequestId(null);
         setPendingText(null);
@@ -221,6 +248,7 @@ export function useComposerDraft(input: {
           nextDraft,
           keepPending ? pendingRequestId : undefined,
           keepPending ? pendingText : undefined,
+          nextSkill,
         );
       if (queuedEdit) {
         setLeaseActivityVersion((version) => version + 1);
@@ -238,6 +266,7 @@ export function useComposerDraft(input: {
       persistDraft,
       draftScopeKey,
       queuedEdit,
+      setSkillName,
     ],
   );
 
@@ -254,7 +283,7 @@ export function useComposerDraft(input: {
       prefill.editRevision !== editRevision.current
     )
       return;
-    updateDraft(prefill.text);
+    updateDraft(prefill.text, prefill.skill ?? null);
     onPrefilledRef.current();
   }, [draftScopeKey, input.prefill, updateDraft]);
 
@@ -262,6 +291,9 @@ export function useComposerDraft(input: {
     draft,
     setDraft,
     draftRef,
+    skillName,
+    setSkillName,
+    skillNameRef,
     pendingRequestId,
     setPendingRequestId,
     pendingText,

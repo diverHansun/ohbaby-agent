@@ -8,6 +8,7 @@ import type {
 import { SlashPalette } from "../commands/SlashPalette.js";
 import type { SlashPaletteItem } from "../commands/slashCommands.js";
 import { readableError } from "../shared/error-text.js";
+import { SkillTokenField } from "../shared/SkillTokenField.js";
 import type { QueuedEditState } from "./draft-storage.js";
 
 /**
@@ -19,7 +20,10 @@ export function ComposerInput(props: {
   readonly textareaRef: RefObject<HTMLTextAreaElement | null>;
   readonly planMode: boolean;
   readonly compact: boolean;
+  /** The request after the skill token, when there is one. */
   readonly draft: string;
+  /** The skill token; the side chat passes none. */
+  readonly skillName?: string | null;
   readonly ariaLabel: string;
   readonly placeholder: string;
   readonly disabled: boolean;
@@ -54,7 +58,8 @@ export function ComposerInput(props: {
         />
       ) : null}
       <div className="ohb-composer-text">
-        <textarea
+        <SkillTokenField skillName={props.skillName ?? null}>
+          <textarea
           aria-label={props.ariaLabel}
           disabled={props.disabled}
           readOnly={props.readOnly}
@@ -62,11 +67,12 @@ export function ComposerInput(props: {
             props.onChange(event.target.value);
           }}
           onKeyDown={props.onKeyDown}
-          placeholder={props.placeholder}
+          placeholder={props.skillName ? "" : props.placeholder}
           ref={props.textareaRef}
           rows={1}
           value={props.draft}
         />
+        </SkillTokenField>
       </div>
       {slash.error || props.queueError || queuedEdit ? (
         <div className="ohb-composer-feedback">

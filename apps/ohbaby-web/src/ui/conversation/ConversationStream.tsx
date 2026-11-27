@@ -15,6 +15,7 @@ import type {
   UiPromptSubmission,
   UiRun,
   UiUnconsumedSteer,
+  UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import { listRetriedAttemptIds, turnTriggerLabel } from "ohbaby-sdk";
 import type { ReactNode } from "react";
@@ -31,7 +32,8 @@ import {
   Pencil,
   Split,
 } from "lucide-react";
-import { UserMessageEditor } from "./UserMessageEditor.js";
+import { type EditedPrompt, UserMessageEditor } from "./UserMessageEditor.js";
+import { skillMarkerName, splitSkillText } from "./skill-text.js";
 import { Spinner } from "../shared/Spinner.js";
 import { IconButton } from "../shared/IconButton.js";
 import { CopyButton } from "../shared/CopyButton.js";
@@ -209,7 +211,13 @@ export function ConversationStream(props: {
     /** What a Send does to the session's current state, after the fixed hints. */
     readonly stateHints: readonly string[];
     /** Resolves to an error text to show in the editor, or null when done. */
-    readonly send: (promptId: string, text: string) => Promise<string | null>;
+    readonly send: (
+      promptId: string,
+      input: EditedPrompt,
+    ) => Promise<string | null>;
+    /** The command catalog, for the editor's skill palette. */
+    readonly listCommands?: () => Promise<UiWebCommandCatalog>;
+    readonly commandCatalogVersion?: string | null;
   };
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
@@ -423,6 +431,18 @@ export function ConversationStream(props: {
             prompt.userMessageId === message.id && prompt.status !== "steered",
         )
       : undefined;
+  // The editor opens on the token and the request, split as the bubble is.
+  const editorSeed = (
+    message: UiMessage,
+  ): { initialSkill: string | null; initialText: string } => {
+    const split = splitSkillText(
+      editablePrompt(message)?.text ?? messageBodyText(message),
+      skillMarkerName(
+        message.parts.find((part) => part.type === "text")?.metadata,
+      ),
+    );
+    return { initialSkill: split.skill, initialText: split.text };
+  };
   const editHints = (message: UiMessage): readonly string[] => {
     // A user message may carry no run id; its prompt names the turn.
     const ownRun = message.runId ?? editablePrompt(message)?.runId;
@@ -1001,18 +1021,17 @@ export function ConversationStream(props: {
                 {editingId === item.message.id &&
                 editablePrompt(item.message) ? (
                   <UserMessageEditor
-                    initialText={
-                      editablePrompt(item.message)?.text ??
-                      messageBodyText(item.message)
-                    }
+                    {...editorSeed(item.message)}
+                    listCommands={edit?.listCommands}
+                    commandCatalogVersion={edit?.commandCatalogVersion}
                     hints={editHints(item.message)}
                     onCancel={() => {
                       setEditingId(null);
                     }}
-                    onSend={async (text) => {
+                    onSend={async (input) => {
                       const promptId = editablePrompt(item.message)?.promptId;
                       if (!edit || promptId === undefined) return null;
-                      const failure = await edit.send(promptId, text);
+                      const failure = await edit.send(promptId, input);
                       if (failure === null) setEditingId(null);
                       return failure;
                     }}
@@ -1039,6 +1058,11 @@ export function ConversationStream(props: {
                       .filter((process) => !process.foldable)
                       .map(renderDuration)}
                     actions={messageActions(item.message)}
+                    expandSignal={
+                      props.anchorMessageId === item.message.id
+                        ? props.anchorToken
+                        : undefined
+                    }
                   />
                 )}
                 {(terminalAfter.get(item.message.id) ?? []).map(renderDuration)}

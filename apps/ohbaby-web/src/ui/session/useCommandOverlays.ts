@@ -37,7 +37,8 @@ export function useCommandOverlays(input: {
   readonly structuredOverlay: StructuredOverlayState | null;
   readonly closeStructuredOverlay: () => void;
   readonly composerPrefill: ComposerPrefill | null;
-  readonly prefillComposer: (text: string) => void;
+  /** Replaces the composer draft; `skill` fills the skill token too. */
+  readonly prefillComposer: (text: string, skill?: string) => void;
   readonly commandInputError: CommandInputError | null;
   readonly setCommandInputError: (error: CommandInputError | null) => void;
   readonly trackComposerRevision: (revision: number) => void;
@@ -165,13 +166,14 @@ export function useCommandOverlays(input: {
   );
 
   const prefillComposer = useCallback(
-    (text: string): void => {
+    (text: string, skill?: string): void => {
       composerPrefillNonce.current += 1;
       setComposerPrefill({
         nonce: composerPrefillNonce.current,
         scopeKey: draftScopeKey,
         editRevision: composerEditRevision.current,
         text,
+        ...(skill === undefined ? {} : { skill }),
       });
     },
     [draftScopeKey],

@@ -20,6 +20,8 @@ describe("editor display viewport", () => {
     expect(rows[0]?.hiddenBefore).toBe(true);
     expect(rows.at(-1)).toEqual({
       text: "line 29 ",
+      line: 29,
+      offset: 0,
       cursorStart: 7,
       cursorEnd: 8,
     });
@@ -50,7 +52,10 @@ describe("editor display viewport", () => {
   });
   it("moves the end cursor to a new physical row at a width boundary", () => {
     expect(editorViewport(createEditorState({ text: "中文❤️" }), 6, 2)).toEqual(
-      [{ text: "中文❤️" }, { text: " ", cursorStart: 0, cursorEnd: 1 }],
+      [
+        { text: "中文❤️", line: 0, offset: 0 },
+        { text: " ", line: 0, offset: 4, cursorStart: 0, cursorEnd: 1 },
+      ],
     );
   });
   it("highlights a whole grapheme when an existing cursor offset falls inside one", () => {
@@ -59,8 +64,17 @@ describe("editor display viewport", () => {
       cursor: { row: 0, col: 1 },
     };
     expect(editorViewport(state, 6, 2)).toEqual([
-      { text: "👩‍💻x", cursorStart: 0, cursorEnd: 5 },
+      { text: "👩‍💻x", line: 0, offset: 0, cursorStart: 0, cursorEnd: 5 },
     ]);
     expect(state.cursor.col).toBe(1);
+  });
+  it("tells each wrapped row which logical line and offset it starts at", () => {
+    const state = createEditorState({ text: "/code-review abc\nxy" });
+    const rows = editorViewport(state, 8, 5);
+    expect(rows.map(({ line, offset, text }) => ({ line, offset, text }))).toEqual([
+      { line: 0, offset: 0, text: "/code-re" },
+      { line: 0, offset: 8, text: "view abc" },
+      { line: 1, offset: 0, text: "xy " },
+    ]);
   });
 });
