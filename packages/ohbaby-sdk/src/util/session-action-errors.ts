@@ -38,5 +38,6 @@ export function sessionActionErrorText(
   const known = typeof code === "string" ? TEXTS[code]?.[key] : undefined;
   if (known) return known;
   const detail = error instanceof Error ? error.message : String(error);
+  if (key === "edit" && code === "REWIND_SKILL_UNAVAILABLE") return detail;
   return `Something went wrong: ${detail}`;
 }

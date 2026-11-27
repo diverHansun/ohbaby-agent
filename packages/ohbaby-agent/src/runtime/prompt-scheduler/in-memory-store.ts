@@ -1,3 +1,4 @@
+import { editedNamingSource } from "./types.js";
 import { sameReasoning } from "./types.js";
 /* eslint-disable @typescript-eslint/require-await -- The in-memory store intentionally implements the same async contract as SQLite. */
 import { randomUUID } from "node:crypto";
@@ -253,13 +254,14 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     editLeaseId: string,
     text: string,
     ownerClientId?: string,
+    namingSource?: PromptSubmissionRecord["namingSource"] | null,
   ): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
     this.assertLease(current, editLeaseId, ownerClientId);
     const updated: PromptSubmissionRecord = {
       ...current,
       text,
-      namingSource: text === current.text ? current.namingSource : undefined,
+      namingSource: editedNamingSource(current, text, namingSource),
       editLeaseId: undefined,
       editLeaseOwnerId: undefined,
       editLeaseExpiresAt: undefined,
@@ -610,8 +612,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     const record: PromptSubmissionRecord = {
       ...current,
       text: input.text,
-      namingSource:
-        input.text === current.text ? current.namingSource : undefined,
+      namingSource: editedNamingSource(current, input.text, input.namingSource),
       status: "queued",
       acceptedAt,
       admissionOrder: order,

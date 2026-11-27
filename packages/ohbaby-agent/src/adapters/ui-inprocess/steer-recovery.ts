@@ -1,3 +1,4 @@
+import { promptInputText } from "../../skill/usage.js";
 import type { UiUnconsumedSteer } from "ohbaby-sdk";
 import type { MessageManager } from "../../core/message/index.js";
 import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
@@ -101,10 +102,8 @@ export async function projectUnconsumedSteers(options: {
   const candidates = await inputs.listUnconsumedSteers(sessionId);
   if (candidates.length) options.assertRecoveryReady?.();
   for (const input of candidates) {
-    if (
-      input.contextScopeId !== undefined ||
-      (await prompts.get(input.sourceId))?.rewoundAt !== undefined
-    )
+    const original = await prompts.get(input.sourceId);
+    if (input.contextScopeId !== undefined || original?.rewoundAt !== undefined)
       continue;
     const run = await runs.get(input.runId);
     if (run?.sessionId !== sessionId)
@@ -127,14 +126,17 @@ export async function projectUnconsumedSteers(options: {
       message.info.contextScopeId !== undefined
     )
       throw new Error("Steered input original message missing or out of scope");
+    if (
+      !original ||
+      original.sessionId !== sessionId ||
+      original.scopeKey !== scopeKey
+    )
+      throw new Error("Steered input original prompt missing or out of scope");
     result.push({
       inputId: input.inputId,
       promptId: input.sourceId,
       messageId: input.messageId,
-      text: message.parts
-        .filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join(""),
+      text: promptInputText(original),
       state:
         input.firstAttemptRequestId === undefined
           ? "unconsumed"

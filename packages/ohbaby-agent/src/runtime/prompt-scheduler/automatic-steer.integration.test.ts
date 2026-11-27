@@ -154,6 +154,57 @@ for (const backend of ["memory", "sqlite"] as const)
       expect(await f.scheduler.accept(submit)).toEqual(accepted);
     });
 
+    it("re-expands a manual skill steer after a concurrent edit and replays its receipt without reading again", async () => {
+      const entered = deferred(),
+        release = deferred();
+      const expand = vi.fn(async ({ text }: { text: string }) => {
+        entered.resolve();
+        await release.promise;
+        return [
+          { type: "text" as const, text: "body", synthetic: true },
+          { type: "text" as const, text },
+        ];
+      });
+      const f = await fixture({
+        resolveSteerTarget: undefined,
+        expandUserParts: expand,
+      });
+      const { record } = await f.scheduler.accept({
+        ...submit,
+        text: "/review first",
+        namingSource: { skillName: "review", request: "first" },
+      });
+      const input = {
+        promptId: record.promptId,
+        sessionId: record.sessionId,
+        scopeKey: record.scopeKey,
+        clientRequestId: "steer",
+        expectedRunId: "goal-run",
+      };
+      const pending = f.scheduler.steerQueued(input);
+      await entered.promise;
+      const lease = await f.queue.acquireEditLease(
+        record.promptId,
+        "editor",
+        1000,
+      );
+      await f.queue.commitEdit(
+        record.promptId,
+        lease.editLeaseId,
+        "/review second",
+        "editor",
+        { skillName: "review", request: "second" },
+      );
+      release.resolve();
+      const result = await pending;
+      expect(result).toMatchObject({
+        status: "steered",
+        message: { parts: [{ text: "body" }, { text: "/review second" }] },
+      });
+      expect(await f.scheduler.steerQueued(input)).toEqual(result);
+      expect(expand).toHaveBeenCalledTimes(2);
+    });
+
     it("keeps two successful same-millisecond steers in acceptance order despite reverse lexical ids", async () => {
       let id = 0;
       const f = await fixture({

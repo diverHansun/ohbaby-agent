@@ -1,6 +1,7 @@
 import {
   FORK_TARGET_INVALID_ERROR_CODE,
   REWIND_TARGET_INVALID_ERROR_CODE,
+  REWIND_SKILL_UNAVAILABLE_ERROR_CODE,
   REWIND_BEFORE_COMPACTION_ERROR_CODE,
 } from "ohbaby-sdk";
 import type {
@@ -117,6 +118,7 @@ export function globalSessionErrorStatus(
       ? error.code
       : undefined;
   switch (code) {
+    case REWIND_SKILL_UNAVAILABLE_ERROR_CODE:
     case REWIND_TARGET_INVALID_ERROR_CODE:
     case REWIND_BEFORE_COMPACTION_ERROR_CODE:
     case FORK_TARGET_INVALID_ERROR_CODE:

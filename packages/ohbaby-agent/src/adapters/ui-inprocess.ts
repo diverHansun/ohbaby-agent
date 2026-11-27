@@ -25,7 +25,9 @@ import {
 } from "../services/settings/reader.js";
 import {
   promptInputText,
-  slashSkillName,
+  slashSkillUsage,
+  slashSubmission,
+  legacySlashBody,
   expandedSkillNamingSource,
   publicNamingSource,
 } from "../skill/usage.js";
@@ -131,6 +133,9 @@ import path from "node:path";
 import {
   parseForkSessionInput,
   parseRewindSessionInput,
+  parseSlashCommandInput,
+  resolveSlashCommand,
+  REWIND_SKILL_UNAVAILABLE_ERROR_CODE,
   submitPromptAndWait as composeSubmitPromptAndWait,
 } from "ohbaby-sdk";
 import type {
@@ -276,6 +281,7 @@ import {
   WorkspacePromptScheduler,
   PromptSubmissionRejectedError,
   type PromptExecutionResult,
+  type PromptSubmissionRecord,
   type PromptSubmissionStore,
 } from "../runtime/prompt-scheduler/index.js";
 import {
@@ -1465,6 +1471,7 @@ export function createInProcessUiBackendClient(
       executionGate: sessionExecution,
       isClaimPaused: (id) => rewindingSessions.has(id),
       currentRunInputs: currentRunInputStore,
+      expandUserParts: (record) => expandSlashSkill(record, getSkillRegistry),
       resolveSteerTarget: getActiveGoalRunForSteer,
       now: () => now().getTime(),
       isExecutionPersistenceError: (error) =>
@@ -4287,6 +4294,42 @@ export function createInProcessUiBackendClient(
     };
   }
 
+  async function editedSubmission(
+    prompt: PromptSubmissionRecord,
+    text: string,
+    rewind = false,
+  ) {
+    const plain = { text, namingSource: undefined };
+    const parsed = parseSlashCommandInput(text);
+    if (!parsed) {
+      // Older clients can resubmit the original, already-expanded queue record.
+      return !rewind && text === prompt.text && legacySlashBody(prompt)
+        ? { text, namingSource: prompt.namingSource }
+        : plain;
+    }
+    if ((await options.sessionManager?.get(prompt.sessionId))?.sideChat)
+      return plain;
+    const catalog = await commandService.listCommands({ surface: "tui" });
+    const resolved = resolveSlashCommand(catalog, parsed);
+    if (resolved.ok && resolved.command.source === "skill")
+      return slashSubmission(
+        resolved.command.path[0],
+        resolved.rawArgs,
+        resolved.body,
+      );
+    const original = slashSkillUsage(prompt.namingSource);
+    if (
+      rewind &&
+      original &&
+      parsed.segments[0]?.toLowerCase() === original.name
+    )
+      throw permissionError(
+        REWIND_SKILL_UNAVAILABLE_ERROR_CODE,
+        `Skill "${original.name}" is not available`,
+      );
+    return plain;
+  }
+
   async function rewindSessionInternal(
     input: Parameters<UiBackendClient["rewindSession"]>[0],
     clientId: string,
@@ -4340,7 +4383,11 @@ export function createInProcessUiBackendClient(
         ...before.runIds,
       ])) ?? [...before.runIds];
       queue();
-      if (text !== undefined) {
+      const replacement =
+        text === undefined
+          ? undefined
+          : await editedSubmission(before.target, text, true);
+      if (replacement) {
         const model =
           before.target.modelEntryId ?? (await sessionModelEntryId(sessionId));
         if (model !== undefined) await assertModelEntrySelectable(model);
@@ -4437,12 +4484,13 @@ export function createInProcessUiBackendClient(
         admission.release();
       }
       const result = { sessionId, restoredText: promptInputText(cut.target) };
-      if (text === undefined) return result;
+      if (!replacement) return result;
       try {
         const prompt = await submitPromptAcceptedWork(
-          text,
+          replacement.text,
           {
             sessionId,
+            namingSource: replacement.namingSource,
             modelEntryId: cut.target.modelEntryId,
             reasoning: cut.target.reasoning,
           },
@@ -6080,7 +6128,9 @@ export function createInProcessUiBackendClient(
         });
       await validatePermissionRoot(prompt.sessionId);
       const result = await promptScheduler.steerQueued({
-        ...input,
+        promptId: input.promptId,
+        expectedRunId: input.expectedRunId,
+        clientRequestId: input.clientRequestId,
         sessionId: prompt.sessionId,
         scopeKey: promptScopeKey,
       });
@@ -6160,23 +6210,12 @@ export function createInProcessUiBackendClient(
             "STEER_INPUT_NOT_FOUND",
             "Original input message unavailable",
           );
-        const text = message.parts
-          .filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join("");
         return submitPromptAcceptedWork(
-          text,
+          original.text,
           {
             sessionId: source.sessionId,
             clientRequestId,
-            ...(text === original.text &&
-            message.parts.some(
-              (part) =>
-                part.type === "text" &&
-                slashSkillName(part) === original.namingSource?.skillName,
-            )
-              ? { namingSource: original.namingSource }
-              : {}),
+            namingSource: original.namingSource,
           },
           { resendOfPromptId: source.sourceId },
         );
@@ -6200,9 +6239,12 @@ export function createInProcessUiBackendClient(
           code: "PROMPT_NOT_FOUND",
         });
       await validatePermissionRoot(prompt.sessionId);
+      const edit = await editedSubmission(prompt, input.text);
       return promptAdmissions.exclusive(prompt.sessionId, () =>
         promptScheduler.resubmitRetained({
           ...input,
+          text: edit.text,
+          namingSource: edit.namingSource ?? null,
           ownerClientId: trustedOwnerClientId,
         }),
       );
@@ -6218,12 +6260,17 @@ export function createInProcessUiBackendClient(
       input: UiEditQueuedPromptInput,
       trustedOwnerClientId: string,
     ): Promise<UiPromptSubmission> {
+      const prompt = await promptScheduler.get(input.promptId);
+      if (!prompt)
+        throw permissionError("PROMPT_NOT_FOUND", "Prompt not found");
+      const edit = await editedSubmission(prompt, input.text);
       return promptRecordToUi(
         await promptScheduler.commitEdit(
           input.promptId,
           input.editLeaseId,
-          input.text,
+          edit.text,
           trustedOwnerClientId,
+          edit.namingSource ?? null,
         ),
       );
     },

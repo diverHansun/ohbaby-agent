@@ -1,5 +1,6 @@
 import { SUBAGENT_RESULT_SOURCE_PREFIX } from "../../agents/subagents/execution-store.js";
-import { slashSkillUsage } from "../../skill/usage.js";
+import type { UserTextPartInput } from "../../skill/slash-expansion.js";
+import { legacySlashBody, slashSkillUsage } from "../../skill/usage.js";
 import { RuntimeInputSnapshotChangedError } from "../../core/lifecycle/runtime-input-error.js";
 /* eslint-disable @typescript-eslint/require-await -- Synchronous domain transitions implement an async persistence contract. */
 import { isDeepStrictEqual } from "node:util";
@@ -25,7 +26,13 @@ import {
   type PromptSubmissionRow,
 } from "./database-store.js";
 
+export class SteerPromptChangedError extends Error {}
 export interface SteerQueuedPromptInput {
+  readonly expectedContent?: Pick<
+    PromptSubmissionRecord,
+    "text" | "namingSource"
+  >;
+  readonly parts?: readonly UserTextPartInput[];
   readonly promptId: string;
   readonly expectedRunId: string;
   readonly clientRequestId: string;
@@ -440,9 +447,26 @@ abstract class CurrentInputs implements CurrentRunInputStore {
         return { status: "not-steered", reason: "target-unavailable", prompt };
       if (target.steerClosedAt !== undefined)
         return { status: "not-steered", reason: "target-sealed", prompt };
+      if (
+        input.expectedContent &&
+        (input.expectedContent.text !== prompt.text ||
+          !isDeepStrictEqual(
+            input.expectedContent.namingSource,
+            prompt.namingSource,
+          ))
+      )
+        throw new SteerPromptChangedError();
       const inputId = `steer:${prompt.promptId}`;
       const acceptedAt = this.nextAcceptedAt(input.expectedRunId);
-      const skillUsage = slashSkillUsage(prompt.namingSource);
+      const parts = input.parts ?? [
+        {
+          type: "text" as const,
+          text: prompt.text,
+          ...(legacySlashBody(prompt) && {
+            metadata: { skillUsage: slashSkillUsage(prompt.namingSource) },
+          }),
+        },
+      ];
       const message: MessageWithParts = {
         info: {
           id: prompt.userMessageId,
@@ -452,18 +476,14 @@ abstract class CurrentInputs implements CurrentRunInputStore {
           agent: input.agent ?? "default",
           time: { created: acceptedAt, updated: acceptedAt },
         },
-        parts: [
-          {
-            id: `${prompt.userMessageId}:steer-text`,
-            messageId: prompt.userMessageId,
-            sessionId: prompt.sessionId,
-            contextScopeId: input.contextScopeId,
-            orderIndex: 0,
-            type: "text",
-            text: prompt.text,
-            ...(skillUsage === undefined ? {} : { metadata: { skillUsage } }),
-          },
-        ],
+        parts: parts.map((part, i) => ({
+          ...part,
+          id: `${prompt.userMessageId}:steer-text${i ? `-${String(i)}` : ""}`,
+          messageId: prompt.userMessageId,
+          sessionId: prompt.sessionId,
+          contextScopeId: input.contextScopeId,
+          orderIndex: i,
+        })),
       };
       const accepted = this.acceptSync(
         {

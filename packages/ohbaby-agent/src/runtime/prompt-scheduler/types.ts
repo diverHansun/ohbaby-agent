@@ -115,7 +115,19 @@ export interface PromptResubmissionReceipt {
   readonly acceptedAt: number;
 }
 
+/** Omitting provenance preserves older callers' same-text edits. Null explicitly clears it. */
+export function editedNamingSource(
+  current: PromptSubmissionRecord,
+  text: string,
+  source?: PromptSubmissionRecord["namingSource"] | null,
+): PromptSubmissionRecord["namingSource"] {
+  return source === undefined && text === current.text
+    ? current.namingSource
+    : (source ?? undefined);
+}
+
 export interface ResubmitRetainedPromptInput {
+  readonly namingSource?: PromptSubmissionRecord["namingSource"] | null;
   readonly scopeKey: string;
   readonly promptId: string;
   readonly operationId: string;
@@ -183,6 +195,7 @@ export interface PromptSubmissionStore {
     editLeaseId: string,
     text: string,
     ownerClientId?: string,
+    namingSource?: PromptSubmissionRecord["namingSource"] | null,
   ): Promise<PromptSubmissionRecord>;
   releaseEditLease(
     promptId: string,

@@ -1,3 +1,4 @@
+import { editedNamingSource } from "./types.js";
 import { assertActiveSessionForWork } from "../../services/session/work-admission.js";
 import { sameReasoning } from "./types.js";
 /* eslint-disable @typescript-eslint/require-await -- SQLite operations are synchronous behind the shared async store contract. */
@@ -427,16 +428,18 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     editLeaseId: string,
     text: string,
     ownerClientId?: string,
+    namingSource?: PromptSubmissionRecord["namingSource"] | null,
   ): Promise<PromptSubmissionRecord> {
     return this.updateWithLease(
       promptId,
       editLeaseId,
       ownerClientId,
       (db, current) => {
+        const source = editedNamingSource(current, text, namingSource);
         const result = db
           .prepare(
             `UPDATE ${this.tableName}
-           SET naming_source = CASE WHEN text = ? THEN naming_source ELSE NULL END,
+           SET naming_source = ?,
                text = ?, edit_lease_id = NULL,
                edit_lease_owner_id = NULL, edit_lease_expires_at = NULL,
                updated_at = ?
@@ -445,7 +448,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
              AND (? IS NULL OR edit_lease_owner_id = ?)`,
           )
           .run(
-            text,
+            source ? JSON.stringify(source) : null,
             text,
             this.nextTime(current),
             promptId,
@@ -880,16 +883,21 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         input.scopeKey,
         current.sessionId,
       );
+      const source = editedNamingSource(
+        current,
+        input.text,
+        input.namingSource,
+      );
       const result = db
         .prepare(
-          `UPDATE ${this.tableName} SET naming_source=CASE WHEN text=? THEN naming_source ELSE NULL END, text=?, status='queued', owner_id=?, owner_pid=?,
+          `UPDATE ${this.tableName} SET naming_source=?, text=?, status='queued', owner_id=?, owner_pid=?,
         accepted_at=?, admission_order=?, updated_at=?, run_id=NULL, started_at=NULL, ended_at=NULL,
         end_time_source=NULL, error_data=NULL, edit_lease_id=NULL, edit_lease_owner_id=NULL, edit_lease_expires_at=NULL
         WHERE prompt_id=? AND status='retained' AND edit_lease_id=? AND edit_lease_expires_at>?
           AND (? IS NULL OR edit_lease_owner_id=?)`,
         )
         .run(
-          input.text,
+          source ? JSON.stringify(source) : null,
           input.text,
           this.ownerId,
           this.ownerPid,

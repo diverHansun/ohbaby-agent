@@ -2,6 +2,8 @@ import {
   createDatabaseWriteBudget,
   withDatabaseWriteBudget,
 } from "../../services/database/write-budget.js";
+import { SteerPromptChangedError } from "./current-run-inputs.js";
+import type { UserTextPartInput } from "../../skill/slash-expansion.js";
 import type {
   CurrentRunInputStore,
   SteerQueuedPromptInput,
@@ -42,6 +44,9 @@ export interface WorkspacePromptSchedulerOptions {
     subscribe(sessionId: string, wake: () => void): () => void;
   };
   readonly currentRunInputs?: CurrentRunInputStore;
+  readonly expandUserParts?: (
+    record: Pick<PromptSubmissionRecord, "text" | "namingSource">,
+  ) => Promise<readonly UserTextPartInput[] | undefined>;
   /** Synchronous goal qualification inside the existing session owner boundary. */
   readonly resolveSteerTarget?: (
     sessionId: string,
@@ -310,6 +315,11 @@ export class WorkspacePromptScheduler {
         typeof input.reasoning === "function"
           ? await input.reasoning(sessionId)
           : input.reasoning;
+      // Only an active goal can accept a steer. Keep disk reads outside its commit.
+      const prepareSkill = input.namingSource && this.options.expandUserParts;
+      const candidate =
+        prepareSkill && this.options.resolveSteerTarget?.(sessionId);
+      const prepared = candidate ? await prepareSkill(input) : undefined;
       const persist = (): Promise<AcceptedWorkspacePrompt> =>
         this.commit(sessionId, async () => {
           this.assertOpen();
@@ -344,7 +354,11 @@ export class WorkspacePromptScheduler {
           if (!accepted.inserted)
             return this.existingAcceptance(accepted.record);
           this.notify(accepted.record, this.options.onSubmitted);
-          return this.steerAccepted(accepted.record);
+          return this.steerAccepted(
+            accepted.record,
+            prepared,
+            prepareSkill ? (candidate?.runId ?? null) : undefined,
+          );
         });
       // An implicit submission only learns its destination during session resolution.
       // Its workspace admission barrier is already released before it waits here.
@@ -377,6 +391,8 @@ export class WorkspacePromptScheduler {
   /** Already inside commit(sessionId): only invoke store methods, never public steerQueued. */
   private async steerAccepted(
     record: PromptSubmissionRecord,
+    parts?: readonly UserTextPartInput[],
+    preparedRunId?: string | null,
   ): Promise<AcceptedWorkspacePrompt> {
     if (!this.options.resolveSteerTarget)
       return {
@@ -402,7 +418,10 @@ export class WorkspacePromptScheduler {
           steer: { status: "not-steered", reason: "earlier-queued" },
         };
       const target = this.options.resolveSteerTarget(record.sessionId);
-      if (!target)
+      if (
+        !target ||
+        (preparedRunId !== undefined && target.runId !== preparedRunId)
+      )
         return {
           record,
           steer: { status: "not-steered", reason: "no-goal-run" },
@@ -410,6 +429,11 @@ export class WorkspacePromptScheduler {
       const inputs = this.options.currentRunInputs;
       if (!inputs) throw new Error("Current-run inputs are unavailable");
       const result = await inputs.steerQueued({
+        parts,
+        expectedContent: parts && {
+          text: record.text,
+          namingSource: record.namingSource,
+        },
         promptId: record.promptId,
         expectedRunId: target.runId,
         // Acceptance and its one automatic routing decision deliberately share identity.
@@ -522,16 +546,35 @@ export class WorkspacePromptScheduler {
     if (!source) throw new PromptSubmissionNotFoundError(input.promptId);
     await this.recoverSession(source.sessionId);
     this.assertOpen();
-    const result = await this.mutatePrompt(input.promptId, async () => {
-      const result = await inputs.steerQueued({
-        ...input,
-        scopeKey: this.options.scopeKey,
-      });
-      if (result.status === "steered") this.completeSteer(result);
-      return result;
-    });
-    this.requestDrain();
-    return result;
+    let snapshot = source;
+    for (let attempt = 0; ; attempt++) {
+      const check =
+        attempt < 3 &&
+        snapshot.status === "queued" &&
+        this.options.expandUserParts;
+      const parts = check ? await check(snapshot) : undefined;
+      try {
+        const result = await this.commit(source.sessionId, async () => {
+          const result = await inputs.steerQueued({
+            ...input,
+            scopeKey: this.options.scopeKey,
+            parts,
+            expectedContent: check
+              ? { text: snapshot.text, namingSource: snapshot.namingSource }
+              : undefined,
+          });
+          if (result.status === "steered") this.completeSteer(result);
+          return result;
+        });
+        this.requestDrain();
+        return result;
+      } catch (error) {
+        if (!(error instanceof SteerPromptChangedError)) throw error;
+        const current = await this.options.store.get(input.promptId);
+        if (!current) throw new PromptSubmissionNotFoundError(input.promptId);
+        snapshot = current;
+      }
+    }
   }
 
   async acquireEditLease(
@@ -579,6 +622,7 @@ export class WorkspacePromptScheduler {
     editLeaseId: string,
     text: string,
     ownerClientId?: string,
+    namingSource?: PromptSubmissionRecord["namingSource"] | null,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
     const prompt = await this.mutatePrompt(promptId, async () => {
@@ -587,6 +631,7 @@ export class WorkspacePromptScheduler {
         editLeaseId,
         text,
         ownerClientId,
+        namingSource,
       );
       this.notify(result, this.options.onUpdated);
       return result;
