@@ -106,7 +106,7 @@ pnpm vitest run packages/ohbaby-agent/src/shell packages/ohbaby-agent/src/permis
 在 Web 和 TUI 各跑一遍冒烟检查：
 
 - 狭义白名单里的常见查看命令（如 `ls -la`、`cat`、`head -n 20`、`wc -l`、`cd <工作区根> && git status --short`）不再弹命令审批。
-- 越出狭义白名单的命令（如 `git log`、`grep`、`ls -R`、`cd sub && git status`、写命令、带 `||` 或通配符的命令）照旧弹窗，且非危险命令展示通用提示 `This command needs your approval.`。
+- 越出狭义白名单的命令（如 `git log`、`grep`、`ls -R`、`cd sub && git status`、写命令、带 `||` 或通配符的命令）照旧弹窗。后端普通审批原因为 `This command needs your approval.`。TUI 显示该提示；Web 卡片沿用命令摘要、实际命令和审批按钮。
 
 ## 4.7 验收标准
 
