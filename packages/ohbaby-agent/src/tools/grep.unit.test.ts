@@ -196,7 +196,7 @@ describe("grep file tool", () => {
     });
     expect(result.output).toContain("Search incomplete");
     expect(result.output).toContain("not confirmed");
-    expect(result.output).toContain("Narrow path/include/pattern");
+    expect(result.output).toContain("output_mode=files");
     expect(result.output).not.toContain("a.txt:2:");
   });
 
@@ -476,6 +476,8 @@ describe("grep file tool", () => {
     expect(files.output?.split("\n").sort()).toEqual(
       ["a.txt", "b.txt"].map((name) => path.join(tempRoot, name)),
     );
+    expect(files.metadata?.count).toBe(2);
+    expect(files.metadata).not.toHaveProperty("matchCount");
     const counts = await tool.execute(
       { pattern: "hit", output_mode: "count" },
       ctx,
@@ -484,6 +486,7 @@ describe("grep file tool", () => {
       `${path.join(tempRoot, "a.txt")}: 130`,
       `${path.join(tempRoot, "b.txt")}: 2`,
     ]);
+    expect(counts.metadata).toMatchObject({ count: 2, matchCount: 262 });
     for (const output_mode of ["files", "count"]) {
       const limited = await tool.execute(
         { pattern: "hit", output_mode, limit: 1 },
@@ -494,6 +497,8 @@ describe("grep file tool", () => {
         scanComplete: false,
         stopReason: "match-limit",
       });
+      expect(limited.output).toContain("matching-file limit");
+      expect(limited.output).not.toContain("output_mode=files");
       const rows =
         limited.output
           ?.split("\n")

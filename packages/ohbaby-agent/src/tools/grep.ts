@@ -50,7 +50,9 @@ function preview(match: RipgrepMatch): { text: string; limited: boolean } {
   };
 }
 
-const STOP_NOTICE: Record<SearchStopReason, string> = {
+const STOP_NOTICE: Record<SearchStopReason | "file-limit", string> = {
+  "file-limit":
+    "The matching-file limit was reached; completeness and additional matching files are not confirmed.",
   "match-limit":
     "The matching-line limit was reached; completeness and additional matches are not confirmed.",
   "output-limit":
@@ -64,7 +66,7 @@ export function createGrepTool(): Tool {
     {
       name: "grep",
       description:
-        "Search file contents with a regular expression. Use this instead of shell grep or rg. Uses ripgrep's default regex syntax (no look-around or backreferences). Defaults to output_mode=content (paths, line numbers, limited previews, and optional before/after context up to 20 lines; matches use path:line:, context uses path-line-, separated by --); also supports output_mode=files (paths only), output_mode=count (matching lines per file), and ignore_case. Use read for full lines or wider context. Directory searches honor project .gitignore/.ignore/.rgignore (parent/global ignores disabled), include hidden files, and exclude .git traversal. Explicit include follows ripgrep glob precedence and can override ignore rules (except .git during traversal), but does not filter a single-file path. Binary files and non-UTF-8 encodings are not guaranteed (non-UTF-8 previews may be unavailable; matched paths must be valid UTF-8); use bash for raw bytes or other encodings.",
+        "Search file contents with a regular expression. Use this instead of shell grep or rg. Uses ripgrep's default regex syntax (no look-around or backreferences). Defaults to output_mode=content (paths, line numbers, limited previews, and optional before/after context up to 20 lines; matches use path:line:, context uses path-line-, separated by --); also supports output_mode=files (paths only), output_mode=count (matching lines per file), and ignore_case. Use read for full lines or wider context. Directory searches include hidden files, exclude .git traversal, and only read .gitignore/.ignore/.rgignore inside the searched directory and its subdirectories (workspace-root rules do not apply when path is a subdirectory; global ignores are not used). Explicit include follows ripgrep glob precedence and can override ignore rules (except .git during traversal), but does not filter a single-file path. Binary files and non-UTF-8 encodings are not guaranteed (non-UTF-8 previews may be unavailable; matched paths must be valid UTF-8); use bash for raw bytes or other encodings.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
@@ -93,7 +95,6 @@ export function createGrepTool(): Tool {
             description:
               "Output format (default: content). content returns matching lines with previews and optional before/after context; files returns matching file paths only; count returns matching line counts per file. before and after are only allowed with content.",
           },
-
           include: {
             description:
               'Ripgrep glob to filter searched files (e.g. "*.ts" by name or "src/**/*.ts" by path). Can override .gitignore; ignored when path is a single file.',
@@ -204,7 +205,7 @@ export function createGrepTool(): Tool {
                   )
                     return "output-limit";
                   count += 1;
-                  matchCount += occurrences;
+                  if (mode === "count") matchCount += occurrences;
                   return count >= limit ? "match-limit" : undefined;
                 },
           onMatch(match) {
@@ -246,10 +247,19 @@ export function createGrepTool(): Tool {
         });
         const scanComplete = !result.stopReason && result.binaryFileCount === 0;
         const notices: string[] = [];
-        if (result.stopReason)
+        if (result.stopReason) {
+          const reason =
+            result.stopReason === "match-limit" && mode !== "content"
+              ? "file-limit"
+              : result.stopReason;
+          const suggestion =
+            mode === "content"
+              ? " Use output_mode=files to list paths only."
+              : "";
           notices.push(
-            `Search incomplete: ${result.stopReason === "match-limit" && mode !== "content" ? "The matching-file limit was reached; completeness and additional matching files are not confirmed." : STOP_NOTICE[result.stopReason]} Narrow path/include/pattern, or use output_mode=files to list paths only.`,
+            `Search incomplete: ${STOP_NOTICE[reason]} Narrow path, include, or pattern.${suggestion}`,
           );
+        }
         if (result.binaryFileCount)
           notices.push(
             `Search incomplete: binary detection stopped or suppressed content in ${String(result.binaryFileCount)} file(s). Binary contents are outside the text-search guarantee.`,
@@ -270,7 +280,7 @@ export function createGrepTool(): Tool {
           output,
           metadata: {
             count,
-            matchCount,
+            ...(mode === "files" ? {} : { matchCount }),
             scanComplete,
             displayLimited: display.limited || Boolean(result.stopReason),
             truncated: !scanComplete || display.limited,

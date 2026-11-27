@@ -292,6 +292,46 @@ describe("glob file tool", () => {
     expect(named.output).toBe("src/build.log");
   });
 
+  it("reads ignore rules from the selected search root and below for both glob and grep", async () => {
+    await writeFile(tempRoot, ".gitignore", "coverage/\n");
+    await writeFile(tempRoot, "packages/.ignore", "generated/\n");
+    await writeFile(tempRoot, "packages/app/.rgignore", "local.txt\n");
+    for (const file of [
+      "visible.txt",
+      "coverage/result.txt",
+      "generated/result.txt",
+      "local.txt",
+    ])
+      await writeFile(tempRoot, "packages/app/" + file, "marker\n");
+    const ctx = createTestContext(tempRoot);
+    const { createGrepTool } = await import("./grep.js");
+    const glob = createGlobTool();
+    const grep = createGrepTool();
+    for (const [root, expected] of [
+      [".", ["packages/app/visible.txt"]],
+      ["packages", ["app/coverage/result.txt", "app/visible.txt"]],
+    ] as const) {
+      const files = await glob.execute({ path: root, pattern: "**" }, ctx);
+      const textFiles = files.output
+        ?.split("\n")
+        .filter((file) => file.endsWith(".txt"));
+      expect(textFiles?.sort()).toEqual(expected);
+      const hits = await grep.execute(
+        { path: root, pattern: "marker", output_mode: "files" },
+        ctx,
+      );
+      const names = hits.output
+        ?.split("\n")
+        .map((file) =>
+          path
+            .relative(path.resolve(tempRoot, root), file)
+            .split(path.sep)
+            .join("/"),
+        );
+      expect(names?.sort()).toEqual(expected);
+    }
+  });
+
   it("explains how to include an ignored directory when a search has no results", async () => {
     await writeFile(tempRoot, ".gitignore", "coverage/\n");
     await writeFile(tempRoot, "coverage/hidden.ts", "needle\n");
