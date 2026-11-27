@@ -24,11 +24,12 @@ import {
   type InstanceSettingsControl,
 } from "../services/settings/reader.js";
 import {
-  slashSkillUsage,
+  promptInputText,
   slashSkillName,
   expandedSkillNamingSource,
   publicNamingSource,
 } from "../skill/usage.js";
+import { expandSlashSkill } from "../skill/slash-expansion.js";
 import {
   collectCleanup,
   createShutdownOptions,
@@ -259,7 +260,6 @@ import {
 import {
   SkillLoader,
   SkillRegistry,
-  formatSkillToolOutput,
   type SkillLogger,
 } from "../skill/index.js";
 import type {
@@ -4436,7 +4436,7 @@ export function createInProcessUiBackendClient(
       } finally {
         admission.release();
       }
-      const result = { sessionId, restoredText: cut.target.text };
+      const result = { sessionId, restoredText: promptInputText(cut.target) };
       if (text === undefined) return result;
       try {
         const prompt = await submitPromptAcceptedWork(
@@ -4818,6 +4818,10 @@ export function createInProcessUiBackendClient(
       if (submitOptions?.reservedUserMessageId) {
         messageIds.reserve(submitOptions.reservedUserMessageId);
       }
+      const initialUserParts = await expandSlashSkill(
+        { text, namingSource: submitOptions?.namingSource },
+        getSkillRegistry,
+      );
       const userMessage: UiMessage = {
         ...createTextMessage({
           id: submitOptions?.runtimeInput
@@ -4826,6 +4830,18 @@ export function createInProcessUiBackendClient(
           role: "user",
           text: submitOptions?.displayText ?? text,
           createdAt,
+        }),
+        ...(initialUserParts && {
+          parts: initialUserParts
+            .filter((part) => !part.synthetic)
+            .map((part) => ({
+              type: "text" as const,
+              text:
+                typeof part.metadata?.displayText === "string"
+                  ? part.metadata.displayText
+                  : part.text,
+              metadata: part.metadata,
+            })),
         }),
         ...(submitOptions?.runtimeInput
           ? { runtimeInputKind: submitOptions.runtimeInput.kind }
@@ -4926,7 +4942,7 @@ export function createInProcessUiBackendClient(
           reasoning,
           runModel,
           initialUserMessageId: userMessage.id,
-          skillUsage: slashSkillUsage(submitOptions?.namingSource),
+          initialUserParts,
           ...(submitOptions?.displayText === undefined
             ? {}
             : { displayUserText: submitOptions.displayText }),
@@ -5459,9 +5475,10 @@ export function createInProcessUiBackendClient(
         await registry.refresh();
         return registry.listUserInvocable();
       },
-      async loadPrompt(name: string): Promise<string> {
+      async validateUserInvocable(name: string): Promise<void> {
         const registry = await getSkillRegistry();
-        return formatSkillToolOutput(await registry.load(name));
+        if (!(await registry.get(name))?.userInvocable)
+          throw new Error(`Skill "${name}" is not available`);
       },
     },
     mcps: {

@@ -1,3 +1,4 @@
+import { slashSubmission } from "../skill/usage.js";
 import type {
   UiCommandCompletion,
   UiPromptReceipt,
@@ -182,14 +183,6 @@ async function listSlashInvocableSkills(
     .slashInvocableSkills;
 }
 
-function formatSkillPrompt(skillPrompt: string, rawArgs: string): string {
-  const trimmedArgs = rawArgs.trim();
-  if (trimmedArgs === "") {
-    return skillPrompt;
-  }
-  return `${skillPrompt.trim()}\n\nUser request:\n${trimmedArgs}`;
-}
-
 async function executeSkillCommand(
   options: CommandServiceOptions,
   invocation: UiCommandInvocation,
@@ -204,16 +197,15 @@ async function executeSkillCommand(
     return;
   }
   const skillName = skillNameFromCommandId(invocation.commandId);
-  const namingSource = { skillName, request: invocation.rawArgs };
-  const prompt = formatSkillPrompt(
-    await options.skills.loadPrompt(skillName),
+  await options.skills.validateUserInvocable(skillName);
+  const { text, namingSource } = slashSubmission(
+    skillName,
     invocation.rawArgs,
+    invocation.body,
   );
-  if (!options.submitPromptAccepted) {
-    context.emitOutput({ kind: "markdown", markdown: prompt });
-    return;
-  }
-  return options.submitPromptAccepted(prompt, {
+  if (!options.submitPromptAccepted)
+    throw new Error("Skill commands require prompt submission");
+  return options.submitPromptAccepted(text, {
     sessionId: invocation.sessionId,
     clientRequestId: invocation.clientRequestId,
     namingSource,

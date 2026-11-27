@@ -1,3 +1,4 @@
+import { isSkillBodyPart } from "../core/message/origin.js";
 import type { UiPromptNamingSource } from "ohbaby-sdk";
 import type { TextPart } from "../core/message/index.js";
 
@@ -18,6 +19,8 @@ export function slashSkillUsage(
 }
 
 export function slashSkillName(part: TextPart): string | undefined {
+  if (!part.text.trim() || (part.synthetic && !isSkillBodyPart(part)))
+    return undefined;
   const usage = part.metadata?.skillUsage;
   if (typeof usage !== "object" || usage === null) return undefined;
   const value = usage as Record<string, unknown>;
@@ -28,7 +31,7 @@ export function slashSkillName(part: TextPart): string | undefined {
     : undefined;
 }
 
-/** Only the backend command callback has just successfully expanded this body. */
+/** Persisted marker for a backend-validated slash invocation (older records already contain the body). */
 export function expandedSkillNamingSource(
   source: UiPromptNamingSource | undefined,
 ): (UiPromptNamingSource & { readonly skillBodyExpanded: true }) | undefined {
@@ -44,4 +47,35 @@ export function publicNamingSource(
   return source === undefined
     ? undefined
     : { skillName: source.skillName, request: source.request };
+}
+
+export interface SlashSubmission {
+  text: string;
+  namingSource?: UiPromptNamingSource;
+}
+
+export function slashSubmission(
+  name: string,
+  rawArgs: string,
+  body?: string,
+): SlashSubmission {
+  const suffix = (rawArgs ? " " + rawArgs : "") + (body ? "\n" + body : "");
+  return {
+    text: "/" + name + suffix,
+    namingSource: expandedSkillNamingSource({
+      skillName: name,
+      request: suffix.slice(1),
+    }),
+  };
+}
+
+export function legacySlashBody(prompt: SlashSubmission): boolean {
+  return !!slashSkillUsage(prompt.namingSource) && !prompt.text.startsWith("/");
+}
+
+export function promptInputText(prompt: SlashSubmission): string {
+  const source = prompt.namingSource;
+  return source && legacySlashBody(prompt)
+    ? "/" + source.skillName + (source.request ? " " + source.request : "")
+    : prompt.text;
 }

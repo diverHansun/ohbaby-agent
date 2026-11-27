@@ -1,6 +1,16 @@
 import type { MessageWithParts, Part, TextPart } from "./types.js";
 
 export const MODEL_CONTEXT_RUNTIME_KIND = "model-context:runtime:v1";
+export const SKILL_BODY_KIND = "skill-body:v1";
+
+export function isSkillBodyPart(part: Part): boolean {
+  return (
+    part.type === "text" &&
+    part.synthetic === true &&
+    part.metadata?.kind === SKILL_BODY_KIND
+  );
+}
+
 export const SYSTEM_REMINDER_KIND = "system-reminder:v1";
 
 export const HIDDEN_TRANSCRIPT_TOOLS: ReadonlySet<string> = new Set([
@@ -15,6 +25,7 @@ export function isTranscriptPart(
   return (
     part.type !== "model-state" &&
     !isModelContextPart(part) &&
+    !isSkillBodyPart(part) &&
     !isSystemReminderPart(part) &&
     (part.type !== "tool" || !HIDDEN_TRANSCRIPT_TOOLS.has(part.tool))
   );

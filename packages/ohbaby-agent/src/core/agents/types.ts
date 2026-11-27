@@ -1,6 +1,6 @@
 import type { TriggerSource } from "../../runtime/run-ledger/types.js";
 import type { RunModel } from "../run-model.js";
-import type { SlashSkillUsage } from "../../skill/usage.js";
+import type { UserTextPartInput } from "../../skill/slash-expansion.js";
 import type { ReasoningConfig } from "ohbaby-llm";
 import type { ReasoningIntent } from "ohbaby-llm";
 import type {
@@ -49,7 +49,7 @@ export interface AgentRunInput {
   readonly initialUserMessageId?: string;
   /** Original user text when model input includes execution-only context. */
   readonly displayUserText?: string;
-  readonly skillUsage?: SlashSkillUsage;
+  readonly initialUserParts?: readonly UserTextPartInput[];
   readonly initialUserPrompt?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
@@ -195,7 +195,7 @@ export interface AgentTurnInput {
   readonly initialUserMessageId?: string;
   /** Original user text when model input includes execution-only context. */
   readonly displayUserText?: string;
-  readonly skillUsage?: SlashSkillUsage;
+  readonly initialUserParts?: readonly UserTextPartInput[];
   readonly prompt: string;
   readonly waitMode: AgentWaitMode;
   readonly signal?: AbortSignal;

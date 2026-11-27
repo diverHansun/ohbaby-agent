@@ -7,6 +7,7 @@ import { messageCursor } from "../../core/message/pagination.js";
 import {
   isModelContextPart,
   isSystemReminderPart,
+  isSkillBodyPart,
 } from "../../core/message/origin.js";
 import type {
   SubagentExecutionRecord,
@@ -162,7 +163,12 @@ function savedContent(message: MessageWithParts): string {
   if (message.info.role === "assistant" && message.info.error)
     parts.push(JSON.stringify({ error: message.info.error }));
   for (const part of message.parts) {
-    if (isModelContextPart(part) || isSystemReminderPart(part)) continue;
+    if (
+      isModelContextPart(part) ||
+      isSystemReminderPart(part) ||
+      isSkillBodyPart(part)
+    )
+      continue;
     if (part.type === "text")
       parts.push(
         typeof part.metadata?.displayText === "string"

@@ -1,5 +1,6 @@
 import {
-  isModelContextPart,
+  isTranscriptPart,
+  transcriptText,
   type MessageWithParts,
 } from "../../core/message/index.js";
 import {
@@ -17,10 +18,8 @@ export function createFallbackSessionTitleFromMessages(
 
     const text = message.parts
       .flatMap((part) =>
-        part.type === "text" &&
-        part.ignored !== true &&
-        !isModelContextPart(part)
-          ? [part.text]
+        part.type === "text" && part.ignored !== true && isTranscriptPart(part)
+          ? [transcriptText(part)]
           : [],
       )
       .join(" ")

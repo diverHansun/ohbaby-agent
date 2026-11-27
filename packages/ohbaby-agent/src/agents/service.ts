@@ -61,7 +61,7 @@ export class AgentService {
       environment: params.environment,
       initialUserMessageId: params.initialUserMessageId,
       displayUserText: params.displayUserText,
-      skillUsage: params.skillUsage,
+      initialUserParts: params.initialUserParts,
       prompt: params.prompt,
       runId: params.runId,
       signal: params.signal,

@@ -69,7 +69,7 @@ async function writeInitialUserMessage(
     | "contextScopeId"
     | "initialUserMessageId"
     | "displayUserText"
-    | "skillUsage"
+    | "initialUserParts"
     | "initialUserPrompt"
     | "sessionId"
   >,
@@ -89,22 +89,22 @@ async function writeInitialUserMessage(
     role: "user",
     sessionId: input.sessionId,
   });
-  await deps.messageManager.appendPart(message.id, {
-    text: input.initialUserPrompt,
-    ...(input.displayUserText === undefined && input.skillUsage === undefined
-      ? {}
-      : {
-          metadata: {
-            ...(input.displayUserText === undefined
-              ? {}
-              : { displayText: input.displayUserText }),
-            ...(input.skillUsage === undefined
-              ? {}
-              : { skillUsage: input.skillUsage }),
-          },
-        }),
-    type: "text",
-  });
+  const parts = input.initialUserParts ?? [
+    {
+      type: "text" as const,
+      text: input.initialUserPrompt,
+      ...(input.displayUserText === undefined
+        ? {}
+        : { metadata: { displayText: input.displayUserText } }),
+    },
+  ];
+  try {
+    for (const part of parts)
+      await deps.messageManager.appendPart(message.id, part);
+  } catch (error) {
+    await deps.messageManager.removeMessage(message.id);
+    throw error;
+  }
   return message.id;
 }
 
@@ -197,7 +197,7 @@ export async function runAgent(
     contextScopeId: scope.contextScopeId,
     initialUserMessageId: input.initialUserMessageId,
     displayUserText: input.displayUserText,
-    skillUsage: input.skillUsage,
+    initialUserParts: input.initialUserParts,
     initialUserPrompt: input.initialUserPrompt,
     sessionId: scope.sessionId,
   });

@@ -1,3 +1,4 @@
+import { promptInputText } from "../../skill/usage.js";
 import type {
   UiCompletedPromptSubmission,
   UiPromptSubmission,
@@ -42,7 +43,7 @@ export function promptRecordToUi(
     scopeKey: record.scopeKey,
     sessionId: record.sessionId,
     userMessageId: record.userMessageId,
-    text: record.text,
+    text: promptInputText(record),
     reasoning: record.reasoning,
     status: record.status,
     runId: record.runId,

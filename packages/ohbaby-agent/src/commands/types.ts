@@ -132,7 +132,7 @@ export interface CommandSkillProvider {
   listUserInvocable():
     | Promise<readonly CommandSkillSummary[]>
     | readonly CommandSkillSummary[];
-  loadPrompt(name: string): Promise<string> | string;
+  validateUserInvocable(name: string): Promise<void> | void;
 }
 
 export type CommandPermissionState = NonNullable<UiSnapshot["permission"]>;

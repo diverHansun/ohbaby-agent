@@ -1,6 +1,6 @@
 import type { TriggerSource } from "../runtime/run-ledger/types.js";
 import type { RunModel } from "../core/run-model.js";
-import type { SlashSkillUsage } from "../skill/usage.js";
+import type { UserTextPartInput } from "../skill/slash-expansion.js";
 import type { ReasoningConfig } from "ohbaby-llm";
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { AgentRunResult } from "../core/agents/index.js";
@@ -87,7 +87,7 @@ export interface StartSessionParams {
   readonly initialUserMessageId?: string;
   /** Original user text when model input includes execution-only context. */
   readonly displayUserText?: string;
-  readonly skillUsage?: SlashSkillUsage;
+  readonly initialUserParts?: readonly UserTextPartInput[];
   readonly sessionId: string;
   readonly projectRoot: string;
   readonly prompt: string;

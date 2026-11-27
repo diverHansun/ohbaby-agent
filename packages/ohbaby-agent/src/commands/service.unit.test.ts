@@ -102,21 +102,21 @@ describe("CommandService", () => {
     };
     const submitPromptAccepted = vi.fn(() => Promise.resolve(receipt));
     const { service, events } = createServiceHarness({
-      skills: { listUserInvocable: () => [], loadPrompt: () => "skill body" },
+      skills: {
+        listUserInvocable: () => [],
+        validateUserInvocable: () => undefined,
+      },
       submitPromptAccepted,
     });
     const result = await service.executeCommand({
       ...makeInvocation("skill.demo", ["demo"], ["request"]),
       clientRequestId: "request_1",
     });
-    expect(submitPromptAccepted).toHaveBeenCalledWith(
-      "skill body\n\nUser request:\nrequest",
-      {
-        sessionId: "session_1",
-        clientRequestId: "request_1",
-        namingSource: { skillName: "demo", request: "request" },
-      },
-    );
+    expect(submitPromptAccepted).toHaveBeenCalledWith("/demo request", {
+      sessionId: "session_1",
+      clientRequestId: "request_1",
+      namingSource: { skillName: "demo", request: "request" },
+    });
     expect(result).toMatchObject({
       status: "completed",
       promptReceipt: receipt,
@@ -629,8 +629,8 @@ describe("CommandService", () => {
             },
           ];
         },
-        loadPrompt() {
-          return "";
+        validateUserInvocable() {
+          return;
         },
       },
     });
@@ -707,8 +707,8 @@ describe("CommandService", () => {
             },
           ];
         },
-        loadPrompt() {
-          return "";
+        validateUserInvocable() {
+          return;
         },
       },
     });
@@ -758,8 +758,8 @@ describe("CommandService", () => {
             },
           ];
         },
-        loadPrompt() {
-          return "";
+        validateUserInvocable() {
+          return;
         },
       },
     });
@@ -856,8 +856,8 @@ describe("CommandService", () => {
             },
           ];
         },
-        loadPrompt() {
-          return "";
+        validateUserInvocable() {
+          return;
         },
       },
     });
@@ -985,7 +985,7 @@ describe("CommandService", () => {
   });
 
   it("gives an accepted extra command id priority over a generated skill id", async () => {
-    const loadPrompt = vi.fn(() => "Review prompt");
+    const validateUserInvocable = vi.fn(() => undefined);
     const { events, service } = createServiceHarness({
       extraCommands: [pluginCommand("skill.review", ["inspect"])],
       skills: {
@@ -998,7 +998,7 @@ describe("CommandService", () => {
             },
           ];
         },
-        loadPrompt,
+        validateUserInvocable,
       },
     });
 
@@ -1015,7 +1015,7 @@ describe("CommandService", () => {
     ).toEqual([]);
 
     await service.executeCommand(makeInvocation("skill.review", ["inspect"]));
-    expect(loadPrompt).not.toHaveBeenCalled();
+    expect(validateUserInvocable).not.toHaveBeenCalled();
     expect(events.at(-1)).toMatchObject({
       error: {
         code: "COMMAND_NOT_FOUND",
@@ -1101,8 +1101,8 @@ describe("CommandService", () => {
             },
           ];
         },
-        loadPrompt() {
-          return "";
+        validateUserInvocable() {
+          return;
         },
       },
     });
@@ -1151,8 +1151,8 @@ describe("CommandService", () => {
             },
           ] as unknown as ReturnType<CommandSkillProvider["listUserInvocable"]>;
         },
-        loadPrompt() {
-          return "";
+        validateUserInvocable() {
+          return;
         },
       },
     });
@@ -1261,8 +1261,8 @@ describe("CommandService", () => {
             { description: "Brainstorm", name: "brainstorm", scope: "user" },
           ];
         },
-        loadPrompt() {
-          return "";
+        validateUserInvocable() {
+          return;
         },
       },
       tools: {

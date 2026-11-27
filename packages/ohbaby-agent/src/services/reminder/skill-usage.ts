@@ -59,8 +59,7 @@ function recentlyUsed(history: readonly MessageWithParts[]): string[] {
         message.info.role === "assistant" && part.type === "tool"
           ? successfulSkillName(part)
           : message.info.role === "user" &&
-              part.type === "text" &&
-              part.text.trim() !== ""
+              part.type === "text"
             ? slashSkillName(part)
             : undefined;
       if (name !== undefined) {
@@ -95,8 +94,7 @@ function visibleBodies(history: readonly MessageWithParts[]): Set<string> {
           : message.info.role === "user" &&
               projected.length > 0 &&
               part.type === "text" &&
-              !part.ignored &&
-              part.text.trim() !== ""
+              !part.ignored
             ? slashSkillName(part)
             : undefined;
       if (name !== undefined) names.add(name);

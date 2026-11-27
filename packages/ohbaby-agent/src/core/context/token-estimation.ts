@@ -7,6 +7,7 @@ import type { ModelMessage } from "ohbaby-llm";
 import {
   isContextSummaryPart,
   isModelContextPart,
+  isSkillBodyPart,
   type MessageWithParts,
   type Part,
 } from "../message/index.js";
@@ -236,6 +237,7 @@ function addHistoryMessagePayloads(
     return;
   }
   const summarizedParts: Part[] = [];
+  const skillParts: Part[] = [];
   const runtimeParts: Part[] = [];
   const subagentParts: Part[] = [];
   const conversationParts: Part[] = [];
@@ -243,6 +245,8 @@ function addHistoryMessagePayloads(
   for (const part of message.parts) {
     if (isContextSummaryPart(part)) {
       summarizedParts.push(part);
+    } else if (isSkillBodyPart(part)) {
+      skillParts.push(part);
     } else if (isModelContextPart(part)) {
       runtimeParts.push(part);
     } else if (part.type === "tool" && SUBAGENT_TOOL_NAMES.has(part.tool)) {
@@ -258,6 +262,7 @@ function addHistoryMessagePayloads(
     message,
     summarizedParts,
   );
+  addSerializedParts(payloads, "skills", message, skillParts);
   addSerializedParts(payloads, "system-prompt", message, runtimeParts);
   addSerializedParts(payloads, "subagent-exchanges", message, subagentParts);
   addSerializedParts(

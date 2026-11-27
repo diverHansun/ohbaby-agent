@@ -6858,8 +6858,7 @@ describe("createInProcessUiBackendClient", () => {
         skillBodyExpanded: true,
       });
       expect(accepted[0]?.titleExpected).toBe(request);
-      expect(accepted[0]?.text).toContain(body.trim());
-      expect(accepted[0]?.text).toContain(`User request:\n${request}`);
+      expect(accepted[0]?.text).toBe(`/review-session ${request}`);
       const titleRequests = controlled.requests.filter(
         isTitleGenerationRequest,
       );
@@ -6880,6 +6879,17 @@ describe("createInProcessUiBackendClient", () => {
         bodyMessage[0]?.parts.find((part) => part.type === "text")?.metadata
           ?.skillUsage,
       ).toEqual({ name: "review-session", source: "slash" });
+      expect(bodyMessage[0]?.parts).toMatchObject([
+        { type: "text", synthetic: true, metadata: { kind: "skill-body:v1" } },
+        {
+          type: "text",
+          text: request,
+          metadata: {
+            displayText: `/review-session ${request}`,
+            skillMarker: { name: "review-session" },
+          },
+        },
+      ]);
       const mainRequests = controlled.requests.filter(
         (r) => !isTitleGenerationRequest(r),
       );
