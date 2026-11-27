@@ -231,4 +231,76 @@ describe("glob file tool", () => {
       ),
     ).rejects.toThrow("directory");
   });
+  it.each(["**", "**/*", "packages/**", "packages/**/*"])(
+    "keeps project ignores during a recursive %s listing",
+    async (pattern) => {
+      await writeFile(tempRoot, ".gitignore", "coverage/\n*.log\n");
+      for (const file of [
+        "packages/app/code.ts",
+        "packages/app/coverage/a.ts",
+        "packages/app/test.log",
+        "other/source.ts",
+      ])
+        await writeFile(tempRoot, file, "x");
+      const result = await createGlobTool().execute(
+        { pattern },
+        createTestContext(tempRoot),
+      );
+      expect(result.output).toContain("packages/app/code.ts");
+      expect(result.output).not.toMatch(/coverage|test\.log/);
+      if (pattern.startsWith("packages/"))
+        expect(result.output).not.toContain("other/source.ts");
+    },
+  );
+  it("applies project ignore files to traversal and keeps fixed exclusions when include_ignored is enabled", async () => {
+    await writeFile(tempRoot, ".gitignore", "coverage/\n*.log\n");
+    await writeFile(tempRoot, ".ignore", "cache/\n");
+    await writeFile(tempRoot, ".rgignore", "generated/\n");
+    const ignored = ["coverage/a.ts", "cache/b.ts", "generated/c.ts"];
+    const visible = [".hidden.ts", "src/app.ts"];
+    const excluded = [".git", "dist", "node_modules", "out", "target"].map(
+      (dir) => dir + "/omit.ts",
+    );
+    for (const name of [...ignored, ...visible, ...excluded, "src/build.log"])
+      await writeFile(tempRoot, name, "needle\n");
+    const tool = createGlobTool();
+    const ctx = createTestContext(tempRoot);
+    const normal = await tool.execute({ pattern: "**/*.ts" }, ctx);
+    expect(normal.output?.split("\n")).toEqual(visible);
+    const { createGrepTool } = await import("./grep.js");
+    const content = await createGrepTool().execute(
+      { pattern: "needle", include: "**/*.ts", output_mode: "files" },
+      ctx,
+    );
+    const grepPaths = (content.output ?? "")
+      .split("\n")
+      .map((name) => path.relative(tempRoot, name).split(path.sep).join("/"));
+    expect(grepPaths.filter((name) => !excluded.includes(name)).sort()).toEqual(
+      visible,
+    );
+    const all = await tool.execute(
+      { pattern: "**/*.ts", include_ignored: true },
+      ctx,
+    );
+    expect(all.output?.split("\n")).toEqual([...ignored, ...visible].sort());
+    const direct = await tool.execute(
+      { pattern: "**/*.ts", path: "coverage" },
+      ctx,
+    );
+    expect(direct.output).toBe("a.ts");
+    const named = await tool.execute({ pattern: "**/*.log" }, ctx);
+    expect(named.output).toBe("src/build.log");
+  });
+
+  it("explains how to include an ignored directory when a search has no results", async () => {
+    await writeFile(tempRoot, ".gitignore", "coverage/\n");
+    await writeFile(tempRoot, "coverage/hidden.ts", "needle\n");
+    const empty = await createGlobTool().execute(
+      { pattern: "**/*.ts" },
+      createTestContext(tempRoot),
+    );
+    expect(empty.metadata).toMatchObject({ count: 0, scanComplete: true });
+    expect(empty.output).toContain("include_ignored");
+    expect(empty.output).toMatch(/path/i);
+  });
 });

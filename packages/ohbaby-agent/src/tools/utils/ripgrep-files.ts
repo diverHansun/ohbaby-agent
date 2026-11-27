@@ -38,6 +38,7 @@ export function normalizeGlobPattern(
   return normalized;
 }
 interface GlobProcessOptions {
+  readonly includeIgnored?: boolean;
   readonly executablePath: string;
   readonly cwd: string;
   readonly pattern: string;
@@ -63,16 +64,23 @@ export async function listFilesWithRipgrep(
 ): Promise<GlobProcessCompletion> {
   if (options.signal.aborted) throw abortError(options.signal);
   const windows = process.platform === "win32";
+  // A positive rg glob can admit ignored directories. A recursive listing
+  // only needs a literal result prefix; let rg prune the ignored tree.
+  const recursive = /^(?<prefix>(?:[^*?[\]{}\\/]+\/)*)\*\*(?:\/\*)?$/u.exec(
+    options.pattern,
+  );
+  const prefix = recursive?.groups?.prefix;
   const args = [
     "--no-config",
     "--files",
-    "--no-ignore",
+    ...(options.includeIgnored
+      ? ["--no-ignore"]
+      : ["--no-ignore-parent", "--no-ignore-global", "--no-require-git"]),
     "--hidden",
     "--null",
     "--sort=path",
     "--path-separator=/",
-    "--glob",
-    `/${options.pattern}`,
+    ...(prefix === undefined ? ["--glob", `/${options.pattern}`] : []),
     "--glob",
     "!.git",
     "--glob",
@@ -181,8 +189,10 @@ export async function listFilesWithRipgrep(
             relativePath.split("/").includes("..")
           )
             throw new Error("Invalid relative path frame.");
-          const reason = options.onPath(relativePath);
-          if (reason) stop(reason);
+          if (prefix === undefined || relativePath.startsWith(prefix)) {
+            const reason = options.onPath(relativePath);
+            if (reason) stop(reason);
+          }
         } catch (cause) {
           fail(
             new Error(
