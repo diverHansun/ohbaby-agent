@@ -53,7 +53,7 @@
 |------|----------|------|
 | 文件系统 | 输入 | 读取 SKILL.md 文件和目录中的辅助文件列表 |
 | Config | 输入 | 获取配置目录路径 |
-| **Commands** | **双向（用户路径）** | 启动时拉 `listUserInvocable()` 注册斜杠命令；用户触发时调 `load()`；接收 reload 命令 |
+| **Commands** | **双向（用户路径）** | 启动时拉 `listUserInvocable()` 注册斜杠命令；用户触发时校验并提交原话；接收 reload 命令 |
 | **ToolScheduler** | **双向（Agent 路径）** | 启动时无条件注册 SkillTool 为 module 工具；构建 description 时调 `listModelInvocable()`；Agent 调用时调 `load()` |
 | Permission | 间接（通过 SkillTool） | SkillTool 执行时评估 `skill:<name>` 权限规则 |
 
@@ -93,34 +93,18 @@
 
 ### 2.2 Skill 加载流程（用户调用 - 主要路径）
 
-```
-1. [外部] 用户输入斜杠命令
-   └── 例如: /code-review "review this function"
+用户执行 `/code-review 帮我检查这段代码` 时，Commands 校验技能允许用户调用，提交记录保存标准名和完整原话。第一行参数取自 `rawArgs`，后续各行取自 `body`。
 
-2. [外部] Commands 模块识别命令
-   ├── 在已注册的 user-invocable skills 中查找
-   └── 找到: code-review
+写入消息历史时，后端加载技能正文。同一条 user 消息包含两个 text part。
 
-3. [外部] Commands 调用 Skill.load(name)
-   └── 参数: "code-review"
+| Part | 给模型的内容 | 界面使用的字段 |
+|------|--------------|----------------|
+| 隐藏的技能正文 | `<skill name="code-review">…</skill>`，末尾有两个换行 | `synthetic: true`、`metadata.kind: "skill-body:v1"`。此 part 记录 `metadata.skillUsage`，投影时隐藏 |
+| 可见的用户原话 | `帮我检查这段代码` | `metadata.displayText` 保存完整的 slash 输入，`metadata.skillMarker.name` 保存标准名 |
 
-4. [内部] SkillRegistry 查找 Skill
-   ├── 缓存命中 → 返回 SkillInfo
-   └── 缓存未命中 → 触发扫描
+排队期间技能被删除、改名或禁用时，消息按普通文字发送。编辑重发使用当前命令目录重新识别技能。若编辑的仍是原技能，且原技能已经不可用，后端在截断历史前返回 `REWIND_SKILL_UNAVAILABLE`。旧版已展开的消息继续按原格式读取。
 
-5. [内部] SkillLoader 读取 Skill 目录内容
-   ├── 解析 SKILL.md，提取 content
-   ├── 扫描目录，列出辅助文件
-   └── 返回 SkillContent（含 files 列表）
-
-6. [外部] Commands 将 Skill 内容注入到上下文
-   ├── 包含 baseDir 路径
-   ├── 包含 Skill 完整指令
-   └── 附加用户的 prompt
-
-7. [外部] Agent 接收包含 Skill 指令的上下文
-   └── Agent 按照 Skill 指令执行任务
-```
+直接集成 `createCommandService` 时，技能提供方需实现 `validateUserInvocable`，执行技能命令还需提供 `submitPromptAccepted` 回调。缺少回调时，命令返回执行错误。
 
 ### 2.3 Skill 加载流程（Agent 调用 - Agent 路径）
 
@@ -419,15 +403,9 @@ type PermissionType = 'tool' | 'bash' | 'skill'
 
 ### 6.2 权限检查流程
 
-```
-1. ToolScheduler 接收 skill 工具调用
-2. 查询 Policy 获取决策（基于 Agent 配置的 skill 权限）
-3. 决策为 'ask' 时，调用 Permission.ask()
-   └── type: 'skill'
-   └── pattern: skill:<name>
-   └── title: 'Load skill: <name>'
-4. 用户响应后继续或拒绝
-```
+内置 `skill` 和 `skill_resource` 读取已注册的技能和参考文件时，默认权限直接放行。工具调度器按注册的工具实现识别这两种读取。用户设置的显式 deny 优先。
+
+会话通过 slash 或内置工具加载技能后，后端把注册表中的当前技能目录登记到该上下文的沙箱租约。普通 `read` 可以直接读取其中的参考文件。启动下一轮时，后端从当前会话及上下文的历史恢复登记。运行中追加的技能在模型成功接收该条 steer 后登记。写入技能目录仍遵循工作区和外部目录的写权限，技能输出目录沿用现有的 `skill-output` 规则。
 
 ### 6.3 Agent 权限配置
 
@@ -447,53 +425,13 @@ type PermissionType = 'tool' | 'bash' | 'skill'
 
 ## 七、与 Commands 模块的集成
 
-### 7.1 Skill 命令注册流程
+### 7.1 命令目录
 
-Commands 模块在启动时注册所有 user-invocable skills 为斜杠命令。
+Commands 读取 `listUserInvocable()`，将符合条件的技能列入命令目录。内置命令和已接受的扩展命令优先占用自己的名字及别名。
 
-```typescript
-// Commands 模块初始化时
-async function registerSkillCommands() {
-  const skills = await Skill.listUserInvocable()
+### 7.2 发送与编辑
 
-  for (const skill of skills) {
-    registerCommand({
-      name: skill.name,
-      description: skill.description,
-      handler: async (args, context) => {
-        // 加载 Skill 完整内容
-        const content = await Skill.load(skill.name)
-
-        // 将 Skill 内容注入到对话上下文
-        await injectSkillToContext(content, context)
-      }
-    })
-  }
-}
-```
-
-### 7.2 数据流总结
-
-```
-用户输入 /<skill-name>
-    ↓
-Commands 模块识别命令
-    ↓
-Skill.load(name) 获取完整内容
-    ↓
-Commands 将内容注入到上下文
-    ↓
-Agent 接收包含 Skill 指令的上下文
-    ↓
-Agent 执行任务
-```
-
-用户路径的设计要点：
-- **完整内容注入**：用户显式触发表示明确意图，注入完整 SKILL.md 内容到对话上下文
-- **不经过 SkillTool**：用户路径与 Agent 路径解耦，Commands 直接调 `Skill.load()`，不走工具调度
-- **不消耗 Agent 决策成本**：用户已替 Agent 做出"使用哪个 skill"的决定
-
-> Agent 路径（SkillTool）的数据流见 §2.3。两条路径基于同一份 SkillRegistry 缓存，保证视图一致。
+`executeSkillCommand` 使用已解析的技能名和参数提交原样输入。编辑重发、排队编辑和保留项重发复用同一份命令目录和名称规范化规则。创建消息和运行中追加输入共用 `expandSlashSkill`，消息结构见 §2.2。模型主动调用内置工具的流程见 §2.3。
 
 ---
 
@@ -502,23 +440,9 @@ Agent 执行任务
 ### 8.1 用户调用 Skill 序列（主要路径）
 
 ```
-用户        Commands      SkillRegistry      SkillLoader      Agent
-  │             │               │                  │            │
-  │─ /code-review ────→│               │                  │            │
-  │             │               │                  │            │
-  │             │─── load("code-review") ─→│                  │            │
-  │             │               │                  │            │
-  │             │               │─── loadContent ─→│            │
-  │             │               │                  │            │
-  │             │               │←── SkillContent ─│            │
-  │             │               │                  │            │
-  │             │←── SkillContent ──────────│                  │            │
-  │             │               │                  │            │
-  │             │─────── inject context ───────────────────────→│
-  │             │               │                  │            │
-  │             │               │                  │            │─ execute task
-  │             │               │                  │            │  with skill
-  │             │               │                  │            │  instructions
+/code-review 原话 → Commands 校验 → 提交记录保存 /code-review 原话
+写入 user 消息 → registry.load("code-review") → 隐藏的技能正文 + 可见原话
+run 取得租约 → 登记当前上下文的技能目录 → 模型接收两段内容
 ```
 
 ### 8.2 Agent 调用 Skill 序列（Agent 路径 - SkillTool 始终注册）
@@ -530,12 +454,7 @@ Agent          ToolScheduler      Policy      Permission      SkillTool      Ski
   │    skill        │               │             │              │                │                  │
   │                 │─── check ────→│             │              │                │                  │
   │                 │               │             │              │                │                  │
-  │                 │←── 'ask' ─────│             │              │                │                  │
-  │                 │               │             │              │                │                  │
-  │                 │────────── ask ────────────→│              │                │                  │
-  │                 │               │             │              │                │                  │
-  │                 │←─────── 'once' ────────────│              │                │                  │
-  │                 │               │             │              │                │                  │
+  │                 │←── allow ─────│             │              │                │                  │
   │                 │───────────────────────────────── execute ─→│                │                  │
   │                 │               │             │              │                │                  │
   │                 │               │             │              │──── load ─────→│                  │

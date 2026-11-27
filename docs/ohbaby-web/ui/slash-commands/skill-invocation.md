@@ -12,6 +12,7 @@
   - skill 命令以 `executionKind:"skill"` 进入 `GET /v1/commands?surface=web` 的 catalog，**仅供浏览器 resolve**。
   - `OhbabyWebRuntime.executeSlashCommand` 对「passthrough ∪ skill」目录 resolve，再由 SDK client 发出 `skill.<name>` invocation。
   - `POST /v1/commands` 放行经过校验的 passthrough 或 skill invocation。
+  - 后端提交记录保存规范化后的 `/技能名 原话`。消息历史包含隐藏的技能正文和可见的用户原话。界面投影只返回可见 part，其 `text` 已取自 `metadata.displayText`，`metadata.skillMarker.name` 是标准技能名。
 - **发现/插入 UI（Layer 2）**：`/skills` 结果弹窗支持键盘导航和落入。
   - `↑/↓`、`PageUp/PageDown` 在 skill 列表中选中，首尾 clamp。
   - `Tab`、`Enter` 或点击把选中项的 `/<skill-name> ` 落入 composer 并关闭弹窗，不在 modal 内直接执行。
@@ -83,13 +84,13 @@ daemon 原本已具备 `executeSkillCommand`；`b5e00f4` 打通了 Web 发现、
 - `executeSlashCommand` 对「passthrough ∪ skill」的 catalog 调用
   `resolveSlashCommand(catalog, parseSlashCommandInput(text), { surface: "tui" })`。
 - 解析成功后照常 `POST /v1/commands`，invocation 带 `commandId:"skill.<name>"`、`surface:"tui"`、`rawArgs`（用户在 `/skill-name ` 之后输入的参数原文）。
-- skill 命令 `acceptsArguments:true`、`argumentMode:"raw"`：`rawArgs` 透传到 daemon，由 `executeSkillCommand` 以 `User request:` 段拼接进 skill prompt。
+- skill 命令 `acceptsArguments:true`、`argumentMode:"raw"`：`rawArgs` 透传到 daemon，与后续行的 `body` 一起组成用户原话。
 
 ### 3.3 服务端网关
 
 - SDK helper `supportsWebSkillCommandInvocation(catalog, invocation)` 在 daemon 全量 catalog（`surface:"tui"`）中校验该命令存在、surface 可见、path 一致、`source === "skill"`。
 - `POST /v1/commands` 网关仅在 `supportsWebPassthroughCommandInvocation(...) || supportsWebSkillCommandInvocation(...)` 时放行，其余维持拒绝。
-- 放行后照常 `backend.executeCommand(...)` → daemon 命中 `executeSkillCommand`：加载 skill prompt、经 raw backend 的 `submitPromptAccepted` 端口持久接受，并返回带原 `clientRequestId` 的 `UiPromptReceipt`，不再发送空 action。外层只记录一次 `executeCommand` 原子写，不为内部 prompt 重复记账；web 通过既有事件流看到 prompt 进入会话、agent 开始响应。
+- 放行后照常 `backend.executeCommand(...)` → daemon 命中 `executeSkillCommand`：校验技能仍可供用户调用，经 `submitPromptAccepted` 保存用户输入，并返回带原 `clientRequestId` 的 `UiPromptReceipt`，不再发送空 action。外层只记录一次 `executeCommand` 原子写，不为内部 prompt 重复记账；web 通过既有事件流看到 prompt 进入会话、agent 开始响应。
 
 ---
 
@@ -144,7 +145,7 @@ daemon 原本已具备 `executeSkillCommand`；`b5e00f4` 打通了 Web 发现、
   → submitText("/hansun-db …") → executeSlashCommand
   → resolve（passthrough ∪ skill）成功 → POST /v1/commands { commandId:"skill.hansun-db", surface:"tui", rawArgs }
   → 服务端 supportsWebSkillCommandInvocation 放行
-  → backend.executeCommand → executeSkillCommand → 加载 prompt → submitPromptAndWait(raw backend)
+  → backend.executeCommand → executeSkillCommand → submitPromptAccepted → 写历史时展开技能
   → 事件流：prompt 进入会话，agent 开始响应
 ```
 
