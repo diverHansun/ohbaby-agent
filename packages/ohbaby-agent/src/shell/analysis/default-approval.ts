@@ -4,6 +4,8 @@ import type { ShellCommandAnalysis } from "./types.js";
 
 // Check the original tree before relying on normalized argv (which strips wrappers).
 export function isDefaultApprovalNode(node: Node): boolean {
+  if (node.type === "redirected_statement" && !node.childForFieldName("body"))
+    return false;
   switch (node.type) {
     case "program":
       return node.childCount === 1;
@@ -55,7 +57,7 @@ export function isDefaultApprovalCommand(
     !!operand && !operand.startsWith("-") && command.pathArgs.includes(operand);
   // File utilities open .. relative to the physical directory, even after a logical cd.
   if (
-    name !== "cd" &&
+    !(name === "cd" && operand === "..") &&
     command.cwd !== "." &&
     operand &&
     /^(?:\.\/)*\.\.(?:\/|$)/u.test(operand)

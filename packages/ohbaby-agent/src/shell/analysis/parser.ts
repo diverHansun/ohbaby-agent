@@ -349,8 +349,6 @@ export async function analyzeShellCommand(
                 .childrenForFieldName("argument")
                 .filter((child): child is Node => child !== null);
           const nodes = [name, ...argumentNodes];
-          simpleSyntax &&=
-            /^[a-z]+$/u.test(name.text) && !WRAPPERS.has(name.text);
           const values: (string | undefined)[] = [];
           const rawTokens: string[] = [];
           for (let i = 0; i < nodes.length; i += 1) {
@@ -381,6 +379,8 @@ export async function analyzeShellCommand(
           const root = (effective.tokens[0] ?? "")
             .toLowerCase()
             .replace(/\.exe$/u, "");
+          simpleSyntax &&=
+            name.text === root && name.text === effective.tokens[0];
           if (values[0] === undefined || !root)
             reasons.add("Command name cannot be determined.");
           const commandCwd = effective.cwdUnknown ? undefined : context.cwd;

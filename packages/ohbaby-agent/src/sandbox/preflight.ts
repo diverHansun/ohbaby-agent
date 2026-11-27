@@ -179,11 +179,7 @@ export async function preflightSandboxShellAnalysis(
 export async function preflightSandboxCommand(
   input: SandboxPreflightInput,
 ): Promise<PreflightResult> {
-  const shell = await analyzeShellCommand(
-    input.command,
-    input.shellKind,
-    input.workdir,
-  );
+  const shell = await analyzeShellCommand(input.command, input.shellKind);
   return preflightSandboxShellAnalysis({
     sessionRoots: input.sessionRoots,
     shellAnalysis: shell,
