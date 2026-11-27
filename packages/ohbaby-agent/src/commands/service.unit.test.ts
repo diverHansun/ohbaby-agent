@@ -115,7 +115,11 @@ describe("CommandService", () => {
     expect(submitPromptAccepted).toHaveBeenCalledWith("/demo request", {
       sessionId: "session_1",
       clientRequestId: "request_1",
-      namingSource: { skillName: "demo", request: "request" },
+      namingSource: {
+        skillName: "demo",
+        request: "request",
+        skillBodyExpanded: true,
+      },
     });
     expect(result).toMatchObject({
       status: "completed",

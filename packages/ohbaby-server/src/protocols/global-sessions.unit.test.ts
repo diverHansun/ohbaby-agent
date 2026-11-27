@@ -85,6 +85,9 @@ describe("global session wire format", () => {
 
   it("maps failures to HTTP status", () => {
     const failure = (code: string): unknown => ({ code });
+    expect(globalSessionErrorStatus(failure("REWIND_SKILL_UNAVAILABLE"))).toBe(
+      400,
+    );
     expect(globalSessionErrorStatus(failure("INVALID_CURSOR"))).toBe(400);
     expect(globalSessionErrorStatus(failure("directory-unavailable"))).toBe(
       400,

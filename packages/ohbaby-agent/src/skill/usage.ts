@@ -31,15 +31,6 @@ export function slashSkillName(part: TextPart): string | undefined {
     : undefined;
 }
 
-/** Persisted marker for a backend-validated slash invocation (older records already contain the body). */
-export function expandedSkillNamingSource(
-  source: UiPromptNamingSource | undefined,
-): (UiPromptNamingSource & { readonly skillBodyExpanded: true }) | undefined {
-  return source === undefined
-    ? undefined
-    : { ...source, skillBodyExpanded: true };
-}
-
 /** Keep public naming behavior, discarding any claimed internal body identity. */
 export function publicNamingSource(
   source: UiPromptNamingSource | undefined,
@@ -60,13 +51,13 @@ export function slashSubmission(
   body?: string,
 ): SlashSubmission {
   const suffix = (rawArgs ? " " + rawArgs : "") + (body ? "\n" + body : "");
-  return {
-    text: "/" + name + suffix,
-    namingSource: expandedSkillNamingSource({
-      skillName: name,
-      request: suffix.slice(1),
-    }),
+  // Older records with this persisted marker already contain the expanded body.
+  const namingSource = {
+    skillName: name,
+    request: suffix.slice(1),
+    skillBodyExpanded: true,
   };
+  return { text: "/" + name + suffix, namingSource };
 }
 
 export function legacySlashBody(prompt: SlashSubmission): boolean {

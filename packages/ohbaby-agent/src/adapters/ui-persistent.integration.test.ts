@@ -3670,78 +3670,194 @@ describe("persistent conversation rewind", () => {
     expect(restored.restoredText).toBe(displayText);
   });
 
-  it("reads an external slash skill reference in its first run, after reopen, and in a fork", async () => {
+  it.each(["initial", "steered"] as const)(
+    "reads an external %s slash skill in the same run, after reopen, and in a fork",
+    async (entry) => {
+      const dir = join(directory, "home", "skill", "review");
+      const reference = join(dir, "references", "guide.txt");
+      await mkdir(join(dir, "references"), { recursive: true });
+      await writeFile(reference, "verified external reference");
+      await writeFile(
+        join(dir, "SKILL.md"),
+        "---\nname: review\ndescription: Review a patch\n---\nRead references/guide.txt",
+      );
+      const readEvent = (id: string): InterfaceProviderStreamEvent => ({
+        finishReason: "tool_calls",
+        toolCallDeltas: [
+          {
+            index: 0,
+            id,
+            name: "read",
+            argumentsDelta: JSON.stringify({ file_path: reference }),
+          },
+        ],
+      });
+      const reply: InterfaceProviderStreamEvent = {
+        finishReason: "stop",
+        textDelta: "Read it",
+      };
+      model = createSequentialFakeLLMClient(
+        [
+          ...(entry === "steered" ? [[reply]] : []),
+          [readEvent("read_first")],
+          [reply],
+          [readEvent("read_reopened")],
+          [reply],
+          [readEvent("read_fork")],
+          [reply],
+        ],
+        requests,
+      );
+      const entered = createDeferred<undefined>();
+      const release = createDeferred<undefined>();
+      const stream = model.provider.streamResponse.bind(model.provider);
+      if (entry === "steered") {
+        model.provider.streamResponse = async (request) => {
+          if (!isSessionTitleGenerationRequest(request) && !requests.length) {
+            entered.resolve(undefined);
+            await release.promise;
+          }
+          return stream(request);
+        };
+      }
+      client = open();
+      const active =
+        entry === "steered"
+          ? await client.submitPromptAccepted("Start the task")
+          : undefined;
+      if (active) await entered.promise;
+      const { promptReceipt } = await client.executeCommand({
+        commandId: "skill.review",
+        path: ["review"],
+        argv: [],
+        raw: "/review",
+        rawArgs: "",
+        surface: "tui",
+        clientInvocationId: "review",
+        sessionId: active?.sessionId,
+      });
+      if (!promptReceipt) throw new Error("Missing skill receipt");
+      if (active) {
+        try {
+          const run = (await client.getSnapshot()).prompts?.find(
+            (prompt) => prompt.promptId === active.promptId,
+          )?.runId;
+          if (!run) throw new Error("Missing active run");
+          expect(
+            await client.steerQueuedPrompt({
+              promptId: promptReceipt.promptId,
+              expectedRunId: run,
+              clientRequestId: "steer-review",
+            }),
+          ).toMatchObject({ status: "steered" });
+        } finally {
+          release.resolve(undefined);
+        }
+      }
+      const first = await client.waitForPrompt(
+        active?.promptId ?? promptReceipt.promptId,
+      );
+      expect(first.prompt.status).toBe("succeeded");
+      await client.dispose();
+      closeDatabase();
+      client = open();
+      const { sessionId } = promptReceipt;
+      const reopened = await client.submitPromptAndWait("Read again", {
+        sessionId,
+      });
+      expect(reopened.prompt.status).toBe("succeeded");
+      const fork = await client.forkSession({ sessionId });
+      expect(
+        (
+          await client.submitPromptAndWait("Read in fork", {
+            sessionId: fork.sessionId,
+          })
+        ).prompt.status,
+      ).toBe("succeeded");
+      for (const callId of ["read_first", "read_reopened", "read_fork"]) {
+        const tool = requests
+          .flatMap((request) => request.messages)
+          .find(
+            (message) => message.role === "tool" && message.callId === callId,
+          );
+        expect(JSON.stringify(tool)).toContain("verified external reference");
+      }
+    },
+  );
+
+  it("keeps skill trust in the context that loaded it", async () => {
     const dir = join(directory, "home", "skill", "review");
-    const reference = join(dir, "references", "guide.txt");
-    await mkdir(join(dir, "references"), { recursive: true });
-    await writeFile(reference, "verified external reference");
+    const reference = join(dir, "guide.txt");
+    await mkdir(dir, { recursive: true });
+    await writeFile(reference, "private reference");
     await writeFile(
       join(dir, "SKILL.md"),
-      "---\nname: review\ndescription: Review a patch\n---\nRead references/guide.txt",
+      "---\nname: review\ndescription: Review a patch\n---\nRead guide.txt",
     );
-    const readEvent = (id: string): InterfaceProviderStreamEvent => ({
-      finishReason: "tool_calls",
-      toolCallDeltas: [
-        {
-          index: 0,
-          id,
-          name: "read",
-          argumentsDelta: JSON.stringify({ file_path: reference }),
-        },
-      ],
-    });
     const reply: InterfaceProviderStreamEvent = {
       finishReason: "stop",
-      textDelta: "Read it",
+      textDelta: "Done",
     };
     model = createSequentialFakeLLMClient(
       [
-        [readEvent("read_first")],
         [reply],
-        [readEvent("read_reopened")],
-        [reply],
-        [readEvent("read_fork")],
+        [
+          {
+            finishReason: "tool_calls",
+            toolCallDeltas: [
+              {
+                index: 0,
+                id: "foreign_read",
+                name: "read",
+                argumentsDelta: JSON.stringify({ file_path: reference }),
+              },
+            ],
+          },
+        ],
         [reply],
       ],
       requests,
     );
     client = open();
-    const { promptReceipt } = await client.executeCommand({
-      commandId: "skill.review",
-      path: ["review"],
-      argv: [],
-      raw: "/review",
-      rawArgs: "",
-      surface: "tui",
-      clientInvocationId: "review",
-    });
-    if (!promptReceipt) throw new Error("Missing skill receipt");
-    const first = await client.waitForPrompt(promptReceipt.promptId);
-    expect(first.prompt.status).toBe("succeeded");
-    await client.dispose();
-    closeDatabase();
-    client = open();
-    const { sessionId } = promptReceipt;
-    const reopened = await client.submitPromptAndWait("Read again", {
+    const { sessionId } = (await client.submitPromptAndWait("Start")).prompt;
+    const db = getDatabase();
+    const at = Date.now();
+    insertMessageRow(db, {
+      id: "other-context-message",
+      role: "user",
+      agent: "default",
       sessionId,
+      contextScopeId: "child",
+      time: { created: at },
     });
-    expect(reopened.prompt.status).toBe("succeeded");
-    const fork = await client.forkSession({ sessionId });
-    expect(
-      (
-        await client.submitPromptAndWait("Read in fork", {
-          sessionId: fork.sessionId,
-        })
-      ).prompt.status,
-    ).toBe("succeeded");
-    for (const callId of ["read_first", "read_reopened", "read_fork"]) {
-      const tool = requests
-        .flatMap((request) => request.messages)
-        .find(
-          (message) => message.role === "tool" && message.callId === callId,
-        );
-      expect(JSON.stringify(tool)).toContain("verified external reference");
-    }
+    insertPartRow(
+      db,
+      {
+        id: "other-context-part",
+        messageId: "other-context-message",
+        sessionId,
+        contextScopeId: "child",
+        orderIndex: 0,
+        type: "text",
+        text: "skill body",
+        synthetic: true,
+        metadata: {
+          kind: "skill-body:v1",
+          skillUsage: { name: "review", source: "slash" },
+        },
+      },
+      at,
+    );
+    const ask = waitForPersistentEvent(
+      client,
+      (e): e is Extract<UiEvent, { type: "permission.requested" }> =>
+        e.type === "permission.requested",
+    );
+    const run = client.submitPromptAndWait("Read the reference", { sessionId });
+    const { request } = await ask;
+    await client.respondPermission(request.id, { choiceId: "reject" });
+    await run;
+    expect(JSON.stringify(requests)).not.toContain("private reference");
   });
 
   it("rewinds a suffix across saved history, open views, exports, model input and restart", async () => {

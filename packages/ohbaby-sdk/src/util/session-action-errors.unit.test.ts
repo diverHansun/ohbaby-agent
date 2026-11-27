@@ -10,6 +10,9 @@ describe("sessionActionErrorText", () => {
       "Nothing to fork yet",
     );
     expect(
+      sessionActionErrorText("edit", coded("REWIND_SKILL_UNAVAILABLE")),
+    ).toBe("server text");
+    expect(
       sessionActionErrorText("edit", coded("REWIND_BEFORE_COMPACTION")),
     ).toBe("This message was compacted and can't be edited");
     expect(sessionActionErrorText("rewind", coded("SESSION_ARCHIVED"))).toBe(

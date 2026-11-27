@@ -449,6 +449,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
         return { status: "not-steered", reason: "target-sealed", prompt };
       if (
         input.expectedContent &&
+        (input.parts || slashSkillUsage(prompt.namingSource)) &&
         (input.expectedContent.text !== prompt.text ||
           !isDeepStrictEqual(
             input.expectedContent.namingSource,

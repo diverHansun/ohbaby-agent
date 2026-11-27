@@ -28,7 +28,6 @@ import {
   slashSkillUsage,
   slashSubmission,
   legacySlashBody,
-  expandedSkillNamingSource,
   publicNamingSource,
 } from "../skill/usage.js";
 import { expandSlashSkill } from "../skill/slash-expansion.js";
@@ -5535,12 +5534,7 @@ export function createInProcessUiBackendClient(
         return runtime.listMcpServerSummaries();
       },
     },
-    submitPromptAccepted(text, submitOptions) {
-      return submitPromptAcceptedInternal(text, {
-        ...submitOptions,
-        namingSource: expandedSkillNamingSource(submitOptions?.namingSource),
-      });
-    },
+    submitPromptAccepted: submitPromptAcceptedInternal,
     connectModel: connectModelInternal,
     setSearchApiKey: setSearchApiKeyInternal,
     permission: {

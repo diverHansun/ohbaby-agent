@@ -1,3 +1,4 @@
+import { slashSubmission } from "../../skill/usage.js";
 import { SessionExecutionGate } from "../../adapters/session-execution.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -171,8 +172,7 @@ for (const backend of ["memory", "sqlite"] as const)
       });
       const { record } = await f.scheduler.accept({
         ...submit,
-        text: "/review first",
-        namingSource: { skillName: "review", request: "first" },
+        ...slashSubmission("review", "first"),
       });
       const input = {
         promptId: record.promptId,
@@ -193,7 +193,7 @@ for (const backend of ["memory", "sqlite"] as const)
         lease.editLeaseId,
         "/review second",
         "editor",
-        { skillName: "review", request: "second" },
+        slashSubmission("review", "second").namingSource,
       );
       release.resolve();
       const result = await pending;

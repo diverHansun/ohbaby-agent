@@ -4593,21 +4593,17 @@ describe("createInProcessUiBackendClient", () => {
         ),
         workdir: projectRoot,
       });
-      const permission = waitForUiEvent(
-        client,
-        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
-          event.type === "permission.requested",
-      );
-
-      const run = client.submitPromptAndWait("Use the project review skill");
-      const permissionEvent = await permission;
-      expect(permissionEvent.request).toMatchObject({
-        title: "Skill requires confirmation: code-review",
+      const approvals: UiEvent[] = [];
+      const unsubscribe = client.subscribeEvents((event) => {
+        if (event.type === "permission.requested") approvals.push(event);
       });
-      await client.respondPermission(permissionEvent.request.id, {
-        choiceId: "allow_once",
-      });
-      await run;
+      try {
+        await client.submitPromptAndWait("Use the project review skill");
+        expect(approvals).toEqual([]);
+      } finally {
+        unsubscribe();
+        await client.dispose();
+      }
 
       const skillTool = requests[0]?.tools?.find(
         (tool) => tool.name === "skill",

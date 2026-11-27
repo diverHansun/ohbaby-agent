@@ -1,3 +1,4 @@
+import { slashSkillUsage } from "../../skill/usage.js";
 import {
   createDatabaseWriteBudget,
   withDatabaseWriteBudget,
@@ -316,10 +317,12 @@ export class WorkspacePromptScheduler {
           ? await input.reasoning(sessionId)
           : input.reasoning;
       // Only an active goal can accept a steer. Keep disk reads outside its commit.
-      const prepareSkill = input.namingSource && this.options.expandUserParts;
-      const candidate =
-        prepareSkill && this.options.resolveSteerTarget?.(sessionId);
-      const prepared = candidate ? await prepareSkill(input) : undefined;
+      const prepareSkill =
+        slashSkillUsage(input.namingSource) && this.options.expandUserParts;
+      const prepared =
+        prepareSkill && this.options.resolveSteerTarget?.(sessionId)
+          ? await prepareSkill(input)
+          : undefined;
       const persist = (): Promise<AcceptedWorkspacePrompt> =>
         this.commit(sessionId, async () => {
           this.assertOpen();
@@ -354,11 +357,7 @@ export class WorkspacePromptScheduler {
           if (!accepted.inserted)
             return this.existingAcceptance(accepted.record);
           this.notify(accepted.record, this.options.onSubmitted);
-          return this.steerAccepted(
-            accepted.record,
-            prepared,
-            prepareSkill ? (candidate?.runId ?? null) : undefined,
-          );
+          return this.steerAccepted(accepted.record, prepared);
         });
       // An implicit submission only learns its destination during session resolution.
       // Its workspace admission barrier is already released before it waits here.
@@ -392,7 +391,6 @@ export class WorkspacePromptScheduler {
   private async steerAccepted(
     record: PromptSubmissionRecord,
     parts?: readonly UserTextPartInput[],
-    preparedRunId?: string | null,
   ): Promise<AcceptedWorkspacePrompt> {
     if (!this.options.resolveSteerTarget)
       return {
@@ -420,7 +418,9 @@ export class WorkspacePromptScheduler {
       const target = this.options.resolveSteerTarget(record.sessionId);
       if (
         !target ||
-        (preparedRunId !== undefined && target.runId !== preparedRunId)
+        (this.options.expandUserParts &&
+          slashSkillUsage(record.namingSource) &&
+          !parts)
       )
         return {
           record,
@@ -552,7 +552,10 @@ export class WorkspacePromptScheduler {
         attempt < 3 &&
         snapshot.status === "queued" &&
         this.options.expandUserParts;
-      const parts = check ? await check(snapshot) : undefined;
+      const parts =
+        check && slashSkillUsage(snapshot.namingSource)
+          ? await check(snapshot)
+          : undefined;
       try {
         const result = await this.commit(source.sessionId, async () => {
           const result = await inputs.steerQueued({
