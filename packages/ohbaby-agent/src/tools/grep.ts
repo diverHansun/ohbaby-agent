@@ -6,7 +6,10 @@ import type {
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
 import {
+  getBooleanParam,
   getNumberParam,
+  optionalEnum,
+  ToolParameterError,
   getOptionalStringParam,
   getStringParam,
 } from "./utils/params.js";
@@ -22,7 +25,7 @@ import {
 const OUTPUT_BYTES = 50 * 1024;
 const NOTICE_RESERVE_BYTES = 1024;
 const PREVIEW_BYTES = 2000;
-const PREVIEW_OMITTED = " [preview omitted; use Read for full content]";
+const PREVIEW_OMITTED = " [preview omitted; use read for full content]";
 
 function preview(match: RipgrepMatch): { text: string; limited: boolean } {
   if (match.text === undefined)
@@ -61,19 +64,46 @@ export function createGrepTool(): Tool {
     {
       name: "grep",
       description:
-        "Search file contents with a regular expression. Use this instead of shell grep or rg. Uses ripgrep default regex syntax (no look-around or backreferences) and returns paths, line numbers, and line previews; use read for full content. Directory searches honor project .gitignore/.ignore/.rgignore, include hidden files, and skip .git traversal (parent/global ignores disabled). Explicit include follows rg glob precedence and can override ignores, but does not filter a single file path. Binary files and non-UTF-8 encodings are not guaranteed; previews may be unavailable. For other encodings or raw bytes, use bash.",
+        "Search file contents with a regular expression. Use this instead of shell grep or rg. Uses ripgrep's default regex syntax (no look-around or backreferences). Defaults to output_mode=content (paths, line numbers, limited previews, and optional before/after context up to 20 lines; matches use path:line:, context uses path-line-, separated by --); also supports output_mode=files (paths only), output_mode=count (matching lines per file), and ignore_case. Use read for full lines or wider context. Directory searches honor project .gitignore/.ignore/.rgignore (parent/global ignores disabled), include hidden files, and exclude .git traversal. Explicit include follows ripgrep glob precedence and can override ignore rules (except .git during traversal), but does not filter a single-file path. Binary files and non-UTF-8 encodings are not guaranteed (non-UTF-8 previews may be unavailable; matched paths must be valid UTF-8); use bash for raw bytes or other encodings.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
+          before: {
+            type: "integer",
+            minimum: 0,
+            maximum: 20,
+            description:
+              "Context lines to include before each match, like grep -B (0-20, default: 0; content mode only). For more than 20 lines, get the line number with grep and read the file with read using offset.",
+          },
+          after: {
+            type: "integer",
+            minimum: 0,
+            maximum: 20,
+            description:
+              "Context lines to include after each match, like grep -A (0-20, default: 0; content mode only). For more than 20 lines, get the line number with grep and read the file with read using offset.",
+          },
+          ignore_case: {
+            type: "boolean",
+            description:
+              "Case-insensitive pattern matching, like grep -i (default: false).",
+          },
+          output_mode: {
+            type: "string",
+            enum: ["content", "files", "count"],
+            description:
+              "Output format (default: content). content returns matching lines with previews and optional before/after context; files returns matching file paths only; count returns matching line counts per file. before and after are only allowed with content.",
+          },
+
           include: {
             description:
               'Ripgrep glob to filter searched files (e.g. "*.ts" by name or "src/**/*.ts" by path). Can override .gitignore; ignored when path is a single file.',
             type: "string",
           },
           limit: {
-            description: "Maximum matching lines to return (default: 100).",
             minimum: 1,
             type: "integer",
+            description:
+              "Maximum matching lines in content mode (context lines are not counted), or maximum matching files in files/count modes (default: 100). Output is still capped at 50 KiB.",
           },
           path: {
             ...FILE_PATH_SCHEMA,
@@ -101,6 +131,32 @@ export function createGrepTool(): Tool {
           integer: true,
           min: 1,
         });
+        const mode = optionalEnum(
+          params,
+          "output_mode",
+          ["content", "files", "count"],
+          {
+            defaultValue: "content",
+            invalidMessage: () =>
+              "Expected output_mode to be content, files, or count.",
+          },
+        );
+        if (
+          mode !== "content" &&
+          (params.before !== undefined || params.after !== undefined)
+        )
+          throw new ToolParameterError(
+            "before and after can only be used when output_mode is content.",
+          );
+        const contextRange = {
+          defaultValue: 0,
+          integer: true,
+          min: 0,
+          max: 20,
+        };
+        const before = getNumberParam(params, "before", contextRange);
+        const after = getNumberParam(params, "after", contextRange);
+        const ignoreCase = getBooleanParam(params, "ignore_case", false);
         if (context.signal.aborted)
           throw context.signal.reason instanceof Error
             ? context.signal.reason
@@ -114,7 +170,18 @@ export function createGrepTool(): Tool {
         const matches: string[] = [];
         let outputBytes = 0;
         let matchCount = 0;
+        let count = 0;
         const display = { limited: false };
+        let previous: RipgrepMatch | undefined;
+        let remainingAfter = 0;
+        function append(line: string): boolean {
+          const cost = Buffer.byteLength(line) + 1;
+          if (outputBytes + cost > OUTPUT_BYTES - NOTICE_RESERVE_BYTES)
+            return false;
+          matches.push(line);
+          outputBytes += cost;
+          return true;
+        }
         const result = await searchWithRipgrep({
           executablePath: resolveBundledRipgrepPath(),
           cwd: stats.isDirectory() ? resolvedPath : path.dirname(resolvedPath),
@@ -122,24 +189,66 @@ export function createGrepTool(): Tool {
           pattern,
           include,
           signal: context.signal,
+          before,
+          after,
+          ignoreCase,
+          firstMatchPerFile: mode === "files",
+          onFileEnd:
+            mode === "content"
+              ? undefined
+              : (file, lines, occurrences): SearchStopReason | undefined => {
+                  if (
+                    !append(
+                      mode === "files" ? file : file + ": " + String(lines),
+                    )
+                  )
+                    return "output-limit";
+                  count += 1;
+                  matchCount += occurrences;
+                  return count >= limit ? "match-limit" : undefined;
+                },
           onMatch(match) {
+            if (mode !== "content") return;
+            const isMatch = match.matchCount > 0;
+            const adjacent =
+              previous?.path === match.path && previous.line + 1 === match.line;
+            if (count >= limit && (isMatch || !adjacent || remainingAfter <= 0))
+              return "match-limit";
             const rendered = preview(match);
-            const line = `${match.path}:${String(match.line)}: ${rendered.text}`;
-            const cost = Buffer.byteLength(line) + 1;
-            if (outputBytes + cost > OUTPUT_BYTES - NOTICE_RESERVE_BYTES)
+            const separator = isMatch ? ":" : "-";
+            const line =
+              match.path +
+              separator +
+              String(match.line) +
+              separator +
+              " " +
+              rendered.text;
+            if (
+              !append(
+                (previous && (before || after) && !adjacent ? "--\n" : "") +
+                  line,
+              )
+            )
               return "output-limit";
-            matches.push(line);
-            matchCount += match.matchCount;
-            outputBytes += cost;
+            previous = match;
             display.limited ||= rendered.limited;
-            return matches.length >= limit ? "match-limit" : undefined;
+            if (isMatch) {
+              count += 1;
+              matchCount += match.matchCount;
+              remainingAfter = after;
+            } else {
+              remainingAfter -= 1;
+            }
+            return count >= limit && remainingAfter <= 0
+              ? "match-limit"
+              : undefined;
           },
         });
         const scanComplete = !result.stopReason && result.binaryFileCount === 0;
         const notices: string[] = [];
         if (result.stopReason)
           notices.push(
-            `Search incomplete: ${STOP_NOTICE[result.stopReason]} Narrow path/include/pattern.`,
+            `Search incomplete: ${result.stopReason === "match-limit" && mode !== "content" ? "The matching-file limit was reached; completeness and additional matching files are not confirmed." : STOP_NOTICE[result.stopReason]} Narrow path/include/pattern, or use output_mode=files to list paths only.`,
           );
         if (result.binaryFileCount)
           notices.push(
@@ -147,7 +256,7 @@ export function createGrepTool(): Tool {
           );
         if (display.limited)
           notices.push(
-            "Result display limited: some previews are omitted or unavailable. Use Read at the returned path and line for details (Read supports UTF-8).",
+            "Result display limited: some previews are omitted or unavailable. Use read at the returned path and line for details (read supports UTF-8).",
           );
         const output = [
           matches.length
@@ -160,7 +269,7 @@ export function createGrepTool(): Tool {
         return {
           output,
           metadata: {
-            count: matches.length,
+            count,
             matchCount,
             scanComplete,
             displayLimited: display.limited || Boolean(result.stopReason),

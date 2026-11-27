@@ -27,6 +27,15 @@ export interface RipgrepMatch {
 }
 
 interface SearchOptions {
+  readonly before?: number;
+  readonly after?: number;
+  readonly ignoreCase?: boolean;
+  readonly firstMatchPerFile?: boolean;
+  readonly onFileEnd?: (
+    path: string,
+    lines: number,
+    occurrences: number,
+  ) => SearchStopReason | undefined;
   readonly executablePath: string;
   readonly target: string;
   readonly cwd: string;
@@ -92,6 +101,10 @@ export async function searchWithRipgrep(
     "--no-require-git",
     "--threads=1",
   ];
+  if (options.before) args.push("--before-context", String(options.before));
+  if (options.after) args.push("--after-context", String(options.after));
+  if (options.ignoreCase) args.push("--ignore-case");
+  if (options.firstMatchPerFile) args.push("--max-count=1");
   if (options.include !== undefined) args.push("--glob", options.include);
   // Last glob wins. This excludes .git during traversal, but rg still honors an
   // explicit file target (including one inside .git).
@@ -153,6 +166,7 @@ export async function searchWithRipgrep(
             lines: EncodedText;
             line_number: number;
             submatches: { start: number }[];
+            stats?: { matched_lines: number; matches: number };
             binary_offset?: number | null;
           };
         };
@@ -166,17 +180,37 @@ export async function searchWithRipgrep(
             event.data.binary_offset !== undefined
           )
             binaryFileCount += 1;
+          else if (options.onFileEnd) {
+            const stats = event.data.stats;
+            if (
+              !stats ||
+              !Number.isSafeInteger(stats.matched_lines) ||
+              stats.matched_lines < 0 ||
+              !Number.isSafeInteger(stats.matches) ||
+              stats.matches < stats.matched_lines
+            )
+              throw new Error("Invalid file match statistics");
+            if (stats.matched_lines) {
+              const reason = options.onFileEnd(
+                decodePath(event.data.path),
+                stats.matched_lines,
+                stats.matches,
+              );
+              if (reason) stop(reason);
+            }
+          }
         } else if (event.type === "summary") summarySeen = true;
-        else if (event.type === "match") {
+        else if (event.type === "match" || event.type === "context") {
           const data = event.data;
           if (
             !Number.isSafeInteger(data.line_number) ||
             data.line_number < 1 ||
-            !Array.isArray(data.submatches) ||
-            !data.submatches.length
+            (event.type === "match" &&
+              (!Array.isArray(data.submatches) || !data.submatches.length))
           )
             throw new Error("Invalid match location");
-          const matchStart = data.submatches[0].start;
+          const matchStart =
+            event.type === "context" ? 0 : data.submatches[0].start;
           if (!Number.isSafeInteger(matchStart) || matchStart < 0)
             throw new Error("Invalid match offset");
           const reason = options.onMatch({
@@ -185,7 +219,7 @@ export async function searchWithRipgrep(
             text:
               typeof data.lines.text === "string" ? data.lines.text : undefined,
             matchStart,
-            matchCount: data.submatches.length,
+            matchCount: event.type === "context" ? 0 : data.submatches.length,
           });
           if (reason) stop(reason);
         } else throw new Error("Unexpected record type");

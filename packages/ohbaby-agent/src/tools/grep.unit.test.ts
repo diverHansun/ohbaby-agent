@@ -376,4 +376,158 @@ describe("grep file tool", () => {
       binaryFileCount: 1,
     });
   });
+  it("merges overlapping context, marks matching lines and separates distant groups", async () => {
+    const lines = [
+      "one",
+      "two",
+      "Hit",
+      "middle",
+      "hit",
+      "six",
+      "seven",
+      "gap",
+      "nine",
+      "ten",
+      "hit",
+      "twelve",
+      "thirteen",
+    ];
+    await writeFile(tempRoot, "context.txt", lines.join("\n") + "\n");
+    const result = await createGrepTool().execute(
+      { pattern: "hit", ignore_case: true, before: 2, after: 2 },
+      createTestContext(tempRoot),
+    );
+    const file = path.join(tempRoot, "context.txt");
+    expect(result.output?.split("\n")).toEqual([
+      `${file}-1- one`,
+      `${file}-2- two`,
+      `${file}:3: Hit`,
+      `${file}-4- middle`,
+      `${file}:5: hit`,
+      `${file}-6- six`,
+      `${file}-7- seven`,
+      "--",
+      `${file}-9- nine`,
+      `${file}-10- ten`,
+      `${file}:11: hit`,
+      `${file}-12- twelve`,
+      `${file}-13- thirteen`,
+    ]);
+    expect(result.metadata).toMatchObject({
+      count: 3,
+      matchCount: 3,
+      scanComplete: true,
+    });
+  });
+
+  it("keeps the last accepted match's trailing context without charging context to the match limit", async () => {
+    await writeFile(
+      tempRoot,
+      "tail.txt",
+      "before\nhit\na1\na2\na3\na4\na5\na6\nhit again\n",
+    );
+    const result = await createGrepTool().execute(
+      { pattern: "hit", after: 5, limit: 1 },
+      createTestContext(tempRoot),
+    );
+    expect(result.output).toContain("tail.txt:2: hit");
+    for (let i = 1; i <= 5; i++)
+      expect(result.output).toContain(
+        `tail.txt-${String(2 + i)}- a${String(i)}`,
+      );
+    expect(result.output).not.toMatch(/tail\.txt[-:](1|8|9)[-:]/);
+    expect(result.metadata).toMatchObject({
+      count: 1,
+      scanComplete: false,
+      stopReason: "match-limit",
+    });
+  });
+
+  it.each([
+    { before: 21 },
+    { after: -1 },
+    { after: 1.5 },
+    { output_mode: "files", before: 0 },
+    { output_mode: "count", after: 1 },
+    { output_mode: "unknown" },
+  ])(
+    "rejects invalid search options before resolving the target: %j",
+    async (options) => {
+      const tool = createGrepTool();
+      await expect(
+        tool.execute(
+          { pattern: "hit", path: "missing", ...options },
+          createTestContext(tempRoot),
+        ),
+      ).rejects.toMatchObject({ name: "ToolParameterError" });
+    },
+  );
+
+  it("returns one path per matching file and counts lines separately from occurrences", async () => {
+    await writeFile(tempRoot, "a.txt", "hit hit\n".repeat(130));
+    await writeFile(tempRoot, "b.txt", "hit\nmiss\nhit\n");
+    await writeFile(tempRoot, "c.txt", "miss\n");
+    const tool = createGrepTool();
+    const ctx = createTestContext(tempRoot);
+    const files = await tool.execute(
+      { pattern: "hit", output_mode: "files" },
+      ctx,
+    );
+    expect(files.output?.split("\n").sort()).toEqual(
+      ["a.txt", "b.txt"].map((name) => path.join(tempRoot, name)),
+    );
+    const counts = await tool.execute(
+      { pattern: "hit", output_mode: "count" },
+      ctx,
+    );
+    expect(counts.output?.split("\n").sort()).toEqual([
+      `${path.join(tempRoot, "a.txt")}: 130`,
+      `${path.join(tempRoot, "b.txt")}: 2`,
+    ]);
+    for (const output_mode of ["files", "count"]) {
+      const limited = await tool.execute(
+        { pattern: "hit", output_mode, limit: 1 },
+        ctx,
+      );
+      expect(limited.metadata).toMatchObject({
+        count: 1,
+        scanComplete: false,
+        stopReason: "match-limit",
+      });
+      const rows =
+        limited.output
+          ?.split("\n")
+          .filter((line) => line.startsWith(tempRoot)) ?? [];
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatch(
+        output_mode === "files" ? /[ab]\.txt$/ : /(?:a\.txt: 130|b\.txt: 2)$/,
+      );
+    }
+  });
+
+  it("charges surrounding lines and separators to the display byte budget", async () => {
+    const lines = [
+      "hit",
+      ...Array<string>(5).fill("界".repeat(550)),
+      "outside",
+    ];
+    await writeFile(
+      tempRoot,
+      "budget.txt",
+      (lines.join("\n") + "\n").repeat(30),
+    );
+    const result = await createGrepTool().execute(
+      { pattern: "hit", after: 5 },
+      createTestContext(tempRoot),
+    );
+    expect(result.metadata).toMatchObject({
+      scanComplete: false,
+      stopReason: "output-limit",
+      truncated: true,
+    });
+    expect(Buffer.byteLength(result.output ?? "")).toBeLessThanOrEqual(
+      50 * 1024,
+    );
+    expect(result.output).toContain("Search incomplete");
+  });
 });
