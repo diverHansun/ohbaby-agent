@@ -204,6 +204,16 @@ describe("sandbox preflight facts", () => {
     expect(result.denylistHits).toEqual([]);
   });
 
+  it("checks expanded home paths against the denylist", async () => {
+    const result = await preflightSandboxCommand({
+      command: "cat ~/.ssh/id_rsa",
+      shellKind: "bash",
+      workdir: tempRoot,
+    });
+    expect(result.denylistHits).toMatchObject([{ reason: "ssh-key-dir" }]);
+    expect(result.externalPaths).toEqual([]);
+  });
+
   it("hard denies symlink targets that resolve to sensitive directories", async () => {
     const workdir = path.join(tempRoot, "workspace");
     const fakeHomeSsh = path.join(

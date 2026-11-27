@@ -68,9 +68,10 @@ describe("shell preflight", () => {
         path.join(root, value),
       ]);
     }
-    expect((await analyzeShellCommand("cat ~/a", "bash")).completeness).toBe(
-      "incomplete",
-    );
+    expect(await analyzeShellCommand("cat ~/a", "bash")).toMatchObject({
+      completeness: "complete",
+      commands: [{ pathArgs: [path.join(os.homedir(), "a")] }],
+    });
   });
   it("allows download output without treating the output path as execution", async () => {
     await expect(
@@ -345,6 +346,7 @@ describe("shell preflight", () => {
   });
 
   it("rejects obvious destructive root removal commands", async () => {
+    await expect(preflight("rm -rf ~")).rejects.toThrow("blacklisted");
     await expect(preflight("rm -rf /")).rejects.toThrow("blacklisted");
   });
 });

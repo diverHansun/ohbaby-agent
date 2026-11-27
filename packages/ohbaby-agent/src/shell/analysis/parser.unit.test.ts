@@ -188,4 +188,67 @@ describe("mature shell analysis", () => {
     ]);
     expect(result.commands[0]?.pathArgs).toEqual(["input", "output"]);
   });
+  it.each([
+    "ls src 2>/dev/null",
+    "ls src >/dev/null 2>&1",
+    "ls src &>/dev/null",
+    "grep foo src 2>&1",
+    "echo x >&2",
+  ])("recognizes harmless redirects in %s", async (source) => {
+    const analysis = await analyzeShellCommand(source, "bash");
+    expect(analysis.completeness).toBe("complete");
+    expect(analysis.commands[0].danger).toBe("readonly");
+    expect(analysis.commands[0].pathArgs).not.toContain("/dev/null");
+  });
+  it.each(["ls src &>out.txt", "ls src 2>err.log", "ls >/dev/tty", "ls >2"])(
+    "retains file redirections in %s",
+    async (source) => {
+      const [command] = (await analyzeShellCommand(source, "bash")).commands;
+      expect(command.danger).toBe("mutating");
+      expect(command.pathArgs).not.toHaveLength(0);
+    },
+  );
+  it("tracks cwd only along successful AND chains", async () => {
+    const result = await analyzeShellCommand(
+      "cd a && cd b && cat x && ls y",
+      "bash",
+    );
+    expect(result.completeness).toBe("complete");
+    expect(result.commands.map((item) => item.cwd)).toEqual([
+      ".",
+      "a",
+      "a/b",
+      "a/b",
+    ]);
+  });
+  it.each([
+    ["cd /tmp && ls a; ls b", "bash"],
+    ["cd x 2>/dev/null; cat y", "bash"],
+    ["Set-Location x; Get-Content y", "powershell"],
+  ] as const)("clears uncertain cwd after %s", async (source, kind) => {
+    const result = await analyzeShellCommand(source, kind);
+    expect(result.commands.at(-1)?.cwd).toBeUndefined();
+    expect(result.completeness).toBe("incomplete");
+  });
+  it("expands unquoted home arguments while retaining literal spellings", async () => {
+    const { commands, completeness } = await analyzeShellCommand(
+      'ls ~ ~/dir "~/dir" a~b',
+      "bash",
+    );
+    expect(completeness).toBe("complete");
+    expect(commands[0].tokens.slice(1)).toEqual([
+      os.homedir(),
+      path.join(os.homedir(), "dir"),
+      "~/dir",
+      "a~b",
+    ]);
+  });
+  it.each(["~user/a", "~+/a", "~\\a"])(
+    "leaves unsupported home expression %s incomplete",
+    async (value) => {
+      expect(
+        (await analyzeShellCommand("cat " + value, "bash")).completeness,
+      ).toBe("incomplete");
+    },
+  );
 });

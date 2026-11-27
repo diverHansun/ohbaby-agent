@@ -1,4 +1,5 @@
 import path from "node:path";
+import os from "node:os";
 import { canonicalizePathTarget } from "../utils/path-canonicalize.js";
 import { resolveSandboxPathArg } from "../sandbox/paths.js";
 import type {
@@ -65,6 +66,7 @@ export function shellArgs(
 }
 function rootTarget(value: string): boolean {
   return (
+    value === os.homedir() ||
     ["/", "/*", "~", "~/", "\\"].includes(value) ||
     /^[A-Za-z]:[\\/]*$/u.test(value)
   );

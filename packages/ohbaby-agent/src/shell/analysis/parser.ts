@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 declare const OHBABY_SHELL_GRAMMAR_ASSETS: string | undefined;
 import { Parser, Language, type Node } from "web-tree-sitter";
@@ -139,11 +140,22 @@ function literal(node: Node, powershell: boolean): string | undefined {
   }
   if (node.type === "raw_string") return value.slice(1, -1);
   if (node.type === "string") return decodePosix(value.slice(1, -1), true);
-  if (node.type === "word" && value.startsWith("~")) return undefined;
+  if (node.type === "word" && value.startsWith("~")) {
+    if (value === "~") return os.homedir();
+    if (!value.startsWith("~/")) return undefined;
+    return path.join(os.homedir(), decodePosix(value.slice(2), false));
+  }
   if (node.type === "word" || node.type === "number")
     return decodePosix(value, false);
   if (node.type === "concatenation") {
-    const parts = namedChildren(node).map((child) => literal(child, false));
+    const fragments = namedChildren(node);
+    if (
+      fragments.some(
+        (part) => part.type === "word" && part.text.startsWith("~"),
+      )
+    )
+      return undefined;
+    const parts = fragments.map((child) => literal(child, false));
     return parts.every((part) => part !== undefined)
       ? parts.join("")
       : undefined;
@@ -247,7 +259,7 @@ export async function analyzeShellCommand(
               nested,
               i === namedChildren(node).length - 1 ? redirects : [],
             );
-          if (nested.cwd !== context.cwd) context.cwd = undefined;
+          context.cwd = nested.conditional ? undefined : nested.cwd;
           return;
         }
         if (
@@ -362,6 +374,9 @@ export async function analyzeShellCommand(
           const paths = [...facts.pathArgs];
           const redirectNodes = [
             ...redirects,
+            ...node
+              .childrenForFieldName("redirect")
+              .filter((child): child is Node => child !== null),
             ...(powershell
               ? namedChildren(
                   node.childForFieldName("command_elements"),
@@ -374,6 +389,11 @@ export async function analyzeShellCommand(
               if (hasDynamic(redirect))
                 reasons.add("Heredoc uses dynamic expansion.");
               continue;
+            }
+            if (redirect.childrenForFieldName("destination").length > 1) {
+              reasons.add(
+                "Arguments after redirection cannot be separated reliably.",
+              );
             }
             const destination =
               redirect.childForFieldName("destination") ??
@@ -389,6 +409,22 @@ export async function analyzeShellCommand(
             const target = targetNode
               ? literal(targetNode, powershell)
               : undefined;
+            const operator = children(redirect).find(
+              (child) => !child.isNamed,
+            )?.text;
+            if (!powershell && operator) {
+              if (
+                operator === ">&" &&
+                target !== undefined &&
+                /^(?:\d+|-)$/u.test(target)
+              )
+                continue;
+              if (
+                [">", ">>", ">|", "&>", "&>>"].includes(operator) &&
+                target === "/dev/null"
+              )
+                continue;
+            }
             writesFiles ||=
               children(redirect).some((child) =>
                 /^(?:\d*|&)>/u.test(child.text),
@@ -399,9 +435,8 @@ export async function analyzeShellCommand(
                     child.type === "file_redirection_operator" &&
                     child.text.includes(">"),
                 ));
-            if (target !== undefined && !/^\d+$/u.test(target))
-              paths.push(target);
-            else if (target === undefined && targetNode)
+            if (target !== undefined) paths.push(target);
+            else if (targetNode)
               reasons.add("Redirection destination is dynamic.");
           }
           if (
@@ -481,8 +516,7 @@ export async function analyzeShellCommand(
         for (const child of namedChildren(node)) {
           const previousCwd = context.cwd;
           walk(child, context);
-          if (child.type === "command" && context.cwd !== previousCwd)
-            context.cwd = undefined;
+          if (context.cwd !== previousCwd) context.cwd = undefined;
         }
       }
       function walkNestedCommands(node: Node, context: WalkContext): void {
