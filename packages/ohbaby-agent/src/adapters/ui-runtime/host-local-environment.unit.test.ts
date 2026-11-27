@@ -40,6 +40,27 @@ describe("createHostLocalEnvironment", () => {
     );
   });
 
+  it("resolves home and a literal tilde through a sandbox lease", async () => {
+    const home = await realpath(
+      await mkdtemp(path.join(tmpdir(), "ohbaby-home-")),
+    );
+    cleanupDirectories.push(home);
+    vi.spyOn(os, "homedir").mockReturnValue(home);
+    await mkdir(path.join(home, "~"));
+    await writeFile(path.join(home, "~", "note.txt"), "literal");
+    const manager = createHostLocalSandboxManager(home);
+    const lease = await manager.acquire("tilde");
+    try {
+      expect(lease.resolvePath("~")).toBe(home);
+      expect(await lease.resolvePathForExisting("./~/note.txt")).toBe(
+        path.join(home, "~", "note.txt"),
+      );
+    } finally {
+      await manager.release(lease);
+      await manager.dispose();
+    }
+  });
+
   it("allows relative writes inside a canonicalized temporary workspace", async () => {
     const workdir = await mkdtemp(path.join(tmpdir(), "ohbaby-host-local-"));
     cleanupDirectories.push(workdir);

@@ -194,11 +194,11 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
 
   const routingDescription = [
     "Use bash for builds, tests, git, package managers, scripts, output pipelines (| grep, | tail, wc -l, sort | uniq -c, du), and non-UTF-8/binary files.",
-    "Use the dedicated tools instead of shell commands (translate these):",
-    "- Read (cat, head, tail, sed -n): use read (numbers lines, resumes via cursor).",
-    "- List (ls): use list. File search (find, ls -R): use glob (skips .git, node_modules, dist, out, target). Content search (grep, rg): use grep (skips .git, .gitignore).",
-    "- Write/edit (echo >, cat <<EOF, sed -i): use write or edit (edit fails safely on mismatch).",
-    "Dedicated tools declare exact paths (complex shell commands are text-checked and need approval each time) and work outside the workspace once approved. Fall back to shell only if explicitly instructed or after verifying a dedicated tool cannot accomplish the task.",
+    "To inspect or change files, use the dedicated tools instead of shell commands:",
+    "- Reading files (cat, head, tail, sed -n): use read (numbers lines, resumes via cursor).",
+    "- Listing a directory (ls): use list. Finding files (find, ls -R): use glob (skips .git, node_modules, dist, out, target). Searching contents (grep, rg): use grep (skips .git and files ignored by .gitignore).",
+    "- Creating or changing files (echo >, cat <<EOF, sed -i): use write or edit (edit fails safely on mismatch).",
+    "Dedicated tools know exactly which paths they touch (shell commands are checked from their text, so complex ones need approval each time) and work outside the workspace once approved. Fall back to shell only when a dedicated tool cannot do the job or the user asks for a shell command.",
     "Issue independent lookups as parallel dedicated-tool calls instead of chaining with && or stitching output with echo separators; use && only for dependent commands.",
   ].join("\n");
 

@@ -446,6 +446,7 @@ describe("bash builtin tool", () => {
       spawn,
     });
 
+    expect(bash.description).toContain("Get-Content -> read");
     const resultPromise = bash.execute(
       { command: "Write-Host hello" },
       createContext(),
