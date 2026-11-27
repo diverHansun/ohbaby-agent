@@ -32,6 +32,8 @@
 | 04 测试与验收 | [链接](improve-1/04-test-and-acceptance.md) | [链接](improve-2/04-test-and-acceptance.md) | [链接](improve-3/04-test-and-acceptance.md) |
 | 05 实施验收 | [记录](improve-1/05-implementation-acceptance.md) | [记录](improve-2/05-implementation-acceptance.md) | [记录](improve-3/05-implementation-acceptance.md) |
 
+三份验收记录保留了测试结果。文中 `.scratch/native-preference/` 是运行时的临时日志目录，验收结束后清理。
+
 [tool-choice-stats.py](tool-choice-stats.py) 是三轮共用的统计脚本。它从本机 `ohbaby.db` 里统计每个模型"原生工具"和"用 bash 做查看"的次数，改动前后各跑一次来对比效果。说明：improve-3 中 [01](improve-3/01-problem-analysis-and-current-state.md) 的历史模拟与历史对比仅作背景观察，不作为最新收紧方案的新预期或验收指标。
 
 ## 实施契约

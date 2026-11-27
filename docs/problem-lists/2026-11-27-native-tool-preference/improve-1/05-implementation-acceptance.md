@@ -65,9 +65,15 @@
 
 全量测试发现，16K 窗口预留 4,096 个输出 token 后，一条普通请求因工具描述过长而在发出前失败。Neon 精简了八个工具源码文件中的英文说明（`a171a9bb`）。相同工作目录下，原始基线、修复前和修复后的输入估算分别为 10,003、11,270、10,478，输入预算为 10,880。宿主机复跑原始集成用例成功，17 个相关文件共 231 项通过，提示词生成物一致性检查通过。
 
+### 最终提示词专项复审
+
+Gemini-4-Neon high 和 Claude Opus-5-5 high 分别核对主代理、子代理提示词及各工具实际发送给模型的说明。根据复审意见，`f23f0a3e` 明确了两点：grep 的 `include` 不过滤显式指定的单个文件；访问工作区外的路径可能需要审批，选择 Allow once 只允许本次调用。两位评审均复核通过，提示词生成物检查和 143 项定向测试通过，其中包含 16K 窗口的回归用例。最终构建通过，全量测试 9,299 项通过、28 项跳过。
+
+用内置浏览器运行该提交的构建产物。模型用 `include="*.ts"` 搜索单个 `note.txt`，命中第 1 行，并正确解释了结果。随后连续两次读取同一外部夹具。第一次选择 Allow once 后读取成功，第二次再次弹窗，选择 Reject 后工具显示 rejected，会话结束。
+
 ## 5.6 本机临时记录（未入库）
 
-以下文件仅存在于本机工作区临时目录与 `/tmp`，不作为受版本控制的永久链接，供本机复盘核对：
+以下路径记录验收时使用的本机临时文件。
 
 - 自动化测试与审查日志（`.scratch/native-preference/`）：`b1-unit.log`、`b1-commit.log`、`b1-opus.log`、`b1-review-test.log`、`b1-review-commit.log`
 - 真实模型实测快照（`/tmp/ohbaby-native-baseline.PG1oRf/`）：`requests.json`、`first-results.json`、`first-home.json`、`child-baseline-tools.json`、`after1-runs/requests.json`、`after1-runs/e2e-results.json`、`after1-home.json`、`after1-children.json`
