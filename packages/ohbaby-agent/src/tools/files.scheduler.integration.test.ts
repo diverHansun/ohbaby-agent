@@ -15,6 +15,7 @@ import {
   type PermissionInfo,
 } from "../permission/index.js";
 import { createBuiltinTools } from "./index.js";
+import { trustedToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import * as fileLocks from "./utils/file-locks.js";
 import { ResourceUnavailableError } from "../core/tool-scheduler/resources.js";
 
@@ -466,6 +467,28 @@ describe("file tools scheduler integration", () => {
     expect(result.status).toBe("error");
     expect(result.error?.message).toContain("rename failed");
     await expect(fs.readdir(tempRoot)).resolves.toEqual([]);
+  });
+
+  it("plans the same write lock for home shorthand and its absolute path", async () => {
+    vi.spyOn(os, "homedir").mockReturnValue(outsideRoot);
+    const tool = createScheduler().get("write");
+    const plan = tool && trustedToolAdmission(tool)?.plan;
+    if (!plan) throw new Error("Missing write resource plan");
+    const context = {
+      callId: "write",
+      messageId: "message",
+      sessionId: "session",
+      signal: new AbortController().signal,
+      environment: createHostLocalEnvironment(tempRoot),
+    };
+    const absolute = await plan(
+      { file_path: path.join(outsideRoot, "new.txt") },
+      context,
+    );
+    expect(await plan({ file_path: "~/new.txt" }, context)).toEqual(absolute);
+    expect(await plan({ file_path: "./~/new.txt" }, context)).not.toEqual(
+      absolute,
+    );
   });
 
   it.each(["absolute", "home"])(

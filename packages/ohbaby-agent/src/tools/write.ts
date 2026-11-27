@@ -36,7 +36,7 @@ export function createWriteTool(): Tool {
     {
       name: "write",
       description:
-        "Create a file or replace its entire contents with the supplied UTF-8 text (20 MiB write budget). Existing contents are fully replaced even if they are not valid UTF-8. The previous encoding is not preserved; an existing UTF-8 BOM is preserved. Input strings containing lone Unicode surrogates are rejected. Use Edit for targeted changes. Dry-run diffs have separate limits and may be omitted.",
+        "Create a file or overwrite its entire contents with UTF-8 text. Use this instead of shell redirection (echo >, cat <<EOF); missing parent directories are created automatically. 20 MiB write budget; replaces existing contents even if non-UTF-8 (preserves an existing UTF-8 BOM, not other encodings) and rejects lone Unicode surrogates. Use edit for targeted changes. Dry-run diffs have separate limits and may be omitted.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {

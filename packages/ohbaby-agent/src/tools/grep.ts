@@ -61,14 +61,30 @@ export function createGrepTool(): Tool {
     {
       name: "grep",
       description:
-        "Locate matching lines with ripgrep's default regex syntax (no look-around or backreferences). Returns paths, line numbers and limited previews; use Read for full content. Directory searches honor project .gitignore/.ignore/.rgignore, include hidden files and exclude .git traversal; parent/global ignores are disabled. Explicit include uses rg glob precedence and can override ignores, but does not filter explicitly named files. Binary files and arbitrary encodings are not guaranteed; previews may be unavailable. Use Bash explicitly for other encodings or raw bytes. No pagination or export.",
+        "Search file contents with a regular expression. Use this instead of shell grep or rg. Uses ripgrep default regex syntax (no look-around or backreferences) and returns paths, line numbers, and line previews; use read for full content. Directory searches honor project .gitignore/.ignore/.rgignore, include hidden files, and skip .git traversal (parent/global ignores disabled). Explicit include follows rg glob precedence and can override ignores, but does not filter a single file path. Binary files and non-UTF-8 encodings are not guaranteed; previews may be unavailable. For other encodings or raw bytes, use bash.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
-          include: { type: "string" },
-          limit: { minimum: 1, type: "integer" },
-          path: FILE_PATH_SCHEMA,
-          pattern: { type: "string" },
+          include: {
+            description:
+              'Ripgrep glob to filter searched files (e.g. "*.ts" by name or "src/**/*.ts" by path). Can override .gitignore; ignored when path is a single file.',
+            type: "string",
+          },
+          limit: {
+            description: "Maximum matching lines to return (default: 100).",
+            minimum: 1,
+            type: "integer",
+          },
+          path: {
+            ...FILE_PATH_SCHEMA,
+            description:
+              "File or directory to search. Defaults to the workspace root. Accepts absolute, ~/, or workspace-relative paths; external directories ask for approval on first access.",
+          },
+          pattern: {
+            description:
+              "Ripgrep default regular expression (no look-around or backreferences).",
+            type: "string",
+          },
         },
         required: ["pattern"],
         type: "object",

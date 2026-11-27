@@ -28,13 +28,25 @@ export function createGlobTool(): Tool {
     {
       name: "glob",
       description:
-        "Find ordinary files with ripgrep globs relative to the search root. Supports *, ?, **, {a,b}, and [ab]; *.ts matches only the root, **/*.ts matches recursively. For a literal [id] directory use app/[[]id]/*.tsx. Includes hidden files and ignores ignore files; .git, dist, node_modules, out, target remain excluded. Does not follow internal symlinks. Returns sorted paths and explicit scan completeness; narrow the pattern or root when results are incomplete.",
+        "Find files by name or path pattern (for example src/**/*.ts). Use this instead of find or ls -R. Matches ordinary files with ripgrep globs relative to path (*, ?, **, {a,b}, [ab]; *.ts matches only the root, **/*.ts matches recursively; escape literal [id] as app/[[]id]/*.tsx). Includes hidden files and does not apply .gitignore, but always skips .git, dist, node_modules, out, and target. Does not follow internal symlinks. Returns sorted paths and scan completeness; narrow pattern or path when incomplete.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
-          limit: { minimum: 1, type: "integer" },
-          path: FILE_PATH_SCHEMA,
-          pattern: { type: "string" },
+          limit: {
+            description: "Maximum file paths to return (default: 100).",
+            minimum: 1,
+            type: "integer",
+          },
+          path: {
+            ...FILE_PATH_SCHEMA,
+            description:
+              "Directory to search. Defaults to the workspace root. Accepts absolute, ~/, or workspace-relative paths; external directories ask for approval on first access.",
+          },
+          pattern: {
+            description:
+              "Relative ripgrep glob (no leading / or ..). Use **/*.ts for recursive matches; *.ts matches only the search root.",
+            type: "string",
+          },
         },
         required: ["pattern"],
         type: "object",

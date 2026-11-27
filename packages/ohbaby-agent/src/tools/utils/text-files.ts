@@ -20,7 +20,7 @@ export const TEXT_FILE_SAMPLE_BYTES = 4_096;
 export const FILE_PATH_SCHEMA = {
   type: "string",
   description:
-    "Path inside the tool execution workspace. Relative paths and absolute paths within the workspace are supported.",
+    "Absolute path, ~/ home path, or workspace-relative path. Paths outside the workspace also work; the first access to an external directory asks for user approval.",
 };
 
 export type LineEnding = "CRLF" | "LF" | "mixed" | "none";
