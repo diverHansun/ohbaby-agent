@@ -22,6 +22,29 @@ describe("mature shell analysis", () => {
     }
   });
 
+  it.each([
+    ['cat "$=FIXTURE"', "zsh"],
+    ['cat "$~FIXTURE"', "zsh"],
+    ["ls &>/dev/null", "sh"],
+    ["pwd && >/dev/null", "bash"],
+    ["cd a && false && cd ..; cat file", "bash"],
+  ] as const)(
+    "requires a one-time decision for uncertain syntax in %s",
+    async (source, kind) => {
+      expect(await analyzeShellCommand(source, kind)).toMatchObject({
+        completeness: "incomplete",
+        defaultApproved: false,
+      });
+    },
+  );
+
+  it("preserves a zsh single-quoted literal filename", async () => {
+    expect(await analyzeShellCommand("cat '$FIXTURE'", "zsh")).toMatchObject({
+      defaultApproved: true,
+      commands: [{ pathArgs: ["$FIXTURE"] }],
+    });
+  });
+
   it("does not claim a successful cwd after unconditional cd", async () => {
     const result = await analyzeShellCommand(
       "cd missing; cat file.txt",

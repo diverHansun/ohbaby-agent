@@ -111,10 +111,10 @@ function decodePosix(value: string, quoted: boolean): string {
   return output;
 }
 /** Decode only AST-proven literal values; never evaluate shell expressions. */
-function literal(node: Node, powershell: boolean): string | undefined {
+function literal(node: Node, kind: ShellKind): string | undefined {
   if (hasDynamic(node) || node.hasError || node.isMissing) return undefined;
   const value = node.text;
-  if (powershell) {
+  if (kind === "powershell") {
     if (node.type === "verbatim_string_characters")
       return value.slice(1, -1).replaceAll("''", "'");
     if (node.type === "expandable_string_literal")
@@ -139,10 +139,17 @@ function literal(node: Node, powershell: boolean): string | undefined {
           ({ n: "\n", r: "\r", t: "\t", "0": "\0" })[character] ?? character,
       );
     if (node.namedChildCount === 1)
-      return literal(namedChildren(node)[0], true);
+      return literal(namedChildren(node)[0], kind);
     return undefined;
   }
   if (node.type === "raw_string") return value.slice(1, -1);
+  // The Bash grammar does not represent every zsh parameter expansion.
+  if (
+    kind === "zsh" &&
+    (node.type === "word" || node.type === "string") &&
+    /[$`]/u.test(value)
+  )
+    return undefined;
   if (node.type === "string") return decodePosix(value.slice(1, -1), true);
   if (node.type === "word" && value.startsWith("~")) {
     if (value === "~") return os.homedir();
@@ -159,13 +166,13 @@ function literal(node: Node, powershell: boolean): string | undefined {
       )
     )
       return undefined;
-    const parts = fragments.map((child) => literal(child, false));
+    const parts = fragments.map((child) => literal(child, kind));
     return parts.every((part) => part !== undefined)
       ? parts.join("")
       : undefined;
   }
   if (node.type === "command_name" && node.namedChildCount === 1)
-    return literal(namedChildren(node)[0], false);
+    return literal(namedChildren(node)[0], kind);
   return undefined;
 }
 function unwrap(tokens: readonly string[]): {
@@ -218,6 +225,7 @@ function changeDirectory(
     : path.posix.normalize(path.posix.join(cwd, target));
 }
 interface WalkContext {
+  lastDirectoryChange?: number;
   cwd: string | undefined;
   conditional: boolean;
   pipelineId?: number;
@@ -240,10 +248,7 @@ export async function analyzeShellCommand(
   const commands: ShellCommandAnalysis[] = [];
   const reasons = new Set<string>();
   let pipelineId = 0;
-  let simpleSyntax =
-    !powershell &&
-    !/[^\S \t\n]|\\/u.test(command) &&
-    !(shellKind === "sh" && command.includes("&>"));
+  let simpleSyntax = !powershell && !/[^\S \t\n]|\\/u.test(command);
   try {
     parser.setLanguage(language);
     const tree = parser.parse(command);
@@ -271,6 +276,7 @@ export async function analyzeShellCommand(
               nested,
               i === namedChildren(node).length - 1 ? redirects : [],
             );
+          context.lastDirectoryChange = nested.lastDirectoryChange;
           context.cwd = nested.conditional ? undefined : nested.cwd;
           return;
         }
@@ -314,19 +320,25 @@ export async function analyzeShellCommand(
           ) {
             reasons.add("Directory change in a pipeline.");
             context.cwd = undefined;
-          } else context.cwd = nested.cwd;
+          } else {
+            context.cwd = nested.cwd;
+            context.lastDirectoryChange = nested.lastDirectoryChange;
+          }
           return;
         }
         if (node.type === "redirected_statement") {
           const body = node.childForFieldName("body");
-          if (body)
-            walk(
-              body,
-              context,
-              node
-                .childrenForFieldName("redirect")
-                .filter((child): child is Node => child !== null),
-            );
+          if (!body) {
+            reasons.add("Redirection without a command is incomplete.");
+            return;
+          }
+          walk(
+            body,
+            context,
+            node
+              .childrenForFieldName("redirect")
+              .filter((child): child is Node => child !== null),
+          );
           return;
         }
         if (node.type === "command") {
@@ -352,7 +364,7 @@ export async function analyzeShellCommand(
           const values: (string | undefined)[] = [];
           const rawTokens: string[] = [];
           for (let i = 0; i < nodes.length; i += 1) {
-            const value = literal(nodes[i], powershell);
+            const value = literal(nodes[i], shellKind);
             const gap =
               i > 0
                 ? command.slice(nodes[i - 1].endIndex, nodes[i].startIndex)
@@ -423,11 +435,17 @@ export async function analyzeShellCommand(
                   )
                 : destination;
             const target = targetNode
-              ? literal(targetNode, powershell)
+              ? literal(targetNode, shellKind)
               : undefined;
             const operator = children(redirect).find(
               (child) => !child.isNamed,
             )?.text;
+            if (
+              shellKind === "sh" &&
+              (operator === "&>" || operator === "&>>")
+            ) {
+              reasons.add("Combined output redirection is not portable in sh.");
+            }
             if (!powershell && operator) {
               if (
                 operator === ">&" &&
@@ -492,11 +510,13 @@ export async function analyzeShellCommand(
             pipelineId: context.pipelineId,
             downloadTargets: facts.downloadTargets,
           });
-          if (DIRECTORY_COMMANDS.has(root))
+          if (DIRECTORY_COMMANDS.has(root)) {
+            context.lastDirectoryChange = node.id;
             context.cwd =
               cdTarget && !context.conditional && !dynamic
                 ? changeDirectory(context.cwd, cdTarget, powershell)
                 : undefined;
+          }
           // Substitutions have their own cwd but their static policy facts remain useful.
           for (const child of namedChildren(node))
             if (hasDynamic(child)) walkNestedCommands(child, { ...context });
@@ -531,8 +551,13 @@ export async function analyzeShellCommand(
         }
         for (const child of namedChildren(node)) {
           const previousCwd = context.cwd;
+          const previousChange = context.lastDirectoryChange;
           walk(child, context);
-          if (context.cwd !== previousCwd) context.cwd = undefined;
+          if (
+            context.cwd !== previousCwd ||
+            context.lastDirectoryChange !== previousChange
+          )
+            context.cwd = undefined;
         }
       }
       function walkNestedCommands(node: Node, context: WalkContext): void {
