@@ -1098,6 +1098,8 @@ export function createToolScheduler(
                   ? "subagent"
                   : call.category,
               params: context.params,
+              readsRegisteredSkill:
+                tool && trustedToolAdmission(tool)?.readsRegisteredSkill,
               shellAnalysis: context.shellAnalysis,
               sessionId: call.sessionId,
               messageId: call.messageId,

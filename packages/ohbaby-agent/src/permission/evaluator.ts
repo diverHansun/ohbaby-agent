@@ -89,6 +89,7 @@ function evaluateLevelFallback(
         { rememberable: false },
       );
     case "skill":
+      if (call.readsRegisteredSkill) return allow();
       return ask(
         `Skill requires confirmation: ${classification.label ?? call.toolName}`,
       );

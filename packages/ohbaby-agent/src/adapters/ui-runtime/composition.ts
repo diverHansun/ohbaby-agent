@@ -1,3 +1,4 @@
+import { trustLoadedSkills } from "../../skill/history-trust.js";
 import { acceptRuntimeOpening } from "./runtime-opening.js";
 import { subscribeRunSteer } from "../../runtime/prompt-scheduler/steer-subscription.js";
 import { InMemoryShellJobStore } from "../../shell-jobs/store.js";
@@ -883,6 +884,17 @@ export async function createUiRuntimeComposition(
   });
 
   const runManager: RunManager = new RunManager({
+    async restoreSkillTrust(lease) {
+      const history = await options.messageManager.listBySession(
+        lease.sessionId,
+        { contextScopeId: lease.contextScopeId },
+      );
+      await trustLoadedSkills(
+        inputStore ? await inputStore.filterModelHistory(history) : history,
+        skillRegistry,
+        lease,
+      );
+    },
     async beforeFinalize(runId, outcome): Promise<void> {
       const run = await runLedger.get(runId);
       if (!run) throw new Error(`Missing execution record for ${runId}`);
@@ -933,6 +945,23 @@ export async function createUiRuntimeComposition(
             runId: identity.runId,
             inputs: inputStore,
             sources: [
+              {
+                reconcile: () => Promise.resolve(),
+                async confirmRequestSuccess(records) {
+                  const ids = records
+                    .filter((record) => record.source === "user-steer")
+                    .map((record) => record.messageId);
+                  if (ids.length)
+                    await trustLoadedSkills(
+                      await options.messageManager.listByIds(
+                        identity.sessionId,
+                        ids,
+                      ),
+                      skillRegistry,
+                      identity.sandboxLease,
+                    );
+                },
+              },
               ...(continuation ? [continuation.createSource(identity)] : []),
               createBackgroundTaskInputSource({
                 store: shellJobStore,

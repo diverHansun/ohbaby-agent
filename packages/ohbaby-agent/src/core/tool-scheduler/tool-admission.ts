@@ -13,6 +13,7 @@ export interface ResolvedToolAccess {
   readonly params?: Record<string, unknown>;
 }
 export interface ToolAdmission {
+  readonly readsRegisteredSkill?: true;
   /** Builtin Bash only: bind its actual injected interpreter and mature analysis. */
   readonly prepareShell?: (
     params: Record<string, unknown>,

@@ -3607,6 +3607,143 @@ describe("persistent conversation rewind", () => {
     await rm(directory, { force: true, recursive: true });
   });
 
+  it("edits a prompt into a multiline skill, and refuses a missing original skill before cutting history", async () => {
+    const dir = join(directory, "workspace", ".ohbaby", "skill", "review");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "SKILL.md"),
+      "---\nname: review\ndescription: Review the patch\n---\nskill-body-needle",
+    );
+    client = open();
+    if (!client.getSessionView) throw new Error("Missing session view");
+    const { prompt: original } =
+      await client.submitPromptAndWait("Original question");
+    const sessionId = original.sessionId;
+    const { prompt } = await client.rewindSession({
+      sessionId,
+      promptId: original.promptId,
+      text: "/ReViEw\n  second line\nthird line",
+    });
+    if (!prompt) throw new Error("Missing replacement receipt");
+    await client.waitForPrompt(prompt.promptId);
+    const displayText = "/review\n  second line\nthird line";
+    const view = await client.getSessionView({ sessionId });
+    expect(
+      view.session.messages.find(
+        (message) => message.id === prompt.userMessageId,
+      )?.parts,
+    ).toMatchObject([
+      {
+        type: "text",
+        text: displayText,
+        metadata: { skillMarker: { name: "review" } },
+      },
+    ]);
+    expect(
+      requests
+        .flatMap((request) => request.messages)
+        .some(
+          (message) =>
+            typeof message.content === "string" &&
+            message.content.includes("skill-body-needle") &&
+            message.content.endsWith("</skill>\n\n  second line\nthird line"),
+        ),
+    ).toBe(true);
+    await rm(dir, { recursive: true });
+    await expect(
+      client.rewindSession({
+        sessionId,
+        promptId: prompt.promptId,
+        text: "/REVIEW change",
+      }),
+    ).rejects.toMatchObject({
+      code: "REWIND_SKILL_UNAVAILABLE",
+      message: 'Skill "review" is not available',
+    });
+    expect(
+      (await client.getSessionView({ sessionId })).session.messages,
+    ).toEqual(view.session.messages);
+    const restored = await client.rewindSession({
+      sessionId,
+      promptId: prompt.promptId,
+    });
+    expect(restored.restoredText).toBe(displayText);
+  });
+
+  it("reads an external slash skill reference in its first run, after reopen, and in a fork", async () => {
+    const dir = join(directory, "home", "skill", "review");
+    const reference = join(dir, "references", "guide.txt");
+    await mkdir(join(dir, "references"), { recursive: true });
+    await writeFile(reference, "verified external reference");
+    await writeFile(
+      join(dir, "SKILL.md"),
+      "---\nname: review\ndescription: Review a patch\n---\nRead references/guide.txt",
+    );
+    const readEvent = (id: string): InterfaceProviderStreamEvent => ({
+      finishReason: "tool_calls",
+      toolCallDeltas: [
+        {
+          index: 0,
+          id,
+          name: "read",
+          argumentsDelta: JSON.stringify({ file_path: reference }),
+        },
+      ],
+    });
+    const reply: InterfaceProviderStreamEvent = {
+      finishReason: "stop",
+      textDelta: "Read it",
+    };
+    model = createSequentialFakeLLMClient(
+      [
+        [readEvent("read_first")],
+        [reply],
+        [readEvent("read_reopened")],
+        [reply],
+        [readEvent("read_fork")],
+        [reply],
+      ],
+      requests,
+    );
+    client = open();
+    const { promptReceipt } = await client.executeCommand({
+      commandId: "skill.review",
+      path: ["review"],
+      argv: [],
+      raw: "/review",
+      rawArgs: "",
+      surface: "tui",
+      clientInvocationId: "review",
+    });
+    if (!promptReceipt) throw new Error("Missing skill receipt");
+    const first = await client.waitForPrompt(promptReceipt.promptId);
+    expect(first.prompt.status).toBe("succeeded");
+    await client.dispose();
+    closeDatabase();
+    client = open();
+    const { sessionId } = promptReceipt;
+    const reopened = await client.submitPromptAndWait("Read again", {
+      sessionId,
+    });
+    expect(reopened.prompt.status).toBe("succeeded");
+    const fork = await client.forkSession({ sessionId });
+    expect(
+      (
+        await client.submitPromptAndWait("Read in fork", {
+          sessionId: fork.sessionId,
+        })
+      ).prompt.status,
+    ).toBe("succeeded");
+    for (const callId of ["read_first", "read_reopened", "read_fork"]) {
+      const tool = requests
+        .flatMap((request) => request.messages)
+        .find(
+          (message) => message.role === "tool" && message.callId === callId,
+        );
+      expect(JSON.stringify(tool)).toContain("verified external reference");
+    }
+  });
+
   it("rewinds a suffix across saved history, open views, exports, model input and restart", async () => {
     client = open();
     if (!client.getSessionView || !client.getSessionHistory)

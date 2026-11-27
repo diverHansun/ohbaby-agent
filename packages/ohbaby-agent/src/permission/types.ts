@@ -95,6 +95,7 @@ export interface PermissionStateStore {
 }
 
 export interface PermissionCall {
+  readonly readsRegisteredSkill?: boolean;
   readonly shellAnalysis?: ShellAnalysisResult;
   readonly sessionId: string;
   readonly messageId: string;

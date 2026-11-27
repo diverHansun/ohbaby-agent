@@ -150,12 +150,10 @@ export interface RunManagerDeps {
   readonly currentRunInputs?: {
     close(runId: string, reason: string): Promise<void>;
   };
-  readonly createCurrentRunInputPort?: (identity: {
-    runId: string;
-    sessionId: string;
-    contextScopeId?: string;
-    isSubagent?: boolean;
-  }) => LifecycleSessionParams["currentRunInputs"];
+  readonly restoreSkillTrust?: (lease: SandboxLease) => Promise<void>;
+  readonly createCurrentRunInputPort?: (
+    identity: RunContext,
+  ) => LifecycleSessionParams["currentRunInputs"];
 
   readonly revokePermissionsForRun?: (runId: string, reason: string) => void;
   readonly lifecycle: RunLifecycle;

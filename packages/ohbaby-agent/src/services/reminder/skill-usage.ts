@@ -58,8 +58,7 @@ function recentlyUsed(history: readonly MessageWithParts[]): string[] {
       const name =
         message.info.role === "assistant" && part.type === "tool"
           ? successfulSkillName(part)
-          : message.info.role === "user" &&
-              part.type === "text"
+          : message.info.role === "user" && part.type === "text"
             ? slashSkillName(part)
             : undefined;
       if (name !== undefined) {

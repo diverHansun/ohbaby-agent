@@ -11,7 +11,10 @@ import {
 import { AdapterRegistry } from "../../../packages/ohbaby-agent/src/sandbox/adapter-registry.js";
 import { HostLocalAdapter } from "../../../packages/ohbaby-agent/src/sandbox/adapters/host-local.js";
 import { SandboxManager } from "../../../packages/ohbaby-agent/src/sandbox/manager.js";
-import { createSkillTool } from "../../../packages/ohbaby-agent/src/skill/tool.js";
+import {
+  createSkillTool,
+  createSkillResourceTool,
+} from "../../../packages/ohbaby-agent/src/skill/tool.js";
 import type {
   SkillContent,
   SkillInfo,
@@ -84,7 +87,7 @@ describe("skill shell sandbox integration", () => {
     const bus = createBus();
     const permissionState = createPermissionState({
       bus,
-      initialLevel: "full-access",
+      initialLevel: "default",
     });
     const permission = createPermissionManager({ bus, state: permissionState });
     const askSpy = vi.spyOn(permission, "ask");
@@ -101,6 +104,18 @@ describe("skill shell sandbox integration", () => {
         get: () => Promise.resolve(info),
         listModelInvocable: () => Promise.resolve([info]),
         load: () => Promise.resolve(createSkillContent(info)),
+      }),
+    );
+    scheduler.register(
+      createSkillResourceTool({
+        get: () => Promise.resolve(info),
+        readResource: () =>
+          Promise.resolve({
+            info,
+            baseDir: skillRoot,
+            path: "guide.txt",
+            content: "reference text",
+          }),
       }),
     );
     scheduler.register(createBashTool());
@@ -120,6 +135,28 @@ describe("skill shell sandbox integration", () => {
         status: "success",
       });
 
+      const resource = {
+        environment: lease,
+        sessionId: "session_1",
+        messageId: "message_1",
+        runId: "run_1",
+        params: { name: info.name, path: "guide.txt" },
+        toolName: "skill_resource",
+      };
+      expect(
+        await scheduler.execute({ ...resource, callId: "read_resource" }),
+      ).toMatchObject({ status: "success" });
+      permissionState.addSessionRule("session_1", {
+        tool: "skill",
+        pattern: info.name,
+        decision: "deny",
+        scope: "session",
+      });
+      expect(
+        await scheduler.execute({ ...resource, callId: "denied_resource" }),
+      ).toMatchObject({ status: "rejected" });
+
+      permissionState.setLevel("full-access");
       expect(lease.containsTrustedPath(await fs.realpath(script))).toBe(true);
       await expect(
         scheduler.execute({

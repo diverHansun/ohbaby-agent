@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import path from "node:path";
+import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
   Tool,
   ToolExecutionResult,
@@ -214,18 +215,21 @@ function skillOutputDirectorySegment(name: string): string {
     : `skill-${Buffer.from(name, "utf8").toString("base64url")}`;
 }
 
-async function activateSkillRuntime(input: {
+export async function activateSkillRuntime(input: {
   readonly baseDir: string;
-  readonly context: Parameters<Tool["execute"]>[1];
+  readonly environment?: Pick<
+    NonNullable<Parameters<Tool["execute"]>[1]["environment"]>,
+    "workdir" | "trustPath"
+  >;
   readonly name: string;
 }): Promise<SkillRuntimePaths> {
   const outputDirRelative = workspaceOutputDirectory(input.name);
-  await input.context.environment?.trustPath?.({
+  await input.environment?.trustPath?.({
     kind: "active-skill",
     path: input.baseDir,
     source: input.name,
   });
-  const workdir = input.context.environment?.workdir;
+  const workdir = input.environment?.workdir;
   const outputDir = workdir
     ? path.join(
         workdir,
@@ -235,7 +239,7 @@ async function activateSkillRuntime(input: {
       )
     : undefined;
   if (outputDir) {
-    await input.context.environment?.trustPath?.({
+    await input.environment?.trustPath?.({
       kind: "skill-output",
       path: outputDir,
       source: input.name,
@@ -250,7 +254,7 @@ export async function createSkillTool(
   registry: SkillToolRegistry,
   options: SkillDescriptionOptions = {},
 ): Promise<Tool> {
-  return {
+  const tool: Tool = {
     annotations: { readOnlyHint: true },
     category: "skill",
     description: await buildSkillToolDescription(registry, options),
@@ -273,7 +277,7 @@ export async function createSkillTool(
       const content = await registry.load(name);
       const runtimePaths = await activateSkillRuntime({
         baseDir: content.baseDir,
-        context,
+        environment: context.environment,
         name: content.info.name,
       });
       return {
@@ -287,12 +291,13 @@ export async function createSkillTool(
       };
     },
   };
+  return withToolAdmission(tool, { readsRegisteredSkill: true });
 }
 
 export function createSkillResourceTool(
   registry: SkillResourceToolRegistry,
 ): Tool {
-  return {
+  const tool: Tool = {
     annotations: { readOnlyHint: true },
     category: "skill",
     description:
@@ -324,7 +329,7 @@ export function createSkillResourceTool(
       );
       await activateSkillRuntime({
         baseDir: content.baseDir,
-        context,
+        environment: context.environment,
         name: content.info.name,
       });
       return {
@@ -337,4 +342,5 @@ export function createSkillResourceTool(
       };
     },
   };
+  return withToolAdmission(tool, { readsRegisteredSkill: true });
 }

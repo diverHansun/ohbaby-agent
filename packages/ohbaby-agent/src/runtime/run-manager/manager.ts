@@ -435,6 +435,7 @@ export class RunManager {
         workdir: record.options.directory,
       });
       record.sandboxLease = sandboxLease;
+      await this.deps.restoreSkillTrust?.(sandboxLease);
       record.abortController.signal.throwIfAborted();
       const context: RunContext = {
         agentInstanceId: record.options.agentInstanceId,
