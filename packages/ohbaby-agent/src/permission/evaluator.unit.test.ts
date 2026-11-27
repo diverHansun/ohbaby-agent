@@ -170,6 +170,52 @@ describe("permission evaluator", () => {
     },
   );
 
+  it.each(["skill", "skill_resource"])(
+    "honors explicit %s denies for registered resource reads",
+    (tool) => {
+      const resource = {
+        ...call("skill_resource", { name: "review" }),
+        category: "skill" as const,
+        readsRegisteredSkill: true,
+      };
+      expect(
+        evaluatePermission(
+          resource,
+          state({
+            mode: "auto",
+            level: "default",
+            rules: [
+              { tool, pattern: "review", scope: "session", decision: "deny" },
+            ],
+          }),
+        ).type,
+      ).toBe("deny");
+    },
+  );
+
+  it.each(["guide.txt", "/skills/review/**"])(
+    "applies read denies to the requested and resolved path (%s)",
+    (pattern) => {
+      const read = {
+        ...call("read", { file_path: "guide.txt" }),
+        category: "readonly" as const,
+        resolvedPath: "/skills/review/guide.txt",
+      };
+      expect(
+        evaluatePermission(
+          read,
+          state({
+            mode: "auto",
+            level: "default",
+            rules: [
+              { tool: "read", pattern, scope: "session", decision: "deny" },
+            ],
+          }),
+        ).type,
+      ).toBe("deny");
+    },
+  );
+
   it("includes actionable reasons for skill and shell asks", async () => {
     const skillDecision = evaluatePermission(
       call("skill", { name: "review" }),

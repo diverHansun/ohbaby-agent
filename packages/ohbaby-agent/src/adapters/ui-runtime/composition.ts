@@ -890,7 +890,9 @@ export async function createUiRuntimeComposition(
         { contextScopeId: lease.contextScopeId },
       );
       await trustLoadedSkills(
-        inputStore ? await inputStore.filterModelHistory(history) : history,
+        inputStore
+          ? await inputStore.filterModelHistory(history)
+          : history.filter((message) => !message.info.runtimeInput),
         skillRegistry,
         lease,
       );

@@ -1098,6 +1098,7 @@ export function createToolScheduler(
                   ? "subagent"
                   : call.category,
               params: context.params,
+              resolvedPath: context.accessIdentity,
               readsRegisteredSkill:
                 tool && trustedToolAdmission(tool)?.readsRegisteredSkill,
               shellAnalysis: context.shellAnalysis,
@@ -1723,6 +1724,7 @@ export function createToolScheduler(
           category:
             call.category === "subagent-control" ? "subagent" : call.category,
           params: prepared.permissionContext.params,
+          resolvedPath: prepared.permissionContext.accessIdentity,
           shellAnalysis: prepared.permissionContext.shellAnalysis,
           sessionId: call.sessionId,
           messageId: call.messageId,

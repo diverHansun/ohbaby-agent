@@ -246,8 +246,9 @@ export function matchesPermissionRule(
     toolName !== ruleTool &&
     !(
       rule.decision === "deny" &&
-      ruleTool === "external_directory" &&
-      toolName.startsWith("external_directory_")
+      (canonicalToolName(call.toolName) === ruleTool ||
+        (ruleTool === "external_directory" &&
+          toolName.startsWith("external_directory_")))
     )
   ) {
     return false;
@@ -281,5 +282,14 @@ export function matchesPermissionRule(
   }
 
   const path = pathParam(call.params);
-  return path ? globToRegex(pattern).test(canonicalPath(path)) : false;
+  const matchesPath = globToRegex(pattern);
+  if (path && matchesPath.test(canonicalPath(path))) return true;
+  // A trusted read can use the caller's relative spelling. Denies also apply
+  // to the resolved file identity, while existing relative rules keep working.
+  return (
+    rule.decision === "deny" &&
+    call.category === "readonly" &&
+    call.resolvedPath !== undefined &&
+    matchesPath.test(canonicalPath(call.resolvedPath))
+  );
 }
