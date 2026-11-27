@@ -21,7 +21,10 @@ import { isSessionSystemPath } from "../../sandbox/trusted-roots.js";
 import { ShellPreflightError } from "../../shell/preflight.js";
 import type { ShellAnalysisResult } from "../../shell/analysis/types.js";
 import type { BashPreparation } from "../../shell/execution.js";
-import { canonicalizePathTarget } from "../../utils/path-canonicalize.js";
+import {
+  canonicalizePathTarget,
+  resolveToolPath,
+} from "../../utils/path-canonicalize.js";
 import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
 import { ConcurrencyController, type CapacityLease } from "./concurrency.js";
 import {
@@ -266,15 +269,6 @@ function isRootPath(inputPath: string): boolean {
   return path.dirname(resolved) === resolved;
 }
 
-function resolveLexicalForEnvironment(
-  environment: ToolExecutionEnvironment,
-  inputPath: string,
-): string {
-  return path.isAbsolute(inputPath)
-    ? path.resolve(inputPath)
-    : path.resolve(environment.workdir, inputPath);
-}
-
 function getFilePathParam(params: Record<string, unknown>): string | undefined {
   for (const key of ["file_path", "filePath", "path"]) {
     const value = params[key];
@@ -445,7 +439,7 @@ async function canonicalizeForPermission(
   environment: ToolExecutionEnvironment,
   inputPath: string,
 ): Promise<string> {
-  const lexical = resolveLexicalForEnvironment(environment, inputPath);
+  const lexical = resolveToolPath(environment.workdir, inputPath);
   return canonicalizeLexicalPath(lexical);
 }
 
@@ -522,7 +516,7 @@ function createExternalReadEnvironment(
       return environment.resolvePath(inputPath);
     },
     async resolvePathForExisting(inputPath: string): Promise<string> {
-      const target = resolveLexicalForEnvironment(environment, inputPath);
+      const target = resolveToolPath(environment.workdir, inputPath);
       const resolved = await fs.realpath(target);
       if (isSameOrInsidePath(resolved, approvedPath)) {
         return resolved;

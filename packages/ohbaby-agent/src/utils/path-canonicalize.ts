@@ -1,5 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
+
+/** Resolve a native file tool argument before checking boundaries or locking it. */
+export function resolveToolPath(workdir: string, inputPath: string): string {
+  if (inputPath === "~") return os.homedir();
+  if (inputPath.startsWith("~/") || inputPath.startsWith("~\\")) {
+    return path.join(os.homedir(), inputPath.slice(2));
+  }
+  return path.resolve(workdir, inputPath);
+}
 
 function errorCode(error: unknown): string | undefined {
   return typeof error === "object" &&

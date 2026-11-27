@@ -468,126 +468,150 @@ describe("file tools scheduler integration", () => {
     await expect(fs.readdir(tempRoot)).resolves.toEqual([]);
   });
 
-  it("allows absolute paths outside the workspace through default permission approval", async () => {
-    const bus = createBus();
-    const permissionState = createPermissionState({
-      bus,
-      initialLevel: "default",
-    });
-    const permission = createPermissionManager({
-      bus,
-      generateId: (() => {
-        let next = 1;
-        return (): string => `permission_${String(next++)}`;
-      })(),
-      state: permissionState,
-    });
-    const scheduler = createToolScheduler({
-      bus,
-      permission: {
-        ask: (input) =>
-          permission.ask({
-            ...input,
-            category:
-              input.category === "subagent-control"
-                ? "dangerous"
-                : input.category,
-            source: { rootSessionId: input.sessionId, ancestorSessionIds: [] },
-          }),
-      },
-      permissionState,
-    });
-    const permissionUpdates: PermissionInfo[] = [];
-    for (const tool of createBuiltinTools()) {
-      scheduler.register(tool);
-    }
-    bus.subscribe(PermissionEvent.Updated, (event) => {
-      permissionUpdates.push(event.info);
-      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
-    });
-    const environment = createHostLocalEnvironment(tempRoot);
-    const outsideReadPath = path.join(outsideRoot, "secret.txt");
-    const outsideWritePath = path.join(outsideRoot, "written.txt");
-    const outsideEditPath = path.join(outsideRoot, "editable.txt");
-    await fs.writeFile(outsideReadPath, "secret\n", "utf8");
-    await fs.writeFile(outsideEditPath, "old\n", "utf8");
+  it.each(["absolute", "home"])(
+    "approves external %s paths before file operations",
+    async (form) => {
+      vi.spyOn(os, "homedir").mockReturnValue(outsideRoot);
+      const argument = (target: string) =>
+        form === "home" ? "~/" + path.relative(outsideRoot, target) : target;
+      const bus = createBus();
+      const permissionState = createPermissionState({
+        bus,
+        initialLevel: "default",
+      });
+      const permission = createPermissionManager({
+        bus,
+        generateId: (() => {
+          let next = 1;
+          return (): string => `permission_${String(next++)}`;
+        })(),
+        state: permissionState,
+      });
+      const scheduler = createToolScheduler({
+        bus,
+        permission: {
+          ask: (input) =>
+            permission.ask({
+              ...input,
+              category:
+                input.category === "subagent-control"
+                  ? "dangerous"
+                  : input.category,
+              source: {
+                rootSessionId: input.sessionId,
+                ancestorSessionIds: [],
+              },
+            }),
+        },
+        permissionState,
+      });
+      const permissionUpdates: PermissionInfo[] = [];
+      for (const tool of createBuiltinTools()) {
+        scheduler.register(tool);
+      }
+      bus.subscribe(PermissionEvent.Updated, (event) => {
+        permissionUpdates.push(event.info);
+        permission.respond(event.info.sessionId, event.info.id, {
+          type: "once",
+        });
+      });
+      const environment = createHostLocalEnvironment(tempRoot);
+      const outsideReadPath = path.join(outsideRoot, "secret.txt");
+      const outsideWritePath = path.join(outsideRoot, "written.txt");
+      const outsideEditPath = path.join(outsideRoot, "editable.txt");
+      await fs.writeFile(outsideReadPath, "secret\n", "utf8");
+      await fs.writeFile(outsideEditPath, "old\n", "utf8");
 
-    const read = await scheduler.execute({
-      runId: "file_test_run",
-      callId: "read_outside",
-      environment,
-      messageId: "message_1",
-      params: { file_path: outsideReadPath },
-      sessionId: "session_1",
-      toolName: "read",
-    });
-    const readForEdit = await scheduler.execute({
-      runId: "file_test_run",
-      callId: "read_outside_edit_target",
-      environment,
-      messageId: "message_1",
-      params: { file_path: outsideEditPath },
-      sessionId: "session_1",
-      toolName: "read",
-    });
-    const write = await scheduler.execute({
-      runId: "file_test_run",
-      callId: "write_outside",
-      environment,
-      messageId: "message_1",
-      params: {
-        content: "changed\n",
-        file_path: outsideWritePath,
-      },
-      sessionId: "session_1",
-      toolName: "write",
-    });
-    const edit = await scheduler.execute({
-      runId: "file_test_run",
-      callId: "edit_outside",
-      environment,
-      messageId: "message_1",
-      params: {
-        expected_mtime_ms: (await fs.stat(outsideEditPath)).mtimeMs,
-        file_path: outsideEditPath,
-        new_string: "changed",
-        old_string: "old",
-      },
-      sessionId: "session_1",
-      toolName: "edit",
-    });
+      const list = await scheduler.execute({
+        runId: "file_test_run",
+        callId: "list_outside",
+        environment,
+        messageId: "message_1",
+        params: { path: argument(outsideRoot) },
+        sessionId: "session_1",
+        toolName: "list",
+      });
+      expect(list.status).toBe("success");
+      expect(list.output).toContain("secret.txt");
+      const read = await scheduler.execute({
+        runId: "file_test_run",
+        callId: "read_outside",
+        environment,
+        messageId: "message_1",
+        params: { file_path: argument(outsideReadPath) },
+        sessionId: "session_1",
+        toolName: "read",
+      });
+      const readForEdit = await scheduler.execute({
+        runId: "file_test_run",
+        callId: "read_outside_edit_target",
+        environment,
+        messageId: "message_1",
+        params: { file_path: argument(outsideEditPath) },
+        sessionId: "session_1",
+        toolName: "read",
+      });
+      const write = await scheduler.execute({
+        runId: "file_test_run",
+        callId: "write_outside",
+        environment,
+        messageId: "message_1",
+        params: {
+          content: "changed\n",
+          file_path: argument(outsideWritePath),
+        },
+        sessionId: "session_1",
+        toolName: "write",
+      });
+      const edit = await scheduler.execute({
+        runId: "file_test_run",
+        callId: "edit_outside",
+        environment,
+        messageId: "message_1",
+        params: {
+          expected_mtime_ms: (await fs.stat(outsideEditPath)).mtimeMs,
+          file_path: argument(outsideEditPath),
+          new_string: "changed",
+          old_string: "old",
+        },
+        sessionId: "session_1",
+        toolName: "edit",
+      });
 
-    expect(read.status).toBe("success");
-    expect(read.output).toContain("secret");
-    expect(readForEdit.status).toBe("success");
-    expect(write.status).toBe("success");
-    expect(edit.status).toBe("success");
-    expect(permissionUpdates.map((info) => info.callId)).toEqual([
-      "read_outside",
-      "read_outside_edit_target",
-      "write_outside",
-      "edit_outside",
-    ]);
-    expect(permissionUpdates.map((info) => info.name)).toEqual([
-      "external_directory_read",
-      "external_directory_read",
-      "write",
-      "edit",
-    ]);
-    expect(permissionUpdates[0]?.title).toContain("External path access");
-    expect(permissionUpdates[1]?.title).toContain("External path access");
-    expect(permissionUpdates[2]?.pattern).toContain("write(");
-    expect(permissionUpdates[3]?.pattern).toContain("edit(");
-    await expect(fs.readFile(outsideReadPath, "utf8")).resolves.toBe(
-      "secret\n",
-    );
-    await expect(fs.readFile(outsideWritePath, "utf8")).resolves.toBe(
-      "changed\n",
-    );
-    await expect(fs.readFile(outsideEditPath, "utf8")).resolves.toBe(
-      "changed\n",
-    );
-  });
+      expect(read.status).toBe("success");
+      expect(read.output).toContain("secret");
+      expect(readForEdit.status).toBe("success");
+      expect(write.status).toBe("success");
+      expect(edit.status).toBe("success");
+      expect(permissionUpdates.map((info) => info.callId)).toEqual([
+        "list_outside",
+        "read_outside",
+        "read_outside_edit_target",
+        "write_outside",
+        "edit_outside",
+      ]);
+      expect(permissionUpdates.map((info) => info.name)).toEqual([
+        "external_directory_read",
+        "external_directory_read",
+        "external_directory_read",
+        "write",
+        "edit",
+      ]);
+      expect(permissionUpdates[0]?.title).toContain("External path access");
+      expect(permissionUpdates[1]?.title).toContain("External path access");
+      expect(permissionUpdates[3]?.pattern).toContain("write(");
+      expect(permissionUpdates[4]?.pattern).toContain("edit(");
+      await expect(fs.readFile(outsideReadPath, "utf8")).resolves.toBe(
+        "secret\n",
+      );
+      await expect(fs.readFile(outsideWritePath, "utf8")).resolves.toBe(
+        "changed\n",
+      );
+      await expect(fs.readFile(outsideEditPath, "utf8")).resolves.toBe(
+        "changed\n",
+      );
+    },
+  );
 
   it("allows full-access external absolute writes without approval or saved rules", async () => {
     const bus = createBus();

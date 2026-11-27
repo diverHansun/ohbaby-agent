@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { canonicalizePathTarget } from "../utils/path-canonicalize.js";
+import {
+  canonicalizePathTarget,
+  resolveToolPath,
+} from "../utils/path-canonicalize.js";
 import { SandboxBoundaryError } from "./errors.js";
 import { containsOrEqualPath } from "./boundary.js";
 import type { InternalSandboxContext } from "./context.js";
@@ -12,12 +15,6 @@ import type {
   PreflightResult,
   SandboxLease,
 } from "./types.js";
-
-function resolveInputPath(workdir: string, inputPath: string): string {
-  return path.isAbsolute(inputPath)
-    ? path.resolve(inputPath)
-    : path.resolve(workdir, inputPath);
-}
 
 function trustedRootPaths(context: InternalSandboxContext): readonly string[] {
   return context.trustedRoots.snapshot().map((root) => root.path);
@@ -78,18 +75,18 @@ export function createSandboxLease(input: {
     },
 
     resolvePath(inputPath: string): string {
-      const resolvedPath = resolveInputPath(context.workdir, inputPath);
+      const resolvedPath = resolveToolPath(context.workdir, inputPath);
       return assertTrustedLexical(context, inputPath, resolvedPath);
     },
 
     async resolvePathForExisting(inputPath: string): Promise<string> {
-      const target = resolveInputPath(context.workdir, inputPath);
+      const target = resolveToolPath(context.workdir, inputPath);
       const resolvedPath = await fs.realpath(target);
       return assertTrusted(context, inputPath, resolvedPath);
     },
 
     async resolvePathForWrite(inputPath: string): Promise<string> {
-      const target = resolveInputPath(context.workdir, inputPath);
+      const target = resolveToolPath(context.workdir, inputPath);
       const resolvedPath = await canonicalizePathTarget(target);
       return assertTrusted(context, inputPath, resolvedPath);
     },

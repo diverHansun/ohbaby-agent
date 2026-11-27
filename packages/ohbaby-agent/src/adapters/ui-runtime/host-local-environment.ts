@@ -1,3 +1,4 @@
+import { resolveToolPath } from "../../utils/path-canonicalize.js";
 import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -56,12 +57,6 @@ function assertInsideWorkdir(
   return resolved;
 }
 
-function resolveHostPath(workdir: string, inputPath: string): string {
-  return path.isAbsolute(inputPath)
-    ? path.resolve(inputPath)
-    : path.resolve(workdir, inputPath);
-}
-
 function realpathExistingDirectory(directory: string): string {
   try {
     return realpathSync.native(directory);
@@ -100,15 +95,15 @@ export function createHostLocalEnvironment(
       return assertInsideWorkdir(
         root,
         inputPath,
-        resolveHostPath(root, inputPath),
+        resolveToolPath(root, inputPath),
       );
     },
     async resolvePathForExisting(inputPath: string): Promise<string> {
-      const resolved = await fs.realpath(resolveHostPath(root, inputPath));
+      const resolved = await fs.realpath(resolveToolPath(root, inputPath));
       return assertInsideWorkdir(root, inputPath, resolved);
     },
     async resolvePathForWrite(inputPath: string): Promise<string> {
-      const target = resolveHostPath(root, inputPath);
+      const target = resolveToolPath(root, inputPath);
       const realParent = await fs.realpath(path.dirname(target));
       const resolved = path.join(realParent, path.basename(target));
       return assertInsideWorkdir(root, inputPath, resolved);

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createHostLocalEnvironment,
   createHostLocalSandboxManager,
@@ -10,6 +10,7 @@ import {
 const cleanupDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const directory of cleanupDirectories.splice(0)) {
     await rm(directory, { force: true, recursive: true });
   }
@@ -21,6 +22,24 @@ function normalizeForBoundary(inputPath: string): string {
 }
 
 describe("createHostLocalEnvironment", () => {
+  it("expands home paths and preserves literal tilde directories", async () => {
+    const home = await realpath(
+      await mkdtemp(path.join(tmpdir(), "ohbaby-home-")),
+    );
+    cleanupDirectories.push(home);
+    vi.spyOn(os, "homedir").mockReturnValue(home);
+    const environment = createHostLocalEnvironment(home);
+    for (const value of ["~", "~/", "~\\"]) {
+      expect(environment.resolvePath(value)).toBe(environment.workdir);
+    }
+    expect(environment.resolvePath("./~")).toBe(
+      path.join(environment.workdir, "~"),
+    );
+    expect(environment.resolvePath("~user")).toBe(
+      path.join(environment.workdir, "~user"),
+    );
+  });
+
   it("allows relative writes inside a canonicalized temporary workspace", async () => {
     const workdir = await mkdtemp(path.join(tmpdir(), "ohbaby-host-local-"));
     cleanupDirectories.push(workdir);

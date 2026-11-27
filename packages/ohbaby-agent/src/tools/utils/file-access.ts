@@ -1,6 +1,5 @@
 import { resolveWritablePreview } from "./text-files.js";
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { ToolAdmission } from "../../core/tool-scheduler/tool-admission.js";
 import { withToolAdmission } from "../../core/tool-scheduler/tool-admission.js";
 import type { ResourceAccess } from "../../core/tool-scheduler/resources.js";
@@ -11,6 +10,7 @@ import type {
 import {
   canonicalizePathTarget,
   canonicalizeResourcePath,
+  resolveToolPath,
 } from "../../utils/path-canonicalize.js";
 import { resolvePath, resolvePathForExisting } from "./context.js";
 import { getStringParam } from "./params.js";
@@ -69,7 +69,7 @@ export function withFileAccess(
       // This permissive identity lookup tolerates targets created by predecessors.
       // Search uses a conservative tree until its actual position in the batch.
       const lexical = context.environment
-        ? path.resolve(context.environment.workdir, value)
+        ? resolveToolPath(context.environment.workdir, value)
         : resolvePath(context, value);
       return [
         resource(
