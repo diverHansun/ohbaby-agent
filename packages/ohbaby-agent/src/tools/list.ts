@@ -18,25 +18,24 @@ export function createListTool(): Tool {
     {
       name: "list",
       description:
-        "List immediate entries (files and subdirectories) of one directory. Use this instead of ls; use glob for recursive search. Includes hidden entries, always skips .git, node_modules, and dist, and returns sorted names (directories end with /).",
+        "List immediate entries of one directory (use instead of ls; use glob recursively). Includes hidden entries, always skips .git, node_modules, and dist, and returns sorted names (directories end with /).",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
           ignore: {
-            description:
-              "Exact immediate entry names to omit (not globs). .git, node_modules, and dist are always omitted.",
+            description: "Exact entry names to omit (not globs).",
             items: { type: "string" },
             type: "array",
           },
           limit: {
-            description: "Maximum entries to return (default: 100).",
+            description: "Maximum entries (default: 100).",
             minimum: 1,
             type: "integer",
           },
           path: {
             ...FILE_PATH_SCHEMA,
             description:
-              "Directory to list. Defaults to the workspace root. Accepts absolute, ~/, or workspace-relative paths; external directories ask for approval on first access.",
+              "Directory to list (default: workspace root; absolute, ~/, or relative; external asks approval).",
           },
         },
         type: "object",

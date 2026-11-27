@@ -66,7 +66,7 @@ export function createGrepTool(): Tool {
     {
       name: "grep",
       description:
-        "Search file contents with a regular expression. Use this instead of shell grep or rg. Uses ripgrep's default regex syntax (no look-around or backreferences). Defaults to output_mode=content (paths, line numbers, limited previews, and optional before/after context up to 20 lines; matches use path:line:, context uses path-line-, separated by --); also supports output_mode=files (paths only), output_mode=count (matching lines per file), and ignore_case. Use read for full lines or wider context. Directory searches include hidden files, exclude .git traversal, and only read .gitignore/.ignore/.rgignore inside the searched directory and its subdirectories (workspace-root rules do not apply when path is a subdirectory; global ignores are not used). Explicit include follows ripgrep glob precedence and can override ignore rules (except .git during traversal), but does not filter a single-file path. Binary files and non-UTF-8 encodings are not guaranteed (non-UTF-8 previews may be unavailable; matched paths must be valid UTF-8); use bash for raw bytes or other encodings.",
+        "Search file contents with ripgrep default regex (no look-around or backreferences); use instead of shell grep/rg. Default output_mode=content returns path:line: previews (context uses path-line-, separated by --); use read for full lines or >20 context lines. Directory searches include hidden files and skip .git traversal. Applies .gitignore/.ignore/.rgignore only in path and below (no ancestor or global ignores). Explicit include uses ripgrep glob precedence and can override ignores (except .git), but not a single-file path. Binary and non-UTF-8 files are not guaranteed (previews may be unavailable; matched paths must be valid UTF-8); use bash for raw bytes or other encodings.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
@@ -75,45 +75,43 @@ export function createGrepTool(): Tool {
             minimum: 0,
             maximum: 20,
             description:
-              "Context lines to include before each match, like grep -B (0-20, default: 0; content mode only). For more than 20 lines, get the line number with grep and read the file with read using offset.",
+              "Context lines before each match (0-20, default: 0; content mode only).",
           },
           after: {
             type: "integer",
             minimum: 0,
             maximum: 20,
             description:
-              "Context lines to include after each match, like grep -A (0-20, default: 0; content mode only). For more than 20 lines, get the line number with grep and read the file with read using offset.",
+              "Context lines after each match (0-20, default: 0; content mode only).",
           },
           ignore_case: {
             type: "boolean",
-            description:
-              "Case-insensitive pattern matching, like grep -i (default: false).",
+            description: "Case-insensitive matching (default: false).",
           },
           output_mode: {
             type: "string",
             enum: ["content", "files", "count"],
             description:
-              "Output format (default: content). content returns matching lines with previews and optional before/after context; files returns matching file paths only; count returns matching line counts per file. before and after are only allowed with content.",
+              "content (default: lines/previews), files (paths only), or count (matching lines per file).",
           },
           include: {
             description:
-              'Ripgrep glob to filter searched files (e.g. "*.ts" by name or "src/**/*.ts" by path). Can override .gitignore; ignored when path is a single file.',
+              'Ripgrep file filter glob (e.g. "*.ts" or "src/**/*.ts").',
             type: "string",
           },
           limit: {
             minimum: 1,
             type: "integer",
             description:
-              "Maximum matching lines in content mode (context lines are not counted), or maximum matching files in files/count modes (default: 100). Output is still capped at 50 KiB.",
+              "Max matching lines in content mode (excluding context) or files in files/count (default: 100; 50 KiB cap).",
           },
           path: {
             ...FILE_PATH_SCHEMA,
             description:
-              "File or directory to search. Defaults to the workspace root. Accepts absolute, ~/, or workspace-relative paths; external directories ask for approval on first access.",
+              "File or directory (default: workspace root; absolute, ~/, or relative; external asks approval).",
           },
           pattern: {
-            description:
-              "Ripgrep default regular expression (no look-around or backreferences).",
+            description: "Ripgrep regex pattern.",
             type: "string",
           },
         },

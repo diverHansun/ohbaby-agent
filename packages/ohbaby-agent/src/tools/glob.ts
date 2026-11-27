@@ -29,28 +29,27 @@ export function createGlobTool(): Tool {
     {
       name: "glob",
       description:
-        "Find files by name or path pattern, for example src/**/*.ts. Use this instead of find or ls -R. Matches ordinary files with a ripgrep glob relative to the search root (supports *, ?, **, {a,b}, [ab]; *.ts matches only the root, **/*.ts matches recursively; for a literal [id] directory use app/[[]id]/*.tsx). Includes hidden files and by default only reads .gitignore/.ignore/.rgignore inside the searched directory and its subdirectories (workspace-root rules do not apply when path is a subdirectory; global ignores are not used). Broad recursive patterns (**, **/*, or a literal prefix with /** or /**/*) apply project ignore rules normally; other specific globs follow ripgrep precedence and can override matching file or directory ignore rules. Set include_ignored=true or pass an ignored directory as path to search ignored paths; .git, dist, node_modules, out, and target are always excluded even when include_ignored=true. Does not follow internal symlinks; matched paths must be valid UTF-8. Returns sorted paths with explicit scan completeness; narrow pattern or path when incomplete.",
+        "Find ordinary files by relative ripgrep glob (use instead of find/ls -R). Supports *, ?, **, {a,b}, [ab] (*.ts: root only; **/*.ts: recursive; literal [id]: app/[[]id]/*.tsx). Includes hidden files. Applies .gitignore/.ignore/.rgignore only in path and below (no ancestor or global ignores). Broad globs (**, **/*, prefix/**, prefix/**/*) honor ignores; other specific globs follow ripgrep precedence and can override matching file or directory ignores. Use include_ignored=true or pass an ignored directory as path to search ignored paths; .git, dist, node_modules, out, and target are always excluded even with include_ignored=true. No internal symlinks; UTF-8 paths only; sorted with scan completeness (narrow when incomplete).",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
           include_ignored: {
             type: "boolean",
             description:
-              "Include files and directories ignored by project .gitignore/.ignore/.rgignore (default: false). Always excludes .git, dist, node_modules, out, and target.",
+              "Include project-ignored files and directories (default: false).",
           },
           limit: {
-            description: "Maximum file paths to return (default: 100).",
+            description: "Maximum paths (default: 100).",
             minimum: 1,
             type: "integer",
           },
           path: {
             ...FILE_PATH_SCHEMA,
             description:
-              "Directory to search. Defaults to the workspace root. Accepts absolute, ~/, or workspace-relative paths; external directories ask for approval on first access.",
+              "Search directory (default: workspace root; absolute, ~/, or relative; external asks approval).",
           },
           pattern: {
-            description:
-              "Relative ripgrep glob (no leading / or ..). Use **/*.ts for recursive matches; *.ts matches only the search root.",
+            description: "Relative ripgrep glob (no leading / or ..).",
             type: "string",
           },
         },

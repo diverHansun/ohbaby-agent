@@ -21,7 +21,7 @@ export function createReadTool(): Tool {
     {
       name: "read",
       description:
-        "Read a UTF-8 file when you know its path. Use this instead of cat, head, tail, or sed -n; call it in parallel for multiple files. Returns lines with original line numbers, up to limit source lines or 50 KiB of output (whichever comes first; a continued partial line counts as one line). Resume with the returned cursor without skipping content. Offset scans are capped at 64 MiB; re-read if the file changes between pages.",
+        "Read a UTF-8 file with line numbers (use instead of cat/head/tail/sed -n; call in parallel for multiple files). Returns up to limit lines or 50 KiB first (continued partial line counts as one). Resume via cursor without skipping. Offset scans cap at 64 MiB; re-read if changed between pages.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
@@ -39,8 +39,7 @@ export function createReadTool(): Tool {
               "Opaque continuation cursor returned by read. Pass it unchanged to resume. Cannot be combined with offset. Each call has its own line limit, including the continued partial line.",
           },
           offset: {
-            description:
-              "1-based line number to start from (default: 1). Cannot be combined with cursor.",
+            description: "1-based start line (default: 1; not with cursor).",
             minimum: 1,
             type: "integer",
           },

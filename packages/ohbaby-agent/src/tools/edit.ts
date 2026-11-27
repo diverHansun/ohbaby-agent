@@ -35,7 +35,7 @@ export function createEditTool(): Tool {
     {
       name: "edit",
       description:
-        "Replace unique text in an existing UTF-8 file (including UTF-8 BOM). Use this instead of sed -i or perl -i; it fails without changing the file when old_string has no unique match. 10 MiB original/result budget; rejects invalid UTF-8 and lone Unicode surrogates, and dry-run/diff previews have separate limits and may be omitted. Exact old_string matches are preferred; bounded indentation and whitespace fuzzy matching runs only if exact matching fails and can collapse spaces, tabs, and newlines, so include enough surrounding context for whitespace-sensitive edits.",
+        "Replace unique text in an existing UTF-8/BOM file (use instead of sed -i/perl -i; fails without changing the file if old_string has no unique match). 10 MiB original/result budget; rejects invalid UTF-8 and lone Unicode surrogates; diff previews have separate limits and may be omitted. Exact old_string matches preferred; fallback bounded indentation/whitespace fuzzy matching can collapse spaces, tabs, and newlines, so include surrounding context.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {

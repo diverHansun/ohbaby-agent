@@ -188,25 +188,21 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
     // The tool keeps its bash name; say plainly when commands run in PowerShell.
     if (detectShellKind(interpreter) === "powershell")
       dialectNote =
-        "The interpreter is PowerShell, not bash: apply the same routing to PowerShell equivalents (Get-Content -> read, Get-ChildItem -> list/glob, Select-String -> grep, Set-Content/Out-File -> write/edit), and write PowerShell syntax ($null instead of /dev/null; no grep or head). Start long-running processes with run_in_background, not Start-Process; processes started with Start-Process are outside ohbaby's process cleanup.";
+        "The interpreter is PowerShell, not bash: route PowerShell equivalents (Get-Content -> read, Get-ChildItem -> list/glob, Select-String -> grep, Set-Content/Out-File -> write/edit) and write PowerShell syntax ($null, no grep/head). Use run_in_background, not Start-Process (outside ohbaby's cleanup).";
   } catch (error) {
     interpreterDescription = `unavailable (${error instanceof Error ? error.message : String(error)})`;
   }
 
   const routingDescription = [
-    "Use bash for builds, tests, git, package managers, scripts, output pipelines (| grep, | tail, wc -l, sort | uniq -c, du), and non-UTF-8/binary files.",
-    "To inspect or change files, use the dedicated tools instead of shell commands:",
-    "- Reading files (cat, head, tail, sed -n): use read (numbers lines, resumes via cursor).",
-    "- Listing a directory (ls): use list. Finding files (find, ls -R): use glob (skips .git, node_modules, dist, out, target). Searching contents (grep, rg): use grep (skips .git and files ignored by .gitignore).",
-    "- Creating or changing files (echo >, cat <<EOF, sed -i): use write or edit (edit fails safely on mismatch).",
-    "Dedicated tools know exactly which paths they touch (shell commands are checked from their text, so complex ones need approval each time) and work outside the workspace once approved. Fall back to shell only when a dedicated tool cannot do the job or the user asks for a shell command.",
-    "Issue independent lookups as parallel dedicated-tool calls instead of chaining with && or stitching output with echo separators; use && only for dependent commands.",
+    "Use bash for builds, tests, git, package managers, scripts, output pipelines (| grep, | tail, wc -l, sort | uniq -c, du), binary/non-UTF-8 files, or when dedicated tools cannot do the job or the user asks for shell.",
+    "Use dedicated tools for file ops (exact path checks; work outside the workspace once approved): read (cat, head, tail, sed -n), list (ls), glob (find, ls -R), grep (grep, rg), write/edit (echo >, cat <<EOF, sed -i).",
+    "Run independent lookups as parallel dedicated-tool calls; use && only for dependent commands.",
   ].join("\n");
 
   function describe(canManageBackground: boolean): string {
     const interpreterIntro = `Run a shell command using ${interpreterDescription} in the execution workspace.`;
     const executionNote = `${dialectNote ? `${dialectNote} ` : ""}Commands execute unchanged with no interpreter fallback after preparation. On Windows, select Git Bash only with a usable native full SHELL path. WSL launchers are unsupported.`;
-    const commandDescription = `${interpreterIntro}\n\n${routingDescription}\n\n${executionNote}`;
+    const commandDescription = `${interpreterIntro}\n${routingDescription}\n${executionNote}`;
     const foregroundTimeout = `For pure foreground execution, timeout defaults to ${String(DEFAULT_FOREGROUND_TIMEOUT_MS)}ms and has a maximum of ${String(MAX_FOREGROUND_TIMEOUT_MS)}ms.`;
     if (!canManageBackground)
       return `${commandDescription} This role can only run foreground commands. Background task management is unavailable. Omit run_in_background, auto_background and wait_ms. ${foregroundTimeout}`;
@@ -227,20 +223,17 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           auto_background: { type: "boolean" },
           command: {
             type: "string",
-            description:
-              "Shell command to run. Use dedicated tools (read, list, glob, grep, write, edit) for file inspection or editing.",
+            description: "Shell command to run.",
           },
           description: {
             type: "string",
-            description:
-              'Short summary of what the command does (e.g. "Run grep unit tests").',
+            description: "Short summary of the command.",
           },
           timeout: {
             maximum: MAX_BACKGROUND_TIMEOUT_MS,
             minimum: 1,
             type: "integer",
-            description:
-              "Process lifetime in milliseconds. Defaults and limits follow the tool description.",
+            description: "Process lifetime in milliseconds.",
           },
           run_in_background: { default: false, type: "boolean" },
           wait_ms: {
