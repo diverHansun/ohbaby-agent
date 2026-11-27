@@ -99,7 +99,9 @@ function evaluateLevelFallback(
       return ask(`Dangerous tool requires confirmation: ${call.toolName}`);
     case "bash-readonly":
     case "bash-mutating":
-      return ask("Shell commands need your approval unless Full access is on.");
+      return call.shellAnalysis?.defaultApproved
+        ? allow()
+        : ask("This command needs your approval.");
     case "write":
       return ask(`Write tool requires confirmation: ${call.toolName}`);
     default: {

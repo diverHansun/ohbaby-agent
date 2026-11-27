@@ -770,7 +770,7 @@ describe("permission patterns", () => {
     );
   });
 
-  it("does not let an always git status approval auto-approve git push", async () => {
+  it("does not let an always git add approval auto-approve git push", async () => {
     const bus = createBus();
     const state = createPermissionState({ bus });
     const permission = createPermissionManager({
@@ -789,8 +789,11 @@ describe("permission patterns", () => {
     const first = permission.ask(
       baseAskInput({
         category: "dangerous",
-        params: { command: "git status" },
-        shellAnalysis: await analyzeShellCommand("git status", "bash"),
+        params: { command: "git add --dry-run README.md" },
+        shellAnalysis: await analyzeShellCommand(
+          "git add --dry-run README.md",
+          "bash",
+        ),
         toolName: "bash",
       }),
     );
@@ -799,7 +802,7 @@ describe("permission patterns", () => {
     expect(state.getSessionRules("session_1")).toEqual([
       {
         decision: "allow",
-        pattern: "git status *",
+        pattern: "git add *",
         scope: "session",
         tool: "bash",
       } satisfies PermissionRule,
@@ -847,25 +850,28 @@ describe("permission patterns", () => {
       state,
     });
 
-    const gitStatus = permission.ask(
+    const gitAdd = permission.ask(
       baseAskInput({
         category: "dangerous",
-        params: { command: "git status" },
-        shellAnalysis: await analyzeShellCommand("git status", "bash"),
+        params: { command: "git add --dry-run README.md" },
+        shellAnalysis: await analyzeShellCommand(
+          "git add --dry-run README.md",
+          "bash",
+        ),
         toolName: "bash",
       }),
     );
     permission.respond("session_1", "permission_1", { type: "always" });
-    await expect(gitStatus).resolves.toBe("always");
+    await expect(gitAdd).resolves.toBe("always");
 
     const appendedGit = permission.ask(
       baseAskInput({
         callId: "call_2",
         category: "dangerous",
         messageId: "message_2",
-        params: { command: "git status && rm -rf build" },
+        params: { command: "git add --dry-run README.md && rm -rf build" },
         shellAnalysis: await analyzeShellCommand(
-          "git status && rm -rf build",
+          "git add --dry-run README.md && rm -rf build",
           "bash",
         ),
         toolName: "bash",

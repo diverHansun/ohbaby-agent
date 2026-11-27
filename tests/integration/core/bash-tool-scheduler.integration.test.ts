@@ -44,7 +44,21 @@ afterEach(async () => {
   await fs.rm(tempRoot, { recursive: true, force: true });
 });
 
-function createHarness(spawn: SpawnCommand = vi.fn()) {
+function successfulSpawn(): SpawnCommand {
+  return () => {
+    const child = new FakeChildProcess();
+    queueMicrotask(() => {
+      child.emit("exit", 0, null);
+      child.emit("close", 0, null);
+    });
+    return child as unknown as ChildProcess;
+  };
+}
+
+function createHarness(
+  spawn: SpawnCommand = successfulSpawn(),
+  externalChoice: "once" | "always" = "once",
+) {
   const bus = createBus();
   const permissionState = createPermissionState({ bus });
   const permission = createPermissionManager({ bus, state: permissionState });
@@ -61,6 +75,7 @@ function createHarness(spawn: SpawnCommand = vi.fn()) {
   });
   const permissionUpdates: string[] = [];
   const permissionTypes: string[] = [];
+  const prompts: PermissionInfo[] = [];
 
   scheduler.register(
     createBashTool({
@@ -72,12 +87,21 @@ function createHarness(spawn: SpawnCommand = vi.fn()) {
     }),
   );
   bus.subscribe(PermissionEvent.Updated, (event) => {
+    prompts.push(event.info);
     permissionUpdates.push(event.info.callId);
     permissionTypes.push(event.info.type);
-    permission.respond(event.info.sessionId, event.info.id, { type: "once" });
+    permission.respond(event.info.sessionId, event.info.id, {
+      type: event.info.type === "external_directory" ? externalChoice : "once",
+    });
   });
 
-  return { permissionState, permissionUpdates, permissionTypes, scheduler };
+  return {
+    permissionState,
+    permissionUpdates,
+    permissionTypes,
+    prompts,
+    scheduler,
+  };
 }
 
 function request(
@@ -176,20 +200,7 @@ describe("bash tool scheduler integration", () => {
   });
 
   it("uses default permission approval for mutating bash in plan mode", async () => {
-    const child = new FakeChildProcess();
-    const spawn = vi.fn<SpawnCommand>(
-      (
-        _file: string,
-        _args: readonly string[],
-        _options: SpawnOptionsWithoutStdio,
-      ) => {
-        queueMicrotask(() => {
-          child.emit("exit", 0, null);
-          child.emit("close", 0, null);
-        });
-        return child as unknown as ChildProcess;
-      },
-    );
+    const spawn = vi.fn(successfulSpawn());
     const { permissionState, permissionUpdates, scheduler } =
       createHarness(spawn);
     permissionState.setMode("plan");
@@ -203,21 +214,8 @@ describe("bash tool scheduler integration", () => {
     expect(spawn).toHaveBeenCalledOnce();
   });
 
-  it("allows cd escapes after scheduler approval", async () => {
-    const child = new FakeChildProcess();
-    const spawn = vi.fn<SpawnCommand>(
-      (
-        _file: string,
-        _args: readonly string[],
-        _options: SpawnOptionsWithoutStdio,
-      ) => {
-        queueMicrotask(() => {
-          child.emit("exit", 0, null);
-          child.emit("close", 0, null);
-        });
-        return child as unknown as ChildProcess;
-      },
-    );
+  it("asks only for the external directory when changing to it and running pwd", async () => {
+    const spawn = vi.fn(successfulSpawn());
     const { permissionUpdates, permissionTypes, scheduler } =
       createHarness(spawn);
 
@@ -230,28 +228,135 @@ describe("bash tool scheduler integration", () => {
       },
       status: "success",
     });
-    expect(permissionUpdates).toEqual(["bash_escape", "bash_escape"]);
-    expect(permissionTypes).toEqual(["external_directory", "bash"]);
+    expect(permissionUpdates).toEqual(["bash_escape"]);
+    expect(permissionTypes).toEqual(["external_directory"]);
     expect(spawn).toHaveBeenCalledOnce();
   });
+
+  it("passes workspace reads through the main and explore schedulers without an approval", async () => {
+    const spawn = vi.fn(successfulSpawn());
+    const { permissionTypes, scheduler } = createHarness(spawn);
+    await fs.mkdir(path.join(workspace, "src"));
+    await fs.writeFile(path.join(workspace, "src", "note.txt"), "fixture");
+    const commands = [
+      "pwd",
+      "ls -la src",
+      "cat src/note.txt",
+      "head -n 10 src/note.txt",
+      "tail -n 10 src/note.txt",
+      "wc -l src/note.txt",
+      "git status",
+      `cd "${workspace.split(path.sep).join("/")}" && git status --short --branch`,
+      "cd src && cd .. && git status --porcelain",
+      "cd src && ls && cat note.txt",
+      "ls src 2>/dev/null",
+    ];
+    for (const [index, command] of commands.entries()) {
+      const result = await scheduler.execute(
+        request("read-" + String(index), command),
+      );
+      expect(result.status).toBe("success");
+    }
+    const child = await scheduler.execute({
+      ...request("explore-read", "cat src/note.txt"),
+      sessionId: "child",
+      isSubagent: true,
+      agentName: "explore",
+    });
+    expect(child.status).toBe("success");
+    expect(permissionTypes).toEqual([]);
+    expect(spawn).toHaveBeenCalledTimes(commands.length + 1);
+  });
+
+  it.each(["git log", "grep foo a.txt", "ls -R", "cd sub && git status"])(
+    "keeps the ordinary shell prompt for %s",
+    async (command) => {
+      await fs.mkdir(path.join(workspace, "sub"));
+      const { prompts, scheduler } = createHarness();
+      expect((await scheduler.execute(request("ask", command))).status).toBe(
+        "success",
+      );
+      expect(prompts).toMatchObject([
+        { type: "bash", title: "This command needs your approval." },
+      ]);
+    },
+  );
+
+  it("asks for an external readonly home directory once and retains its Always grant", async () => {
+    const home = await fs.realpath(tempRoot);
+    const directory = path.join(home, ".ohbaby");
+    await fs.mkdir(directory);
+    await fs.writeFile(path.join(directory, "note.txt"), "fixture");
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("USERPROFILE", home);
+    const sandbox = createHostLocalSandboxManager(workspace);
+    const lease = await sandbox.acquire("session_1");
+    try {
+      const spawn = vi.fn(successfulSpawn());
+      const { permissionTypes, scheduler } = createHarness(spawn, "always");
+      const read = (id: string, command: string) =>
+        scheduler.execute({ ...request(id, command), environment: lease });
+      expect((await read("first", "ls ~/.ohbaby")).status).toBe("success");
+      expect(permissionTypes).toEqual(["external_directory"]);
+      expect(lease.trustedRoots()).toContainEqual(
+        expect.objectContaining({ path: directory, kind: "external-approved" }),
+      );
+      expect((await read("second", "cat ~/.ohbaby/note.txt")).status).toBe(
+        "success",
+      );
+      expect(permissionTypes).toEqual(["external_directory"]);
+      expect((await read("from-cd", "cd ../.ohbaby && ls")).status).toBe(
+        "success",
+      );
+      expect((await read("wc", "wc -l ../.ohbaby/note.txt")).status).toBe(
+        "success",
+      );
+      expect(permissionTypes).toEqual(["external_directory"]);
+      expect(spawn).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.unstubAllEnvs();
+      await sandbox.release(lease);
+    }
+  });
+
+  it.each(["cat .env", "wc -l .env", "cd sub && cat .env"])(
+    "retains the sensitive path prompt for %s",
+    async (command) => {
+      await fs.writeFile(path.join(workspace, ".env"), "fixture");
+      await fs.mkdir(path.join(workspace, "sub"));
+      await fs.writeFile(path.join(workspace, "sub", ".env"), "sub fixture");
+      const { scheduler, prompts } = createHarness();
+      const result = await scheduler.execute({
+        ...request("sensitive-path", command),
+        isSubagent: true,
+        agentName: "explore",
+      });
+      expect(result.status).toBe("success");
+      expect(prompts).toMatchObject([
+        { type: "sensitive_path", metadata: { rememberable: false } },
+      ]);
+    },
+  );
+
+  it.each(["cat ~/.ssh/id_rsa", "wc -l ~/.ssh/id_rsa", "cd ~/.ssh && ls"])(
+    "denies %s before approval or spawn",
+    async (command) => {
+      const spawn = vi.fn(successfulSpawn());
+      const { scheduler, permissionTypes } = createHarness(spawn);
+      const result = await scheduler.execute(request("deny-home", command));
+      expect(result).toMatchObject({
+        status: "rejected",
+        error: { type: "PermissionDeniedError" },
+      });
+      expect(permissionTypes).toEqual([]);
+      expect(spawn).not.toHaveBeenCalled();
+    },
+  );
 
   it("asks external_directory_shell before bash and then executes with a rich sandbox lease", async () => {
     const externalFile = path.join(tempRoot, "outside.txt");
     await fs.writeFile(externalFile, "outside\n", "utf8");
-    const child = new FakeChildProcess();
-    const spawn = vi.fn<SpawnCommand>(
-      (
-        _file: string,
-        _args: readonly string[],
-        _options: SpawnOptionsWithoutStdio,
-      ) => {
-        queueMicrotask(() => {
-          child.emit("exit", 0, null);
-          child.emit("close", 0, null);
-        });
-        return child as unknown as ChildProcess;
-      },
-    );
+    const spawn = vi.fn(successfulSpawn());
     const bus = createBus();
     const permissionState = createPermissionState({ bus });
     const permission = createPermissionManager({ bus, state: permissionState });

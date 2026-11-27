@@ -216,6 +216,48 @@ describe("permission evaluator", () => {
     },
   );
 
+  it("allows complete readonly commands, respects deny rules and keeps incomplete commands one-shot", async () => {
+    const defaults = { level: "default", mode: "auto" } as const;
+    const readonly = {
+      ...call("bash", { command: "ls" }),
+      shellAnalysis: await analyzeShellCommand("ls", "bash"),
+    };
+    expect(evaluatePermission(readonly, state(defaults))).toEqual({
+      type: "allow",
+    });
+    expect(
+      evaluatePermission(
+        readonly,
+        state({
+          ...defaults,
+          rules: [rule({ tool: "bash", pattern: "ls", decision: "deny" })],
+        }),
+      ).type,
+    ).toBe("deny");
+    const incomplete = {
+      ...call("bash", { command: "ls || pwd" }),
+      shellAnalysis: await analyzeShellCommand("ls || pwd", "bash"),
+    };
+    expect(evaluatePermission(incomplete, state(defaults))).toMatchObject({
+      type: "ask",
+      rememberable: false,
+    });
+    const mutating = {
+      ...call("bash", { command: "touch note.txt" }),
+      shellAnalysis: await analyzeShellCommand("touch note.txt", "bash"),
+    };
+    expect(evaluatePermission(mutating, state(defaults))).toMatchObject({
+      type: "ask",
+      reason: "This command needs your approval.",
+    });
+    expect(
+      evaluatePermission(
+        mutating,
+        state({ ...defaults, level: "full-access" }),
+      ),
+    ).toEqual({ type: "allow" });
+  });
+
   it("includes actionable reasons for skill and shell asks", async () => {
     const skillDecision = evaluatePermission(
       call("skill", { name: "review" }),
