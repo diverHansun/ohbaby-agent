@@ -32,10 +32,11 @@ describe("Glob real tree scope and model completeness", () => {
   afterEach(async () => {
     await fs.rm(root, { recursive: true, force: true });
   });
-  it("ignores ignore/config settings while retaining fixed exclusions and symlink scope", async () => {
-    await fs.writeFile(path.join(root, ".gitignore"), "*.ts\n");
+  it("honors directory ignores and explicit globs while retaining fixed exclusions and symlink scope", async () => {
+    await fs.writeFile(path.join(root, ".gitignore"), "*.ts\ncoverage/\n");
     for (const dir of [
       "src",
+      "coverage",
       ".git",
       "dist",
       "node_modules",
@@ -68,6 +69,16 @@ describe("Glob real tree scope and model completeness", () => {
       truncated: false,
       displayLimited: false,
     });
+    const withIgnored = await createGlobTool().execute(
+      { pattern: "**/*.ts", include_ignored: true },
+      context,
+    );
+    expect(withIgnored.output?.split("\n")).toEqual([
+      "!name.ts",
+      ".hidden.ts",
+      "coverage/entry.ts",
+      "src/entry.ts",
+    ]);
     const bang = await createGlobTool().execute(
       { pattern: "!name.ts" },
       context,
@@ -77,7 +88,8 @@ describe("Glob real tree scope and model completeness", () => {
       { pattern: "nothing*.missing" },
       context,
     );
-    expect(empty.output).toBe("No files matched.");
+    expect(empty.output).toContain("No files matched.");
+    expect(empty.output).toContain("include_ignored=true");
     expect(empty.metadata?.scanComplete).toBe(true);
     const limited = await createGlobTool().execute(
       { pattern: "**/*.ts", limit: 2 },
