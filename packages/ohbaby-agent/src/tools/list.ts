@@ -35,7 +35,7 @@ export function createListTool(): Tool {
           path: {
             ...FILE_PATH_SCHEMA,
             description:
-              "Directory to list (default: workspace root; absolute, ~/, or relative; external asks approval).",
+              "Directory to list (default: workspace root; absolute, ~/, or relative; external may ask approval).",
           },
         },
         type: "object",

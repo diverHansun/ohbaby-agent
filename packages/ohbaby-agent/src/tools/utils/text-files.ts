@@ -20,7 +20,7 @@ export const TEXT_FILE_SAMPLE_BYTES = 4_096;
 export const FILE_PATH_SCHEMA = {
   type: "string",
   description:
-    "Absolute, ~/, or workspace-relative path (external directories ask approval on first access).",
+    "Absolute, ~/, or workspace-relative path (external paths may ask approval).",
 };
 
 export type LineEnding = "CRLF" | "LF" | "mixed" | "none";

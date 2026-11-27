@@ -46,7 +46,7 @@ export function createGlobTool(): Tool {
           path: {
             ...FILE_PATH_SCHEMA,
             description:
-              "Search directory (default: workspace root; absolute, ~/, or relative; external asks approval).",
+              "Search directory (default: workspace root; absolute, ~/, or relative; external may ask approval).",
           },
           pattern: {
             description: "Relative ripgrep glob (no leading / or ..).",

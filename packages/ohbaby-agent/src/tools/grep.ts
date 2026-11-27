@@ -66,7 +66,7 @@ export function createGrepTool(): Tool {
     {
       name: "grep",
       description:
-        "Search file contents with ripgrep default regex (no look-around or backreferences); use instead of shell grep/rg. Default output_mode=content returns path:line: previews (context uses path-line-, separated by --); use read for full lines or >20 context lines. Directory searches include hidden files and skip .git traversal. Applies .gitignore/.ignore/.rgignore only in path and below (no ancestor or global ignores). Explicit include uses ripgrep glob precedence and can override ignores (except .git), but not a single-file path. Binary and non-UTF-8 files are not guaranteed (previews may be unavailable; matched paths must be valid UTF-8); use bash for raw bytes or other encodings.",
+        "Search file contents with ripgrep default regex (no look-around or backreferences); use instead of shell grep/rg. Default output_mode=content returns path:line: previews (context uses path-line-, separated by --); use read for full lines or >20 context lines. Directory searches include hidden files and skip .git traversal. Applies .gitignore/.ignore/.rgignore only in path and below (no ancestor or global ignores). Explicit include uses ripgrep glob precedence (can override ignores except .git; does not filter a single file). Binary and non-UTF-8 files are not guaranteed (previews may be unavailable; matched paths must be valid UTF-8); use bash for raw bytes or other encodings.",
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
@@ -108,7 +108,7 @@ export function createGrepTool(): Tool {
           path: {
             ...FILE_PATH_SCHEMA,
             description:
-              "File or directory (default: workspace root; absolute, ~/, or relative; external asks approval).",
+              "File or directory (default: workspace root; absolute, ~/, or relative; external may ask approval).",
           },
           pattern: {
             description: "Ripgrep regex pattern.",
