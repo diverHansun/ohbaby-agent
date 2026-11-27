@@ -23,6 +23,7 @@ const PATH_COMMANDS = new Set([
   "tee",
   "touch",
   "type",
+  "wc",
   "xcopy",
   "add-content",
   "clear-content",

@@ -20,6 +20,8 @@ export interface ShellCommandAnalysis {
 }
 
 export interface ShellAnalysisResult {
+  /** Only set by analysis of the original POSIX syntax, before wrappers are discarded. */
+  readonly defaultApproved?: boolean;
   readonly shellKind: ShellKind;
   readonly commands: readonly ShellCommandAnalysis[];
   readonly completeness: "complete" | "incomplete";

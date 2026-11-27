@@ -37,6 +37,32 @@ describe("sandbox preflight facts", () => {
     expect(result.denylistHits).toEqual([]);
   });
 
+  it.each([
+    ["wc -l", []],
+    ["wc -l .env", [".env"]],
+    ["wc -l ../outside/a.ts", ["../outside/a.ts"]],
+  ] as const)(
+    "extracts only the file operand of %s",
+    async (command, paths) => {
+      const workdir = await fs.realpath(tempRoot);
+      const result = await preflightSandboxCommand({
+        command,
+        shellKind: "bash",
+        workdir,
+      });
+      expect(result.commands[0]?.pathArgs).toEqual(paths);
+      if (paths[0] === ".env") {
+        expect(result.sensitivePaths.map((item) => item.absolutePath)).toEqual([
+          path.join(workdir, ".env"),
+        ]);
+      } else if (paths[0]) {
+        expect(result.externalPaths.map((item) => item.absolutePath)).toEqual([
+          path.resolve(workdir, paths[0]),
+        ]);
+      }
+    },
+  );
+
   it("classifies absolute paths outside the workspace as external paths", async () => {
     const workdir = path.join(tempRoot, "workspace");
     const outside = path.join(tempRoot, "outside.txt");

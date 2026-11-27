@@ -144,6 +144,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
     const shellAnalysis = await analyzeShellCommand(
       command,
       detectShellKind(shellPath),
+      commandContext.cwd,
     );
     const shellPreflight = await runPreflight({
       command,

@@ -7,6 +7,10 @@ import { Parser, Language, type Node } from "web-tree-sitter";
 import { classifyShellCommandDetail } from "../command-classifier.js";
 import { extractShellPathFacts } from "../path-args.js";
 import type { ShellKind } from "../preflight.js";
+import {
+  isDefaultApprovalCommand,
+  isDefaultApprovalNode,
+} from "./default-approval.js";
 import { computeShellArityKey } from "./arity.js";
 import type { ShellAnalysisResult, ShellCommandAnalysis } from "./types.js";
 
@@ -203,10 +207,12 @@ function unwrap(tokens: readonly string[]): {
 function changeDirectory(
   cwd: string | undefined,
   target: string,
+  powershell: boolean,
 ): string | undefined {
   if (path.win32.isAbsolute(target) && /^[A-Za-z]:|^\\\\/u.test(target))
     return path.win32.normalize(target);
-  if (target.startsWith("/") || target.startsWith("~")) return target;
+  if (target.startsWith("/") || (powershell && target.startsWith("~")))
+    return target;
   return cwd === undefined
     ? undefined
     : path.posix.normalize(path.posix.join(cwd, target));
@@ -219,6 +225,7 @@ interface WalkContext {
 export async function analyzeShellCommand(
   command: string,
   shellKind: ShellKind,
+  workdir?: string,
 ): Promise<ShellAnalysisResult> {
   if (shellKind === "cmd")
     return {
@@ -233,6 +240,10 @@ export async function analyzeShellCommand(
   const commands: ShellCommandAnalysis[] = [];
   const reasons = new Set<string>();
   let pipelineId = 0;
+  let simpleSyntax =
+    !powershell &&
+    !/[^\S \t\n]|\\/u.test(command) &&
+    !(shellKind === "sh" && command.includes("&>"));
   try {
     parser.setLanguage(language);
     const tree = parser.parse(command);
@@ -248,6 +259,7 @@ export async function analyzeShellCommand(
         context: WalkContext,
         redirects: readonly Node[] = [],
       ): void {
+        simpleSyntax &&= isDefaultApprovalNode(node);
         if (node.type === "list") {
           const or = children(node).some((child) => child.text === "||");
           if (or)
@@ -311,7 +323,9 @@ export async function analyzeShellCommand(
             walk(
               body,
               context,
-              namedChildren(node).filter((child) => child !== body),
+              node
+                .childrenForFieldName("redirect")
+                .filter((child): child is Node => child !== null),
             );
           return;
         }
@@ -335,6 +349,8 @@ export async function analyzeShellCommand(
                 .childrenForFieldName("argument")
                 .filter((child): child is Node => child !== null);
           const nodes = [name, ...argumentNodes];
+          simpleSyntax &&=
+            /^[a-z]+$/u.test(name.text) && !WRAPPERS.has(name.text);
           const values: (string | undefined)[] = [];
           const rawTokens: string[] = [];
           for (let i = 0; i < nodes.length; i += 1) {
@@ -479,7 +495,7 @@ export async function analyzeShellCommand(
           if (DIRECTORY_COMMANDS.has(root))
             context.cwd =
               cdTarget && !context.conditional && !dynamic
-                ? changeDirectory(context.cwd, cdTarget)
+                ? changeDirectory(context.cwd, cdTarget, powershell)
                 : undefined;
           // Substitutions have their own cwd but their static policy facts remain useful.
           for (const child of namedChildren(node))
@@ -533,6 +549,13 @@ export async function analyzeShellCommand(
       return {
         shellKind,
         commands,
+        defaultApproved:
+          simpleSyntax &&
+          !reasons.size &&
+          commands.length > 0 &&
+          commands.every((item, i) =>
+            isDefaultApprovalCommand(item, i < commands.length - 1, workdir),
+          ),
         completeness: reasons.size ? "incomplete" : "complete",
         incompleteReasons: [...reasons],
       };
